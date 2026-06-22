@@ -35,6 +35,7 @@ import logging
 import math
 import board
 import busio
+from adafruit_extended_bus import ExtendedI2C
 import adafruit_ads1x15.ads1115 as ADS
 from adafruit_ads1x15.analog_in import AnalogIn
 from probes.base import ProbeInterface
@@ -54,10 +55,13 @@ BUSMAP = {
 
 class ADSDevice():
 	''' ADS1115 Device Based on the Adafruit Module '''
-	def __init__(self, i2c_bus_addr=0x48):
+	def __init__(self, i2c_bus_addr=0x48, i2c_bus_kind = 'basic', i2c_bus_num=0):
 		self.logger = logging.getLogger("control")
 		# Create the I2C bus
-		self.i2c = busio.I2C(board.SCL, board.SDA)
+		if i2c_bus_kind == 'basic':
+			self.i2c = busio.I2C(board.SCL, board.SDA)
+		elif i2c_bus_kind == 'extended':
+			self.i2c = ExtendedI2C(i2c_bus_num)
 		# Create the ADC object using the I2C bus
 		self.ads = ADS.ADS1115(self.i2c, address=i2c_bus_addr)
 		self.status = {}
@@ -89,4 +93,6 @@ class ReadProbes(ProbeInterface):
 		self.time_delay = 0.008
 		self.device_info['ports'] = ['ADC0', 'ADC1', 'ADC2', 'ADC3']
 		i2c_bus_addr = BUSMAP[self.device_info['config'].get('i2c_bus_addr', '0x48')]
-		self.device = ADSDevice(i2c_bus_addr=i2c_bus_addr)
+		i2c_bus_kind = self.device_info['config'].get('i2c_bus_kind', 'basic')
+		i2c_bus_num = self.device_info['config'].get('i2c_bus_num', 0)
+		self.device = ADSDevice(i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num)

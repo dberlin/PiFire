@@ -26,6 +26,7 @@ dependencies = [
     "uuid>=1.30",
     "zeroconf>=0.149.17",
     "gevent>=26.5.0",
+    "adafruit-extended-bus>=1.0.2",
 ]
 
 [tool.uv.sources]

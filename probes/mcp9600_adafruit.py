@@ -36,6 +36,7 @@ import logging
 import time
 import board
 import busio
+from adafruit_extended_bus import ExtendedI2C
 from adafruit_bus_device.i2c_device import I2CDevice
 from adafruit_mcp9600 import MCP9600
 from probes.base import ProbeInterface
@@ -57,13 +58,16 @@ BUSMAP = {
 
 class KTTDevice():
 	''' MCP9600 Device Based on the Adafruit Module '''
-	def __init__(self, i2c_bus_addr=0x67, i2c_bus= None):
+	def __init__(self, i2c_bus_addr=0x67, i2c_bus_kind = 'basic', i2c_bus_num=0):
 		self.logger = logging.getLogger("control")
 		self.status = {}
 		
-		if i2c_bus == None:
+		if i2c_bus_kind == 'basic':
 			# Create the I2C bus
 			self.i2c = busio.I2C(board.SCL, board.SDA)
+		elif i2c_bus_kind == 'extended':
+			self.i2c = ExtendedI2C(i2c_bus_num)
+
 
 		self.sensor = MCP9600(self.i2c, address=i2c_bus_addr)
 
@@ -83,8 +87,10 @@ class ReadProbes(ProbeInterface):
 		self.time_delay = 0
 		self.device_info['ports'] = ['KTT0']
 		i2c_bus_addr = BUSMAP[self.device_info['config'].get('i2c_bus_addr', '0x67')]
+		i2c_bus_kind = self.device_info['config'].get('i2c_bus_kind', 'basic')
+		i2c_bus_num = self.device_info['config'].get('i2c_bus_num', 0)
 		try:
-			self.device = KTTDevice(i2c_bus_addr=i2c_bus_addr)
+			self.device = KTTDevice(i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num)
 		except:
 			self.logger.error('Something went wrong when trying to initialize the MCP9600 device.')
 			raise
