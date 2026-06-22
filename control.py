@@ -24,7 +24,7 @@ import importlib
 import atexit
 from common import *  # Common Module for WebUI and Control Program
 from common.process_mon import Process_Monitor
-from common.redis_queue import RedisQueue
+from common.valkey_queue import ValkeyQueue
 from notify.notifications import *
 from file_mgmt.recipes import convert_recipe_units
 from file_mgmt.cookfile import create_cookfile
@@ -51,16 +51,16 @@ event_message = f"PiFire Control Process started. PiFire Version: {settings['ver
 eventLogger.info(event_message)
 controlLogger.info(event_message)
 
-# Flush Redis DB and create JSON structure
+# Flush Valkey DB and create JSON structure
 control = read_control(flush=True)
-# Delete Redis DB for history / current
+# Delete Valkey DB for history / current
 read_history(0, flushhistory=True)
 # Flush metrics DB for tracking certain metrics
 write_metrics(flush=True)
 # Create/Flush errors list 
 errors = read_errors(flush=True)
 
-eventLogger.info('Flushing Redis DB and creating new control structure')
+eventLogger.info('Flushing Valkey DB and creating new control structure')
 
 platform_config = settings['platform']
 platform_config['frequency'] = settings['pwm']['frequency']
@@ -278,9 +278,9 @@ def _init_controller(settings, control):
 
 def _process_system_commands(grill_platform):
 	# Setup access to the system command queue 
-	system_commands = RedisQueue('control:systemq')
+	system_commands = ValkeyQueue('control:systemq')
 	# Setup access to the system output queue
-	system_output = RedisQueue('control:systemo')
+	system_output = ValkeyQueue('control:systemo')
 	# Initialize variable for supported commands (only look for supported commands if we have something to process)
 	supported_cmds = []
 
@@ -834,7 +834,7 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 					continue
 			# Send Data to Display
 			display_device.display_status(in_data, status_data)
-			# Save Status Data to Redis 
+			# Save Status Data to Valkey 
 			write_status(status_data)
 			display_toggle_time = time.time()  # Reset the display_toggle_time to current time
 

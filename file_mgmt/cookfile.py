@@ -142,7 +142,7 @@ def create_cookfile():
 		command = f'rm -rf {cook_file_path}'
 		os.system(command)
 
-	# Delete Redis DB for history / current
+	# Delete Valkey DB for history / current
 	read_history(0, flushhistory=True)
 	# Flush metrics DB for tracking certain metrics
 	write_metrics(flush=True)

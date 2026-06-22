@@ -4,7 +4,7 @@ Common PiFire WebApp Functions Shared Between Blueprints
 
 from common.common import process_command, read_settings, read_metrics, seconds_to_string, metrics_items
 from flask import current_app
-from common.redis_queue import RedisQueue
+from common.valkey_queue import ValkeyQueue
 import time
 import json
 import datetime
@@ -26,7 +26,7 @@ def get_supported_cmds():
 
 
 def get_system_command_output(requested='supported_commands', timeout=1):
-	system_output = RedisQueue('control:systemo')
+	system_output = ValkeyQueue('control:systemo')
 	endtime = timeout + time.time()
 	while time.time() < endtime:
 		while system_output.length() > 0:

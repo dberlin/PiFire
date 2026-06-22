@@ -20,7 +20,7 @@ import os
 import io
 import json
 import math
-import redis
+import valkey
 import uuid
 import random
 import logging
@@ -29,8 +29,8 @@ import threading
 from logging.handlers import RotatingFileHandler
 from collections.abc import Mapping
 from ratelimitingfilter import RateLimitingFilter
-from common.redis_queue import RedisQueue
-from common.redis_handler import RedisHandler
+from common.valkey_queue import ValkeyQueue
+from common.valkey_handler import ValkeyHandler
 
 # *****************************************
 # Constants and Globals 
@@ -53,7 +53,7 @@ COLOR_LIST = [
 ]
 
 # Setup Command / Status database connection Global 
-cmdsts = redis.StrictRedis('localhost', 6379, charset="utf-8", decode_responses=True)
+cmdsts = valkey.StrictValkey('localhost', 6379, charset="utf-8", decode_responses=True)
 
 
 '''
@@ -90,11 +90,11 @@ def create_logger(
 		rotating_handler.addFilter(ratelimit)
 		logger.addHandler(rotating_handler)
 
-		# RedisHandler
-		redis_handler = RedisHandler(cmdsts, 'logs:' + name)
-		redis_handler.setFormatter(formatter)
-		redis_handler.addFilter(ratelimit)
-		logger.addHandler(redis_handler)
+		# ValkeyHandler
+		valkey_handler = ValkeyHandler(cmdsts, 'logs:' + name)
+		valkey_handler.setFormatter(formatter)
+		valkey_handler.addFilter(ratelimit)
+		logger.addHandler(valkey_handler)
 	return logger
 
 def default_settings():
@@ -877,7 +877,7 @@ def generate_uuid():
 
 def read_control(flush=False):
 	"""
-	Read Control from Redis DB
+	Read Control from Valkey DB
 
 	:param flush: True to clean control. False otherwise
 	:return: control
@@ -886,7 +886,7 @@ def read_control(flush=False):
 
 	try:
 		if flush:
-			# Remove all control structures in Redis DB (not history or current)
+			# Remove all control structures in Valkey DB (not history or current)
 			cmdsts.delete('control:general')
 			cmdsts.delete('control:command')
 			cmdsts.delete('control:write')
@@ -907,7 +907,7 @@ def read_control(flush=False):
 
 def write_control(control, direct_write=False, origin='unknown'):
 	"""
-	Read Control from Redis DB
+	Read Control from Valkey DB
 
 	:param control: Control Dictionary
 	:param direct_write:  If set to true, write directly to the control data.  Else, write the control data to a command queue.  Defaults to false.  
@@ -923,7 +923,7 @@ def write_control(control, direct_write=False, origin='unknown'):
 
 def execute_control_writes():
 	"""
-	Execute Control Writes in Queue from Redis DB
+	Execute Control Writes in Queue from Valkey DB
 
 	:param None
 
@@ -942,7 +942,7 @@ def execute_control_writes():
 
 def read_errors(flush=False):
 	"""
-	Read Errors from Redis DB
+	Read Errors from Valkey DB
 
 	:param flush: True to clear errors. False otherwise
 	:return: errors
@@ -951,7 +951,7 @@ def read_errors(flush=False):
 
 	try:
 		if flush:
-			# Remove all error structures in Redis DB
+			# Remove all error structures in Valkey DB
 			cmdsts.delete('errors')
 
 			errors = []
@@ -959,13 +959,13 @@ def read_errors(flush=False):
 		else: 
 			errors = json.loads(cmdsts.get('errors'))
 	except:
-		errors = ['Unable to reach Redis database.  You may need to reinstall PiFire or enable redis-server.']
+		errors = ['Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.']
 
 	return(errors)
 
 def write_errors(errors):
 	"""
-	Write Errors to Redis DB
+	Write Errors to Valkey DB
 
 	:param errors: Errors
 	"""
@@ -975,7 +975,7 @@ def write_errors(errors):
 
 def read_warnings():
 	"""
-	Read Warnings from Redis DB and then burn them
+	Read Warnings from Valkey DB and then burn them
 
 	:return: warnings
 	"""
@@ -987,17 +987,17 @@ def read_warnings():
 		else:
 			# Read list of warnings 
 			warnings = cmdsts.lrange('warnings', 0, -1)
-			# Remove all warnings in Redis DB
+			# Remove all warnings in Valkey DB
 			cmdsts.delete('warnings')
 	except:
-		warnings = ['Unable to reach Redis database.  You may need to reinstall PiFire or enable redis-server.']
+		warnings = ['Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.']
 		write_log(warnings[0])
 
 	return warnings
 
 def write_warning(warning):
 	"""
-	Write a warning to Redis DB
+	Write a warning to Valkey DB
 
 	:param warnings: Warnings List 
 	"""
@@ -1006,12 +1006,12 @@ def write_warning(warning):
 	try:
 		cmdsts.rpush('warnings', warning)
 	except:
-		event = 'Unable to reach Redis database.  You may need to reinstall PiFire or enable redis-server.'
+		event = 'Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.'
 		write_log(event)
 
 def read_metrics(all=False):
 	"""
-	Read Metrics from Redis DB
+	Read Metrics from Valkey DB
 
 	:param all: True to read entire list. False for top of list.
 	"""
@@ -1035,7 +1035,7 @@ def read_metrics(all=False):
 
 def write_metrics(metrics=default_metrics(), flush=False, new_metric=False):
 	"""
-	Write metrics to Redis DB
+	Write metrics to Valkey DB
 
 	:param metrics: Metrics Data
 	:param flush: True to clear metrics. False otherwise
@@ -1044,7 +1044,7 @@ def write_metrics(metrics=default_metrics(), flush=False, new_metric=False):
 	global cmdsts
 
 	if(flush or not(cmdsts.exists('metrics:general'))):
-		# Remove all metrics structures in Redis DB
+		# Remove all metrics structures in Valkey DB
 		cmdsts.delete('metrics:general')
 
 		# The following set's no persistence so that we don't get writes to the disk / SDCard 
@@ -1159,13 +1159,13 @@ def write_settings(settings):
 	"""
 	settings['lastupdated']['time'] = math.trunc(time.time())
 
-	write_settings_redis(settings)
+	write_settings_valkey(settings)
 
 	json_data_string = json.dumps(settings, indent=2, sort_keys=True)
 	with open("settings.json", 'w') as settings_file:
 		settings_file.write(json_data_string)
 
-def read_settings_redis(init=False):
+def read_settings_valkey(init=False):
 	global cmdsts
 
 	if init:
@@ -1179,9 +1179,9 @@ def read_settings_redis(init=False):
 
 	return(settings)
 
-def write_settings_redis(settings):
+def write_settings_valkey(settings):
 	"""
-	Write Settings to Redis DB
+	Write Settings to Valkey DB
 
 	:param settings: Settings
 	"""
@@ -1387,7 +1387,7 @@ def downgrade_settings(settings, settings_default):
 
 def read_connected_users(flush=False):
 	"""
-	Read Connected Users from Redis DB
+	Read Connected Users from Valkey DB
 
 	:param flush: True to clean connected_users. False otherwise
 	:return: connected_users (List of Client ID's)
@@ -1404,14 +1404,14 @@ def read_connected_users(flush=False):
 			# Read list of users
 			connected_users = cmdsts.lrange('users:connected', 0, -1)
 	except:
-		event = 'Unable to reach Redis database.  You may need to reinstall PiFire or enable redis-server.'
+		event = 'Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.'
 		write_log(event)
 
 	return connected_users
 
 def write_connected_user(client_id):
 	"""
-	Write a Connected User to Redis DB
+	Write a Connected User to Valkey DB
 
 	:param client_id: Users Client ID from Socket IO/Flask
 	"""
@@ -1420,12 +1420,12 @@ def write_connected_user(client_id):
 	try:
 		cmdsts.rpush('users:connected', client_id)
 	except:
-		event = 'Unable to reach Redis database.  You may need to reinstall PiFire or enable redis-server.'
+		event = 'Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.'
 		write_log(event)
 
 def remove_connected_user(client_id):
 	"""
-	Removes a Connected User to Redis DB
+	Removes a Connected User to Valkey DB
 
 	:param client_id: Users Client ID from Socket IO/Flask
 	"""
@@ -1434,7 +1434,7 @@ def remove_connected_user(client_id):
 	try:
 		cmdsts.lrem('users:connected', 0, client_id)
 	except:
-		event = 'Unable to reach Redis database.  You may need to reinstall PiFire or enable redis-server.'
+		event = 'Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.'
 		write_log(event)
 
 def read_pellet_db(filename='pelletdb.json'):
@@ -1482,12 +1482,12 @@ def write_pellet_db(pelletdb):
 
 	:param pelletdb: Pellet Database
 	"""
-	write_pellets_redis(pelletdb)
+	write_pellets_valkey(pelletdb)
 	json_data_string = json.dumps(pelletdb, indent=2, sort_keys=True)
 	with open("pelletdb.json", 'w') as json_file:
 		json_file.write(json_data_string)
 
-def read_pellets_redis(init=False):
+def read_pellets_valkey(init=False):
 	global cmdsts
 
 	if init:
@@ -1501,9 +1501,9 @@ def read_pellets_redis(init=False):
 
 	return(pelletdb)
 
-def write_pellets_redis(pelletdb):
+def write_pellets_valkey(pelletdb):
 	"""
-	Write Settings to Redis DB
+	Write Settings to Valkey DB
 
 	:param settings: Settings
 	"""
@@ -1641,9 +1641,9 @@ def write_event(settings, event):
 	elif not event.startswith('*'):
 		write_log(event)
 
-def read_events_redis(flush=False):
+def read_events_valkey(flush=False):
 	"""
-	Read Events from Redis DB
+	Read Events from Valkey DB
 
 	:param flush: True to clean events. False otherwise
 	:return: events_list
@@ -1678,14 +1678,14 @@ def read_events_redis(flush=False):
 				}
 				events_list.append(event)
 	except:
-		event = 'Unable to reach Redis database.  You may need to reinstall PiFire or enable redis-server.'
+		event = 'Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.'
 		write_log(event)
 
 	return(events_list)
 
 def read_history(num_items=0, flushhistory=False):
 	"""
-	Read history from Redis DB and populate a list of data
+	Read history from Valkey DB and populate a list of data
 
 	:param num_items: Items from end of the history (set to 0 for all items)
 	:param flushhistory: True=flush history & current, False=normal history read
@@ -1741,7 +1741,7 @@ def unpack_history(datalist):
 
 def write_history(in_data, maxsizelines=28800, ext_data=False):
 	"""
-	Write History to Redis DB
+	Write History to Valkey DB
 
 	:param in_data: History data to be written to the database 
 	:param maxsizelines: Maximum Line Size (Default 28800)
@@ -1827,7 +1827,7 @@ def read_current(zero_out=False):
 
 def write_tr(tr_data):
 	"""
-	Write tr values to Redis DB
+	Write tr values to Valkey DB
 
 	"""
 	global cmdsts
@@ -1835,7 +1835,7 @@ def write_tr(tr_data):
 
 def read_tr():
 	"""
-	Read tr from Redis DB and return structure
+	Read tr from Valkey DB and return structure
 
 	:return: Current probe Tr values structure
 	"""
@@ -2038,7 +2038,7 @@ def read_wizard(filename='wizard/wizard_manifest.json'):
 
 def load_wizard_install_info():
 	"""
-	Load Wizard Install Info from Redis DB
+	Load Wizard Install Info from Valkey DB
 
 	:return: wizard_install_info
 	"""
@@ -2048,7 +2048,7 @@ def load_wizard_install_info():
 
 def store_wizard_install_info(wizard_install_info):
 	"""
-	Write Wizard Install Info to Redis DB
+	Write Wizard Install Info to Valkey DB
 
 	:param wizard_install_info: Wizard Install Info
 	:return:
@@ -2058,7 +2058,7 @@ def store_wizard_install_info(wizard_install_info):
 
 def get_wizard_install_status():
 	"""
-	Read Wizard Install Status from Redis DB
+	Read Wizard Install Status from Valkey DB
 
 	:return: Wizard Install (Percent, Status, Output)
 	"""
@@ -2070,7 +2070,7 @@ def get_wizard_install_status():
 
 def set_wizard_install_status(percent, status, output):
 	"""
-	Write Wizard Install Status to Redis DB
+	Write Wizard Install Status to Valkey DB
 
 	:param percent: Percent Complete
 	:param status: Current Status
@@ -2112,7 +2112,7 @@ def read_updater_manifest(filename='updater/updater_manifest.json'):
 
 def get_updater_install_status():
 	"""
-	Read Updater Install Status from Redis DB
+	Read Updater Install Status from Valkey DB
 
 	:return: Wizard Updater (Percent, Status, Output)
 	"""
@@ -2124,7 +2124,7 @@ def get_updater_install_status():
 
 def set_updater_install_status(percent, status, output):
 	"""
-	Write Updater Install Status to Redis DB
+	Write Updater Install Status to Valkey DB
 
 	:param percent: Percent Complete
 	:param status: Current Status
@@ -2222,7 +2222,7 @@ def seconds_to_string(seconds):
 	return time_string
 
 def get_system_command_output(requested='supported_commands', timeout=1):
-	system_output = RedisQueue('control:systemo')
+	system_output = ValkeyQueue('control:systemo')
 	endtime = timeout + time.time()
 	while time.time() < endtime:
 		while system_output.length() > 0:
@@ -2261,7 +2261,7 @@ def write_generic_json(dictionary, filename):
 
 def write_status(status):
 	"""
-	Write Status to Redis DB
+	Write Status to Valkey DB
 
 	:param status: Status Dictionary
 	"""
@@ -2271,7 +2271,7 @@ def write_status(status):
 
 def read_status(init=False):
 	"""
-	Read Status dictionary from Redis DB
+	Read Status dictionary from Valkey DB
 	"""
 	global cmdsts
 
@@ -2370,7 +2370,7 @@ def read_probe_status(probe_info):
 		status = read_probe_status(probe_info)
 		# Returns structured status information for all probes
 	"""
-	# Get current device status information from Redis
+	# Get current device status information from Valkey
 	probe_device_info = read_generic_key('probe_device_info')
 	#print(f'Probe Device Info: {probe_device_info}')
 
@@ -3094,7 +3094,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 	elif action == 'sys':
 		''' System Control Commands '''
 		
-		system_command_queue = RedisQueue('control:systemq')
+		system_command_queue = ValkeyQueue('control:systemq')
 		system_command_queue.push(arglist)
 
 	else:
@@ -3137,7 +3137,7 @@ def set_nested_key_value(data, key_list, value):
 
 def read_generic_key(key):
 	"""
-	Read generic data from Redis DB
+	Read generic data from Valkey DB
 	:param key: key name
 	"""
 	global cmdsts
@@ -3148,7 +3148,7 @@ def read_generic_key(key):
 
 def write_generic_key(key, value):
 	"""
-	Write generic data to Redis DB
+	Write generic data to Valkey DB
 	:param key: key name
 	:parma value: value to write
 	"""
