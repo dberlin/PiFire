@@ -57,12 +57,13 @@ BUSMAP = {
 
 class KTTDevice():
 	''' MCP9600 Device Based on the Adafruit Module '''
-	def __init__(self, i2c_bus_addr=0x67):
+	def __init__(self, i2c_bus_addr=0x67, i2c_bus= None):
 		self.logger = logging.getLogger("control")
 		self.status = {}
 		
-		# Create the I2C bus
-		self.i2c = busio.I2C(board.SCL, board.SDA)
+		if i2c_bus == None:
+			# Create the I2C bus
+			self.i2c = busio.I2C(board.SCL, board.SDA)
 
 		self.sensor = MCP9600(self.i2c, address=i2c_bus_addr)
 
