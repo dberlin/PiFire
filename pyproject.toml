@@ -16,6 +16,7 @@ dependencies = [
     "influxdb-client>=1.50.0",
     "netifaces>=0.11.0",
     "paho-mqtt>=2.1.0",
+    "pyserial>=3.5",
     "pillow>=12.2.0",
     "psutil>=7.2.2",
     "pygame>=2.6.1",
@@ -27,7 +28,13 @@ dependencies = [
     "zeroconf>=0.149.17",
     "gevent>=26.5.0",
     "adafruit-extended-bus>=1.0.2",
+    "adafruit-circuitpython-mcp9600>=2.0.10",
 ]
 
 [tool.uv.sources]
 valkey = { git = "https://github.com/valkey-io/valkey-py" }
+
+[dependency-groups]
+dev = [
+    "ipython>=9.14.1",
+]
