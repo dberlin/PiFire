@@ -67,3 +67,107 @@ def find_i2c_bus(match='CP2112', devices_path='/sys/bus/i2c/devices'):
 	if not found:
 		raise RuntimeError(f'No i2c adapter found matching {match!r} under {devices_path}')
 	raise RuntimeError(f'Multiple i2c adapters match {match!r}: {sorted(found)}')
+
+
+"""
+	==============================
+	  Class Definition
+	==============================
+"""
+
+# Default Numato relay index for each PiFire output.
+_DEFAULT_OUTPUTS = {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}
+
+
+class GrillPlatform:
+
+	def __init__(self, config):
+		self.logger = create_logger('control')
+		self.config = config
+
+		outputs = config.get('outputs', {}) or {}
+		self.relay_map = {
+			name: int(outputs.get(name, default))
+			for name, default in _DEFAULT_OUTPUTS.items()
+		}
+
+		numato_cfg = config.get('numato', {}) or {}
+		self.device = numato_cfg.get('device', '/dev/ttyACM0')
+		self.baudrate = int(numato_cfg.get('baudrate', 921600))
+
+		emc_cfg = config.get('emc2101', {}) or {}
+		self.i2c_bus_match = emc_cfg.get('i2c_bus_match', 'CP2112')
+		address = emc_cfg.get('address', 0x4c)
+		if isinstance(address, str):
+			address = int(address, 16)
+		self.emc_address = address
+
+		self.frequency = config.get('frequency', 100)
+		self.standalone = config.get('standalone', True)
+
+		# Cached commanded output state (avoids a serial round-trip per poll).
+		self._output_state = {'auger': False, 'fan': False, 'igniter': False, 'power': False}
+		self._fan_speed_percent = 0
+
+		# Fan ramp control.
+		self._ramp_thread = None
+		self._ramp_stop = threading.Event()
+
+		# Open the relay board.
+		self.relay = NumatoUSBRelay(self.device, baudrate=self.baudrate)
+
+		# Open the EMC2101 on the CP2112 bridge bus.
+		bus_num = find_i2c_bus(match=self.i2c_bus_match)
+		self.emc = EMC2101(ExtendedI2C(bus_num))
+
+		# Start in a known state: all relays off, fan stopped.
+		self.relay.reset()
+		self.emc.manual_fan_speed = 0
+
+	# MARK: Output control
+	def _set_output(self, name, state):
+		# Call relay_on/relay_off directly (not relay_set) so the action is
+		# explicit and observable when the relay driver is mocked in tests.
+		index = self.relay_map[name]
+		if state:
+			self.relay.relay_on(index)
+		else:
+			self.relay.relay_off(index)
+		self._output_state[name] = state
+
+	def auger_on(self):
+		self.logger.debug('auger_on: Turning on auger')
+		self._set_output('auger', True)
+
+	def auger_off(self):
+		self.logger.debug('auger_off: Turning off auger')
+		self._set_output('auger', False)
+
+	def igniter_on(self):
+		self.logger.debug('igniter_on: Turning on igniter')
+		self._set_output('igniter', True)
+
+	def igniter_off(self):
+		self.logger.debug('igniter_off: Turning off igniter')
+		self._set_output('igniter', False)
+
+	def power_on(self):
+		self.logger.debug('power_on: Powering on grill platform')
+		self._set_output('power', True)
+
+	def power_off(self):
+		self.logger.debug('power_off: Powering off grill platform')
+		self._set_output('power', False)
+
+	def get_input_status(self):
+		# No selector/shutdown inputs on this platform.
+		return False
+
+	def get_output_status(self):
+		self.current = {
+			'auger': self._output_state['auger'],
+			'igniter': self._output_state['igniter'],
+			'power': self._output_state['power'],
+			'fan': self._output_state['fan'],
+		}
+		return self.current
