@@ -214,6 +214,36 @@ class GrillPlatform:
 				self._ramp_thread.join(timeout=5)
 			self._ramp_thread = None
 
+	# MARK: Fan ramp (Smoke Plus)
+	def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
+		self.logger.debug('pwm_fan_ramp: Starting fan ramp on_time=' + str(on_time) +
+			' min=' + str(min_duty_cycle) + ' max=' + str(max_duty_cycle))
+		self.relay.relay_on(self.relay_map['fan'])
+		self._output_state['fan'] = True
+		self._start_ramp(on_time, min_duty_cycle, max_duty_cycle)
+
+	def _start_ramp(self, on_time, min_duty_cycle, max_duty_cycle):
+		self._stop_ramp()
+		self._ramp_stop = threading.Event()
+		self._ramp_thread = threading.Thread(
+			target=self._ramp_device,
+			args=(on_time, min_duty_cycle, max_duty_cycle),
+			daemon=True,
+		)
+		self._ramp_thread.start()
+
+	def _ramp_device(self, on_time, min_duty_cycle, max_duty_cycle, fps=25):
+		# Linearly ramp the fan speed from min to max over on_time seconds.
+		# No inversion: values are fan-speed percent applied directly.
+		steps = max(int(fps * on_time), 1)
+		for i in range(steps):
+			fraction = i / steps
+			percent = min_duty_cycle + (max_duty_cycle - min_duty_cycle) * fraction
+			self.set_duty_cycle(round(percent, 2), override_ramping=False)
+			if self._ramp_stop.wait(1.0 / fps):
+				break
+		self.set_duty_cycle(max_duty_cycle, override_ramping=False)
+
 	def get_output_status(self):
 		self.current = {
 			'auger': self._output_state['auger'],
