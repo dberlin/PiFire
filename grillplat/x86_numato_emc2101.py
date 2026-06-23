@@ -244,6 +244,191 @@ class GrillPlatform:
 				break
 		self.set_duty_cycle(max_duty_cycle, override_ramping=False)
 
+	# MARK: Lifecycle
+	def cleanup(self):
+		self.logger.debug('cleanup: Shutting down outputs')
+		self._stop_ramp()
+		try:
+			self.emc.manual_fan_speed = 0
+		except Exception:
+			pass
+		try:
+			self.relay.reset()
+		finally:
+			self.relay.close()
+
+	# MARK: System / Platform Commands
+	def supported_commands(self, arglist):
+		supported_commands = [
+			'check_throttled',
+			'check_wifi_quality',
+			'check_cpu_temp',
+			'supported_commands',
+			'check_alive',
+			'scan_bluetooth',
+			'os_info',
+			'network_info',
+			'hardware_info',
+		]
+		return {
+			'result': 'OK',
+			'message': 'Supported commands listed in "data".',
+			'data': {'supported_cmds': supported_commands},
+		}
+
+	def check_throttled(self, arglist):
+		# Not applicable on x86 hardware.
+		return {
+			'result': 'OK',
+			'message': 'No under-voltage or throttling detected.',
+			'data': {'cpu_under_voltage': False, 'cpu_throttled': False},
+		}
+
+	def check_cpu_temp(self, arglist):
+		import psutil
+		temp = 0.0
+		result = 'OK'
+		message = 'Successfully obtained CPU temperature.'
+		try:
+			sensors = psutil.sensors_temperatures()
+			readings = []
+			for label in ('coretemp', 'k10temp', 'cpu_thermal', 'acpitz'):
+				if sensors.get(label):
+					readings = sensors[label]
+					break
+			if not readings:
+				for entries in sensors.values():
+					if entries:
+						readings = entries
+						break
+			if readings:
+				temp = float(readings[0].current)
+			else:
+				message = 'No CPU temperature sensors available.'
+		except Exception as exc:
+			result = 'ERROR'
+			message = 'Error obtaining CPU temperature: ' + str(exc)
+		if not is_float(str(temp)):
+			temp = 0.0
+		return {
+			'result': result,
+			'message': message,
+			'data': {'cpu_temp': float(temp)},
+		}
+
+	def check_wifi_quality(self, arglist):
+		import subprocess
+		data = {'result': 'ERROR', 'message': 'Unable to obtain wifi quality data.', 'data': {}}
+		try:
+			output = subprocess.check_output(['iwconfig'])
+			lines = output.decode('utf-8').splitlines()
+			for line in lines:
+				if 'Link Quality=' in line:
+					quality_str = line.split('=')[1].strip()
+					quality_parts = quality_str.split(' ')[0]
+					try:
+						quality_value, quality_max = quality_parts.split('/')
+						percentage = (int(quality_value) / int(quality_max)) * 100
+						data['result'] = 'OK'
+						data['message'] = 'Successfully obtained wifi quality data.'
+						data['data']['wifi_quality_value'] = int(quality_value)
+						data['data']['wifi_quality_max'] = int(quality_max)
+						data['data']['wifi_quality_percentage'] = round(percentage, 2)
+					except ValueError:
+						pass
+		except Exception:
+			pass
+		return data
+
+	def check_alive(self, arglist):
+		return {
+			'result': 'OK',
+			'message': 'The control script is running.',
+			'data': {},
+		}
+
+	def scan_bluetooth(self, arglist):
+		import asyncio
+		try:
+			from bleak import BleakScanner
+		except ImportError:
+			return {
+				'result': 'ERROR',
+				'message': 'bleak is not installed. Run: pip install bleak',
+				'data': {'bt_devices': []},
+			}
+
+		bt_devices = []
+		result = 'OK'
+		message = 'Bluetooth scan completed successfully.'
+
+		async def _scan():
+			discovered = await BleakScanner.discover(timeout=5.0)
+			for dev in discovered:
+				name = dev.name or 'Unknown'
+				bt_devices.append({'name': name, 'hw_id': dev.address.lower(), 'info': ''})
+
+		try:
+			asyncio.run(_scan())
+		except Exception as exc:
+			result = 'ERROR'
+			message = 'Bluetooth scan error: ' + str(exc)
+			self.logger.error('scan_bluetooth: Error during scan - ' + str(exc))
+
+		return {
+			'result': result,
+			'message': message,
+			'data': {'bt_devices': bt_devices},
+		}
+
+	def os_info(self, arglist):
+		return {
+			'result': 'OK',
+			'message': 'OS information retrieved successfully.',
+			'data': get_os_info(),
+		}
+
+	def network_info(self, arglist):
+		import netifaces
+		net_info = {}
+		for iface in netifaces.interfaces():
+			addrs = netifaces.ifaddresses(iface)
+			ip_addr = addrs.get(netifaces.AF_INET, [{}])[0].get('addr', 'N/A')
+			mac_addr = addrs.get(netifaces.AF_LINK, [{}])[0].get('addr', 'N/A')
+			net_info[iface] = {'ip_address': ip_addr, 'mac_address': mac_addr}
+		return {
+			'result': 'OK',
+			'message': 'Network information retrieved successfully.',
+			'data': net_info,
+		}
+
+	def hardware_info(self, arglist):
+		import psutil
+		cpu_info = {
+			'hardware': 'Unknown',
+			'model': 'Unknown',
+			'model_name': 'Unknown',
+			'cores': psutil.cpu_count(logical=True),
+			'frequency': psutil.cpu_freq().current if psutil.cpu_freq() else 'Unknown',
+		}
+		try:
+			with open('/proc/cpuinfo') as f:
+				for line in f:
+					if 'model name' in line.lower():
+						cpu_info['model_name'] = line.strip().split(':')[1].strip()
+		except OSError:
+			pass
+		mem_info = psutil.virtual_memory()
+		return {
+			'result': 'OK',
+			'message': 'Hardware information retrieved successfully.',
+			'data': {
+				'cpu_info': cpu_info,
+				'total_ram': mem_info.total,
+				'available_ram': mem_info.available,
+			},
+		}
+
 	def get_output_status(self):
 		self.current = {
 			'auger': self._output_state['auger'],
