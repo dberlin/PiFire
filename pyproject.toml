@@ -28,6 +28,7 @@ dependencies = [
     "zeroconf>=0.149.17",
     "gevent>=26.5.0",
     "adafruit-extended-bus>=1.0.2",
+    "adafruit-circuitpython-emc2101>=1.0.0",
     "adafruit-circuitpython-mcp9600>=2.0.10",
 ]
 
@@ -37,4 +38,5 @@ valkey = { git = "https://github.com/valkey-io/valkey-py" }
 [dependency-groups]
 dev = [
     "ipython>=9.14.1",
+    "pytest>=8.0.0",
 ]

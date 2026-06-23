@@ -102,3 +102,7 @@ test_*.py
 debug_*.py
 debug_*.html
 *_test.py
+
+# Allow the proper test suite directory
+!tests/
+!tests/**
