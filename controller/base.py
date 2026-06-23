@@ -75,5 +75,13 @@ class ControllerBase:
 	    '''
 		self.units = units
 
+	def get_control_period(self):
+		'''
+		Desired re-solve / actuation period in seconds. Return None to use the
+		mode's CycleTime (legacy behavior). Controllers that run faster than the
+		auger cycle (e.g. MPC) return a fixed period such as 1.0.
+		'''
+		return None
+
 	def supported_functions(self):
 		return self.function_list

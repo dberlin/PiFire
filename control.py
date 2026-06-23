@@ -302,6 +302,22 @@ def _process_system_commands(grill_platform):
 			}
 		system_output.push(result)
 
+def normalize_controller_output(output):
+	'''
+	Normalize a controller's update() return into (cycle_ratio, fan).
+
+	Legacy controllers return a float cycle ratio; the MPC controller returns
+	{'cycle_ratio': float, 'fan': {'duty': pct or None}}. fan is returned only
+	when a duty is present.
+	'''
+	if isinstance(output, dict):
+		ratio = float(output.get('cycle_ratio', 0.0))
+		fan = output.get('fan')
+		if isinstance(fan, dict) and fan.get('duty') is not None:
+			return ratio, fan
+		return ratio, None
+	return float(output), None
+
 def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device):
 	"""
 	Work Cycle Function
@@ -706,10 +722,16 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 		if mode in ('Startup', 'Reignite', 'Smoke', 'Hold', 'Prime'):
 			if mode == 'Hold':
 				# Check to see if it's time to update pid and update if needed.
-				if (now - controllerCycleStart) > CycleTime:
-					pid_output = controllerCore.update(ptemp)
+				controller_interval = controllerCore.get_control_period() or CycleTime
+				if (now - controllerCycleStart) > controller_interval:
+					raw_output = controllerCore.update(ptemp)
+					pid_output, fan_cmd = normalize_controller_output(raw_output)
 					controllerCycleStart = now
 					CycleRatio = RawCycleRatio = settings['cycle_data']['u_min'] if LidOpenDetect else pid_output
+					# Controllers that command the fan directly (MPC) apply duty
+					# here, only when a PWM/DC fan is present.
+					if fan_cmd is not None and settings['platform']['dc_fan'] and control['pwm_control']:
+						grill_platform.set_duty_cycle(fan_cmd['duty'])
 					# If ratio is less than min set auger ratio to min and control further via fan.
 					if CycleRatio < settings['cycle_data']['u_min']:
 						CycleRatio = settings['cycle_data']['u_min']
