@@ -51,9 +51,10 @@ the architecture (see "Simulation validation").
   Pi), so horizon length, the estimator, and the `do-mpc`/`CasADi`/IPOPT
   toolchain add negligible cost. (`casadi 3.7.2` + `do-mpc 5.1.1` verified to
   install and solve on this Python 3.14 environment.)
-- `do-mpc` provides the pieces we need from one framework: the symbolic model,
-  the MPC controller (IPOPT backend), the estimator (MHE), and a simulator used
-  for closed-loop tests.
+- `do-mpc` provides the symbolic model, the MPC controller (IPOPT backend), and
+  a simulator used for closed-loop tests. The estimator is a Kalman filter over
+  the augmented linear model (not do-mpc's MHE — see "Offset-free estimator" for
+  the decision record).
 - The controller framework: `control.py` does
   `importlib.import_module(f'controller.{name}')` then
   `Controller(settings['controller']['config'][name], units, cycle_data)`.
@@ -115,14 +116,41 @@ knowledge the MPC must not have to learn:
 
 ### Offset-free estimator
 
-Each control step, before optimizing, a `do_mpc.estimator.MHE` updates the
-estimated states `[T_f, T_c, d]` from the measured probe temperature, weighting
-process vs. measurement noise per configured covariances. The integrating
-disturbance `d` drives the steady-state output error to zero under unmeasured
-disturbances — this, more than nominal model fidelity, is what makes the
-±1.0 °C band achievable. (An EKF over the same augmented model is an acceptable
-drop-in; the feasibility spike used an equivalent steady-state Kalman filter and
-achieved the offset-free property.)
+Each control step, before optimizing, a **Kalman filter** over the augmented
+linear model updates the estimated states `[T_f, T_c, d]` from the measured
+probe temperature, weighting process vs. measurement noise per configured
+covariances. The integrating disturbance `d` drives the steady-state output
+error to zero under unmeasured disturbances — this, more than nominal model
+fidelity, is what makes the ±1.0 °C band achievable.
+
+**Estimator choice — KF vs. MHE (decision record).** do-mpc's MHE was evaluated
+as the estimator and rejected for this design. For a *linear* grey-box model the
+Kalman filter is the optimal estimator (KF and MHE coincide in the
+linear-Gaussian case), and the spikes bore this out empirically against the same
+mismatched plant:
+
+| | Kalman filter | do-mpc MHE (default objective) |
+|---|---|---|
+| steady band, max | **0.31 °C** | 1.53 °C |
+| within ±1.0 °C | **100%** | 34% |
+| mean bias | −0.02 °C | −1.11 °C (not offset-free) |
+| per-step solve | ~8 ms | ~16 ms (~2×) |
+
+The MHE failed to be offset-free because do-mpc treats the control input as a
+free decision variable, so it absorbed the model mismatch into the estimated
+input and left the disturbance state at `d≈0`. Making MHE offset-free would
+require extra plumbing to fix its inputs to the applied values — more complexity
+and ~2× compute for no accuracy gain on a linear model. The KF is therefore the
+chosen estimator (simple, deterministic, ~30 lines, validated at 0.31 °C).
+
+**Re-evaluate MHE if the model becomes non-linear.** MHE earns its keep on
+nonlinear models and when hard state/parameter constraints matter — e.g. if a
+future revision replaces the linear grey-box with a nonlinear combustion/heat-
+transfer model, or estimates physical parameters online. At that point MHE (with
+its inputs properly fixed to applied values) should be reconsidered over the
+linear KF / an EKF. (Reference spikes:
+`docs/superpowers/experiments/mpc_cascade_spike.py` (KF) and
+`mpc_mhe_spike.py` (MHE comparison).)
 
 ### MPC optimization
 
