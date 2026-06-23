@@ -867,7 +867,7 @@ Then add the system/platform commands:
 		except Exception as exc:
 			result = 'ERROR'
 			message = 'Error obtaining CPU temperature: ' + str(exc)
-		if not is_float(temp):
+		if not is_float(str(temp)):  # is_float() only accepts strings
 			temp = 0.0
 		return {
 			'result': result,
