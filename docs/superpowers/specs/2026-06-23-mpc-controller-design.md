@@ -146,11 +146,18 @@ chosen estimator (simple, deterministic, ~30 lines, validated at 0.31 °C).
 **Re-evaluate MHE if the model becomes non-linear.** MHE earns its keep on
 nonlinear models and when hard state/parameter constraints matter — e.g. if a
 future revision replaces the linear grey-box with a nonlinear combustion/heat-
-transfer model, or estimates physical parameters online. At that point MHE (with
-its inputs properly fixed to applied values) should be reconsidered over the
-linear KF / an EKF. (Reference spikes:
-`docs/superpowers/experiments/mpc_cascade_spike.py` (KF) and
-`mpc_mhe_spike.py` (MHE comparison).)
+transfer model, or estimates physical parameters online. At that point MHE
+should be reconsidered over the linear KF / an EKF. A follow-up spike confirmed
+this empirically: on a model with a nonlinear radiative (T⁴) loss term, MHE —
+**with the control input modeled as a known parameter (fed the applied-input
+history) rather than a free decision variable** — engaged the disturbance state
+and matched the KF (0.35 °C steady band, 100% within ±1.0 °C, −0.01 °C bias) at
+~14 ms/step. The "input as known parameter" detail is the crux: it is what makes
+MHE offset-free (the original linear MHE attempt left the input free and was not
+offset-free). (Reference spikes:
+`docs/superpowers/experiments/mpc_cascade_spike.py` (KF),
+`mpc_mhe_spike.py` (linear MHE, free input — fails), and
+`mpc_nonlinear_mhe_spike.py` (nonlinear MHE, pinned input — works).)
 
 ### MPC optimization
 
