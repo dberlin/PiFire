@@ -461,7 +461,7 @@ git commit -m "feat: add GrillPlatform construction and relay output control for
 
 **Interfaces:**
 - Consumes: `GrillPlatform` from Task 3; `self.relay`, `self.emc`, `self.relay_map['fan']`, `self._output_state`, `self._fan_speed_percent`, `self.frequency`.
-- Produces: `fan_on(fan_speed_percent=100)`, `fan_off()`, `fan_toggle()`, `set_duty_cycle(fan_speed_percent, override_ramping=True)`, `set_pwm_frequency(frequency=100)`, and an extended `get_output_status()` that also returns `pwm` (current fan %) and `frequency`.
+- Produces: `fan_on(fan_speed_percent=100)`, `fan_off()`, `fan_toggle()`, `set_duty_cycle(fan_speed_percent, override_ramping=True)`, `set_pwm_frequency(frequency=100)`, `_stop_ramp()` (the fan methods call it; the ramp-start methods in Task 5 also rely on it), and an extended `get_output_status()` that also returns `pwm` (current fan %) and `frequency`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -577,6 +577,16 @@ Add these methods to `GrillPlatform` (place after the output-control methods, be
 				self.emc.pwm_frequency = frequency
 			except (ValueError, OSError) as exc:
 				self.logger.warning('set_pwm_frequency: EMC2101 rejected frequency: ' + str(exc))
+
+	def _stop_ramp(self):
+		# Stop any in-progress fan ramp. Defined here (not in Task 5) because the
+		# fan methods above call it; the ramp-start methods in Task 5 reuse it.
+		# Safe to call when no ramp is running (self._ramp_thread is None).
+		if self._ramp_thread is not None:
+			self._ramp_stop.set()
+			if self._ramp_thread is not threading.current_thread():
+				self._ramp_thread.join(timeout=5)
+			self._ramp_thread = None
 ```
 
 Then replace `get_output_status` to also report `pwm` and `frequency`:
@@ -615,8 +625,8 @@ git commit -m "feat: add EMC2101 fan and PWM control for x86 platform"
 - Create: `tests/test_x86_ramp.py`
 
 **Interfaces:**
-- Consumes: `set_duty_cycle`, `self.relay`, `self._ramp_thread`, `self._ramp_stop` from earlier tasks.
-- Produces: `pwm_fan_ramp(on_time=5, min_duty_cycle=20, max_duty_cycle=100)`, plus private `_start_ramp`, `_stop_ramp`, `_ramp_device`. Ramp uses `threading.Thread` + `threading.Event` (no gpiozero). When a ramp finishes or is stopped, the fan ends at `max_duty_cycle`.
+- Consumes: `set_duty_cycle`, `self.relay`, `self._ramp_thread`, `self._ramp_stop`, and `_stop_ramp` from earlier tasks. **NOTE:** `_stop_ramp` was moved into Task 4 (the fan methods call it), so it ALREADY EXISTS on the class — do NOT redefine it here.
+- Produces: `pwm_fan_ramp(on_time=5, min_duty_cycle=20, max_duty_cycle=100)`, plus private `_start_ramp`, `_ramp_device`. Ramp uses `threading.Thread` + `threading.Event` (no gpiozero). When a ramp finishes or is stopped, the fan ends at `max_duty_cycle`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -682,13 +692,6 @@ Add to `GrillPlatform` (after the fan/PWM methods):
 			daemon=True,
 		)
 		self._ramp_thread.start()
-
-	def _stop_ramp(self):
-		if self._ramp_thread is not None:
-			self._ramp_stop.set()
-			if self._ramp_thread is not threading.current_thread():
-				self._ramp_thread.join(timeout=5)
-			self._ramp_thread = None
 
 	def _ramp_device(self, on_time, min_duty_cycle, max_duty_cycle, fps=25):
 		# Linearly ramp the fan speed from min to max over on_time seconds.
