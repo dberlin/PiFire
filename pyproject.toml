@@ -26,6 +26,7 @@ dependencies = [
     "scikit-learn>=1.9.0",
     "uuid>=1.30",
     "zeroconf>=0.149.17",
+    "do-mpc>=5.1.1",
     "gevent>=26.5.0",
     "adafruit-extended-bus>=1.0.2",
     "adafruit-circuitpython-emc2101>=1.0.0",
