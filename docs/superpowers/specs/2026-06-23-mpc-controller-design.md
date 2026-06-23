@@ -3,182 +3,214 @@
 ## Overview
 
 Add a Model Predictive Control (MPC) controller as a selectable alternative to
-the existing PID/ML/fuzzy controllers. The MPC controls the **auger** (pellet
-feed cycle ratio) and, where hardware supports it, the **fan**, using a
-grey-box thermal model of the grill, an online disturbance estimator for
-offset-free tracking, and a constrained optimization solved each control cycle.
-The goal is tight setpoint tracking (target: ±1.0 °C steady-state band),
-validated in closed-loop simulation.
+the existing PID/ML/fuzzy controllers. The MPC uses a **cascade** design:
 
-The igniter is **not** an MPC actuator; it remains under control.py's existing
-startup/reignite/flame-out logic.
+1. An **outer MPC** manipulates a single scalar — a net **firing-rate / heat-
+   release demand `Q`** — against a grey-box thermal model of the grill, with an
+   online disturbance estimator for offset-free tracking.
+2. An **inner combustion allocator** maps `Q` to the physical actuators
+   (**auger** duty and, on PWM/DC-fan builds, **fan** speed) along a sensible
+   air-fuel curve.
+
+This keeps the optimization well-conditioned (one input, one output, no
+fuel/air degeneracy) and makes nonsensical fuel/air combinations impossible by
+construction. The **igniter is not** an MPC actuator; it stays under control.py's
+existing startup/reignite/flame-out logic.
+
+Built on `do-mpc` (CasADi/IPOPT). Target: ±1.0 °C steady-state tracking,
+validated in closed-loop simulation. A feasibility spike has already validated
+the architecture (see "Simulation validation").
 
 ## Goals
 
 - A new `controller/mpc.py` that plugs into the existing controller framework
   and is selectable through the wizard/settings like any other controller.
-- Tight setpoint tracking in Hold mode, validated to a ±1.0 °C steady-state
-  band in a closed-loop simulation whose plant is deliberately mismatched from
-  the controller's internal model (so the result is not tautological).
+- Tight setpoint tracking in Hold mode — a ±1.0 °C steady-state band, validated
+  in a closed-loop simulation whose plant is deliberately mismatched from the
+  controller's internal model.
+- Combustion always kept on a sensible air-fuel curve by the allocator.
+- A control step fast enough to run the loop at **≥ 1 Hz** (measured ~8 ms/step;
+  see "Control rate").
 - Full integration: controller manifest, settings defaults, and wizard support.
-- Ships with working default model parameters; an offline calibration utility
-  lets users refine the model from their own logged data.
+- Ships with working default parameters; an offline calibration utility lets
+  users refine the model + firing curve from their own logged data.
 
 ## Non-Goals
 
 - No igniter control by the MPC.
 - No changes to Startup/Smoke/Shutdown/Prime modes; like every existing
   controller, MPC is active only in **Hold** mode.
-- The MPC is built on **`do-mpc`** (which pulls in `CasADi`); these are added
-  as dependencies. No bespoke QP/solver code is hand-rolled.
+- The MPC is built on **`do-mpc`** (which pulls in `CasADi`, plus `matplotlib`/
+  `pandas`); these are added as dependencies. No bespoke QP/solver code.
 - No claim of ±1.0 °C on real hardware; that depends on calibration and the
   specific grill. The acceptance gate is the closed-loop simulation.
 
 ## Context / Environment
 
 - PiFire currently runs on x86 for this work (not constrained to a Raspberry
-  Pi), so horizon length, discretization granularity, the estimator, and the
-  `do-mpc`/`CasADi`/IPOPT toolchain add negligible cost.
-- `do-mpc` (with `CasADi`) is added to `pyproject.toml`. `do-mpc` provides the
-  three pieces we need from one coherent framework: the symbolic model, the MPC
-  controller (IPOPT backend), and the estimator (MHE) — plus a simulator used
+  Pi), so horizon length, the estimator, and the `do-mpc`/`CasADi`/IPOPT
+  toolchain add negligible cost. (`casadi 3.7.2` + `do-mpc 5.1.1` verified to
+  install and solve on this Python 3.14 environment.)
+- `do-mpc` provides the pieces we need from one framework: the symbolic model,
+  the MPC controller (IPOPT backend), the estimator (MHE), and a simulator used
   for closed-loop tests.
 - The controller framework: `control.py` does
   `importlib.import_module(f'controller.{name}')` then
   `Controller(settings['controller']['config'][name], units, cycle_data)`.
-  `ControllerBase` (`controller/base.py`) defines the contract; the key method
-  is `update(current) -> cycle_ratio`.
-- In Hold mode, `control.py` calls `controllerCore.update(ptemp)` once per
-  `CycleTime`, clamps the returned ratio to `cycle_data['u_min'/'u_max']`, and
-  uses it to time the auger on/off within `HoldCycleTime` (default 25 s).
-  Defaults: `u_min=0.1`, `u_max=0.9`, `HoldCycleTime=25`.
-- Precedent for an internal model: `controller/pid_sp.py` already carries FOPDT
-  parameters `tau=115`, `theta=65`. Precedent for an offline trainer:
-  `controller/update_ml.py` + `controller/ml_dataset.csv`.
+  `ControllerBase` (`controller/base.py`) defines the contract; `update(current)`
+  returns the actuation command. Controller config defaults derive from
+  `controller/controllers.json` via `_default_controller_config()` (option keys
+  `option_name`/`option_default`), so a manifest entry alone populates settings.
+- In Hold mode, `control.py` calls the controller and uses an auger cycle ratio
+  to time the auger on/off within `HoldCycleTime` (default 25 s); `u_min=0.1`,
+  `u_max=0.9`. Precedent for an internal model: `controller/pid_sp.py`
+  (`tau=115`, `theta=65`). Precedent for an offline trainer:
+  `controller/update_ml.py`.
 
 ## Architecture
 
-### Grey-box model (state-space, 2 thermal masses + disturbance)
+### Grey-box thermal model (2 masses + disturbance), input = `Q`
 
-A discrete linear state-space model, sampled at `Ts = HoldCycleTime`:
+A continuous-time `do_mpc.model.Model`, sampled at the prediction step `t_step`:
 
 - **States:**
   - `T_f` — firepot / burn-zone temperature (fast lumped mass).
-  - `T_c` — chamber/grate temperature (slow lumped mass); this is the
-    controlled output, compared against the control probe.
-  - `d` — an **integrating disturbance state** (offset-free augmentation) that
-    absorbs ambient drift, pellet-quality variation, and model error.
-- **Inputs:**
-  - `u_auger` ∈ [u_min, u_max] — pellet feed duty (heat into the firepot).
-  - `u_fan` ∈ [fan_min, fan_max] — combustion air / convection; an MPC input
-    only when a PWM/DC fan is present, otherwise held constant (auger-only MPC).
-- **Continuous dynamics (before discretization):**
-  - `C_f·dT_f/dt = K_a·u_auger·g(u_fan) − h_fc·(T_f − T_c)`
-  - `C_c·dT_c/dt = h_fc·(T_f − T_c) − h_amb·(T_c − T_amb)`  ← **ambient loss**
-  - `g(u_fan)` is the fan's effect on burn/heat-transfer (linearized about
-    `fan_nom`); `h_amb·(T_c − T_amb)` is the loss term that sets steady state.
-  - The output bias is `T_c + d`, with `d` modeled as integrating (`d[k+1]=d[k]`
-    in the model, driven by the estimator).
-- **Parameters (config, with shipped defaults):** `C_f, C_c, h_fc, h_amb, K_a,
-  K_f (fan gain), fan_nom, T_amb`. Defaults are chosen to reproduce the
-  `pid_sp` first-order response (`tau≈115`, effective deadtime from the
-  two-mass lag) at a nominal mid-range setpoint. `T_amb` defaults to a constant
-  and is overridden by an ambient probe reading when one is configured.
+  - `T_c` — chamber/grate temperature (slow lumped mass); the controlled output,
+    compared against the control probe.
+  - `d` — an **integrating disturbance state** (offset-free augmentation; rhs 0,
+    driven by the estimator) absorbing ambient drift, pellet-quality variation,
+    and model error.
+- **Input:** `Q` — net firing-rate / heat-release demand, bounded
+  `[Q_min, Q_max]`. This is the *only* manipulated variable the optimizer sees.
+- **Dynamics:**
+  - `C_f·dT_f/dt = Q − h_fc·(T_f − T_c)`
+  - `C_c·dT_c/dt = h_fc·(T_f − T_c) − h_amb·(T_c − T_amb) + d`  ← **ambient loss**
+  - `dd/dt = 0`
+  - `h_amb·(T_c − T_amb)` is the loss term that sets steady state; `T_amb`
+    defaults to a constant and is overridden by an ambient probe when configured.
+- **Parameters (config, shipped defaults):** `C_f, C_c, h_fc, h_amb, T_amb,
+  Q_min, Q_max`. Defaults reproduce the `pid_sp` first-order response at a
+  nominal mid-range setpoint.
 
-The dynamics are expressed once as a `do_mpc.model.Model` (continuous-time,
-CasADi symbolic). `do-mpc` discretizes internally (orthogonal collocation) for
-the controller and integrates the continuous model in the simulator, so the
-same parameterization drives the controller, estimator, and test plant.
+Because the single input is `Q`, the model is linear and has no input
+degeneracy or bilinearity — this is the core reason the cascade tracks cleanly.
+
+### Combustion allocator (inner layer)
+
+`Q → (auger_duty, fan)` along a sensible air-fuel curve, encoding the combustion
+knowledge the MPC must not have to learn:
+
+- `auger_duty` increases monotonically with `Q` over `[u_min, u_max]`.
+- `fan` (on PWM/DC-fan builds) increases with `Q` so air tracks fuel, holding
+  the air-fuel ratio near its target across the firing range (the principle is
+  fuel-air **cross-limiting** — lead with air on ramp-up, cut fuel first on
+  ramp-down).
+- Honors min/max fire (a pellet grill has a minimum sustainable burn).
+- **Hardware-aware:** on a PWM/DC fan it sets fuel **and** air; on an AC (on/off)
+  fan it maps `Q` to auger only and the fan stays on. The MPC layer is identical
+  either way — it always commands `Q` — which cleanly removes the earlier
+  "fan input only on PWM" special-casing from the optimizer.
+- **Parameters (config):** firing-curve endpoints (auger/fan at min and max
+  fire) and the air-fuel target; calibration refines these.
 
 ### Offset-free estimator
 
-Each control cycle, before optimizing, a `do_mpc.estimator.MHE`
-(moving-horizon estimator) updates the estimated states `[T_f, T_c, d]` from
-the measured probe temperature, weighting process vs. measurement noise per the
-configured covariances. The integrating disturbance `d` drives the steady-state
-output error to zero under unmeasured disturbances — this is what makes the
-±1.0 °C band achievable despite ambient changes and pellet variability,
-independent of nominal model accuracy. (If MHE proves heavier than warranted,
-an EKF over the same augmented model is an acceptable drop-in; MHE is the
-default because it handles the input/state bounds naturally.)
+Each control step, before optimizing, a `do_mpc.estimator.MHE` updates the
+estimated states `[T_f, T_c, d]` from the measured probe temperature, weighting
+process vs. measurement noise per configured covariances. The integrating
+disturbance `d` drives the steady-state output error to zero under unmeasured
+disturbances — this, more than nominal model fidelity, is what makes the
+±1.0 °C band achievable. (An EKF over the same augmented model is an acceptable
+drop-in; the feasibility spike used an equivalent steady-state Kalman filter and
+achieved the offset-free property.)
 
 ### MPC optimization
 
 - A `do_mpc.controller.MPC` over a prediction horizon `n_horizon` (default
-  `≈ 2·tau/Ts`, e.g. ~16 steps) at step `t_step = Ts`. x86 allows generous
-  horizons.
-- **Cost:** lterm/mterm penalizing tracking error `(T_c − setpoint)²` (weight
-  `Q`), with `rterm` penalizing input moves `(Δu)²` (weight `R_Δ`); an input
-  effort weight `R` about the disturbance-corrected steady-state input.
-- **Constraints:** box bounds on `u_auger` (`u_min`/`u_max`) and `u_fan`
-  (`fan_min`/`fan_max`); per-step rate limits via `rterm`/`du` bounds.
-- **Solver:** IPOPT via `do-mpc`, warm-started from the previous solution
-  (do-mpc keeps the last solution). Apply the first move (`mpc.make_step`).
-- Fan input is included only when a PWM/DC fan is available
-  (`settings['platform']['dc_fan']` and PWM control active); otherwise the
-  optimization is auger-only and the fan stays on, consistent with the existing
-  "PWM + FanPid not compatible" note in `control.py`.
+  `≈ 2·tau/t_step`, e.g. ~16–20 steps) at prediction step `t_step`.
+- **Cost:** `mterm`/`lterm` penalize tracking error `(T_c − setpoint)²` (weight
+  `Q_w`); `rterm` penalizes firing-rate moves `(ΔQ)²` (weight `R_dQ`).
+- **Constraints:** box bounds on `Q` (`Q_min`/`Q_max`); optional rate limit on
+  `ΔQ`.
+- **Solver:** IPOPT via `do-mpc`, warm-started from the previous solution. Apply
+  the first move (`mpc.make_step`) → `Q`, hand to the allocator.
+
+### Control rate
+
+The MPC re-solves at a configurable **control period** (`control_period`,
+default 1.0 s) — independent of the prediction `t_step`, which stays coarse
+(seconds) because grill dynamics are slow. Measured per-step cost on this x86
+environment (3 states, `n_horizon=20`, IPOPT, warm-started):
+
+- warm MPC solve: **mean ≈ 8.4 ms, p95 ≈ 11 ms, max ≈ 13 ms**; cold (first)
+  solve ≈ 31 ms; Kalman/estimator update ≈ 0.04 ms.
+- ⇒ ~120 control steps/second achievable — the **≥ 1 Hz** requirement clears by
+  ~100×.
+
+So `control.py` calls the MPC every `control_period` (default 1 s) rather than
+once per auger cycle. A timing test asserts the warm solve stays within a budget
+(e.g. < 200 ms) so the ≥ 1 Hz guarantee is regression-protected.
 
 ### Actuation contract (integration with control.py)
 
-`update(current)` becomes **backward-compatible** in its return type:
+`update(current)` is **backward-compatible** in its return type:
 
 - Legacy controllers return a `float` cycle ratio (unchanged).
-- MPC returns a `dict`: `{'cycle_ratio': <float>, 'fan': {'duty': <pct or None>}}`.
+- MPC returns a `dict`: `{'cycle_ratio': <auger_duty>, 'fan': {'duty': <pct or None>}}`.
 
-In `control.py`'s Hold work-cycle, immediately after
-`pid_output = controllerCore.update(ptemp)`:
+In `control.py`'s Hold loop:
 
-- If `pid_output` is a `dict`: use `pid_output['cycle_ratio']` exactly where the
-  float was used today (same `u_min`/`u_max` clamping and auger timing), and, if
-  `fan.duty` is not `None` and a PWM fan is available, call
+- The MPC is invoked every `control_period`; internally `update()` runs the
+  estimator then the optimizer, maps `Q` through the allocator, and returns the
+  dict.
+- If the return is a `dict`: `cycle_ratio` feeds the existing auger
+  time-proportioning (refreshed each control tick, same `u_min`/`u_max`
+  clamping); if `fan.duty` is not `None` and a PWM fan is available, call
   `grill_platform.set_duty_cycle(duty)`.
-- If `pid_output` is a `float`: behavior is identical to today.
+- If the return is a `float`: behavior is identical to today.
 
-A small helper normalizes the return so the change to `control.py` is minimal
-and every existing controller is byte-for-byte unaffected. `ControllerBase`
-documents the extended return contract.
+A small helper normalizes the return so the `control.py` change is minimal and
+every existing controller is unaffected. `ControllerBase` documents the
+extended return contract.
 
 ### Grill simulator (test-only)
 
-`controller/grill_sim.py` — a plant simulator used only by tests, built on
-`do_mpc.simulator.Simulator`. To keep the ±1.0 °C validation honest, the
-simulator's model is **deliberately mismatched** from the MPC's internal model:
-parameter offsets (and/or extra dynamics), additive process/measurement noise,
-an **ambient temperature drift**, and a **wind-gust / lid-open disturbance**
-(injected through the simulator's `tvp`/`p` hooks). This exercises the
-offset-free estimator rather than rewarding a model that matches itself.
+`controller/grill_sim.py` — a plant simulator built on
+`do_mpc.simulator.Simulator`, used only by tests. To keep the ±1.0 °C validation
+honest, the simulated plant is **deliberately mismatched** from the MPC's model:
+parameter offsets, an **AFR-dependent combustion efficiency** (so bad fuel/air
+actually loses heat), additive process/measurement noise, an **ambient drift**,
+and a **lid-open disturbance**. The allocator's job is to keep the plant on the
+high-efficiency part of that curve; the estimator handles the residual.
 
 ## Configuration / Settings / Wizard
 
-- New `mpc` entry in `controller/controllers.json` `metadata`, with:
-  - `friendly_name`, `module_name: "mpc"`, `description`, author/attribution.
-  - `recommendations.cycle` (cycle_time, cycle_ratio_min/max).
-  - a `config` array (same schema the wizard already renders for PID) exposing:
-    horizon `Np`/`Nc`; weights `Q`/`R`/`R_delta`; model params `C_f, C_c, h_fc,
-    h_amb, K_a, K_f, fan_nom, T_amb`; estimator noise `q_process`/`r_meas`;
-    `enable_fan_input`; fan bounds `fan_min`/`fan_max`.
-- `settings['controller']['config']['mpc']` default is derived from the manifest
-  `config` defaults (same mechanism PID uses), so wizard + settings support is
-  automatic once the manifest entry exists.
+- New `mpc` entry in `controller/controllers.json` `metadata`, with
+  `friendly_name`, `module_name: "mpc"`, `description`, `recommendations.cycle`,
+  and a `config` array (same schema the wizard already renders for PID) exposing:
+  horizon `n_horizon`, prediction `t_step`, `control_period`, weights `Q_w`/
+  `R_dQ`; model params `C_f, C_c, h_fc, h_amb, T_amb`; firing-rate bounds
+  `Q_min`/`Q_max`; allocator params (firing-curve endpoints + air-fuel target);
+  estimator covariances `q_process`/`r_meas`.
+- `settings['controller']['config']['mpc']` derives automatically from the
+  manifest `option_default`s — no `common.py` or `settings.json` edit needed.
 
 ## Calibration path (secondary)
 
 `controller/update_mpc.py` — an offline utility mirroring `update_ml.py`. It
 reads a logged history CSV (time, probe temp, auger duty, fan, ambient if
-available) and fits the grey-box parameters (`C_f, C_c, h_fc, h_amb, K_a, K_f`)
-via least-squares, writing them back as the `mpc` config defaults. The
-controller ships with working defaults and does not require calibration to run.
+available) and fits the grey-box parameters and firing curve via least-squares,
+writing them back as the `mpc` config defaults. Ships with working defaults and
+does not require calibration to run.
 
 ## Error Handling
 
-- If IPOPT reports a non-success status on a cycle (checked via the do-mpc
-  solver stats), the MPC returns the previous applied move (or the
-  disturbance-corrected steady-state input), clamped to bounds — never an
-  unbounded or NaN command.
-- The relatively expensive do-mpc/IPOPT setup happens once at controller
-  construction (`controller/mpc.py.__init__`); `update()` only runs
-  `estimator.make_step()` then `mpc.make_step()` and maps the result.
+- If IPOPT reports a non-success status on a step (checked via do-mpc solver
+  stats), the MPC returns the previous applied move (or the disturbance-corrected
+  steady-state firing rate), clamped to bounds — never an unbounded/NaN command.
+- The expensive do-mpc/IPOPT setup happens once at construction
+  (`controller/mpc.py.__init__`); `update()` only runs `estimator.make_step()`,
+  `mpc.make_step()`, and the allocator map.
 - Construction validates config; missing keys fall back to shipped defaults.
 - The dict/float return is normalized defensively so a malformed return cannot
   break the Hold cycle.
@@ -188,19 +220,42 @@ controller ships with working defaults and does not require calibration to run.
 All in `tests/`:
 
 1. **Model:** the `do_mpc.model.Model` builds; open-loop step response (via the
-   simulator) matches expected first-order-like behavior; the ambient-loss term
-   yields the correct steady-state gain.
-2. **Estimator:** with a constant unmeasured disturbance, the MHE estimate of
-   `d` converges so predicted output bias → 0 (offset-free property).
-3. **Optimizer:** `mpc.make_step` returns a first move within box and rate
-   constraints; a forced non-success solver status falls back safely to a
-   bounded command.
-4. **Contract/integration:** `update()` returns the documented dict; the
+   simulator) is first-order-like; the ambient-loss term yields the correct
+   steady-state gain.
+2. **Allocator:** `Q → (auger, fan)` is monotonic, respects `u_min`/`u_max` and
+   fan bounds, holds the air-fuel target across the range, and falls back to
+   auger-only when no PWM fan is present.
+3. **Estimator:** with a constant unmeasured disturbance, the estimate of `d`
+   converges so predicted output bias → 0 (offset-free property).
+4. **Optimizer:** `mpc.make_step` returns a `Q` within bounds; a forced
+   non-success solver status falls back safely to a bounded command.
+5. **Timing:** warm solve stays within the configured budget (regression guard
+   for the ≥ 1 Hz requirement).
+6. **Contract/integration:** `update()` returns the documented dict; the
    control.py dispatch helper handles both dict and float; fan duty is applied
    only when PWM is available; legacy float controllers are unaffected.
-5. **Closed-loop ±1.0 °C gate:** run `mpc` against `grill_sim` (mismatched plant
-   + noise + ambient drift + wind/lid disturbance); after settling, the
-   steady-state error stays within ±1.0 °C for a sustained window, inputs stay
-   within constraints, and the controller recovers from the disturbance.
-6. **Config/registration:** the `mpc` manifest entry exists with
-   `module_name == "mpc"`; `_default_*` derivation includes an `mpc` config.
+7. **Closed-loop ±1.0 °C gate:** run `mpc` against `grill_sim` (mismatched plant
+   + AFR efficiency + noise + ambient drift + lid disturbance); after settling,
+   steady-state error stays within ±1.0 °C for a sustained window, the air-fuel
+   ratio stays near target, inputs respect constraints, and the controller
+   recovers from the lid disturbance.
+8. **Config/registration:** the `mpc` manifest entry exists with
+   `module_name == "mpc"`; `_default_controller_config()` includes an `mpc`
+   config.
+
+## Simulation validation (feasibility spike)
+
+A standalone spike (`docs/superpowers/experiments/mpc_cascade_spike.py`)
+validated the architecture against a mismatched plant (~15% parameter error,
+ambient drift 18→10 °C, 0.2 °C sensor noise, a lid-open event, a +14 °C setpoint
+step):
+
+- **Cascade:** steady-state |error| max **0.31 °C**, RMS 0.12 °C, mean bias
+  −0.02 °C, **100%** within ±1.0 °C; air-fuel ratio pinned at target; lid-open
+  (−28 °C dip) recovered to ±1 °C in ~210 s.
+- **Direct two-input baseline (no allocator):** drove air-fuel ratio off target
+  (efficiency collapsing to 0), carried a persistent ~1.2 °C bias, held the band
+  only ~27% of the time — confirming the cascade is the right architecture.
+
+These results gate the design; the production implementation reproduces them via
+the `grill_sim` closed-loop test.
