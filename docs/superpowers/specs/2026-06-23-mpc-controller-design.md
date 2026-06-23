@@ -29,16 +29,20 @@ startup/reignite/flame-out logic.
 - No igniter control by the MPC.
 - No changes to Startup/Smoke/Shutdown/Prime modes; like every existing
   controller, MPC is active only in **Hold** mode.
-- No new third-party MPC/solver dependency — `numpy` and `scipy` are already
-  installed and are sufficient.
+- The MPC is built on **`do-mpc`** (which pulls in `CasADi`); these are added
+  as dependencies. No bespoke QP/solver code is hand-rolled.
 - No claim of ±1.0 °C on real hardware; that depends on calibration and the
   specific grill. The acceptance gate is the closed-loop simulation.
 
 ## Context / Environment
 
 - PiFire currently runs on x86 for this work (not constrained to a Raspberry
-  Pi), so horizon length, discretization granularity, and the estimator add
-  negligible cost.
+  Pi), so horizon length, discretization granularity, the estimator, and the
+  `do-mpc`/`CasADi`/IPOPT toolchain add negligible cost.
+- `do-mpc` (with `CasADi`) is added to `pyproject.toml`. `do-mpc` provides the
+  three pieces we need from one coherent framework: the symbolic model, the MPC
+  controller (IPOPT backend), and the estimator (MHE) — plus a simulator used
+  for closed-loop tests.
 - The controller framework: `control.py` does
   `importlib.import_module(f'controller.{name}')` then
   `Controller(settings['controller']['config'][name], units, cycle_data)`.
@@ -81,29 +85,35 @@ A discrete linear state-space model, sampled at `Ts = HoldCycleTime`:
   two-mass lag) at a nominal mid-range setpoint. `T_amb` defaults to a constant
   and is overridden by an ambient probe reading when one is configured.
 
-The model matrices `(A, B, C)` are built from these parameters and discretized
-(zero-order hold) at `Ts`.
+The dynamics are expressed once as a `do_mpc.model.Model` (continuous-time,
+CasADi symbolic). `do-mpc` discretizes internally (orthogonal collocation) for
+the controller and integrates the continuous model in the simulator, so the
+same parameterization drives the controller, estimator, and test plant.
 
 ### Offset-free estimator
 
-Each control cycle, before optimizing, a steady-state Kalman filter (fixed gain
-computed from configured process/measurement noise) updates the estimated
-states `[T_f, T_c, d]` from the measured probe temperature. The integrating
-disturbance `d` drives the steady-state output error to zero under unmeasured
-disturbances — this is what makes the ±1.0 °C band achievable despite ambient
-changes and pellet variability, independent of nominal model accuracy.
+Each control cycle, before optimizing, a `do_mpc.estimator.MHE`
+(moving-horizon estimator) updates the estimated states `[T_f, T_c, d]` from
+the measured probe temperature, weighting process vs. measurement noise per the
+configured covariances. The integrating disturbance `d` drives the steady-state
+output error to zero under unmeasured disturbances — this is what makes the
+±1.0 °C band achievable despite ambient changes and pellet variability,
+independent of nominal model accuracy. (If MHE proves heavier than warranted,
+an EKF over the same augmented model is an acceptable drop-in; MHE is the
+default because it handles the input/state bounds naturally.)
 
 ### MPC optimization
 
-- Condensed formulation over a control horizon `Nc`, predicting over `Np`
-  (default `Np`≈ 2·tau/Ts, e.g. ~16 steps; `Nc` ~ 3–5). x86 allows generous
+- A `do_mpc.controller.MPC` over a prediction horizon `n_horizon` (default
+  `≈ 2·tau/Ts`, e.g. ~16 steps) at step `t_step = Ts`. x86 allows generous
   horizons.
-- **Cost:** `Σ Q·(T_c[k] − setpoint)² + Σ R·(u − u_ss)² + Σ R_Δ·(Δu)²`, where
-  `u_ss` is the disturbance-corrected steady-state input.
+- **Cost:** lterm/mterm penalizing tracking error `(T_c − setpoint)²` (weight
+  `Q`), with `rterm` penalizing input moves `(Δu)²` (weight `R_Δ`); an input
+  effort weight `R` about the disturbance-corrected steady-state input.
 - **Constraints:** box bounds on `u_auger` (`u_min`/`u_max`) and `u_fan`
-  (`fan_min`/`fan_max`), plus per-step rate limits.
-- **Solver:** `scipy.optimize.minimize` (bounded, e.g. SLSQP/L-BFGS-B) over the
-  input sequence, warm-started from the previous solution. Apply the first move.
+  (`fan_min`/`fan_max`); per-step rate limits via `rterm`/`du` bounds.
+- **Solver:** IPOPT via `do-mpc`, warm-started from the previous solution
+  (do-mpc keeps the last solution). Apply the first move (`mpc.make_step`).
 - Fan input is included only when a PWM/DC fan is available
   (`settings['platform']['dc_fan']` and PWM control active); otherwise the
   optimization is auger-only and the fan stays on, consistent with the existing
@@ -131,12 +141,13 @@ documents the extended return contract.
 
 ### Grill simulator (test-only)
 
-`controller/grill_sim.py` — a plant simulator used only by tests. To keep the
-±1.0 °C validation honest, the simulated plant is **deliberately mismatched**
-from the MPC's internal model: different (e.g. higher-order or perturbed)
-dynamics, parameter offsets, additive process/measurement noise, an **ambient
-temperature drift**, and a **wind-gust / lid-open disturbance**. This exercises
-the offset-free estimator rather than rewarding a model that matches itself.
+`controller/grill_sim.py` — a plant simulator used only by tests, built on
+`do_mpc.simulator.Simulator`. To keep the ±1.0 °C validation honest, the
+simulator's model is **deliberately mismatched** from the MPC's internal model:
+parameter offsets (and/or extra dynamics), additive process/measurement noise,
+an **ambient temperature drift**, and a **wind-gust / lid-open disturbance**
+(injected through the simulator's `tvp`/`p` hooks). This exercises the
+offset-free estimator rather than rewarding a model that matches itself.
 
 ## Configuration / Settings / Wizard
 
@@ -161,9 +172,13 @@ controller ships with working defaults and does not require calibration to run.
 
 ## Error Handling
 
-- If the optimizer fails to converge on a cycle, the MPC returns the previous
-  applied move (or the disturbance-corrected steady-state input), clamped to
-  bounds — never an unbounded or NaN command.
+- If IPOPT reports a non-success status on a cycle (checked via the do-mpc
+  solver stats), the MPC returns the previous applied move (or the
+  disturbance-corrected steady-state input), clamped to bounds — never an
+  unbounded or NaN command.
+- The relatively expensive do-mpc/IPOPT setup happens once at controller
+  construction (`controller/mpc.py.__init__`); `update()` only runs
+  `estimator.make_step()` then `mpc.make_step()` and maps the result.
 - Construction validates config; missing keys fall back to shipped defaults.
 - The dict/float return is normalized defensively so a malformed return cannot
   break the Hold cycle.
@@ -172,13 +187,14 @@ controller ships with working defaults and does not require calibration to run.
 
 All in `tests/`:
 
-1. **Model:** state-space build + ZOH discretization correctness; open-loop step
-   response matches expected first-order-like behavior; ambient-loss term yields
-   the correct steady-state gain.
-2. **Estimator:** with a constant unmeasured disturbance, the estimated `d`
-   converges so predicted output bias → 0 (offset-free property).
-3. **Optimizer:** returns the first move; respects box and rate constraints;
-   non-convergence falls back safely to a bounded command.
+1. **Model:** the `do_mpc.model.Model` builds; open-loop step response (via the
+   simulator) matches expected first-order-like behavior; the ambient-loss term
+   yields the correct steady-state gain.
+2. **Estimator:** with a constant unmeasured disturbance, the MHE estimate of
+   `d` converges so predicted output bias → 0 (offset-free property).
+3. **Optimizer:** `mpc.make_step` returns a first move within box and rate
+   constraints; a forced non-success solver status falls back safely to a
+   bounded command.
 4. **Contract/integration:** `update()` returns the documented dict; the
    control.py dispatch helper handles both dict and float; fan duty is applied
    only when PWM is available; legacy float controllers are unaffected.
