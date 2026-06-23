@@ -163,11 +163,64 @@ class GrillPlatform:
 		# No selector/shutdown inputs on this platform.
 		return False
 
+	# MARK: Fan / PWM control
+	def fan_on(self, fan_speed_percent=100):
+		self.logger.debug('fan_on: Enabling fan power and setting speed to ' + str(fan_speed_percent))
+		self.relay.relay_on(self.relay_map['fan'])
+		self._output_state['fan'] = True
+		self._stop_ramp()
+		self.set_duty_cycle(fan_speed_percent)
+
+	def fan_off(self):
+		self.logger.debug('fan_off: Stopping fan and removing power')
+		self._stop_ramp()
+		self.emc.manual_fan_speed = 0
+		self._fan_speed_percent = 0
+		self.relay.relay_off(self.relay_map['fan'])
+		self._output_state['fan'] = False
+
+	def fan_toggle(self):
+		if self._output_state['fan']:
+			self.fan_off()
+		else:
+			self.fan_on()
+
+	def set_duty_cycle(self, fan_speed_percent, override_ramping=True):
+		# Called by control.py (override_ramping=True) and by the ramp thread
+		# (override_ramping=False so it does not stop the thread it runs in).
+		if override_ramping:
+			self._stop_ramp()
+		# EMC2101 duty maps directly to fan speed percent (no inversion).
+		self.emc.manual_fan_speed = fan_speed_percent
+		self._fan_speed_percent = fan_speed_percent
+
+	def set_pwm_frequency(self, frequency=100):
+		self.logger.debug('set_pwm_frequency: Setting PWM frequency to ' + str(frequency))
+		self.frequency = frequency
+		# Best-effort: apply to the EMC2101 if the library exposes the property.
+		if hasattr(self.emc, 'pwm_frequency'):
+			try:
+				self.emc.pwm_frequency = frequency
+			except (ValueError, OSError) as exc:
+				self.logger.warning('set_pwm_frequency: EMC2101 rejected frequency: ' + str(exc))
+
+	def _stop_ramp(self):
+		# Stop any in-progress fan ramp. The fan methods above call it; the
+		# ramp-start methods (added in a later task) reuse it. Safe to call when
+		# no ramp is running (self._ramp_thread is None).
+		if self._ramp_thread is not None:
+			self._ramp_stop.set()
+			if self._ramp_thread is not threading.current_thread():
+				self._ramp_thread.join(timeout=5)
+			self._ramp_thread = None
+
 	def get_output_status(self):
 		self.current = {
 			'auger': self._output_state['auger'],
 			'igniter': self._output_state['igniter'],
 			'power': self._output_state['power'],
 			'fan': self._output_state['fan'],
+			'pwm': self._fan_speed_percent,
+			'frequency': self.frequency,
 		}
 		return self.current
