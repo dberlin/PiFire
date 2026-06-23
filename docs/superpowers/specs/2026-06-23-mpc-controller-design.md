@@ -251,8 +251,12 @@ ambient drift 18→10 °C, 0.2 °C sensor noise, a lid-open event, a +14 °C set
 step):
 
 - **Cascade:** steady-state |error| max **0.31 °C**, RMS 0.12 °C, mean bias
-  −0.02 °C, **100%** within ±1.0 °C; air-fuel ratio pinned at target; lid-open
-  (−28 °C dip) recovered to ±1 °C in ~210 s.
+  −0.02 °C, **100%** within ±1.0 °C; air-fuel ratio pinned at target. Transients
+  (excluded from the steady band): a +14 °C setpoint step overshoots the new
+  target by only **~1.6 °C** and settles to ±1 °C in **~175 s**; a lid-open
+  event (temperature dips ~28 °C below target) recovers to ±1 °C in **~210 s**.
+  (The instantaneous error at a step equals the step size — that is lag, not
+  overshoot, since temperature cannot change instantly.)
 - **Direct two-input baseline (no allocator):** drove air-fuel ratio off target
   (efficiency collapsing to 0), carried a persistent ~1.2 °C bias, held the band
   only ~27% of the time — confirming the cascade is the right architecture.

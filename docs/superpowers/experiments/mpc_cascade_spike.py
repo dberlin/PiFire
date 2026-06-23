@@ -201,17 +201,33 @@ def report(name, L):
     print(f"within +-1.0 C fraction  : {100*np.mean(np.abs(err[sm])<=1.0):5.1f} %")
     print(f"AFR range (steady)       : {afr[sm].min():.2f} .. {afr[sm].max():.2f}  (optimal {AFR_OPT})")
     print(f"combustion eff (steady)  : {eff[sm].min():.2f} .. {eff[sm].max():.2f}")
-    # transients reported separately (NOT part of the steady band)
-    step_mask = (t >= 3600) & (t < 4600)
+    # transients reported separately (NOT part of the steady band).
+    # NB: temperature cannot teleport, so right at a setpoint step the error
+    # equals the step size -- that is lag, not overshoot. We instead report the
+    # two things that actually matter: peak OVERSHOOT past the new setpoint, and
+    # SETTLING TIME back to within +-1 C.
+    step_t, step_from, step_to = 3600.0, 107.0, 121.0
+    step_mask = (t >= step_t) & (t < 4600)
     if step_mask.any():
-        print(f"[transient] +14C setpoint-step peak err : {np.max(np.abs(err[step_mask])):5.2f} C")
+        rising = step_to > step_from
+        # overshoot = how far temperature goes PAST the new setpoint
+        if rising:
+            overshoot = max(0.0, Tc[step_mask].max() - step_to)
+        else:
+            overshoot = max(0.0, step_to - Tc[step_mask].min())
+        settled = t[(t >= step_t) & (np.abs(err) <= 1.0)]
+        settle_s = (settled[0] - step_t) if len(settled) else float('nan')
+        print(f"[setpoint step {step_from:.0f}->{step_to:.0f}C]"
+              f" peak overshoot past target: {overshoot:4.2f} C,"
+              f" settle to +-1C in {settle_s:4.0f} s")
     lid_mask = (t >= 3000) & (t < 3600)
     if lid_mask.any():
-        dip = np.min(err[lid_mask])
+        dip = np.min(err[lid_mask])   # negative = temperature below setpoint
         # recovery: time after lid closes (3090) until |err| back within 1.0 C
         rec = t[(t >= 3090) & (np.abs(err) <= 1.0)]
         rect = (rec[0] - 3090) if len(rec) else float('nan')
-        print(f"[disturbance] lid-open dip {dip:6.2f} C, recover to +-1C in {rect:4.0f} s")
+        print(f"[lid-open disturbance] max temp dip below target: {-dip:5.2f} C,"
+              f" recover to +-1C in {rect:4.0f} s")
 
 if __name__ == '__main__':
     print("Running cascade ...")
