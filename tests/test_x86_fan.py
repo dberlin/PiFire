@@ -55,3 +55,14 @@ def test_get_output_status_includes_pwm_and_frequency(platform):
     status = platform.get_output_status()
     assert status['pwm'] == 75
     assert status['frequency'] == 100
+
+
+def test_set_duty_cycle_clamps_out_of_range(platform):
+    # The EMC2101 raises ValueError outside 0-100; a bad settings value must
+    # not propagate (it would kill the ramp thread). It is clamped instead.
+    platform.set_duty_cycle(150)
+    assert platform.emc.manual_fan_speed == 100
+    assert platform.get_output_status()['pwm'] == 100
+    platform.set_duty_cycle(-20)
+    assert platform.emc.manual_fan_speed == 0
+    assert platform.get_output_status()['pwm'] == 0

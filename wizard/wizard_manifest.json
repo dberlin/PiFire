@@ -925,7 +925,8 @@
 						"friendly_name": "EMC2101 I2C Address",
 						"description": "I2C address of the EMC2101 fan controller.",
 						"options": {
-							"0x4c": "0x4C"
+							"0x4c": "0x4C",
+							"0x4d": "0x4D"
 						},
 						"settings": ["platform", "emc2101", "address"]
 					},

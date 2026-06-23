@@ -190,6 +190,10 @@ class GrillPlatform:
 		# (override_ramping=False so it does not stop the thread it runs in).
 		if override_ramping:
 			self._stop_ramp()
+		# Clamp to the EMC2101's valid 0-100 range.  manual_fan_speed raises
+		# ValueError outside that range; an out-of-range settings value would
+		# otherwise kill the ramp thread silently mid-ramp.
+		fan_speed_percent = max(0, min(100, fan_speed_percent))
 		# EMC2101 duty maps directly to fan speed percent (no inversion).
 		self.emc.manual_fan_speed = fan_speed_percent
 		self._fan_speed_percent = fan_speed_percent
