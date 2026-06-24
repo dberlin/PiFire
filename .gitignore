@@ -106,3 +106,7 @@ debug_*.html
 # Allow the proper test suite directory
 !tests/
 !tests/**
+
+# approxMPC experiment artifacts
+docs/superpowers/experiments/_ampc_data/
+docs/superpowers/experiments/training/
