@@ -2,11 +2,13 @@
 """
 ApproxMPC proof of concept (single setpoint, 110C). Approximate the production
 nonlinear MPC's policy (state -> firing rate Q) with a small neural net so the
-~15ms NLP solve becomes a ~us net evaluation. Estimation still uses the MHE.
+~15ms NLP solve becomes a ~us net evaluation. Estimation uses the production
+default (EKF) via the controller's own estimator.
 
-Pipeline (do-mpc approximateMPC): sample the real MPC -> train a FeedforwardNN ->
-run closed-loop with MHE + the net, comparing band and per-step solve time vs
-the full MPC.
+Pipeline: sample the real MPC -> compare three policies closed-loop on the
+realistic plant: full MPC, a do-mpc FeedforwardNN approximator, and a residual
+net (learns MPC_Q - Q_ss(d) with the analytic offset-free feedforward added
+back). Reports band and per-step time vs the full MPC.
 """
 import warnings, sys, time, os, shutil
 warnings.filterwarnings("ignore")
@@ -94,7 +96,7 @@ def run_full(seed=0, minutes=75):
 
 
 def run_approx(ampc, seed=0, minutes=75):
-    # MHE for estimation, approx-net for the policy
+    # production estimator (EKF) for state, approx-net for the policy
     c = make_controller(); est = c.estimator
     plant = GrillSim(seed=seed)
     qmin, qmax = _DEFAULTS['Q_min'], _DEFAULTS['Q_max']
@@ -127,7 +129,7 @@ def band(T, win=0.4):
 #   Q_ss = [h_amb*(T_set-T_amb) + rad_loss(T_set) - d] / K_Q
 # Anchoring on Q_ss makes steady-state offset-free BY CONSTRUCTION (residual->0),
 # regardless of net approximation error -- and it tracks the real operating d
-# the MHE produces, which uniform-box sampling under-covers.
+# the estimator produces, which uniform-box sampling under-covers.
 DCFG = _DEFAULTS
 DIDX = int(_DEFAULTS['n_delay']) + 2          # index of d in the state vector
 
@@ -212,13 +214,13 @@ if __name__ == '__main__':
     print("\nClosed loop at 110C:", flush=True)
     Tf, msf = run_full()
     r, m, b = band(Tf)
-    print(f"  FULL  MPC  : band RMS={r:.2f} max={m:.2f} bias={b:+.2f}  solve(MHE+MPC) median={np.median(msf[2:]):.0f}ms")
+    print(f"  FULL  MPC  : band RMS={r:.2f} max={m:.2f} bias={b:+.2f}  solve(EKF+MPC) median={np.median(msf[2:]):.0f}ms")
     Ta, mse, msn = run_approx(ampc)
     r, m, b = band(Ta)
-    print(f"  APPROX MPC : band RMS={r:.2f} max={m:.2f} bias={b:+.2f}  MHE median={np.median(mse[2:]):.1f}ms  net median={np.median(msn[2:]):.2f}ms")
+    print(f"  APPROX MPC : band RMS={r:.2f} max={m:.2f} bias={b:+.2f}  est median={np.median(mse[2:]):.2f}ms  net median={np.median(msn[2:]):.2f}ms")
 
     print("\nResidual approxMPC (net learns MPC_Q - Q_ss(d), + analytic feedforward):", flush=True)
     rnet, stats = build_residual_net()
     Tr, rse, rsn = run_residual(rnet, stats)
     r, m, b = band(Tr)
-    print(f"  RESID  MPC : band RMS={r:.2f} max={m:.2f} bias={b:+.2f}  MHE median={np.median(rse[2:]):.1f}ms  net median={np.median(rsn[2:]):.2f}ms")
+    print(f"  RESID  MPC : band RMS={r:.2f} max={m:.2f} bias={b:+.2f}  est median={np.median(rse[2:]):.2f}ms  net median={np.median(rsn[2:]):.2f}ms")
