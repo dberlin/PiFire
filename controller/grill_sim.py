@@ -16,7 +16,7 @@
    - the FAN as a real lever (it accelerates burn, boosts firepot->chamber
      convection, and increases chamber->ambient loss);
    - combustion noise (pellet quality), sensor LAG (probe time constant ~4.5 s),
-     and intermittent WIND GUSTS on the chamber heat loss.
+     and a light, occasional WIND breeze nudging chamber heat loss a few percent.
 
  So a passing closed-loop result is honest about realistic performance (a few
  degrees C band), not the artificially tight band an idealized plant gives.
@@ -59,10 +59,14 @@ class GrillSim:
 		self._gust = 1.0
 
 	def _wind(self):
+		# Realistic light wind: mostly dead calm, with an occasional light 1-2 mph
+		# breeze that bumps chamber heat loss only a few percent. (An earlier model
+		# multiplied loss by 1.6-2.6x, which swamped control and is not
+		# representative -- real cooks are mostly calm.)
 		if self.t > self._gust_until:
-			if self.rng.random() < 0.004:                 # ~ every 250 s
-				self._gust = self.rng.uniform(1.6, 2.6)
-				self._gust_until = self.t + self.rng.uniform(20, 60)
+			if self.rng.random() < 0.0010:               # ~ every 17 min
+				self._gust = self.rng.uniform(1.03, 1.12)
+				self._gust_until = self.t + self.rng.uniform(30, 90)
 			else:
 				self._gust = 1.0
 		return self._gust

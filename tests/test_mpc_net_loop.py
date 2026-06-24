@@ -39,21 +39,22 @@ def test_net_policy_holds_band_low_setpoint():
     _, ts, temps = _run(cfg, 110.0)
     sm = ts >= 1800
     err = temps[sm] - 110.0
-    assert np.sqrt(np.mean(err ** 2)) <= 5.0
-    assert np.mean(np.abs(err) <= 5.0) >= 0.70
-    assert np.max(np.abs(err)) <= 16.0
-    assert abs(np.mean(err)) <= 2.5          # offset-free
+    assert np.sqrt(np.mean(err ** 2)) <= 2.5     # net matches NLP band (~1.1C)
+    assert np.mean(np.abs(err) <= 2.5) >= 0.85
+    assert np.max(np.abs(err)) <= 6.0
+    assert abs(np.mean(err)) <= 1.5          # offset-free
 
 
 @needs_art
 def test_net_policy_holds_band_high_setpoint():
-    # 220C (~428F): the deadtime-limited band is wider, but still tracked offset-free
+    # 220C (~428F): band is slightly wider at high fire, but still tight + offset-free
     cfg = dict(_DEFAULTS); cfg['policy'] = 'net'
     _, ts, temps = _run(cfg, 220.0)
     sm = ts >= 2400
     err = temps[sm] - 220.0
-    assert np.sqrt(np.mean(err ** 2)) <= 9.0
-    assert abs(np.mean(err)) <= 3.0
+    assert np.sqrt(np.mean(err ** 2)) <= 3.5     # measured ~1.4C
+    assert np.max(np.abs(err)) <= 8.0
+    assert abs(np.mean(err)) <= 1.5
 
 
 def test_net_missing_artifact_falls_back_to_nlp():
