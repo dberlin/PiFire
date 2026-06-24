@@ -12,8 +12,11 @@ import warnings, sys, time, os, shutil
 warnings.filterwarnings("ignore")
 sys.path.insert(0, '.')
 import numpy as np
+import pandas as pd
 import torch
+import torch.nn as nn
 from controller.mpc import Controller, _DEFAULTS
+from controller.mpc_model import _rad_loss
 from controller.grill_sim import GrillSim
 from do_mpc.approximateMPC import AMPCSampler, ApproxMPC, Trainer
 
@@ -117,6 +120,92 @@ def band(T, win=0.4):
     return np.sqrt(np.mean(e ** 2)), np.max(np.abs(e)), np.mean(e)
 
 
+# ---------------------------------------------------------------------------
+# Residual approxMPC: net learns MPC_Q - Q_ss(d); inference adds analytic Q_ss
+# back. The disturbance d enters T_c as an additive heat rate, so at steady
+# state the offset-free firing rate is exactly
+#   Q_ss = [h_amb*(T_set-T_amb) + rad_loss(T_set) - d] / K_Q
+# Anchoring on Q_ss makes steady-state offset-free BY CONSTRUCTION (residual->0),
+# regardless of net approximation error -- and it tracks the real operating d
+# the MHE produces, which uniform-box sampling under-covers.
+DCFG = _DEFAULTS
+DIDX = int(_DEFAULTS['n_delay']) + 2          # index of d in the state vector
+
+
+def Q_ss(d, set_c):
+    return (DCFG['h_amb'] * (set_c - DCFG['T_amb'])
+            + _rad_loss(set_c, DCFG['T_amb'], DCFG['sigma']) - d) / DCFG['K_Q']
+
+
+class ResidualNet(nn.Module):
+    def __init__(self, n_in, h=64):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(n_in, h), nn.Tanh(),
+                                 nn.Linear(h, h), nn.Tanh(), nn.Linear(h, 1))
+
+    def forward(self, x):
+        return self.net(x)
+
+
+def build_residual_net(epochs=600):
+    df = pd.read_pickle(os.path.join(DATA, 'pifire', 'data_pifire_opt.pkl'))
+    X0 = np.stack([np.asarray(r).flatten() for r in df['x0']])          # [N,7]
+    UP = np.array([np.asarray(r).flatten()[0] for r in df['u_prev']])   # [N]
+    U0 = np.array([np.asarray(r).flatten()[0] for r in df['u0']])       # [N] MPC Q
+    Xin = np.column_stack([X0, UP])                                     # [N,8]
+    resid = U0 - Q_ss(X0[:, DIDX], SP)                                  # target
+
+    # z-score standardize in/out (stored for inference)
+    xm, xs = Xin.mean(0), Xin.std(0) + 1e-8
+    rm, rs = resid.mean(), resid.std() + 1e-8
+    Xs = torch.tensor((Xin - xm) / xs, dtype=torch.float32)
+    ys = torch.tensor(((resid - rm) / rs).reshape(-1, 1), dtype=torch.float32)
+
+    torch.manual_seed(0)
+    n_val = int(0.15 * len(Xs)); perm = torch.randperm(len(Xs))
+    vi, ti = perm[:n_val], perm[n_val:]
+    net = ResidualNet(Xin.shape[1])
+    opt = torch.optim.Adam(net.parameters(), lr=2e-3, weight_decay=1e-5)
+    lossf = nn.MSELoss()
+    t0 = time.perf_counter()
+    for ep in range(epochs):
+        net.train(); opt.zero_grad()
+        loss = lossf(net(Xs[ti]), ys[ti]); loss.backward(); opt.step()
+    net.eval()
+    with torch.no_grad():
+        vloss = lossf(net(Xs[vi]), ys[vi]).item()
+    print(f"  residual net trained {epochs} epochs in {time.perf_counter()-t0:.0f}s "
+          f"(val_mse={vloss:.4f})", flush=True)
+    stats = (torch.tensor(xm, dtype=torch.float32), torch.tensor(xs, dtype=torch.float32),
+             float(rm), float(rs))
+    return net, stats
+
+
+def run_residual(net, stats, seed=0, minutes=75):
+    xm, xs, rm, rs = stats
+    c = make_controller(); est = c.estimator
+    plant = GrillSim(seed=seed)
+    qmin, qmax = DCFG['Q_min'], DCFG['Q_max']
+    umin, umax = 0.1, 0.9
+    T, ms_est, ms_net = [], [], []
+    lastQ = qmin
+    for w in range(int(minutes * 60 / 25)):
+        y = plant.measured()
+        a = time.perf_counter(); xh = est.update(lastQ, y).flatten(); ms_est.append((time.perf_counter() - a) * 1e3)
+        a = time.perf_counter()
+        with torch.no_grad():
+            inp = (torch.tensor(np.append(xh, lastQ), dtype=torch.float32) - xm) / xs
+            resid = net(inp.reshape(1, -1)).item() * rs + rm
+        Q = Q_ss(xh[DIDX], c._set_point_c) + resid       # analytic feedforward + learned transient
+        ms_net.append((time.perf_counter() - a) * 1e3)
+        Q = float(np.clip(Q, qmin, qmax)); lastQ = Q
+        r = umin + (Q - qmin) / (qmax - qmin) * (umax - umin)
+        on = int(round(r * 25))
+        for s in range(25):
+            plant.step(auger_on=(s < on), fan_frac=1.0); T.append(plant.true_Tc)
+    return np.array(T), np.array(ms_est), np.array(ms_net)
+
+
 if __name__ == '__main__':
     print("Building approxMPC (sample + train) ...", flush=True)
     ampc = build_approx()
@@ -127,3 +216,9 @@ if __name__ == '__main__':
     Ta, mse, msn = run_approx(ampc)
     r, m, b = band(Ta)
     print(f"  APPROX MPC : band RMS={r:.2f} max={m:.2f} bias={b:+.2f}  MHE median={np.median(mse[2:]):.1f}ms  net median={np.median(msn[2:]):.2f}ms")
+
+    print("\nResidual approxMPC (net learns MPC_Q - Q_ss(d), + analytic feedforward):", flush=True)
+    rnet, stats = build_residual_net()
+    Tr, rse, rsn = run_residual(rnet, stats)
+    r, m, b = band(Tr)
+    print(f"  RESID  MPC : band RMS={r:.2f} max={m:.2f} bias={b:+.2f}  MHE median={np.median(rse[2:]):.1f}ms  net median={np.median(rsn[2:]):.2f}ms")
