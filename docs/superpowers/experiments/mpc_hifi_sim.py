@@ -43,7 +43,7 @@ class HiFiGrill:
         self.k_burn = 0.10
         self.T_amb = 17.0
         self.deadtime = self._deadtime_override   # s (transport + ignition)
-        self.probe_tau = 8.0                 # sensor lag (s)
+        self.probe_tau = 4.5                 # sensor lag (s)
         # state
         self.transit = deque([0.0] * self.deadtime)
         self.fuel = 0.0
