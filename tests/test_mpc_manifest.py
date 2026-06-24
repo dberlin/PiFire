@@ -30,6 +30,6 @@ def test_default_controller_config_includes_mpc():
     assert cfg['mpc']['theta'] == 50.0
     assert cfg['mpc']['n_delay'] == 4
     assert cfg['mpc']['K_Q'] == 3.5
-    assert cfg['mpc']['estimator'] == 'mhe'
+    assert cfg['mpc']['estimator'] == 'ekf'
     assert cfg['mpc']['sigma'] > 0.0
     assert cfg['mpc']['enable_fan_input'] is False

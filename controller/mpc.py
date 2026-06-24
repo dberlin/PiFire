@@ -22,7 +22,7 @@ import numpy as np
 import do_mpc
 
 from controller.base import ControllerBase
-from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxMHE
+from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE
 from controller.mpc_allocator import allocate
 
 _DEFAULTS = dict(
@@ -31,7 +31,9 @@ _DEFAULTS = dict(
 	# Nominal grey-box thermal params -- CALIBRATE to your grill via update_mpc.py.
 	C_f=9.0, C_c=320.0, h_fc=1.3, h_amb=0.50, T_amb=20.0,
 	theta=50.0, n_delay=4, K_Q=3.5, sigma=1.4e-9,
-	estimator='mhe',                      # 'mhe' (nonlinear-capable) or 'kf' (linear only)
+	# 'ekf' linearizes the nonlinear radiative term each step (~us, default);
+	# 'mhe' solves an NLP (nonlinear, slower); 'kf' is linear-only.
+	estimator='ekf',
 	fan_min_pct=40.0, fan_max_pct=100.0, enable_fan_input=False,
 	est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
 	# Optional logging of (time_s, temp_c, Q) for the offline calibration utility.
@@ -92,13 +94,21 @@ class Controller(ControllerBase):
 		# known-input formulation) or the linear Kalman filter. Discretized at the
 		# control period so faster re-solves estimate the real elapsed time. Both
 		# expose update(Q_applied, y) -> state estimate.
-		if str(cfg.get('estimator', 'mhe')).lower() == 'kf':
+		est_kind = str(cfg.get('estimator', 'mhe')).lower()
+		if est_kind == 'kf':
 			self.estimator = GreyBoxKF(
 				C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'], h_amb=cfg['h_amb'],
 				T_amb=cfg['T_amb'], t_step=float(cfg['control_period']),
 				q_temp=cfg['est_q_temp'], q_dist=cfg['est_q_dist'],
 				r_meas=cfg['est_r_meas'], theta=float(cfg['theta']), n_delay=n_delay,
 				K_Q=float(cfg['K_Q']))
+		elif est_kind == 'ekf':
+			self.estimator = GreyBoxEKF(
+				C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'], h_amb=cfg['h_amb'],
+				T_amb=cfg['T_amb'], t_step=float(cfg['control_period']),
+				q_temp=cfg['est_q_temp'], q_dist=cfg['est_q_dist'],
+				r_meas=cfg['est_r_meas'], theta=float(cfg['theta']), n_delay=n_delay,
+				K_Q=float(cfg['K_Q']), sigma=float(cfg['sigma']))
 		else:
 			self.estimator = GreyBoxMHE(
 				C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'], h_amb=cfg['h_amb'],

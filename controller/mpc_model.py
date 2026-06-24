@@ -123,6 +123,86 @@ class GreyBoxKF:
 		return self.x
 
 
+class GreyBoxEKF:
+	'''
+	Extended Kalman filter over the augmented model with the nonlinear radiative
+	chamber loss. The only nonlinearity is the Stefan-Boltzmann term on T_c, so
+	each step we linearize it about the current T_c estimate (slope
+	4*sigma*(T_c+273.15)^3) and fold the linearization offset into the affine
+	input -- this reproduces the nonlinear loss exactly at the operating point
+	and to first order nearby, while keeping the exact expm propagation for the
+	stiff linear part. Reduces EXACTLY to GreyBoxKF when sigma=0. Nonlinear-capable
+	like the MHE but ~us/step (one small expm) instead of an NLP solve. Same
+	integrating-disturbance state d gives offset-free tracking, and the same
+	update(Q_applied, y) interface as GreyBoxKF / GreyBoxMHE.
+	'''
+
+	def __init__(self, *, C_f, C_c, h_fc, h_amb, T_amb, t_step,
+	             q_temp, q_dist, r_meas, theta=0.0, n_delay=0, K_Q=1.0,
+	             sigma=0.0, x0=None):
+		n = n_delay + 3
+		iTf, iTc, iD = n_delay, n_delay + 1, n_delay + 2
+
+		A = np.zeros((n, n))
+		if n_delay > 0:
+			tau_d = theta / n_delay
+			for i in range(n_delay):
+				A[i, i] = -1.0 / tau_d
+				if i > 0:
+					A[i, i - 1] = 1.0 / tau_d
+			A[iTf, n_delay - 1] = K_Q / C_f
+		A[iTf, iTf] = -h_fc / C_f
+		A[iTf, iTc] = h_fc / C_f
+		A[iTc, iTf] = h_fc / C_c
+		A[iTc, iTc] = -(h_fc + h_amb) / C_c
+		A[iTc, iD] = 1.0 / C_c
+
+		Baug = np.zeros((n, 2))
+		if n_delay > 0:
+			Baug[0, 0] = 1.0 / (theta / n_delay)
+		else:
+			Baug[iTf, 0] = K_Q / C_f
+		Baug[iTc, 1] = h_amb * T_amb / C_c
+
+		self.A_lin, self.Baug = A, Baug
+		self.n, self.iTc = n, iTc
+		self.C_c, self.T_amb, self.sigma = C_c, T_amb, sigma
+		self.t_step = t_step
+		self.H = np.zeros((1, n)); self.H[0, iTc] = 1.0
+		self.Qkf = np.diag([q_temp] * (n_delay + 2) + [q_dist])
+		self.Rkf = np.array([[r_meas]])
+		if x0 is None:
+			x0 = [0.0] * n_delay + [T_amb, T_amb, 0.0]
+		self.x = np.array(x0, dtype=float)
+		self.P = np.eye(n) * 5.0
+
+	def _discretize(self):
+		# linearize the radiative term about the current chamber estimate
+		n, iTc, C_c = self.n, self.iTc, self.C_c
+		T_c0 = self.x[iTc]
+		rp = 4.0 * self.sigma * (T_c0 + _KELVIN) ** 3            # d(rad)/dT_c
+		r0 = _rad_loss(T_c0, self.T_amb, self.sigma)             # rad loss at T_c0
+		A = self.A_lin.copy(); A[iTc, iTc] += -rp / C_c
+		Baug = self.Baug.copy(); Baug[iTc, 1] += -(r0 - rp * T_c0) / C_c
+		Mblk = np.zeros((n + 2, n + 2))
+		Mblk[:n, :n] = A
+		Mblk[:n, n:] = Baug
+		Md = expm(Mblk * self.t_step)
+		return Md[:n, :n], Md[:n, n:n + 1], Md[:n, n + 1:n + 2]
+
+	def update(self, Q_applied, y_measured):
+		Ad, Bd, bd = self._discretize()
+		# predict
+		self.x = Ad @ self.x + Bd.flatten() * Q_applied + bd.flatten()
+		self.P = Ad @ self.P @ Ad.T + self.Qkf
+		# update
+		S = self.H @ self.P @ self.H.T + self.Rkf
+		K = (self.P @ self.H.T) / S
+		self.x = self.x + K.flatten() * (y_measured - (self.H @ self.x)[0])
+		self.P = (np.eye(self.n) - K @ self.H) @ self.P
+		return self.x
+
+
 class GreyBoxMHE:
 	'''
 	Moving-horizon estimator over the (possibly nonlinear) augmented model,
