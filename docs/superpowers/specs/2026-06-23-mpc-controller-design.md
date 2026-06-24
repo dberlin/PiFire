@@ -37,12 +37,12 @@ temperature, **offset-free at every setpoint** (mean bias < 0.4 °C):
 
 | setpoint | steady-state RMS | peak \|error\| |
 |---|---|---|
-| 110 °C (230 °F) | ~1.05 °C | ~2.8 °C |
-| 190 °C (374 °F) | ~1.1 °C | ~3.3 °C |
-| 218 °C (425 °F) | ~1.25 °C | ~4.1 °C |
-| 260 °C (500 °F) | ~1.2 °C | ~4.3 °C |
-| 288 °C (550 °F) | ~1.3 °C | ~3.7 °C |
-| 316 °C (600 °F) | ~1.25 °C | ~4.5 °C |
+| 110 °C (230 °F) | ~0.9 °C | ~2.4 °C |
+| 190 °C (374 °F) | ~1.05 °C | ~3.7 °C |
+| 218 °C (425 °F) | ~1.1 °C | ~3.8 °C |
+| 260 °C (500 °F) | ~1.1 °C | ~3.8 °C |
+| 288 °C (550 °F) | ~1.1 °C | ~3.2 °C |
+| 316 °C (600 °F) | ~1.15 °C | ~4.8 °C |
 
 The band stays ~±1 °C RMS all the way to **600 °F** — high-temp holding is a
 non-issue, and there is firing headroom (only ~77 % of max fire at 600 °F, never
@@ -51,13 +51,13 @@ band across 230–600 °F is where the nonlinear radiative (T⁴) term earns its
 the temperature-dependent loss is built into the model gain, so one calibration
 spans the range without the loop running out of authority.
 
-**Setpoint changes** (e.g. a brisket cook stepping 225 → 275 → 300 °F) overshoot
-only **~3 °C (~5 °F)** and reach the new target in **2–5 min** — fast rise without
-a big overshoot. A **cold preheat** to a high target (e.g. 500 °F) rises in ~10 min
-and overshoots only ~5–6 °F before settling. Two design choices make this work:
-the integrating-disturbance estimate is kept deliberately slow (`est_q_dist` low)
-so it does not chase transients, and the deadtime is modeled so the MPC predicts
-across it.
+**Setpoint changes** (e.g. a brisket cook stepping 225 → 275 → 300 °F) reach the
+new target in **~1–2 min** and overshoot **~4–8 °F**. A **cold preheat** to a high
+target (e.g. 500 °F) rises in **~8 min** and overshoots only ~5 °F before settling.
+Three design choices make this work: the firing-move penalty `R_dQ` is kept low so
+the rise is fast; the integrating-disturbance estimate is kept slow (`est_q_dist`
+low) so it does not chase transients; and the deadtime is modeled so the MPC
+predicts across it.
 
 On real hardware accuracy further depends on calibration and the specific grill.
 The regression gate (`tests/test_mpc_closed_loop.py`) asserts the band at 110 °C
@@ -255,7 +255,7 @@ exposes a `config` array (same schema the wizard renders for PID). Shipped
 defaults:
 
 - **MPC:** `n_horizon=24`, `t_step=25.0`, `control_period=25.0`, `Q_w=1.0`,
-  `R_dQ=1.0`, `Q_min=5.0`, `Q_max=100.0`.
+  `R_dQ=0.1` (low for fast rise + tight band), `Q_min=5.0`, `Q_max=100.0`.
 - **Grey-box model (calibrate per grill):** `C_f=9.0`, `C_c=320.0`, `h_fc=1.3`,
   `h_amb=0.50`, `T_amb=20.0`, `theta=50.0`, `n_delay=4`, `K_Q=3.5`,
   `sigma=1.4e-9`.
