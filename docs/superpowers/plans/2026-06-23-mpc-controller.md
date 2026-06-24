@@ -759,16 +759,21 @@ git commit -m "feat: add grill simulator and closed-loop +-1C MPC validation tes
 ### Task 6: control.py integration + extended contract
 
 **Files:**
-- Modify: `controller/base.py`
-- Modify: `control.py` (controller dispatch in the Hold work-cycle, ~lines 705-712; add a module-level helper)
+- Modify: `controller/base.py` (add `get_control_period` default AND the `normalize_controller_output` helper)
+- Modify: `control.py` (import the helper from `controller.base`; controller dispatch in the Hold work-cycle, ~lines 705-712)
 - Test: `tests/test_mpc_integration.py`
+
+**IMPORTANT — do not import `control` in tests.** `control.py` runs an unguarded
+`while True:` loop at module top level, so `import control` hangs forever. The
+`normalize_controller_output` helper therefore lives in the import-safe
+`controller/base.py` (not in `control.py`), and the test imports it from there.
 
 **Interfaces:**
 - Consumes: `Controller.update()` dict contract and `get_control_period()` (Task 4).
 - Produces:
   - `ControllerBase.get_control_period(self) -> None` (default; legacy controllers keep CycleTime cadence).
-  - `control.normalize_controller_output(output) -> (cycle_ratio: float, fan: dict|None)`.
-  - control.py applies the fan duty and uses the controller's control period for the update cadence.
+  - `controller.base.normalize_controller_output(output) -> (cycle_ratio: float, fan: dict|None)` (module-level function in `controller/base.py`).
+  - control.py imports that helper, applies the fan duty, and uses the controller's control period for the update cadence.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -785,16 +790,18 @@ def test_base_default_control_period_is_none():
 
 
 def test_normalize_handles_float_and_dict():
-    control = importlib.import_module('control')
+    # NOTE: import the helper from controller.base, NOT from control --
+    # importing control hangs (it runs an unguarded while True: loop).
+    from controller.base import normalize_controller_output
     # legacy float
-    ratio, fan = control.normalize_controller_output(0.42)
+    ratio, fan = normalize_controller_output(0.42)
     assert ratio == 0.42 and fan is None
     # mpc dict
-    ratio, fan = control.normalize_controller_output(
+    ratio, fan = normalize_controller_output(
         {'cycle_ratio': 0.3, 'fan': {'duty': 80.0}})
     assert ratio == 0.3 and fan == {'duty': 80.0}
     # dict without fan
-    ratio, fan = control.normalize_controller_output({'cycle_ratio': 0.5})
+    ratio, fan = normalize_controller_output({'cycle_ratio': 0.5})
     assert ratio == 0.5 and fan is None
 ```
 
@@ -817,9 +824,11 @@ In `controller/base.py`, add to `ControllerBase` (after `supported_functions`):
 		return None
 ```
 
-- [ ] **Step 4: Add the normalize helper to control.py**
+- [ ] **Step 4: Add the normalize helper to `controller/base.py`**
 
-In `control.py`, add a module-level function (place it near the other module-level helpers, before `work_cycle`):
+In `controller/base.py`, add a module-level function (outside the
+`ControllerBase` class, e.g. after it). `base.py` only imports `time`, so it is
+safe to import from tests and from `control.py`:
 
 ```python
 def normalize_controller_output(output):
@@ -841,7 +850,14 @@ def normalize_controller_output(output):
 
 - [ ] **Step 5: Wire the dispatch into the Hold work-cycle**
 
-In `control.py`, replace the Hold update block (currently around lines 709-712):
+First, in `control.py`'s import section (near the top, with the other imports),
+add:
+
+```python
+from controller.base import normalize_controller_output
+```
+
+Then replace the Hold update block (currently around lines 709-712):
 
 ```python
 				if (now - controllerCycleStart) > CycleTime:
@@ -872,9 +888,9 @@ with:
 Run: `uv run pytest tests/test_mpc_integration.py -v`
 Expected: 2 passed.
 
-- [ ] **Step 7: Sanity-check the existing controller still loads**
+- [ ] **Step 7: Sanity-check the helper (do NOT import `control` — it hangs)**
 
-Run: `uv run python -c "import control; print(control.normalize_controller_output(0.5))"`
+Run: `uv run python -c "from controller.base import normalize_controller_output; print(normalize_controller_output(0.5))"`
 Expected: prints `(0.5, None)` with no import error.
 
 - [ ] **Step 8: Commit**
