@@ -25,7 +25,7 @@ from controller.mpc_allocator import allocate
 _DEFAULTS = dict(
 	n_horizon=20, t_step=25.0, control_period=25.0, Q_w=1.0, R_dQ=0.02,
 	Q_min=5.0, Q_max=100.0, C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55,
-	T_amb=20.0, theta=50.0, n_delay=4, fan_min_pct=40.0, fan_max_pct=100.0,
+	T_amb=20.0, theta=50.0, n_delay=4, K_Q=1.0, fan_min_pct=40.0, fan_max_pct=100.0,
 	enable_fan_input=False,
 	est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
 )
@@ -54,7 +54,7 @@ class Controller(ControllerBase):
 		self.model = build_do_mpc_model(
 			C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'],
 			h_amb=cfg['h_amb'], T_amb=cfg['T_amb'],
-			theta=float(cfg['theta']), n_delay=n_delay)
+			theta=float(cfg['theta']), n_delay=n_delay, K_Q=float(cfg['K_Q']))
 
 		# MPC controller
 		self.mpc = do_mpc.controller.MPC(self.model)
@@ -85,7 +85,8 @@ class Controller(ControllerBase):
 			C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'], h_amb=cfg['h_amb'],
 			T_amb=cfg['T_amb'], t_step=float(cfg['control_period']),
 			q_temp=cfg['est_q_temp'], q_dist=cfg['est_q_dist'],
-			r_meas=cfg['est_r_meas'], theta=float(cfg['theta']), n_delay=n_delay)
+			r_meas=cfg['est_r_meas'], theta=float(cfg['theta']), n_delay=n_delay,
+			K_Q=float(cfg['K_Q']))
 
 		x0 = np.zeros((n_delay + 3, 1))
 		x0[n_delay, 0] = cfg['T_amb']        # T_f

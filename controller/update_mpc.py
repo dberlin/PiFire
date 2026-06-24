@@ -21,7 +21,7 @@ import numpy as np
 from scipy.optimize import least_squares
 
 
-def simulate_chamber(t, Q, *, C_f, C_c, h_fc, h_amb, T_amb, T0):
+def simulate_chamber(t, Q, *, C_f, C_c, h_fc, h_amb, T_amb, T0, K_Q=1.0):
 	'''Forward-simulate chamber temperature for the grey-box model (Euler).
 
 	out[i] is the chamber temperature AT time t[i] (so out[0] == T0); each step
@@ -37,7 +37,7 @@ def simulate_chamber(t, Q, *, C_f, C_c, h_fc, h_amb, T_amb, T0):
 		out[i] = Tc                      # record state at t[i] (out[0] == T0)
 		if i < len(t) - 1:
 			dt = t[i + 1] - t[i]
-			dTf = (Q[i] - h_fc * (Tf - Tc)) / C_f
+			dTf = (K_Q * Q[i] - h_fc * (Tf - Tc)) / C_f
 			dTc = (h_fc * (Tf - Tc) - h_amb * (Tc - T_amb)) / C_c
 			Tf += dTf * dt
 			Tc += dTc * dt
@@ -45,19 +45,25 @@ def simulate_chamber(t, Q, *, C_f, C_c, h_fc, h_amb, T_amb, T0):
 
 
 def fit_params(t, temp, Q, *, T_amb, init):
+	# Fit the firing-rate heat gain K_Q (steady gain) along with C_c, h_fc, h_amb.
+	# C_f (the firepot time constant) is held fixed at its init value: it is
+	# redundant with K_Q for the steady gain, so fitting both is ill-posed.
 	temp = np.asarray(temp, dtype=float)
-	keys = ['C_f', 'C_c', 'h_fc', 'h_amb']
+	keys = ['K_Q', 'C_c', 'h_fc', 'h_amb']
+	C_f = init['C_f']
 	x0 = np.array([init[k] for k in keys], dtype=float)
 
 	def residual(x):
 		params = dict(zip(keys, x))
-		sim = simulate_chamber(t, Q, T_amb=T_amb, T0=float(temp[0]), **params)
+		sim = simulate_chamber(t, Q, T_amb=T_amb, T0=float(temp[0]), C_f=C_f, **params)
 		return sim - temp
 
 	# Keep parameters physically positive via solver bounds (cleaner than abs(),
 	# which introduces a non-smooth gradient at zero).
 	res = least_squares(residual, x0, method='trf', bounds=(0.0, np.inf), max_nfev=2000)
-	return dict(zip(keys, res.x))
+	out = dict(zip(keys, res.x))
+	out['C_f'] = C_f
+	return out
 
 
 def main():

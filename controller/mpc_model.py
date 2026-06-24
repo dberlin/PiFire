@@ -25,7 +25,7 @@ from scipy.linalg import expm
 import do_mpc
 
 
-def build_do_mpc_model(*, C_f, C_c, h_fc, h_amb, T_amb, theta=0.0, n_delay=0):
+def build_do_mpc_model(*, C_f, C_c, h_fc, h_amb, T_amb, theta=0.0, n_delay=0, K_Q=1.0):
 	model = do_mpc.model.Model('continuous')
 	q = [model.set_variable('_x', f'q{i}') for i in range(n_delay)]
 	T_f = model.set_variable('_x', 'T_f')
@@ -41,7 +41,8 @@ def build_do_mpc_model(*, C_f, C_c, h_fc, h_amb, T_amb, theta=0.0, n_delay=0):
 		heat_in = q[n_delay - 1]
 	else:
 		heat_in = Q
-	model.set_rhs('T_f', (heat_in - h_fc * (T_f - T_c)) / C_f)
+	# K_Q maps the abstract firing rate to actual heat (calibrated to grill power)
+	model.set_rhs('T_f', (K_Q * heat_in - h_fc * (T_f - T_c)) / C_f)
 	model.set_rhs('T_c', (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb) + d) / C_c)
 	model.set_rhs('d', d * 0)
 	model.setup()
@@ -58,7 +59,7 @@ class GreyBoxKF:
 	'''
 
 	def __init__(self, *, C_f, C_c, h_fc, h_amb, T_amb, t_step,
-	             q_temp, q_dist, r_meas, theta=0.0, n_delay=0, x0=None):
+	             q_temp, q_dist, r_meas, theta=0.0, n_delay=0, K_Q=1.0, x0=None):
 		n = n_delay + 3
 		iTf, iTc, iD = n_delay, n_delay + 1, n_delay + 2
 
@@ -69,7 +70,7 @@ class GreyBoxKF:
 				A[i, i] = -1.0 / tau_d
 				if i > 0:
 					A[i, i - 1] = 1.0 / tau_d
-			A[iTf, n_delay - 1] = 1.0 / C_f      # last lag feeds the firepot
+			A[iTf, n_delay - 1] = K_Q / C_f      # last lag feeds the firepot (scaled by K_Q)
 		A[iTf, iTf] = -h_fc / C_f
 		A[iTf, iTc] = h_fc / C_f
 		A[iTc, iTf] = h_fc / C_c
@@ -81,7 +82,7 @@ class GreyBoxKF:
 		if n_delay > 0:
 			Baug[0, 0] = 1.0 / (theta / n_delay)  # Q enters the first transport lag
 		else:
-			Baug[iTf, 0] = 1.0 / C_f              # no deadtime: Q enters the firepot
+			Baug[iTf, 0] = K_Q / C_f              # no deadtime: Q enters the firepot (scaled by K_Q)
 		Baug[iTc, 1] = h_amb * T_amb / C_c
 
 		Mblk = np.zeros((n + 2, n + 2))
