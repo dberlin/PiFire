@@ -111,3 +111,6 @@ debug_*.html
 docs/superpowers/experiments/_ampc_data/
 docs/superpowers/experiments/training/
 /training/
+
+# externally-generated sample dumps
+pifire_from_other_machine_samples.npz

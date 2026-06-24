@@ -35,6 +35,7 @@ SP = 110.0
 CYCLE = {'u_min': 0.1, 'u_max': 0.9, 'HoldCycleTime': 25}
 ND = int(_DEFAULTS['n_delay'])
 OUT = './docs/superpowers/experiments/_ampc_data/pifire_samples.npz'
+OUT_SPAN = './docs/superpowers/experiments/_ampc_data/pifire_span.npz'
 
 
 def generate_states(n, *, seed=0, op_frac=0.55):
@@ -146,6 +147,85 @@ def _episode(arg):
     return np.array(Xh), np.array(Up), np.array(Q)
 
 
+# ----- setpoint-spanning closed-loop sampling -------------------------------
+# Like the single-setpoint DAgger rollout, but each episode follows a random
+# setpoint SCHEDULE across the operating range -- so the data covers steady holds
+# at many temperatures AND the big-step transients (110->220 etc., the hard
+# cases). T_set is logged per sample; the spanning net takes it as an input and
+# the analytic Q_ss(d, T_set) feedforward generalizes across the range for free.
+def _episode_span(arg):
+    ep_seed, minutes, dither, sp_lo, sp_hi = arg
+    rng = np.random.default_rng(ep_seed)
+    c = Controller(dict(_DEFAULTS), 'C', dict(CYCLE))
+    cfg = c.cfg
+    qmin, qmax = cfg['Q_min'], cfg['Q_max']
+    plant = GrillSim(seed=ep_seed)
+    nsteps = int(minutes * 60 / 25)
+    # random setpoint schedule: 1-3 segments across the range
+    nseg = int(rng.integers(1, 4))
+    seg_sp = rng.uniform(sp_lo, sp_hi, size=nseg)
+    seg_bounds = np.linspace(0, nsteps, nseg + 1).astype(int)
+    # warm-start most episodes anywhere in the reachable range
+    if rng.random() < 0.6:
+        t0 = float(rng.uniform(20.0, min(sp_hi, 300.0)))
+        plant.T_c = plant.T_meas = t0
+        plant.T_f = t0 + float(rng.uniform(0.0, 150.0))
+        lastQ = float(rng.uniform(qmin, 80.0))
+    else:
+        lastQ = qmin
+    c.set_target(float(seg_sp[0]))
+    seg = 0
+    Xh, Up, Ts, Q = [], [], [], []
+    for k in range(nsteps):
+        if seg + 1 < nseg and k >= seg_bounds[seg + 1]:
+            seg += 1; c.set_target(float(seg_sp[seg]))
+        y = plant.measured()
+        x_hat = c.estimator.update(lastQ, y)
+        try:
+            q_exp = float(np.asarray(c.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+        except Exception:
+            q_exp = lastQ
+        q_exp = float(np.clip(q_exp, qmin, qmax))
+        if k >= 4:
+            Xh.append(np.asarray(x_hat).flatten().copy()); Up.append(lastQ)
+            Ts.append(float(c._set_point_c)); Q.append(q_exp)
+        q_app = q_exp + (rng.normal(0, dither) if rng.random() < 0.5 else 0.0)
+        q_app = float(np.clip(q_app, qmin, qmax))
+        auger, fan_duty = allocate(q_app, Q_min=qmin, Q_max=qmax,
+                                   u_min=c.u_min, u_max=c.u_max,
+                                   fan_min_pct=cfg['fan_min_pct'], fan_max_pct=cfg['fan_max_pct'],
+                                   enable_fan=bool(cfg['enable_fan_input']))
+        ratio = float(np.clip(auger, c.u_min, c.u_max))
+        fan = fan_duty if fan_duty is not None else 100.0
+        on = int(round(ratio * 25))
+        for s in range(25):
+            plant.step(auger_on=(s < on), fan_frac=fan / 100.0)
+        lastQ = q_app
+    return np.array(Xh), np.array(Up), np.array(Ts), np.array(Q)
+
+
+def sample_span(episodes=150, workers=None, seed=0, minutes=120, dither=8.0,
+                sp_lo=100.0, sp_hi=290.0, out=OUT_SPAN):
+    workers = workers or max(1, (os.cpu_count() or 2) - 2)
+    args = [(seed * 100000 + e, minutes, dither, sp_lo, sp_hi) for e in range(episodes)]
+    t0 = time.perf_counter()
+    ctx = mp.get_context('fork')
+    with ctx.Pool(processes=workers) as pool:
+        results = pool.map(_episode_span, args)
+    dt = time.perf_counter() - t0
+    X0 = np.concatenate([r[0] for r in results])
+    Up = np.concatenate([r[1] for r in results])
+    Ts = np.concatenate([r[2] for r in results])
+    U0 = np.concatenate([r[3] for r in results])
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    np.savez_compressed(out, X0=X0, u_prev=Up, t_set=Ts, u0=U0, sp_lo=sp_lo, sp_hi=sp_hi)
+    print(f"span: {episodes} episodes [{sp_lo:.0f},{sp_hi:.0f}]C on {workers} workers in "
+          f"{dt:.0f}s -> {len(U0)} samples ({len(U0)/dt:.0f}/s) | "
+          f"T_set [{Ts.min():.0f},{Ts.max():.0f}] u0 [{U0.min():.1f},{U0.max():.1f}] mean {U0.mean():.1f}")
+    print(f"saved {out}")
+    return out
+
+
 def sample_closed_loop(episodes=120, workers=None, seed=0, minutes=60, dither=8.0, out=OUT):
     workers = workers or max(1, (os.cpu_count() or 2) - 2)
     args = [(seed * 100000 + e, minutes, dither) for e in range(episodes)]
@@ -195,15 +275,23 @@ def sample(n=16000, workers=None, seed=0, out=OUT):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('--mode', choices=['box', 'closed'], default='closed',
-                    help="box=structured open-loop; closed=DAgger closed-loop (default)")
+    ap.add_argument('--mode', choices=['box', 'closed', 'span'], default='closed',
+                    help="box=structured open-loop; closed=single-setpoint DAgger; "
+                         "span=setpoint-spanning DAgger")
     ap.add_argument('-n', type=int, default=16000, help="box mode: number of samples")
-    ap.add_argument('-e', '--episodes', type=int, default=120, help="closed mode: episodes")
+    ap.add_argument('-e', '--episodes', type=int, default=120, help="closed/span: episodes")
     ap.add_argument('-w', '--workers', type=int, default=None)
+    ap.add_argument('--minutes', type=float, default=None, help="episode length (min)")
     ap.add_argument('--dither', type=float, default=8.0)
+    ap.add_argument('--sp-lo', type=float, default=100.0)
+    ap.add_argument('--sp-hi', type=float, default=290.0)
     ap.add_argument('--seed', type=int, default=0)
     a = ap.parse_args()
     if a.mode == 'box':
         sample(n=a.n, workers=a.workers, seed=a.seed)
+    elif a.mode == 'closed':
+        sample_closed_loop(episodes=a.episodes, workers=a.workers, seed=a.seed,
+                           dither=a.dither, minutes=a.minutes or 60)
     else:
-        sample_closed_loop(episodes=a.episodes, workers=a.workers, seed=a.seed, dither=a.dither)
+        sample_span(episodes=a.episodes, workers=a.workers, seed=a.seed, dither=a.dither,
+                    minutes=a.minutes or 120, sp_lo=a.sp_lo, sp_hi=a.sp_hi)
