@@ -19,14 +19,17 @@ import numpy as np
 import do_mpc
 
 from controller.base import ControllerBase
-from controller.mpc_model import build_do_mpc_model, GreyBoxKF
+from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxMHE
 from controller.mpc_allocator import allocate
 
 _DEFAULTS = dict(
-	n_horizon=20, t_step=25.0, control_period=25.0, Q_w=1.0, R_dQ=0.02,
-	Q_min=5.0, Q_max=100.0, C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55,
-	T_amb=20.0, theta=50.0, n_delay=4, K_Q=1.0, fan_min_pct=40.0, fan_max_pct=100.0,
-	enable_fan_input=False,
+	n_horizon=24, t_step=25.0, control_period=25.0, Q_w=1.0, R_dQ=1.0,
+	Q_min=5.0, Q_max=100.0,
+	# Nominal grey-box thermal params -- CALIBRATE to your grill via update_mpc.py.
+	C_f=9.0, C_c=320.0, h_fc=1.3, h_amb=0.50, T_amb=20.0,
+	theta=50.0, n_delay=4, K_Q=3.5, sigma=1.4e-9,
+	estimator='mhe',                      # 'mhe' (nonlinear-capable) or 'kf' (linear only)
+	fan_min_pct=40.0, fan_max_pct=100.0, enable_fan_input=False,
 	est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
 )
 
@@ -54,7 +57,8 @@ class Controller(ControllerBase):
 		self.model = build_do_mpc_model(
 			C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'],
 			h_amb=cfg['h_amb'], T_amb=cfg['T_amb'],
-			theta=float(cfg['theta']), n_delay=n_delay, K_Q=float(cfg['K_Q']))
+			theta=float(cfg['theta']), n_delay=n_delay, K_Q=float(cfg['K_Q']),
+			sigma=float(cfg['sigma']))
 
 		# MPC controller
 		self.mpc = do_mpc.controller.MPC(self.model)
@@ -79,14 +83,23 @@ class Controller(ControllerBase):
 		self.mpc.set_tvp_fun(tvp_fun)
 		self.mpc.setup()
 
-		# estimator (discretized at the control period so faster re-solves are
-		# estimated over the real elapsed time, not the prediction t_step)
-		self.kf = GreyBoxKF(
-			C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'], h_amb=cfg['h_amb'],
-			T_amb=cfg['T_amb'], t_step=float(cfg['control_period']),
-			q_temp=cfg['est_q_temp'], q_dist=cfg['est_q_dist'],
-			r_meas=cfg['est_r_meas'], theta=float(cfg['theta']), n_delay=n_delay,
-			K_Q=float(cfg['K_Q']))
+		# estimator: MHE (handles the nonlinear radiative model; offset-free via a
+		# known-input formulation) or the linear Kalman filter. Discretized at the
+		# control period so faster re-solves estimate the real elapsed time. Both
+		# expose update(Q_applied, y) -> state estimate.
+		if str(cfg.get('estimator', 'mhe')).lower() == 'kf':
+			self.estimator = GreyBoxKF(
+				C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'], h_amb=cfg['h_amb'],
+				T_amb=cfg['T_amb'], t_step=float(cfg['control_period']),
+				q_temp=cfg['est_q_temp'], q_dist=cfg['est_q_dist'],
+				r_meas=cfg['est_r_meas'], theta=float(cfg['theta']), n_delay=n_delay,
+				K_Q=float(cfg['K_Q']))
+		else:
+			self.estimator = GreyBoxMHE(
+				C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'], h_amb=cfg['h_amb'],
+				T_amb=cfg['T_amb'], t_step=float(cfg['control_period']),
+				theta=float(cfg['theta']), n_delay=n_delay, K_Q=float(cfg['K_Q']),
+				sigma=float(cfg['sigma']), r_meas=cfg['est_r_meas'])
 
 		x0 = np.zeros((n_delay + 3, 1))
 		x0[n_delay, 0] = cfg['T_amb']        # T_f
@@ -105,7 +118,7 @@ class Controller(ControllerBase):
 	def update(self, current):
 		y = _to_c(current, self.units)
 		# 1) estimate states from the measurement
-		x_hat = self.kf.update(self._last_Q, y)
+		x_hat = self.estimator.update(self._last_Q, y)
 		# 2) optimize firing rate Q. The box constraints bound Q; on any solver
 		#    error we hold the previous move so the control loop never breaks.
 		try:

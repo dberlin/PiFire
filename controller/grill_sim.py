@@ -34,7 +34,7 @@ DT = 1.0
 
 class GrillSim:
 	def __init__(self, *, seed=0, deadtime=20, fan_is_lever=True, fixed_fan=None,
-	             probe_tau=4.5, H=140.0):
+	             probe_tau=4.5, H=420.0):
 		self.rng = np.random.default_rng(seed)
 		self.fan_is_lever = fan_is_lever
 		self.fixed_fan = fixed_fan            # if set, fan held at this frac

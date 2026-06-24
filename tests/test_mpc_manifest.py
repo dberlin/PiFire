@@ -14,8 +14,8 @@ def test_mpc_entry_present():
     assert e['module_name'] == 'mpc'
     names = {o['option_name'] for o in e['config']}
     # a representative subset of the required options
-    assert {'n_horizon', 'control_period', 'theta', 'n_delay', 'K_Q', 'C_c',
-            'h_amb', 'Q_max', 'enable_fan_input', 'est_r_meas'} <= names
+    assert {'n_horizon', 'control_period', 'theta', 'n_delay', 'K_Q', 'sigma',
+            'estimator', 'C_c', 'h_amb', 'Q_max', 'enable_fan_input', 'est_r_meas'} <= names
 
 
 def test_default_controller_config_includes_mpc():
@@ -29,5 +29,7 @@ def test_default_controller_config_includes_mpc():
     assert cfg['mpc']['control_period'] == 25.0
     assert cfg['mpc']['theta'] == 50.0
     assert cfg['mpc']['n_delay'] == 4
-    assert cfg['mpc']['K_Q'] == 1.0
+    assert cfg['mpc']['K_Q'] == 3.5
+    assert cfg['mpc']['estimator'] == 'mhe'
+    assert cfg['mpc']['sigma'] > 0.0
     assert cfg['mpc']['enable_fan_input'] is False

@@ -25,7 +25,16 @@ from scipy.linalg import expm
 import do_mpc
 
 
-def build_do_mpc_model(*, C_f, C_c, h_fc, h_amb, T_amb, theta=0.0, n_delay=0, K_Q=1.0):
+_KELVIN = 273.15
+
+
+def _rad_loss(T_c, T_amb, sigma):
+	# Radiative chamber loss (Stefan-Boltzmann-like). sigma=0 -> purely linear.
+	return sigma * ((T_c + _KELVIN) ** 4 - (T_amb + _KELVIN) ** 4)
+
+
+def build_do_mpc_model(*, C_f, C_c, h_fc, h_amb, T_amb, theta=0.0, n_delay=0,
+                       K_Q=1.0, sigma=0.0):
 	model = do_mpc.model.Model('continuous')
 	q = [model.set_variable('_x', f'q{i}') for i in range(n_delay)]
 	T_f = model.set_variable('_x', 'T_f')
@@ -43,7 +52,8 @@ def build_do_mpc_model(*, C_f, C_c, h_fc, h_amb, T_amb, theta=0.0, n_delay=0, K_
 		heat_in = Q
 	# K_Q maps the abstract firing rate to actual heat (calibrated to grill power)
 	model.set_rhs('T_f', (K_Q * heat_in - h_fc * (T_f - T_c)) / C_f)
-	model.set_rhs('T_c', (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb) + d) / C_c)
+	model.set_rhs('T_c', (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb)
+	                      - _rad_loss(T_c, T_amb, sigma) + d) / C_c)
 	model.set_rhs('d', d * 0)
 	model.setup()
 	return model
@@ -111,3 +121,73 @@ class GreyBoxKF:
 		self.x = self.x + K.flatten() * (y_measured - (self.H @ self.x)[0])
 		self.P = (np.eye(self.n) - K @ self.H) @ self.P
 		return self.x
+
+
+class GreyBoxMHE:
+	'''
+	Moving-horizon estimator over the (possibly nonlinear) augmented model,
+	x = [q0..q_{n_delay-1}, T_f, T_c, d]. The control input Q is modeled as a
+	KNOWN time-varying parameter (fed the applied-input history) so the
+	disturbance state d -- not the input -- absorbs model mismatch, giving
+	offset-free tracking. Required for the nonlinear (radiative) model, where a
+	linear Kalman filter does not apply. Same update(Q_applied, y) interface as
+	GreyBoxKF.
+	'''
+
+	def __init__(self, *, C_f, C_c, h_fc, h_amb, T_amb, t_step, theta=0.0,
+	             n_delay=0, K_Q=1.0, sigma=0.0, r_meas=0.04, pw_state=10.0,
+	             pw_dist=0.5, px_state=1.0, px_dist=0.5, mhe_horizon=10):
+		from collections import deque
+		n = n_delay + 3
+		self.n = n
+		self._N = int(mhe_horizon)
+
+		model = do_mpc.model.Model('continuous')
+		q = [model.set_variable('_x', f'q{i}') for i in range(n_delay)]
+		T_f = model.set_variable('_x', 'T_f')
+		T_c = model.set_variable('_x', 'T_c')
+		d = model.set_variable('_x', 'd')
+		Q_app = model.set_variable('_tvp', 'Q_app')        # applied input, KNOWN
+		if n_delay > 0:
+			tau_d = theta / n_delay
+			model.set_rhs('q0', (Q_app - q[0]) / tau_d, process_noise=True)
+			for i in range(1, n_delay):
+				model.set_rhs(f'q{i}', (q[i - 1] - q[i]) / tau_d, process_noise=True)
+			heat_in = q[n_delay - 1]
+		else:
+			heat_in = Q_app
+		model.set_rhs('T_f', (K_Q * heat_in - h_fc * (T_f - T_c)) / C_f, process_noise=True)
+		model.set_rhs('T_c', (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb)
+		                      - _rad_loss(T_c, T_amb, sigma) + d) / C_c, process_noise=True)
+		model.set_rhs('d', d * 0, process_noise=True)
+		model.set_meas('T_c_meas', T_c, meas_noise=True)
+		model.setup()
+
+		mhe = do_mpc.estimator.MHE(model, [])
+		mhe.set_param(n_horizon=self._N, t_step=t_step, store_full_solution=False,
+		              meas_from_data=True,
+		              nlpsol_opts={'ipopt.print_level': 0, 'print_time': 0, 'ipopt.sb': 'yes'})
+		P_x = np.diag([px_state] * (n_delay + 2) + [px_dist])
+		P_v = np.array([[1.0 / r_meas]])
+		P_w = np.diag([pw_state] * (n_delay + 2) + [pw_dist])
+		mhe.set_default_objective(P_x, P_v, P_w=P_w)
+
+		self._qhist = deque([0.0] * (self._N + 1), maxlen=self._N + 1)
+		tvp_template = mhe.get_tvp_template()
+		def tvp_fun(t_now):
+			for k in range(self._N + 1):
+				tvp_template['_tvp', k, 'Q_app'] = self._qhist[k]
+			return tvp_template
+		mhe.set_tvp_fun(tvp_fun)
+		mhe.setup()
+
+		x0 = np.zeros((n, 1))
+		x0[n_delay, 0] = T_amb
+		x0[n_delay + 1, 0] = T_amb
+		mhe.x0 = x0
+		mhe.set_initial_guess()
+		self.mhe = mhe
+
+	def update(self, Q_applied, y_measured):
+		self._qhist.append(float(Q_applied))
+		return np.asarray(self.mhe.make_step(np.array([[float(y_measured)]]))).flatten()
