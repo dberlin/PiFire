@@ -34,7 +34,7 @@ DT = 1.0
 
 class GrillSim:
 	def __init__(self, *, seed=0, deadtime=20, fan_is_lever=True, fixed_fan=None,
-	             probe_tau=4.5):
+	             probe_tau=4.5, H=140.0):
 		self.rng = np.random.default_rng(seed)
 		self.fan_is_lever = fan_is_lever
 		self.fixed_fan = fixed_fan            # if set, fan held at this frac
@@ -44,7 +44,7 @@ class GrillSim:
 		self.h_fc0, self.h_amb0 = 1.3, 0.42
 		self.sigma = 1.4e-9
 		self.feed_rate = 1.0                  # fuel units/s while auger ON
-		self.H = 140.0                        # heat per fuel unit (110C at ~0.45 fire)
+		self.H = H                            # heat per fuel unit (~140 -> 334F max; ~300 -> ~450F max)
 		self.k_burn = 0.10
 		self.T_amb = 17.0
 		from collections import deque
