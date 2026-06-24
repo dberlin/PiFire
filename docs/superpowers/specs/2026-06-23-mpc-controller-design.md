@@ -32,21 +32,32 @@ operate internally in **Celsius**.
 Validated closed-loop against a deliberately mismatched, realistic plant
 (`controller/grill_sim.py`: pellet pulses, ~20 s deadtime, fan-as-lever, sensor
 lag, light occasional wind, AFR-dependent efficiency). The steady band is
-**~±1 °C RMS**, with worst-case peaks ~2.5–3 °C, **offset-free at every setpoint**
-(mean bias < 0.5 °C):
+**~±1 °C RMS** across the whole operating range, with peaks growing modestly with
+temperature, **offset-free at every setpoint** (mean bias < 0.4 °C):
 
 | setpoint | steady-state RMS | peak \|error\| |
 |---|---|---|
-| 110 °C (230 °F) | ~1.0 °C | ~2.6 °C |
-| 135 °C (275 °F) | ~1.1 °C | ~2.8 °C |
-| 190 °C (374 °F) | ~1.1 °C | ~2.7 °C |
-| 220 °C (428 °F) | ~1.25 °C | ~3.2 °C |
+| 110 °C (230 °F) | ~1.05 °C | ~2.8 °C |
+| 190 °C (374 °F) | ~1.1 °C | ~3.3 °C |
+| 218 °C (425 °F) | ~1.25 °C | ~4.1 °C |
+| 260 °C (500 °F) | ~1.2 °C | ~4.3 °C |
+| 288 °C (550 °F) | ~1.3 °C | ~3.7 °C |
+| 316 °C (600 °F) | ~1.25 °C | ~4.5 °C |
+
+The band stays ~±1 °C RMS all the way to **600 °F** — high-temp holding is a
+non-issue, and there is firing headroom (only ~77 % of max fire at 600 °F, never
+pinned), so the controller still rejects disturbances near the ceiling. This flat
+band across 230–600 °F is where the nonlinear radiative (T⁴) term earns its keep:
+the temperature-dependent loss is built into the model gain, so one calibration
+spans the range without the loop running out of authority.
 
 **Setpoint changes** (e.g. a brisket cook stepping 225 → 275 → 300 °F) overshoot
 only **~3 °C (~5 °F)** and reach the new target in **2–5 min** — fast rise without
-a big overshoot. Two design choices make this work: the integrating-disturbance
-estimate is kept deliberately slow (`est_q_dist` low) so it does not chase
-transients, and the deadtime is modeled so the MPC predicts across it.
+a big overshoot. A **cold preheat** to a high target (e.g. 500 °F) rises in ~10 min
+and overshoots only ~5–6 °F before settling. Two design choices make this work:
+the integrating-disturbance estimate is kept deliberately slow (`est_q_dist` low)
+so it does not chase transients, and the deadtime is modeled so the MPC predicts
+across it.
 
 On real hardware accuracy further depends on calibration and the specific grill.
 The regression gate (`tests/test_mpc_closed_loop.py`) asserts the band at 110 °C
@@ -233,8 +244,8 @@ occasional wind** breeze (a few-percent loss bump — deliberately modest, since
 earlier ×1.6–2.6 gust model was unrealistic and dominated the band).
 `step(auger_on, fan_frac)` advances 1 s; `measured()` is the lagged + noisy probe
 reading; `true_Tc` is the noise-free chamber temperature.
-Full firing reaches ~341 °C (~646 °F), so setpoints up to ~290 °C are controllable
-with headroom.
+Full firing reaches ~341 °C (~646 °F), so even a 316 °C (600 °F) setpoint is held
+with headroom (~77 % fire).
 
 ## Configuration / Settings / Wizard
 
