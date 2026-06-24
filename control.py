@@ -569,6 +569,7 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 	}
 
 	pid_output = 0
+	mpc_fan_duty = None  # set when an MPC-style controller commands the fan (PWM builds)
 	ControlFanPid = False
 
 	# ============ Main Work Cycle ============
@@ -713,10 +714,14 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 					pid_output, fan_cmd = normalize_controller_output(raw_output)
 					controllerCycleStart = now
 					CycleRatio = RawCycleRatio = settings['cycle_data']['u_min'] if LidOpenDetect else pid_output
-					# Controllers that command the fan directly (MPC) apply duty
-					# here, only when a PWM/DC fan is present.
+					# Controllers that command the fan directly (MPC) route the duty
+					# through control['duty_cycle'] so the PWM apply path below uses it.
+					# Setting mpc_fan_duty also suppresses the legacy temperature-profile
+					# fan logic so it cannot overwrite the MPC command.
 					if fan_cmd is not None and settings['platform']['dc_fan'] and control['pwm_control']:
-						grill_platform.set_duty_cycle(fan_cmd['duty'])
+						mpc_fan_duty = fan_cmd['duty']
+						control['duty_cycle'] = mpc_fan_duty
+						write_control(control, direct_write=True, origin='control')
 					# If ratio is less than min set auger ratio to min and control further via fan.
 					if CycleRatio < settings['cycle_data']['u_min']:
 						CycleRatio = settings['cycle_data']['u_min']
@@ -904,6 +909,7 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 
 			# If PWM Fan Control enabled set duty_cycle based on temperature.
 			if (settings['platform']['dc_fan'] and mode == 'Hold' and control['pwm_control'] and
+					mpc_fan_duty is None and
 					(now - fan_update_time) > settings['pwm']['update_time']):
 				fan_update_time = now
 				if ptemp > control['primary_setpoint']:

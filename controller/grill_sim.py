@@ -32,7 +32,6 @@ AFR_OPT, AFR_SIGMA = 1.0, 0.28
 class GrillSim:
 	def __init__(self, *, seed=0):
 		self.rng = np.random.default_rng(seed)
-		self.t = 0.0
 		self.afr = AFR_OPT
 		m = do_mpc.model.Model('continuous')
 		T_f = m.set_variable('_x', 'T_f')
@@ -74,5 +73,4 @@ class GrillSim:
 		eff = np.exp(-((afr - AFR_OPT) ** 2) / (2 * AFR_SIGMA ** 2))
 		Qh = FUEL_TO_HEAT * fuel * eff
 		self.sim.make_step(np.array([[Qh]]))
-		self.t += Ts
 		return self.true_Tc

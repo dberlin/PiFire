@@ -50,12 +50,14 @@ def fit_params(t, temp, Q, *, T_amb, init):
 	x0 = np.array([init[k] for k in keys], dtype=float)
 
 	def residual(x):
-		params = dict(zip(keys, np.abs(x)))     # keep params positive
+		params = dict(zip(keys, x))
 		sim = simulate_chamber(t, Q, T_amb=T_amb, T0=float(temp[0]), **params)
 		return sim - temp
 
-	res = least_squares(residual, x0, method='trf', max_nfev=2000)
-	return dict(zip(keys, np.abs(res.x)))
+	# Keep parameters physically positive via solver bounds (cleaner than abs(),
+	# which introduces a non-smooth gradient at zero).
+	res = least_squares(residual, x0, method='trf', bounds=(0.0, np.inf), max_nfev=2000)
+	return dict(zip(keys, res.x))
 
 
 def main():
