@@ -23,9 +23,10 @@ from controller.mpc_model import build_do_mpc_model, GreyBoxKF
 from controller.mpc_allocator import allocate
 
 _DEFAULTS = dict(
-	n_horizon=20, t_step=25.0, control_period=1.0, Q_w=1.0, R_dQ=0.02,
+	n_horizon=20, t_step=25.0, control_period=25.0, Q_w=1.0, R_dQ=0.02,
 	Q_min=5.0, Q_max=100.0, C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55,
-	T_amb=20.0, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan_input=False,
+	T_amb=20.0, theta=50.0, n_delay=4, fan_min_pct=40.0, fan_max_pct=100.0,
+	enable_fan_input=False,
 	est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
 )
 
@@ -48,10 +49,12 @@ class Controller(ControllerBase):
 		self._set_point_c = 0.0
 		self._last_Q = cfg['Q_min']
 
-		# grey-box do-mpc model
+		# grey-box do-mpc model (with transport-lag deadtime states)
+		n_delay = int(cfg['n_delay'])
 		self.model = build_do_mpc_model(
 			C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'],
-			h_amb=cfg['h_amb'], T_amb=cfg['T_amb'])
+			h_amb=cfg['h_amb'], T_amb=cfg['T_amb'],
+			theta=float(cfg['theta']), n_delay=n_delay)
 
 		# MPC controller
 		self.mpc = do_mpc.controller.MPC(self.model)
@@ -76,14 +79,18 @@ class Controller(ControllerBase):
 		self.mpc.set_tvp_fun(tvp_fun)
 		self.mpc.setup()
 
-		# estimator
+		# estimator (discretized at the control period so faster re-solves are
+		# estimated over the real elapsed time, not the prediction t_step)
 		self.kf = GreyBoxKF(
 			C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'], h_amb=cfg['h_amb'],
-			T_amb=cfg['T_amb'], t_step=float(cfg['t_step']),
+			T_amb=cfg['T_amb'], t_step=float(cfg['control_period']),
 			q_temp=cfg['est_q_temp'], q_dist=cfg['est_q_dist'],
-			r_meas=cfg['est_r_meas'], x0=(cfg['T_amb'], cfg['T_amb'], 0.0))
+			r_meas=cfg['est_r_meas'], theta=float(cfg['theta']), n_delay=n_delay)
 
-		self.mpc.x0 = np.array([[cfg['T_amb']], [cfg['T_amb']], [0.0]])
+		x0 = np.zeros((n_delay + 3, 1))
+		x0[n_delay, 0] = cfg['T_amb']        # T_f
+		x0[n_delay + 1, 0] = cfg['T_amb']    # T_c
+		self.mpc.x0 = x0
 		self.mpc.set_initial_guess()
 
 	def set_target(self, set_point):
