@@ -46,7 +46,10 @@ _DEFAULTS = dict(
 	# not match this config.
 	policy='nlp', policy_net_path='./controller/mpc_policy_net.npz',
 	fan_min_pct=40.0, fan_max_pct=100.0, enable_fan_input=False,
-	est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
+	# est_q_dist deliberately slow: a fast disturbance estimate chases unmeasured
+	# transients and worsens setpoint-step overshoot; 0.05 cut step overshoot ~30%
+	# with no change to the steady-state band. See experiments/mpc_overshoot_fix.py.
+	est_q_temp=1e-2, est_q_dist=0.05, est_r_meas=0.04,
 	# Optional logging of (time_s, temp_c, Q) for the offline calibration utility.
 	log_data=False, log_path='./controller/mpc_calibration_log.csv',
 )
