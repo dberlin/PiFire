@@ -15,6 +15,9 @@
 *****************************************
 '''
 
+import os
+import time
+
 import numpy as np
 import do_mpc
 
@@ -31,6 +34,8 @@ _DEFAULTS = dict(
 	estimator='mhe',                      # 'mhe' (nonlinear-capable) or 'kf' (linear only)
 	fan_min_pct=40.0, fan_max_pct=100.0, enable_fan_input=False,
 	est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
+	# Optional logging of (time_s, temp_c, Q) for the offline calibration utility.
+	log_data=False, log_path='./controller/mpc_calibration_log.csv',
 )
 
 
@@ -107,6 +112,24 @@ class Controller(ControllerBase):
 		self.mpc.x0 = x0
 		self.mpc.set_initial_guess()
 
+		# Optional data logging for offline calibration (update_mpc.py): one
+		# (time_s, temp_c, Q) row per control step. Logs internal Celsius.
+		self._log_path = cfg['log_path'] if cfg.get('log_data') else None
+		if self._log_path and (not os.path.exists(self._log_path)
+		                        or os.path.getsize(self._log_path) == 0):
+			try:
+				with open(self._log_path, 'a') as f:
+					f.write('time_s,temp_c,Q\n')
+			except OSError:
+				self._log_path = None      # disable logging if the path is unwritable
+
+	def _log_row(self, temp_c, Q):
+		try:
+			with open(self._log_path, 'a') as f:
+				f.write(f'{time.time():.3f},{temp_c:.3f},{Q:.4f}\n')
+		except OSError:
+			self._log_path = None      # stop trying after a write failure
+
 	def set_target(self, set_point):
 		self.set_point = set_point
 		self._set_point_c = _to_c(set_point, self.units)
@@ -127,6 +150,8 @@ class Controller(ControllerBase):
 			Q = self._last_Q
 		Q = float(np.clip(Q, self.cfg['Q_min'], self.cfg['Q_max']))
 		self._last_Q = Q
+		if self._log_path:
+			self._log_row(y, Q)
 		# 3) allocate Q -> actuators
 		auger, fan_duty = allocate(
 			Q, Q_min=self.cfg['Q_min'], Q_max=self.cfg['Q_max'],
