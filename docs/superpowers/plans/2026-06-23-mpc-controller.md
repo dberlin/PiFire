@@ -1,5 +1,15 @@
 # MPC Controller Implementation Plan
 
+> **HISTORICAL — superseded.** This is the original step-by-step build plan and
+> describes the *initial* design (linear Kalman filter, 1 Hz re-solve, ±1 °C
+> target, old grey-box params). The shipped controller has since evolved well
+> past it: nonlinear radiative grey-box with a deadtime lag chain, **EKF** default
+> (MHE/KF optional), an optional pure-numpy **neural-net policy**, a 25 s control
+> period, recalibrated parameters, and a slow disturbance estimate for low
+> setpoint-step overshoot. For the as-built design and the realistic ~±1 °C band,
+> see `docs/superpowers/specs/2026-06-23-mpc-controller-design.md` and the code in
+> `controller/`. The task-by-task content below is kept only as build provenance.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a selectable Model Predictive Control (MPC) controller that holds grill temperature to a ±1.0 °C steady-state band, using a cascade design (firing-rate MPC + combustion allocator) with offset-free disturbance estimation.

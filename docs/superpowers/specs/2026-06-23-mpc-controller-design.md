@@ -1,11 +1,12 @@
 # MPC Controller for PiFire
 
-> This document describes the MPC controller **as built**. The early drafts
-> targeted a ±1.0 °C band from an idealized simulator; that proved to be a
-> simulator artifact. The honest, deadtime-limited band on a realistic plant is
-> recorded under **Accuracy** below, and the architecture here reflects the
-> shipped code (nonlinear radiative model, EKF default, optional neural-net
-> policy), not the original linear/KF/1 Hz sketch.
+> This document describes the MPC controller **as built**. The architecture
+> reflects the shipped code — nonlinear radiative grey-box, EKF default, optional
+> neural-net policy, 25 s control period — not the original linear/KF/1 Hz sketch.
+> On a realistic plant the steady band is **~±1 °C RMS** (see **Accuracy**); an
+> intermediate draft reported ~±3–8 °C, but that came from a test plant whose wind
+> model was wildly overstated (×1.6–2.6 heat-loss gusts) — corrected to a realistic
+> light breeze, the original ±1 °C aspiration is essentially met.
 
 ## Overview
 
@@ -30,25 +31,33 @@ operate internally in **Celsius**.
 
 Validated closed-loop against a deliberately mismatched, realistic plant
 (`controller/grill_sim.py`: pellet pulses, ~20 s deadtime, fan-as-lever, sensor
-lag, wind gusts, AFR-dependent efficiency). The achievable band is
-**deadtime-limited and temperature-dependent**, and **offset-free at every
-setpoint** (mean bias < 0.5 °C):
+lag, light occasional wind, AFR-dependent efficiency). The steady band is
+**~±1 °C RMS**, with worst-case peaks ~2.5–3 °C, **offset-free at every setpoint**
+(mean bias < 0.5 °C):
 
-| setpoint | steady-state RMS | peak excursion |
+| setpoint | steady-state RMS | peak \|error\| |
 |---|---|---|
-| 110 °C (230 °F) | ~2.8 °C | ~9 °C |
-| 150 °C (302 °F) | ~4.1 °C | ~14 °C |
-| 190 °C (374 °F) | ~5.2 °C | ~18 °C |
-| 220 °C (428 °F) | ~6.2 °C | ~21 °C |
-| 260 °C (500 °F) | ~7.5 °C | ~25 °C |
+| 110 °C (230 °F) | ~1.0 °C | ~2.6 °C |
+| 135 °C (275 °F) | ~1.1 °C | ~2.8 °C |
+| 190 °C (374 °F) | ~1.1 °C | ~2.7 °C |
+| 220 °C (428 °F) | ~1.25 °C | ~3.2 °C |
 
-There is **no ±1 °C claim**. The band widens with temperature because the plant's
-transport/ignition deadtime sets the fundamental control limit; the integrating
-disturbance state keeps tracking offset-free across the whole range despite that.
+**Setpoint changes** (e.g. a brisket cook stepping 225 → 275 → 300 °F) overshoot
+only **~3 °C (~5 °F)** and reach the new target in **2–5 min** — fast rise without
+a big overshoot. Two design choices make this work: the integrating-disturbance
+estimate is kept deliberately slow (`est_q_dist` low) so it does not chase
+transients, and the deadtime is modeled so the MPC predicts across it.
+
 On real hardware accuracy further depends on calibration and the specific grill.
-The regression gate (`tests/test_mpc_closed_loop.py`) asserts the realistic band
-at 110 °C (RMS ≤ 5 °C, ≥ 70 % of samples within ±5 °C, |peak| ≤ 16 °C, |bias|
-≤ 2.5 °C), not a fixed ±1 °C.
+The regression gate (`tests/test_mpc_closed_loop.py`) asserts the band at 110 °C
+(RMS ≤ 2 °C, ≥ 90 % of samples within ±2.5 °C, |peak| ≤ 5 °C, |bias| ≤ 1 °C).
+
+**A note on "realistic."** An earlier `grill_sim` wind model applied ×1.6–2.6
+heat-loss gusts every ~250 s; that single (unrealistic) disturbance dominated the
+band (~±3–8 °C) and produced what looked like a setpoint-step limit cycle. Real
+cooks are mostly calm with at most a light 1–2 mph breeze, so wind now bumps loss
+only a few percent — and the band collapses to the ~±1 °C above. The control loop
+itself was never the problem: against a *matched* plant it tracks to ~0.1 °C.
 
 ## Goals
 
@@ -64,7 +73,8 @@ at 110 °C (RMS ≤ 5 °C, ≥ 70 % of samples within ±5 °C, |peak| ≤ 16 °C
 
 - No igniter control by the MPC.
 - No changes to Startup/Smoke/Shutdown/Prime; MPC is active only in **Hold**.
-- No ±1 °C claim anywhere — the realistic band is wider and temperature-dependent.
+- No *guaranteed* fixed band on real hardware — the ~±1 °C RMS above is on the
+  simulator; real accuracy depends on calibration and the specific grill/conditions.
 - The NLP policy is built on **`do-mpc`** (CasADi/IPOPT, plus `pandas`); these are
   dependencies. The **net policy + EKF path needs only numpy/scipy** (do-mpc is
   imported lazily and is never touched in that mode).
@@ -218,9 +228,11 @@ controller's model, so a passing closed-loop test is honest about realistic
 performance. It models discrete pellet **pulses**, transport/ignition
 **deadtime** (~20 s), the **fan as a real lever** (it accelerates burn, boosts
 firepot→chamber convection, and increases chamber→ambient loss), radiative loss,
-combustion/pellet noise, **sensor lag** (probe `tau` ~4.5 s), and intermittent
-**wind gusts**. `step(auger_on, fan_frac)` advances 1 s; `measured()` is the
-lagged + noisy probe reading; `true_Tc` is the noise-free chamber temperature.
+combustion/pellet noise, **sensor lag** (probe `tau` ~4.5 s), and a **light,
+occasional wind** breeze (a few-percent loss bump — deliberately modest, since an
+earlier ×1.6–2.6 gust model was unrealistic and dominated the band).
+`step(auger_on, fan_frac)` advances 1 s; `measured()` is the lagged + noisy probe
+reading; `true_Tc` is the noise-free chamber temperature.
 Full firing reaches ~341 °C (~646 °F), so setpoints up to ~290 °C are controllable
 with headroom.
 
@@ -237,7 +249,9 @@ defaults:
   `h_amb=0.50`, `T_amb=20.0`, `theta=50.0`, `n_delay=4`, `K_Q=3.5`,
   `sigma=1.4e-9`.
 - **Estimator:** `estimator='ekf'` (`ekf` | `mhe` | `kf`); covariances
-  `est_q_temp=1e-2`, `est_q_dist=0.5`, `est_r_meas=0.04`.
+  `est_q_temp=1e-2`, `est_q_dist=0.05`, `est_r_meas=0.04`. `est_q_dist` is kept
+  low on purpose — a fast disturbance estimate chases unmeasured transients and
+  worsens setpoint-step overshoot.
 - **Policy:** `policy='nlp'` (`nlp` | `net`),
   `policy_net_path='./controller/mpc_policy_net.npz'`.
 - **Allocator:** `fan_min_pct=40.0`, `fan_max_pct=100.0`,
