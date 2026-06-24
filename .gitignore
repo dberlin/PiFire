@@ -110,3 +110,4 @@ debug_*.html
 # approxMPC experiment artifacts
 docs/superpowers/experiments/_ampc_data/
 docs/superpowers/experiments/training/
+/training/
