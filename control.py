@@ -29,6 +29,7 @@ from notify.notifications import *
 from file_mgmt.recipes import convert_recipe_units
 from file_mgmt.cookfile import create_cookfile
 from file_mgmt.common import read_json_file_data
+from controller.base import normalize_controller_output
 from os.path import exists
 
 '''
@@ -301,22 +302,6 @@ def _process_system_commands(grill_platform):
 				'data' : {}
 			}
 		system_output.push(result)
-
-def normalize_controller_output(output):
-	'''
-	Normalize a controller's update() return into (cycle_ratio, fan).
-
-	Legacy controllers return a float cycle ratio; the MPC controller returns
-	{'cycle_ratio': float, 'fan': {'duty': pct or None}}. fan is returned only
-	when a duty is present.
-	'''
-	if isinstance(output, dict):
-		ratio = float(output.get('cycle_ratio', 0.0))
-		fan = output.get('fan')
-		if isinstance(fan, dict) and fan.get('duty') is not None:
-			return ratio, fan
-		return ratio, None
-	return float(output), None
 
 def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device):
 	"""

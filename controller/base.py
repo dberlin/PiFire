@@ -85,3 +85,20 @@ class ControllerBase:
 
 	def supported_functions(self):
 		return self.function_list
+
+
+def normalize_controller_output(output):
+	'''
+	Normalize a controller's update() return into (cycle_ratio, fan).
+
+	Legacy controllers return a float cycle ratio; the MPC controller returns
+	{'cycle_ratio': float, 'fan': {'duty': pct or None}}. fan is returned only
+	when a duty is present.
+	'''
+	if isinstance(output, dict):
+		ratio = float(output.get('cycle_ratio', 0.0))
+		fan = output.get('fan')
+		if isinstance(fan, dict) and fan.get('duty') is not None:
+			return ratio, fan
+		return ratio, None
+	return float(output), None
