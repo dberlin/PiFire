@@ -423,17 +423,54 @@
             "image" : "",
             "description" : "**EXPERIMENTAL** This controller is NOT recommended for use at this time.  REQUIRES SCIKIT-LEARN which may not install on 32-bit OSes.  This is an attempt at designing a machine learning based controller for set temperature control.  It is currently using Scikit Learn Python Module to implement a relatively straightforward machine learning controller.  This controller should be considered pre-Alpha and extremely experimental.  This module will store the machine learning controller in an object, which is saved in the controller directory, named 'ml_model.joblib'.  If any changes are made to the default controller settings, then this joblib file should be deleted so that a new object can be created with new settings.  Note that it may take a very long time for the object to be generated on the Raspberry Pi due to the limited performance capabilities of that processor.",
             "author" : "Ben Parmeter",
-            "link" : "http://docs.pifire.io", 
+            "link" : "http://docs.pifire.io",
             "contributors" : [],
             "attributions" : ["Sci-Kit Learn"],
             "recommendations" : {
-                "cycle" : { 
+                "cycle" : {
                     "cycle_time" : 25,
                     "cycle_ratio_min" : 0.1,
                     "cycle_ratio_max" : 1.0
-                }   
+                }
             },
             "config" : []
+        },
+        "mpc": {
+            "friendly_name": "Model Predictive Control (MPC)",
+            "module_name": "mpc",
+            "image": "pid.png",
+            "description": "Model Predictive Controller. An outer optimizer commands a firing-rate demand against a grey-box thermal model with offset-free disturbance estimation; an inner combustion allocator maps it to auger and (on PWM/DC-fan builds) fan. Targets a tight temperature band. Built on do-mpc.",
+            "author": "PiFire",
+            "link": "",
+            "contributors": [],
+            "attributions": [],
+            "recommendations": {
+                "cycle": {
+                    "cycle_time": 25,
+                    "cycle_ratio_min": 0.1,
+                    "cycle_ratio_max": 0.9
+                }
+            },
+            "config": [
+                {"option_name": "n_horizon", "option_friendly_name": "Prediction Horizon (steps)", "option_description": "Number of prediction steps. [Default=20]", "option_type": "int", "option_default": 20, "option_min": 5, "option_max": 60, "option_step": 1, "hidden": false},
+                {"option_name": "t_step", "option_friendly_name": "Prediction Step (s)", "option_description": "Prediction discretization interval in seconds. [Default=25]", "option_type": "float", "option_default": 25.0, "option_min": 1.0, "option_max": 60.0, "option_step": 1.0, "hidden": false},
+                {"option_name": "control_period", "option_friendly_name": "Control Period (s)", "option_description": "How often the MPC re-solves and updates the actuators. [Default=1.0]", "option_type": "float", "option_default": 1.0, "option_min": 0.5, "option_max": 25.0, "option_step": 0.5, "hidden": false},
+                {"option_name": "Q_w", "option_friendly_name": "Tracking Weight", "option_description": "Penalty on temperature tracking error. [Default=1.0]", "option_type": "float", "option_default": 1.0, "option_min": 0.0, "option_max": null, "option_step": 0.1, "hidden": false},
+                {"option_name": "R_dQ", "option_friendly_name": "Move Suppression", "option_description": "Penalty on firing-rate changes (smoothness). [Default=0.02]", "option_type": "float", "option_default": 0.02, "option_min": 0.0, "option_max": null, "option_step": 0.01, "hidden": false},
+                {"option_name": "Q_min", "option_friendly_name": "Min Firing Rate", "option_description": "Minimum sustainable firing-rate demand. [Default=5.0]", "option_type": "float", "option_default": 5.0, "option_min": 0.0, "option_max": null, "option_step": 1.0, "hidden": false},
+                {"option_name": "Q_max", "option_friendly_name": "Max Firing Rate", "option_description": "Maximum firing-rate demand. [Default=100.0]", "option_type": "float", "option_default": 100.0, "option_min": 1.0, "option_max": null, "option_step": 1.0, "hidden": false},
+                {"option_name": "C_f", "option_friendly_name": "Firepot Heat Capacity", "option_description": "Firepot lumped thermal mass. [Default=60.0]", "option_type": "float", "option_default": 60.0, "option_min": 1.0, "option_max": null, "option_step": 1.0, "hidden": false},
+                {"option_name": "C_c", "option_friendly_name": "Chamber Heat Capacity", "option_description": "Chamber lumped thermal mass. [Default=306.0]", "option_type": "float", "option_default": 306.0, "option_min": 1.0, "option_max": null, "option_step": 1.0, "hidden": false},
+                {"option_name": "h_fc", "option_friendly_name": "Firepot-Chamber Coupling", "option_description": "Heat-transfer coefficient firepot->chamber. [Default=2.0]", "option_type": "float", "option_default": 2.0, "option_min": 0.0, "option_max": null, "option_step": 0.1, "hidden": false},
+                {"option_name": "h_amb", "option_friendly_name": "Ambient Loss Coefficient", "option_description": "Chamber->ambient heat-loss coefficient (sets steady state). [Default=0.55]", "option_type": "float", "option_default": 0.55, "option_min": 0.0, "option_max": null, "option_step": 0.01, "hidden": false},
+                {"option_name": "T_amb", "option_friendly_name": "Ambient Temperature (C)", "option_description": "Nominal ambient temperature in Celsius. [Default=20.0]", "option_type": "float", "option_default": 20.0, "option_min": -40.0, "option_max": 60.0, "option_step": 1.0, "hidden": false},
+                {"option_name": "fan_min_pct", "option_friendly_name": "Fan Duty at Min Fire (%)", "option_description": "Fan duty percent at minimum firing rate (PWM fans). [Default=40.0]", "option_type": "float", "option_default": 40.0, "option_min": 0.0, "option_max": 100.0, "option_step": 1.0, "hidden": false},
+                {"option_name": "fan_max_pct", "option_friendly_name": "Fan Duty at Max Fire (%)", "option_description": "Fan duty percent at maximum firing rate (PWM fans). [Default=100.0]", "option_type": "float", "option_default": 100.0, "option_min": 0.0, "option_max": 100.0, "option_step": 1.0, "hidden": false},
+                {"option_name": "enable_fan_input", "option_friendly_name": "MPC Controls Fan", "option_description": "If enabled, the MPC commands fan duty (PWM/DC-fan builds only). [Default=false]", "option_type": "bool", "option_default": false, "hidden": false},
+                {"option_name": "est_q_temp", "option_friendly_name": "Estimator Temp Noise", "option_description": "Process-noise variance on temperature states. [Default=0.01]", "option_type": "float", "option_default": 0.01, "option_min": 0.0, "option_max": null, "option_step": 0.001, "hidden": false},
+                {"option_name": "est_q_dist", "option_friendly_name": "Estimator Disturbance Noise", "option_description": "Random-walk variance on the disturbance state (drift tracking). [Default=0.5]", "option_type": "float", "option_default": 0.5, "option_min": 0.0, "option_max": null, "option_step": 0.1, "hidden": false},
+                {"option_name": "est_r_meas", "option_friendly_name": "Estimator Measurement Noise", "option_description": "Measurement-noise variance (sensor). [Default=0.04]", "option_type": "float", "option_default": 0.04, "option_min": 0.0, "option_max": null, "option_step": 0.01, "hidden": false}
+            ]
         }
     }
 }
