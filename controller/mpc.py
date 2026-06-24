@@ -32,7 +32,10 @@ from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, Grey
 from controller.mpc_allocator import allocate
 
 _DEFAULTS = dict(
-	n_horizon=24, t_step=25.0, control_period=25.0, Q_w=1.0, R_dQ=1.0,
+	# R_dQ (firing-move penalty) kept low: 1.0 was over-damped -> sluggish rise AND
+	# a looser steady band. 0.1 gives ~4x faster setpoint-step rise and a tighter
+	# band, at a modest step-overshoot increase. See experiments/mpc_risetime.py.
+	n_horizon=24, t_step=25.0, control_period=25.0, Q_w=1.0, R_dQ=0.1,
 	Q_min=5.0, Q_max=100.0,
 	# Nominal grey-box thermal params -- CALIBRATE to your grill via update_mpc.py.
 	C_f=9.0, C_c=320.0, h_fc=1.3, h_amb=0.50, T_amb=20.0,
