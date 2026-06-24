@@ -15,7 +15,11 @@ def test_mpc_entry_present():
     names = {o['option_name'] for o in e['config']}
     # a representative subset of the required options
     assert {'n_horizon', 'control_period', 'theta', 'n_delay', 'K_Q', 'sigma',
-            'estimator', 'C_c', 'h_amb', 'Q_max', 'enable_fan_input', 'est_r_meas'} <= names
+            'estimator', 'policy', 'policy_net_path', 'C_c', 'h_amb', 'Q_max',
+            'enable_fan_input', 'est_r_meas'} <= names
+    policy = next(o for o in e['config'] if o['option_name'] == 'policy')
+    assert set(policy['list_values']) == {'nlp', 'net'}
+    assert policy['option_default'] == 'nlp'
 
 
 def test_default_controller_config_includes_mpc():
@@ -31,5 +35,6 @@ def test_default_controller_config_includes_mpc():
     assert cfg['mpc']['n_delay'] == 4
     assert cfg['mpc']['K_Q'] == 3.5
     assert cfg['mpc']['estimator'] == 'ekf'
+    assert cfg['mpc']['policy'] == 'nlp'
     assert cfg['mpc']['sigma'] > 0.0
     assert cfg['mpc']['enable_fan_input'] is False

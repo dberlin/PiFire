@@ -5,10 +5,15 @@
  PiFire MPC Controller (cascade: firing-rate + combustion allocator)
 *****************************************
 
- Outer MPC manipulates a scalar firing-rate demand Q against a grey-box
- thermal model with an integrating-disturbance state (offset-free tracking via
- a Kalman filter). The inner combustion allocator maps Q to auger/fan. Returns
- a dict: {'cycle_ratio': auger_duty, 'fan': {'duty': pct or None}}.
+ Outer loop manipulates a scalar firing-rate demand Q against a grey-box thermal
+ model with an integrating-disturbance state (offset-free tracking). The inner
+ combustion allocator maps Q to auger/fan. Returns a dict:
+ {'cycle_ratio': auger_duty, 'fan': {'duty': pct or None}}.
+
+ State is estimated by the EKF (default), MHE, or KF. The firing-rate policy is
+ either the do-mpc NLP solve ('nlp') or a pure-numpy neural approximation
+ ('net', no IPOPT/CasADi) that falls back to the NLP if its artifact is missing
+ or mismatched. net policy + EKF needs only numpy/scipy at runtime.
 
  Operates internally in Celsius.
 
@@ -19,7 +24,8 @@ import os
 import time
 
 import numpy as np
-import do_mpc
+# do_mpc (CasADi/IPOPT) is imported lazily only when the NLP policy is built; the
+# net policy + EKF path is pure numpy/scipy and never imports it.
 
 from controller.base import ControllerBase
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE
@@ -34,6 +40,11 @@ _DEFAULTS = dict(
 	# 'ekf' linearizes the nonlinear radiative term each step (~us, default);
 	# 'mhe' solves an NLP (nonlinear, slower); 'kf' is linear-only.
 	estimator='ekf',
+	# Firing-rate policy: 'nlp' solves the MPC NLP each step (do_mpc/IPOPT);
+	# 'net' uses a pure-numpy neural approximation of the policy (no IPOPT/CasADi)
+	# and falls back to 'nlp' if the artifact is missing or its calibration does
+	# not match this config.
+	policy='nlp', policy_net_path='./controller/mpc_policy_net.npz',
 	fan_min_pct=40.0, fan_max_pct=100.0, enable_fan_input=False,
 	est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
 	# Optional logging of (time_s, temp_c, Q) for the offline calibration utility.
@@ -59,42 +70,13 @@ class Controller(ControllerBase):
 		self._set_point_c = 0.0
 		self._last_Q = cfg['Q_min']
 
-		# grey-box do-mpc model (with transport-lag deadtime states)
 		n_delay = int(cfg['n_delay'])
-		self.model = build_do_mpc_model(
-			C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'],
-			h_amb=cfg['h_amb'], T_amb=cfg['T_amb'],
-			theta=float(cfg['theta']), n_delay=n_delay, K_Q=float(cfg['K_Q']),
-			sigma=float(cfg['sigma']))
 
-		# MPC controller
-		self.mpc = do_mpc.controller.MPC(self.model)
-		self.mpc.set_param(
-			n_horizon=int(cfg['n_horizon']), t_step=float(cfg['t_step']),
-			store_full_solution=False,
-			nlpsol_opts={'ipopt.print_level': 0, 'print_time': 0,
-			             'ipopt.sb': 'yes'})
-		T_c = self.model.x['T_c']
-		T_set = self.model.tvp['T_set']
-		self.mpc.set_objective(mterm=cfg['Q_w'] * (T_c - T_set) ** 2,
-		                       lterm=cfg['Q_w'] * (T_c - T_set) ** 2)
-		self.mpc.set_rterm(Q=cfg['R_dQ'])
-		self.mpc.bounds['lower', '_u', 'Q'] = cfg['Q_min']
-		self.mpc.bounds['upper', '_u', 'Q'] = cfg['Q_max']
-
-		tvp_template = self.mpc.get_tvp_template()
-		def tvp_fun(t_now):
-			for k in range(int(cfg['n_horizon']) + 1):
-				tvp_template['_tvp', k, 'T_set'] = self._set_point_c
-			return tvp_template
-		self.mpc.set_tvp_fun(tvp_fun)
-		self.mpc.setup()
-
-		# estimator: MHE (handles the nonlinear radiative model; offset-free via a
-		# known-input formulation) or the linear Kalman filter. Discretized at the
-		# control period so faster re-solves estimate the real elapsed time. Both
-		# expose update(Q_applied, y) -> state estimate.
-		est_kind = str(cfg.get('estimator', 'mhe')).lower()
+		# State/disturbance estimator (independent of the policy). EKF linearizes
+		# the nonlinear radiative term each step (default); MHE solves an NLP; KF
+		# is linear-only. All expose update(Q_applied, y) -> state estimate and are
+		# discretized at the control period so faster re-solves track elapsed time.
+		est_kind = str(cfg.get('estimator', 'ekf')).lower()
 		if est_kind == 'kf':
 			self.estimator = GreyBoxKF(
 				C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'], h_amb=cfg['h_amb'],
@@ -116,11 +98,16 @@ class Controller(ControllerBase):
 				theta=float(cfg['theta']), n_delay=n_delay, K_Q=float(cfg['K_Q']),
 				sigma=float(cfg['sigma']), r_meas=cfg['est_r_meas'])
 
-		x0 = np.zeros((n_delay + 3, 1))
-		x0[n_delay, 0] = cfg['T_amb']        # T_f
-		x0[n_delay + 1, 0] = cfg['T_amb']    # T_c
-		self.mpc.x0 = x0
-		self.mpc.set_initial_guess()
+		# Firing-rate policy. 'net' uses the pure-numpy neural approximation (no
+		# IPOPT/CasADi); it falls back to the NLP if the artifact is missing or its
+		# calibration does not match this config.
+		self.model = None
+		self.mpc = None
+		self._net = None
+		if str(cfg.get('policy', 'nlp')).lower() == 'net':
+			self._net = self._load_net_policy(cfg)
+		if self._net is None:
+			self._build_nlp(cfg, n_delay)
 
 		# Optional data logging for offline calibration (update_mpc.py): one
 		# (time_s, temp_c, Q) row per control step. Logs internal Celsius.
@@ -132,6 +119,58 @@ class Controller(ControllerBase):
 					f.write('time_s,temp_c,Q\n')
 			except OSError:
 				self._log_path = None      # disable logging if the path is unwritable
+
+	def _load_net_policy(self, cfg):
+		'''Load the numpy net policy, or return None to fall back to the NLP.'''
+		from controller.mpc_net import NetPolicy
+		path = cfg.get('policy_net_path')
+		if not path or not os.path.exists(path):
+			print(f'[mpc] policy=net but artifact not found ({path}); using NLP')
+			return None
+		try:
+			net = NetPolicy.load(path)
+		except Exception as e:
+			print(f'[mpc] could not load net policy ({e}); using NLP')
+			return None
+		if not net.matches_config(cfg):
+			print('[mpc] net policy calibration does not match config; using NLP')
+			return None
+		return net
+
+	def _build_nlp(self, cfg, n_delay):
+		'''Build the do-mpc NLP policy (lazily imports do_mpc/CasADi/IPOPT).'''
+		import do_mpc
+		self.model = build_do_mpc_model(
+			C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'],
+			h_amb=cfg['h_amb'], T_amb=cfg['T_amb'],
+			theta=float(cfg['theta']), n_delay=n_delay, K_Q=float(cfg['K_Q']),
+			sigma=float(cfg['sigma']))
+		self.mpc = do_mpc.controller.MPC(self.model)
+		self.mpc.set_param(
+			n_horizon=int(cfg['n_horizon']), t_step=float(cfg['t_step']),
+			store_full_solution=False,
+			nlpsol_opts={'ipopt.print_level': 0, 'print_time': 0, 'ipopt.sb': 'yes'})
+		T_c = self.model.x['T_c']
+		T_set = self.model.tvp['T_set']
+		self.mpc.set_objective(mterm=cfg['Q_w'] * (T_c - T_set) ** 2,
+		                       lterm=cfg['Q_w'] * (T_c - T_set) ** 2)
+		self.mpc.set_rterm(Q=cfg['R_dQ'])
+		self.mpc.bounds['lower', '_u', 'Q'] = cfg['Q_min']
+		self.mpc.bounds['upper', '_u', 'Q'] = cfg['Q_max']
+
+		tvp_template = self.mpc.get_tvp_template()
+		def tvp_fun(t_now):
+			for k in range(int(cfg['n_horizon']) + 1):
+				tvp_template['_tvp', k, 'T_set'] = self._set_point_c
+			return tvp_template
+		self.mpc.set_tvp_fun(tvp_fun)
+		self.mpc.setup()
+
+		x0 = np.zeros((n_delay + 3, 1))
+		x0[n_delay, 0] = cfg['T_amb']        # T_f
+		x0[n_delay + 1, 0] = cfg['T_amb']    # T_c
+		self.mpc.x0 = x0
+		self.mpc.set_initial_guess()
 
 	def _log_row(self, temp_c, Q):
 		try:
@@ -152,10 +191,13 @@ class Controller(ControllerBase):
 		y = _to_c(current, self.units)
 		# 1) estimate states from the measurement
 		x_hat = self.estimator.update(self._last_Q, y)
-		# 2) optimize firing rate Q. The box constraints bound Q; on any solver
+		# 2) compute firing rate Q from the active policy (net or NLP). On any
 		#    error we hold the previous move so the control loop never breaks.
 		try:
-			Q = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+			if self._net is not None:
+				Q = self._net.firing_rate(x_hat, self._last_Q, self._set_point_c)
+			else:
+				Q = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
 		except Exception:
 			Q = self._last_Q
 		Q = float(np.clip(Q, self.cfg['Q_min'], self.cfg['Q_max']))

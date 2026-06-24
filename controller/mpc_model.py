@@ -22,7 +22,10 @@
 
 import numpy as np
 from scipy.linalg import expm
-import do_mpc
+# NOTE: do_mpc (and its CasADi/IPOPT stack) is imported LAZILY inside the do-mpc
+# model builder and the MHE. The Kalman/EKF estimators and the neural-net policy
+# are pure numpy/scipy, so an IPOPT-free deployment (net policy + EKF) does not
+# require do_mpc to be installed at all.
 
 
 _KELVIN = 273.15
@@ -35,6 +38,7 @@ def _rad_loss(T_c, T_amb, sigma):
 
 def build_do_mpc_model(*, C_f, C_c, h_fc, h_amb, T_amb, theta=0.0, n_delay=0,
                        K_Q=1.0, sigma=0.0):
+	import do_mpc
 	model = do_mpc.model.Model('continuous')
 	q = [model.set_variable('_x', f'q{i}') for i in range(n_delay)]
 	T_f = model.set_variable('_x', 'T_f')
@@ -217,6 +221,7 @@ class GreyBoxMHE:
 	def __init__(self, *, C_f, C_c, h_fc, h_amb, T_amb, t_step, theta=0.0,
 	             n_delay=0, K_Q=1.0, sigma=0.0, r_meas=0.04, pw_state=10.0,
 	             pw_dist=0.5, px_state=1.0, px_dist=0.5, mhe_horizon=10):
+		import do_mpc
 		from collections import deque
 		n = n_delay + 3
 		self.n = n
