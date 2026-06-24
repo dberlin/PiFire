@@ -31,6 +31,7 @@ dependencies = [
     "adafruit-extended-bus>=1.0.2",
     "adafruit-circuitpython-emc2101>=1.0.0",
     "adafruit-circuitpython-mcp9600>=2.0.10",
+    "gpiozero>=2.0.1",
 ]
 
 [tool.uv.sources]
