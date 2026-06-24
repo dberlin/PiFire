@@ -149,11 +149,25 @@ class ResidualNet(nn.Module):
         return self.net(x)
 
 
-def build_residual_net(epochs=600):
+SAMPLES_NPZ = os.path.join(DATA, 'pifire_samples.npz')
+
+
+def _load_samples():
+    # Prefer the structured parallel sampler's npz (sample_mpc.py); fall back to
+    # the do-mpc uniform-box pkl.
+    if os.path.exists(SAMPLES_NPZ):
+        z = np.load(SAMPLES_NPZ)
+        print(f"  using structured samples: {len(z['u0'])} from {SAMPLES_NPZ}", flush=True)
+        return z['X0'], z['u_prev'].flatten(), z['u0'].flatten()
     df = pd.read_pickle(os.path.join(DATA, 'pifire', 'data_pifire_opt.pkl'))
-    X0 = np.stack([np.asarray(r).flatten() for r in df['x0']])          # [N,7]
-    UP = np.array([np.asarray(r).flatten()[0] for r in df['u_prev']])   # [N]
-    U0 = np.array([np.asarray(r).flatten()[0] for r in df['u0']])       # [N] MPC Q
+    print(f"  using do-mpc uniform-box samples: {len(df)}", flush=True)
+    return (np.stack([np.asarray(r).flatten() for r in df['x0']]),
+            np.array([np.asarray(r).flatten()[0] for r in df['u_prev']]),
+            np.array([np.asarray(r).flatten()[0] for r in df['u0']]))
+
+
+def build_residual_net(epochs=600):
+    X0, UP, U0 = _load_samples()                                        # [N,7],[N],[N]
     Xin = np.column_stack([X0, UP])                                     # [N,8]
     resid = U0 - Q_ss(X0[:, DIDX], SP)                                  # target
 
