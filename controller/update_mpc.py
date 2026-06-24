@@ -22,19 +22,25 @@ from scipy.optimize import least_squares
 
 
 def simulate_chamber(t, Q, *, C_f, C_c, h_fc, h_amb, T_amb, T0):
-	'''Forward-simulate chamber temperature for the grey-box model (Euler).'''
+	'''Forward-simulate chamber temperature for the grey-box model (Euler).
+
+	out[i] is the chamber temperature AT time t[i] (so out[0] == T0); each step
+	advances the state from t[i] to t[i+1] using the input Q[i]. This alignment
+	matters when fitting real logs, where the measured series starts at T0.
+	'''
 	t = np.asarray(t, dtype=float)
 	Q = np.asarray(Q, dtype=float)
 	Tf = T0
 	Tc = T0
 	out = np.empty_like(t)
 	for i in range(len(t)):
-		dt = (t[i] - t[i - 1]) if i > 0 else (t[1] - t[0] if len(t) > 1 else 1.0)
-		dTf = (Q[i] - h_fc * (Tf - Tc)) / C_f
-		dTc = (h_fc * (Tf - Tc) - h_amb * (Tc - T_amb)) / C_c
-		Tf += dTf * dt
-		Tc += dTc * dt
-		out[i] = Tc
+		out[i] = Tc                      # record state at t[i] (out[0] == T0)
+		if i < len(t) - 1:
+			dt = t[i + 1] - t[i]
+			dTf = (Q[i] - h_fc * (Tf - Tc)) / C_f
+			dTc = (h_fc * (Tf - Tc) - h_amb * (Tc - T_amb)) / C_c
+			Tf += dTf * dt
+			Tc += dTc * dt
 	return out
 
 
