@@ -1934,26 +1934,38 @@ def restart_webapp():
 
 def restart_scripts():
 	"""
-	Restart the Control and WebApp Scripts
+	Restart the Control and WebApp Scripts by restarting the supervisor service.
+
+	The supervisor systemd unit is named 'supervisor' on Debian / Raspberry Pi OS
+	but 'supervisord' on Fedora / RHEL, so try each name in turn (systemctl first,
+	then the legacy 'service' command) until one succeeds.
 	"""
 	if is_real_hardware():
 		def _restart_supervisor():
-			try:
-				# Try systemctl first (modern systemd systems)
-				result = subprocess.run(['sudo', 'systemctl', 'restart', 'supervisor'], 
-									   capture_output=True, text=True, timeout=10)
-				if result.returncode != 0:
-					# Log the error and try fallback
-					print(f"systemctl restart failed: {result.stderr}")
-					# Fallback to service command
-					subprocess.run(['sudo', 'service', 'supervisor', 'restart'], timeout=10)
-			except subprocess.TimeoutExpired:
-				print("Supervisor restart command timed out")
-			except Exception as e:
-				print(f"Error restarting supervisor: {e}")
-				# Final fallback to original method
-				os.system("sleep 3 && sudo service supervisor restart &")
-		
+			service_names = ['supervisor', 'supervisord']
+			# Prefer systemctl (modern systemd systems)
+			for name in service_names:
+				try:
+					result = subprocess.run(['sudo', 'systemctl', 'restart', name],
+					                        capture_output=True, text=True, timeout=10)
+					if result.returncode == 0:
+						return
+				except subprocess.TimeoutExpired:
+					print("Supervisor restart command timed out")
+					return
+				except Exception as e:
+					print(f"Error restarting {name} via systemctl: {e}")
+			# Fall back to the legacy 'service' command for either name
+			for name in service_names:
+				try:
+					result = subprocess.run(['sudo', 'service', name, 'restart'],
+					                        capture_output=True, text=True, timeout=10)
+					if result.returncode == 0:
+						return
+				except Exception as e:
+					print(f"Error restarting {name} via service: {e}")
+			print("Failed to restart supervisor under any known service name")
+
 		# Run in background thread to avoid blocking
 		threading.Thread(target=_restart_supervisor, daemon=True).start()
 
