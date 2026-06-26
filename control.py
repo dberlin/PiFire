@@ -38,200 +38,6 @@ from os.path import exists
 ==============================================================================
 '''
 # Read Settings to get Modules Configuration 
-settings = read_settings(init=True)
-
-# Setup logging
-log_level = logging.DEBUG if settings['globals']['debug_mode'] else logging.ERROR
-controlLogger = create_logger('control', filename='./logs/control.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level)
-
-log_level = logging.DEBUG if settings['globals']['debug_mode'] else logging.INFO
-eventLogger = create_logger('events', filename='./logs/events.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level)
-
-event_message = f"PiFire Control Process started. PiFire Version: {settings['versions']['server']} Build: {settings['versions']['build']}, Debug Mode: {settings['globals']['debug_mode']}"
-
-eventLogger.info(event_message)
-controlLogger.info(event_message)
-
-# Flush Valkey DB and create JSON structure
-control = read_control(flush=True)
-# Delete Valkey DB for history / current
-read_history(0, flushhistory=True)
-# Flush metrics DB for tracking certain metrics
-write_metrics(flush=True)
-# Create/Flush errors list 
-errors = read_errors(flush=True)
-
-eventLogger.info('Flushing Valkey DB and creating new control structure')
-
-platform_config = settings['platform']
-platform_config['frequency'] = settings['pwm']['frequency']
-units = settings['globals']['units']
-
-'''
-Set up GrillPlatform Module
-'''
-try: 
-	grill_platform = settings['modules']['grillplat']
-	GrillPlatModule = importlib.import_module(f'grillplat.{grill_platform}')
-
-except:
-	control['critical_error'] = True
-	write_control(control, direct_write=True, origin='control')
-	controlLogger.exception(f'Error occurred importing grillplatform module ({settings["modules"]["grillplat"]}). Trace dump: ')
-	GrillPlatModule = importlib.import_module('grillplat.prototype')
-	error_event = f'An error occurred importing the [{settings["modules"]["grillplat"]}] platform module.  The ' \
-		f'prototype module has been imported instead.  This sometimes means that the module does not exist or is not ' \
-		f'properly named.  Please run the configuration wizard again from the admin ' \
-		f'panel to fix this issue.'
-	errors.append(error_event)
-	write_errors(errors)
-	eventLogger.error(error_event)
-	controlLogger.error(error_event)
-	if settings['globals']['debug_mode']:
-		raise
-
-try:
-	grill_platform = GrillPlatModule.GrillPlatform(platform_config)
-except:
-	control['critical_error'] = True
-	write_control(control, direct_write=True, origin='control')
-	controlLogger.exception(f'Error occurred configuring grillplatform module ({settings["modules"]["grillplat"]}). Trace dump: ')
-	from grillplat.prototype import GrillPlatform  # Simulated Library for controlling the grill platform
-	grill_platform = GrillPlatform(platform_config)
-	error_event = f'An error occurred configuring the [{settings["modules"]["grillplat"]}] platform object.  The ' \
-		f'prototype module has been loaded instead.  This sometimes means that the hardware is not ' \
-		f'connected properly, or the module is not configured.  Please run the configuration wizard ' \
-		f'again from the admin panel to fix this issue.'
-	errors.append(error_event)
-	write_errors(errors)
-	eventLogger.error(error_event)
-	controlLogger.error(error_event)
-	if settings['globals']['debug_mode']:
-		raise
-
-'''
-Set up Probes Input Module
-'''
-try: 
-	from probes.main import ProbesMain  # Probe device library: loads probe devices and maps them to ports
-	probe_complex = ProbesMain(settings["probe_settings"]["probe_map"], settings['globals']['units'])
-
-except:
-	controlLogger.exception(f'Error occurred loading probes modules. Trace dump: ')
-	#settings['probe_settings']['probe_map'] = default_probe_map(settings["probe_settings"]['probe_profiles'])
-	probe_complex = ProbesMain(settings["probe_settings"]["probe_map"], settings['globals']['units'], disable=True)
-	error_event = f'An error occurred loading the probes module(s).  All probes & probe devices have been disabled. ' \
-		f'This sometimes means that the hardware is not connected properly, or the module is not configured correctly. ' \
-		f'Please run the configuration wizard again from the admin panel to fix this issue. ' 
-	errors.append(error_event)
-	write_errors(errors)
-	eventLogger.error(error_event)
-	controlLogger.error(error_event)
-	if settings['globals']['debug_mode']:
-		raise
-
-# Get probe initialization errors and pass along to the frontend
-probe_errors = probe_complex.get_errors()
-if len(probe_errors) > 0:
-	for error in probe_errors:
-		eventLogger.error(error)
-		errors.append(error)
-		write_errors(errors)
-
-# Get probe device info for frontend
-write_generic_key('probe_device_info', probe_complex.get_device_info())
-
-'''
-Set up Display Module
-'''
-try: 
-	display_name = settings['modules']['display']
-	DisplayModule = importlib.import_module(f'display.{display_name}')
-	display_config = settings['display']['config'][display_name]
-	display_config['probe_info'] = get_probe_info(settings['probe_settings']['probe_map']['probe_info'])
-	disp_rotation = display_config.get('rotation', 0)
-
-except:
-	controlLogger.exception(f'Error occurred loading the display module ({display_name}). Trace dump: ')
-	DisplayModule = importlib.import_module('display_none')
-	error_event = f'An error occurred loading the [{settings["modules"]["display"]}] display module.  The ' \
-		f'"display_none" module has been loaded instead.  This sometimes means that the hardware is ' \
-		f'not connected properly, or the module is not configured.  Please run the configuration wizard ' \
-		f'again from the admin panel to fix this issue.'
-	errors.append(error_event)
-	write_errors(errors)
-	eventLogger.error(error_event)
-	controlLogger.error(error_event)
-	if settings['globals']['debug_mode']:
-		raise
-
-try:
-	display_device = DisplayModule.Display(dev_pins=settings['platform']['devices'], buttonslevel=settings['platform']['buttonslevel'],
-										   rotation=disp_rotation, units=units, config=display_config)
-except:
-	controlLogger.exception(f'Error occurred configuring the display module ({settings["modules"]["display"]}). Trace dump: ')
-	from display.none import Display  # Simulated Library for controlling the grill platform
-	display_device = Display(dev_pins=settings['platform']['devices'], buttonslevel=settings['platform']['buttonslevel'], rotation=disp_rotation, units=units, config={})
-	error_event = f'An error occurred configuring the [{settings["modules"]["display"]}] display object.  The ' \
-		f'"display_none" module has been loaded instead.  This sometimes means that the hardware is ' \
-		f'not connected properly, or the module is not configured.  Please run the configuration wizard ' \
-		f'again from the admin panel to fix this issue.'
-	errors.append(error_event)
-	write_errors(errors)
-	eventLogger.error(error_event)
-	controlLogger.error(error_event)
-	if settings['globals']['debug_mode']:
-		raise
-
-'''
-Set up Distance (Hopper Level) Module
-'''
-try: 
-	dist_name = settings['modules']['dist']
-	DistanceModule = importlib.import_module(f'distance.{dist_name}')
-
-except:
-	controlLogger.exception(f'Error occurred loading the distance module ({dist_name}). Trace dump: ')
-	DistanceModule = importlib.import_module('distance.none')
-	error_event = f'An error occurred loading the [{settings["modules"]["dist"]}] distance module.  The none ' \
-		f'module has been loaded instead.  This sometimes means that the hardware is not connected ' \
-		f'properly, or the module is not configured.  Please run the configuration wizard again from the ' \
-		f'admin panel to fix this issue.'
-	errors.append(error_event)
-	write_errors(errors)
-	eventLogger.error(error_event)
-	controlLogger.error(error_event)
-
-try:
-	if settings['modules']['grillplat'] == 'prototype' and settings['modules']['dist'] == 'prototype':
-		# If in prototype mode, enable test reading (i.e. random values from proto distance sensor)
-		dist_device = DistanceModule.HopperLevel(
-			dev_pins=settings['platform']['devices'], empty=settings['pelletlevel']['empty'], full=settings['pelletlevel']['full'],
-			debug=settings['globals']['debug_mode'], random=True)
-	else:
-		dist_device = DistanceModule.HopperLevel(
-			dev_pins=settings['platform']['devices'], empty=settings['pelletlevel']['empty'], full=settings['pelletlevel']['full'],
-			debug=settings['globals']['debug_mode'])
-except:
-	controlLogger.exception(f'Error occurred configuring the distance module ({dist_name}). Trace dump: ')
-	from distance.none import HopperLevel  # Simulated Library for controlling the grill platform
-	dist_device = HopperLevel(
-		dev_pins=settings['platform']['devices'], empty=settings['pelletlevel']['empty'], full=settings['pelletlevel']['full'],
-		debug=settings['globals']['debug_mode'])
-	error_event = f'An error occurred configuring the [{settings["modules"]["dist"]}] distance object.  The ' \
-		f'none module has been loaded instead.  This sometimes means that the hardware is not ' \
-		f'connected properly, or the module is not configured.  Please run the configuration wizard again ' \
-		f'from the admin panel to fix this issue.'
-	errors.append(error_event)
-	write_errors(errors)
-	eventLogger.error(error_event)
-	controlLogger.error(error_event)
-
-# Get current hopper level and save it to the current pellet information
-pelletdb = read_pellet_db()
-pelletdb['current']['hopper_level'] = dist_device.get_level(override=True)
-write_pellet_db(pelletdb)
-eventLogger.info(f'Hopper Level Checked @ {pelletdb["current"]["hopper_level"]}%')
 
 '''
 *****************************************
@@ -1249,272 +1055,472 @@ def exit_handler():
 	grill_platform.cleanup()
 	return
 
-# Register the exit handler
-atexit.register(exit_handler)
 
-# *****************************************
-# Main Program Start / Init and Loop
-# *****************************************
+# Only run hardware init and the control loop when executed as the main
+# program. Guarding this lets the module be imported (e.g. by tests) without
+# initializing hardware, flushing the datastore, or entering the control loop.
+if __name__ == '__main__':
+	settings = read_settings(init=True)
 
-last = grill_platform.get_input_status()
+	# Setup logging
+	log_level = logging.DEBUG if settings['globals']['debug_mode'] else logging.ERROR
+	controlLogger = create_logger('control', filename='./logs/control.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level)
 
-''' If the user has selected boot-to-monitor mode, then issue the command prior to the main loop '''
-if settings['globals']['boot_to_monitor']:
-	control = read_control()
-	control['mode'] = 'Monitor'
-	control['updated'] = True
-	write_control(control, direct_write=True, origin='control')
+	log_level = logging.DEBUG if settings['globals']['debug_mode'] else logging.INFO
+	eventLogger = create_logger('events', filename='./logs/events.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level)
 
-''' Initialize the status data on first run. '''
-status = read_status(init=True)
+	event_message = f"PiFire Control Process started. PiFire Version: {settings['versions']['server']} Build: {settings['versions']['build']}, Debug Mode: {settings['globals']['debug_mode']}"
 
-while True:
-	# Check the On/Off switch for changes
-	if not settings['platform']['standalone'] and last != grill_platform.get_input_status():
-		last = grill_platform.get_input_status()
-		if not last:
-			eventLogger.info('Switch set to off, going to stop mode.')
-			controlLogger.info(f'Switch set to off, going to stop mode.')
-			control['updated'] = True  # Change mode
-			control['mode'] = 'Stop'
-			write_control(control, direct_write=True, origin='control')
+	eventLogger.info(event_message)
+	controlLogger.info(event_message)
 
-	status = read_status()
-	
+	# Flush Valkey DB and create JSON structure
+	control = read_control(flush=True)
+	# Delete Valkey DB for history / current
+	read_history(0, flushhistory=True)
+	# Flush metrics DB for tracking certain metrics
+	write_metrics(flush=True)
+	# Create/Flush errors list 
+	errors = read_errors(flush=True)
+
+	eventLogger.info('Flushing Valkey DB and creating new control structure')
+
+	platform_config = settings['platform']
+	platform_config['frequency'] = settings['pwm']['frequency']
+	units = settings['globals']['units']
+
+	'''
+	Set up GrillPlatform Module
+	'''
+	try: 
+		grill_platform = settings['modules']['grillplat']
+		GrillPlatModule = importlib.import_module(f'grillplat.{grill_platform}')
+
+	except:
+		control['critical_error'] = True
+		write_control(control, direct_write=True, origin='control')
+		controlLogger.exception(f'Error occurred importing grillplatform module ({settings["modules"]["grillplat"]}). Trace dump: ')
+		GrillPlatModule = importlib.import_module('grillplat.prototype')
+		error_event = f'An error occurred importing the [{settings["modules"]["grillplat"]}] platform module.  The ' \
+			f'prototype module has been imported instead.  This sometimes means that the module does not exist or is not ' \
+			f'properly named.  Please run the configuration wizard again from the admin ' \
+			f'panel to fix this issue.'
+		errors.append(error_event)
+		write_errors(errors)
+		eventLogger.error(error_event)
+		controlLogger.error(error_event)
+		if settings['globals']['debug_mode']:
+			raise
+
+	try:
+		grill_platform = GrillPlatModule.GrillPlatform(platform_config)
+	except:
+		control['critical_error'] = True
+		write_control(control, direct_write=True, origin='control')
+		controlLogger.exception(f'Error occurred configuring grillplatform module ({settings["modules"]["grillplat"]}). Trace dump: ')
+		from grillplat.prototype import GrillPlatform  # Simulated Library for controlling the grill platform
+		grill_platform = GrillPlatform(platform_config)
+		error_event = f'An error occurred configuring the [{settings["modules"]["grillplat"]}] platform object.  The ' \
+			f'prototype module has been loaded instead.  This sometimes means that the hardware is not ' \
+			f'connected properly, or the module is not configured.  Please run the configuration wizard ' \
+			f'again from the admin panel to fix this issue.'
+		errors.append(error_event)
+		write_errors(errors)
+		eventLogger.error(error_event)
+		controlLogger.error(error_event)
+		if settings['globals']['debug_mode']:
+			raise
+
+	'''
+	Set up Probes Input Module
+	'''
+	try: 
+		from probes.main import ProbesMain  # Probe device library: loads probe devices and maps them to ports
+		probe_complex = ProbesMain(settings["probe_settings"]["probe_map"], settings['globals']['units'])
+
+	except:
+		controlLogger.exception(f'Error occurred loading probes modules. Trace dump: ')
+		#settings['probe_settings']['probe_map'] = default_probe_map(settings["probe_settings"]['probe_profiles'])
+		probe_complex = ProbesMain(settings["probe_settings"]["probe_map"], settings['globals']['units'], disable=True)
+		error_event = f'An error occurred loading the probes module(s).  All probes & probe devices have been disabled. ' \
+			f'This sometimes means that the hardware is not connected properly, or the module is not configured correctly. ' \
+			f'Please run the configuration wizard again from the admin panel to fix this issue. ' 
+		errors.append(error_event)
+		write_errors(errors)
+		eventLogger.error(error_event)
+		controlLogger.error(error_event)
+		if settings['globals']['debug_mode']:
+			raise
+
+	# Get probe initialization errors and pass along to the frontend
+	probe_errors = probe_complex.get_errors()
+	if len(probe_errors) > 0:
+		for error in probe_errors:
+			eventLogger.error(error)
+			errors.append(error)
+			write_errors(errors)
+
 	# Get probe device info for frontend
 	write_generic_key('probe_device_info', probe_complex.get_device_info())
 
-	current = grill_platform.get_output_status()  # Get current pin settings
-	for item in settings['platform']['outputs']:
-		try:
-			status['outpins'][item] = current[item]
-		except KeyError:
-			continue
-	write_status(status)
+	'''
+	Set up Display Module
+	'''
+	try: 
+		display_name = settings['modules']['display']
+		DisplayModule = importlib.import_module(f'display.{display_name}')
+		display_config = settings['display']['config'][display_name]
+		display_config['probe_info'] = get_probe_info(settings['probe_settings']['probe_map']['probe_info'])
+		disp_rotation = display_config.get('rotation', 0)
 
-	# Check control for changes 
-	execute_control_writes()
-	control = read_control()
+	except:
+		controlLogger.exception(f'Error occurred loading the display module ({display_name}). Trace dump: ')
+		DisplayModule = importlib.import_module('display_none')
+		error_event = f'An error occurred loading the [{settings["modules"]["display"]}] display module.  The ' \
+			f'"display_none" module has been loaded instead.  This sometimes means that the hardware is ' \
+			f'not connected properly, or the module is not configured.  Please run the configuration wizard ' \
+			f'again from the admin panel to fix this issue.'
+		errors.append(error_event)
+		write_errors(errors)
+		eventLogger.error(error_event)
+		controlLogger.error(error_event)
+		if settings['globals']['debug_mode']:
+			raise
 
-	# Check for system commands
-	_process_system_commands(grill_platform)
+	try:
+		display_device = DisplayModule.Display(dev_pins=settings['platform']['devices'], buttonslevel=settings['platform']['buttonslevel'],
+											   rotation=disp_rotation, units=units, config=display_config)
+	except:
+		controlLogger.exception(f'Error occurred configuring the display module ({settings["modules"]["display"]}). Trace dump: ')
+		from display.none import Display  # Simulated Library for controlling the grill platform
+		display_device = Display(dev_pins=settings['platform']['devices'], buttonslevel=settings['platform']['buttonslevel'], rotation=disp_rotation, units=units, config={})
+		error_event = f'An error occurred configuring the [{settings["modules"]["display"]}] display object.  The ' \
+			f'"display_none" module has been loaded instead.  This sometimes means that the hardware is ' \
+			f'not connected properly, or the module is not configured.  Please run the configuration wizard ' \
+			f'again from the admin panel to fix this issue.'
+		errors.append(error_event)
+		write_errors(errors)
+		eventLogger.error(error_event)
+		controlLogger.error(error_event)
+		if settings['globals']['debug_mode']:
+			raise
 
-	# Check if there were updates to any of the settings that were flagged
-	if control['settings_update']:
-		control['settings_update'] = False
+	'''
+	Set up Distance (Hopper Level) Module
+	'''
+	try: 
+		dist_name = settings['modules']['dist']
+		DistanceModule = importlib.import_module(f'distance.{dist_name}')
+
+	except:
+		controlLogger.exception(f'Error occurred loading the distance module ({dist_name}). Trace dump: ')
+		DistanceModule = importlib.import_module('distance.none')
+		error_event = f'An error occurred loading the [{settings["modules"]["dist"]}] distance module.  The none ' \
+			f'module has been loaded instead.  This sometimes means that the hardware is not connected ' \
+			f'properly, or the module is not configured.  Please run the configuration wizard again from the ' \
+			f'admin panel to fix this issue.'
+		errors.append(error_event)
+		write_errors(errors)
+		eventLogger.error(error_event)
+		controlLogger.error(error_event)
+
+	try:
+		if settings['modules']['grillplat'] == 'prototype' and settings['modules']['dist'] == 'prototype':
+			# If in prototype mode, enable test reading (i.e. random values from proto distance sensor)
+			dist_device = DistanceModule.HopperLevel(
+				dev_pins=settings['platform']['devices'], empty=settings['pelletlevel']['empty'], full=settings['pelletlevel']['full'],
+				debug=settings['globals']['debug_mode'], random=True)
+		else:
+			dist_device = DistanceModule.HopperLevel(
+				dev_pins=settings['platform']['devices'], empty=settings['pelletlevel']['empty'], full=settings['pelletlevel']['full'],
+				debug=settings['globals']['debug_mode'])
+	except:
+		controlLogger.exception(f'Error occurred configuring the distance module ({dist_name}). Trace dump: ')
+		from distance.none import HopperLevel  # Simulated Library for controlling the grill platform
+		dist_device = HopperLevel(
+			dev_pins=settings['platform']['devices'], empty=settings['pelletlevel']['empty'], full=settings['pelletlevel']['full'],
+			debug=settings['globals']['debug_mode'])
+		error_event = f'An error occurred configuring the [{settings["modules"]["dist"]}] distance object.  The ' \
+			f'none module has been loaded instead.  This sometimes means that the hardware is not ' \
+			f'connected properly, or the module is not configured.  Please run the configuration wizard again ' \
+			f'from the admin panel to fix this issue.'
+		errors.append(error_event)
+		write_errors(errors)
+		eventLogger.error(error_event)
+		controlLogger.error(error_event)
+
+	# Get current hopper level and save it to the current pellet information
+	pelletdb = read_pellet_db()
+	pelletdb['current']['hopper_level'] = dist_device.get_level(override=True)
+	write_pellet_db(pelletdb)
+	eventLogger.info(f'Hopper Level Checked @ {pelletdb["current"]["hopper_level"]}%')
+
+	# Register the exit handler
+	atexit.register(exit_handler)
+
+	# *****************************************
+	# Main Program Start / Init and Loop
+	# *****************************************
+
+	last = grill_platform.get_input_status()
+
+	''' If the user has selected boot-to-monitor mode, then issue the command prior to the main loop '''
+	if settings['globals']['boot_to_monitor']:
+		control = read_control()
+		control['mode'] = 'Monitor'
+		control['updated'] = True
 		write_control(control, direct_write=True, origin='control')
-		settings = read_settings()
 
-	# Check if there are any notifications pending
-	check_notify(settings, control, pelletdb=pelletdb, grill_platform=grill_platform)
+	''' Initialize the status data on first run. '''
+	status = read_status(init=True)
 
-	# Check if there is a timer running, see if it has expired, send notification and reset
-	for index, item in enumerate(control['notify_data']):
-		if item['type'] == 'timer' and item['req']:
-			if time.time() >= control['timer']['end']:
-				send_notifications("Timer_Expired")
-				control['notify_data'][index]['req'] = False
-				control['timer']['start'] = 0
-				control['timer']['paused'] = 0
-				control['timer']['end'] = 0
-				control['notify_data'][index]['shutdown'] = False
-				control['notify_data'][index]['keep_warm'] = False
+	while True:
+		# Check the On/Off switch for changes
+		if not settings['platform']['standalone'] and last != grill_platform.get_input_status():
+			last = grill_platform.get_input_status()
+			if not last:
+				eventLogger.info('Switch set to off, going to stop mode.')
+				controlLogger.info(f'Switch set to off, going to stop mode.')
+				control['updated'] = True  # Change mode
+				control['mode'] = 'Stop'
 				write_control(control, direct_write=True, origin='control')
 
-	# Check if user changed hopper levels and update if required
-	if control['distance_update']:
-		empty = settings['pelletlevel']['empty']
-		full = settings['pelletlevel']['full']
-		dist_device.update_distances(empty, full)
-		control['distance_update'] = False
-		write_control(control, direct_write=True, origin='control')
+		status = read_status()
+	
+		# Get probe device info for frontend
+		write_generic_key('probe_device_info', probe_complex.get_device_info())
 
-	if control['hopper_check']:
-		pelletdb = read_pellet_db()
-		# Get current hopper level and save it to the current pellet information
-		pelletdb['current']['hopper_level'] = dist_device.get_level(override=True)
-		write_pellet_db(pelletdb)
-		eventLogger.info("Hopper Level Checked @ " + str(pelletdb['current']['hopper_level']) + "%")
-		control['hopper_check'] = False
-		write_control(control, direct_write=True, origin='control')
+		current = grill_platform.get_output_status()  # Get current pin settings
+		for item in settings['platform']['outputs']:
+			try:
+				status['outpins'][item] = current[item]
+			except KeyError:
+				continue
+		write_status(status)
 
-	# Grab current probe profiles if they have changed since the last loop.
-	if control['probe_profile_update']:
-		settings = read_settings()
-		control['probe_profile_update'] = False
-		write_control(control, direct_write=True, origin='control')
-		# Add new probe profiles to probe complex object
-		probe_complex.update_probe_profiles(settings['probe_settings']['probe_map']['probe_info'])
-		eventLogger.info('Active probe profiles updated in control script.')
+		# Check control for changes 
+		execute_control_writes()
+		control = read_control()
 
-	if control['updated'] and not control['critical_error']:
-		eventLogger.debug(f'Control Settings Updated.  Mode: {control["mode"]}, Units Change: {control["units_change"]} ')
-		# Clear control flag
-		control['updated'] = False  # Reset Control Updated to False
-		write_control(control, direct_write=True, origin='control')  # Commit change in 'updated' status to the file
+		# Check for system commands
+		_process_system_commands(grill_platform)
 
-		if control['units_change']:
-			eventLogger.debug('Changing Base Units.')
+		# Check if there were updates to any of the settings that were flagged
+		if control['settings_update']:
+			control['settings_update'] = False
+			write_control(control, direct_write=True, origin='control')
 			settings = read_settings()
-			# Update ADC objects and set profiles
-			probe_complex.update_units(settings['globals']['units'])
-			control['mode'] = 'Stop'  # Stop any activity
-			control['units_change'] = False
-			read_history(0, flushhistory=True)  # Clear history data
-			# No need to write control, as it should be written by the 'Stop' mode change
 
-		# Check if there was an Error flagged in Monitor Mode - If no, then change status to active
-		if control['status'] != 'monitor' and control['mode'] != 'Error':
-			control['status'] = 'active'  # Set status to active
+		# Check if there are any notifications pending
+		check_notify(settings, control, pelletdb=pelletdb, grill_platform=grill_platform)
+
+		# Check if there is a timer running, see if it has expired, send notification and reset
+		for index, item in enumerate(control['notify_data']):
+			if item['type'] == 'timer' and item['req']:
+				if time.time() >= control['timer']['end']:
+					send_notifications("Timer_Expired")
+					control['notify_data'][index]['req'] = False
+					control['timer']['start'] = 0
+					control['timer']['paused'] = 0
+					control['timer']['end'] = 0
+					control['notify_data'][index]['shutdown'] = False
+					control['notify_data'][index]['keep_warm'] = False
+					write_control(control, direct_write=True, origin='control')
+
+		# Check if user changed hopper levels and update if required
+		if control['distance_update']:
+			empty = settings['pelletlevel']['empty']
+			full = settings['pelletlevel']['full']
+			dist_device.update_distances(empty, full)
+			control['distance_update'] = False
 			write_control(control, direct_write=True, origin='control')
 
-		if control['mode'] in ('Stop', 'Error'):
-			grill_platform.auger_off()
-			grill_platform.igniter_off()
-			grill_platform.fan_off()
-			# Register Stop Mode in Metrics DB if this is not initial stop-mode on startup (i.e. DB is empty)
-			metrics_list = read_metrics(all=True)
-			if len(metrics_list) != 0:
-				write_metrics(new_metric=True)
-				metrics = read_metrics()
-				metrics['mode'] = 'Stop'
-				write_metrics(metrics)
-				if metrics_list[-1]['mode'] != 'Prime':
-					create_cookfile()
+		if control['hopper_check']:
+			pelletdb = read_pellet_db()
+			# Get current hopper level and save it to the current pellet information
+			pelletdb['current']['hopper_level'] = dist_device.get_level(override=True)
+			write_pellet_db(pelletdb)
+			eventLogger.info("Hopper Level Checked @ " + str(pelletdb['current']['hopper_level']) + "%")
+			control['hopper_check'] = False
+			write_control(control, direct_write=True, origin='control')
 
-			status['p_mode'] = 0  
-			status['mode'] = "Stop"
-			status['recipe'] = False
-			status['recipe_paused'] = False
-			status['start_time'] = 0
-			status['lid_open_detected'] = False 
-			status['lid_open_endtime'] = 0
-			status['startup_timestamp'] = 0
-			write_status(status)
+		# Grab current probe profiles if they have changed since the last loop.
+		if control['probe_profile_update']:
+			settings = read_settings()
+			control['probe_profile_update'] = False
+			write_control(control, direct_write=True, origin='control')
+			# Add new probe profiles to probe complex object
+			probe_complex.update_probe_profiles(settings['probe_settings']['probe_map']['probe_info'])
+			eventLogger.info('Active probe profiles updated in control script.')
 
-			if control['status'] == 'monitor' and control['mode'] == 'Error':
-				grill_platform.power_on()
-			else:
-				grill_platform.power_off()
+		if control['updated'] and not control['critical_error']:
+			eventLogger.debug(f'Control Settings Updated.  Mode: {control["mode"]}, Units Change: {control["units_change"]} ')
+			# Clear control flag
+			control['updated'] = False  # Reset Control Updated to False
+			write_control(control, direct_write=True, origin='control')  # Commit change in 'updated' status to the file
+
+			if control['units_change']:
+				eventLogger.debug('Changing Base Units.')
+				settings = read_settings()
+				# Update ADC objects and set profiles
+				probe_complex.update_units(settings['globals']['units'])
+				control['mode'] = 'Stop'  # Stop any activity
+				control['units_change'] = False
+				read_history(0, flushhistory=True)  # Clear history data
+				# No need to write control, as it should be written by the 'Stop' mode change
+
+			# Check if there was an Error flagged in Monitor Mode - If no, then change status to active
+			if control['status'] != 'monitor' and control['mode'] != 'Error':
+				control['status'] = 'active'  # Set status to active
+				write_control(control, direct_write=True, origin='control')
+
+			if control['mode'] in ('Stop', 'Error'):
+				grill_platform.auger_off()
+				grill_platform.igniter_off()
+				grill_platform.fan_off()
+				# Register Stop Mode in Metrics DB if this is not initial stop-mode on startup (i.e. DB is empty)
+				metrics_list = read_metrics(all=True)
+				if len(metrics_list) != 0:
+					write_metrics(new_metric=True)
+					metrics = read_metrics()
+					metrics['mode'] = 'Stop'
+					write_metrics(metrics)
+					if metrics_list[-1]['mode'] != 'Prime':
+						create_cookfile()
+
+				status['p_mode'] = 0  
+				status['mode'] = "Stop"
+				status['recipe'] = False
+				status['recipe_paused'] = False
+				status['start_time'] = 0
+				status['lid_open_detected'] = False 
+				status['lid_open_endtime'] = 0
+				status['startup_timestamp'] = 0
+				write_status(status)
+
+				if control['status'] == 'monitor' and control['mode'] == 'Error':
+					grill_platform.power_on()
+				else:
+					grill_platform.power_off()
 			
-			if control['mode'] == 'Stop':
-				eventLogger.info('Stop Mode Started.')
-				display_device.clear_display()  # When in error mode, leave the display showing ERROR
-				control['status'] = 'inactive'
-				# Reset Control to Defaults
-				control = read_control(flush=True)
-				control['updated'] = False
-				control['tuning_mode'] = False  # Turn off Tuning Mode on Stop just in case it is on
-				control['next_mode'] = 'Stop'
-				control['safety']['reigniteretries'] = settings['safety']['reigniteretries']  # Reset retry counter to default
-				control['startup_timestamp'] = 0  # Reset the startup timestamp to 0
-				write_control(control, direct_write=True, origin='control')
-			else:
-				eventLogger.error('An error has occurred, Stop Mode enabled.')
-				controlLogger.error('An error has occurred, Stop Mode enabled.')
-				# Reset Control to Defaults but preserve 'Error' mode condition
-				control = default_control()
-				control['mode'] = 'Error'
-				control['status'] = 'inactive'
-				control['tuning_mode'] = False  # Turn off Tuning Mode on Stop just in case it is on
-				control['updated'] = False
-				control['next_mode'] = 'Stop'
-				control['safety']['reigniteretries'] = settings['safety']['reigniteretries']  # Reset retry counter to default
-				write_control(control, direct_write=True, origin='control')
-				time.sleep(3)
-				display_device.clear_display()  
+				if control['mode'] == 'Stop':
+					eventLogger.info('Stop Mode Started.')
+					display_device.clear_display()  # When in error mode, leave the display showing ERROR
+					control['status'] = 'inactive'
+					# Reset Control to Defaults
+					control = read_control(flush=True)
+					control['updated'] = False
+					control['tuning_mode'] = False  # Turn off Tuning Mode on Stop just in case it is on
+					control['next_mode'] = 'Stop'
+					control['safety']['reigniteretries'] = settings['safety']['reigniteretries']  # Reset retry counter to default
+					control['startup_timestamp'] = 0  # Reset the startup timestamp to 0
+					write_control(control, direct_write=True, origin='control')
+				else:
+					eventLogger.error('An error has occurred, Stop Mode enabled.')
+					controlLogger.error('An error has occurred, Stop Mode enabled.')
+					# Reset Control to Defaults but preserve 'Error' mode condition
+					control = default_control()
+					control['mode'] = 'Error'
+					control['status'] = 'inactive'
+					control['tuning_mode'] = False  # Turn off Tuning Mode on Stop just in case it is on
+					control['updated'] = False
+					control['next_mode'] = 'Stop'
+					control['safety']['reigniteretries'] = settings['safety']['reigniteretries']  # Reset retry counter to default
+					write_control(control, direct_write=True, origin='control')
+					time.sleep(3)
+					display_device.clear_display()  
 
-			read_current(zero_out=True)  # Zero out the current values
+				read_current(zero_out=True)  # Zero out the current values
 
-		# Prime (dump preset amount of pellets into the firepot)
-		elif control['mode'] == 'Prime':
-			if not settings['platform']['standalone'] and not grill_platform.get_input_status():
-				eventLogger.warning('PiFire is set to OFF. This doesn\'t prevent startup, but this means the switch won\'t behave as normal.')
-			# Call Work Cycle for Startup Mode
-			_work_cycle('Prime', grill_platform, probe_complex, display_device, dist_device)
-			# Select Next Mode
-			settings = read_settings()
-			_next_mode(control['next_mode'], setpoint=settings['startup']['start_to_mode']['primary_setpoint'])			
-
-		# Startup (startup sequence)
-		elif control['mode'] == 'Startup':
-			if not settings['platform']['standalone'] and not grill_platform.get_input_status():
-				eventLogger.warning('PiFire is set to OFF. This doesn\'t prevent startup, but this means the switch won\'t behave as normal.')
-			settings = read_settings()
-			# Clear History (in the case it wasn't already cleared fromt he last run)
-			eventLogger.debug('Clearing History and Current Log on Startup Mode.')
-			read_history(0, flushhistory=True)  # Clear all history
-			# Check if Prime on Startup is selected
-			if settings['startup']['prime_on_startup'] > 0:
-				control['prime_amount'] = settings['startup']['prime_on_startup']
-				control['mode'] = 'Prime'
-				write_control(control, direct_write=True, origin='control')
-				# Call Work Cycle for Prime Mode
-				_work_cycle('Prime', grill_platform, probe_complex, display_device, dist_device)
-				control = read_control()  # Refresh control in case any changes were made during the cycle
-				if control['mode'] in ['Prime', 'Startup']:
-					control['updated'] = False 
-					control['mode'] = 'Startup'
-			# Check if there was a mode change during Priming
-			if control['mode'] == 'Startup':
-				# Setup Next Mode (after startup mode)
-				control['next_mode'] = settings['startup']['start_to_mode']['after_startup_mode']
-				write_control(control, direct_write=True, origin='control')
+			# Prime (dump preset amount of pellets into the firepot)
+			elif control['mode'] == 'Prime':
+				if not settings['platform']['standalone'] and not grill_platform.get_input_status():
+					eventLogger.warning('PiFire is set to OFF. This doesn\'t prevent startup, but this means the switch won\'t behave as normal.')
 				# Call Work Cycle for Startup Mode
-				_work_cycle('Startup', grill_platform, probe_complex, display_device, dist_device)
+				_work_cycle('Prime', grill_platform, probe_complex, display_device, dist_device)
 				# Select Next Mode
 				settings = read_settings()
-				_next_mode(control['next_mode'], setpoint=settings['startup']['start_to_mode']['primary_setpoint'])
+				_next_mode(control['next_mode'], setpoint=settings['startup']['start_to_mode']['primary_setpoint'])			
 
-		# Smoke (smoke cycle)
-		elif control['mode'] == 'Smoke':
-			_work_cycle('Smoke', grill_platform, probe_complex, display_device, dist_device)
-			_next_mode(control['next_mode'])			
+			# Startup (startup sequence)
+			elif control['mode'] == 'Startup':
+				if not settings['platform']['standalone'] and not grill_platform.get_input_status():
+					eventLogger.warning('PiFire is set to OFF. This doesn\'t prevent startup, but this means the switch won\'t behave as normal.')
+				settings = read_settings()
+				# Clear History (in the case it wasn't already cleared fromt he last run)
+				eventLogger.debug('Clearing History and Current Log on Startup Mode.')
+				read_history(0, flushhistory=True)  # Clear all history
+				# Check if Prime on Startup is selected
+				if settings['startup']['prime_on_startup'] > 0:
+					control['prime_amount'] = settings['startup']['prime_on_startup']
+					control['mode'] = 'Prime'
+					write_control(control, direct_write=True, origin='control')
+					# Call Work Cycle for Prime Mode
+					_work_cycle('Prime', grill_platform, probe_complex, display_device, dist_device)
+					control = read_control()  # Refresh control in case any changes were made during the cycle
+					if control['mode'] in ['Prime', 'Startup']:
+						control['updated'] = False 
+						control['mode'] = 'Startup'
+				# Check if there was a mode change during Priming
+				if control['mode'] == 'Startup':
+					# Setup Next Mode (after startup mode)
+					control['next_mode'] = settings['startup']['start_to_mode']['after_startup_mode']
+					write_control(control, direct_write=True, origin='control')
+					# Call Work Cycle for Startup Mode
+					_work_cycle('Startup', grill_platform, probe_complex, display_device, dist_device)
+					# Select Next Mode
+					settings = read_settings()
+					_next_mode(control['next_mode'], setpoint=settings['startup']['start_to_mode']['primary_setpoint'])
 
-		# Hold (hold at setpoint)
-		elif control['mode'] == 'Hold':
-			_work_cycle('Hold', grill_platform, probe_complex, display_device, dist_device)
-			_next_mode(control['next_mode'])			
+			# Smoke (smoke cycle)
+			elif control['mode'] == 'Smoke':
+				_work_cycle('Smoke', grill_platform, probe_complex, display_device, dist_device)
+				_next_mode(control['next_mode'])			
 
-		# Shutdown (shutdown sequence)
-		elif control['mode'] == 'Shutdown':
-			control['next_mode'] = 'Stop'
-			write_control(control, direct_write=True, origin='control')
-			_work_cycle('Shutdown', grill_platform, probe_complex, display_device, dist_device)
-			_next_mode(control['next_mode'])			
-			if settings['shutdown']['auto_power_off']:
-				eventLogger.info('Shutdown mode ended powering off grill')
-				os.system("sleep 3 && sudo shutdown -h now &")
+			# Hold (hold at setpoint)
+			elif control['mode'] == 'Hold':
+				_work_cycle('Hold', grill_platform, probe_complex, display_device, dist_device)
+				_next_mode(control['next_mode'])			
 
-		# Monitor (monitor the OEM controller)
-		elif control['mode'] == 'Monitor':
-			control['status'] = 'monitor'  # Set status to monitor
-			write_control(control, direct_write=True, origin='control')
-			_work_cycle('Monitor', grill_platform, probe_complex, display_device, dist_device)
+			# Shutdown (shutdown sequence)
+			elif control['mode'] == 'Shutdown':
+				control['next_mode'] = 'Stop'
+				write_control(control, direct_write=True, origin='control')
+				_work_cycle('Shutdown', grill_platform, probe_complex, display_device, dist_device)
+				_next_mode(control['next_mode'])			
+				if settings['shutdown']['auto_power_off']:
+					eventLogger.info('Shutdown mode ended powering off grill')
+					os.system("sleep 3 && sudo shutdown -h now &")
 
-		# Manual Mode
-		elif control['mode'] == 'Manual':
-			_work_cycle('Manual', grill_platform, probe_complex, display_device, dist_device)
+			# Monitor (monitor the OEM controller)
+			elif control['mode'] == 'Monitor':
+				control['status'] = 'monitor'  # Set status to monitor
+				write_control(control, direct_write=True, origin='control')
+				_work_cycle('Monitor', grill_platform, probe_complex, display_device, dist_device)
+
+			# Manual Mode
+			elif control['mode'] == 'Manual':
+				_work_cycle('Manual', grill_platform, probe_complex, display_device, dist_device)
 		
-		# Recipe Mode
-		elif control['mode'] == 'Recipe':
-			_recipe_mode(grill_platform, probe_complex, display_device, dist_device, start_step=control['recipe']['start_step'])
+			# Recipe Mode
+			elif control['mode'] == 'Recipe':
+				_recipe_mode(grill_platform, probe_complex, display_device, dist_device, start_step=control['recipe']['start_step'])
 		
-		# Reignite (reignite sequence)
-		elif control['mode'] == 'Reignite':
-			if (not settings['platform']['standalone']) and (not grill_platform.get_input_status()):
-				eventLogger.warning("PiFire is set to OFF. This doesn't prevent reignite, "
-									   "but this means the switch won't behave as normal.")
-			control['next_mode'] = control['safety']['reignitelaststate']
-			setpoint = control['primary_setpoint']
-			write_control(control, direct_write=True, origin='control')
-			_work_cycle('Reignite', grill_platform, probe_complex, display_device, dist_device)
-			_next_mode(control['next_mode'], setpoint=setpoint)
+			# Reignite (reignite sequence)
+			elif control['mode'] == 'Reignite':
+				if (not settings['platform']['standalone']) and (not grill_platform.get_input_status()):
+					eventLogger.warning("PiFire is set to OFF. This doesn't prevent reignite, "
+										   "but this means the switch won't behave as normal.")
+				control['next_mode'] = control['safety']['reignitelaststate']
+				setpoint = control['primary_setpoint']
+				write_control(control, direct_write=True, origin='control')
+				_work_cycle('Reignite', grill_platform, probe_complex, display_device, dist_device)
+				_next_mode(control['next_mode'], setpoint=setpoint)
 	
-	if settings['notify_services'].get('mqtt') != None and settings['notify_services']['mqtt']['enabled']:
-		check_notify(settings, control, pelletdb=pelletdb)
+		if settings['notify_services'].get('mqtt') != None and settings['notify_services']['mqtt']['enabled']:
+			check_notify(settings, control, pelletdb=pelletdb)
 
-	time.sleep(0.1)
-# ===================
-# End of Main Loop
-# ===================
+		time.sleep(0.1)
+	# ===================
+	# End of Main Loop
+	# ===================
