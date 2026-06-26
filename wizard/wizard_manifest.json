@@ -2759,10 +2759,10 @@
 				]
 			},
 			"dsi_1024x768t": {
-				"friendly_name": "Raspberry Pi DSI Connected Display 1024x768 w/Touch",
+				"friendly_name": "DSI/HDMI Connected Display 1024x768 w/Touch",
 				"filename": "dsi_1024x768t",
 				"description": "A 1024x768 (4:3) DSI or HDMI connected touch display. Uses the same pygame display engine as the 800x480 DSI display, with the layout rescaled to 1024x768.",
-				"notes": "Raspberry Pi OS 12 Bookworm 64-Bit is not currently compatible with this module.  It has been tested successfully with 32-Bit Bookworm and Bullseye.  This module may take a very long time to install due to the OS dependencies that are required.  Please be aware that this may take more than 10 minutes to install depending on your system and internet connection.",
+				"notes": "",
 				"default": false,
 				"image": "dsi_touch.png",
 				"reboot_required": true,
