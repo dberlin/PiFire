@@ -167,7 +167,15 @@ def default_settings():
 				"CE0" : 8,  # In case a non-standard CE/CS is utilized
 				"CE1" : 7,  # In case a non-standard CE/CS is utilized
 			},
-			"1WIRE" : None  # 1WIRE is used for probe devices specifically the DS18B20 
+			"1WIRE" : None  # 1WIRE is used for probe devices specifically the DS18B20
+		},
+		"numato" : {  # x86_numato_emc2101 platform: Numato USB relay board
+			"device" : "/dev/ttyACM0",  # serial (tty) device path
+			"baudrate" : 921600
+		},
+		"emc2101" : {  # x86_numato_emc2101 platform: EMC2101 fan PWM controller
+			"i2c_bus_match" : "CP2112",  # substring matched against I2C adapter names
+			"address" : "0x4c"           # EMC2101 I2C address
 		},
 		"current" : "custom",
 		"dc_fan": False,  # True if system has a DC Fan (Does not indicate PWM)

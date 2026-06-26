@@ -16,10 +16,17 @@ def get_settings_dependencies_values(settings, moduleData):
 	for setting, data in moduleData['settings_dependencies'].items():
 		setting_location = data['settings']
 		setting_value = settings
-		for setting_name in setting_location:
-			setting_value = setting_value[setting_name]
-		moduleSettings[setting] = setting_value 
-	return moduleSettings 
+		try:
+			for setting_name in setting_location:
+				setting_value = setting_value[setting_name]
+		except (KeyError, TypeError):
+			# The setting isn't present yet -- normal during initial setup (e.g. a
+			# platform whose settings haven't been written before this wizard run,
+			# or a module that introduces new settings keys). Fall back to None so
+			# the card still renders and the user can pick a value.
+			setting_value = None
+		moduleSettings[setting] = setting_value
+	return moduleSettings
 
 def wizardInstallInfoDefaults(wizardData, settings):
 	
