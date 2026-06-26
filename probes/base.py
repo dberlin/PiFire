@@ -37,23 +37,29 @@ def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
 	adapter matches, so the caller fails clearly rather than guessing.
 	'''
 	match_lower = str(match).lower()
-	found = []
+	adapters = []  # (bus_num, name) for every i2c adapter present
 	for bus_dir in glob.glob(os.path.join(devices_path, 'i2c-*')):
 		try:
 			with open(os.path.join(bus_dir, 'name')) as handle:
 				name = handle.read().strip()
 		except OSError:
 			continue
-		if match_lower in name.lower():
-			try:
-				found.append(int(os.path.basename(bus_dir).split('-')[-1]))
-			except ValueError:
-				continue
+		try:
+			bus_num = int(os.path.basename(bus_dir).split('-')[-1])
+		except ValueError:
+			continue
+		adapters.append((bus_num, name))
+
+	found = [num for num, name in adapters if match_lower in name.lower()]
 	if len(found) == 1:
 		return found[0]
+	# Include what IS present so a misconfigured match string is easy to fix.
+	available = ', '.join(f'i2c-{n} ({name!r})' for n, name in sorted(adapters)) or '(none)'
 	if not found:
-		raise RuntimeError(f'No i2c adapter found matching {match!r} under {devices_path}')
-	raise RuntimeError(f'Multiple i2c adapters match {match!r}: {sorted(found)}')
+		raise RuntimeError(f'No i2c adapter found matching {match!r} under {devices_path}. '
+		                   f'Available adapters: {available}')
+	raise RuntimeError(f'Multiple i2c adapters match {match!r}: {sorted(found)}. '
+	                   f'Available adapters: {available}')
 
 
 def resolve_i2c_bus(bus):
@@ -63,10 +69,14 @@ def resolve_i2c_bus(bus):
 	string (e.g. 'CP2112' -> discovered via find_i2c_bus, robust against the
 	dynamic bus numbers USB-to-I2C bridges get).
 	'''
-	try:
-		return int(str(bus).strip())
-	except (ValueError, TypeError):
-		return find_i2c_bus(bus)
+	spec = str(bus).strip()
+	# A plain number is a /dev/i2c-N bus index; anything else is an adapter-name
+	# match. Check explicitly (rather than try/int/except) so a name like 'CP2112'
+	# does not raise a ValueError -- only find_i2c_bus's clear "not found" error
+	# can surface.
+	if spec.isdigit():
+		return int(spec)
+	return find_i2c_bus(spec)
 
 
 '''
