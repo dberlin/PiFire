@@ -2353,6 +2353,26 @@
               "hidden": false
             },
             {
+              "label": "i2c_bus_kind",
+              "friendly_name": "I2C Bus Type",
+              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
+              "type": "list",
+              "list_values": ["basic", "extended"],
+              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)"],
+              "default": "basic",
+              "hidden": false
+            },
+            {
+              "label": "i2c_bus_num",
+              "friendly_name": "Extended I2C Bus",
+              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
+              "type": "list",
+              "list_values": ["CP2112", "0", "1", "2", "3", "4", "5"],
+              "list_labels": ["CP2112 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5"],
+              "default": "CP2112",
+              "hidden": false
+            },
+            {
               "label": "ADC0_rd",
               "friendly_name": "ADC0 Resistor Divider Value",
               "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
@@ -2453,6 +2473,26 @@
               "list_values": ["0x48", "0x49", "0x4A", "0x4B"],
               "list_labels": ["0x48", "0x49", "0x4A", "0x4B"],
               "default": "0x48",
+              "hidden": false
+            },
+            {
+              "label": "i2c_bus_kind",
+              "friendly_name": "I2C Bus Type",
+              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
+              "type": "list",
+              "list_values": ["basic", "extended"],
+              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)"],
+              "default": "basic",
+              "hidden": false
+            },
+            {
+              "label": "i2c_bus_num",
+              "friendly_name": "Extended I2C Bus",
+              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
+              "type": "list",
+              "list_values": ["CP2112", "0", "1", "2", "3", "4", "5"],
+              "list_labels": ["CP2112 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5"],
+              "default": "CP2112",
               "hidden": false
             },
             {

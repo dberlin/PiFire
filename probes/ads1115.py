@@ -33,7 +33,7 @@ Description:
 import logging
 import math
 import ADS1115
-from probes.base import ProbeInterface
+from probes.base import ProbeInterface, resolve_i2c_bus
 
 '''
 *****************************************
@@ -50,9 +50,15 @@ BUSMAP = {
 
 class ADSDevice():
 	''' ADS1115 Device Based on the ADS1115 Python Module '''
-	def __init__(self, i2c_bus_addr=0x48):
+	def __init__(self, i2c_bus_addr=0x48, i2c_bus_kind='basic', i2c_bus_num=0):
 		self.logger = logging.getLogger("control")
 		self.ads = ADS1115.ADS1115(address=i2c_bus_addr)
+		if i2c_bus_kind == 'extended':
+			# The ADS1115 library hardcodes smbus2.SMBus(1); repoint it at the
+			# extended bus -- a /dev/i2c-N number or an adapter-name match (e.g.
+			# 'CP2112') resolved against the available i2c adapters.
+			import smbus2
+			self.ads.i2c = smbus2.SMBus(resolve_i2c_bus(i2c_bus_num))
 		self.status = {}
 
 	def read_voltage(self, port):
@@ -81,4 +87,6 @@ class ReadProbes(ProbeInterface):
 		self.time_delay = 0.008
 		self.device_info['ports'] = ['ADC0', 'ADC1', 'ADC2', 'ADC3']
 		i2c_bus_addr = BUSMAP[self.device_info['config'].get('i2c_bus_addr', '0x48')]
-		self.device = ADSDevice(i2c_bus_addr=i2c_bus_addr)
+		i2c_bus_kind = self.device_info['config'].get('i2c_bus_kind', 'basic')
+		i2c_bus_num = self.device_info['config'].get('i2c_bus_num', 0)
+		self.device = ADSDevice(i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num)
