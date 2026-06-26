@@ -37,7 +37,7 @@ import busio
 from adafruit_extended_bus import ExtendedI2C
 import adafruit_ads1x15.ads1015 as ADS
 from adafruit_ads1x15.analog_in import AnalogIn
-from probes.base import ProbeInterface
+from probes.base import ProbeInterface, resolve_i2c_bus
 
 '''
 *****************************************
@@ -60,7 +60,7 @@ class ADSDevice():
 		if i2c_bus_kind == 'basic':
 			self.i2c = busio.I2C(board.SCL, board.SDA)
 		elif i2c_bus_kind == 'extended':
-			self.i2c = ExtendedI2C(i2c_bus_num)
+			self.i2c = ExtendedI2C(resolve_i2c_bus(i2c_bus_num))
 		# Create the ADC object using the I2C bus
 		self.ads = ADS.ADS1015(self.i2c, address=i2c_bus_addr)
 		self.status = {}

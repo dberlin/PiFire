@@ -19,11 +19,59 @@ Description:
 import math
 import time
 import logging
+import os
+import glob
 from probes.temp_queue import TempQueue
 
 '''
 *****************************************
- Class Definitions 
+ I2C Bus Helpers
+*****************************************
+'''
+
+def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
+	'''
+	Return the integer i2c bus number whose adapter name contains `match`
+	(case-insensitive), e.g. 'CP2112' for a USB-to-I2C bridge. Scans
+	`<devices_path>/i2c-*/name`. Raises RuntimeError if zero or more than one
+	adapter matches, so the caller fails clearly rather than guessing.
+	'''
+	match_lower = str(match).lower()
+	found = []
+	for bus_dir in glob.glob(os.path.join(devices_path, 'i2c-*')):
+		try:
+			with open(os.path.join(bus_dir, 'name')) as handle:
+				name = handle.read().strip()
+		except OSError:
+			continue
+		if match_lower in name.lower():
+			try:
+				found.append(int(os.path.basename(bus_dir).split('-')[-1]))
+			except ValueError:
+				continue
+	if len(found) == 1:
+		return found[0]
+	if not found:
+		raise RuntimeError(f'No i2c adapter found matching {match!r} under {devices_path}')
+	raise RuntimeError(f'Multiple i2c adapters match {match!r}: {sorted(found)}')
+
+
+def resolve_i2c_bus(bus):
+	'''
+	Resolve an extended-i2c-bus spec to a bus number. Accepts an int or numeric
+	string (e.g. 3 / '3' -> /dev/i2c-3, used directly) or an adapter-name match
+	string (e.g. 'CP2112' -> discovered via find_i2c_bus, robust against the
+	dynamic bus numbers USB-to-I2C bridges get).
+	'''
+	try:
+		return int(str(bus).strip())
+	except (ValueError, TypeError):
+		return find_i2c_bus(bus)
+
+
+'''
+*****************************************
+ Class Definitions
 *****************************************
 '''
 

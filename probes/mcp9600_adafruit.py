@@ -39,7 +39,7 @@ import busio
 from adafruit_extended_bus import ExtendedI2C
 from adafruit_bus_device.i2c_device import I2CDevice
 from adafruit_mcp9600 import MCP9600
-from probes.base import ProbeInterface
+from probes.base import ProbeInterface, resolve_i2c_bus
 
 BUSMAP = {
 	'0x67' : 0x67,  # Default
@@ -66,7 +66,7 @@ class KTTDevice():
 			# Create the I2C bus
 			self.i2c = busio.I2C(board.SCL, board.SDA)
 		elif i2c_bus_kind == 'extended':
-			self.i2c = ExtendedI2C(i2c_bus_num)
+			self.i2c = ExtendedI2C(resolve_i2c_bus(i2c_bus_num))
 
 
 		self.sensor = MCP9600(self.i2c, address=i2c_bus_addr)
