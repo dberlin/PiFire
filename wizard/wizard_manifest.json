@@ -1511,7 +1511,7 @@
             "friendly_name": "I2C Bridge Name Match",
             "description": "Substring matched against I2C adapter names to locate the EMC2101 bus (default CP2112).",
             "options": {
-              "CP2112": "CP2112 USB-to-I2C Bridge"
+              "CP2112": "CP2112"
             },
             "settings": ["platform", "emc2101", "i2c_bus_match"]
           },
@@ -2009,8 +2009,26 @@
               "friendly_name": "I2C Bus Address",
               "description": "Select the I2C bus address to use for this device.  Default is 0x67.  If you have more than one MCP9600, you can assign unique device bus address for up to five devices.",
               "type": "list",
-              "list_values": ["0x67", "0x66", "0x65", "0x64", "0x60"],
-              "list_labels": ["0x67", "0x66", "0x65", "0x64", "0x60"],
+              "list_values": [
+                "0x67",
+                "0x66",
+                "0x65",
+                "0x64",
+                "0x63",
+                "0x62",
+                "0x61",
+                "0x60"
+              ],
+              "list_labels": [
+                "0x67",
+                "0x66",
+                "0x65",
+                "0x64",
+                "0x63",
+                "0x62",
+                "0x61",
+                "0x60"
+              ],
               "default": "0x67",
               "hidden": false
             },
