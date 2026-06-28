@@ -81,6 +81,91 @@ def resolve_i2c_bus(bus):
 
 '''
 *****************************************
+ SPI Bus Helpers
+*****************************************
+'''
+
+# Stored chip-select value -> board pin attribute name. The wizard stores the
+# `list_values` entry, which for this field is the BCM name 'GPIOn'; the 'Dn'
+# Adafruit name is accepted too so a legacy stored value or an in-code default
+# still resolves. 'GPIO6' and 'D6' are the same physical pin (board.D6).
+_SPI_CS_BOARD_PINS = {}
+for _spi_cs_n in (2, 3, 4, 5, 6, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                  23, 24, 25, 26, 27):
+	_SPI_CS_BOARD_PINS[f'GPIO{_spi_cs_n}'] = f'D{_spi_cs_n}'
+	_SPI_CS_BOARD_PINS[f'D{_spi_cs_n}'] = f'D{_spi_cs_n}'
+del _spi_cs_n
+
+# Cache of opened MCP2210 bridges, keyed by serial. A USB-HID handle can be
+# opened only once, so every probe on the same bridge must share one instance.
+_MCP2210_CACHE = {}
+
+
+def resolve_mcp2210(serial=None):
+	'''
+	Open (and cache) a single MCP2210 USB-to-SPI bridge per serial and return
+	the shared instance. The MCP2210 HID handle can be opened only once, so
+	probes sharing a bridge must share one instance; the cache guarantees that.
+	serial=None or '' selects the first MCP2210 by VID/PID (0x04D8/0x00DE) and is
+	cached under one canonical key.
+	'''
+	key = serial or ''  # None and '' both mean "the first/only bridge"
+	if key not in _MCP2210_CACHE:
+		from mcp2210 import MCP2210
+		_MCP2210_CACHE[key] = MCP2210(serial=serial or None)
+	return _MCP2210_CACHE[key]
+
+
+def _gp_index(cs):
+	'''
+	Parse an MCP2210 GPIO chip-select spec to an int 0-8. Accepts 0-8, 'GP3', or
+	'GPIO3'. Raises ValueError for anything else, so a misconfigured CS fails
+	clearly rather than driving the wrong pin.
+	'''
+	text = str(cs).strip().upper()
+	if text.startswith('GPIO'):
+		text = text[4:]
+	elif text.startswith('GP'):
+		text = text[2:]
+	if not text.isdigit():
+		raise ValueError(f'Invalid MCP2210 chip-select {cs!r}; expected GP0-GP8')
+	index = int(text)
+	if not 0 <= index <= 8:
+		raise ValueError(f'MCP2210 chip-select out of range: {cs!r} (GP0-GP8)')
+	return index
+
+
+def resolve_spi_bus(config, default_cs):
+	'''
+	Build the (spi, chip_select) pair for an SPI probe from its config dict.
+	  spi_bus_kind 'basic'   -> board.SPI() + digitalio.DigitalInOut(board pin)
+	  spi_bus_kind 'mcp2210' -> shared MCP2210.spi + mcp.digital_inout(GP index)
+	Reads standardized keys: spi_bus_kind (default 'basic'), cs (default
+	`default_cs`), mcp2210_serial (default ''). Returns objects ready for an
+	adafruit_bus_device / SPIDevice-based sensor constructor. Raises ValueError
+	on an unknown spi_bus_kind or an unknown board chip-select. board/digitalio
+	are imported lazily so this module imports without Blinka present.
+	'''
+	kind = config.get('spi_bus_kind', 'basic')
+	cs = config.get('cs', default_cs)
+	if kind == 'mcp2210':
+		mcp = resolve_mcp2210(config.get('mcp2210_serial') or None)
+		return mcp.spi, mcp.digital_inout(_gp_index(cs))
+	if kind == 'basic':
+		import board
+		import digitalio
+		try:
+			pin_attr = _SPI_CS_BOARD_PINS[cs]
+		except KeyError:
+			raise ValueError(
+				f'Unknown SPI chip-select {cs!r} for native board.SPI()')
+		return board.SPI(), digitalio.DigitalInOut(getattr(board, pin_attr))
+	raise ValueError(
+		f'Unknown spi_bus_kind {kind!r}; expected "basic" or "mcp2210"')
+
+
+'''
+*****************************************
  Class Definitions
 *****************************************
 '''

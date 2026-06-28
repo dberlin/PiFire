@@ -1,0 +1,101 @@
+import sys
+import types
+import pytest
+
+import probes.base as base
+import mcp2210
+
+
+# --- _gp_index ---
+
+def test_gp_index_parses_all_forms():
+    assert base._gp_index(3) == 3
+    assert base._gp_index("3") == 3
+    assert base._gp_index("GP3") == 3
+    assert base._gp_index("GPIO3") == 3
+
+
+def test_gp_index_rejects_out_of_range():
+    with pytest.raises(ValueError):
+        base._gp_index(9)
+
+
+def test_gp_index_rejects_non_numeric():
+    with pytest.raises(ValueError):
+        base._gp_index("nope")
+
+
+# --- resolve_mcp2210 caching ---
+
+def test_resolve_mcp2210_caches_per_serial(monkeypatch):
+    base._MCP2210_CACHE.clear()
+    created = []
+
+    class FakeMCP:
+        def __init__(self, serial=None):
+            created.append(serial)
+            self.serial = serial
+
+    monkeypatch.setattr(mcp2210, "MCP2210", FakeMCP)
+    a = base.resolve_mcp2210(None)
+    b = base.resolve_mcp2210("")        # same canonical key as None
+    c = base.resolve_mcp2210(None)
+    assert a is b is c                  # one shared instance
+    assert created == [None]            # constructed exactly once
+    d = base.resolve_mcp2210("ABC")
+    assert d is not a
+    assert created == [None, "ABC"]
+    base._MCP2210_CACHE.clear()
+
+
+# --- resolve_spi_bus: mcp2210 path ---
+
+def test_resolve_spi_bus_mcp2210(monkeypatch):
+    class FakeMCP:
+        spi = "SPIBUS"
+        def digital_inout(self, n):
+            return ("CS", n)
+
+    monkeypatch.setattr(base, "resolve_mcp2210", lambda serial=None: FakeMCP())
+    spi, cs = base.resolve_spi_bus(
+        {"spi_bus_kind": "mcp2210", "cs": "5"}, default_cs="D6")
+    assert spi == "SPIBUS"
+    assert cs == ("CS", 5)
+
+
+# --- resolve_spi_bus: basic path (regression for the GPIOn KeyError bug) ---
+
+def _install_fake_board(monkeypatch):
+    fake_board = types.ModuleType("board")
+    fake_board.D6 = "BOARD_D6"
+    fake_board.SPI = lambda: "BOARD_SPI"
+    fake_digitalio = types.ModuleType("digitalio")
+
+    class DigitalInOut:
+        def __init__(self, pin):
+            self.pin = pin
+
+    fake_digitalio.DigitalInOut = DigitalInOut
+    monkeypatch.setitem(sys.modules, "board", fake_board)
+    monkeypatch.setitem(sys.modules, "digitalio", fake_digitalio)
+    return DigitalInOut
+
+
+def test_resolve_spi_bus_basic_stored_gpio_value(monkeypatch):
+    dio = _install_fake_board(monkeypatch)
+    spi, cs = base.resolve_spi_bus(
+        {"spi_bus_kind": "basic", "cs": "GPIO6"}, default_cs="D6")
+    assert spi == "BOARD_SPI"
+    assert isinstance(cs, dio) and cs.pin == "BOARD_D6"
+
+
+def test_resolve_spi_bus_defaults_to_basic_and_accepts_d_name(monkeypatch):
+    dio = _install_fake_board(monkeypatch)
+    spi, cs = base.resolve_spi_bus({"cs": "D6"}, default_cs="D6")  # no kind key
+    assert spi == "BOARD_SPI"
+    assert isinstance(cs, dio) and cs.pin == "BOARD_D6"
+
+
+def test_resolve_spi_bus_unknown_kind_raises():
+    with pytest.raises(ValueError):
+        base.resolve_spi_bus({"spi_bus_kind": "frobnicate"}, default_cs="D6")
