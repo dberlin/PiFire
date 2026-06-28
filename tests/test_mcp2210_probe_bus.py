@@ -141,3 +141,30 @@ def test_max31865_init_device_uses_resolver(monkeypatch):
     assert obj.device.sensor.rtd_nominal == 1000
     assert obj.device.sensor.ref_resistor == 430
     assert obj.device.sensor.wires == 3
+
+
+import json
+import os
+
+
+def test_manifest_max31865_has_spi_bus_fields():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    manifest = json.load(open(os.path.join(repo_root, "wizard", "wizard_manifest.json")))
+    entry = manifest["modules"]["probes"]["max31865_adafruit"]
+
+    labels = [item["label"] for item in entry["device_specific"]["config"]]
+    assert "spi_bus_kind" in labels
+    assert "mcp2210_serial" in labels
+
+    kind = next(i for i in entry["device_specific"]["config"]
+                if i["label"] == "spi_bus_kind")
+    assert kind["list_values"] == ["basic", "mcp2210"]
+    assert kind["default"] == "basic"
+
+    cs = next(i for i in entry["device_specific"]["config"] if i["label"] == "cs")
+    # GP0-GP8 stored values are appended after the board pins.
+    assert all(str(n) in cs["list_values"] for n in range(0, 9))
+
+    deps = " ".join(entry["py_dependencies"])
+    assert "mcp2210" in deps
+    assert "hid" in deps
