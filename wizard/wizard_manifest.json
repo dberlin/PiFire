@@ -2016,6 +2016,145 @@
           ]
         }
       },
+      "max31856_adafruit": {
+        "friendly_name": "MAX31856 Thermocouple Adafruit",
+        "filename": "max31856_adafruit",
+        "description": "This SPI device reads thermocouple probes (types B, E, J, K, N, R, S, T) using the Adafruit CircuitPython MAX31856 module. Supports native SPI or an MCP2210 USB-to-SPI bridge. Use a GPIO other than CE0/CE1 for the chip select.",
+        "default": false,
+        "image": "max31865.png",
+        "reboot_required": false,
+        "py_dependencies": [
+          "adafruit-circuitpython-max31856",
+          "mcp2210",
+          "hid>=1.0.4"
+        ],
+        "apt_dependencies": [],
+        "command_list": [],
+        "settings_dependencies": {
+          "units": {
+            "friendly_name": "Temp Units",
+            "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
+            "options": {
+              "F": "Fahrenheit",
+              "C": "Celsius"
+            },
+            "settings": [
+              "globals",
+              "units"
+            ]
+          }
+        },
+        "device_specific": {
+          "ports": [
+            "TC0"
+          ],
+          "type": "thermocouple",
+          "config": [
+            {
+              "label": "cs",
+              "friendly_name": "SPI Chip Select (CS)",
+              "description": "SPI Chip Select pin. For Basic (native SPI) pick a board GPIO (D2-D27). For MCP2210 pick the bridge's GP0-GP8.",
+              "type": "list",
+              "list_values": [
+                "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO12", "GPIO13",
+                "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO19", "GPIO20",
+                "GPIO21", "GPIO22", "GPIO23", "GPIO24", "GPIO25", "GPIO26", "GPIO27",
+                "0", "1", "2", "3", "4", "5", "6", "7", "8"
+              ],
+              "list_labels": [
+                "D2", "D3", "D4", "D5", "D6", "D12", "D13", "D14", "D15", "D16", "D17",
+                "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27",
+                "MCP2210 GP0", "MCP2210 GP1", "MCP2210 GP2", "MCP2210 GP3", "MCP2210 GP4",
+                "MCP2210 GP5", "MCP2210 GP6", "MCP2210 GP7", "MCP2210 GP8"
+              ],
+              "default": "D2",
+              "hidden": false
+            },
+            {
+              "label": "spi_bus_kind",
+              "friendly_name": "SPI Bus Type",
+              "description": "Use the board's native SPI (Basic) or an MCP2210 USB-to-SPI bridge. MCP2210 is required on hosts without native SPI (e.g. x86).",
+              "type": "list",
+              "list_values": [
+                "basic",
+                "mcp2210"
+              ],
+              "list_labels": [
+                "Basic (native SPI)",
+                "MCP2210 (USB-to-SPI bridge)"
+              ],
+              "default": "basic",
+              "hidden": false
+            },
+            {
+              "label": "mcp2210_serial",
+              "friendly_name": "MCP2210 Serial",
+              "description": "Optional. Leave blank to use the first/only MCP2210. Enter a USB serial string to select a specific bridge when more than one is attached. Ignored when SPI Bus Type is Basic.",
+              "type": "string",
+              "default": "",
+              "hidden": false
+            },
+            {
+              "label": "tc_type",
+              "friendly_name": "Thermocouple Type",
+              "description": "Thermocouple type. Type K is the most common for cooking.",
+              "type": "list",
+              "list_values": [
+                "B", "E", "J", "K", "N", "R", "S", "T"
+              ],
+              "list_labels": [
+                "Type B", "Type E", "Type J", "Type K", "Type N", "Type R", "Type S", "Type T"
+              ],
+              "default": "K",
+              "hidden": false
+            },
+            {
+              "label": "averaging",
+              "friendly_name": "Averaging Samples",
+              "description": "Number of samples averaged per reading. More samples = smoother but slower.",
+              "type": "list",
+              "list_values": [
+                "1", "2", "4", "8", "16"
+              ],
+              "list_labels": [
+                "1", "2", "4", "8", "16"
+              ],
+              "default": "1",
+              "hidden": false
+            },
+            {
+              "label": "noise_rejection",
+              "friendly_name": "Noise Rejection",
+              "description": "Mains noise rejection filter frequency. Use 60 Hz in North America, 50 Hz in most of Europe/Asia.",
+              "type": "list",
+              "list_values": [
+                "60", "50"
+              ],
+              "list_labels": [
+                "60 Hz (US)", "50 Hz (EU)"
+              ],
+              "default": "60",
+              "hidden": false
+            },
+            {
+              "label": "transient",
+              "friendly_name": "Transient",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "type": "list",
+              "list_values": [
+                "False",
+                "True"
+              ],
+              "list_labels": [
+                "Fixed (always attached)",
+                "Transient (sometimes detached)"
+              ],
+              "default": "False",
+              "hidden": true
+            }
+          ]
+        }
+      },
       "mcp9600_adafruit": {
         "friendly_name": "MCP9600 Thermocouple Amplifier Adafruit",
         "filename": "mcp9600_adafruit",

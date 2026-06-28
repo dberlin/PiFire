@@ -89,3 +89,39 @@ def test_temperature_property(monkeypatch):
         temperature = 123.4
     dev.sensor = S()
     assert dev.temperature == 123.4
+
+
+import json
+import os
+
+
+def test_manifest_max31856_entry():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    manifest = json.load(open(os.path.join(repo_root, "wizard", "wizard_manifest.json")))
+    probes = manifest["modules"]["probes"]
+    assert "max31856_adafruit" in probes
+    entry = probes["max31856_adafruit"]
+
+    ds = entry["device_specific"]
+    assert ds["type"] == "thermocouple"
+    assert ds["ports"] == ["TC0"]
+
+    labels = [item["label"] for item in ds["config"]]
+    for required in ("cs", "spi_bus_kind", "mcp2210_serial",
+                     "tc_type", "averaging", "noise_rejection"):
+        assert required in labels
+
+    tc = next(i for i in ds["config"] if i["label"] == "tc_type")
+    assert tc["list_values"] == ["B", "E", "J", "K", "N", "R", "S", "T"]
+    assert tc["default"] == "K"
+
+    avg = next(i for i in ds["config"] if i["label"] == "averaging")
+    assert avg["list_values"] == ["1", "2", "4", "8", "16"]
+
+    nr = next(i for i in ds["config"] if i["label"] == "noise_rejection")
+    assert nr["list_values"] == ["60", "50"]
+
+    deps = " ".join(entry["py_dependencies"])
+    assert "adafruit-circuitpython-max31856" in deps
+    assert "mcp2210" in deps
+    assert "hid" in deps
