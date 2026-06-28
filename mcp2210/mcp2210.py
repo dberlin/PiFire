@@ -30,6 +30,8 @@ class MCP2210:
     _SPI_RETRY_MAX = 200          # ~ retries before giving up on a busy engine
     _SPI_RETRY_SLEEP = 0.001      # seconds between busy retries
 
+    NVRAM_SUB_SPI = 0x10          # NVRAM sub-command: power-up SPI settings
+
     def __init__(self, vid=VID, pid=PID, serial=None, hid_device=None):
         if hid_device is not None:
             self._hid = hid_device
@@ -146,6 +148,57 @@ class MCP2210:
     def digital_inout(self, index):
         from .pin import DigitalInOut
         return DigitalInOut(self.get_pin(index))
+
+    def read_eeprom(self, addr):
+        resp = self._xfer(bytes([p.CMD_READ_EEPROM, addr & 0xFF]))
+        return resp[3]
+
+    def write_eeprom(self, addr, value):
+        self._xfer(bytes([p.CMD_WRITE_EEPROM, addr & 0xFF, value & 0xFF]))
+
+    def interrupt_count(self, reset=False):
+        resp = self._xfer(bytes([p.CMD_GET_INTERRUPT_COUNT, 1 if reset else 0]))
+        return resp[4] | (resp[5] << 8)
+
+    def chip_status(self):
+        resp = self._xfer(bytes([p.CMD_GET_CHIP_STATUS]))
+        return {
+            "bus_release_pending": resp[2],
+            "bus_owner": resp[3],
+            "password_attempts": resp[4],
+            "password_guessed": bool(resp[5]),
+        }
+
+    def cancel_spi(self):
+        self._xfer(bytes([p.CMD_SPI_CANCEL]))
+
+    def request_bus_release(self):
+        self._xfer(bytes([p.CMD_REQUEST_BUS_RELEASE]))
+
+    def get_nvram(self, sub):
+        resp = self._xfer(bytes([p.CMD_GET_NVRAM, sub & 0xFF]))
+        return resp[4:]               # settings payload follows the 4-byte header
+
+    def set_nvram(self, sub, payload):
+        self._xfer(bytes([p.CMD_SET_NVRAM, sub & 0xFF, 0, 0]) + bytes(payload))
+
+    def get_nvram_spi_settings(self):
+        return p.unpack_spi_settings(self.get_nvram(self.NVRAM_SUB_SPI)[:17])
+
+    def set_nvram_spi_settings(self, *, bitrate, mode, transfer_size=0,
+                               idle_cs=0xFFFF, active_cs=0xFFFF):
+        payload = p.pack_spi_settings(
+            bitrate=int(bitrate), idle_cs=idle_cs, active_cs=active_cs,
+            cs_to_data=0, data_to_cs=0, between_bytes=0,
+            transfer_size=transfer_size, mode=mode,
+        )
+        self.set_nvram(self.NVRAM_SUB_SPI, payload)
+
+    def send_password(self, password):
+        password = bytes(password)
+        if len(password) != 8:
+            raise ValueError("MCP2210 password must be exactly 8 bytes")
+        self._xfer(bytes([p.CMD_SEND_PASSWORD]) + password)
 
     def close(self):
         if self._hid is not None:
