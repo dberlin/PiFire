@@ -422,7 +422,7 @@ class GaugeCompact(FlexObject):
 
         # Draw Units
         text = f'{self.objectData["units"]}°'
-        units_label = self._draw_text(text, 'Trebuchet_MS_Bold.ttf', 50, self.objectData['fg_color'])
+        units_label = self._draw_text(text, 'trebucbd.ttf', 50, self.objectData['fg_color'])
         #units_label_size = units_label.size() 
         units_label_position = (330, (size[1] // 2))
         gauge.paste(units_label, units_label_position, units_label)
