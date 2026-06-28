@@ -113,6 +113,40 @@ class MCP2210:
                 time.sleep(self._SPI_RETRY_SLEEP)
         return bytes(rx[:total])
 
+    def get_chip_settings(self):
+        resp = self._xfer(bytes([p.CMD_GET_CHIP_SETTINGS]))
+        return p.unpack_chip_settings(resp[4:4 + 14])
+
+    def set_chip_settings(self, designations, gpio_output, gpio_direction, other=0):
+        payload = p.pack_chip_settings(designations, gpio_output, gpio_direction, other)
+        self._xfer(bytes([p.CMD_SET_CHIP_SETTINGS, 0, 0, 0]) + payload)
+
+    def get_gpio_direction(self):
+        resp = self._xfer(bytes([p.CMD_GET_GPIO_DIRECTION]))
+        return resp[4] | (resp[5] << 8)
+
+    def set_gpio_direction(self, mask):
+        self._xfer(bytes([p.CMD_SET_GPIO_DIRECTION, 0, 0, 0,
+                          mask & 0xFF, (mask >> 8) & 0xFF]))
+
+    def get_gpio_value(self):
+        resp = self._xfer(bytes([p.CMD_GET_GPIO_VALUE]))
+        return resp[4] | (resp[5] << 8)
+
+    def set_gpio_value(self, mask):
+        self._xfer(bytes([p.CMD_SET_GPIO_VALUE, 0, 0, 0,
+                          mask & 0xFF, (mask >> 8) & 0xFF]))
+
+    def get_pin(self, index):
+        if index not in self._pins:
+            from .pin import Pin
+            self._pins[index] = Pin(self, index)
+        return self._pins[index]
+
+    def digital_inout(self, index):
+        from .pin import DigitalInOut
+        return DigitalInOut(self.get_pin(index))
+
     def close(self):
         if self._hid is not None:
             try:
