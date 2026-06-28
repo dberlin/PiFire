@@ -1,7 +1,6 @@
-import struct
 import pytest
 from tests._fake_hid import FakeHID
-from mcp2210 import MCP2210, _protocol as p
+from mcp2210 import MCP2210, MCP2210Error, _protocol as p
 
 
 def make():
@@ -104,3 +103,34 @@ def test_frequency_reports_configured_baudrate():
     spi.try_lock()
     spi.configure(baudrate=2_000_000)
     assert spi.frequency == 2_000_000
+
+
+def test_poll_loop_bounded_when_engine_never_finishes():
+    """After all TX data is sent the poll loop must raise instead of hanging.
+
+    The cap is lowered to 3 so we only need a handful of queued responses.
+    We queue:
+      - one 0x40 settings-OK
+      - one 0x42 with ENGINE_NOT_FINISHED (carries the single TX byte; now
+        idx >= total, poll phase begins)
+      - three more 0x42 STATUS_OK / ENGINE_NOT_FINISHED responses (each burns
+        one poll_retries increment; the 3rd push exceeds the cap of 3)
+
+    Without the fix the loop would spin until FakeHID returns all-zero reports,
+    which would raise a command-echo mismatch instead of MCP2210Error.  With
+    the fix it raises MCP2210Error("SPI transfer never completed") at poll
+    iteration 4.
+    """
+    dev, fake = make()
+    dev._SPI_RETRY_MAX = 3  # lower cap so the test terminates instantly
+
+    fake.queue(
+        _spi_ok(),                                           # 0x40 settings-OK
+        _xfer_resp([0xAB], p.ENGINE_NOT_FINISHED),           # chunk sent, idx>=total
+        _xfer_resp([], p.ENGINE_NOT_FINISHED),               # poll 1
+        _xfer_resp([], p.ENGINE_NOT_FINISHED),               # poll 2
+        _xfer_resp([], p.ENGINE_NOT_FINISHED),               # poll 3 -> exceeds cap
+    )
+
+    with pytest.raises(MCP2210Error, match="never completed"):
+        dev.spi_exchange(b"\x55", bitrate=100000, mode=0)

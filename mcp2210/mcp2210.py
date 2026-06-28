@@ -81,6 +81,7 @@ class MCP2210:
         rx = bytearray()
         idx = 0
         retries = 0
+        poll_retries = 0
         while True:
             chunk = data[idx:idx + 60]
             req = bytes([p.CMD_SPI_TRANSFER, len(chunk), 0, 0]) + chunk
@@ -103,6 +104,13 @@ class MCP2210:
                 rx += resp[4:4 + rx_len]
             if resp[3] == p.ENGINE_FINISHED:
                 break
+            # All data has been sent but the engine has not finished yet;
+            # keep sending empty 0x42 polls to pump remaining RX bytes.
+            if idx >= total:
+                poll_retries += 1
+                if poll_retries > self._SPI_RETRY_MAX:
+                    raise MCP2210Error("SPI transfer never completed")
+                time.sleep(self._SPI_RETRY_SLEEP)
         return bytes(rx[:total])
 
     def close(self):
