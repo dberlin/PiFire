@@ -1941,7 +1941,7 @@
                 "MCP2210 GP0", "MCP2210 GP1", "MCP2210 GP2", "MCP2210 GP3", "MCP2210 GP4",
                 "MCP2210 GP5", "MCP2210 GP6", "MCP2210 GP7", "MCP2210 GP8"
               ],
-              "default": "D2",
+              "default": "GPIO2",
               "hidden": false
             },
             {
@@ -2067,7 +2067,7 @@
                 "MCP2210 GP0", "MCP2210 GP1", "MCP2210 GP2", "MCP2210 GP3", "MCP2210 GP4",
                 "MCP2210 GP5", "MCP2210 GP6", "MCP2210 GP7", "MCP2210 GP8"
               ],
-              "default": "D2",
+              "default": "GPIO2",
               "hidden": false
             },
             {

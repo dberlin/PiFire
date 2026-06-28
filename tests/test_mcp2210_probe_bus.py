@@ -168,3 +168,18 @@ def test_manifest_max31865_has_spi_bus_fields():
     deps = " ".join(entry["py_dependencies"])
     assert "mcp2210" in deps
     assert "hid" in deps
+
+
+def test_manifest_list_defaults_are_valid_values():
+    # The wizard stores the list_values entry (the <option value>), so every
+    # list-type config field's `default` must be one of its list_values --
+    # otherwise nothing is preselected. Guards against the cs `default: "D2"`
+    # (a label, not a value) regression.
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    manifest = json.load(open(os.path.join(repo_root, "wizard", "wizard_manifest.json")))
+    offenders = []
+    for name, entry in manifest["modules"]["probes"].items():
+        for item in entry.get("device_specific", {}).get("config", []):
+            if item.get("type") == "list" and item.get("default") not in item.get("list_values", []):
+                offenders.append(f"{name}.{item['label']} default={item.get('default')!r}")
+    assert offenders == [], f"list defaults not in list_values: {offenders}"
