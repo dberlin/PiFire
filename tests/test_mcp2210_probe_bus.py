@@ -99,3 +99,45 @@ def test_resolve_spi_bus_defaults_to_basic_and_accepts_d_name(monkeypatch):
 def test_resolve_spi_bus_unknown_kind_raises():
     with pytest.raises(ValueError):
         base.resolve_spi_bus({"spi_bus_kind": "frobnicate"}, default_cs="D6")
+
+
+def test_max31865_init_device_uses_resolver(monkeypatch):
+    # Fake the adafruit lib so the probe module imports without hardware.
+    fake_ada = types.ModuleType("adafruit_max31865")
+
+    class FakeSensor:
+        def __init__(self, spi, cs, rtd_nominal=None, ref_resistor=None, wires=None):
+            self.spi = spi
+            self.cs = cs
+            self.rtd_nominal = rtd_nominal
+            self.ref_resistor = ref_resistor
+            self.wires = wires
+
+    fake_ada.MAX31865 = FakeSensor
+    monkeypatch.setitem(sys.modules, "adafruit_max31865", fake_ada)
+
+    import importlib
+    import probes.max31865_adafruit as probe
+    importlib.reload(probe)  # bind the fake adafruit_max31865
+
+    captured = {}
+
+    def fake_resolve(config, default_cs):
+        captured["config"] = config
+        captured["default_cs"] = default_cs
+        return ("SPI", "CS")
+
+    monkeypatch.setattr(probe, "resolve_spi_bus", fake_resolve)
+
+    obj = probe.ReadProbes.__new__(probe.ReadProbes)  # bypass heavy base __init__
+    obj.device_info = {"config": {
+        "spi_bus_kind": "mcp2210", "cs": "5",
+        "rtd_nominal": "1000", "ref_resistor": "430", "wires": "3"}}
+    obj._init_device()
+
+    assert captured["default_cs"] == "D6"
+    assert obj.device.sensor.spi == "SPI"
+    assert obj.device.sensor.cs == "CS"
+    assert obj.device.sensor.rtd_nominal == 1000
+    assert obj.device.sensor.ref_resistor == 430
+    assert obj.device.sensor.wires == 3

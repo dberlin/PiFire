@@ -30,64 +30,33 @@ Description:
  Imported Libraries
 *****************************************
 '''
-import logging 
-import time
-import board
-import digitalio
+import logging
 import adafruit_max31865
-from probes.base import ProbeInterface
-
-LOOKUP_TABLE = {
-	'D2' : board.D2,
-	'D3' : board.D3,
-	'D4' : board.D4,
-	'D5' : board.D5,
-	'D6' : board.D6,
-	'D12' : board.D12,
-	'D13' : board.D13,
-	'D14' : board.D14,
-	'D15' : board.D15,
-	'D16' : board.D16,
-	'D17' : board.D17,
-	'D18' : board.D18,
-	'D19' : board.D19,
-	'D20' : board.D20,
-	'D21' : board.D21,
-	'D22' : board.D22,
-	'D23' : board.D23,
-	'D24' : board.D24,
-	'D25' : board.D25,
-	'D26' : board.D26,
-	'D27' : board.D27,
-}
+from probes.base import ProbeInterface, resolve_spi_bus
 
 '''
 *****************************************
- Class Definitions 
+ Class Definitions
 *****************************************
 '''
 
 class RTDDevice():
 	''' MAX31865 Device Based on the Adafruit Module '''
-	def __init__(self, cs, rtd_nominal=1000, ref_resistor=4300, wires=2):
+	def __init__(self, spi, cs, rtd_nominal=1000, ref_resistor=4300, wires=2):
 		self.wires = wires
-
-		# RTD Constants
 		self.rtd_nominal = rtd_nominal
 		self.ref_resistor = ref_resistor
-
 		self.status = {}
-
-		self.spi = board.SPI()
-		self.cs = digitalio.DigitalInOut(LOOKUP_TABLE[cs])  # Chip select of the MAX31865 board.
-		self.sensor = adafruit_max31865.MAX31865(self.spi, self.cs, rtd_nominal=self.rtd_nominal, ref_resistor=self.ref_resistor, wires=self.wires)
+		self.sensor = adafruit_max31865.MAX31865(
+			spi, cs, rtd_nominal=self.rtd_nominal,
+			ref_resistor=self.ref_resistor, wires=self.wires)
 
 	@property
 	def temperature(self):
 		return self.sensor.temperature
-	
+
 	@property
-	def resistance(self): 
+	def resistance(self):
 		return self.sensor.resistance
 
 	def get_status(self):
@@ -101,11 +70,12 @@ class ReadProbes(ProbeInterface):
 	def _init_device(self):
 		self.time_delay = 0
 		self.device_info['ports'] = ['RTD0']
-		cs = self.device_info['config'].get('cs', 'D6')
-		rtd_nominal = int(self.device_info['config'].get('rtd_nominal', 1000))
-		ref_resistor = int(self.device_info['config'].get('ref_resistor', 4300))
-		wires = int(self.device_info['config'].get('wires', 2))
-		self.device = RTDDevice(cs, rtd_nominal, ref_resistor, wires)
+		config = self.device_info['config']
+		spi, cs = resolve_spi_bus(config, default_cs='D6')
+		rtd_nominal = int(config.get('rtd_nominal', 1000))
+		ref_resistor = int(config.get('ref_resistor', 4300))
+		wires = int(config.get('wires', 2))
+		self.device = RTDDevice(spi, cs, rtd_nominal, ref_resistor, wires)
 
 	def read_all_ports(self, output_data):
 		''' Read temperature from device '''
