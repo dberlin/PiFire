@@ -92,6 +92,17 @@ This helper owns:
   `mcp2210` → `mcp.digital_inout(_gp_index(cs))`, where `_gp_index` parses
   `0`–`8`, `"GP3"`, or `"GPIO3"` to an int 0–8.
 
+**CS value/label convention (board-pin path).** The wizard renders a `list`
+config field as `<option value="{list_values[i]}">{list_labels[i]}</option>`,
+so the value **stored** in `config['cs']` is the `list_values` entry and the
+`list_labels` entry is only the on-screen text. The existing `max31865_adafruit`
+`cs` field uses `list_values` = `GPIO2`…`GPIO27` (BCM names, the stored values)
+and `list_labels` = `D2`…`D27` (the Adafruit board names shown to the user) —
+`GPIO6` *is* `D6`. The relocated `LOOKUP_TABLE` is therefore keyed by the stored
+`GPIOn` names mapping to the `board.Dn` pin objects (e.g. `'GPIO6': board.D6`).
+For robustness it also accepts the `Dn` form as a key (so a legacy stored value
+or the in-code default still resolves), and `default_cs` stays `'D6'`.
+
 ### Probe modules become thin
 
 `max31865_adafruit.py` `_init_device()` (and every future SPI probe) reduces to:
@@ -132,9 +143,10 @@ Native case is unchanged from today (`"spi_bus_kind"` absent or `"basic"`,
 - Add `mcp2210_serial` (text; default `""`; description: leave blank for the
   first/only MCP2210, or enter a USB serial to pick a specific bridge).
 - Extend the existing `cs` field's `list_values`/`list_labels` to include the
-  MCP2210 GPIO options `0`–`8` (labelled "MCP2210 GP0"–"GP8") alongside the
-  existing board pins, with a description noting board pins apply to Basic and
-  GP0–GP8 apply to MCP2210.
+  MCP2210 GPIO options: `list_values` `"0"`–`"8"` (the stored values that
+  `_gp_index` parses) with `list_labels` "MCP2210 GP0"–"GP8", appended after the
+  existing board-pin entries (whose `list_values` stay `GPIO2`…`GPIO27`). The
+  field description notes board pins apply to Basic and GP0–GP8 to MCP2210.
 - Add `mcp2210` and `hid` to `py_dependencies`.
 
 No changes are needed in the wizard/probeconfig blueprints: they already parse
@@ -200,8 +212,3 @@ on `sys.path`).
   considered and declined.)
 - **The raw-spidev `max31865.py`** stays as-is (it uses `spidev` directly, not
   busio, so it can't take a busio bus without a larger rewrite).
-- **Pre-existing manifest quirk (noted, not fixed here):** the current
-  `max31865_adafruit` `cs` field stores `list_values` like `"GPIO2"` while the
-  probe's `LOOKUP_TABLE` is keyed by `"D2"`; the code default (`D6`) is what the
-  working path uses. This design preserves the existing board-pin behaviour
-  unchanged and does not attempt to reconcile that quirk.
