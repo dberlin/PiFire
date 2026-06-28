@@ -103,6 +103,12 @@ and `list_labels` = `D2`…`D27` (the Adafruit board names shown to the user) �
 For robustness it also accepts the `Dn` form as a key (so a legacy stored value
 or the in-code default still resolves), and `default_cs` stays `'D6'`.
 
+**Bug fixed as part of this work.** Today the probe's `LOOKUP_TABLE` is keyed by
+`Dn` (the display labels), but the wizard stores the `GPIOn` `list_values`, so
+`LOOKUP_TABLE[cs]` raises `KeyError` for any wizard-configured CS
+(`probes/max31865_adafruit.py:82`). Keying the relocated table by `GPIOn` (and
+accepting `Dn`) corrects this. This fix is in scope.
+
 ### Probe modules become thin
 
 `max31865_adafruit.py` `_init_device()` (and every future SPI probe) reduces to:
@@ -184,7 +190,9 @@ on `sys.path`).
   a fake/cached MCP2210; with `'basic'`, monkeypatch `board`/`digitalio` so the
   test asserts `board.SPI()` and a board-pin `DigitalInOut` are used; unknown
   kind raises `ValueError`; `_gp_index` parses `3`/`"GP3"`/`"GPIO3"` → 3 and
-  rejects out-of-range.
+  rejects out-of-range. **Regression for the CS bug:** a stored `cs` of
+  `"GPIO6"` (the wizard's `list_values` form) resolves to `board.D6` on the
+  `basic` path rather than raising `KeyError`.
 - **`max31865_adafruit` wiring:** monkeypatch `resolve_spi_bus` and
   `adafruit_max31865.MAX31865` to assert `_init_device` calls the helper with
   `default_cs='D6'` and the parsed sensor params, without importing real
