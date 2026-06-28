@@ -8,10 +8,12 @@ from .mcp2210 import (  # noqa: E402
     MCP2210BusUnavailableError,
     MCP2210InProgressError,
 )
+from .spi import SPI  # noqa: F401
 
 __all__ = [
     "MCP2210",
     "MCP2210Error",
     "MCP2210BusUnavailableError",
     "MCP2210InProgressError",
+    "SPI",
 ]
