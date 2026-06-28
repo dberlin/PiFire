@@ -19,6 +19,13 @@ def _xfer_resp(rx_bytes, engine):
     return r
 
 
+def test_configure_requires_lock():
+    dev, _ = make()
+    spi = dev.spi
+    with pytest.raises(RuntimeError):
+        spi.configure(baudrate=100000)
+
+
 def test_configure_rejects_non_8_bits():
     dev, _ = make()
     spi = dev.spi

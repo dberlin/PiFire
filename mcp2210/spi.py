@@ -18,6 +18,8 @@ class SPI:
         self._locked = False
 
     def configure(self, *, baudrate=100000, polarity=0, phase=0, bits=8):
+        if not self._locked:
+            raise RuntimeError("function requires lock")
         if bits != 8:
             raise ValueError("MCP2210 supports 8 bits per word only")
         if polarity not in (0, 1) or phase not in (0, 1):
