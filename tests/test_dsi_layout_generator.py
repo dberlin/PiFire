@@ -14,6 +14,10 @@ def test_reproduces_committed_1024x768_byte_for_byte():
     assert dumps(build(1024, 768)) == _committed(1024, 768)
 
 
+def test_reproduces_committed_1280x720_byte_for_byte():
+    assert dumps(build(1280, 720)) == _committed(1280, 720)
+
+
 def test_registered_resolutions():
     assert (1024, 768) in RESOLUTIONS
     assert (1280, 720) in RESOLUTIONS
