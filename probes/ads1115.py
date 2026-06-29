@@ -41,13 +41,6 @@ from probes.base import ProbeInterface, resolve_i2c_bus
 *****************************************
 '''
 
-BUSMAP = {
-	'0x48' : 0x48,  # Address Pin GND
-	'0x49' : 0x49,  # Address Pin VIN 
-	'0x4A' : 0x4A,	# Address Pin SDA
-	'0x4B' : 0x4B	# Address Pin SCL
-}
-
 class ADSDevice():
 	''' ADS1115 Device Based on the ADS1115 Python Module '''
 	def __init__(self, i2c_bus_addr=0x48, i2c_bus_kind='basic', i2c_bus_num=0):
@@ -86,7 +79,7 @@ class ReadProbes(ProbeInterface):
 	def _init_device(self):
 		self.time_delay = 0.008
 		self.device_info['ports'] = ['ADC0', 'ADC1', 'ADC2', 'ADC3']
-		i2c_bus_addr = BUSMAP[self.device_info['config'].get('i2c_bus_addr', '0x48')]
+		i2c_bus_addr = int(self.device_info['config'].get('i2c_bus_addr', '0x48'), 16)
 		i2c_bus_kind = self.device_info['config'].get('i2c_bus_kind', 'basic')
 		i2c_bus_num = self.device_info['config'].get('i2c_bus_num', 0)
 		self.device = ADSDevice(i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num)
