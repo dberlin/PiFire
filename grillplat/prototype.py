@@ -11,9 +11,9 @@
 # *****************************************
 
 """
-	==============================
-	  Imported Libraries
-	==============================
+==============================
+  Imported Libraries
+==============================
 """
 
 from gpiozero.threads import GPIOThread
@@ -25,15 +25,15 @@ from common import is_float, create_logger, get_os_info
 	==============================
 """
 
-class GrillPlatform:
 
+class GrillPlatform:
 	def __init__(self, config):
 		self.logger = create_logger('control')
 		try:
-			self.out_pins = config.get('outputs', None)  # Pins to control the PiFire outputs 
-			self.in_pins = config.get('inputs', None)  # Pins for input 
+			self.out_pins = config.get('outputs', None)  # Pins to control the PiFire outputs
+			self.in_pins = config.get('inputs', None)  # Pins for input
 			self.dc_fan = config.get('dc_fan', False)  # Save state for DC Fan
-			self.frequency = config.get('frequency', 100)  # Save configured fan frequency 
+			self.frequency = config.get('frequency', 100)  # Save configured fan frequency
 			self.standalone = config.get('standalone', True)  # Save configured state for Standalone
 			self.current = {}
 		except:
@@ -65,7 +65,7 @@ class GrillPlatform:
 		self.out_pins['fan'] = False
 
 	def fan_toggle(self):
-		if(self.out_pins['fan']):
+		if self.out_pins['fan']:
 			self.out_pins['fan'] = False
 		else:
 			self.out_pins['fan'] = True
@@ -76,7 +76,7 @@ class GrillPlatform:
 		self._stop_ramp()
 		duty_cycle = float((100 - percent) / 100.0)
 		self.out_pins['pwm'] = duty_cycle
-		#print('Set PWM Speed ' + str(percent))
+		# print('Set PWM Speed ' + str(percent))
 
 	def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
 		self.out_pins['fan'] = True
@@ -98,7 +98,7 @@ class GrillPlatform:
 		self.out_pins['power'] = False
 
 	def get_input_status(self):
-		return (self.in_pins['selector'])
+		return self.in_pins['selector']
 
 	def set_input_status(self, value):
 		self.in_pins['selector'] = value
@@ -138,10 +138,10 @@ class GrillPlatform:
 		for value, delay in sequence:
 			percent = round(float(100 - (value * 100)), 4)
 			self.out_pins['pwm'] = percent
-			#print('Set PWM Speed ' + str(percent))
+			# print('Set PWM Speed ' + str(percent))
 			if self._ramp_thread.stopping.wait(delay):
 				break
-	
+
 	def cleanup(self):
 		self.power_off()
 		self.igniter_off()
@@ -168,15 +168,13 @@ class GrillPlatform:
 			'scan_bluetooth',
 			'os_info',
 			'network_info',
-			'hardware_info'
+			'hardware_info',
 		]
 
 		data = {
-			'result' : 'OK',
-			'message' : 'Supported commands listed in "data".',
-			'data' : {
-				'supported_cmds' : supported_commands
-			}
+			'result': 'OK',
+			'message': 'Supported commands listed in "data".',
+			'data': {'supported_cmds': supported_commands},
 		}
 		return data
 
@@ -195,73 +193,57 @@ class GrillPlatform:
 			message = 'No under-voltage or throttling detected.'
 
 		data = {
-			'result' : 'OK',
-			'message' : message,
-			'data' : {
-				'cpu_under_voltage' : under_voltage,
-				'cpu_throttled' : throttled
-			}
+			'result': 'OK',
+			'message': message,
+			'data': {'cpu_under_voltage': under_voltage, 'cpu_throttled': throttled},
 		}
 		return data
-	
+
 	def check_wifi_quality(self, arglist):
 		"""Checks the Wi-Fi signal quality on a Raspberry Pi and returns the value (or None if not connected)."""
 		# Return None if not connected or if there was an error
 
 		data = {
-			'result' : 'OK',
-			'message' : 'Success.',
-			'data' : {
-				'wifi_quality_value' : 60,
-				'wifi_quality_max' : 70,
-				'wifi_quality_percentage' : 80
-			}
+			'result': 'OK',
+			'message': 'Success.',
+			'data': {'wifi_quality_value': 60, 'wifi_quality_max': 70, 'wifi_quality_percentage': 80},
 		}
 		return data
 
 	def check_cpu_temp(self, arglist):
 		temp = '40.0'
-		
+
 		if is_float(temp):
 			temp = float(temp)
 		else:
 			temp = 0.0
-		
-		data = {
-			'result' : 'OK',
-			'message' : 'Success.',
-			'data' : {
-				'cpu_temp' : temp
-			}
-		}
+
+		data = {'result': 'OK', 'message': 'Success.', 'data': {'cpu_temp': temp}}
 		return data
-	
+
 	def check_alive(self, arglist):
-		'''
-		 Simple check to see if the platform is up and running. 
-		'''
-		
-		data = {
-			'result' : 'OK',
-			'message' : 'The control script is running.',
-			'data' : {}
-		}
+		"""
+		Simple check to see if the platform is up and running.
+		"""
+
+		data = {'result': 'OK', 'message': 'The control script is running.', 'data': {}}
 		return data
 
 	def scan_bluetooth(self, arglist):
-		'''
-		 Scan for bluetooth device addresses using bleak (modern BlueZ D-Bus API).
-		 bleak cooperates with bluetoothd rather than fighting it over raw HCI access,
-		 making it compatible with BlueZ 5.56+ unlike the unmaintained bluepy library.
-		'''
+		"""
+		Scan for bluetooth device addresses using bleak (modern BlueZ D-Bus API).
+		bleak cooperates with bluetoothd rather than fighting it over raw HCI access,
+		making it compatible with BlueZ 5.56+ unlike the unmaintained bluepy library.
+		"""
 		import asyncio
+
 		try:
 			from bleak import BleakScanner
 		except ImportError:
 			return {
 				'result': 'ERROR',
 				'message': 'bleak is not installed. Run: pip install bleak',
-				'data': {'bt_devices': []}
+				'data': {'bt_devices': []},
 			}
 
 		bt_devices = []
@@ -282,53 +264,36 @@ class GrillPlatform:
 			message = f'Bluetooth scan error: {e}'
 			self.logger.error(f'scan_bluetooth: Error during scan - {e}')
 
-		data = {
-			'result' : result,
-			'message' : message,
-			'data' : {
-				'bt_devices' : bt_devices
-			}
-		}
+		data = {'result': result, 'message': message, 'data': {'bt_devices': bt_devices}}
 		return data
-	
+
 	def os_info(self, arglist):
 		"""
 		Retrieve OS information such as version and architecture.
 		"""
 		os_info = get_os_info()
-		
-		data = {
-			'result' : 'OK',
-			'message' : 'OS information retrieved successfully.',
-			'data' : os_info
-		}
+
+		data = {'result': 'OK', 'message': 'OS information retrieved successfully.', 'data': os_info}
 		return data
-	
+
 	def network_info(self, arglist):
 		"""
 		Retrieve network information such as IP address and MAC address.
 		"""
 		import netifaces
-		
+
 		ifaces = netifaces.interfaces()
 		net_info = {}
-		
+
 		for iface in ifaces:
 			addrs = netifaces.ifaddresses(iface)
 			ip_addr = addrs.get(netifaces.AF_INET, [{}])[0].get('addr', 'N/A')
 			mac_addr = addrs.get(netifaces.AF_LINK, [{}])[0].get('addr', 'N/A')
-			net_info[iface] = {
-				'ip_address': ip_addr,
-				'mac_address': mac_addr
-			}
-		
-		data = {
-			'result' : 'OK',
-			'message' : 'Network information retrieved successfully.',
-			'data' : net_info
-		}
+			net_info[iface] = {'ip_address': ip_addr, 'mac_address': mac_addr}
+
+		data = {'result': 'OK', 'message': 'Network information retrieved successfully.', 'data': net_info}
 		return data
-	
+
 	def hardware_info(self, arglist):
 		"""
 		Retrieve hardware information such as CPU model and RAM size.
@@ -340,7 +305,7 @@ class GrillPlatform:
 			'model': 'Unknown',
 			'model_name': 'Unknown',
 			'cores': psutil.cpu_count(logical=True),
-			'frequency': psutil.cpu_freq().current if psutil.cpu_freq() else 'Unknown'
+			'frequency': psutil.cpu_freq().current if psutil.cpu_freq() else 'Unknown',
 		}
 
 		with open('/proc/cpuinfo') as f:
@@ -353,14 +318,10 @@ class GrillPlatform:
 					cpu_info['model'] = line.strip().split(':')[1].strip()
 
 		mem_info = psutil.virtual_memory()
-		
+
 		data = {
-			'result' : 'OK',
-			'message' : 'Hardware information retrieved successfully.',
-			'data' : {
-				'cpu_info': cpu_info,
-				'total_ram': mem_info.total,
-				'available_ram': mem_info.available
-			}
+			'result': 'OK',
+			'message': 'Hardware information retrieved successfully.',
+			'data': {'cpu_info': cpu_info, 'total_ram': mem_info.total, 'available_ram': mem_info.available},
 		}
 		return data

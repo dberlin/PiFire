@@ -1,31 +1,32 @@
 #!/usr/bin/env python3
-'''
+"""
 *****************************************
 PiFire Display Interface Library
 *****************************************
 
- Description: 
+ Description:
    This library supports using
  the ST7789 display with resolution.
  This module utilizes the Pimoroni libraries
  to interface this display.
 
 *****************************************
-'''
+"""
 
-'''
+"""
  Imported Libraries
-'''
+"""
 import threading
 import ST7789 as ST7789
 from display.base_240x320 import DisplayBase
 from PIL import Image
 
-'''
+"""
 Display class definition
-'''
-class Display(DisplayBase):
+"""
 
+
+class Display(DisplayBase):
 	def __init__(self, dev_pins, buttonslevel='HIGH', rotation=0, units='F', config={}):
 		self.config = config
 		super().__init__(dev_pins, buttonslevel, rotation, units, config)
@@ -46,7 +47,7 @@ class Display(DisplayBase):
 			rotation=self.rotation,
 			width=320,
 			height=240,
-			spi_speed_hz=60 * 1000 * 1000
+			spi_speed_hz=60 * 1000 * 1000,
 		)
 		self.WIDTH = self.device.width
 		self.HEIGHT = self.device.height
@@ -55,9 +56,9 @@ class Display(DisplayBase):
 		display_thread = threading.Thread(target=self._display_loop)
 		display_thread.start()
 
-	'''
+	"""
 	============== Graphics / Display / Draw Methods ============= 
-	'''
+	"""
 
 	def _display_clear(self):
 		# Create blank canvas
@@ -70,4 +71,4 @@ class Display(DisplayBase):
 		# Display canvas to screen for ST7789
 		# Turn on Backlight (just in case it was off)
 		self.device.set_backlight(1)
-		self.device.display(canvas.convert(mode="RGB"))
+		self.device.display(canvas.convert(mode='RGB'))

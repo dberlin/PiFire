@@ -6,12 +6,15 @@ import pytest
 @pytest.fixture
 def platform():
 	import grillplat.x86_numato_emc2101 as mod
-	with mock.patch.object(mod, 'NumatoUSBRelay'), \
-	     mock.patch.object(mod, 'EMC2101'), \
-	     mock.patch.object(mod, 'ExtendedI2C'), \
-	     mock.patch.object(mod, 'busio'), \
-	     mock.patch.object(mod, 'board'), \
-	     mock.patch.object(mod, 'find_i2c_bus', return_value=7):
+
+	with (
+		mock.patch.object(mod, 'NumatoUSBRelay'),
+		mock.patch.object(mod, 'EMC2101'),
+		mock.patch.object(mod, 'ExtendedI2C'),
+		mock.patch.object(mod, 'busio'),
+		mock.patch.object(mod, 'board'),
+		mock.patch.object(mod, 'find_i2c_bus', return_value=7),
+	):
 		config = {'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}, 'frequency': 100}
 		yield mod.GrillPlatform(config)
 
@@ -25,6 +28,7 @@ def test_check_throttled_reports_ok_and_false(platform):
 
 def test_check_cpu_temp_uses_psutil(platform):
 	import grillplat.x86_numato_emc2101 as mod
+
 	fake_reading = mock.Mock(current=47.0)
 	with mock.patch('psutil.sensors_temperatures', return_value={'coretemp': [fake_reading]}):
 		data = platform.check_cpu_temp([])

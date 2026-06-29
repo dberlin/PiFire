@@ -1,4 +1,4 @@
-'''
+"""
 ==============================================================================
  PiFire Module Wizard
 ==============================================================================
@@ -6,18 +6,19 @@
  Description: This script used during install to configure modules and settings
 
 ==============================================================================
-'''
+"""
 
-'''
+"""
 ==============================================================================
  Imported Libraries
 ==============================================================================
-'''
+"""
 
-from common import * # Common Library for writing settings
+from common import *  # Common Library for writing settings
 import subprocess
 import argparse
 import logging
+
 
 def _convert_value(value):
 	"""
@@ -29,10 +30,10 @@ def _convert_value(value):
 	Returns:
 	- int or float or bool or list or str or None: The converted value in the appropriate data type.
 
-	The function checks if the value is a string representation of a number and converts it to an integer or float if possible. 
-	If the value is the string representation of a boolean, it is converted to a boolean value. 
-	If the value is the string representation of None, it is converted to None. 
-	If the value is a string representation of a list, it is converted to a list. 
+	The function checks if the value is a string representation of a number and converts it to an integer or float if possible.
+	If the value is the string representation of a boolean, it is converted to a boolean value.
+	If the value is the string representation of None, it is converted to None.
+	If the value is a string representation of a list, it is converted to a list.
 	Otherwise, the original value is returned.
 
 	Note:
@@ -61,53 +62,36 @@ def _convert_value(value):
 	if value == 'True' or value == 'False':
 		return value == 'True'
 
-	# Convert 'None' to None 
+	# Convert 'None' to None
 	if value == 'None':
-		return None 
+		return None
 
 	# Convert String List to List
 	if value.startswith('[') and value.endswith(']'):
-		value = value.replace('\'', '').replace('\"', '').replace(' ', '')
+		value = value.replace("'", '').replace('"', '').replace(' ', '')
 		return [_convert_value(item) for item in value[1:-1].split(',') if item]
 
 	return value
 
+
 def wizardInstallInfoExisting(settings, wizardData):
 	wizardInstallInfo = {
-		'modules' : {
-			'grillplatform' : {
-				'profile_selected' : [settings['platform']['current']],
-				'settings' : {},
-				'config' : {}
-			}, 
-			'display' : {
-				'profile_selected' : [settings['modules']['display']],
-				'settings' : {},
-				'config' : {}
-			}, 
-			'distance' : {
-				'profile_selected' : [settings['modules']['dist']],
-				'settings' : {},
-				'config' : {}
-			}, 
-			'probes' : {
-				'profile_selected' : [],
-				'settings' : {
-					'units' : settings['globals']['units']
-				},
-				'config' : {}
-			}
-		}, 
-		'probe_map' : settings['probe_settings']['probe_map']
-	} 
-	''' Populate Probes Module List with all configured probe devices '''
+		'modules': {
+			'grillplatform': {'profile_selected': [settings['platform']['current']], 'settings': {}, 'config': {}},
+			'display': {'profile_selected': [settings['modules']['display']], 'settings': {}, 'config': {}},
+			'distance': {'profile_selected': [settings['modules']['dist']], 'settings': {}, 'config': {}},
+			'probes': {'profile_selected': [], 'settings': {'units': settings['globals']['units']}, 'config': {}},
+		},
+		'probe_map': settings['probe_settings']['probe_map'],
+	}
+	""" Populate Probes Module List with all configured probe devices """
 	for device in wizardInstallInfo['probe_map']['probe_devices']:
 		wizardInstallInfo['modules']['probes']['profile_selected'].append(device['module'])
-	
-	''' Populate Modules Info with current Settings '''
+
+	""" Populate Modules Info with current Settings """
 	for module in ['grillplatform', 'display', 'distance']:
 		selected = wizardInstallInfo['modules'][module]['profile_selected'][0]
-		''' Error condition if the item in settings doesn't match the wizard manifest '''
+		""" Error condition if the item in settings doesn't match the wizard manifest """
 		if selected not in wizardData['modules'][module].keys():
 			if module == 'grillplatform':
 				selected = 'custom'
@@ -118,13 +102,16 @@ def wizardInstallInfoExisting(settings, wizardData):
 
 		for setting in wizardData['modules'][module][selected]['settings_dependencies']:
 			settingsLocation = wizardData['modules'][module][selected]['settings_dependencies'][setting]['settings']
-			settingsValue = settings.copy() 
+			settingsValue = settings.copy()
 			for index in range(0, len(settingsLocation)):
 				settingsValue = settingsValue[settingsLocation[index]]
 			wizardInstallInfo['modules'][module]['settings'][setting] = str(settingsValue)
 		if module == 'display':
-			wizardInstallInfo['modules'][module]['config'] = settings['display']['config'][settings['modules']['display']]
+			wizardInstallInfo['modules'][module]['config'] = settings['display']['config'][
+				settings['modules']['display']
+			]
 	return wizardInstallInfo
+
 
 def run_wizard(settings, WizardData, WizardInstallInfo):
 	settings = read_settings()
@@ -143,10 +130,10 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 	distance_selected = WizardInstallInfo['modules']['distance']['profile_selected'][0]
 	settings['modules']['dist'] = WizardData['modules']['distance'][distance_selected]['filename']
 
-	''' Configuring Probes Data '''
+	""" Configuring Probes Data """
 	settings['probe_settings']['probe_map'] = WizardInstallInfo['probe_map']
 
-	''' Update History Page Config with Latest Probe Config '''
+	""" Update History Page Config with Latest Probe Config """
 	settings['history_page']['probe_config'] = default_probe_config(settings)
 
 	percent = 10
@@ -163,7 +150,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 			settingsLocation = WizardData['modules'][module][selected]['settings_dependencies'][setting]['settings']
 			selected_setting = WizardInstallInfo['modules'][module]['settings'][setting]
 
-			# Convert Strings to the correct type 
+			# Convert Strings to the correct type
 			selected_setting = _convert_value(selected_setting)
 
 			# Special Handling for Units
@@ -171,7 +158,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 				units = WizardInstallInfo['modules'][module]['settings'][setting]
 				if units == 'C' and settings['globals']['units'] == 'F':
 					settings = convert_settings_units('C', settings)
-				elif(units == 'F') and (settings['globals']['units'] == 'C'):
+				elif (units == 'F') and (settings['globals']['units'] == 'C'):
 					settings = convert_settings_units('F', settings)
 			else:
 				settings = set_nested_key_value(settings, settingsLocation, selected_setting)
@@ -182,7 +169,9 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 			settings['display']['config'][selected] = WizardInstallInfo['modules']['display']['config']
 			for key in settings['display']['config'][selected]:
 				# Convert Strings to the correct type
-				settings['display']['config'][selected][key] = _convert_value(settings['display']['config'][selected][key])
+				settings['display']['config'][selected][key] = _convert_value(
+					settings['display']['config'][selected][key]
+				)
 
 	percent = 15
 	status = 'Installing Dependencies...'
@@ -191,7 +180,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 	set_wizard_install_status(percent, status, output)
 	time.sleep(2)
 
-	''' Set the grillplatform module per the system_type '''
+	""" Set the grillplatform module per the system_type """
 	settings['modules']['grillplat'] = 'prototype'
 	if settings['platform']['system_type'] == 'raspberry_pi_all':
 		settings['modules']['grillplat'] = 'raspberry_pi_all'
@@ -211,7 +200,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 	py_dependencies = []
 	apt_dependencies = []
 	command_list = []
-	reboot_required = False 
+	reboot_required = False
 
 	for module in WizardInstallInfo['modules']:
 		for selected in WizardInstallInfo['modules'][module]['profile_selected']:
@@ -226,12 +215,12 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 			if WizardData['modules'][module][selected]['reboot_required']:
 				reboot_required = True
 
-	# Calculate the percent done from remaining items to install 
+	# Calculate the percent done from remaining items to install
 	items_remaining = len(py_dependencies) + len(apt_dependencies) + len(command_list)
 	if items_remaining == 0:
 		increment = 80
 	else:
-		increment = 80 / items_remaining 
+		increment = 80 / items_remaining
 
 	# Install Apt dependencies
 	launch_apt = ['sudo', 'apt', 'install']
@@ -245,7 +234,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 		command.extend(launch_apt)
 		command.append(apt_item)
 		command.append('-y')
-		
+
 		if is_real_hardware():
 			process = subprocess.Popen(command, stdout=subprocess.PIPE, encoding='utf-8')
 			while True:
@@ -261,7 +250,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 		else:
 			# This path is for development/testing
 			time.sleep(2)
-		
+
 		percent += increment
 		output = f' - Completed Install of {apt_item}'
 		logger.info(output)
@@ -306,7 +295,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 		logger.info(output)
 		set_wizard_install_status(percent, status, output)
 
-	# Get PIP List 
+	# Get PIP List
 	command = [python_exec, 'updater.py', '-p']
 
 	pip_list = subprocess.run(command, capture_output=True, text=True)
@@ -319,9 +308,9 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 	set_wizard_install_status(percent, status, output)
 
 	for command in command_list:
-		if "sudo" in command and "python" in command:
-			#replace "python" with python_exec in command list object
-			command = [python_exec if item == "python" else item for item in command]
+		if 'sudo' in command and 'python' in command:
+			# replace "python" with python_exec in command list object
+			command = [python_exec if item == 'python' else item for item in command]
 		if is_real_hardware():
 			process = subprocess.Popen(command, stdout=subprocess.PIPE, encoding='utf-8')
 			while True:
@@ -332,11 +321,11 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 					set_wizard_install_status(percent, status, output.strip())
 					print(f'command output: {output.strip()}')
 					logger.info(output.strip())
-			#return_code = process.poll()
+			# return_code = process.poll()
 		else:
 			# This path is for development/testing
 			time.sleep(2)
-			
+
 		percent += increment
 		output = f' - Completed General Dependency Item'
 		logger.info(output)
@@ -346,7 +335,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 	status = 'Finished!'
 	if reboot_required:
 		output = ' - Finished!  Rebooting Server...'
-	else: 
+	else:
 		output = ' - Finished!  Restarting Server...'
 
 	logger.info(output)
@@ -358,25 +347,29 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 	set_wizard_install_status(percent, status, output)
 
 	# Clear First Time Setup Flag
-	settings['globals']['first_time_setup'] = False 
+	settings['globals']['first_time_setup'] = False
 	# Commit Setting to JSON
 	write_settings(settings)
 
 
-
-'''
+"""
 ==============================================================================
  Main Program
 ==============================================================================
-'''
+"""
 
 print('PiFire Module Wizard')
 print('Copyright 2022-2025, MIT License, Ben Parmeter')
 
-if __name__ == "__main__":
+if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='PiFire Module Wizard')
-	parser.add_argument('-e','--existing', action='store_true', help='Run the wizard to install modules and settings for an existing PiFire installation.')
-	parser.add_argument('-d','--debug', action='store_true', help='Run the wizard in debug mode.')
+	parser.add_argument(
+		'-e',
+		'--existing',
+		action='store_true',
+		help='Run the wizard to install modules and settings for an existing PiFire installation.',
+	)
+	parser.add_argument('-d', '--debug', action='store_true', help='Run the wizard in debug mode.')
 
 	args = parser.parse_args()
 
@@ -390,7 +383,12 @@ if __name__ == "__main__":
 	else:
 		log_level = logging.INFO
 
-	logger = create_logger('wizard', filename='./logs/wizard.log', messageformat='%(asctime)s | %(levelname)s | %(message)s', level=log_level)
+	logger = create_logger(
+		'wizard',
+		filename='./logs/wizard.log',
+		messageformat='%(asctime)s | %(levelname)s | %(message)s',
+		level=log_level,
+	)
 
 	if args.existing:
 		print('Running Wizard for Existing PiFire Installation...')
@@ -402,7 +400,7 @@ if __name__ == "__main__":
 			print('Found existing wizard install info.')
 			run_wizard(settings, WizardData, WizardInstallInfo)
 			exit(0)
-	else:		
+	else:
 		WizardInstallInfo = load_wizard_install_info()
 		if WizardInstallInfo is None:
 			print('No wizard install info found.  Exiting...')

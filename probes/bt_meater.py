@@ -1,20 +1,20 @@
-'''
+"""
 *****************************************
-PiFire Bluetooth Meater Module 
+PiFire Bluetooth Meater Module
 *****************************************
 
-Description: 
+Description:
   This module connects to the Meater BTLE thermometer via bluetooth and returns temperature data.
 
-  	Ex Device Definition: 
-	
+        Ex Device Definition:
+
 	device_info = {
 			'device' : 'your_device_name',	# Unique name for the device
 			'module' : 'bt_meater_alt',  	# Must be populated for this module to load properly
 			'ports' : ['BT_Tip', 'BT_Ambient'],  # Meater probes have two temperature readings
 			'config' : {
 				'transient' : True
-			} 
+			}
 		}
 
 	''
@@ -25,29 +25,28 @@ Credits:
 	Kjokay - April 2020
 	https://github.com/kjokay
 	Likely derived from: https://github.com/nathanfaber/meaterble
-	Nathan Fabar - Jan 2020 
+	Nathan Fabar - Jan 2020
 
-	Additional code derived from: 
+	Additional code derived from:
 	https://github.com/jcallaghan/home-assistant-config/issues/82
 	https://community.home-assistant.io/t/support-for-meater-true-wireless-cooking-thermometer/513156
 	https://github.com/nathanfaber/meaterble
 
 Requirements:
-	bluepy - 
+	bluepy -
 		https://github.com/IanHarvey/bluepy
 		https://ianharvey.github.io/bluepy-doc/
 		** sudo apt install libglib2.0-dev ** prior to installing bluepy
 		.. venv/lib/python3.12/site-packages/bluepy$ sudo setcap 'cap_net_raw,cap_net_admin+eip' bluepy-helper
-	A compatible BTLE Meater thermometer.  This module is known to work with: Original Meater, Meater Plus.  
-	This module does not appear to be working with the Meater Pro (Meater 2 Plus) yet. 
-'''
+	A compatible BTLE Meater thermometer.  This module is known to work with: Original Meater, Meater Plus.
+	This module does not appear to be working with the Meater Pro (Meater 2 Plus) yet.
+"""
 
-
-'''
+"""
 *****************************************
  Imported Libraries
 *****************************************
-'''
+"""
 
 import threading
 import time
@@ -56,7 +55,8 @@ import struct
 
 from probes.base import ProbeInterface
 from bluepy import btle
-#from icecream import ic  # For debugging
+# from icecream import ic  # For debugging
+
 
 class BaseMeater:
 	# Handle addresses for Meater Original
@@ -64,8 +64,8 @@ class BaseMeater:
 	HANDLE_BATTERY = 35
 	HANDLE_FIRMWARE = 22
 
-	def __init__(self,  peripheral, characteristic_uuid):
-		self.logger = logging.getLogger("control")
+	def __init__(self, peripheral, characteristic_uuid):
+		self.logger = logging.getLogger('control')
 		self.peripheral = peripheral
 		self.__tip = None
 		self.__ambient = None
@@ -79,10 +79,10 @@ class BaseMeater:
 			self.discovered_handle_temp = self.HANDLE_TEMP
 			logger_msg = f'(Meater) No handle found for characteristic: {self.characteristic_uuid}, using default handle: {self.discovered_handle_temp}'
 			self.logger.debug(logger_msg)
-			#ic(logger_msg)
+			# ic(logger_msg)
 
 	def getHandle(self, uuid):
-		''' Get the handle for a given characteristic UUID '''
+		"""Get the handle for a given characteristic UUID"""
 		services = self.peripheral.getServices()
 		for service in services:
 			characteristics = service.getCharacteristics()
@@ -90,7 +90,7 @@ class BaseMeater:
 				if characteristic.uuid == uuid:
 					logger_msg = f'(Meater) Found characteristic: {characteristic.uuid} with handle: {characteristic.getHandle()}'
 					self.logger.debug(logger_msg)
-					#ic(logger_msg)
+					# ic(logger_msg)
 					return characteristic.getHandle()
 		return self.HANDLE_TEMP
 
@@ -101,7 +101,7 @@ class BaseMeater:
 		tip = self.bytesToInt(array[0], array[1])
 		ra = self.bytesToInt(array[2], array[3])
 		oa = self.bytesToInt(array[4], array[5])
-		return int(tip+(max(0,((((ra-min(48,oa))*16)*589))/1487)))
+		return int(tip + (max(0, (((ra - min(48, oa)) * 16) * 589) / 1487)))
 
 	def readCharacteristic(self, c):
 		try:
@@ -109,12 +109,12 @@ class BaseMeater:
 		except btle.BTLEDisconnectError as e:
 			logger_msg = f'(Meater) Device disconnected: {e}'
 			self.logger.debug(logger_msg)
-			#ic(logger_msg)
+			# ic(logger_msg)
 			raise
 		except Exception as e:
 			logger_msg = f'(Meater) Read Attempt failed: {e}'
 			self.logger.debug(logger_msg)
-			#ic(logger_msg)
+			# ic(logger_msg)
 		return bytearray(self.peripheral.readCharacteristic(c))
 
 	def update(self):
@@ -127,23 +127,23 @@ class BaseMeater:
 		tempBytes = self.readCharacteristic(self.discovered_handle_temp)
 		logger_msg = f'(Meater) Temperature bytes: {tempBytes}'
 		self.logger.debug(logger_msg)
-		#ic(logger_msg)
+		# ic(logger_msg)
 		self.__tip = self.bytesToInt(tempBytes[0], tempBytes[1])
 		logger_msg = f'(Meater) Tip: {self.__tip}'
 		self.logger.debug(logger_msg)
-		#ic(logger_msg)
+		# ic(logger_msg)
 		self.__ambient = self.convertAmbient(tempBytes)
 		logger_msg = f'(Meater) Ambient: {self.__ambient}'
 		self.logger.debug(logger_msg)
-		#ic(logger_msg)
+		# ic(logger_msg)
 
 	def _read_battery(self):
 		batteryBytes = self.readCharacteristic(self.HANDLE_BATTERY)
-		self.battery_percentage = self.bytesToInt(batteryBytes[0], batteryBytes[1])*10
+		self.battery_percentage = self.bytesToInt(batteryBytes[0], batteryBytes[1]) * 10
 
 	def _read_firmware(self):
 		firmware_bytes = self.readCharacteristic(self.HANDLE_FIRMWARE)
-		self.firmware_id, self.probe_id = str(firmware_bytes).split("_")
+		self.firmware_id, self.probe_id = str(firmware_bytes).split('_')
 
 	@property
 	def tip(self):
@@ -157,18 +157,18 @@ class BaseMeater:
 	def probe_values_C(self):
 		tip = round(self.getTipC(), 1)
 		ambient = round(self.getAmbientC(), 1)
-		#ic(tip, ambient)
+		# ic(tip, ambient)
 		return [tip, ambient]
 
 	def toCelsius(self, value):
 		if value is None:
 			return None
-		return (float(value)+8.0)/16.0
+		return (float(value) + 8.0) / 16.0
 
 	def toFahrenheit(self, value):
 		if value is None:
 			return None
-		return ((self.toCelsius(value)*9)/5)+32.0
+		return ((self.toCelsius(value) * 9) / 5) + 32.0
 
 	def getTipF(self):
 		return self.toFahrenheit(self.__tip)
@@ -191,14 +191,16 @@ class BaseMeater:
 	def firmware(self):
 		return self.firmware_id
 
+
 class MeaterOriginal(BaseMeater):
 	def __init__(self, peripheral, characteristic_uuid):
 		super().__init__(peripheral, characteristic_uuid)
 
+
 class MeaterPro(BaseMeater):
 	def __init__(self, peripheral, characteristic_uuid):
 		super().__init__(peripheral, characteristic_uuid)
-	
+
 	def toCelsius(self, value):
 		if value is None:
 			return None
@@ -219,7 +221,7 @@ class MeaterPro(BaseMeater):
 		return temp * 9 / 5 + 32
 
 	def get_short(self, data, offset):
-		return struct.unpack_from("<h", data, offset)[0]	
+		return struct.unpack_from('<h', data, offset)[0]
 
 	def ambient_correction(self, ambient_temp, internal_temp):
 		return int(internal_temp + ((ambient_temp - internal_temp) * 1.2))
@@ -238,7 +240,7 @@ class MeaterPro(BaseMeater):
 
 	def getAmbient(self):
 		return self.toFahrenheitAmbient(self.ambient_temp)
-	
+
 	def getAmbientC(self):
 		return self.ambient_temp
 
@@ -258,13 +260,13 @@ class MeaterPro(BaseMeater):
 		self.convert_to_temperatures(tempBytes)
 
 
-class Meater_Device():
+class Meater_Device:
 	def __init__(self, port_map, primary_port, units, transient=True, hardware_id=None):
-		self.logger = logging.getLogger("control")
+		self.logger = logging.getLogger('control')
 		self.transient = transient
 		self.port_map = port_map
 		self.primary_port = primary_port
-		self.units = units 
+		self.units = units
 		self.debug = True
 		self.device = None
 		self.device_setup = False
@@ -277,12 +279,12 @@ class Meater_Device():
 		self.probe_id = None  # The probe ID of the Meater Probe, which should be etched on the probe (1-4)?
 
 		self.status = {
-			'battery_percentage' : self.battery_percentage,
-			'battery_charging' : True if self.battery_percentage == 0 else False,
-			'connected' : self.device_setup,
-			'hardware_id' : self.hardware_id,
-			'firmware_id' : self.firmware_id,
-			'probe_id' : self.probe_id
+			'battery_percentage': self.battery_percentage,
+			'battery_charging': True if self.battery_percentage == 0 else False,
+			'connected': self.device_setup,
+			'hardware_id': self.hardware_id,
+			'firmware_id': self.firmware_id,
+			'probe_id': self.probe_id,
 		}
 
 		self.sensor_thread_active = False
@@ -296,63 +298,63 @@ class Meater_Device():
 		self.meater = None  # Will hold the specific Meater instance
 
 	def _setup_device(self):
-		''' Bluetooth Meater Device Class '''
+		"""Bluetooth Meater Device Class"""
 		while True:
-			''' Scan for a Meater Probe '''
+			""" Scan for a Meater Probe """
 			if self.hardware_id is None:
 				try:
 					scanner = btle.Scanner()
 
 					logger_msg = f'(Meater) Starting scan...'
 					self.logger.debug(logger_msg)
-					#ic(logger_msg)
+					# ic(logger_msg)
 
 					for entry in scanner.scan(5):
 						name = entry.getValueText(9)
-						#logger_msg = f'(Meater) Scanned Peripheral: {name} at address {entry.addr}'
-						#self.logger.debug(logger_msg)
-						#ic(logger_msg)
+						# logger_msg = f'(Meater) Scanned Peripheral: {name} at address {entry.addr}'
+						# self.logger.debug(logger_msg)
+						# ic(logger_msg)
 
-						if(name is not None and 'meater+' in name.lower()):
-							continue # Skip Meater+ devices as those are the base station devices and should be turned off
-						elif(name is not None and 'meater' in name.lower()):
+						if name is not None and 'meater+' in name.lower():
+							continue  # Skip Meater+ devices as those are the base station devices and should be turned off
+						elif name is not None and 'meater' in name.lower():
 							self.hardware_id = entry.addr
 							logger_msg = f'(Meater) Found a Meater Probe at address {entry.addr}'
 							self.logger.debug(logger_msg)
-							#ic(logger_msg)
+							# ic(logger_msg)
 							break
 					logger_msg = f'(Meater) Stopping scan.'
-				
+
 				except Exception as e:
 					logger_msg = f'(Meater) Error scanning for device: {e}'
 					self.logger.error(logger_msg)
-					#ic(logger_msg)
+					# ic(logger_msg)
 					time.sleep(10)
 
-			''' If we found the Hardware ID and it hasn't been setup, then setup the Meater Probe '''
+			""" If we found the Hardware ID and it hasn't been setup, then setup the Meater Probe """
 			if self.hardware_id is not None and self.device_setup is False:
-				# Connect to the Meater Probe 
+				# Connect to the Meater Probe
 				try:
 					self.device = btle.Peripheral(self.hardware_id)
 					self.device.setMTU(512)
 					logger_msg = f'(Meater) Connected to device: {self.hardware_id}'
 					self.logger.debug(logger_msg)
-					#ic(logger_msg)
+					# ic(logger_msg)
 
 				except Exception as e:
 					logger_msg = f'(Meater) Error connecting to device: {e}'
 					self.logger.debug(logger_msg)
-					#ic(logger_msg)
+					# ic(logger_msg)
 					self.device_setup = False
 					self.device = None
-					#self.hardware_id = None
-					#raise e
+					# self.hardware_id = None
+					# raise e
 
 				if self.device is not None:
 					try:
 						# We can determine if this is a Meater Original or Meater Pro (AKA Meater 2 Plus) by the service UUID
 						temp_handle = '7edda774-045e-4bbf-909b-45d1991a2876'
-						services =self.device.getServices()
+						services = self.device.getServices()
 						for service in services:
 							if service.uuid == 'c9e2746c-59f1-4e54-a0dd-e1e54555cf8b':
 								self.meater_type = 'MEATER_PRO'
@@ -360,7 +362,7 @@ class Meater_Device():
 								self.device_setup = True
 								logger_msg = f'(Meater) Meater Pro setup complete'
 								self.logger.debug(logger_msg)
-								#ic(logger_msg)
+								# ic(logger_msg)
 								break
 							elif service.uuid == 'a75cc7fc-c956-488f-ac2a-2dbc08b63a04':
 								self.meater_type = 'MEATER_ORIGINAL'
@@ -368,28 +370,28 @@ class Meater_Device():
 								self.device_setup = True
 								logger_msg = f'(Meater) Meater Original setup complete'
 								self.logger.debug(logger_msg)
-								#ic(logger_msg)
+								# ic(logger_msg)
 								break
 							else:
 								self.meater_type = None
 								self.meater = None
 								self.device_setup = False
-								#break
+								# break
 					except Exception as e:
 						logger_msg = f'(Meater) Error determining meater type: {e}'
 						self.logger.debug(logger_msg)
-						#ic(logger_msg)
-			
+						# ic(logger_msg)
+
 			time.sleep(10)
 
 	def _sensing_loop(self):
-		''' Bluetooth Meater Device Class '''
+		"""Bluetooth Meater Device Class"""
 		while True:
 			if self.device_setup:
 				self.sensor_thread_active = True
 				logger_msg = f'(Meater) Sensor thread active.'
 				self.logger.debug(logger_msg)
-				#ic(logger_msg)
+				# ic(logger_msg)
 
 				try:
 					while self.sensor_thread_active:
@@ -398,18 +400,18 @@ class Meater_Device():
 				except btle.BTLEDisconnectError as e:
 					logger_msg = f'(Meater) Device disconnected: {e}'
 					self.logger.error(logger_msg)
-					#ic(logger_msg)
+					# ic(logger_msg)
 					self.sensor_thread_active = False
 					self.device_setup = False
-					#self.hardware_id = None
+					# self.hardware_id = None
 					self.device = None
 				except Exception as e:
 					logger_msg = f'(Meater) Error in sensing loop: {e}'
 					self.logger.error(logger_msg)
-					#ic(logger_msg)
+					# ic(logger_msg)
 					self.sensor_thread_active = False
 					self.device_setup = False
-					#self.hardware_id = None
+					# self.hardware_id = None
 					self.device = None
 
 			time.sleep(1)
@@ -425,18 +427,23 @@ class Meater_Device():
 	def get_port_values(self):
 		return self.probe_values_C
 
-	def get_status(self): 
+	def get_status(self):
 		if self.battery_percentage is not None:
-			self.status['battery_percentage'] = self.battery_percentage if (self.battery_percentage > 0 and self.device_setup) else None
-			self.status['battery_charging'] = True if (self.battery_percentage == 0 and self.device_setup) else False # Reads zero when charging
+			self.status['battery_percentage'] = (
+				self.battery_percentage if (self.battery_percentage > 0 and self.device_setup) else None
+			)
+			self.status['battery_charging'] = (
+				True if (self.battery_percentage == 0 and self.device_setup) else False
+			)  # Reads zero when charging
 		else:
 			self.status['battery_percentage'] = self.battery_percentage
 			self.status['battery_charging'] = False
 		self.status['connected'] = self.device_setup
 		self.status['hardware_id'] = self.hardware_id
 		self.status['firmware_id'] = str(self.firmware_id)
-		self.status['probe_id'] = str(self.probe_id)	
+		self.status['probe_id'] = str(self.probe_id)
 		return self.status
+
 
 class ReadProbes(ProbeInterface):
 	def __init__(self, probe_info, device_info, units):
@@ -444,31 +451,35 @@ class ReadProbes(ProbeInterface):
 		if self.hardware_id == '':
 			self.hardware_id = None
 		super().__init__(probe_info, device_info, units)
-		#ic(self.port_map)
-		#ic(self.output_data)
-		#ic(device_info)
+		# ic(self.port_map)
+		# ic(self.output_data)
+		# ic(device_info)
 
-	def _init_device(self): 
+	def _init_device(self):
 		self.time_delay = 0
-		self.device = Meater_Device(self.port_map, self.primary_port, self.units, transient=self.transient, hardware_id=self.hardware_id)
+		self.device = Meater_Device(
+			self.port_map, self.primary_port, self.units, transient=self.transient, hardware_id=self.hardware_id
+		)
 
 	def read_all_ports(self, output_data):
 		port_values = {}
 
 		probe_values_C = self.device.get_port_values()
-		#ic(probe_values_C) # Debugging only	
+		# ic(probe_values_C) # Debugging only
 
 		if len(probe_values_C) >= len(self.port_map):
 			for index, port in enumerate(self.port_map):
-                		# Read Ports from Device
-				port_values[port] = probe_values_C[index] if self.units == 'C' else self._to_fahrenheit(probe_values_C[index])
-				#output_value = port_values[port] if port_values[port] != None else 0 # If the read value is None, pass that to the output
+				# Read Ports from Device
+				port_values[port] = (
+					probe_values_C[index] if self.units == 'C' else self._to_fahrenheit(probe_values_C[index])
+				)
+				# output_value = port_values[port] if port_values[port] != None else 0 # If the read value is None, pass that to the output
 				output_value = port_values[port]
 
-                		# Output Tr
+				# Output Tr
 				self.output_data['tr'][self.port_map[port]] = 0  # resistance NA
 
-                		# Get average temperature from the queue and store it in the output data structure
+				# Get average temperature from the queue and store it in the output data structure
 				if port == self.primary_port:
 					self.output_data['primary'][self.port_map[port]] = output_value
 				elif port in self.food_ports:
@@ -478,5 +489,5 @@ class ReadProbes(ProbeInterface):
 
 				if self.time_delay:
 					time.sleep(self.time_delay)  # Time delay, if needed for single-shot mode on some ADC's
-		
+
 		return self.output_data

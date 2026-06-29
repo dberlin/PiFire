@@ -4,8 +4,8 @@
 # PiFire Raspberry Pi Platform Interface Library
 # *****************************************
 #
-# Description: This library utilizes the Raspberry Pi to control outputs and 
-# monitor inputs for PiFire.  
+# Description: This library utilizes the Raspberry Pi to control outputs and
+# monitor inputs for PiFire.
 #
 # Relays (power, auger, igniter, and fan) are controlled via GPIO pins.
 #
@@ -22,14 +22,14 @@
 #     PWM duty cycle - the actual "percent high" waveform parameter sent to the PWM generator
 #     Fan percent (or "fan duty cycle") - the requested fan speed percentage
 #     Since the PWM board's amplifier inverts the PWM signal logic, technically:
-#	PWM duty cycle = (100 - fan percent speed / fan duty cycle)
-#	Fan percent speed = (100 - PWM duty cycle)
+# PWM duty cycle = (100 - fan percent speed / fan duty cycle)
+# Fan percent speed = (100 - PWM duty cycle)
 #
 
 """
-	==============================
-	  Imported Libraries
-	==============================
+==============================
+  Imported Libraries
+==============================
 """
 
 import subprocess
@@ -45,38 +45,43 @@ from rpi_hardware_pwm import HardwarePWM
 	==============================
 """
 
-class GrillPlatform:
 
+class GrillPlatform:
 	def __init__(self, config):
 		self.logger = create_logger('control')
 		try:
-			self.out_pins = config.get('outputs', None)  # Pins to control the PiFire outputs 
-			self.in_pins = config.get('inputs', None)  # Pins for input 
+			self.out_pins = config.get('outputs', None)  # Pins to control the PiFire outputs
+			self.in_pins = config.get('inputs', None)  # Pins for input
 			self.dc_fan = config.get('dc_fan', False)  # Save state for DC Fan
-			self.frequency = config.get('frequency', 100)  # Save configured fan frequency 
+			self.frequency = config.get('frequency', 100)  # Save configured fan frequency
 			self.standalone = config.get('standalone', True)  # Save configured state for Standalone
 			self.current = {}
 		except:
 			self.logger.error('Error parsing platform configuration.  Check your settings.json file.')
 			raise
 
-		if not self.standalone: 
+		if not self.standalone:
 			self.selector = Button(self.in_pins['selector'])
 		else:
 			self.selector = None
 
-		active_high = True if config.get('triggerlevel', 'HIGH') == 'HIGH' else False 
+		active_high = True if config.get('triggerlevel', 'HIGH') == 'HIGH' else False
 
 		if self.dc_fan:
-			self.current_fan_speed_percent = 100 # Hardware PWM library does not have a mechanism to retrieve the current duty cycle - initialize a variable to track this
+			self.current_fan_speed_percent = 100  # Hardware PWM library does not have a mechanism to retrieve the current duty cycle - initialize a variable to track this
 			self._ramp_thread = None
 			self.fan = OutputDevice(self.out_pins['dc_fan'], active_high=active_high, initial_value=False)
 			if self.out_pins['pwm'] in [13, 19]:
-				self.hardware_pwm_channel = 1 # Raspberry Pi maps GPIO13 & GPIO19 to Hardware PWM channel 1
-			else: 
-				self.hardware_pwm_channel = 0 # Raspberry Pi maps GPIO12 & GPIO18 to Hardware PWM channel 0
+				self.hardware_pwm_channel = 1  # Raspberry Pi maps GPIO13 & GPIO19 to Hardware PWM channel 1
+			else:
+				self.hardware_pwm_channel = 0  # Raspberry Pi maps GPIO12 & GPIO18 to Hardware PWM channel 0
 			self.pwm = HardwarePWM(pwm_channel=self.hardware_pwm_channel, hz=self.frequency)
-			self.logger.debug('Hardware PWM setup: Using PWM channel ' + str(self.hardware_pwm_channel) + ' and PWM frequency ' + str(self.frequency))
+			self.logger.debug(
+				'Hardware PWM setup: Using PWM channel '
+				+ str(self.hardware_pwm_channel)
+				+ ' and PWM frequency '
+				+ str(self.frequency)
+			)
 
 		else:
 			self.fan = OutputDevice(self.out_pins['fan'], active_high=active_high, initial_value=False)
@@ -94,20 +99,22 @@ class GrillPlatform:
 		self.auger.off()
 
 	def fan_on(self, fan_speed_percent=100):
-		self.fan.on() # Turn on fan output pin to enable fan power
+		self.fan.on()  # Turn on fan output pin to enable fan power
 		if self.dc_fan:
 			self._stop_ramp()
 			self.logger.debug('fan_on: Turning on PWM fan with fan speed percent ' + str(fan_speed_percent))
-			start_duty_cycle = float(100 - fan_speed_percent) # PWM duty cycle = (100 - fan percent speed)
-			self.pwm.start(start_duty_cycle) # Hardware PWM needs to have a start() before we can change_duty_cycle() later
-			self.current_fan_speed_percent = fan_speed_percent # Keep track of our current fan percent speed
+			start_duty_cycle = float(100 - fan_speed_percent)  # PWM duty cycle = (100 - fan percent speed)
+			self.pwm.start(
+				start_duty_cycle
+			)  # Hardware PWM needs to have a start() before we can change_duty_cycle() later
+			self.current_fan_speed_percent = fan_speed_percent  # Keep track of our current fan percent speed
 
 	def fan_off(self):
 		self.fan.off()
 		if self.dc_fan:
 			self.logger.debug('fan_off: Turning off PWM fan')
 			self.pwm.stop()
-			self.current_fan_speed_percent = 0 # Fan is off, so our current fan speed is now 0
+			self.current_fan_speed_percent = 0  # Fan is off, so our current fan speed is now 0
 
 	def fan_toggle(self):
 		self.fan.toggle()
@@ -119,13 +126,20 @@ class GrillPlatform:
 		if override_ramping:
 			self._stop_ramp()
 		self.logger.debug('set_duty_cycle: Changing fan speed percent to ' + str(fan_speed_percent))
-		pwm_duty_cycle = float(100 - fan_speed_percent) # Duty cycle is inverted due to PWM board amplifier circuitry
-		self.pwm.change_duty_cycle(pwm_duty_cycle) # Hardware PWM library simply takes duty cycle in percent
-		self.current_fan_speed_percent = fan_speed_percent # Keep track of our current fan percent speed
+		pwm_duty_cycle = float(100 - fan_speed_percent)  # Duty cycle is inverted due to PWM board amplifier circuitry
+		self.pwm.change_duty_cycle(pwm_duty_cycle)  # Hardware PWM library simply takes duty cycle in percent
+		self.current_fan_speed_percent = fan_speed_percent  # Keep track of our current fan percent speed
 
 	def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
 		self.fan.on()
-		self.logger.debug('pwm_fan_ramp: Starting fan ramp: on_time: ' + str(on_time) + ' min_duty_cycle: ' + str(min_duty_cycle) + ' max_duty_cycle: ' + str(max_duty_cycle))
+		self.logger.debug(
+			'pwm_fan_ramp: Starting fan ramp: on_time: '
+			+ str(on_time)
+			+ ' min_duty_cycle: '
+			+ str(min_duty_cycle)
+			+ ' max_duty_cycle: '
+			+ str(max_duty_cycle)
+		)
 		self._start_ramp(on_time=on_time, min_duty_cycle=min_duty_cycle, max_duty_cycle=max_duty_cycle)
 
 	def set_pwm_frequency(self, frequency=30):
@@ -160,17 +174,26 @@ class GrillPlatform:
 		self.current['power'] = self.power.is_active
 		self.current['fan'] = self.fan.is_active
 		if self.dc_fan:
-#			self.logger.debug('get_output_status: self.current_fan_speed_percent = ' + str(self.current_fan_speed_percent)) # This is a little verbose, even for debug logging
+			# self.logger.debug('get_output_status: self.current_fan_speed_percent = ' + str(self.current_fan_speed_percent)) # This is a little verbose, even for debug logging
 			self.current['pwm'] = self.current_fan_speed_percent
 			self.current['frequency'] = self.frequency
 		return self.current
 
 	def _start_ramp(self, on_time, min_duty_cycle, max_duty_cycle, background=True):
 		self._stop_ramp()
-		self.logger.debug('_start_ramp: Setting starting fan percentage for ramp: min_duty_cycle: ' + str(min_duty_cycle))
-		self.logger.debug('_start_ramp: Starting fan ramp thread: on_time: ' + str(on_time) + ' min_duty_cycle: ' + str(min_duty_cycle) + ' max_duty_cycle: ' + str(max_duty_cycle))
-		min_fan_percent = min_duty_cycle # Keeping things sane, the setting passed in is actually percent, not the eventual PWM duty cycle
-		self.fan_on(min_fan_percent) # Need to turn on PWM with starting percentage
+		self.logger.debug(
+			'_start_ramp: Setting starting fan percentage for ramp: min_duty_cycle: ' + str(min_duty_cycle)
+		)
+		self.logger.debug(
+			'_start_ramp: Starting fan ramp thread: on_time: '
+			+ str(on_time)
+			+ ' min_duty_cycle: '
+			+ str(min_duty_cycle)
+			+ ' max_duty_cycle: '
+			+ str(max_duty_cycle)
+		)
+		min_fan_percent = min_duty_cycle  # Keeping things sane, the setting passed in is actually percent, not the eventual PWM duty cycle
+		self.fan_on(min_fan_percent)  # Need to turn on PWM with starting percentage
 		self._ramp_thread = GPIOThread(self._ramp_device, (on_time, min_duty_cycle, max_duty_cycle))
 		self._ramp_thread.start()
 		if not background:
@@ -194,12 +217,16 @@ class GrillPlatform:
 		sequence.append((1.0 - duty_cycle, 1 / fps))
 
 		for value, delay in sequence:
-			new_duty_cycle = round(value, 4) * 100 # PWM duty cycle is 0-100 for Hardware PWM, sequence above generates 0.00-1.00, so multiply by 100
-			fan_speed_percent = float(100 - new_duty_cycle) # Duty cycle is inverted due to PWM amplifier
-#			self.logger.debug('grillplat pifire_pwm _ramp_device: Changing fan speed percent to ' + str(fan_speed_percent)) # Redundant
+			new_duty_cycle = (
+				round(value, 4) * 100
+			)  # PWM duty cycle is 0-100 for Hardware PWM, sequence above generates 0.00-1.00, so multiply by 100
+			fan_speed_percent = float(100 - new_duty_cycle)  # Duty cycle is inverted due to PWM amplifier
+			# self.logger.debug('grillplat pifire_pwm _ramp_device: Changing fan speed percent to ' + str(fan_speed_percent)) # Redundant
 			# Call self.set_duty_cycle but set extra override_ramping parameter to False so we don't kill the thread
-			self.set_duty_cycle(fan_speed_percent,False) # set_duty_cycle takes fan speed percent, not actual PWM duty cycle
-			self.current_fan_speed_percent = fan_speed_percent # Keep track of our current fan percent speed
+			self.set_duty_cycle(
+				fan_speed_percent, False
+			)  # set_duty_cycle takes fan speed percent, not actual PWM duty cycle
+			self.current_fan_speed_percent = fan_speed_percent  # Keep track of our current fan percent speed
 			if self._ramp_thread.stopping.wait(delay):
 				break
 
@@ -232,15 +259,13 @@ class GrillPlatform:
 			'scan_bluetooth',
 			'os_info',
 			'network_info',
-			'hardware_info'
+			'hardware_info',
 		]
 
 		data = {
-			'result' : 'OK',
-			'message' : 'Supported commands listed in "data".',
-			'data' : {
-				'supported_cmds' : supported_commands
-			}
+			'result': 'OK',
+			'message': 'Supported commands listed in "data".',
+			'data': {'supported_cmds': supported_commands},
 		}
 		return data
 
@@ -251,8 +276,8 @@ class GrillPlatform:
 			(bool, bool): A tuple of (under_voltage, throttled) indicating their status.
 		"""
 		try:
-			output = subprocess.check_output(["sudo", "vcgencmd", "get_throttled"])
-			status_str = output.decode("utf-8").strip()[10:]  # Extract the numerical value
+			output = subprocess.check_output(['sudo', 'vcgencmd', 'get_throttled'])
+			status_str = output.decode('utf-8').strip()[10:]  # Extract the numerical value
 			status_int = int(status_str, 16)  # Convert from hex to decimal
 
 			under_voltage = bool(status_int & 0x10000)  # Check bit 16 for under-voltage
@@ -269,38 +294,30 @@ class GrillPlatform:
 			result = 'ERROR'
 
 		data = {
-			'result' : result,
-			'message' : message,
-			'data' : {
-				'cpu_under_voltage' : under_voltage,
-				'cpu_throttled' : throttled
-			}
+			'result': result,
+			'message': message,
+			'data': {'cpu_under_voltage': under_voltage, 'cpu_throttled': throttled},
 		}
 		self.logger.debug(f'Check Throttled Called. [data = {data}]')
 		return data
 
-
 	def check_wifi_quality(self, arglist):
 		"""Checks the Wi-Fi signal quality on a Raspberry Pi and returns the percentage value (or None if not connected)."""
-		data = {
-			'result' : 'ERROR',
-			'message' : 'Unable to obtain wifi quality data.',
-			'data' : {}
-		}
+		data = {'result': 'ERROR', 'message': 'Unable to obtain wifi quality data.', 'data': {}}
 
 		try:
 			# Use iwconfig to get the signal quality
-			output = subprocess.check_output(["iwconfig", "wlan0"])
-			lines = output.decode("utf-8").splitlines()
+			output = subprocess.check_output(['iwconfig', 'wlan0'])
+			lines = output.decode('utf-8').splitlines()
 
 			# Find the line containing "Link Quality" and extract the relevant part
 			for line in lines:
-				if "Link Quality=" in line:
-					quality_str = line.split("=")[1].strip()  # Isolate the part after "="
-					quality_parts = quality_str.split(" ")[0]  # Extract only the first part before spaces
+				if 'Link Quality=' in line:
+					quality_str = line.split('=')[1].strip()  # Isolate the part after "="
+					quality_parts = quality_str.split(' ')[0]  # Extract only the first part before spaces
 
 					try:
-						quality_value, quality_max = quality_parts.split("/")  # Split for numerical values
+						quality_value, quality_max = quality_parts.split('/')  # Split for numerical values
 						percentage = (int(quality_value) / int(quality_max)) * 100
 						data['result'] = 'OK'
 						data['message'] = 'Successfully obtained wifi quality data.'
@@ -322,8 +339,8 @@ class GrillPlatform:
 
 	def check_cpu_temp(self, arglist):
 		try:
-			output = subprocess.check_output(["sudo", "vcgencmd", "measure_temp"])
-			temp = output.decode("utf-8").replace("temp=","").replace("'C", "").replace("\n", "")
+			output = subprocess.check_output(['sudo', 'vcgencmd', 'measure_temp'])
+			temp = output.decode('utf-8').replace('temp=', '').replace("'C", '').replace('\n', '')
 			result = 'OK'
 			message = 'Successfully obtained CPU temperature.'
 
@@ -338,42 +355,33 @@ class GrillPlatform:
 			message = 'Error obtaining CPU temperature.'
 			result = 'ERROR'
 
-		data = {
-			'result' : result,
-			'message' : message,
-			'data' : {
-				'cpu_temp' : float(temp)
-			}
-		}
+		data = {'result': result, 'message': message, 'data': {'cpu_temp': float(temp)}}
 		self.logger.debug(f'Check CPU Temp Called. [data = {data}]')
 		return data
-		
+
 	def check_alive(self, arglist):
-		'''
-		 Simple check to see if the platform is up and running. 
-		'''
-		
-		data = {
-			'result' : 'OK',
-			'message' : 'The control script is running.',
-			'data' : {}
-		}
+		"""
+		Simple check to see if the platform is up and running.
+		"""
+
+		data = {'result': 'OK', 'message': 'The control script is running.', 'data': {}}
 		return data
-	
+
 	def scan_bluetooth(self, arglist):
-		'''
-		 Scan for bluetooth device addresses using bleak (modern BlueZ D-Bus API).
-		 bleak cooperates with bluetoothd rather than fighting it over raw HCI access,
-		 making it compatible with BlueZ 5.56+ unlike the unmaintained bluepy library.
-		'''
+		"""
+		Scan for bluetooth device addresses using bleak (modern BlueZ D-Bus API).
+		bleak cooperates with bluetoothd rather than fighting it over raw HCI access,
+		making it compatible with BlueZ 5.56+ unlike the unmaintained bluepy library.
+		"""
 		import asyncio
+
 		try:
 			from bleak import BleakScanner
 		except ImportError:
 			return {
 				'result': 'ERROR',
 				'message': 'bleak is not installed. Run: pip install bleak',
-				'data': {'bt_devices': []}
+				'data': {'bt_devices': []},
 			}
 
 		bt_devices = []
@@ -394,53 +402,36 @@ class GrillPlatform:
 			message = f'Bluetooth scan error: {e}'
 			self.logger.error(f'scan_bluetooth: Error during scan - {e}')
 
-		data = {
-			'result' : result,
-			'message' : message,
-			'data' : {
-				'bt_devices' : bt_devices
-			}
-		}
+		data = {'result': result, 'message': message, 'data': {'bt_devices': bt_devices}}
 		return data
-	
+
 	def os_info(self, arglist):
 		"""
 		Retrieve OS information such as version and architecture.
 		"""
 		os_info = get_os_info()
-		
-		data = {
-			'result' : 'OK',
-			'message' : 'OS information retrieved successfully.',
-			'data' : os_info
-		}
+
+		data = {'result': 'OK', 'message': 'OS information retrieved successfully.', 'data': os_info}
 		return data
-	
+
 	def network_info(self, arglist):
 		"""
 		Retrieve network information such as IP address and MAC address.
 		"""
 		import netifaces
-		
+
 		ifaces = netifaces.interfaces()
 		net_info = {}
-		
+
 		for iface in ifaces:
 			addrs = netifaces.ifaddresses(iface)
 			ip_addr = addrs.get(netifaces.AF_INET, [{}])[0].get('addr', 'N/A')
 			mac_addr = addrs.get(netifaces.AF_LINK, [{}])[0].get('addr', 'N/A')
-			net_info[iface] = {
-				'ip_address': ip_addr,
-				'mac_address': mac_addr
-			}
-		
-		data = {
-			'result' : 'OK',
-			'message' : 'Network information retrieved successfully.',
-			'data' : net_info
-		}
+			net_info[iface] = {'ip_address': ip_addr, 'mac_address': mac_addr}
+
+		data = {'result': 'OK', 'message': 'Network information retrieved successfully.', 'data': net_info}
 		return data
-	
+
 	def hardware_info(self, arglist):
 		"""
 		Retrieve hardware information such as CPU model and RAM size.
@@ -452,7 +443,7 @@ class GrillPlatform:
 			'model': 'Unknown',
 			'model_name': 'Unknown',
 			'cores': psutil.cpu_count(logical=True),
-			'frequency': psutil.cpu_freq().current if psutil.cpu_freq() else 'Unknown'
+			'frequency': psutil.cpu_freq().current if psutil.cpu_freq() else 'Unknown',
 		}
 
 		with open('/proc/cpuinfo') as f:
@@ -465,14 +456,10 @@ class GrillPlatform:
 					cpu_info['model'] = line.strip().split(':')[1].strip()
 
 		mem_info = psutil.virtual_memory()
-		
+
 		data = {
-			'result' : 'OK',
-			'message' : 'Hardware information retrieved successfully.',
-			'data' : {
-				'cpu_info': cpu_info,
-				'total_ram': mem_info.total,
-				'available_ram': mem_info.available
-			}
+			'result': 'OK',
+			'message': 'Hardware information retrieved successfully.',
+			'data': {'cpu_info': cpu_info, 'total_ram': mem_info.total, 'available_ram': mem_info.available},
 		}
 		return data

@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-'''
+"""
 *****************************************
 PiFire Display Interface Library
 *****************************************
 
- Description: 
-   This library supports using 
+ Description:
+   This library supports using
  the ILI9488 display with 320Hx480W resolution.
- This module utilizes Luma.LCD to interface 
- this display. 
+ This module utilizes Luma.LCD to interface
+ this display.
 
 *****************************************
-'''
+"""
 
-'''
+"""
  Imported Libraries
-'''
+"""
 import time
 import threading
 from luma.core.interface.serial import spi
@@ -23,11 +23,12 @@ from luma.lcd.device import ili9488
 from display.base_320x480 import DisplayBase
 from gpiozero import Button
 
-'''
+"""
 Display class definition
-'''
-class Display(DisplayBase):
+"""
 
+
+class Display(DisplayBase):
 	def __init__(self, dev_pins, buttonslevel='HIGH', rotation=0, units='F', config={}):
 		self.config = config
 		super().__init__(dev_pins, buttonslevel, rotation, units, config)
@@ -39,21 +40,29 @@ class Display(DisplayBase):
 		rst_pin = self.dev_pins['display']['rst']
 		spi_device = self.config.get('spi_device', 0)
 
-		self.serial = spi(port=0, device=spi_device, gpio_DC=dc_pin, gpio_RST=rst_pin, bus_speed_hz=32000000,
-						  reset_hold_time=0.2, reset_release_time=0.2)
-		self.device = ili9488(self.serial, active_low=False, width=480, height=320, gpio_LIGHT=led_pin,
-							  rotate=self.rotation)
+		self.serial = spi(
+			port=0,
+			device=spi_device,
+			gpio_DC=dc_pin,
+			gpio_RST=rst_pin,
+			bus_speed_hz=32000000,
+			reset_hold_time=0.2,
+			reset_release_time=0.2,
+		)
+		self.device = ili9488(
+			self.serial, active_low=False, width=480, height=320, gpio_LIGHT=led_pin, rotate=self.rotation
+		)
 
-		# Setup & Start Display Loop Thread 
+		# Setup & Start Display Loop Thread
 		display_thread = threading.Thread(target=self._display_loop)
 		display_thread.start()
 
 	def _init_input(self):
 		self.input_enabled = True
 		# Init GPIO for button input, setup callbacks: Uncomment to utilize GPIO input
-		self.up = self.dev_pins['input']['up_clk'] 		# UP - GPIO16
-		self.down = self.dev_pins['input']['down_dt']	# DOWN - GPIO20
-		self.enter = self.dev_pins['input']['enter_sw'] # ENTER - GPIO21
+		self.up = self.dev_pins['input']['up_clk']  # UP - GPIO16
+		self.down = self.dev_pins['input']['down_dt']  # DOWN - GPIO20
+		self.enter = self.dev_pins['input']['enter_sw']  # ENTER - GPIO21
 		self.debounce_ms = 500  # number of milliseconds to debounce input
 		self.input_event = None
 		self.input_counter = 0
@@ -67,28 +76,29 @@ class Display(DisplayBase):
 
 		# Init Menu Structures
 		self._init_menu()
-		
+
 		self.up_button.when_pressed = self._up_callback
 		self.down_button.when_pressed = self._down_callback
 		self.enter_button.when_pressed = self._enter_callback
 		self.up_button.when_held = self._up_callback
 		self.down_button.when_held = self._down_callback
 
-	'''
+	"""
 	============== Input Callbacks ============= 
-	'''
+	"""
+
 	def _enter_callback(self):
-		self.input_event='ENTER'
+		self.input_event = 'ENTER'
 
 	def _up_callback(self, held=False):
-		self.input_event='UP'
+		self.input_event = 'UP'
 
 	def _down_callback(self, held=False):
-		self.input_event='DOWN'
+		self.input_event = 'DOWN'
 
-	'''
+	"""
 	============== Graphics / Display / Draw Methods ============= 
-	'''
+	"""
 
 	def _display_clear(self):
 		self.device.clear()
@@ -99,16 +109,17 @@ class Display(DisplayBase):
 		# Display Image
 		self.device.backlight(True)
 		self.device.show()
-		self.device.display(canvas.convert(mode="RGB"))
+		self.device.display(canvas.convert(mode='RGB'))
 
-	'''
+	"""
 	 ====================== Input & Menu Code ========================
-	'''
+	"""
+
 	def _event_detect(self):
 		"""
 		Called to detect input events from buttons.
 		"""
-		command = self.input_event  # Save to variable to prevent spurious changes 
+		command = self.input_event  # Save to variable to prevent spurious changes
 		if command:
 			self.display_timeout = None  # If something is being displayed i.e. text, network, splash then override this
 
@@ -117,7 +128,7 @@ class Display(DisplayBase):
 
 			self.display_command = None
 			self.display_data = None
-			self.input_event=None
+			self.input_event = None
 			self.menu_active = True
 			self.menu_time = time.time()
 			self._menu_display(command)

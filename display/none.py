@@ -4,8 +4,8 @@
 # PiFire Display None Interface Library
 # *****************************************
 #
-# Description: This library can be used on 
-# systems with no display present.  
+# Description: This library can be used on
+# systems with no display present.
 #
 # *****************************************
 
@@ -13,13 +13,13 @@
 # Imported Libraries
 # *****************************************
 
-class Display:
 
+class Display:
 	def __init__(self, dev_pins, buttonslevel='HIGH', rotation=0, units='F', config={}):
 		self.display_splash()
 
 	def display_status(self, in_data, status_data):
-		pass 
+		pass
 
 	def display_splash(self):
 		pass
@@ -31,4 +31,4 @@ class Display:
 		pass
 
 	def display_network(self):
-		pass 
+		pass

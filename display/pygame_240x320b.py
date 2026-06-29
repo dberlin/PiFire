@@ -1,40 +1,41 @@
 #!/usr/bin/env python3
-'''
+"""
 *****************************************
 PiFire Display Interface Library
 *****************************************
 
- Description: This library supports using pygame 
- on your Linux development PC for debug and development 
- purposes. Only works in a graphical desktop 
- environment.  Tested on Ubuntu 20.04.  
+ Description: This library supports using pygame
+ on your Linux development PC for debug and development
+ purposes. Only works in a graphical desktop
+ environment.  Tested on Ubuntu 20.04.
 
- This version supports arrow keys (up/down) and enter.  
+ This version supports arrow keys (up/down) and enter.
 
 *****************************************
-'''
+"""
 
-'''
+"""
  Imported Libraries
-'''
+"""
 import logging
 import time
 import threading
 import socket
-import pygame 
+import pygame
 from display.base_240x320 import DisplayBase
 
-'''
+"""
 Display class definition
-'''
-class Display(DisplayBase):
+"""
 
+
+class Display(DisplayBase):
 	def __init__(self, dev_pins, buttonslevel='HIGH', rotation=0, units='F', config={}):
 		super().__init__(dev_pins, buttonslevel, rotation, units, config)
 		self.eventLogger = logging.getLogger('events')
 
 	def _init_display_device(self):
-		# Setup & Start Display Loop Thread 
+		# Setup & Start Display Loop Thread
 		display_thread = threading.Thread(target=self._display_loop)
 		display_thread.start()
 
@@ -50,14 +51,14 @@ class Display(DisplayBase):
 		"""
 		# Init Device
 		pygame.init()
-		# set the pygame window name 
+		# set the pygame window name
 		pygame.display.set_caption('PiFire Device Display')
 		# Create Display Surface
 		self.display_surface = pygame.display.set_mode(size=(self.WIDTH, self.HEIGHT), flags=pygame.SHOWN)
 		self.display_command = 'splash'
 
 		while True:
-			''' Add pygame key test here. '''
+			""" Add pygame key test here. """
 			pygame.time.delay(50)
 			events = pygame.event.get()  # Gets events (required for key presses to be registered)
 			# This will give us a dictionary where each key has a value of 1 or 0. Where 1 is pressed and 0 is not pressed.
@@ -68,8 +69,8 @@ class Display(DisplayBase):
 				self.input_event = 'DOWN'
 			if keys[pygame.K_RETURN]:
 				self.input_event = 'ENTER'
-			
-			''' Normal display loop'''
+
+			""" Normal display loop"""
 			self._event_detect()
 
 			if self.display_timeout:
@@ -88,7 +89,7 @@ class Display(DisplayBase):
 				self._display_splash()
 				self.display_timeout = time.time() + 3
 				self.display_command = 'clear'
-				pygame.time.delay(3000) # Hold splash screen for 3 seconds
+				pygame.time.delay(3000)  # Hold splash screen for 3 seconds
 
 			if self.display_command == 'text':
 				self._display_text()
@@ -97,14 +98,14 @@ class Display(DisplayBase):
 
 			if self.display_command == 'network':
 				s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-				s.connect(("8.8.8.8", 80))
+				s.connect(('8.8.8.8', 80))
 				network_ip = s.getsockname()[0]
 				if network_ip != '':
 					self._display_network(network_ip)
 					self.display_timeout = time.time() + 30
 					self.display_command = None
 				else:
-					self.display_text("No IP Found")
+					self.display_text('No IP Found')
 
 			if self.menu_active and not self.display_timeout:
 				if time.time() - self.menu_time > 5:
@@ -119,35 +120,37 @@ class Display(DisplayBase):
 
 		pygame.quit()
 
-	'''
+	"""
 	============== Graphics / Display / Draw Methods ============= 
-	'''
+	"""
+
 	def _display_clear(self):
 		self.eventLogger.info('Screen Cleared.')
-		self.display_surface.fill((0,0,0))
-		pygame.display.update() 
+		self.display_surface.fill((0, 0, 0))
+		pygame.display.update()
 
 	def _display_canvas(self, canvas):
 		# Convert to PyGame and Display
 		strFormat = canvas.mode
 		size = canvas.size
-		raw_str = canvas.tobytes("raw", strFormat)
-		
+		raw_str = canvas.tobytes('raw', strFormat)
+
 		self.display_image = pygame.image.fromstring(raw_str, size, strFormat)
 
-		self.display_surface.fill((255,255,255))
+		self.display_surface.fill((255, 255, 255))
 		self.display_surface.blit(self.display_image, (0, 0))
 
-		pygame.display.update() 
+		pygame.display.update()
 
-	'''
+	"""
 	 ====================== Input & Menu Code ========================
-	'''
+	"""
+
 	def _event_detect(self):
 		"""
 		Called to detect input events from buttons, encoder, touch, etc.
 		"""
-		command = self.input_event  # Save to variable to prevent spurious changes 
+		command = self.input_event  # Save to variable to prevent spurious changes
 		if command:
 			self.display_timeout = None  # If something is being displayed i.e. text, network, splash then override this
 
@@ -156,7 +159,7 @@ class Display(DisplayBase):
 
 			self.display_command = None
 			self.display_data = None
-			self.input_event=None
+			self.input_event = None
 			self.menu_active = True
 			self.menu_time = time.time()
 			self._menu_display(command)

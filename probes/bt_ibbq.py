@@ -1,14 +1,14 @@
-'''
+"""
 *****************************************
-PiFire Bluetooth iBBQ Module 
+PiFire Bluetooth iBBQ Module
 *****************************************
 
-Description: 
+Description:
   This module connects to the iBBQ BTLE thermometer via bluetooth and returns temperature data.
-  Tested with Inkbird IBT-IBT4XS. 
+  Tested with Inkbird IBT-IBT4XS.
 
-  	Ex Device Definition: 
-	
+        Ex Device Definition:
+
 	device_info = {
 			'device' : 'your_device_name',	# Unique name for the device
 			'module' : 'bt_ibbq',  			# Must be populated for this module to load properly
@@ -16,7 +16,7 @@ Description:
 			'config' : {
 				'transient' : True,
 				'num_probes' : 6,  # Number of probes supported by the device (4 or 6)
-			} 
+			}
 		}
 
 	''
@@ -29,19 +29,19 @@ Credits:
     https://github.com/8none1
 
 Requirements:
-    bluepy - 
+    bluepy -
 		https://github.com/IanHarvey/bluepy
         ** sudo apt install libglib2.0-dev ** prior to installing bluepy
 		.. venv/lib/python3.12/site-packages/bluepy$ sudo setcap 'cap_net_raw,cap_net_admin+eip' bluepy-helper
     A compatible BTLE iBBQ thermometer. Perhaps one of these? https://amzn.to/2ZLXyDi
 
-'''
+"""
 
-'''
+"""
 *****************************************
  Imported Libraries
 *****************************************
-'''
+"""
 import threading
 import time
 import logging
@@ -49,43 +49,46 @@ import struct  # NEW: required for battery unpack in DataDelegate
 
 from probes.base import ProbeInterface
 from bluepy.btle import *
-#from icecream import ic  # For debugging
+# from icecream import ic  # For debugging
 
-'''
+"""
 *****************************************
  Class Definitions 
 *****************************************
-'''
+"""
+
 
 class ScanDelegate(DefaultDelegate):
 	def __init__(self):
 		DefaultDelegate.__init__(self)
-		self.logger = logging.getLogger("control")
+		self.logger = logging.getLogger('control')
+
 	def handleDiscovery(self, dev, isNewDev, isNewData):
 		if isNewDev:
 			logger_msg = f'(ibbq) Discovered device {dev.addr}'
 			# self.logger.debug(logger_msg)
 			# ic(logger_msg)
 
+
 class DataDelegate(DefaultDelegate):
 	def __init__(self):
 		DefaultDelegate.__init__(self)
-		self.logger = logging.getLogger("control")
+		self.logger = logging.getLogger('control')
 		self.probe_temps = []
 		self.data_initialized = False
 		self.batt_percent = None
-		self.temp_handle = None       # NEW: dynamic handle for realtime temps (FFF4)
-		self.info_handle = None       # NEW: dynamic handle for settings/info (FFF1)
+		self.temp_handle = None  # NEW: dynamic handle for realtime temps (FFF4)
+		self.info_handle = None  # NEW: dynamic handle for settings/info (FFF1)
 
 	def set_handles(self, temp_handle, info_handle):  # NEW
-		self.temp_handle = temp_handle                 # NEW
-		self.info_handle = info_handle                 # NEW
+		self.temp_handle = temp_handle  # NEW
+		self.info_handle = info_handle  # NEW
 
 	def handleNotification(self, cHandle, data):
 		# NEW: use dynamic handles instead of hard-coded 48/37
 		if self.temp_handle is not None and cHandle == self.temp_handle:
 			# Temperature payload is 4x uint16 little-endian (tenths of °C), 0xFFFF => unplugged
-			temps = [int.from_bytes(data[i:i+2], "little") for i in range(0, len(data), 2)]
+			temps = [int.from_bytes(data[i : i + 2], 'little') for i in range(0, len(data), 2)]
 			if not self.data_initialized:
 				self.probe_temps = [None] * len(temps)  # NEW: init slots (remove legacy 4-probe limit)
 				self.data_initialized = True
@@ -101,8 +104,9 @@ class DataDelegate(DefaultDelegate):
 			if len(data) >= 5 and data[0] == 0x24:
 				# Battery format: <BHHB  (0x24, current_mV, max_mV, pad)
 				try:
-					header, current_voltage, max_voltage, pad = struct.unpack("<BHHB", data[:6])
-					if max_voltage == 0: max_voltage = 6580
+					header, current_voltage, max_voltage, pad = struct.unpack('<BHHB', data[:6])
+					if max_voltage == 0:
+						max_voltage = 6580
 					self.batt_percent = 100 * current_voltage / max_voltage
 					self.logger.debug(f'(ibbq) Battery Percent: {self.batt_percent}')
 				except Exception as e:
@@ -120,29 +124,30 @@ class DataDelegate(DefaultDelegate):
 	def get_batt_percent(self):
 		return self.batt_percent
 
-class iBBQ_Device():
+
+class iBBQ_Device:
 	def __init__(self, port_map, primary_port, units, transient=True, hardware_id=None):
-		self.logger = logging.getLogger("control")
+		self.logger = logging.getLogger('control')
 		self.transient = transient
 		self.port_map = port_map
 		self.primary_port = primary_port
 		self.battery_percentage = None
 
-		self.units = units 
+		self.units = units
 		self.debug = True
 		self.device_ready = False
 		self.device_setup = False
 
 		self.port_values = []
 		self.probe_values_C = []
-		
+
 		self.hardware_id = hardware_id
 
 		self.status = {
-			'battery_percentage' : self.battery_percentage,
-			'battery_charging' : True if self.battery_percentage == 0 else False,
-			'connected' : self.device_setup,
-			'hardware_id' : self.hardware_id
+			'battery_percentage': self.battery_percentage,
+			'battery_charging': True if self.battery_percentage == 0 else False,
+			'connected': self.device_setup,
+			'hardware_id': self.hardware_id,
 		}
 
 		self.sensor_thread_active = False
@@ -152,44 +157,44 @@ class iBBQ_Device():
 
 		self.sensor_thread = threading.Thread(target=self._sensing_loop)
 		self.sensor_thread.start()
-	
+
 	def _setup_device(self):
-		''' Bluetooth iBBQ Device Class '''
+		"""Bluetooth iBBQ Device Class"""
 		# iBBQ static commands
-		CREDENTIALS_MESSAGE  = bytearray.fromhex("21 07 06 05 04 03 02 01 b8 22 00 00 00 00 00")
-		REALTIME_DATA_ENABLE = bytearray.fromhex("0B 01 00 00 00 00")
-		UNITS_FAHRENHEIT     = bytearray.fromhex("02 01 00 00 00 00")
-		UNITS_CELSIUS        = bytearray.fromhex("02 00 00 00 00 00")
-		BATTERY_LEVEL        = bytearray.fromhex("08 24 00 00 00 00")
+		CREDENTIALS_MESSAGE = bytearray.fromhex('21 07 06 05 04 03 02 01 b8 22 00 00 00 00 00')
+		REALTIME_DATA_ENABLE = bytearray.fromhex('0B 01 00 00 00 00')
+		UNITS_FAHRENHEIT = bytearray.fromhex('02 01 00 00 00 00')
+		UNITS_CELSIUS = bytearray.fromhex('02 00 00 00 00 00')
+		BATTERY_LEVEL = bytearray.fromhex('08 24 00 00 00 00')
 		# iBBQ static service
-		MAIN_SERVICE         = 0xFFF0 # Service which provides the characteristics 
-		CCCD_UUID            = 0x2902 # We have to write here to enable notifications. bluepy doesn't do this for us. See the "show_all_descriptors" XXX Fix me
+		MAIN_SERVICE = 0xFFF0  # Service which provides the characteristics
+		CCCD_UUID = 0x2902  # We have to write here to enable notifications. bluepy doesn't do this for us. See the "show_all_descriptors" XXX Fix me
 		# iBBQ static characteristics
-		SETTINGS_RESULTS     = 0xFFF1
-		PAIR_UUID            = 0xFFF2
-		HISTORY_UUID         = 0xFFF3 # Don't know how this works, here for completeness
-		REALTIMEDATA_UUID    = 0xFFF4
-		CMD_UUID             = 0xFFF5
+		SETTINGS_RESULTS = 0xFFF1
+		PAIR_UUID = 0xFFF2
+		HISTORY_UUID = 0xFFF3  # Don't know how this works, here for completeness
+		REALTIMEDATA_UUID = 0xFFF4
+		CMD_UUID = 0xFFF5
 		# Static hex little endian ones and zeros
-		ON                   = bytearray.fromhex("01 00")
-		OFF                  = bytearray.fromhex("00 00")
+		ON = bytearray.fromhex('01 00')
+		OFF = bytearray.fromhex('00 00')
 
 		# NEW: Additional observed xBBQ initialization messages (safe on older units)
-		XBBQ_MSG_0823        = bytearray.fromhex("08 23 00 00 00 00")  # NEW
-		XBBQ_MSG_0824        = bytearray.fromhex("08 24 00 00 00 00")  # NEW
-		XBBQ_MSG_0825        = bytearray.fromhex("08 25 00 00 00 00")  # NEW
-		SECURE_MODE          = bytearray.fromhex("02 01 00 00 00 00")  # NEW
-		
+		XBBQ_MSG_0823 = bytearray.fromhex('08 23 00 00 00 00')  # NEW
+		XBBQ_MSG_0824 = bytearray.fromhex('08 24 00 00 00 00')  # NEW
+		XBBQ_MSG_0825 = bytearray.fromhex('08 25 00 00 00 00')  # NEW
+		SECURE_MODE = bytearray.fromhex('02 01 00 00 00 00')  # NEW
+
 		while True:
 			try:
 				if self.hardware_id == None:
-					bbqs={}
+					bbqs = {}
 					scanner = Scanner().withDelegate(ScanDelegate())
 					devices = scanner.scan(10.0)
 
 					for dev in devices:
 						# self.logger.info(f'(ibbq) Device {dev.addr}, RSSI={dev.rssi}dB')
-						for (adtype, desc, value) in dev.getScanData():
+						for adtype, desc, value in dev.getScanData():
 							# Accept both legacy "iBBQ" and newer "xBBQ" advertising names
 							if desc == 'Complete Local Name' and value in ('iBBQ', 'xBBQ'):  # NEW
 								bbqs[dev.rssi] = dev
@@ -225,26 +230,27 @@ class iBBQ_Device():
 					self.ibbq_device.setDelegate(self.ibbq_delegate)
 
 					# Resolve characteristics up front so we can capture their runtime handles  # NEW
-					realtime_characteristic = self.main_service.getCharacteristics(REALTIMEDATA_UUID)[0]      # NEW
+					realtime_characteristic = self.main_service.getCharacteristics(REALTIMEDATA_UUID)[0]  # NEW
 					settingsresult_characteristic = self.main_service.getCharacteristics(SETTINGS_RESULTS)[0]  # NEW
 
 					# First we have to log in (legacy method remains for back-compat)
 					login_characteristic = self.main_service.getCharacteristics(PAIR_UUID)[0]
-					login_characteristic.write(CREDENTIALS_MESSAGE) # Send the magic bytes to login
+					login_characteristic.write(CREDENTIALS_MESSAGE)  # Send the magic bytes to login
 
 					# Optionally get a full list (historically helped notifications)
 					_ = self.ibbq_device.getCharacteristics()
 					_ = self.main_service.getDescriptors()
 
 					# --- Enable CCCDs BEFORE init writes to avoid missing early frames (xBBQ-friendly) ---  # NEW
-					temperature_cccd = realtime_characteristic.getDescriptors(forUUID=CCCD_UUID)[0]          # NEW
-					temperature_cccd.write(ON)                                                              # NEW
-					settingsresults_cccd = settingsresult_characteristic.getDescriptors(forUUID=CCCD_UUID)[0]# NEW
-					settingsresults_cccd.write(ON)                                                          # NEW
+					temperature_cccd = realtime_characteristic.getDescriptors(forUUID=CCCD_UUID)[0]  # NEW
+					temperature_cccd.write(ON)  # NEW
+					settingsresults_cccd = settingsresult_characteristic.getDescriptors(forUUID=CCCD_UUID)[0]  # NEW
+					settingsresults_cccd.write(ON)  # NEW
 
 					# Hand the actual value handles to the delegate (no hard-coded numbers)  # NEW
-					self.ibbq_delegate.set_handles(realtime_characteristic.getHandle(),
-					                               settingsresult_characteristic.getHandle())              # NEW
+					self.ibbq_delegate.set_handles(
+						realtime_characteristic.getHandle(), settingsresult_characteristic.getHandle()
+					)  # NEW
 
 					# --- xBBQ compatibility: send observed init sequence (harmless on older units) ---
 					settings_characteristic = self.main_service.getCharacteristics(CMD_UUID)[0]
@@ -258,7 +264,7 @@ class iBBQ_Device():
 						pass  # NEW
 
 					# The device logs all temperature in degrees C, but we can fix that for you (affects on-device display)
-					if self.units == "F":
+					if self.units == 'F':
 						settings_characteristic.write(UNITS_FAHRENHEIT, withResponse=True)
 					else:
 						settings_characteristic.write(UNITS_CELSIUS, withResponse=True)
@@ -291,7 +297,7 @@ class iBBQ_Device():
 						if self.ibbq_device.waitForNotifications(1):
 							self.probe_values_C = self.ibbq_delegate.get_probe_temps()
 							self.battery_percentage = self.ibbq_delegate.get_batt_percent()
-					
+
 					logger_msg = f'(ibbq) Sensor thread inactive.'
 					self.logger.debug(logger_msg)
 					self.sensor_thread_active = False
@@ -343,15 +349,20 @@ class iBBQ_Device():
 					The hardware_id of the iBBQ device
 		"""
 		if self.battery_percentage is not None:
-			self.status['battery_percentage'] = self.battery_percentage if (self.battery_percentage > 0 and self.device_setup) else None
-			self.status['battery_charging'] = True if (self.battery_percentage == 0 and self.device_setup) else False # Reads zero when charging
+			self.status['battery_percentage'] = (
+				self.battery_percentage if (self.battery_percentage > 0 and self.device_setup) else None
+			)
+			self.status['battery_charging'] = (
+				True if (self.battery_percentage == 0 and self.device_setup) else False
+			)  # Reads zero when charging
 		else:
 			self.status['battery_percentage'] = self.battery_percentage
 			self.status['battery_charging'] = False
 		self.status['connected'] = self.device_setup
 		self.status['hardware_id'] = self.hardware_id
 		return self.status
-	
+
+
 class ReadProbes(ProbeInterface):
 	def __init__(self, probe_info, device_info, units):
 		self.hardware_id = device_info['config'].get('hardware_id', None)
@@ -363,25 +374,29 @@ class ReadProbes(ProbeInterface):
 
 	def _init_device(self):
 		self.time_delay = 0
-		self.device = iBBQ_Device(self.port_map, self.primary_port, self.units, transient=self.transient, hardware_id=self.hardware_id)
+		self.device = iBBQ_Device(
+			self.port_map, self.primary_port, self.units, transient=self.transient, hardware_id=self.hardware_id
+		)
 
 	def read_all_ports(self, output_data):
 		port_values = {}
 
 		probe_values_C = self.device.get_port_values()
-		# ic(probe_values_C) # Debugging only	
+		# ic(probe_values_C) # Debugging only
 
 		if len(probe_values_C) >= len(self.port_map):
 			for index, port in enumerate(self.port_map):
-				''' Read Ports from Device '''
-				port_values[port] = probe_values_C[index] if self.units == 'C' else self._to_fahrenheit(probe_values_C[index])
+				""" Read Ports from Device """
+				port_values[port] = (
+					probe_values_C[index] if self.units == 'C' else self._to_fahrenheit(probe_values_C[index])
+				)
 				# output_value = port_values[port] if port_values[port] != None else 0 # If the read value is None, pass that to the output
 				output_value = port_values[port]
 
-				''' Output Tr '''
+				""" Output Tr """
 				self.output_data['tr'][self.port_map[port]] = 0  # resistance NA
 
-				''' Get average temperature from the queue and store it in the output data structure'''
+				""" Get average temperature from the queue and store it in the output data structure"""
 				if port == self.primary_port:
 					self.output_data['primary'][self.port_map[port]] = output_value
 				elif port in self.food_ports:
@@ -391,5 +406,5 @@ class ReadProbes(ProbeInterface):
 
 				if self.time_delay:
 					time.sleep(self.time_delay)  # Time delay, if needed for single-shot mode on some ADC's
-		
+
 		return self.output_data

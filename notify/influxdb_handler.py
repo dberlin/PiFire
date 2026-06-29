@@ -4,17 +4,20 @@ import threading
 
 
 class InfluxNotificationHandler:
-
 	def __init__(self, settings) -> None:
 		self.queue = []
 		self.last_updated = time.time()
 
-		t1 = threading.Thread(target=self.publishing_thread, daemon=True,
-							  args=(
-								  settings['notify_services']['influxdb']['url'],
-								  settings['notify_services']['influxdb']['token'],
-								  settings['notify_services']['influxdb']['org'],
-								  settings['notify_services']['influxdb']['bucket']))
+		t1 = threading.Thread(
+			target=self.publishing_thread,
+			daemon=True,
+			args=(
+				settings['notify_services']['influxdb']['url'],
+				settings['notify_services']['influxdb']['token'],
+				settings['notify_services']['influxdb']['org'],
+				settings['notify_services']['influxdb']['bucket'],
+			),
+		)
 		t1.start()
 
 	def publishing_thread(self, url, token, org, bucket):
@@ -22,23 +25,26 @@ class InfluxNotificationHandler:
 
 		bucket = bucket
 
-		client = InfluxDBClient(url=url, token=token,
-								org=org)
+		client = InfluxDBClient(url=url, token=token, org=org)
 
 		from influxdb_client import WriteOptions
+
 		write_api = None
 
 		while True:
 			time.sleep(1)
 			if not write_api:
-
-				write_api = client.write_api(write_options=WriteOptions(batch_size=100,
-																		flush_interval=5_000,
-																		jitter_interval=2_000,
-																		retry_interval=2_000,
-																		max_retries=3,
-																		max_retry_delay=30_000,
-																		exponential_base=2))
+				write_api = client.write_api(
+					write_options=WriteOptions(
+						batch_size=100,
+						flush_interval=5_000,
+						jitter_interval=2_000,
+						retry_interval=2_000,
+						max_retries=3,
+						max_retry_delay=30_000,
+						exponential_base=2,
+					)
+				)
 
 			try:
 				buf = self.queue.copy()
@@ -55,6 +61,7 @@ class InfluxNotificationHandler:
 			return
 
 		from influxdb_client import Point
+
 		name = settings['globals']['grill_name']
 		if len(name) == 0:
 			name = 'Smoker'
@@ -67,7 +74,7 @@ class InfluxNotificationHandler:
 		PrimaryKey = list(in_data['probe_history']['primary'].keys())[0]
 		Probe1Key = list(in_data['probe_history']['food'].keys())[0]
 		Probe2Key = list(in_data['probe_history']['food'].keys())[1]
-		
+
 		PrimaryTemp = in_data['probe_history']['primary'][PrimaryKey]
 		PrimarySetpoint = in_data['primary_setpoint']
 		PrimaryNotify = in_data['notify_targets'][PrimaryKey]
@@ -76,16 +83,19 @@ class InfluxNotificationHandler:
 		Probe2Temp = in_data['probe_history']['food'][Probe2Key]
 		Probe2Notify = in_data['notify_targets'][Probe2Key]
 
-		p = Point(name).time(time=datetime.utcnow()) \
-			.field("GrillTemp", float(PrimaryTemp)) \
-			.field('GrillSetPoint', float(PrimarySetpoint)) \
-			.field('GrillNotifyPoint', float(PrimaryNotify)) \
-			.field('Probe1Temp', float(Probe1Temp)) \
-			.field('Probe1SetPoint', float(Probe1Notify)) \
-			.field('Probe2Temp', float(Probe2Temp)) \
-			.field('Probe2SetPoint', float(Probe2Notify)) \
-			.field("Mode", str(get_or_default(control, "mode", 'unknown'))) \
+		p = (
+			Point(name)
+			.time(time=datetime.utcnow())
+			.field('GrillTemp', float(PrimaryTemp))
+			.field('GrillSetPoint', float(PrimarySetpoint))
+			.field('GrillNotifyPoint', float(PrimaryNotify))
+			.field('Probe1Temp', float(Probe1Temp))
+			.field('Probe1SetPoint', float(Probe1Notify))
+			.field('Probe2Temp', float(Probe2Temp))
+			.field('Probe2SetPoint', float(Probe2Notify))
+			.field('Mode', str(get_or_default(control, 'mode', 'unknown')))
 			.field('PelletLevel', int(get_or_default(get_or_default(pelletdb, 'current', {}), 'hopper_level', 100)))
+		)
 		if grill_platform is not None:
 			outputs = grill_platform.GetOutputStatus()
 			for key in outputs:

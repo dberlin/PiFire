@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire PID Controller
 *****************************************
@@ -26,8 +26,8 @@
   INT  = Historic cumulative value of errors
   e(t) = Current Error = Set Point - Current Temp
 
-  
-  Configuration Defaults: 
+
+  Configuration Defaults:
   "config": {
       "PB": 42.0,
       "Td": 45.0,
@@ -35,25 +35,30 @@
    }
 
 *****************************************
-'''
+"""
 
-'''
+"""
 Imported Libraries
-'''
+"""
 import time
 import logging
 from common import create_logger
-from controller.base import ControllerBase 
-log_level = logging.DEBUG
-eventLogger = create_logger('events', filename='./logs/events.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level)
+from controller.base import ControllerBase
 
-'''
+log_level = logging.DEBUG
+eventLogger = create_logger(
+	'events', filename='./logs/events.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level
+)
+
+"""
 Class Definition
-'''
+"""
+
+
 class Controller(ControllerBase):
 	def __init__(self, config, units, cycle_data):
 		super().__init__(config, units, cycle_data)
-		self.function_list.append('set_gains') 
+		self.function_list.append('set_gains')
 		self.function_list.append('get_k')
 		self.pb = config.get('PB', 42.0)
 		self.ti = config.get('Ti', 180.0)
@@ -106,22 +111,35 @@ class Controller(ControllerBase):
 		# PID
 		self.u = self.p + self.i + self.d
 
-		# Clamping anti-windup method. 
-		# Stops integration when the sum of the block components exceeds the output limits 
-		# and the integrator output and block input have the same sign. 
-		# Resumes integration when either the sum of the block components exceeds the output limits 
+		# Clamping anti-windup method.
+		# Stops integration when the sum of the block components exceeds the output limits
+		# and the integrator output and block input have the same sign.
+		# Resumes integration when either the sum of the block components exceeds the output limits
 		# and the integrator output and block input have opposite sign or the sum no longer exceeds the output limits.
-		# 
-		# Implemented via reversing the addition to self.inter above if we are clamping.		
+		#
+		# Implemented via reversing the addition to self.inter above if we are clamping.
 		if not ((abs(self.u) >= 1) and (self.i * self.u > 0)):
-			clamping_log = "false"
+			clamping_log = 'false'
 			eventLogger.debug('Not clamping integrator.')
 		else:
-			clamping_log = "true"
+			clamping_log = 'true'
 			eventLogger.debug('clamping integrator.')
 			self.inter -= error * dt
 
-		eventLogger.debug('PID Update... error: ' + str(error) + ', p: ' + str(self.p) + ', i: ' + str(self.i) + ', d: ' + str(self.d) + ', pid: ' + str(self.u) + ' , clamping: ' + str(clamping_log))
+		eventLogger.debug(
+			'PID Update... error: '
+			+ str(error)
+			+ ', p: '
+			+ str(self.p)
+			+ ', i: '
+			+ str(self.i)
+			+ ', d: '
+			+ str(self.d)
+			+ ', pid: '
+			+ str(self.u)
+			+ ' , clamping: '
+			+ str(clamping_log)
+		)
 
 		# Update for next cycle
 		self.error_last = error
@@ -142,7 +160,7 @@ class Controller(ControllerBase):
 		self.ti = ti
 		self.td = td
 		self._calculate_gains()
-	
+
 	def set_config(self, config):
 		super().set_config(config)
 		self.pb = config.get('PB', 42.0)
@@ -155,4 +173,3 @@ class Controller(ControllerBase):
 
 	def get_k(self):
 		return self.kp, self.ki, self.kd
-	

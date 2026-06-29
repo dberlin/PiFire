@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire PID Controller
 *****************************************
@@ -18,8 +18,8 @@
   PB = Proportional Band
   Ti = Goal of eliminating in Ti seconds
   Td = Predicts error value at Td in seconds
-  
-  Configuration Defaults: 
+
+  Configuration Defaults:
   "config": {
       "PB": 60.0,
       "Td": 45.0,
@@ -28,22 +28,24 @@
    }
 
 *****************************************
-'''
+"""
 
-'''
+"""
 Imported Libraries
-'''
+"""
 import time
-from controller.base import ControllerBase 
+from controller.base import ControllerBase
 
-'''
+"""
 Class Definition
-'''
+"""
+
+
 class Controller(ControllerBase):
 	def __init__(self, config, units, cycle_data):
 		super().__init__(config, units, cycle_data)
 
-		self.function_list.append('set_gains') 
+		self.function_list.append('set_gains')
 		self.function_list.append('get_k')
 
 		self._calculate_gains(config.get('PB', 60.0), config.get('Ti', 180.0), config.get('Td', 45.0))
@@ -63,7 +65,7 @@ class Controller(ControllerBase):
 		self.inter = 0.0
 		if self.ki != 0:
 			self.inter_max = abs(self.center / self.ki)
-		else: 
+		else:
 			self.inter_max = 0
 
 		self.last = 150
@@ -84,7 +86,7 @@ class Controller(ControllerBase):
 	def update(self, current):
 		# P
 		error = current - self.set_point
-		self.p = self.kp * error + self.center # p = 1 for pb / 2 under set_point, p = 0 for pb / 2 over set_point
+		self.p = self.kp * error + self.center  # p = 1 for pb / 2 under set_point, p = 0 for pb / 2 over set_point
 
 		# I
 		dt = time.time() - self.last_update
@@ -118,7 +120,7 @@ class Controller(ControllerBase):
 		self.last_update = time.time()
 
 	def set_gains(self, pb, ti, td):
-		self._calculate_gains(pb,ti,td)
+		self._calculate_gains(pb, ti, td)
 		if self.ki != 0:
 			self.inter_max = abs(self.center / self.ki)
 		else:
@@ -137,5 +139,5 @@ class Controller(ControllerBase):
 		self.center = config.get('center', 0.5)
 		if self.ki != 0:
 			self.inter_max = abs(self.center / self.ki)
-		else: 
+		else:
 			self.inter_max = 0

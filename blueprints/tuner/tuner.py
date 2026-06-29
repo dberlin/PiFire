@@ -1,9 +1,10 @@
 import math
 from common.common import write_log
 
+
 def calc_shh_coefficients(t1, t2, t3, r1, r2, r3, units='F'):
-	try: 
-		if units=='F':
+	try:
+		if units == 'F':
 			# Convert Temps from Fahrenheit to Kelvin
 			t1 = ((t1 - 32) * (5 / 9)) + 273.15
 			t2 = ((t2 - 32) * (5 / 9)) + 273.15
@@ -44,17 +45,17 @@ def calc_shh_coefficients(t1, t2, t3, r1, r2, r3, units='F'):
 		a = 0
 		b = 0
 		c = 0
-	return(a, b, c)
+	return (a, b, c)
 
 
 def calc_shh_chart(a, b, c, units='F', temp_range=220, tr_points=[]):
-	'''
+	"""
 	Based on SHH Coefficients determined during tuning, show Temp (x) vs. Tr (y) chart
-	'''
+	"""
 
 	labels = []
 
-	for label in range(0, temp_range, temp_range//20):
+	for label in range(0, temp_range, temp_range // 20):
 		labels.append(label)
 
 	chart_data = []
@@ -70,12 +71,13 @@ def calc_shh_chart(a, b, c, units='F', temp_range=220, tr_points=[]):
 
 	return labels, chart_data
 
-def temp_to_tr(temp, a, b, c, units='F'):
-	'''
-	# Not recommended for use, as it commonly produces a complex number
-	'''
 
-	try: 
+def temp_to_tr(temp, a, b, c, units='F'):
+	"""
+	# Not recommended for use, as it commonly produces a complex number
+	"""
+
+	try:
 		if units == 'F':
 			temp_k = ((temp - 32) * (5 / 9)) + 273.15
 		else:
@@ -85,30 +87,31 @@ def temp_to_tr(temp, a, b, c, units='F'):
 		# Inverse of the equation, to determine Tr = Resistance Value of the thermistor
 
 		x = (a - (1 / temp_k)) / c
-		y1 = math.pow((b/(3*c)), 3) 
-		y2 = ((x*x)/4)
-		y = math.sqrt(y1+y2)  # If the result of y1 + y2 is negative, this will throw an exception
-		Tr = math.exp(math.pow(y - (x/2), (1/3)) - math.pow(y + (x/2), (1/3)))
-	except: 
+		y1 = math.pow((b / (3 * c)), 3)
+		y2 = (x * x) / 4
+		y = math.sqrt(y1 + y2)  # If the result of y1 + y2 is negative, this will throw an exception
+		Tr = math.exp(math.pow(y - (x / 2), (1 / 3)) - math.pow(y + (x / 2), (1 / 3)))
+	except:
 		Tr = 0
 
 	return int(Tr)
 
+
 def tr_to_temp(tr, a, b, c, units='F'):
 	try:
-		#Steinhart Hart Equation
+		# Steinhart Hart Equation
 		# 1/T = A + B(ln(R)) + C(ln(R))^3
 		# T = 1/(a + b[ln(ohm)] + c[ln(ohm)]^3)
-		ln_ohm = math.log(tr) # ln(ohms)
-		t1 = (b * ln_ohm) # b[ln(ohm)]
-		t2 = c * math.pow(ln_ohm, 3) # c[ln(ohm)]^3
-		temp_k = 1/(a + t1 + t2) # calculate temperature in Kelvin
-		temp_c = temp_k - 273.15 # Kelvin to Celsius
-		temp_f = temp_c * (9 / 5) + 32 # Celsius to Fahrenheit
+		ln_ohm = math.log(tr)  # ln(ohms)
+		t1 = b * ln_ohm  # b[ln(ohm)]
+		t2 = c * math.pow(ln_ohm, 3)  # c[ln(ohm)]^3
+		temp_k = 1 / (a + t1 + t2)  # calculate temperature in Kelvin
+		temp_c = temp_k - 273.15  # Kelvin to Celsius
+		temp_f = temp_c * (9 / 5) + 32  # Celsius to Fahrenheit
 	except:
 		temp_c = 0.0
 		temp_f = 0
-	if units == 'F': 
-		return int(temp_f) # Return Calculated Temperature and Thermistor Value in Ohms
+	if units == 'F':
+		return int(temp_f)  # Return Calculated Temperature and Thermistor Value in Ohms
 	else:
 		return temp_c

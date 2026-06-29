@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
 PiFire Probes MAX31856 Adafruit Module
 *****************************************
@@ -25,13 +25,13 @@ Description:
 			}
 		}
 
-'''
+"""
 
-'''
+"""
 *****************************************
  Imported Libraries
 *****************************************
-'''
+"""
 import logging
 import adafruit_max31856
 from probes.base import ProbeInterface, resolve_spi_bus
@@ -48,18 +48,19 @@ _TC_TYPES = {
 	'T': adafruit_max31856.ThermocoupleType.T,
 }
 
-'''
+"""
 *****************************************
  Class Definitions
 *****************************************
-'''
+"""
 
-class TCDevice():
-	''' MAX31856 Thermocouple Device Based on the Adafruit Module '''
+
+class TCDevice:
+	"""MAX31856 Thermocouple Device Based on the Adafruit Module"""
+
 	def __init__(self, spi, cs, tc_type='K', averaging=1, noise_rejection=60):
 		self.status = {}
-		self.sensor = adafruit_max31856.MAX31856(
-			spi, cs, thermocouple_type=_TC_TYPES[tc_type])
+		self.sensor = adafruit_max31856.MAX31856(spi, cs, thermocouple_type=_TC_TYPES[tc_type])
 		self.sensor.averaging = averaging
 		self.sensor.noise_rejection = noise_rejection
 
@@ -70,8 +71,8 @@ class TCDevice():
 	def get_status(self):
 		return self.status
 
-class ReadProbes(ProbeInterface):
 
+class ReadProbes(ProbeInterface):
 	def __init__(self, probe_info, device_info, units):
 		super().__init__(probe_info, device_info, units)
 
@@ -86,15 +87,15 @@ class ReadProbes(ProbeInterface):
 		self.device = TCDevice(spi, cs, tc_type, averaging, noise_rejection)
 
 	def read_all_ports(self, output_data):
-		''' Read temperature from device '''
+		"""Read temperature from device"""
 		tempC = round(self.device.temperature, 1)
-		tempF = int(tempC * (9/5) + 32) # Celsius to Fahrenheit
+		tempF = int(tempC * (9 / 5) + 32)  # Celsius to Fahrenheit
 		port = self.device_info['ports'][0]
 
-		''' Thermocouples have no resistance reading '''
+		""" Thermocouples have no resistance reading """
 		self.output_data['tr'][self.port_map[port]] = 0
 
-		''' Store the temperature in the output data structure '''
+		""" Store the temperature in the output data structure """
 		if port == self.primary_port:
 			self.output_data['primary'][self.port_map[port]] = tempF if self.units == 'F' else tempC
 		elif port in self.food_ports:

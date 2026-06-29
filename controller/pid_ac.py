@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire PID Controller
 *****************************************
@@ -18,8 +18,8 @@
   PB = Proportional Band
   Ti = Goal of eliminating in Ti seconds
   Td = Predicts error value at Td in seconds
-  
-  Configuration Defaults: 
+
+  Configuration Defaults:
   "config": {
       "PB": 60.0,
       "Td": 45.0,
@@ -28,21 +28,23 @@
    }
 
 *****************************************
-'''
+"""
 
-'''
+"""
 Imported Libraries
-'''
+"""
 import time
-from controller.base import ControllerBase 
+from controller.base import ControllerBase
 
-'''
+"""
 Class Definition
-'''
+"""
+
+
 class Controller(ControllerBase):
 	def __init__(self, config, units, cycle_data):
 		super().__init__(config, units, cycle_data)
-		self.function_list.append('set_gains') 
+		self.function_list.append('set_gains')
 		self.function_list.append('get_k')
 
 		self._calculate_gains(config.get('PB', 60.0), config.get('Ti', 180.0), config.get('Td', 45.0))
@@ -94,11 +96,11 @@ class Controller(ControllerBase):
 		# Elapsed time since last update
 		current_time = time.time()
 		dt = current_time - self.last_update
-		
+
 		# Fix self.last being set to 0.0 on set point change
 		if self.last == 0.0 and self.new_target:
 			self.last = current
-			
+
 		# Error Calculation.
 		error = current - self.set_point
 
@@ -114,19 +116,23 @@ class Controller(ControllerBase):
 				self.new_target = False
 
 			# Reset integral if the system is not within stable window or has not reached halfway to the set point within 3 cycles. Prevents overshoots on small set point changes.
-			if (abs(error) > self.stable_window) or (self.new_target and current_time - self.last_set_time >= self.cycle_time * 3 and abs(error) <= abs(self.start_change_temp - self.set_point) / 2):
+			if (abs(error) > self.stable_window) or (
+				self.new_target
+				and current_time - self.last_set_time >= self.cycle_time * 3
+				and abs(error) <= abs(self.start_change_temp - self.set_point) / 2
+			):
 				self.inter = 0.0
 
 			# Minimize derivative to maximize descent rate when setting new lower Set Point
 			if (self.new_target and self.set_point < current) or (abs(error) > self.pb / 2):
 				self.derv = 0.0
-		
+
 			# P
 			self.p = self.kp * error + self.center
 
 			# I
 			self.inter += error * dt
-			
+
 			self.i = self.ki * self.inter
 			self.i = max(self.i, -self.center)
 			self.i = min(self.i, self.center)
@@ -155,19 +161,19 @@ class Controller(ControllerBase):
 		self.start_change_temp = self.last
 		self.new_target = True
 		# Dynamically set self.center depending on set_point. Higher centers are needed to achieve higher temps, lower centers for lower temps.
-		if self.units == "F":
+		if self.units == 'F':
 			if set_point <= 240:
 				self.center = set_point * self.center_factor
 			else:
 				self.center = set_point * self.center_factor * 1.2
-		elif self.units == "C":
+		elif self.units == 'C':
 			if set_point <= 115:
-				self.center = (set_point * 9/5 + 32) * self.center_factor
+				self.center = (set_point * 9 / 5 + 32) * self.center_factor
 			else:
-				self.center = (set_point * 9/5 + 32) * self.center_factor * 1.2
-    
+				self.center = (set_point * 9 / 5 + 32) * self.center_factor * 1.2
+
 	def set_gains(self, pb, ti, td):
-		self._calculate_gains(pb,ti,td)
+		self._calculate_gains(pb, ti, td)
 
 	def get_k(self):
 		return self.kp, self.ki, self.kd

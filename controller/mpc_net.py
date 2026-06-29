@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire MPC Neural-Net Policy (IPOPT-free)
 *****************************************
@@ -23,7 +23,7 @@
  stale net (e.g. after recalibration) can never silently mislead.
 
 *****************************************
-'''
+"""
 
 import numpy as np
 
@@ -31,14 +31,27 @@ _KELVIN = 273.15
 # Calibration the net policy depends on. The net approximates the MPC's policy,
 # which is a function of the full grey-box model, the MPC tuning AND the bounds --
 # so ALL of these must match the active config or the net is stale.
-_CALIB_FLOATS = ('C_f', 'C_c', 'h_fc', 'h_amb', 'T_amb', 'theta', 'K_Q', 'sigma',
-                 'Q_w', 'R_dQ', 't_step', 'Q_min', 'Q_max')
+_CALIB_FLOATS = (
+	'C_f',
+	'C_c',
+	'h_fc',
+	'h_amb',
+	'T_amb',
+	'theta',
+	'K_Q',
+	'sigma',
+	'Q_w',
+	'R_dQ',
+	't_step',
+	'Q_min',
+	'Q_max',
+)
 _CALIB_INTS = ('n_delay', 'n_horizon')
 
 
 class NetPolicy:
 	def __init__(self, weights, x_mean, x_std, r_mean, r_std, calib, sp_lo, sp_hi):
-		self.weights = weights              # list of (W[in,out], b[out])
+		self.weights = weights  # list of (W[in,out], b[out])
 		self.x_mean = x_mean
 		self.x_std = x_std
 		self.r_mean = float(r_mean)
@@ -56,12 +69,19 @@ class NetPolicy:
 		weights = [(z[f'W{i}'].astype(float), z[f'b{i}'].astype(float)) for i in range(L)]
 		calib = {k: float(z[k]) for k in _CALIB_FLOATS}
 		calib.update({k: int(z[k]) for k in _CALIB_INTS})
-		return cls(weights, z['x_mean'].astype(float), z['x_std'].astype(float),
-		           float(z['r_mean']), float(z['r_std']), calib,
-		           float(z['sp_lo']), float(z['sp_hi']))
+		return cls(
+			weights,
+			z['x_mean'].astype(float),
+			z['x_std'].astype(float),
+			float(z['r_mean']),
+			float(z['r_std']),
+			calib,
+			float(z['sp_lo']),
+			float(z['sp_hi']),
+		)
 
 	def matches_config(self, cfg, rtol=1e-3, atol=1e-12):
-		'''True iff the net was trained for (essentially) this calibration.'''
+		"""True iff the net was trained for (essentially) this calibration."""
 		for k in _CALIB_INTS:
 			if k in cfg and int(cfg[k]) != self.calib[k]:
 				return False
@@ -83,7 +103,7 @@ class NetPolicy:
 		return out * self.r_std + self.r_mean
 
 	def firing_rate(self, x_hat, u_prev, set_point_c):
-		'''Firing-rate demand Q for the estimated state and target (Celsius).'''
+		"""Firing-rate demand Q for the estimated state and target (Celsius)."""
 		x = np.asarray(x_hat, dtype=float).reshape(-1)
 		d = x[self.n_delay + 2]
 		# the net only saw T_set in [sp_lo, sp_hi]; clip its input to avoid

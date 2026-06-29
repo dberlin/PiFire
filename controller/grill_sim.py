@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire MPC Grill Simulator (test-only)
 *****************************************
@@ -25,7 +25,7 @@
  lagged + noisy probe reading; true_Tc is the (noise-free) chamber temperature.
 
 *****************************************
-'''
+"""
 
 import numpy as np
 
@@ -33,21 +33,21 @@ DT = 1.0
 
 
 class GrillSim:
-	def __init__(self, *, seed=0, deadtime=20, fan_is_lever=True, fixed_fan=None,
-	             probe_tau=4.5, H=420.0):
+	def __init__(self, *, seed=0, deadtime=20, fan_is_lever=True, fixed_fan=None, probe_tau=4.5, H=420.0):
 		self.rng = np.random.default_rng(seed)
 		self.fan_is_lever = fan_is_lever
-		self.fixed_fan = fixed_fan            # if set, fan held at this frac
+		self.fixed_fan = fixed_fan  # if set, fan held at this frac
 		self.probe_tau = probe_tau
 		# truth params (offset from the controller's nominal grey-box)
 		self.C_f, self.C_c = 9.0, 300.0
 		self.h_fc0, self.h_amb0 = 1.3, 0.42
 		self.sigma = 1.4e-9
-		self.feed_rate = 1.0                  # fuel units/s while auger ON
-		self.H = H                            # heat per fuel unit (~140 -> 334F max; ~300 -> ~450F max)
+		self.feed_rate = 1.0  # fuel units/s while auger ON
+		self.H = H  # heat per fuel unit (~140 -> 334F max; ~300 -> ~450F max)
 		self.k_burn = 0.10
 		self.T_amb = 17.0
 		from collections import deque
+
 		self.transit = deque([0.0] * int(deadtime))
 		self.fuel = 0.0
 		self.T_f = 20.0
@@ -64,7 +64,7 @@ class GrillSim:
 		# multiplied loss by 1.6-2.6x, which swamped control and is not
 		# representative -- real cooks are mostly calm.)
 		if self.t > self._gust_until:
-			if self.rng.random() < 0.0010:               # ~ every 17 min
+			if self.rng.random() < 0.0010:  # ~ every 17 min
 				self._gust = self.rng.uniform(1.03, 1.12)
 				self._gust_until = self.t + self.rng.uniform(30, 90)
 			else:

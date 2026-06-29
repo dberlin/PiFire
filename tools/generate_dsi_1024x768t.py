@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-'''
+"""
 Generate display/dsi_1024x768t.json from display/dsi_800x480t.json.
 
 Strategy A: uniform 1.28x scale (1024/800) with centering on the slack axis.
 Re-run after changing the 800x480 layout:
     python tools/generate_dsi_1024x768t.py
-'''
+"""
+
 import json
 import copy
 import os

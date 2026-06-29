@@ -1,18 +1,18 @@
-'''
+"""
 ==============================================================================
- PiFire Updater 
+ PiFire Updater
 ==============================================================================
 
  Description: Update support functions to utilize Git/GitHub for live system updates
 
 ==============================================================================
-'''
+"""
 
-'''
+"""
 ==============================================================================
  Imported Modules
 ==============================================================================
-'''
+"""
 
 from common import *
 from importlib.metadata import version, PackageNotFoundError
@@ -21,11 +21,12 @@ import subprocess
 import argparse
 import logging
 
-'''
+"""
 ==============================================================================
  Supporting Functions
 ==============================================================================
-'''
+"""
+
 
 def get_available_branches():
 	command = ['git', 'branch', '-a']
@@ -33,7 +34,7 @@ def get_available_branches():
 	branch_list = []
 	error_msg = ''
 	if branches.returncode == 0:
-		input_list = branches.stdout.split("\n")
+		input_list = branches.stdout.split('\n')
 		for line in input_list:
 			line = line.strip(' *')
 			if 'origin/main' in line:
@@ -46,8 +47,9 @@ def get_available_branches():
 			elif line != '':
 				branch_list.append(line)
 	else:
-		error_msg = branches.stderr 
-	return(branch_list, error_msg)
+		error_msg = branches.stderr
+	return (branch_list, error_msg)
+
 
 def update_remote_branches():
 	# git remote set-branches origin '*'
@@ -55,13 +57,14 @@ def update_remote_branches():
 	remote_branches = subprocess.run(command, capture_output=True, text=True)
 	error_msg = ''
 	if remote_branches.returncode != 0:
-		error_msg = remote_branches.stderr 
+		error_msg = remote_branches.stderr
 	# Fetch Branch Information Locally
-	command = ['git', 'fetch'] 
+	command = ['git', 'fetch']
 	fetch = subprocess.run(command, capture_output=True, text=True)
 	if fetch.returncode != 0:
-		error_msg += ' | ' + remote_branches.stderr 
-	return(error_msg)
+		error_msg += ' | ' + remote_branches.stderr
+	return error_msg
+
 
 def get_branch():
 	# --show-current is only in later versions of git, and unfortunately buster does not have this
@@ -70,15 +73,16 @@ def get_branch():
 	error_msg = ''
 	result = ''
 	if branches.returncode == 0:
-		input_list = branches.stdout.split("\n")
+		input_list = branches.stdout.split('\n')
 		for line in input_list:
 			if '*' in line:
 				result = line.strip(' *')
 				break
 	else:
 		result = 'ERROR Getting Current Branch'
-		error_msg = branches.stderr 
-	return(result, error_msg)
+		error_msg = branches.stderr
+	return (result, error_msg)
+
 
 def set_branch(branch_target):
 	command = ['git', 'checkout', '-f', branch_target]
@@ -87,10 +91,11 @@ def set_branch(branch_target):
 	result = ''
 	if target.returncode == 0:
 		result = target.stdout.replace('\n', '<br>') + target.stderr.replace('\n', '<br>')
-	else: 
+	else:
 		result = 'ERROR Setting Branch'
 		error_msg = target.stderr.replace('\n', '<br>')
-	return(result, error_msg)
+	return (result, error_msg)
+
 
 def get_remote_url():
 	command = ['git', 'config', '--get', 'remote.origin.url']
@@ -101,7 +106,8 @@ def get_remote_url():
 	else:
 		result = 'ERROR Retrieving URL'
 		error_msg = remote.stderr.replace(' \n', ' ')
-	return(result, error_msg)
+	return (result, error_msg)
+
 
 def get_available_updates(branch=''):
 	result = {}
@@ -114,26 +120,31 @@ def get_available_updates(branch=''):
 		fetch = subprocess.run(command, capture_output=True, text=True)
 		command = ['git', 'rev-list', '--left-only', '--count', f'origin/{branch}...@']
 		rev_list = subprocess.run(command, capture_output=True, text=True)
-		#print(f'rev_list.returncode = {rev_list.returncode}')
-		#print(f'fetch.returncode = {fetch.returncode}')
+		# print(f'rev_list.returncode = {rev_list.returncode}')
+		# print(f'fetch.returncode = {fetch.returncode}')
 
 		if rev_list.returncode == 0 and fetch.returncode == 0:
 			rev_list = rev_list.stdout.strip(' \n')
 			if rev_list.isnumeric():
-				result['success'] = True 
+				result['success'] = True
 				result['commits_behind'] = int(rev_list)
-			else: 
-				result['success'] = False 
+			else:
+				result['success'] = False
 				result['message'] = rev_list
-		else: 
-			result['success'] = False 
-			result['message'] = 'ERROR Getting Revision List: ' + rev_list.stderr.replace('\n', ' ') + \
-								rev_list.stdout.replace('\n', ' ')
+		else:
+			result['success'] = False
+			result['message'] = (
+				'ERROR Getting Revision List: '
+				+ rev_list.stderr.replace('\n', ' ')
+				+ rev_list.stdout.replace('\n', ' ')
+			)
 	else:
-		result['success'] = False 
-		result['message'] = 'ERROR Getting Remote or Branch: ' + error_msg1.replace('\n', ' ') + ' ' + \
-							error_msg2.replace('\n', ' ')
-	return(result)
+		result['success'] = False
+		result['message'] = (
+			'ERROR Getting Remote or Branch: ' + error_msg1.replace('\n', ' ') + ' ' + error_msg2.replace('\n', ' ')
+		)
+	return result
+
 
 def do_update():
 	branch, error_msg1 = get_branch()
@@ -144,21 +155,26 @@ def do_update():
 		command = ['git', 'reset', '--hard', f'origin/{branch}']
 		reset = subprocess.run(command, capture_output=True, text=True)
 
-		'''
+		"""
 		command = ['git', 'reset', '--hard', 'HEAD']
 		reset = subprocess.run(command, capture_output=True, text=True)
 		command = ['git', 'merge', f'origin/{branch}']
 		merge = subprocess.run(command, capture_output=True, text=True)
-		'''
+		"""
 		error_msg = ''
 		if fetch.returncode == 0 and reset.returncode == 0:
-			result = fetch.stdout.replace('\n', '<br>') + '<br>' + reset.stdout.replace('\n', '<br>') # + '<br>' + merge.stdout.replace('\n', '<br>')
-		else: 
+			result = (
+				fetch.stdout.replace('\n', '<br>') + '<br>' + reset.stdout.replace('\n', '<br>')
+			)  # + '<br>' + merge.stdout.replace('\n', '<br>')
+		else:
 			result = 'ERROR Performing Update.'
-			error_msg = fetch.stderr.replace('\n', '<br>') + '<br>' + reset.stderr.replace('\n', '<br>') # + '<br>' + merge.stderr.replace('\n', '<br>')
-	else: 
+			error_msg = (
+				fetch.stderr.replace('\n', '<br>') + '<br>' + reset.stderr.replace('\n', '<br>')
+			)  # + '<br>' + merge.stderr.replace('\n', '<br>')
+	else:
 		result = 'ERROR Getting Remote URL.'
-	return(result, error_msg)
+	return (result, error_msg)
+
 
 def get_log(num_commits=10):
 	branch, error_msg = get_branch()
@@ -167,50 +183,52 @@ def get_log(num_commits=10):
 		log = subprocess.run(command, capture_output=True, text=True)
 		if log.returncode == 0:
 			result = log.stdout.replace('\n', '<br>').replace('"', '')
-		else: 
+		else:
 			result = 'ERROR Getting Log.'
 			error_msg = log.stderr.replace('\n', '<br>')
-	else: 
+	else:
 		result = 'ERROR Getting Branch Name.'
-	return(result, error_msg)
+	return (result, error_msg)
+
 
 def get_remote_version():
 	remote_url, error_msg = get_remote_url()
 	current_branch, branch_error = get_branch()
-	
+
 	if error_msg == '' and branch_error == '':
 		# Instead of getting all tags, we'll get tags that are on the current branch
 		# First fetch the latest tags
 		fetch_command = ['git', 'fetch', '--tags']
 		fetch = subprocess.run(fetch_command, capture_output=True, text=True)
-		
+
 		if fetch.returncode != 0:
-			return "ERROR Fetching Tags.", fetch.stderr.replace('\n', ' | ')
-		
+			return 'ERROR Fetching Tags.', fetch.stderr.replace('\n', ' | ')
+
 		# Now get tags that contain commits from the current branch
 		# This command finds tags that are reachable from the branch
 		command = ['git', 'tag', '--sort=v:refname', '--merged', f'origin/{current_branch}']
 		versions = subprocess.run(command, capture_output=True, text=True)
-		
+
 		if versions.returncode == 0:
 			version_list = versions.stdout.split('\n')  # Make a list of versions from the output
 			# Remove empty entries
 			version_list = [v for v in version_list if v]
-			
+
 			if version_list:
 				# Get the latest tag from the list
 				result = version_list[-1]
-			else: 
-				result = "No tags found on current branch"
-		else: 
-			result = "ERROR Getting Remote Version."
+			else:
+				result = 'No tags found on current branch'
+		else:
+			result = 'ERROR Getting Remote Version.'
 			error_msg = versions.stderr.replace('\n', ' | ')
-	else: 
+	else:
 		result = 'ERROR Getting Remote URL or Branch.'
-		if error_msg: 
+		if error_msg:
 			error_msg += ' | '
 		error_msg += branch_error
-	return(result, error_msg)
+	return (result, error_msg)
+
 
 def get_current_tag():
 	error_msg = ''
@@ -218,10 +236,11 @@ def get_current_tag():
 	tag = subprocess.run(command, capture_output=True, text=True)
 	if tag.returncode == 0:
 		result = tag.stdout.replace('\n', '')
-	else: 
+	else:
 		result = 'ERROR Getting Log.'
 		error_msg = tag.stderr.replace('\n', '<br>')
-	return(result, error_msg)
+	return (result, error_msg)
+
 
 def get_update_data(settings):
 	# Populate Update Data Structure
@@ -245,6 +264,7 @@ def get_update_data(settings):
 
 	return update_data
 
+
 def change_branch(branch_target):
 	command = ['git', 'checkout', '-f', branch_target]
 	target = subprocess.run(command, capture_output=True, text=True)
@@ -256,7 +276,8 @@ def change_branch(branch_target):
 		status = 'ERROR Changing Branch'
 		output = ' - ' + target.stderr
 		success = False
-	return(success, status, output)
+	return (success, status, output)
+
 
 def install_update():
 	branch, error_msg1 = get_branch()
@@ -280,7 +301,8 @@ def install_update():
 		status = 'ERROR Getting Remote URL.'
 		output = ' - ERROR Getting Remote URL. Please check your git install'
 		success = False
-	return(success, status, output)
+	return (success, status, output)
+
 
 def read_output(command):
 	process = subprocess.Popen(command, stdout=subprocess.PIPE, encoding='utf-8')
@@ -294,6 +316,7 @@ def read_output(command):
 
 	return_code = process.poll()
 	print(f'Return Code: {return_code}')
+
 
 def install_dependencies(current_version_string='0.0.0', current_build=None):
 	result = 0
@@ -313,37 +336,36 @@ def install_dependencies(current_version_string='0.0.0', current_build=None):
 
 	updaterInfo = read_updater_manifest()
 
-	# Get ALL PyPi & Apt dependencies and commands to install / update 
+	# Get ALL PyPi & Apt dependencies and commands to install / update
 	py_dependencies = []
 	apt_dependencies = []
 	command_list = []
 	reboot = False
 
 	for version_info in updaterInfo['versions']:
-		''' Walk list of versions in updater_manifest, check for dependencies '''	
-		if (semantic_ver_is_lower(current_version_string, version_info['version'])) or \
-			((current_version_string == version_info['version']) and \
-			(current_build < version_info['build'])):
-			
+		""" Walk list of versions in updater_manifest, check for dependencies """
+		if (semantic_ver_is_lower(current_version_string, version_info['version'])) or (
+			(current_version_string == version_info['version']) and (current_build < version_info['build'])
+		):
 			# If the current version (pre-update) is less than this version information, install dependencies, etc.
 			for section in version_info['dependencies']:
 				for module in version_info['dependencies'][section]['py_dependencies']:
 					try:
 						pkg_version = version(module)
-						logger.info(f"Found {module} version {pkg_version}")
+						logger.info(f'Found {module} version {pkg_version}')
 					except PackageNotFoundError:
-						logger.info(f"Package {module} not found, adding to dependencies")
+						logger.info(f'Package {module} not found, adding to dependencies')
 						py_dependencies.append(module)
 
 				for package in version_info['dependencies'][section]['apt_dependencies']:
-					if subprocess.call(["which", package]) != 0:
+					if subprocess.call(['which', package]) != 0:
 						apt_dependencies.append(package)
 
 				for command in version_info['dependencies'][section]['command_list']:
 					command_list.append(command)
-				
+
 				if version_info['reboot_required']:
-					reboot = True 
+					reboot = True
 
 	if DEBUG:
 		print(f'py_dep: {py_dependencies}')
@@ -397,7 +419,7 @@ def install_dependencies(current_version_string='0.0.0', current_build=None):
 			return_code = process.poll()
 			result += return_code
 			print(f'Return Code: {return_code}')
-		
+
 		percent += increment
 		output = f' - Completed Install of {py_item}'
 		set_updater_install_status(percent, status, output)
@@ -435,7 +457,7 @@ def install_dependencies(current_version_string='0.0.0', current_build=None):
 			return_code = process.poll()
 			result += return_code
 			print(f'Return Code: {return_code}')
-		
+
 		percent += increment
 		output = f' - Completed Install of {apt_item}'
 		set_updater_install_status(percent, status, output)
@@ -462,9 +484,9 @@ def install_dependencies(current_version_string='0.0.0', current_build=None):
 	logger.debug(f'Output:  {output}')
 
 	for command in command_list:
-		if "sudo" in command and "python" in command:
-			#replace "python" with python_exec in command list object
-			command = [python_exec if item == "python" else item for item in command]
+		if 'sudo' in command and 'python' in command:
+			# replace "python" with python_exec in command list object
+			command = [python_exec if item == 'python' else item for item in command]
 		process = subprocess.Popen(command, stdout=subprocess.PIPE, encoding='utf-8')
 		while True:
 			output = process.stdout.readline()
@@ -507,25 +529,38 @@ def install_dependencies(current_version_string='0.0.0', current_build=None):
 
 	return result
 
-'''
+
+"""
 ==============================================================================
  Main
 ==============================================================================
-'''
-if __name__ == "__main__":
+"""
+if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='Updater Script')
-	parser.add_argument('-b', '--branch', metavar='BRANCH', type=str, required=False, help="Change Branches")
-	parser.add_argument('-u', '--update', metavar='BRANCH', type=str, required=False, help="Update Current Branch")
-	parser.add_argument('-r', '--remote', action='store_true', required=False, help="Update Remote Branches")
-	parser.add_argument('-p', '--piplist', action='store_true', required=False, help="Output PIP List packages to JSON file.")
-	parser.add_argument('-v', '--uv', action='store_true', required=False, help="Set uv flag and clear venv flag in settings.json")
-	parser.add_argument('-l', '--legacyvenv', action='store_true', required=False, help="Set venv flag in settings.json")
-	parser.add_argument('-d', '--debug', action='store_true', required=False, help="Enable Debug Mode")
-	parser.add_argument('-i', '--installdependencies', action='store_true', required=False, help="Install Dependencies for current version")
+	parser.add_argument('-b', '--branch', metavar='BRANCH', type=str, required=False, help='Change Branches')
+	parser.add_argument('-u', '--update', metavar='BRANCH', type=str, required=False, help='Update Current Branch')
+	parser.add_argument('-r', '--remote', action='store_true', required=False, help='Update Remote Branches')
+	parser.add_argument(
+		'-p', '--piplist', action='store_true', required=False, help='Output PIP List packages to JSON file.'
+	)
+	parser.add_argument(
+		'-v', '--uv', action='store_true', required=False, help='Set uv flag and clear venv flag in settings.json'
+	)
+	parser.add_argument(
+		'-l', '--legacyvenv', action='store_true', required=False, help='Set venv flag in settings.json'
+	)
+	parser.add_argument('-d', '--debug', action='store_true', required=False, help='Enable Debug Mode')
+	parser.add_argument(
+		'-i',
+		'--installdependencies',
+		action='store_true',
+		required=False,
+		help='Install Dependencies for current version',
+	)
 
 	args = parser.parse_args()
 
-	''' Setup Logger '''
+	""" Setup Logger """
 	if args.debug:
 		log_level = logging.DEBUG
 		DEBUG = True
@@ -533,7 +568,12 @@ if __name__ == "__main__":
 		log_level = logging.INFO
 		DEBUG = False
 
-	logger = create_logger('updater', filename='./logs/update.log', messageformat='%(asctime)s | %(levelname)s | %(message)s', level=log_level)
+	logger = create_logger(
+		'updater',
+		filename='./logs/update.log',
+		messageformat='%(asctime)s | %(levelname)s | %(message)s',
+		level=log_level,
+	)
 
 	# num_args = number of arguments passed to the script
 	num_args = 0
@@ -612,12 +652,12 @@ if __name__ == "__main__":
 		pip_list = subprocess.run(command, capture_output=True, text=True)
 		if pip_list.returncode == 0:
 			write_generic_json(json.loads(pip_list.stdout), 'pip_list.json')
-			#print(f'PIP List: {pip_list.stdout}')
+			# print(f'PIP List: {pip_list.stdout}')
 		else:
 			print(f'Error creating PIP List: {pip_list.stderr}')
 			pip_list = []
 			write_generic_json(pip_list, 'pip_list.json')
-	
+
 	if args.uv:
 		num_args += 1
 		settings = read_settings()
@@ -626,7 +666,7 @@ if __name__ == "__main__":
 		settings['globals']['python_exec'] = '.venv/bin/python'
 		write_generic_json(settings, 'settings.json')
 		print('Updated settings.json to set uv flag and set venv flag')
-	
+
 	if args.legacyvenv:
 		num_args += 1
 		settings = read_settings()
@@ -636,7 +676,6 @@ if __name__ == "__main__":
 		write_generic_json(settings, 'settings.json')
 		print('Updated settings.json to set venv flag and clear uv flag')
 
-	''' If no valid arguments are passed, print help message '''
+	""" If no valid arguments are passed, print help message """
 	if num_args == 0:
 		print('No valid arguments provided. Use -h for help.')
-

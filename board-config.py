@@ -1,39 +1,40 @@
-'''
+"""
 ==============================================================================
- PiFire Board Configuration Tool 
+ PiFire Board Configuration Tool
 ==============================================================================
 
  Description: Tool to configure the board settings based on the settings.json
   configuration.  Currently supports only Raspberry Pi based platforms.
 
 ==============================================================================
-'''
+"""
 
-'''
+"""
 ==============================================================================
  Imported Modules
 ==============================================================================
-'''
+"""
 
 import argparse
 import logging
-import os 
+import os
 import json
 import subprocess
 
-'''
+"""
 ==============================================================================
  Globals
 ==============================================================================
-'''
+"""
 
 log_level = logging.DEBUG
 
-'''
+"""
 ==============================================================================
  Main Functions
 ==============================================================================
-'''
+"""
+
 
 def set_pwm_gpio():
 	result = 'Setting the PWM pin: '
@@ -43,19 +44,20 @@ def set_pwm_gpio():
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result 
-	
+		return result
+
 	try:
 		if system_type == 'raspberry_pi_all' or system_type == 'prototype':
 			# "dtoverlay=pwm-2chan,pin=13,func=4"
 			pin = int(pin) if pin != None else None
-			result += rpi_config_write('dtoverlay', 'pwm-2chan', add_config={'func' : '4'}, pin=pin, pin_type='pin')
+			result += rpi_config_write('dtoverlay', 'pwm-2chan', add_config={'func': '4'}, pin=pin, pin_type='pin')
 		else:
 			result += 'NA - No system defined'
 	except:
 		result += 'FAILED (error making the configuration change) '
-	
-	return result 
+
+	return result
+
 
 def set_onewire_gpio():
 	result = 'Setting the 1Wire pin: '
@@ -65,8 +67,8 @@ def set_onewire_gpio():
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result 
-	
+		return result
+
 	try:
 		if system_type == 'raspberry_pi_all' or system_type == 'prototype':
 			# "dtoverlay=w1-gpio,pin=6"
@@ -76,8 +78,9 @@ def set_onewire_gpio():
 			result += 'NA - No system defined'
 	except:
 		result += 'FAILED (error making the configuration change) '
-	
-	return result 
+
+	return result
+
 
 def set_backlight():
 	result = 'Enabling Backlight Control for DSI Touch Display: '
@@ -86,17 +89,20 @@ def set_backlight():
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result 
-	
+		return result
+
 	try:
 		if system_type == 'raspberry_pi_all':
-			lines = [ 'SUBSYSTEM=="backlight",RUN+="/bin/chmod 666 /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power"\n' ] 
+			lines = [
+				'SUBSYSTEM=="backlight",RUN+="/bin/chmod 666 /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power"\n'
+			]
 			file = '/etc/udev/rules.d/backlight-permissions.rules'
 			result += create_file(file, lines)
 	except:
 		result += 'FAILED (error making the configuration change) '
-	
-	return result 
+
+	return result
+
 
 def enable_spi():
 	result = 'Enabling SPI: '
@@ -105,8 +111,8 @@ def enable_spi():
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result 
-	
+		return result
+
 	try:
 		if system_type == 'raspberry_pi_all' or system_type == 'prototype':
 			# "dtparam=spi=on"
@@ -115,8 +121,9 @@ def enable_spi():
 			result += 'NA - No system defined'
 	except:
 		result += 'FAILED (error making the configuration change) '
-	
-	return result 
+
+	return result
+
 
 def enable_i2c():
 	result = 'Enabling I2C: '
@@ -125,8 +132,8 @@ def enable_i2c():
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result 
-	
+		return result
+
 	try:
 		if system_type == 'raspberry_pi_all':
 			# dtparam=i2c_arm=on
@@ -139,8 +146,9 @@ def enable_i2c():
 
 	except:
 		result += 'FAILED (error making the configuration change) '
-	
-	return result 
+
+	return result
+
 
 def set_i2c_speed(baud=100000):
 	result = f'Setting I2C speed ({baud} Baud): '
@@ -149,8 +157,8 @@ def set_i2c_speed(baud=100000):
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result 
-	
+		return result
+
 	try:
 		if system_type == 'raspberry_pi_all' or system_type == 'prototype':
 			# dtparam=i2c_arm_baudrate=100000
@@ -160,8 +168,9 @@ def set_i2c_speed(baud=100000):
 
 	except:
 		result += 'FAILED (error making the configuration change) '
-	
-	return result 
+
+	return result
+
 
 def enable_gpio_shutdown():
 	result = 'Enabling the GPIO Shutdown pin: '
@@ -171,47 +180,49 @@ def enable_gpio_shutdown():
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result 
-	
+		return result
+
 	try:
 		if system_type == 'raspberry_pi_all' or system_type == 'prototype':
 			# dtoverlay=gpio-shutdown,gpio_pin=17,active_low=1,gpio_pull=up
-			add_config = {
-				'active_low' : '1',
-				'gpio_pull' : 'up'
-			}
+			add_config = {'active_low': '1', 'gpio_pull': 'up'}
 			pin = int(pin) if pin != None else None
-			result += rpi_config_write('dtoverlay', 'gpio-shutdown', add_config=add_config, pin=pin, pin_type='gpio_pin')
+			result += rpi_config_write(
+				'dtoverlay', 'gpio-shutdown', add_config=add_config, pin=pin, pin_type='gpio_pin'
+			)
 		else:
 			result += 'NA - No system defined'
 	except:
 		result += 'FAILED (error making the configuration change) '
-	
-	return result 
-'''
+
+	return result
+
+
+"""
 ==============================================================================
  Supporting Functions
 ==============================================================================
-'''
+"""
+
 
 def rpi_config_write(config_type, feature, add_config={}, pin=0, param='', pin_type='gpio_pin'):
 	result = 'SUCCESS'
-	''' Check OS version, so we can get the correct location of config.txt '''
+	""" Check OS version, so we can get the correct location of config.txt """
 	os_info = get_os_info()
 	version = os_info.get('VERSION_ID', None)
-	if version in  ['12', '13']:
-		''' Version 12 Bookworm or Version 13 Trixie '''
+	if version in ['12', '13']:
+		""" Version 12 Bookworm or Version 13 Trixie """
 		config_filename = '/boot/firmware/config.txt'
 	elif version == '11':
-		''' Version 11 Bullseye '''
+		""" Version 11 Bullseye """
 		config_filename = '/boot/config.txt'
 	else:
-		''' Test Mode '''
+		""" Test Mode """
 		config_filename = './local/config.txt'
 
-	''' Modify the configuration file '''
+	""" Modify the configuration file """
 	try:
-		''' Open the configuration file '''
+		""" Open the configuration file """
 		with open(config_filename, 'r+') as config_txt:
 			config_data = config_txt.readlines()
 
@@ -225,12 +236,12 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param='', pin_t
 				new_config_data.append(line)
 			config_data = new_config_data
 
-		''' Look for the configuration line if it exists already '''
+		""" Look for the configuration line if it exists already """
 		found = False
 		for index in range(0, len(config_data)):
 			if config_type in config_data[index] and feature in config_data[index]:
 				found = True
-				# Check for leading hashtag and remove 
+				# Check for leading hashtag and remove
 				config_line = remove_hashtag(config_data[index])
 
 				# If the pin is marked as disabled / None, then comment out the line
@@ -240,7 +251,7 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param='', pin_t
 					# Remove the preceding configuration type
 					config_line = config_line.replace(f'{config_type}=', '')
 
-					# Get dictionary of the components 
+					# Get dictionary of the components
 					config_dict = parse_config_line(config_line)
 
 					# For dtparams, turn on feature
@@ -250,7 +261,7 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param='', pin_t
 						else:
 							config_dict[feature] = param
 
-					# For dtoverlay, edit gpio-pin and additional features 
+					# For dtoverlay, edit gpio-pin and additional features
 					elif config_type == 'dtoverlay':
 						# Modify pin number
 						if pin > 0:
@@ -264,9 +275,9 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param='', pin_t
 							for key, value in add_config.items():
 								config_dict[feature][key] = value
 
-					''' Create the modified configuration line '''
+					""" Create the modified configuration line """
 					config_data[index] = build_config_line(config_type, config_dict)
-				break 
+				break
 
 		if not found and pin is not None:
 			config_dict = {}
@@ -275,25 +286,26 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param='', pin_t
 				config_dict[feature][pin_type] = pin
 				if add_config != {}:
 					for key, value in add_config.items():
-						config_dict[feature][key] = value 
+						config_dict[feature][key] = value
 			elif config_type == 'dtparam':
 				config_dict[feature] = 'on'
 
 			config_data.append(build_config_line(config_type, config_dict))
 
-		''' Write all data back to the file '''
+		""" Write all data back to the file """
 		with open(config_filename, 'w') as config_txt:
 			config_txt.writelines(config_data)
 
 	except:
 		result = 'FAILED '
 
-	return result 
+	return result
+
 
 def parse_config_line(config_line):
 	"""
 	(Format of the configuration line adheres to the Raspberry Pi config.txt formatting rules)
-	This function parses a configuration line into component options. 
+	This function parses a configuration line into component options.
 	This function assumes that the preceding configuration option has been removed (i.e. dtparam=, dtoverlay=, etc.).
 	This function removes comments.
 
@@ -301,7 +313,7 @@ def parse_config_line(config_line):
 		config_line: The configuration line to be parsed
 
 	Returns:
-		Dictionary of configuration keys and values, sub-keys/values 
+		Dictionary of configuration keys and values, sub-keys/values
 	"""
 	if '#' in config_line:
 		config_line = config_line.split('#')[0]
@@ -323,10 +335,11 @@ def parse_config_line(config_line):
 			feature = item_split[0]
 	return config_dict
 
+
 def build_config_line(config_type, config_dict):
 	"""
 	(Format of the configuration line adheres to the Raspberry Pi config.txt formatting rules)
-	This function parses a configuration dictionary into a configuration string/line. 
+	This function parses a configuration dictionary into a configuration string/line.
 
 	Args:
 		config_type: String of the type 'dtparam', 'dtoverlay', etc.
@@ -357,27 +370,30 @@ def build_config_line(config_type, config_dict):
 
 	return config_line
 
+
 def create_file(filename, lines):
 	result = f'\n - Attempting to write data to {filename}: '
 	try:
-		with open(filename, "w") as file:
+		with open(filename, 'w') as file:
 			for line in lines:
 				file.write(line)
 		result += f' SUCCESS (creating file {filename}) '
 	except:
 		result += f' FAILED (creating file {filename}) '
-	return result 
+	return result
+
 
 def append_file(filename, lines):
 	result = f'\n - Attempting to append data to {filename}: '
 	try:
-		with open(filename, "a+") as file:
+		with open(filename, 'a+') as file:
 			for line in lines:
 				file.write(line)
 		result += f' SUCCESS (appending file {filename}) '
 	except:
 		result += f' FAILED (appending file {filename}) '
-	return result 
+	return result
+
 
 def remove_hashtag(text):
 	"""Removes a preceding hashtag character from a string if it exists,
@@ -387,18 +403,19 @@ def remove_hashtag(text):
 		text: The string to process.
 
 	Returns:
-		The string with the hashtag and leading spaces removed if it existed, 
+		The string with the hashtag and leading spaces removed if it existed,
 		otherwise the original string.
 	"""
 	if text:
 		# Strip leading spaces
 		stripped_text = text.lstrip()
-		if stripped_text and stripped_text[0] == "#":
+		if stripped_text and stripped_text[0] == '#':
 			return stripped_text[1:]
 		else:
 			return text
 	else:
 		return text
+
 
 def read_generic_json(filename):
 	try:
@@ -406,14 +423,15 @@ def read_generic_json(filename):
 		json_data = json_file.read()
 		dictionary = json.loads(json_data)
 		json_file.close()
-	except: 
+	except:
 		dictionary = {}
 		event = f'An error occurred loading {filename} '
 		logger.error(event)
 	return dictionary
 
+
 def write_generic_json(dictionary, filename):
-	try: 
+	try:
 		json_data_string = json.dumps(dictionary, indent=2, sort_keys=True)
 		with open(filename, 'w') as json_file:
 			json_file.write(json_data_string)
@@ -421,22 +439,26 @@ def write_generic_json(dictionary, filename):
 		event = f'Error writing generic json file ({filename})'
 		logger.error(event)
 
-def create_logger(name, filename='./logs/pifire.log', messageformat='%(asctime)s | %(levelname)s | %(message)s', level=logging.INFO):
-	'''Create or Get Existing Logger'''
+
+def create_logger(
+	name, filename='./logs/pifire.log', messageformat='%(asctime)s | %(levelname)s | %(message)s', level=logging.INFO
+):
+	"""Create or Get Existing Logger"""
 	logger = logging.getLogger(name)
-	''' 
+	""" 
 		If the logger does not exist, create one. Else return the logger. 
 		Note: If the a log-level change is needed, the developer should directly set the log level on the logger, instead of using 
 		this function.  
-	'''
+	"""
 	if not logger.hasHandlers():
 		logger.setLevel(level)
 		formatter = logging.Formatter(fmt=messageformat, datefmt='%Y-%m-%d %H:%M:%S')
 		# datefmt='%Y-%m-%d %H:%M:%S'
-		handler = logging.FileHandler(filename)        
+		handler = logging.FileHandler(filename)
 		handler.setFormatter(formatter)
 		logger.addHandler(handler)
 	return logger
+
 
 def get_os_info(filepath='os_info.json', loggername='events'):
 	"""Get operating system information"""
@@ -451,41 +473,53 @@ def get_os_info(filepath='os_info.json', loggername='events'):
 					# Remove quotes if present
 					value = value.strip('"')
 					os_info[key] = value
-		
+
 		# Get architecture using uname -m
 		arch = subprocess.check_output(['/bin/uname', '-m']).decode().strip()
 		os_info['ARCHITECTURE'] = arch
-		
+
 		# Save to JSON file
 		write_generic_json(os_info, filepath)
 		return os_info
 
 	except Exception as e:
-		event = f"Error getting OS info: {str(e)}"
+		event = f'Error getting OS info: {str(e)}'
 		logger.error(event)
 		return os_info
 
-'''
+
+"""
 ==============================================================================
  Main
 ==============================================================================
-'''
-if __name__ == "__main__":
+"""
+if __name__ == '__main__':
 	logger = create_logger('board_config', filename='./logs/board_config.log', level=log_level)
-	
+
 	print('PiFire Board Configuration Tool v1.0.1')
 	print('Ben Parmeter - 2025 - MIT License')
 	print(' --help, -h for command details\n')
-	
-	parser = argparse.ArgumentParser(description='This tool performs board specific configuration for certain system level features.  Use the below options to enable/disable and configure these features.  System settings are read from the settings.json file.')
-	parser.add_argument('-pwm', '--pwm', action='store_true', required=False, help="Set PWM GPIO.")
-	parser.add_argument('-ow', '--onewire', action='store_true', required=False, help="Set 1Wire GPIO.")
-	parser.add_argument('-bl', '--backlight', action='store_true', required=False, help="Enable backlight permissions.")
-	parser.add_argument('-ov', '--osversion', action='store_true', required=False, help="Get OS Version. Saves to os_info.json.")
-	parser.add_argument('-s', '--spi', action='store_true', required=False, help="Enable SPI.")
-	parser.add_argument('-i', '--i2c', action='store_true', required=False, help="Enable I2C.")
-	parser.add_argument('-is', '--i2cspeed', metavar='BAUD', type=int, required=False, help="Set the I2C baud rate. BAUD should be an integer, i.e. 100000")
-	parser.add_argument('-gs', '--gpioshutdown', action='store_true', required=False, help="Enable GPIO shutdown.")
+
+	parser = argparse.ArgumentParser(
+		description='This tool performs board specific configuration for certain system level features.  Use the below options to enable/disable and configure these features.  System settings are read from the settings.json file.'
+	)
+	parser.add_argument('-pwm', '--pwm', action='store_true', required=False, help='Set PWM GPIO.')
+	parser.add_argument('-ow', '--onewire', action='store_true', required=False, help='Set 1Wire GPIO.')
+	parser.add_argument('-bl', '--backlight', action='store_true', required=False, help='Enable backlight permissions.')
+	parser.add_argument(
+		'-ov', '--osversion', action='store_true', required=False, help='Get OS Version. Saves to os_info.json.'
+	)
+	parser.add_argument('-s', '--spi', action='store_true', required=False, help='Enable SPI.')
+	parser.add_argument('-i', '--i2c', action='store_true', required=False, help='Enable I2C.')
+	parser.add_argument(
+		'-is',
+		'--i2cspeed',
+		metavar='BAUD',
+		type=int,
+		required=False,
+		help='Set the I2C baud rate. BAUD should be an integer, i.e. 100000',
+	)
+	parser.add_argument('-gs', '--gpioshutdown', action='store_true', required=False, help='Enable GPIO shutdown.')
 
 	args = parser.parse_args()
 
@@ -527,4 +561,3 @@ if __name__ == "__main__":
 		for item in results:
 			print(f' - {item}')
 			logger.info(f'{item}')
-

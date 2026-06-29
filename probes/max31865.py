@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
-PiFire Probes MAX31865 Module 
+PiFire Probes MAX31865 Module
 *****************************************
 
-Description: 
-  This module utilizes the MAX31865 hardware and returns temperature data.  
+Description:
+  This module utilizes the MAX31865 hardware and returns temperature data.
   Credit to Adafruit (https://github.com/adafruit/Adafruit_CircuitPython_MAX31865) for much of this code.
   While the code here was contributed by another user, it does appear that much of it was borrowed originally
-  from the Adafruit module.  The only difference, it appears, is that this module uses spidev instead of 
-  the circuitpython modules. 
+  from the Adafruit module.  The only difference, it appears, is that this module uses spidev instead of
+  the circuitpython modules.
 
 	Depends on: spidev
 
-	Ex Device Definition: 
-	
+	Ex Device Definition:
+
 	device = {
 			'device' : 'your_device_name',	# Unique name for the device
 			'module' : 'max31865',  		# Must be populated for this module to load properly
@@ -25,35 +25,37 @@ Description:
 				'rtd_nominal' : 1000, 		# RTD Nominal (Defaults to 1000)
 				'ref_resistor' : 4300, 		# Reference Resistor (Defaults to 4300)
 				'wires' : 2					# Number of RTD Probe Wires (Defaults to 2)
-			} 
+			}
 		}
 
-'''
+"""
 
-'''
+"""
 *****************************************
  Imported Libraries
 *****************************************
-'''
+"""
 import logging
 import spidev
 import time
 import math
 from probes.base import ProbeInterface
 
-'''
+"""
 *****************************************
  Class Definitions 
 *****************************************
-'''
+"""
 # Register and other constant values
 _RTD_A = 3.9083e-3
 _RTD_B = -5.775e-7
 
-class RTDDevice():
-	''' MAX31865 Device Init '''
+
+class RTDDevice:
+	"""MAX31865 Device Init"""
+
 	def __init__(self, cs, rtd_nominal=1000, ref_resistor=4300, wires=2):
-		self.logger = logging.getLogger("control")
+		self.logger = logging.getLogger('control')
 		self.cs = cs
 		self.wires = wires
 
@@ -70,7 +72,7 @@ class RTDDevice():
 		self.spi.mode = 0b01
 
 		self.config()
-	
+
 	def config(self):
 		# Config
 		# V_Bias (1=on)
@@ -108,8 +110,10 @@ class RTDDevice():
 			resistance = self.read_rtd()
 			resistance /= 32768
 			resistance *= self.ref_resistor
-		except: 
-			self.logger.exception(f'Exception occurred while reading probe port {self.device_info["ports"][0]}.  Trace dump: ')
+		except:
+			self.logger.exception(
+				f'Exception occurred while reading probe port {self.device_info["ports"][0]}.  Trace dump: '
+			)
 			resistance = 0
 		return resistance
 
@@ -189,8 +193,8 @@ class RTDDevice():
 	def get_status(self):
 		return self.status
 
-class ReadProbes(ProbeInterface):
 
+class ReadProbes(ProbeInterface):
 	def __init__(self, probe_info, device_info, units):
 		super().__init__(probe_info, device_info, units)
 
@@ -204,20 +208,20 @@ class ReadProbes(ProbeInterface):
 		self.device = RTDDevice(cs, rtd_nominal, ref_resistor, wires)
 
 	def read_all_ports(self, output_data):
-		''' Read temperature from device '''
+		"""Read temperature from device"""
 		tempC = round(self.device.temperature, 1)
-		tempF = int(tempC * (9/5) + 32) # Celsius to Farenheit
+		tempF = int(tempC * (9 / 5) + 32)  # Celsius to Farenheit
 		port = self.device_info['ports'][0]
 
-		''' Read resistance from device '''
+		""" Read resistance from device """
 		self.output_data['tr'][self.port_map[port]] = self.device.resistance
 
-		''' Get average temperature from the queue and store it in the output data structure'''
+		""" Get average temperature from the queue and store it in the output data structure"""
 		if port == self.primary_port:
 			self.output_data['primary'][self.port_map[port]] = tempF if self.units == 'F' else tempC
 		elif port in self.food_ports:
 			self.output_data['food'][self.port_map[port]] = tempF if self.units == 'F' else tempC
 		elif port in self.aux_ports:
 			self.output_data['aux'][self.port_map[port]] = tempF if self.units == 'F' else tempC
-		
+
 		return self.output_data

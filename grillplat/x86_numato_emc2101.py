@@ -18,9 +18,9 @@
 # *****************************************
 
 """
-	==============================
-	  Imported Libraries
-	==============================
+==============================
+  Imported Libraries
+==============================
 """
 
 import glob
@@ -42,6 +42,7 @@ from grillplat.numato_usbrelay import NumatoUSBRelay
 	  Module Helpers
 	==============================
 """
+
 
 def find_i2c_bus(match='CP2112', devices_path='/sys/bus/i2c/devices'):
 	"""
@@ -105,16 +106,12 @@ _DEFAULT_OUTPUTS = {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}
 
 
 class GrillPlatform:
-
 	def __init__(self, config):
 		self.logger = create_logger('control')
 		self.config = config
 
 		outputs = config.get('outputs', {}) or {}
-		self.relay_map = {
-			name: int(outputs.get(name, default))
-			for name, default in _DEFAULT_OUTPUTS.items()
-		}
+		self.relay_map = {name: int(outputs.get(name, default)) for name, default in _DEFAULT_OUTPUTS.items()}
 
 		numato_cfg = config.get('numato', {}) or {}
 		self.device = numato_cfg.get('device', '/dev/ttyACM0')
@@ -135,7 +132,7 @@ class GrillPlatform:
 		else:
 			self.i2c_bus_kind = 'basic'
 		self.i2c_bus_num = emc_cfg.get('i2c_bus_num', emc_cfg.get('i2c_bus_match', 'CP2112'))
-		address = emc_cfg.get('address', 0x4c)
+		address = emc_cfg.get('address', 0x4C)
 		if isinstance(address, str):
 			address = int(address, 16)
 		self.emc_address = address
@@ -261,8 +258,14 @@ class GrillPlatform:
 
 	# MARK: Fan ramp (Smoke Plus)
 	def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
-		self.logger.debug('pwm_fan_ramp: Starting fan ramp on_time=' + str(on_time) +
-			' min=' + str(min_duty_cycle) + ' max=' + str(max_duty_cycle))
+		self.logger.debug(
+			'pwm_fan_ramp: Starting fan ramp on_time='
+			+ str(on_time)
+			+ ' min='
+			+ str(min_duty_cycle)
+			+ ' max='
+			+ str(max_duty_cycle)
+		)
 		self.relay.relay_on(self.relay_map['fan'])
 		self._output_state['fan'] = True
 		self._start_ramp(on_time, min_duty_cycle, max_duty_cycle)
@@ -271,9 +274,7 @@ class GrillPlatform:
 		self._stop_ramp()
 		self._ramp_stop = threading.Event()
 		self._ramp_thread = threading.Thread(
-			target=self._ramp_device,
-			args=(on_time, min_duty_cycle, max_duty_cycle),
-			daemon=True,
+			target=self._ramp_device, args=(on_time, min_duty_cycle, max_duty_cycle), daemon=True
 		)
 		self._ramp_thread.start()
 
@@ -331,6 +332,7 @@ class GrillPlatform:
 
 	def check_cpu_temp(self, arglist):
 		import psutil
+
 		temp = 0.0
 		result = 'OK'
 		message = 'Successfully obtained CPU temperature.'
@@ -355,14 +357,11 @@ class GrillPlatform:
 			message = 'Error obtaining CPU temperature: ' + str(exc)
 		if not is_float(str(temp)):
 			temp = 0.0
-		return {
-			'result': result,
-			'message': message,
-			'data': {'cpu_temp': float(temp)},
-		}
+		return {'result': result, 'message': message, 'data': {'cpu_temp': float(temp)}}
 
 	def check_wifi_quality(self, arglist):
 		import subprocess
+
 		data = {'result': 'ERROR', 'message': 'Unable to obtain wifi quality data.', 'data': {}}
 		try:
 			output = subprocess.check_output(['iwconfig'])
@@ -386,14 +385,11 @@ class GrillPlatform:
 		return data
 
 	def check_alive(self, arglist):
-		return {
-			'result': 'OK',
-			'message': 'The control script is running.',
-			'data': {},
-		}
+		return {'result': 'OK', 'message': 'The control script is running.', 'data': {}}
 
 	def scan_bluetooth(self, arglist):
 		import asyncio
+
 		try:
 			from bleak import BleakScanner
 		except ImportError:
@@ -420,35 +416,25 @@ class GrillPlatform:
 			message = 'Bluetooth scan error: ' + str(exc)
 			self.logger.error('scan_bluetooth: Error during scan - ' + str(exc))
 
-		return {
-			'result': result,
-			'message': message,
-			'data': {'bt_devices': bt_devices},
-		}
+		return {'result': result, 'message': message, 'data': {'bt_devices': bt_devices}}
 
 	def os_info(self, arglist):
-		return {
-			'result': 'OK',
-			'message': 'OS information retrieved successfully.',
-			'data': get_os_info(),
-		}
+		return {'result': 'OK', 'message': 'OS information retrieved successfully.', 'data': get_os_info()}
 
 	def network_info(self, arglist):
 		import netifaces
+
 		net_info = {}
 		for iface in netifaces.interfaces():
 			addrs = netifaces.ifaddresses(iface)
 			ip_addr = addrs.get(netifaces.AF_INET, [{}])[0].get('addr', 'N/A')
 			mac_addr = addrs.get(netifaces.AF_LINK, [{}])[0].get('addr', 'N/A')
 			net_info[iface] = {'ip_address': ip_addr, 'mac_address': mac_addr}
-		return {
-			'result': 'OK',
-			'message': 'Network information retrieved successfully.',
-			'data': net_info,
-		}
+		return {'result': 'OK', 'message': 'Network information retrieved successfully.', 'data': net_info}
 
 	def hardware_info(self, arglist):
 		import psutil
+
 		cpu_info = {
 			'hardware': 'Unknown',
 			'model': 'Unknown',
@@ -467,11 +453,7 @@ class GrillPlatform:
 		return {
 			'result': 'OK',
 			'message': 'Hardware information retrieved successfully.',
-			'data': {
-				'cpu_info': cpu_info,
-				'total_ram': mem_info.total,
-				'available_ram': mem_info.available,
-			},
+			'data': {'cpu_info': cpu_info, 'total_ram': mem_info.total, 'available_ram': mem_info.available},
 		}
 
 	def get_output_status(self):

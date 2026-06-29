@@ -1,35 +1,35 @@
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
-PiFire Probes ADS1015 Adafruit Module 
+PiFire Probes ADS1015 Adafruit Module
 *****************************************
 
-Description: 
+Description:
   This module utilizes the adafruit ADS1015 hardware and returns temperature data.
-	
-	Ex Device Definition: 
-	
+
+	Ex Device Definition:
+
 	device = {
 			'device' : 'your_device_name',	# Unique name for the device
 			'module' : 'ads1015_adafruit',	# Must be populated for this module to load properly
 			'ports' : ['ADC0', 'ADC1', 'ADC2', 'ADC3'], # This is defined in the module, so this does not need to be defined.
 			'config' : {
 				'ADC0_rd': '10000',
-            	'ADC1_rd': '10000',
-            	'ADC2_rd': '10000',
-            	'ADC3_rd': '10000',
-            	'i2c_bus_addr': '0x48',
-            	'voltage_ref': '3.28'
+                'ADC1_rd': '10000',
+                'ADC2_rd': '10000',
+                'ADC3_rd': '10000',
+                'i2c_bus_addr': '0x48',
+                'voltage_ref': '3.28'
 			}
-		} 
-'''
+		}
+"""
 
-'''
+"""
 *****************************************
  Imported Libraries
 *****************************************
-'''
+"""
 import logging
 import math
 import board
@@ -39,16 +39,18 @@ import adafruit_ads1x15.ads1015 as ADS
 from adafruit_ads1x15.analog_in import AnalogIn
 from probes.base import ProbeInterface, resolve_i2c_bus
 
-'''
+"""
 *****************************************
  Class Definitions 
 *****************************************
-'''
+"""
 
-class ADSDevice():
-	''' ADS1015 Device Based on the Adafruit Module '''
-	def __init__(self, i2c_bus_addr=0x48, i2c_bus_kind = 'basic', i2c_bus_num=0):
-		self.logger = logging.getLogger("control")
+
+class ADSDevice:
+	"""ADS1015 Device Based on the Adafruit Module"""
+
+	def __init__(self, i2c_bus_addr=0x48, i2c_bus_kind='basic', i2c_bus_num=0):
+		self.logger = logging.getLogger('control')
 		# Create the I2C bus
 		if i2c_bus_kind == 'basic':
 			self.i2c = busio.I2C(board.SCL, board.SDA)
@@ -59,12 +61,7 @@ class ADSDevice():
 		self.status = {}
 
 	def read_voltage(self, port):
-		adc_ports = {
-			'ADC0' : ADS.P0, 
-			'ADC1' : ADS.P1, 
-			'ADC2' : ADS.P2, 
-			'ADC3' : ADS.P3
-		}
+		adc_ports = {'ADC0': ADS.P0, 'ADC1': ADS.P1, 'ADC2': ADS.P2, 'ADC3': ADS.P3}
 		try:
 			read_data = AnalogIn(self.ads, adc_ports[port])
 			voltage = math.floor(read_data.voltage * 1000)
@@ -76,8 +73,8 @@ class ADSDevice():
 	def get_status(self):
 		return self.status
 
-class ReadProbes(ProbeInterface):
 
+class ReadProbes(ProbeInterface):
 	def __init__(self, probe_info, device_info, units):
 		super().__init__(probe_info, device_info, units)
 

@@ -1,34 +1,35 @@
 #!/usr/bin/env python3
-'''
+"""
 *****************************************
 PiFire Display Interface Library
 *****************************************
 
- Description: 
-   This library supports using 
+ Description:
+   This library supports using
  the ST7789 display with 240Hx240W resolution.
- This module utilizes Luma.LCD to interface 
- this display. 
+ This module utilizes Luma.LCD to interface
+ this display.
 
 *****************************************
-'''
+"""
 
-'''
+"""
  Imported Libraries
-'''
+"""
 import time
 import threading
 from luma.core.interface.serial import spi
-from luma.lcd.device import st7789 
+from luma.lcd.device import st7789
 from display.base_240x240 import DisplayBase
 from PIL import Image
 from pyky040 import pyky040
 
-'''
+"""
 Display class definition
-'''
-class Display(DisplayBase):
+"""
 
+
+class Display(DisplayBase):
 	def __init__(self, dev_pins, buttonslevel='HIGH', rotation=0, units='F', config={}):
 		self.config = config
 		super().__init__(dev_pins, buttonslevel, rotation, units, config)
@@ -40,21 +41,23 @@ class Display(DisplayBase):
 		led_pin = self.dev_pins['display']['led']
 		rst_pin = self.dev_pins['display']['rst']
 		spi_device = self.config.get('spi_device', 0)
-		
-		#bus_speed_hz in [mhz * 1000000 for mhz in [0.5, 1, 2, 4, 8, 16, 20, 24, 28, 32, 36, 40, 44, 48, 50, 52]
-		self.serial = spi(port=0, device=spi_device, gpio_DC=dc_pin, gpio_RST=rst_pin)
-		self.device = st7789(self.serial, active_low=False, width=240, height=240, gpio_LIGHT=led_pin, bus_speed=4000000)
 
-		# Setup & Start Display Loop Thread 
+		# bus_speed_hz in [mhz * 1000000 for mhz in [0.5, 1, 2, 4, 8, 16, 20, 24, 28, 32, 36, 40, 44, 48, 50, 52]
+		self.serial = spi(port=0, device=spi_device, gpio_DC=dc_pin, gpio_RST=rst_pin)
+		self.device = st7789(
+			self.serial, active_low=False, width=240, height=240, gpio_LIGHT=led_pin, bus_speed=4000000
+		)
+
+		# Setup & Start Display Loop Thread
 		display_thread = threading.Thread(target=self._display_loop)
 		display_thread.start()
 
 	def _init_input(self):
 		self.input_enabled = True
-		# Init constants and variables 
-		clk_pin = self.dev_pins['input']['up_clk']  	# Clock - GPIO16
-		dt_pin = self.dev_pins['input']['down_dt']  	# DT - GPIO20
-		sw_pin = self.dev_pins['input']['enter_sw'] 	# Switch - GPIO21
+		# Init constants and variables
+		clk_pin = self.dev_pins['input']['up_clk']  # Clock - GPIO16
+		dt_pin = self.dev_pins['input']['down_dt']  # DT - GPIO20
+		sw_pin = self.dev_pins['input']['enter_sw']  # Switch - GPIO21
 		self.input_event = None
 		self.input_counter = 0
 		self.last_direction = None
@@ -66,17 +69,25 @@ class Display(DisplayBase):
 
 		# Init Device
 		self.encoder = pyky040.Encoder(CLK=clk_pin, DT=dt_pin, SW=sw_pin)
-		self.encoder.setup(scale_min=0, scale_max=100, step=1, inc_callback=self._inc_callback,
-						   dec_callback=self._dec_callback, sw_callback=self._click_callback, polling_interval=200)
+		self.encoder.setup(
+			scale_min=0,
+			scale_max=100,
+			step=1,
+			inc_callback=self._inc_callback,
+			dec_callback=self._dec_callback,
+			sw_callback=self._click_callback,
+			polling_interval=200,
+		)
 
-		# Setup & Start Input Thread 
+		# Setup & Start Input Thread
 
 		encoder_thread = threading.Thread(target=self.encoder.watch)
 		encoder_thread.start()
-		
-	'''
+
+	"""
 	============== Input Callbacks ============= 
-	'''
+	"""
+
 	def _click_callback(self):
 		self.input_event = 'ENTER'
 		self.enter_received = True
@@ -107,23 +118,22 @@ class Display(DisplayBase):
 					self.enter_received = False
 					return  # if enter command is received during this time, execute the enter command and not the down
 
-
-	'''
+	"""
 	============== Graphics / Display / Draw Methods ============= 
-	'''
+	"""
+
 	def _display_clear(self):
 		img = Image.new('RGB', (self.WIDTH, self.HEIGHT), color=(0, 0, 0))
-		#self.device.clear()
+		# self.device.clear()
 		self.device.backlight(False)
-		#self.device.hide()
+		# self.device.hide()
 		self.device.display(img)
-
 
 	def _display_canvas(self, canvas):
 		# Display Image
 		self.device.backlight(True)
-		#self.device.show()
-		'''Luma.lcd's rotation settings are counter clockwise'''
+		# self.device.show()
+		"""Luma.lcd's rotation settings are counter clockwise"""
 		if self.rotation == 1:
 			canvas = canvas.rotate(270)
 		elif self.rotation == 2:
@@ -131,22 +141,23 @@ class Display(DisplayBase):
 		elif self.rotation == 3:
 			canvas = canvas.rotate(90)
 
-		self.device.display(canvas.convert(mode="RGB"))
+		self.device.display(canvas.convert(mode='RGB'))
 
-	'''
+	"""
 	 ====================== Input & Menu Code ========================
-	'''
+	"""
+
 	def _event_detect(self):
 		"""
 		Called to detect input events from encoder
 		"""
-		command = self.input_event  # Save to variable to prevent spurious changes 
+		command = self.input_event  # Save to variable to prevent spurious changes
 		if command:
 			self.display_timeout = None  # If something is being displayed i.e. text, network, splash then override this
 
 			if command != 'ENTER' and self.input_counter == 0:
 				return
-			else: 
+			else:
 				if command not in ['UP', 'DOWN', 'ENTER']:
 					return
 
@@ -154,7 +165,7 @@ class Display(DisplayBase):
 				self.status_data = None
 				self.display_command = None
 				self.display_data = None
-				self.input_event=None
+				self.input_event = None
 				self.menu_active = True
 				self.menu_time = time.time()
 				self.monitor_display = False

@@ -23,12 +23,12 @@ import logging
 import threading
 from common import create_logger
 
-class HopperLevel:
 
+class HopperLevel:
 	def __init__(self, dev_pins, empty=22, full=4, debug=False):
 		self.logger = create_logger('events')
-		self.empty = empty # Empty is greater than distance measured for empty
-		self.full = full # Full is less than or equal to the minimum full distance.
+		self.empty = empty  # Empty is greater than distance measured for empty
+		self.full = full  # Full is less than or equal to the minimum full distance.
 		self.debug = debug
 		self.distance_read = 100
 
@@ -42,15 +42,15 @@ class HopperLevel:
 			self.full = 4
 		self.__start_sensor()
 		# Setup & Start Sensor Loop Thread
-		self.sensor_thread_active = True 
+		self.sensor_thread_active = True
 		self.sensor_thread_read_interval = 60  # Read sensor every 60 seconds
-		self.sensor_thread_override = True  # Allow override to do direct reads 
+		self.sensor_thread_override = True  # Allow override to do direct reads
 		self.sensor_thread = threading.Thread(target=self._sensing_loop)
 		self.sensor_thread.start()
 
 	def __start_sensor(self):
 		# Create a VL53L0X object as tof (time-of-flight)
-		self.tof = VL53L0X.VL53L0X(i2c_bus=1,i2c_address=0x29)
+		self.tof = VL53L0X.VL53L0X(i2c_bus=1, i2c_address=0x29)
 		# Open Sensor
 		self.tof.open()
 		# Start ranging
@@ -61,14 +61,14 @@ class HopperLevel:
 		self.tof.close()
 
 	def _sensing_loop(self):
-		''' This loop should run in a thread so that it does not stall the main control process '''
+		"""This loop should run in a thread so that it does not stall the main control process"""
 		sample_time = time.time()
 		while self.sensor_thread_active:
 			now = time.time()
 			if self.sensor_thread_override or (now > sample_time + self.sensor_thread_read_interval):
 				timing = self.tof.get_timing()
-				if (timing < 20000):
-					timing = 20000 # Set minimum timing
+				if timing < 20000:
+					timing = 20000  # Set minimum timing
 
 				# Read the sensor multiple times and average the result
 				avg_dist = 0
@@ -78,12 +78,12 @@ class HopperLevel:
 					distance = self.tof.get_distance()
 					if distance > 0:
 						if avg_dist > 0:
-							avg_dist = (avg_dist + distance)/2
+							avg_dist = (avg_dist + distance) / 2
 						else:
 							avg_dist = distance
-					time.sleep(timing/1000000.00)
-				
-				# Convert mm to cm 
+					time.sleep(timing / 1000000.00)
+
+				# Convert mm to cm
 				avg_dist = avg_dist / 10
 
 				if self.debug:
@@ -96,7 +96,7 @@ class HopperLevel:
 				# If Average Distance is less than the empty distance, calculate percentage
 				elif avg_dist <= self.empty:
 					capacity = self.empty - self.full
-					adjusted_ratio = (self.empty / capacity) * 100 
+					adjusted_ratio = (self.empty / capacity) * 100
 					level = adjusted_ratio * (1 - (avg_dist / self.empty))
 				# If Average Distance is higher than empty distance, report 0 level
 				else:
@@ -107,7 +107,9 @@ class HopperLevel:
 				# If it took a long time to get sensor data, then the sensor might be having issues
 				if (time.time() - start_time) > 0.5:
 					self.__start_sensor()  # Attempt re-init of sensor
-					event = 'Warning: The TOF sensor took longer than normal to get a reading.  Re-initializing the sensor.'
+					event = (
+						'Warning: The TOF sensor took longer than normal to get a reading.  Re-initializing the sensor.'
+					)
 					self.logger.info(event)
 				if self.sensor_thread_override:
 					self.event.set()
@@ -117,7 +119,7 @@ class HopperLevel:
 
 	def set_level(self, level=100):
 		# Do nothing
-		return()
+		return ()
 
 	def update_distances(self, empty=22, full=4):
 		self.empty = empty
@@ -127,12 +129,12 @@ class HopperLevel:
 		levels = {}
 		levels['empty'] = self.empty
 		levels['full'] = self.full
-		return (levels)
+		return levels
 
 	def get_level(self, override=False):
-		''' If override selected, force the sensor thread to update '''
+		"""If override selected, force the sensor thread to update"""
 		if override:
 			self.sensor_thread_override = True
-			self.event.wait(3)	# Wait 3 seconds for sensor to update
+			self.event.wait(3)  # Wait 3 seconds for sensor to update
 			self.event.clear()  # Clear event flag
-		return self.distance_read 
+		return self.distance_read
