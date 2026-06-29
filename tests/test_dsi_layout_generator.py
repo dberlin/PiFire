@@ -1,0 +1,19 @@
+import os
+from tools.generate_dsi_layout import build, dumps, RESOLUTIONS
+
+BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+
+def _committed(width, height):
+    path = os.path.join(BASE, 'display', f'dsi_{width}x{height}t.json')
+    with open(path) as f:
+        return f.read()
+
+
+def test_reproduces_committed_1024x768_byte_for_byte():
+    assert dumps(build(1024, 768)) == _committed(1024, 768)
+
+
+def test_registered_resolutions():
+    assert (1024, 768) in RESOLUTIONS
+    assert (1280, 720) in RESOLUTIONS
