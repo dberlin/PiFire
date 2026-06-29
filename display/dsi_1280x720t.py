@@ -1,4 +1,4 @@
-'''
+"""
 *****************************************
 PiFire Display Interface Library
 *****************************************
@@ -11,6 +11,6 @@ PiFire Display Interface Library
  from display/dsi_1280x720t.json, which the wizard pairs with this module.
 
 *****************************************
-'''
+"""
 
 from display.dsi_800x480t import Display

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-'''
+"""
 Generate display/dsi_<W>x<H>t.json from display/dsi_800x480t.json.
 
 Uniform fit-scale (min of per-axis ratios) with centering on the slack axis.
 Re-run after changing the 800x480 layout:
     python tools/generate_dsi_layout.py
-'''
+"""
 import json
 import copy
 import os
@@ -13,7 +13,10 @@ import os
 SOURCE_W, SOURCE_H = 800, 480
 
 # Target resolutions this generator owns. (width, height) of the landscape
-# profile_1 canvas; profile_2 is the same canvas rotated.
+# profile_1 canvas; profile_2 is the same canvas rotated. Adding a resolution
+# here also requires a display/dsi_<W>x<H>t.py re-export module, a
+# wizard_manifest.json entry, and a paired byte-identical regression assertion
+# in tests/test_dsi_layout_generator.py.
 RESOLUTIONS = [(1024, 768), (1280, 720)]
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
