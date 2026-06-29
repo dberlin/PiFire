@@ -9,6 +9,8 @@ def platform():
     with mock.patch.object(mod, 'NumatoUSBRelay'), \
          mock.patch.object(mod, 'EMC2101'), \
          mock.patch.object(mod, 'ExtendedI2C'), \
+         mock.patch.object(mod, 'busio'), \
+         mock.patch.object(mod, 'board'), \
          mock.patch.object(mod, 'find_i2c_bus', return_value=7):
         config = {'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}, 'frequency': 100}
         yield mod.GrillPlatform(config)

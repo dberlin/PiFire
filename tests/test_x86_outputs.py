@@ -10,6 +10,8 @@ def platform():
     with mock.patch.object(mod, 'NumatoUSBRelay') as relay_cls, \
          mock.patch.object(mod, 'EMC2101') as emc_cls, \
          mock.patch.object(mod, 'ExtendedI2C') as i2c_cls, \
+         mock.patch.object(mod, 'busio'), \
+         mock.patch.object(mod, 'board'), \
          mock.patch.object(mod, 'find_i2c_bus', return_value=7):
         config = {
             'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3},
@@ -23,10 +25,12 @@ def platform():
 
 
 def test_init_opens_relay_and_emc(platform):
-    # Relay opened on the default device; EMC2101 constructed on discovered bus.
+    # Relay opened on the default device; EMC2101 constructed on the default
+    # (basic / integrated) I2C bus, so the extended bus is not used here.
+    # Bus-kind selection itself is covered in test_x86_bus_discovery.
     platform._relay_cls.assert_called_once()
     assert platform._relay_cls.call_args.args[0] == '/dev/ttyACM0'
-    platform._i2c_cls.assert_called_once_with(7)
+    platform._i2c_cls.assert_not_called()
     platform._emc_cls.assert_called_once()
 
 

@@ -174,8 +174,9 @@ def default_settings():
 			"baudrate" : 921600
 		},
 		"emc2101" : {  # x86_numato_emc2101 platform: EMC2101 fan PWM controller
-			"i2c_bus_match" : "CP2112",  # substring matched against I2C adapter names
-			"address" : "0x4c"           # EMC2101 I2C address
+			"i2c_bus_kind" : "basic",  # 'basic' = integrated I2C bus (board.SCL/SDA); 'extended' = numbered/bridge bus
+			"i2c_bus_num" : "1",       # extended only: /dev/i2c-N number or adapter-name match (e.g. 'CP2112')
+			"address" : "0x4c"         # EMC2101 I2C address
 		},
 		"current" : "custom",
 		"dc_fan": False,  # True if system has a DC Fan (Does not indicate PWM)

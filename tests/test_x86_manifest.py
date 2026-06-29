@@ -18,6 +18,8 @@ def test_x86_platform_entry_present():
 def test_x86_platform_settings_dependencies():
     manifest = _manifest()
     deps = manifest['modules']['grillplatform']['x86_numato_emc2101']['settings_dependencies']
-    # Exposes the EMC2101 address and the i2c bus match string.
+    # Exposes the EMC2101 address and the selectable basic/extended I2C bus.
     assert 'emc2101_address' in deps
-    assert 'i2c_bus_match' in deps
+    assert 'i2c_bus_kind' in deps
+    assert 'i2c_bus_num' in deps
+    assert set(deps['i2c_bus_kind']['options']) == {'basic', 'extended'}
