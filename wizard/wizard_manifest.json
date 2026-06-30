@@ -1517,8 +1517,8 @@
             "settings": ["platform", "numato", "device"]
           },
           "i2c_bus_kind": {
-            "friendly_name": "EMC2101 I2C Bus Type",
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the EMC2101 is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
+            "friendly_name": "Fan Controller I2C Bus Type",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the fan controller is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
             "options": {
               "basic": "Basic (integrated I2C bus)",
               "extended": "Extended (numbered / bridge bus)"
@@ -1526,7 +1526,7 @@
             "settings": ["platform", "fan_controller", "i2c_bus_kind"]
           },
           "i2c_bus_num": {
-            "friendly_name": "EMC2101 Extended Bus",
+            "friendly_name": "Fan Controller Extended Bus",
             "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
             "options": {
               "CP2112": "CP2112 (bridge name match)",
