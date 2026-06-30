@@ -10,7 +10,8 @@ def platform():
 
 	with (
 		mock.patch.object(mod, 'NumatoUSBRelay') as relay_cls,
-		mock.patch.object(mod, 'EMC2101') as emc_cls,
+		mock.patch.object(mod, 'EMC2101_LUT') as emc_cls,
+		mock.patch.object(mod, 'EMC2301'),
 		mock.patch.object(mod, 'ExtendedI2C') as i2c_cls,
 		mock.patch.object(mod, 'busio'),
 		mock.patch.object(mod, 'board'),

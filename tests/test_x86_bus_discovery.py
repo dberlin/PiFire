@@ -3,21 +3,22 @@ from unittest import mock
 import pytest
 
 
-def _build_platform(emc2101_cfg):
-	"""Build a GrillPlatform with the relay/EMC2101/I2C hardware mocked, so only
+def _build_platform(fan_cfg):
+	"""Build a GrillPlatform with the relay/EMC/I2C hardware mocked, so only
 	the I2C-bus resolution logic in __init__ is exercised. Returns the platform
 	plus the mocks needed to assert which bus was opened."""
 	import grillplat.x86_numato as mod
 
 	with (
 		mock.patch.object(mod, 'NumatoUSBRelay'),
-		mock.patch.object(mod, 'EMC2101'),
+		mock.patch.object(mod, 'EMC2101_LUT'),
+		mock.patch.object(mod, 'EMC2301'),
 		mock.patch.object(mod, 'ExtendedI2C') as extended_i2c,
 		mock.patch.object(mod, 'busio') as busio,
 		mock.patch.object(mod, 'board') as board,
 		mock.patch.object(mod, 'find_i2c_bus', return_value=7) as find_bus,
 	):
-		config = {} if emc2101_cfg is None else {'emc2101': emc2101_cfg}
+		config = {} if fan_cfg is None else {'fan_controller': fan_cfg}
 		platform = mod.GrillPlatform(config)
 		return platform, extended_i2c, busio, board, find_bus
 

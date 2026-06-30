@@ -32,9 +32,10 @@ from common import is_float, create_logger, get_os_info
 import board
 import busio
 from adafruit_extended_bus import ExtendedI2C
-from adafruit_emc2101 import EMC2101
+from adafruit_emc2101.emc2101_lut import EMC2101_LUT
 
 from grillplat.numato_usbrelay import NumatoUSBRelay
+from grillplat.emc2301 import EMC2301
 
 
 """
@@ -117,23 +118,28 @@ class GrillPlatform:
 		self.device = numato_cfg.get('device', '/dev/ttyACM0')
 		self.baudrate = int(numato_cfg.get('baudrate', 921600))
 
-		emc_cfg = config.get('emc2101', {}) or {}
+		fan_cfg = config.get('fan_controller', {}) or {}
+		self.chip = str(fan_cfg.get('chip', 'emc2101')).lower()
+
 		# I2C bus selection, matching the probe drivers' basic/extended scheme:
 		#   'basic'    -> the board's integrated I2C bus (board.SCL/SDA)
 		#   'extended' -> a numbered /dev/i2c-N bus, or a USB-to-I2C bridge
 		#                 (e.g. a CP2112) discovered by adapter-name match.
-		if 'i2c_bus_kind' in emc_cfg:
-			self.i2c_bus_kind = emc_cfg['i2c_bus_kind']
-		elif 'i2c_bus_match' in emc_cfg:
-			# Legacy config (pre basic/extended): the EMC2101 lived on a CP2112
-			# bridge, so honor it as an extended bus rather than silently
-			# switching the install to the integrated bus.
+		if 'i2c_bus_kind' in fan_cfg:
+			self.i2c_bus_kind = fan_cfg['i2c_bus_kind']
+		elif 'i2c_bus_match' in fan_cfg:
+			# Legacy config (pre basic/extended): the controller lived on a
+			# CP2112 bridge, so honor it as an extended bus.
 			self.i2c_bus_kind = 'extended'
 		else:
 			self.i2c_bus_kind = 'basic'
-		self.i2c_bus_num = emc_cfg.get('i2c_bus_num', emc_cfg.get('i2c_bus_match', 'CP2112'))
-		address = emc_cfg.get('address', 0x4C)
-		if isinstance(address, str):
+		self.i2c_bus_num = fan_cfg.get('i2c_bus_num', fan_cfg.get('i2c_bus_match', 'CP2112'))
+
+		# Address defaults per chip when unset.
+		address = fan_cfg.get('address')
+		if address is None:
+			address = 0x2F if self.chip == 'emc2301' else 0x4C
+		elif isinstance(address, str):
 			address = int(address, 16)
 		self.emc_address = address
 
@@ -151,12 +157,19 @@ class GrillPlatform:
 		# Open the relay board.
 		self.relay = NumatoUSBRelay(self.device, baudrate=self.baudrate)
 
-		# Open the EMC2101 on the configured I2C bus.
+		# Open the fan controller on the configured I2C bus.
 		if self.i2c_bus_kind == 'extended':
 			i2c = ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
 		else:
 			i2c = busio.I2C(board.SCL, board.SDA)
-		self.emc = EMC2101(i2c)
+
+		if self.chip == 'emc2301':
+			self.emc = EMC2301(i2c, address=self.emc_address)
+		else:
+			self.emc = EMC2101_LUT(i2c)
+			# Drive the fan directly from PiFire's control logic, not the
+			# chip's internal lookup-table fan curve.
+			self.emc.lut_enabled = False
 
 		# Start in a known state: all relays off, fan stopped.
 		self.relay.reset()
