@@ -21,10 +21,13 @@ regardless of which chip is installed.
 - Let the platform choose `emc2101` or `emc2301` via configuration and the
   configuration wizard.
 - Disable the EMC2301 watchdog (continuous mode) and SMBus timeout at init.
-- Drive both chips at a 4-wire-fan-appropriate PWM frequency (~25–26 kHz),
-  decoupled from PiFire's RPi-amplifier-oriented global `pwm.frequency`. The
-  EMC2301 runs at its native **26 kHz**; the EMC2101 is explicitly configured to
-  **~25 kHz** (replacing today's misleading `100` Hz no-op).
+- Actually apply a 4-wire-fan-appropriate PWM frequency (~25–26 kHz) to the
+  chip. PiFire's global `settings['pwm']['frequency']` already defaults to
+  **25000** Hz (Intel 4-wire spec) and is passed to the platform as
+  `config['frequency']`; this change makes the platform *use* it instead of (a)
+  silently no-op'ing on the EMC2101 and (b) carrying a misleading in-module
+  `100` Hz fallback. The EMC2301 runs at its native **26 kHz**; the EMC2101 is
+  explicitly configured to **~25 kHz**.
 
 ## Non-Goals
 
@@ -134,11 +137,10 @@ New generic settings group under `settings['platform']`:
 
 ```jsonc
 "fan_controller": {
-  "chip":          "emc2101",  // "emc2101" | "emc2301"  (default "emc2101")
-  "address":       "0x4c",     // optional; default per chip when unset
-  "i2c_bus_kind":  "basic",    // "basic" | "extended"   (unchanged semantics)
-  "i2c_bus_num":   "CP2112",   // numbered bus or adapter-name match
-  "pwm_frequency": 25000        // Hz; default per chip (see below)
+  "chip":         "emc2101",   // "emc2101" | "emc2301"  (default "emc2101")
+  "address":      "0x4c",      // optional; default per chip when unset
+  "i2c_bus_kind": "basic",     // "basic" | "extended"   (unchanged semantics)
+  "i2c_bus_num":  "CP2112"     // numbered bus or adapter-name match
 }
 ```
 
@@ -147,20 +149,35 @@ New generic settings group under `settings['platform']`:
   parsing reused).
 - `i2c_bus_kind` / `i2c_bus_num` keep today's basic/extended (integrated bus
   vs numbered `/dev/i2c-N` or CP2112-by-name) behavior.
-- `pwm_frequency` lives in this group so the fan PWM frequency is governed by
-  the platform's own value, **not** the global `settings['pwm']['frequency']`
-  (which is RPi-amplifier-oriented and would otherwise inject the wrong ~100 Hz).
-  It defaults **per chip** when unset: **25000 Hz** for emc2101 (≈25.7 kHz
-  achieved), **26000 Hz** for emc2301. The platform passes it to the driver
-  (`emc.pwm_frequency = hz`) and reports it in `get_output_status`. The legacy
-  in-module `100` fallback is removed.
+
+**PWM frequency uses the existing global, not a new per-chip key.**
+`settings['pwm']['frequency']` already defaults to **25000** Hz and `control.py`
+passes it to the platform as `config['frequency']`, then re-applies it at
+runtime via `set_pwm_frequency()` whenever it differs from
+`get_output_status()['frequency']` (when `dc_fan` is set). So:
+
+- The in-module fallback changes from `config.get('frequency', 100)` to
+  `config.get('frequency', 25000)`.
+- `__init__` **applies the frequency to the chip** (via the same code path as
+  `set_pwm_frequency`) so the chip is at the right frequency immediately,
+  independent of whether `control.py` later calls `set_pwm_frequency` (which is
+  gated on `dc_fan`).
+- `get_output_status()['frequency']` reports the **last requested** frequency
+  (`self.frequency`), not the chip's exact achieved value, so `control.py`'s
+  `requested == reported` comparison settles and it does not call
+  `set_pwm_frequency` every control loop.
 
 In `GrillPlatform.__init__`, after the I2C bus is opened, a small factory
-selects and configures the driver, then applies `pwm_frequency`:
+selects the driver, then `set_pwm_frequency(self.frequency)` configures it:
 
 - `chip == "emc2101"` → `adafruit_emc2101.emc2101_lut.EMC2101_LUT(i2c)`,
-  configured for manual (non-LUT) operation and ~25 kHz (see EMC2101 section).
+  configured for manual (non-LUT) operation (see EMC2101 section).
 - `chip == "emc2301"` → `grillplat.emc2301.EMC2301(i2c, address=...)`.
+
+`set_pwm_frequency(hz)` stores `self.frequency = hz` and maps `hz` onto the
+selected chip's registers (EMC2101: PWM_F/divisor; EMC2301: base/divide),
+keeping its `hasattr` + try/except guard so a driver without the property never
+raises.
 
 Constructor failures (bus not found, chip absent, relay device missing) raise,
 triggering `control.py`'s existing log-and-fall-back-to-prototype path —
@@ -178,11 +195,8 @@ In `wizard/wizard_manifest.json`, under `modules.grillplatform`:
 - Rebind the existing I2C bus-kind / bus-num / address settings to the new
   `platform.fan_controller.*` paths. The address option list includes both
   EMC2101 addresses (`0x4c` / `0x4d`) and the EMC2301 address (`0x2f`).
-- Add a **`fan_controller_pwm_frequency`** dropdown bound to
-  `platform.fan_controller.pwm_frequency`. Offer the fan-appropriate targets
-  (`25000` / `26000` Hz) plus the EMC2301's lower base frequencies (`19531` /
-  `4882` / `2441` Hz); each driver maps the chosen Hz onto the nearest value its
-  chip can produce.
+- No PWM-frequency control is added to the wizard: frequency stays the existing
+  global `settings['pwm']['frequency']` (default 25000), unchanged.
 - `py_dependencies` keeps `adafruit-circuitpython-emc2101`. The EMC2301 driver
   is local and uses `adafruit_bus_device` — confirm
   `adafruit-circuitpython-busdevice` is listed as a direct dependency in
@@ -204,9 +218,9 @@ Unit tests, no hardware (I2C / `I2CDevice` mocked):
   - `__init__` performs a read-modify-write on Configuration register `0x20`
     leaving `DIS_TO = 1` and `WD_EN = 0`, and writes the expected PWM
     output-config and initial Fan Setting (`0`) registers.
-  - `__init__` selects the 26 kHz base frequency and sets PWM Divide
-    `0x31 = 1`; `pwm_frequency` getter returns 26000 by default and the setter
-    maps the four selectable base frequencies to the right register values.
+  - `pwm_frequency` setter maps a requested Hz onto the base-frequency/divide
+    registers (`0x31`), selecting the nearest of the four base frequencies; a
+    25000 request lands on the 26 kHz base.
 - **`tests/test_x86_*.py`** (updated):
   - Import the renamed module `grillplat.x86_numato`.
   - Use the new `platform.fan_controller` config group.
@@ -216,9 +230,9 @@ Unit tests, no hardware (I2C / `I2CDevice` mocked):
   - The emc2101 factory uses `EMC2101_LUT` and configures it at init:
     `set_pwm_clock(use_preset=False, use_slow=False)`, `pwm_frequency = 7`,
     `pwm_frequency_divisor = 1` (≈25.7 kHz), in manual (non-LUT) mode.
-  - The fan PWM frequency defaults per chip (`25000` for emc2101, `26000` for
-    emc2301) — never `100` — comes from `fan_controller.pwm_frequency` rather
-    than the global `pwm.frequency`, and is reported by `get_output_status`.
+  - `__init__` applies the frequency to the chip; the in-module fallback is
+    `25000` (never `100`); `get_output_status()['frequency']` reports the
+    requested frequency so `control.py`'s re-apply comparison settles.
 - **`tests/test_x86_manifest.py`** (updated): assert the renamed `x86_numato`
   wizard entry, the new `fan_controller_chip` and `fan_controller_pwm_frequency`
   options, and the rebound `fan_controller.*` settings paths.
