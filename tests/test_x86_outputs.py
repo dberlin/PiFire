@@ -6,7 +6,7 @@ import pytest
 @pytest.fixture
 def platform():
 	"""A GrillPlatform with all hardware mocked out."""
-	import grillplat.x86_numato_emc2101 as mod
+	import grillplat.x86_numato as mod
 
 	with (
 		mock.patch.object(mod, 'NumatoUSBRelay') as relay_cls,

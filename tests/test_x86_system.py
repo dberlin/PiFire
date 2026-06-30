@@ -5,7 +5,7 @@ import pytest
 
 @pytest.fixture
 def platform():
-	import grillplat.x86_numato_emc2101 as mod
+	import grillplat.x86_numato as mod
 
 	with (
 		mock.patch.object(mod, 'NumatoUSBRelay'),
@@ -27,7 +27,7 @@ def test_check_throttled_reports_ok_and_false(platform):
 
 
 def test_check_cpu_temp_uses_psutil(platform):
-	import grillplat.x86_numato_emc2101 as mod
+	import grillplat.x86_numato as mod
 
 	fake_reading = mock.Mock(current=47.0)
 	with mock.patch('psutil.sensors_temperatures', return_value={'coretemp': [fake_reading]}):

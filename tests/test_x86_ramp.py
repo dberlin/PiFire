@@ -5,7 +5,7 @@ import pytest
 
 @pytest.fixture
 def platform():
-	import grillplat.x86_numato_emc2101 as mod
+	import grillplat.x86_numato as mod
 
 	with (
 		mock.patch.object(mod, 'NumatoUSBRelay'),

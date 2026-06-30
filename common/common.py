@@ -163,11 +163,11 @@ def default_settings():
 			},
 			'1WIRE': None,  # 1WIRE is used for probe devices specifically the DS18B20
 		},
-		'numato': {  # x86_numato_emc2101 platform: Numato USB relay board
+		'numato': {  # x86_numato platform: Numato USB relay board
 			'device': '/dev/ttyACM0',  # serial (tty) device path
 			'baudrate': 921600,
 		},
-		'emc2101': {  # x86_numato_emc2101 platform: EMC2101 fan PWM controller
+		'emc2101': {  # x86_numato platform: EMC2101 fan PWM controller
 			'i2c_bus_kind': 'basic',  # 'basic' = integrated I2C bus (board.SCL/SDA); 'extended' = numbered/bridge bus
 			'i2c_bus_num': '1',  # extended only: /dev/i2c-N number or adapter-name match (e.g. 'CP2112')
 			'address': '0x4c',  # EMC2101 I2C address

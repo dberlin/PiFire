@@ -184,8 +184,8 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 	settings['modules']['grillplat'] = 'prototype'
 	if settings['platform']['system_type'] == 'raspberry_pi_all':
 		settings['modules']['grillplat'] = 'raspberry_pi_all'
-	elif settings['platform']['system_type'] == 'x86_numato_emc2101':
-		settings['modules']['grillplat'] = 'x86_numato_emc2101'
+	elif settings['platform']['system_type'] == 'x86_numato':
+		settings['modules']['grillplat'] = 'x86_numato'
 
 	# Commit Settings to JSON
 	write_settings(settings)
