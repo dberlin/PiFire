@@ -1525,6 +1525,7 @@ name = "pifire"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "adafruit-circuitpython-busdevice" },
     { name = "adafruit-circuitpython-emc2101" },
     { name = "adafruit-circuitpython-mcp9600" },
     { name = "adafruit-extended-bus" },
@@ -1563,6 +1564,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "adafruit-circuitpython-busdevice", specifier = ">=5.0.0" },
     { name = "adafruit-circuitpython-emc2101", specifier = ">=1.0.0" },
     { name = "adafruit-circuitpython-mcp9600", specifier = ">=2.0.10" },
     { name = "adafruit-extended-bus", specifier = ">=1.0.2" },
