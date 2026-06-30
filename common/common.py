@@ -167,10 +167,11 @@ def default_settings():
 			'device': '/dev/ttyACM0',  # serial (tty) device path
 			'baudrate': 921600,
 		},
-		'emc2101': {  # x86_numato platform: EMC2101 fan PWM controller
+		'fan_controller': {  # x86_numato platform: selectable EMC2101/EMC2301 fan PWM controller
+			'chip': 'emc2101',  # 'emc2101' or 'emc2301'
 			'i2c_bus_kind': 'basic',  # 'basic' = integrated I2C bus (board.SCL/SDA); 'extended' = numbered/bridge bus
 			'i2c_bus_num': '1',  # extended only: /dev/i2c-N number or adapter-name match (e.g. 'CP2112')
-			'address': '0x4c',  # EMC2101 I2C address
+			'address': '0x4c',  # fan controller I2C address (EMC2101 0x4C / EMC2301 0x2F)
 		},
 		'current': 'custom',
 		'dc_fan': False,  # True if system has a DC Fan (Does not indicate PWM)
