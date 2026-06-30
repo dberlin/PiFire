@@ -16,7 +16,7 @@ def platform():
 		mock.patch.object(mod, 'board'),
 		mock.patch.object(mod, 'find_i2c_bus', return_value=7),
 	):
-		config = {'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}, 'frequency': 100}
+		config = {'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}}
 		yield mod.GrillPlatform(config)
 
 
@@ -50,17 +50,49 @@ def test_fan_toggle_flips_state(platform):
 	assert platform.get_output_status()['fan'] is False
 
 
-def test_set_pwm_frequency_stored_and_reported(platform):
-	platform.set_pwm_frequency(30)
-	assert platform.frequency == 30
-	assert platform.get_output_status()['frequency'] == 30
+def test_frequency_defaults_to_25000(platform):
+	assert platform.frequency == 25000
+	assert platform.get_output_status()['frequency'] == 25000
+
+
+def test_init_configures_emc2101_for_25khz(platform):
+	# EMC2101_LUT is configured for ~25 kHz at init: 360 kHz preset clock,
+	# PWM_F = 7, divisor 1.
+	platform.emc.set_pwm_clock.assert_called_with(use_preset=False, use_slow=False)
+	assert platform.emc.pwm_frequency == 7
+	assert platform.emc.pwm_frequency_divisor == 1
+
+
+def test_set_pwm_frequency_reports_requested_value(platform):
+	platform.set_pwm_frequency(26000)
+	assert platform.frequency == 26000
+	assert platform.get_output_status()['frequency'] == 26000
+	# 26 kHz still maps to PWM_F = 7 on the EMC2101.
+	assert platform.emc.pwm_frequency == 7
+
+
+def test_set_pwm_frequency_on_emc2301_passes_hz():
+	import grillplat.x86_numato as mod
+
+	with (
+		mock.patch.object(mod, 'NumatoUSBRelay'),
+		mock.patch.object(mod, 'EMC2101_LUT'),
+		mock.patch.object(mod, 'EMC2301'),
+		mock.patch.object(mod, 'ExtendedI2C'),
+		mock.patch.object(mod, 'busio'),
+		mock.patch.object(mod, 'board'),
+		mock.patch.object(mod, 'find_i2c_bus', return_value=7),
+	):
+		platform = mod.GrillPlatform({'fan_controller': {'chip': 'emc2301'}})
+	# EMC2301 takes a frequency in Hz directly.
+	assert platform.emc.pwm_frequency == 25000
 
 
 def test_get_output_status_includes_pwm_and_frequency(platform):
 	platform.fan_on(75)
 	status = platform.get_output_status()
 	assert status['pwm'] == 75
-	assert status['frequency'] == 100
+	assert status['frequency'] == 25000
 
 
 def test_set_duty_cycle_clamps_out_of_range(platform):

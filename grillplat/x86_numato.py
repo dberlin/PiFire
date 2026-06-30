@@ -143,7 +143,7 @@ class GrillPlatform:
 			address = int(address, 16)
 		self.emc_address = address
 
-		self.frequency = config.get('frequency', 100)
+		self.frequency = config.get('frequency', 25000)
 		self.standalone = config.get('standalone', True)
 
 		# Cached commanded output state (avoids a serial round-trip per poll).
@@ -174,6 +174,9 @@ class GrillPlatform:
 		# Start in a known state: all relays off, fan stopped.
 		self.relay.reset()
 		self.emc.manual_fan_speed = 0
+		# Apply the fan PWM frequency now so the chip is correct immediately,
+		# independent of whether control.py later calls set_pwm_frequency.
+		self.set_pwm_frequency(self.frequency)
 
 	# MARK: Output control
 	def _set_output(self, name, state):
@@ -249,15 +252,24 @@ class GrillPlatform:
 		self.emc.manual_fan_speed = fan_speed_percent
 		self._fan_speed_percent = fan_speed_percent
 
-	def set_pwm_frequency(self, frequency=100):
+	def set_pwm_frequency(self, frequency=25000):
 		self.logger.debug('set_pwm_frequency: Setting PWM frequency to ' + str(frequency))
+		# Report the requested value so control.py's "re-apply if changed"
+		# comparison settles even though each chip rounds to its own grid.
 		self.frequency = frequency
-		# Best-effort: apply to the EMC2101 if the library exposes the property.
-		if hasattr(self.emc, 'pwm_frequency'):
-			try:
+		try:
+			if self.chip == 'emc2301':
+				# The EMC2301 driver takes a frequency in Hz.
 				self.emc.pwm_frequency = frequency
-			except (ValueError, OSError) as exc:
-				self.logger.warning('set_pwm_frequency: EMC2101 rejected frequency: ' + str(exc))
+			else:
+				# EMC2101: f = 360 kHz / (2 * PWM_F); PWM_F also sets duty
+				# resolution (2 * PWM_F steps). Use the 360 kHz preset clock.
+				pwm_f = max(1, min(31, round(360000 / (2 * frequency))))
+				self.emc.set_pwm_clock(use_preset=False, use_slow=False)
+				self.emc.pwm_frequency_divisor = 1
+				self.emc.pwm_frequency = pwm_f
+		except (ValueError, OSError, AttributeError) as exc:
+			self.logger.warning('set_pwm_frequency: controller rejected frequency: ' + str(exc))
 
 	def _stop_ramp(self):
 		# Stop any in-progress fan ramp. The fan methods above call it; the
