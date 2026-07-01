@@ -144,6 +144,9 @@ def default_settings():
 			'distance': {
 				'echo': 27,  # HCSR04 Distance Sensor
 				'trig': 23,  # HCSR04 Distance Sensor
+				'i2c_bus_kind': 'basic',  # VL53L0X/VL53L4CD: "basic" | "extended"
+				'i2c_bus_num': 'CP2112',  # VL53L0X/VL53L4CD: numbered bus or adapter-name match
+				'address': None,  # VL53L0X/VL53L4CD: optional I2C address override (hex string or int)
 			},
 			'input': {
 				'down_dt': 20,  # Button (DOWN) or Encoder (DT)
