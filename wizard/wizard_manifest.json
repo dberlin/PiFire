@@ -491,6 +491,53 @@
             },
             "settings": ["platform", "devices", "distance", "trig"]
           },
+          "device_distance_i2c_bus_kind": {
+            "friendly_name": "Distance Sensor I2C Bus Type",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "options": {
+              "basic": "Basic (integrated I2C bus)",
+              "extended": "Extended (numbered / bridge bus)"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
+          },
+          "device_distance_i2c_bus_num": {
+            "friendly_name": "Distance Sensor Extended I2C Bus",
+            "description": "Which bus to use when Distance Sensor I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
+            "options": {
+              "CP2112": "CP2112 (bridge name match)",
+              "0": "i2c-0",
+              "1": "i2c-1",
+              "2": "i2c-2",
+              "3": "i2c-3",
+              "4": "i2c-4",
+              "5": "i2c-5",
+              "6": "i2c-6",
+              "7": "i2c-7",
+              "8": "i2c-8",
+              "9": "i2c-9",
+              "10": "i2c-10",
+              "11": "i2c-11",
+              "12": "i2c-12",
+              "13": "i2c-13",
+              "14": "i2c-14",
+              "15": "i2c-15"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
+          },
+          "device_distance_address": {
+            "friendly_name": "Distance Sensor I2C Address",
+            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "options": {
+              "0x29": "0x29 (default)",
+              "0x2a": "0x2A",
+              "0x2b": "0x2B",
+              "0x2c": "0x2C",
+              "0x2d": "0x2D",
+              "0x2e": "0x2E",
+              "0x2f": "0x2F"
+            },
+            "settings": ["platform", "devices", "distance", "address"]
+          },
           "device_input_down_dt": {
             "friendly_name": "Down Button / Encoder DT",
             "description": "GPIO Pin for Down Button / Encoder DT",
@@ -782,6 +829,53 @@
             },
             "settings": ["platform", "devices", "distance", "trig"]
           },
+          "device_distance_i2c_bus_kind": {
+            "friendly_name": "Distance Sensor I2C Bus Type",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "options": {
+              "basic": "Basic (integrated I2C bus)",
+              "extended": "Extended (numbered / bridge bus)"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
+          },
+          "device_distance_i2c_bus_num": {
+            "friendly_name": "Distance Sensor Extended I2C Bus",
+            "description": "Which bus to use when Distance Sensor I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
+            "options": {
+              "CP2112": "CP2112 (bridge name match)",
+              "0": "i2c-0",
+              "1": "i2c-1",
+              "2": "i2c-2",
+              "3": "i2c-3",
+              "4": "i2c-4",
+              "5": "i2c-5",
+              "6": "i2c-6",
+              "7": "i2c-7",
+              "8": "i2c-8",
+              "9": "i2c-9",
+              "10": "i2c-10",
+              "11": "i2c-11",
+              "12": "i2c-12",
+              "13": "i2c-13",
+              "14": "i2c-14",
+              "15": "i2c-15"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
+          },
+          "device_distance_address": {
+            "friendly_name": "Distance Sensor I2C Address",
+            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "options": {
+              "0x29": "0x29 (default)",
+              "0x2a": "0x2A",
+              "0x2b": "0x2B",
+              "0x2c": "0x2C",
+              "0x2d": "0x2D",
+              "0x2e": "0x2E",
+              "0x2f": "0x2F"
+            },
+            "settings": ["platform", "devices", "distance", "address"]
+          },
           "device_input_down_dt": {
             "friendly_name": "Down Button / Encoder DT",
             "description": "GPIO Pin for Down Button / Encoder DT",
@@ -1019,6 +1113,53 @@
             "settings": ["platform", "devices", "distance", "trig"],
             "hidden": true
           },
+          "device_distance_i2c_bus_kind": {
+            "friendly_name": "Distance Sensor I2C Bus Type",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "options": {
+              "basic": "Basic (integrated I2C bus)",
+              "extended": "Extended (numbered / bridge bus)"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
+          },
+          "device_distance_i2c_bus_num": {
+            "friendly_name": "Distance Sensor Extended I2C Bus",
+            "description": "Which bus to use when Distance Sensor I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
+            "options": {
+              "CP2112": "CP2112 (bridge name match)",
+              "0": "i2c-0",
+              "1": "i2c-1",
+              "2": "i2c-2",
+              "3": "i2c-3",
+              "4": "i2c-4",
+              "5": "i2c-5",
+              "6": "i2c-6",
+              "7": "i2c-7",
+              "8": "i2c-8",
+              "9": "i2c-9",
+              "10": "i2c-10",
+              "11": "i2c-11",
+              "12": "i2c-12",
+              "13": "i2c-13",
+              "14": "i2c-14",
+              "15": "i2c-15"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
+          },
+          "device_distance_address": {
+            "friendly_name": "Distance Sensor I2C Address",
+            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "options": {
+              "0x29": "0x29 (default)",
+              "0x2a": "0x2A",
+              "0x2b": "0x2B",
+              "0x2c": "0x2C",
+              "0x2d": "0x2D",
+              "0x2e": "0x2E",
+              "0x2f": "0x2F"
+            },
+            "settings": ["platform", "devices", "distance", "address"]
+          },
           "device_input_down_dt": {
             "friendly_name": "Down Button / Encoder DT",
             "description": "GPIO Pin for Down Button / Encoder DT",
@@ -1220,6 +1361,53 @@
             "settings": ["platform", "devices", "distance", "trig"],
             "hidden": true
           },
+          "device_distance_i2c_bus_kind": {
+            "friendly_name": "Distance Sensor I2C Bus Type",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "options": {
+              "basic": "Basic (integrated I2C bus)",
+              "extended": "Extended (numbered / bridge bus)"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
+          },
+          "device_distance_i2c_bus_num": {
+            "friendly_name": "Distance Sensor Extended I2C Bus",
+            "description": "Which bus to use when Distance Sensor I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
+            "options": {
+              "CP2112": "CP2112 (bridge name match)",
+              "0": "i2c-0",
+              "1": "i2c-1",
+              "2": "i2c-2",
+              "3": "i2c-3",
+              "4": "i2c-4",
+              "5": "i2c-5",
+              "6": "i2c-6",
+              "7": "i2c-7",
+              "8": "i2c-8",
+              "9": "i2c-9",
+              "10": "i2c-10",
+              "11": "i2c-11",
+              "12": "i2c-12",
+              "13": "i2c-13",
+              "14": "i2c-14",
+              "15": "i2c-15"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
+          },
+          "device_distance_address": {
+            "friendly_name": "Distance Sensor I2C Address",
+            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "options": {
+              "0x29": "0x29 (default)",
+              "0x2a": "0x2A",
+              "0x2b": "0x2B",
+              "0x2c": "0x2C",
+              "0x2d": "0x2D",
+              "0x2e": "0x2E",
+              "0x2f": "0x2F"
+            },
+            "settings": ["platform", "devices", "distance", "address"]
+          },
           "device_input_down_dt": {
             "friendly_name": "Down Button / Encoder DT",
             "description": "GPIO Pin for Down Button / Encoder DT",
@@ -1419,6 +1607,53 @@
             "settings": ["platform", "devices", "distance", "trig"],
             "hidden": true
           },
+          "device_distance_i2c_bus_kind": {
+            "friendly_name": "Distance Sensor I2C Bus Type",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "options": {
+              "basic": "Basic (integrated I2C bus)",
+              "extended": "Extended (numbered / bridge bus)"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
+          },
+          "device_distance_i2c_bus_num": {
+            "friendly_name": "Distance Sensor Extended I2C Bus",
+            "description": "Which bus to use when Distance Sensor I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
+            "options": {
+              "CP2112": "CP2112 (bridge name match)",
+              "0": "i2c-0",
+              "1": "i2c-1",
+              "2": "i2c-2",
+              "3": "i2c-3",
+              "4": "i2c-4",
+              "5": "i2c-5",
+              "6": "i2c-6",
+              "7": "i2c-7",
+              "8": "i2c-8",
+              "9": "i2c-9",
+              "10": "i2c-10",
+              "11": "i2c-11",
+              "12": "i2c-12",
+              "13": "i2c-13",
+              "14": "i2c-14",
+              "15": "i2c-15"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
+          },
+          "device_distance_address": {
+            "friendly_name": "Distance Sensor I2C Address",
+            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "options": {
+              "0x29": "0x29 (default)",
+              "0x2a": "0x2A",
+              "0x2b": "0x2B",
+              "0x2c": "0x2C",
+              "0x2d": "0x2D",
+              "0x2e": "0x2E",
+              "0x2f": "0x2F"
+            },
+            "settings": ["platform", "devices", "distance", "address"]
+          },
           "device_input_down_dt": {
             "friendly_name": "Down Button / Encoder DT",
             "description": "GPIO Pin for Down Button / Encoder DT",
@@ -1558,6 +1793,53 @@
               "0x2f": "0x2F"
             },
             "settings": ["platform", "fan_controller", "address"]
+          },
+          "device_distance_i2c_bus_kind": {
+            "friendly_name": "Distance Sensor I2C Bus Type",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "options": {
+              "basic": "Basic (integrated I2C bus)",
+              "extended": "Extended (numbered / bridge bus)"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
+          },
+          "device_distance_i2c_bus_num": {
+            "friendly_name": "Distance Sensor Extended I2C Bus",
+            "description": "Which bus to use when Distance Sensor I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
+            "options": {
+              "CP2112": "CP2112 (bridge name match)",
+              "0": "i2c-0",
+              "1": "i2c-1",
+              "2": "i2c-2",
+              "3": "i2c-3",
+              "4": "i2c-4",
+              "5": "i2c-5",
+              "6": "i2c-6",
+              "7": "i2c-7",
+              "8": "i2c-8",
+              "9": "i2c-9",
+              "10": "i2c-10",
+              "11": "i2c-11",
+              "12": "i2c-12",
+              "13": "i2c-13",
+              "14": "i2c-14",
+              "15": "i2c-15"
+            },
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
+          },
+          "device_distance_address": {
+            "friendly_name": "Distance Sensor I2C Address",
+            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "options": {
+              "0x29": "0x29 (default)",
+              "0x2a": "0x2A",
+              "0x2b": "0x2B",
+              "0x2c": "0x2C",
+              "0x2d": "0x2D",
+              "0x2e": "0x2E",
+              "0x2f": "0x2F"
+            },
+            "settings": ["platform", "devices", "distance", "address"]
           },
           "output_power": {
             "friendly_name": "Power Relay Index",
@@ -4129,10 +4411,20 @@
         "default": false,
         "image": "vl53l0x.png",
         "reboot_required": false,
-        "py_dependencies": [
-          "git+https://github.com/pimoroni/VL53L0X-python.git"
-        ],
-        "apt_dependencies": ["python3-smbus"],
+        "py_dependencies": ["adafruit-circuitpython-vl53l0x"],
+        "apt_dependencies": [],
+        "command_list": [],
+        "settings_dependencies": {}
+      },
+      "vl53l4cd": {
+        "friendly_name": "VL53L4CD Time of Flight Distance Sensor",
+        "filename": "vl53l4cd",
+        "description": "The VL53L4CD is a newer-generation Time-of-Flight (ToF) laser-ranging module with improved accuracy at short range, a good alternative to the VL53L0X for hopper level sensing.",
+        "default": false,
+        "image": "vl53l4cd.png",
+        "reboot_required": false,
+        "py_dependencies": ["adafruit-circuitpython-vl53l4cd"],
+        "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {}
       },
