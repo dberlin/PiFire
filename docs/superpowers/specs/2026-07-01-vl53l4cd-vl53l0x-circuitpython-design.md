@@ -27,6 +27,8 @@ Raspberry Pi I2C bus 1. This change:
   bridge) I2C buses, reusing `probes.base.resolve_i2c_bus`.
 - Add wizard UI (dropdown + bus-number field) for the distance sensor's I2C
   bus selection on every platform block, mirroring the fan_controller pattern.
+- Add wizard UI for the I2C address of both sensors, also mirroring the
+  fan_controller `address` field (optional, defaults per chip when unset).
 - Factor the shared thread/percent-calc/bus-resolution logic into a
   `distance/_tof_base.py` base class; both drivers become thin subclasses.
 
@@ -35,9 +37,11 @@ Raspberry Pi I2C bus 1. This change:
 - No settings migration script. Missing `i2c_bus_kind`/`i2c_bus_num` keys on
   existing installs default to `'basic'`, preserving today's Pi-only,
   bus-1 behavior exactly.
-- No I2C address configuration in the wizard. Both chips use their factory
-  default address `0x29`; changing it (e.g. to run two ToF sensors on one bus)
-  is out of scope.
+- No multi-sensor addressing support (e.g. XSHUT-pin-based sequential
+  reassignment to run two ToF sensors on one bus). The address field lets a
+  user who has already reassigned a sensor's address (via external means)
+  point PiFire at it; PiFire itself does not drive XSHUT or reassign
+  addresses.
 - No changes to `hcsr04.py`, `none.py`, or `prototype.py`.
 - No updater_manifest.json version-bump entry — that's part of the maintainer's
   release process, not this feature change.
@@ -53,13 +57,18 @@ Raspberry Pi I2C bus 1. This change:
   chip-specific:
   - `__init__(dev_pins, empty=22, full=4, debug=False)`: validates
     `empty > full` (forcing safe defaults and logging an error otherwise),
-    resolves the I2C bus, calls `self._open_sensor(i2c)`, and starts the
-    polling thread.
+    resolves the I2C bus and address, calls `self._open_sensor(i2c,
+    address)`, and starts the polling thread.
   - I2C bus resolution: reads `dev_pins['distance'].get('i2c_bus_kind',
     'basic')` and `dev_pins['distance'].get('i2c_bus_num', 'CP2112')`.
     `'basic'` → `busio.I2C(board.SCL, board.SDA)`; `'extended'` →
     `ExtendedI2C(resolve_i2c_bus(bus_num))`, importing `resolve_i2c_bus` from
     `probes.base` (no third copy of the bus-matching helper).
+  - Address resolution: reads `dev_pins['distance'].get('address')`. If unset,
+    falls back to `self.default_address` (a subclass class attribute, `0x29`
+    for both chips today). Accepts an int or a hex string (`int(address,
+    16)`), matching the fan_controller `address` parsing in
+    `grillplat/x86_numato.py`.
   - `_sensing_loop`: same behavior as today's VL53L0X thread — takes 3
     readings via `self._read_distance_mm()`, averages them, converts mm→cm,
     computes the hopper-level percentage from `empty`/`full`, and re-runs
@@ -68,19 +77,21 @@ Raspberry Pi I2C bus 1. This change:
   - Public API unchanged from today's `HopperLevel`: `set_level`,
     `update_distances`, `get_distances`, `get_level(override=False)`.
   - Subclass hooks (each driver implements these three):
-    - `_open_sensor(self, i2c)` — construct the Adafruit driver instance and
-      start ranging.
+    - `_open_sensor(self, i2c, address)` — construct the Adafruit driver
+      instance at the resolved address and start ranging.
     - `_read_distance_mm(self)` — return one raw distance reading in mm.
     - `_close_sensor(self)` — stop ranging / release the sensor (optional,
       no-op default).
 
 - **`distance/vl53l0x.py`** — `HopperLevel(ToFHopperLevel)`:
-  - `_open_sensor`: `self.tof = adafruit_vl53l0x.VL53L0X(i2c, address=0x29)`.
+  - `default_address = 0x29`.
+  - `_open_sensor`: `self.tof = adafruit_vl53l0x.VL53L0X(i2c, address=address)`.
   - `_read_distance_mm`: `self.tof.range` (already mm).
 
 - **`distance/vl53l4cd.py`** (new) — `HopperLevel(ToFHopperLevel)`:
-  - `_open_sensor`: `self.tof = adafruit_vl53l4cd.VL53L4CD(i2c, address=0x29)`;
-    call `self.tof.start_ranging()`.
+  - `default_address = 0x29`.
+  - `_open_sensor`: `self.tof = adafruit_vl53l4cd.VL53L4CD(i2c,
+    address=address)`; call `self.tof.start_ranging()`.
   - `_read_distance_mm`: wait for `self.tof.data_ready`, read
     `self.tof.distance` (returned in **cm** by this driver) and convert to mm
     (`* 10`), then `self.tof.clear_interrupt()` per the Adafruit VL53L4CD
@@ -102,11 +113,12 @@ default settings:
   "echo": 27,
   "trig": 23,
   "i2c_bus_kind": "basic",   // "basic" | "extended"
-  "i2c_bus_num":  "CP2112"   // numbered bus or adapter-name match
+  "i2c_bus_num":  "CP2112",  // numbered bus or adapter-name match
+  "address":      null       // optional; defaults to 0x29 per chip when unset
 }
 ```
 
-Both VL53L0X and VL53L4CD drivers read these two new keys via
+Both VL53L0X and VL53L4CD drivers read these three new keys via
 `dev_pins['distance'].get(...)`; `hcsr04.py`/`none.py`/`prototype.py` ignore
 them, matching how those modules already ignore each other's keys.
 
@@ -125,7 +137,7 @@ In `wizard/wizard_manifest.json`, under `modules.distance`:
   ["adafruit-circuitpython-vl53l4cd"]`, `apt_dependencies: []`.
 
 Under each of the 6 platform blocks (`custom`, `pcb_2.00a`, `pcb_3.01a`,
-`pcb_pwm`, `pcb_4.x.x`, `x86_numato`), two new fields added alongside the
+`pcb_pwm`, `pcb_4.x.x`, `x86_numato`), three new fields added alongside the
 existing `device_distance_echo`/`device_distance_trig` fields:
 
 - **`device_distance_i2c_bus_kind`** — dropdown, `"basic"` / `"extended"`,
@@ -134,6 +146,12 @@ existing `device_distance_echo`/`device_distance_trig` fields:
 - **`device_distance_i2c_bus_num`** — text field (shown when `i2c_bus_kind ==
   "extended"`), bound to `["platform", "devices", "distance", "i2c_bus_num"]`,
   default `"CP2112"`.
+- **`device_distance_address`** — text/dropdown field, bound to
+  `["platform", "devices", "distance", "address"]`, matching the
+  fan_controller `address` field's shape (accepts a hex string, e.g.
+  `"0x29"`; left unset/blank uses the chip default). Shown regardless of
+  which distance module (`vl53l0x`/`vl53l4cd`) is selected, since both share
+  `0x29` as their default and the field is a no-op for `hcsr04`/`none`.
 
 `x86_numato` defaults `i2c_bus_kind` to `"extended"` / `"CP2112"`, matching its
 existing `fan_controller` default, since that platform has no integrated I2C
@@ -174,19 +192,23 @@ Unit tests, no hardware (I2C mocked, following `tests/test_emc2301.py`'s
   - Basic vs. extended I2C bus resolution calls the right bus constructor
     (`busio.I2C` vs. `ExtendedI2C(resolve_i2c_bus(...))`), with `board`/
     `busio`/`ExtendedI2C`/`resolve_i2c_bus` mocked.
+  - Address resolution: unset `address` falls back to the subclass's
+    `default_address`; a configured hex string (`"0x2a"`) or int is parsed and
+    passed to `_open_sensor`.
 - **`tests/test_vl53l0x.py`** (new): `_open_sensor` constructs
-  `adafruit_vl53l0x.VL53L0X` at address `0x29`; `_read_distance_mm` returns
-  `tof.range` directly.
+  `adafruit_vl53l0x.VL53L0X` at the resolved address (default `0x29`, or a
+  configured override); `_read_distance_mm` returns `tof.range` directly.
 - **`tests/test_vl53l4cd.py`** (new): `_open_sensor` constructs
-  `adafruit_vl53l4cd.VL53L4CD` at address `0x29` and calls `start_ranging()`;
-  `_read_distance_mm` waits for `data_ready`, reads `distance` (cm→mm
-  conversion), and calls `clear_interrupt()`.
+  `adafruit_vl53l4cd.VL53L4CD` at the resolved address (default `0x29`, or a
+  configured override) and calls `start_ranging()`; `_read_distance_mm` waits
+  for `data_ready`, reads `distance` (cm→mm conversion), and calls
+  `clear_interrupt()`.
 - **`tests/test_distance_manifest.py`** (new, or added to an existing manifest
   test file): assert the `vl53l0x` entry's updated `py_dependencies` /
   `apt_dependencies`, the new `vl53l4cd` entry's presence and dependencies,
   and that all 6 platform blocks carry the new
-  `device_distance_i2c_bus_kind`/`device_distance_i2c_bus_num` fields bound to
-  the correct settings paths.
+  `device_distance_i2c_bus_kind`/`device_distance_i2c_bus_num`/
+  `device_distance_address` fields bound to the correct settings paths.
 
 ## Documentation
 
