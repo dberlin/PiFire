@@ -46,8 +46,16 @@ a number of tach edges set by the EDGES field:
 count = ((msb << 8) | lsb) >> 3
 ```
 
-A stopped or stalled fan drives the count to its maximum, `0x1FFF` (all 13 bits
-set).
+A stopped or stalled fan drives the count *near* its maximum but not reliably to
+exactly `0x1FFF` — on real hardware a motionless fan was observed at `0x1FFE`.
+Detecting a stopped fan by the count value is therefore fragile; see Error
+handling for the correction (use the Fan Stall Status bit).
+
+> **Correction (post-implementation):** this section originally stated the count
+> reaches exactly `0x1FFF`, and the driver's first cut keyed off `count >=
+> 0x1FFF`. Hardware testing showed a stopped fan reads `0x1FFE` (count 8190),
+> one below the threshold, so the driver reported a phantom ~960 RPM (the RANGE
+> floor). Fixed by keying off the Fan Stall Status register instead.
 
 ### RPM conversion
 
@@ -130,7 +138,10 @@ Rounding: return the raw quotient as a `float` (the Adafruit EMC2101 rounds to
 
 ## Error handling
 
-- **Stopped/stalled fan** (`count >= 0x1FFF`): return `0.0`.
+- **Stopped/stalled fan** — return `0.0` when the Fan Stall Status register
+  (`0x25`) bit 0 is set. This is the chip's authoritative signal and works in
+  direct-PWM mode. (The original count-threshold approach was wrong; see the
+  correction under "Background".)
 - **Zero count** (guards divide-by-zero; not expected in normal operation):
   return `0.0`.
 - I2C read failures propagate as they do for the existing register accessors —
