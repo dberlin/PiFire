@@ -39,6 +39,12 @@ def _build_emc(seed=None, poles=2):
 	return emc, fake
 
 
+def _seed_tach(count):
+	"""Return a register seed dict encoding a 13-bit tach `count` into the
+	TACH high/low registers (inverse of the driver's ((msb<<8)|lsb)>>3)."""
+	return {0x3E: (count >> 5) & 0xFF, 0x3F: (count << 3) & 0xF8}
+
+
 def test_init_disables_timeout_and_continuous_watchdog():
 	_, fake = _build_emc()
 	# DIS_TO (bit6) set, WD_EN (bit5) clear.
@@ -115,3 +121,30 @@ def test_init_rejects_invalid_poles():
 		for bad in (0, 5):
 			with pytest.raises(ValueError):
 				mod.EMC2301(object(), address=0x2F, poles=bad)
+
+
+def test_fan_speed_default_range_multiplier_two():
+	# Power-on default Fan Config 1 0x2B has RANGE bits 0b01 -> m=2.
+	seed = {0x32: 0x2B}
+	seed.update(_seed_tach(1024))
+	emc, _ = _build_emc(seed=seed)
+	assert emc.fan_speed == round((2 * 3932160) / 1024, 2)
+
+
+def test_fan_speed_reads_range_multiplier_one_live():
+	# RANGE bits 0b00 -> m=1; the same count must yield half the RPM of the
+	# m=2 case, proving the multiplier is read from the register, not assumed.
+	seed = {0x32: 0x03}  # RANGE=00; EDGES/UDT bits are irrelevant to m
+	seed.update(_seed_tach(1024))
+	emc, _ = _build_emc(seed=seed)
+	assert emc.fan_speed == round((1 * 3932160) / 1024, 2)
+
+
+def test_fan_speed_stalled_fan_returns_zero():
+	emc, _ = _build_emc(seed=_seed_tach(0x1FFF))
+	assert emc.fan_speed == 0.0
+
+
+def test_fan_speed_zero_count_returns_zero():
+	emc, _ = _build_emc(seed=_seed_tach(0))
+	assert emc.fan_speed == 0.0

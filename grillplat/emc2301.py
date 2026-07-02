@@ -19,6 +19,8 @@ _REG_PWM_BASE_FREQ = 0x2D  # PWM base frequency select
 _REG_FAN_SETTING = 0x30  # Direct PWM duty (0x00-0xFF)
 _REG_PWM_DIVIDE = 0x31  # PWM divide ratio
 _REG_FAN_CONFIG1 = 0x32  # Fan Configuration 1: RANGE[6:5], EDGES[4:3]
+_REG_TACH_HIGH = 0x3E  # TACH reading, high byte
+_REG_TACH_LOW = 0x3F  # TACH reading, low byte (bits [7:3])
 
 # Configuration register bits.
 _CONFIG_DIS_TO = 0x40  # bit 6: 1 = SMBus timeout disabled
@@ -28,6 +30,13 @@ _EDGES_MASK = 0x18  # Fan Config 1 bits [4:3]: tach edges, set to match poles
 # PWM base frequency: Hz -> 0x2D register value.
 _BASE_FREQS = {26000: 0x00, 19531: 0x01, 4882: 0x02, 2441: 0x03}
 _BASE_VALUE_TO_HZ = {value: hz for hz, value in _BASE_FREQS.items()}
+
+# Tachometer -> RPM. RANGE bits [6:5] of Fan Config 1 select the multiplier m;
+# with EDGES set to match the pole count, RPM = m * 3932160 / count (3932160 =
+# 2 * f_TACH * 60, f_TACH = 32768 Hz). A stalled fan reads the max 13-bit count.
+_RANGE_TO_MULTIPLIER = {0: 1, 1: 2, 2: 4, 3: 8}
+_TACH_STALL_COUNT = 0x1FFF
+_RPM_CONSTANT = 3932160
 
 _DEFAULT_ADDRESS = 0x2F
 _MAX_DUTY = 0xFF
@@ -89,3 +98,16 @@ class EMC2301:
 		nearest = min(_BASE_FREQS, key=lambda base: abs(base - hz))
 		self._write_register(_REG_PWM_BASE_FREQ, _BASE_FREQS[nearest])
 		self._write_register(_REG_PWM_DIVIDE, 0x01)
+
+	@property
+	def fan_speed(self):
+		"""Measured fan speed in RPM from the tachometer, or 0.0 if the fan is
+		stopped/stalled. Reads the RANGE multiplier live so the result is
+		correct regardless of how RANGE is configured."""
+		msb = self._read_register(_REG_TACH_HIGH)
+		lsb = self._read_register(_REG_TACH_LOW)
+		count = ((msb << 8) | lsb) >> 3
+		if count == 0 or count >= _TACH_STALL_COUNT:
+			return 0.0
+		multiplier = _RANGE_TO_MULTIPLIER[(self._read_register(_REG_FAN_CONFIG1) >> 5) & 0x03]
+		return round((multiplier * _RPM_CONSTANT) / count, 2)
