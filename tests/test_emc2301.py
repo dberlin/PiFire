@@ -140,9 +140,23 @@ def test_fan_speed_reads_range_multiplier_one_live():
 	assert emc.fan_speed == round((1 * 3932160) / 1024, 2)
 
 
-def test_fan_speed_stalled_fan_returns_zero():
-	emc, _ = _build_emc(seed=_seed_tach(0x1FFF))
+def test_fan_speed_stopped_fan_reports_zero_via_stall_bit():
+	# Real registers captured from hardware with the fan stopped: the tach
+	# count saturates near (but not exactly at) its max -- 0x3E=0xFF, 0x3F=0xF0
+	# -> count 0x1FFE -- so a count-threshold check misses it and computes a
+	# phantom ~960 RPM. The Fan Stall Status bit (0x25 b0) is the authoritative
+	# stopped signal and must force 0.0.
+	seed = {0x32: 0x2B, 0x3E: 0xFF, 0x3F: 0xF0, 0x25: 0x01}
+	emc, _ = _build_emc(seed=seed)
 	assert emc.fan_speed == 0.0
+
+
+def test_fan_speed_running_reports_measured_rpm():
+	# Real registers captured at full speed: count 0x0B80 (2944), RANGE m=2,
+	# stall bit clear -> the measured RPM is reported.
+	seed = {0x32: 0x2B, 0x3E: 0x5C, 0x3F: 0x00, 0x25: 0x00}
+	emc, _ = _build_emc(seed=seed)
+	assert emc.fan_speed == 2671.3
 
 
 def test_fan_speed_zero_count_returns_zero():
