@@ -18,10 +18,12 @@ _REG_CONFIG = 0x20  # Configuration
 _REG_PWM_BASE_FREQ = 0x2D  # PWM base frequency select
 _REG_FAN_SETTING = 0x30  # Direct PWM duty (0x00-0xFF)
 _REG_PWM_DIVIDE = 0x31  # PWM divide ratio
+_REG_FAN_CONFIG1 = 0x32  # Fan Configuration 1: RANGE[6:5], EDGES[4:3]
 
 # Configuration register bits.
 _CONFIG_DIS_TO = 0x40  # bit 6: 1 = SMBus timeout disabled
 _CONFIG_WD_EN = 0x20  # bit 5: 1 = watchdog runs continuously
+_EDGES_MASK = 0x18  # Fan Config 1 bits [4:3]: tach edges, set to match poles
 
 # PWM base frequency: Hz -> 0x2D register value.
 _BASE_FREQS = {26000: 0x00, 19531: 0x01, 4882: 0x02, 2441: 0x03}
@@ -32,7 +34,10 @@ _MAX_DUTY = 0xFF
 
 
 class EMC2301:
-	def __init__(self, i2c_bus, address=_DEFAULT_ADDRESS):
+	def __init__(self, i2c_bus, address=_DEFAULT_ADDRESS, poles=2):
+		if poles not in (1, 2, 3, 4):
+			raise ValueError('poles must be 1-4')
+		self.poles = poles
 		self.i2c_device = I2CDevice(i2c_bus, address)
 		# Disable the SMBus timeout (DIS_TO=1) and keep the watchdog out of
 		# continuous mode (WD_EN=0) so the fan is never force-ramped to full
@@ -45,6 +50,11 @@ class EMC2301:
 		self._write_register(_REG_PWM_BASE_FREQ, _BASE_FREQS[26000])
 		self._write_register(_REG_PWM_DIVIDE, 0x01)
 		self._write_register(_REG_FAN_SETTING, 0x00)
+		# Set the tachometer EDGES field to match the fan's pole count so the
+		# tach measurement is correct; preserve the RANGE and other bits.
+		config1 = self._read_register(_REG_FAN_CONFIG1)
+		config1 = (config1 & ~_EDGES_MASK) | ((poles - 1) << 3)
+		self._write_register(_REG_FAN_CONFIG1, config1)
 
 	def _read_register(self, register):
 		result = bytearray(1)

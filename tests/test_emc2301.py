@@ -26,7 +26,7 @@ class FakeI2C:
 		in_buf[0] = self.registers.get(out_buf[0], 0)
 
 
-def _build_emc(seed=None):
+def _build_emc(seed=None, poles=2):
 	"""Construct an EMC2301 with a FakeI2C, optionally pre-seeding registers
 	before __init__ runs. Returns (emc, fake)."""
 	import grillplat.emc2301 as mod
@@ -35,7 +35,7 @@ def _build_emc(seed=None):
 	if seed:
 		fake.registers.update(seed)
 	with mock.patch.object(mod, 'I2CDevice', return_value=fake):
-		emc = mod.EMC2301(object(), address=0x2F)
+		emc = mod.EMC2301(object(), address=0x2F, poles=poles)
 	return emc, fake
 
 
@@ -91,3 +91,27 @@ def test_pwm_frequency_maps_to_nearest_base():
 	assert fake.registers[0x2D] == 0x00
 	assert fake.registers[0x31] == 0x01
 	assert emc.pwm_frequency == 26000.0
+
+
+def test_init_sets_edges_for_default_two_poles():
+	_, fake = _build_emc()
+	# EDGES bits [4:3] == poles-1 == 1 (0b01) for the default 2-pole fan.
+	assert (fake.registers[0x32] >> 3) & 0x03 == 1
+
+
+def test_init_sets_edges_for_four_poles_preserving_other_bits():
+	# Seed 0x32 with RANGE=0b11 (bits 6:5) and update-time bits 0b101; init must
+	# set EDGES to 0b11 (4 poles) while preserving RANGE and update-time bits.
+	_, fake = _build_emc(seed={0x32: 0b0110_0101}, poles=4)
+	assert (fake.registers[0x32] >> 3) & 0x03 == 3  # EDGES == poles-1 == 3
+	assert (fake.registers[0x32] >> 5) & 0x03 == 3  # RANGE preserved (0b11)
+	assert fake.registers[0x32] & 0x07 == 0b101  # update-time bits preserved
+
+
+def test_init_rejects_invalid_poles():
+	import grillplat.emc2301 as mod
+
+	with mock.patch.object(mod, 'I2CDevice', return_value=FakeI2C()):
+		for bad in (0, 5):
+			with pytest.raises(ValueError):
+				mod.EMC2301(object(), address=0x2F, poles=bad)
