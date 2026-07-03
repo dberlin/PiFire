@@ -33,7 +33,7 @@
 """
 
 import subprocess
-from common import is_float, create_logger, get_os_info
+from common import is_float, create_logger, get_os_info, get_wifi_quality
 from gpiozero import OutputDevice
 from gpiozero import Button
 from gpiozero.threads import GPIOThread
@@ -302,40 +302,8 @@ class GrillPlatform:
 		return data
 
 	def check_wifi_quality(self, arglist):
-		"""Checks the Wi-Fi signal quality on a Raspberry Pi and returns the percentage value (or None if not connected)."""
-		data = {'result': 'ERROR', 'message': 'Unable to obtain wifi quality data.', 'data': {}}
-
-		try:
-			# Use iwconfig to get the signal quality
-			output = subprocess.check_output(['iwconfig', 'wlan0'])
-			lines = output.decode('utf-8').splitlines()
-
-			# Find the line containing "Link Quality" and extract the relevant part
-			for line in lines:
-				if 'Link Quality=' in line:
-					quality_str = line.split('=')[1].strip()  # Isolate the part after "="
-					quality_parts = quality_str.split(' ')[0]  # Extract only the first part before spaces
-
-					try:
-						quality_value, quality_max = quality_parts.split('/')  # Split for numerical values
-						percentage = (int(quality_value) / int(quality_max)) * 100
-						data['result'] = 'OK'
-						data['message'] = 'Successfully obtained wifi quality data.'
-						data['data']['wifi_quality_value'] = int(quality_value)
-						data['data']['wifi_quality_max'] = int(quality_max)
-						data['data']['wifi_quality_percentage'] = round(percentage, 2)  # Round to two decimal places
-
-					except ValueError:
-						# Handle cases where the value might not be directly convertible to an integer
-						pass
-
-		except subprocess.CalledProcessError:
-			# Handle errors, such as iwconfig not being found or wlan0 not existing
-			self.logger.debug(f'Check Throttled had a subprocess error')
-			pass
-
-		self.logger.debug(f'Check Throttled Called. [data = {data}]')
-		return data
+		"""Checks the Wi-Fi signal quality and returns the value (or None if not connected)."""
+		return get_wifi_quality(logger=self.logger)
 
 	def check_cpu_temp(self, arglist):
 		try:

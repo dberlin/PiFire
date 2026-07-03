@@ -19,6 +19,7 @@ import datetime
 import os
 import io
 import json
+import re
 import math
 import valkey
 import uuid
@@ -356,6 +357,46 @@ def _default_display_config():
 			config[display][option['option_name']] = option['default']
 
 	return config
+
+
+def get_display_info(settings):
+	"""Return human-readable info about the currently selected display.
+
+	Used by the admin GPIO info page, where a DSI/HDMI (or other non-SPI)
+	display has no dc/led/rst GPIO pins worth showing -- its resolution and
+	type are the meaningful facts instead.
+
+	:param settings: The settings dictionary.
+	:return: dict with 'module', 'type' (friendly name) and 'resolution'
+	         ('WxH' string, or None when unknown).
+	"""
+	display_module = settings.get('modules', {}).get('display', 'none')
+	info = {'module': display_module, 'type': display_module, 'resolution': None}
+
+	# Prefer the wizard manifest's friendly name for the display type.
+	manifest = read_generic_json('./wizard/wizard_manifest.json')
+	module_meta = manifest.get('modules', {}).get('display', {}).get(display_module, {})
+	if module_meta.get('friendly_name'):
+		info['type'] = module_meta['friendly_name']
+
+	# Resolution comes from the display's data JSON metadata when it has one
+	# (DSI/HDMI and pygame-style displays), otherwise fall back to a WxH token
+	# embedded in the module name (e.g. 'st7789_240x320' -> '240x320').
+	display_config = settings.get('display', {}).get('config', {}).get(display_module, {})
+	data_filename = display_config.get('display_data_filename')
+	if data_filename:
+		display_data = read_generic_json(data_filename)
+		metadata = display_data.get('metadata', {}) if isinstance(display_data, dict) else {}
+		width = metadata.get('screen_width')
+		height = metadata.get('screen_height')
+		if width and height:
+			info['resolution'] = f'{width}x{height}'
+	if info['resolution'] is None:
+		match = re.search(r'(\d+x\d+)', display_module)
+		if match:
+			info['resolution'] = match.group(1)
+
+	return info
 
 
 def _default_recipe_probe_map(settings):
@@ -3200,3 +3241,94 @@ def get_os_info(filepath='os_info.json', loggername='events'):
 		event = f'Error getting OS info: {str(e)}'
 		write_log(event, level='error', loggername=loggername)
 		return os_info
+
+
+def _detect_wireless_interface():
+	"""Return the name of the first wireless network interface, or 'wlan0' as a fallback.
+
+	Wireless interfaces expose a 'wireless' subdirectory under /sys/class/net/<iface>.
+	"""
+	try:
+		for iface in sorted(os.listdir('/sys/class/net')):
+			if os.path.isdir(f'/sys/class/net/{iface}/wireless'):
+				return iface
+	except OSError:
+		pass
+	return 'wlan0'
+
+
+def _wifi_quality_from_iwconfig(interface):
+	"""Parse the 'Link Quality=x/y' field from iwconfig.
+
+	Returns a (value, max) tuple, or None if the field is not present. Raises
+	FileNotFoundError if iwconfig is not installed.
+	"""
+	output = subprocess.check_output(['iwconfig', interface], stderr=subprocess.DEVNULL)
+	for line in output.decode('utf-8', errors='replace').splitlines():
+		if 'Link Quality=' in line:
+			quality = line.split('Link Quality=')[1].split(' ')[0]
+			value, maximum = quality.split('/')
+			return int(value), int(maximum)
+	return None
+
+
+def _wifi_quality_from_iw(interface):
+	"""Parse the 'signal: N dBm' field from 'iw dev <interface> link'.
+
+	Converts the signal strength to a 0-100 quality using the NetworkManager
+	formula (clamp(2 * (dBm + 100), 0, 100)) and returns a (percentage, 100)
+	tuple, or None if no signal line is present. Raises FileNotFoundError if iw
+	is not installed.
+	"""
+	output = subprocess.check_output(['iw', 'dev', interface, 'link'], stderr=subprocess.DEVNULL)
+	for line in output.decode('utf-8', errors='replace').splitlines():
+		line = line.strip()
+		if line.startswith('signal:'):
+			dbm = int(line.split('signal:')[1].strip().split(' ')[0])
+			percentage = max(0, min(100, 2 * (dbm + 100)))
+			return percentage, 100
+	return None
+
+
+def get_wifi_quality(interface=None, logger=None):
+	"""Return Wi-Fi link quality using iwconfig when available, falling back to iw.
+
+	The interface is auto-detected when not supplied. iwconfig is tried first; if
+	it is not installed (FileNotFoundError) or fails to yield a reading, the newer
+	iw tool is tried. Returns the standard system-command dict with
+	wifi_quality_value / wifi_quality_max / wifi_quality_percentage in 'data'.
+	"""
+	data = {'result': 'ERROR', 'message': 'Unable to obtain wifi quality data.', 'data': {}}
+
+	if interface is None:
+		interface = _detect_wireless_interface()
+
+	reading = None
+	for name, parser in (('iwconfig', _wifi_quality_from_iwconfig), ('iw', _wifi_quality_from_iw)):
+		try:
+			reading = parser(interface)
+		except FileNotFoundError:
+			if logger:
+				logger.debug(f'{name} not found; trying next method for wifi quality.')
+			continue
+		except (subprocess.CalledProcessError, ValueError, IndexError) as e:
+			if logger:
+				logger.debug(f'{name} failed to obtain wifi quality: {e}')
+			continue
+		if reading is not None:
+			break
+
+	if reading is not None:
+		value, maximum = reading
+		percentage = round((value / maximum) * 100, 2)
+		data['result'] = 'OK'
+		data['message'] = 'Successfully obtained wifi quality data.'
+		data['data'] = {
+			'wifi_quality_value': value,
+			'wifi_quality_max': maximum,
+			'wifi_quality_percentage': percentage,
+		}
+
+	if logger:
+		logger.debug(f'get_wifi_quality called. [data = {data}]')
+	return data

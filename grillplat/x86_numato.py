@@ -27,7 +27,7 @@ import glob
 import os
 import threading
 
-from common import is_float, create_logger, get_os_info
+from common import is_float, create_logger, get_os_info, get_wifi_quality
 
 import board
 import busio
@@ -385,29 +385,7 @@ class GrillPlatform:
 		return {'result': result, 'message': message, 'data': {'cpu_temp': float(temp)}}
 
 	def check_wifi_quality(self, arglist):
-		import subprocess
-
-		data = {'result': 'ERROR', 'message': 'Unable to obtain wifi quality data.', 'data': {}}
-		try:
-			output = subprocess.check_output(['iwconfig'])
-			lines = output.decode('utf-8').splitlines()
-			for line in lines:
-				if 'Link Quality=' in line:
-					quality_str = line.split('=')[1].strip()
-					quality_parts = quality_str.split(' ')[0]
-					try:
-						quality_value, quality_max = quality_parts.split('/')
-						percentage = (int(quality_value) / int(quality_max)) * 100
-						data['result'] = 'OK'
-						data['message'] = 'Successfully obtained wifi quality data.'
-						data['data']['wifi_quality_value'] = int(quality_value)
-						data['data']['wifi_quality_max'] = int(quality_max)
-						data['data']['wifi_quality_percentage'] = round(percentage, 2)
-					except ValueError:
-						pass
-		except Exception:
-			pass
-		return data
+		return get_wifi_quality(logger=self.logger)
 
 	def check_alive(self, arglist):
 		return {'result': 'OK', 'message': 'The control script is running.', 'data': {}}
