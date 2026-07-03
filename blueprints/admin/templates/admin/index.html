@@ -837,14 +837,39 @@
 			</div><!-- End of Tab -->
 			<!-- ============================ GPIO Info ========================== -->
 			
+			{% set is_numato = settings['modules']['grillplat'] == 'x86_numato' %}
 			<div class="tab-pane fade {% if request.MOBILE %} show active {% endif %}" id="v-pills-gpio" role="tabpanel" aria-labelledby="v-pills-gpio-tab">
 				<div class="card shadow">
 					<div class="card-header bg-secondary text-white">
 						<h5>
+							{% if is_numato %}
+							<i class="fas fa-info-circle"></i>&nbsp; Relay Output Mapping
+							{% else %}
 							<i class="fas fa-info-circle"></i>&nbsp; GPIO Input/Output Info
+							{% endif %}
 						</h5>
 					</div>
 					<div class="card-body">
+						{% if is_numato %}
+						<!-- Numato USB relay board: outputs map to relay indices, not GPIO pins,
+						     and the board has no PiFire-driven GPIO inputs. -->
+						<table class="table">
+							<thead>
+								<tr>
+									<th>Output Name</th>
+									<th>Relay #</th>
+								</tr>
+							</thead>
+							<tbody>
+								{% for name in ['power', 'igniter', 'auger', 'fan'] %}
+								<tr>
+									<td>{{ name.capitalize() }}</td>
+									<td>Relay {{ settings['platform']['outputs'].get(name, 'N/A') }}</td>
+								</tr>
+								{% endfor %}
+							</tbody>
+						</table>
+						{% else %}
 						<table class="table">
 							<thead>
 								<tr>
@@ -878,6 +903,7 @@
 								{% endfor %}
 							</tbody>
 						</table>
+						{% endif %}
 					</div>
 				</div>
 				<br>
@@ -903,13 +929,31 @@
 									<td></td>
 									<td></td>
 								</tr>
+								{% if is_numato and device == 'display' %}
+								<!-- Numato platforms use a DSI/HDMI (non-SPI) display, which has no
+								     dc/led/rst GPIO pins; show its resolution and type instead. -->
+								<tr>
+									<td></td>
+									<td>resolution</td>
+									<td>{{ display_info['resolution'] if display_info['resolution'] else 'Unknown' }}</td>
+								</tr>
+								<tr>
+									<td></td>
+									<td>type</td>
+									<td>{{ display_info['type'] }}</td>
+								</tr>
+								{% else %}
 								{% for index, data in settings['platform']['devices'][device].items()|sort %}
+								{# On numato, i2c_bus_num is irrelevant when the bus kind is 'basic'. #}
+								{% if not (is_numato and index == 'i2c_bus_num' and settings['platform']['devices'][device].get('i2c_bus_kind') == 'basic') %}
 								<tr>
 									<td></td>
 									<td>{{ index }}</td>
 									<td>{{ settings['platform']['devices'][device][index] }}</td>
 								</tr>
+								{% endif %}
 								{% endfor %}
+								{% endif %}
 							{% endfor %}
 							</tbody>
 						</table>

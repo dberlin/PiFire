@@ -24,6 +24,7 @@ from common.common import (
 	backup_settings,
 	backup_pellet_db,
 	get_os_info,
+	get_display_info,
 )
 from common.app import allowed_file, get_supported_cmds, get_system_command_output
 from common.server_status import set_server_status, get_server_status
@@ -344,6 +345,7 @@ def admin_page(action=None):
 		control=control,
 		system_info=system_info,
 		qr_content=url,
+		display_info=get_display_info(settings),
 		pip_list=pip_list,
 		page_theme=settings['globals'].get('page_theme', 'light'),
 		grill_name=settings['globals'].get('grill_name', ''),
