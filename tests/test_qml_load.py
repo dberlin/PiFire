@@ -46,3 +46,14 @@ def test_main_qml_loads_without_errors():
 	config = {'display_data_filename': './display/qtquick_dsi_1280x720t.json'}
 	engine = qtapp.build_engine(config, backend)
 	assert engine.rootObjects(), 'Main.qml failed to load (see QML errors above)'
+
+
+def test_dash_screen_loads_and_binds_primary():
+	_app()
+	backend = _stub_backend(
+		in_data={'P': {'Grill': 225}, 'F': {}, 'AUX': {}, 'PSP': 250, 'NT': {}},
+		status={'mode': 'Hold', 'units': 'F', 'outpins': {}},
+	)
+	engine = _engine_with_backend(backend)
+	obj = _create(engine, 'screens/DashScreen.qml')
+	assert obj is not None

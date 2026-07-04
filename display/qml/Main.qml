@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
 import "."
+import "screens"
 
 Window {
 	id: root
@@ -34,9 +35,19 @@ Window {
 		}
 	}
 
-	// Replaced by DashScreen in Task 6.
+	property Item dashItem
+
 	Component {
 		id: dashComponent
+		DashScreen {
+			Component.onCompleted: root.dashItem = this
+			onOpenMenu: stack.push(menuComponent)
+		}
+	}
+
+	// Replaced by MenuScreen in Task 7.
+	Component {
+		id: menuComponent
 		Rectangle { color: Theme.background }
 	}
 }
