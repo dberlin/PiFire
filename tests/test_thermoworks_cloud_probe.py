@@ -380,3 +380,32 @@ def test_read_all_ports_maps_port_name_to_channel_and_respects_num_probes(monkey
 	# entirely and its pre-existing sentinel value is untouched.
 	assert result['food']['Extra'] == -999
 	assert result['tr']['Extra'] == -999
+
+
+import json
+import os
+
+
+def test_wizard_manifest_has_thermoworks_cloud_entry():
+	manifest_path = os.path.join(
+		os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json'
+	)
+	with open(manifest_path) as f:
+		manifest = json.load(f)
+
+	entry = manifest['modules']['probes']['thermoworks_cloud']
+
+	assert entry['filename'] == 'thermoworks_cloud'
+	assert entry['device_specific']['type'] == 'network'
+	assert entry['device_specific']['ports'] == [
+		'TWC0', 'TWC1', 'TWC2', 'TWC3', 'TWC4', 'TWC5', 'TWC6', 'TWC7',
+	]
+	assert 'thermoworks-cloud>=0.1.13' in entry['py_dependencies']
+
+	labels = [item['label'] for item in entry['device_specific']['config']]
+	assert labels == ['email', 'password', 'device_serial', 'num_probes', 'poll_interval']
+
+	config_by_label = {item['label']: item for item in entry['device_specific']['config']}
+	assert config_by_label['device_serial']['hidden'] is True
+	assert config_by_label['num_probes']['hidden'] is True
+	assert config_by_label['poll_interval']['default'] == 30
