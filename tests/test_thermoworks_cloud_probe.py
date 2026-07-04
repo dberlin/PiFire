@@ -2,6 +2,7 @@ import sys
 import types
 import importlib
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -83,3 +84,48 @@ def test_poll_once_maps_channels_and_handles_missing(monkeypatch):
 	assert result[1].value == 100.0
 	assert result[2] is None
 	assert result[3].value == 100.0
+
+
+def test_channel_to_celsius_converts_fahrenheit(monkeypatch):
+	probe = _load_probe(monkeypatch)
+
+	class FakeReading:
+		def __init__(self, value, units):
+			self.value = value
+			self.units = units
+
+	assert probe._channel_to_celsius(FakeReading(value=32.0, units='F')) == pytest.approx(0.0)
+	assert probe._channel_to_celsius(FakeReading(value=100.0, units='C')) == pytest.approx(100.0)
+	assert probe._channel_to_celsius(FakeReading(value=None, units='F')) is None
+
+
+def test_get_channel_celsius_returns_fresh_value_and_none_when_stale(monkeypatch):
+	probe = _load_probe(monkeypatch)
+
+	device = probe.ThermoworksCloudDevice(
+		email='a@b.com', password='pw', device_serial='SN1',
+		num_probes=2, poll_interval=10,
+	)
+
+	fresh_time = datetime.now(timezone.utc)
+	stale_time = fresh_time - timedelta(seconds=1000)
+	device._cache[1] = (55.5, fresh_time)
+	device._cache[2] = (60.0, stale_time)
+
+	assert device.get_channel_celsius(1) == pytest.approx(55.5)
+	assert device.get_channel_celsius(2) is None
+	assert device.get_channel_celsius(3) is None  # never populated
+
+
+def test_initial_status_is_disconnected(monkeypatch):
+	probe = _load_probe(monkeypatch)
+
+	device = probe.ThermoworksCloudDevice(
+		email='a@b.com', password='pw', device_serial='SN1',
+		num_probes=1, poll_interval=10,
+	)
+
+	status = device.get_status()
+	assert status['connected'] is False
+	assert status['last_error'] is None
+	assert status['last_poll_time'] is None
