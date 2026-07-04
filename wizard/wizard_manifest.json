@@ -4320,6 +4320,121 @@
           }
         ]
       },
+      "qtquick_dsi_1280x720t": {
+        "friendly_name": "DSI/HDMI Connected Display 1280x720 w/Touch (Qt Quick)",
+        "filename": "qtquick_dsi_1280x720t",
+        "description": "A 1280x720 (16:9) DSI or HDMI connected touch display rendered with a native PySide6 / Qt Quick (QML) interface. Drop-in alternative to the pygame 1280x720 display.",
+        "notes": "",
+        "default": false,
+        "image": "dsi_touch.png",
+        "reboot_required": true,
+        "py_dependencies": [
+          "rpi-backlight==2.6.0",
+          "pillow==11.1.0",
+          "pygame-ce>=2.5.7",
+          "pyside6>=6.11.1"
+        ],
+        "apt_dependencies": [
+          "lightdm",
+          "libsdl2-2.0-0",
+          "python3-pygame",
+          "libgl1",
+          "libxcb-cursor0"
+        ],
+        "command_list": [
+          [
+            "sudo",
+            "python",
+            "board-config.py",
+            "-bl"
+          ]
+        ],
+        "settings_dependencies": {
+          "buttonslevel": {
+            "friendly_name": "Button Level",
+            "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
+            "options": {
+              "HIGH": "Pullups",
+              "LOW": "Pulldowns"
+            },
+            "settings": [
+              "platform",
+              "buttonslevel"
+            ]
+          }
+        },
+        "config": [
+          {
+            "option_name": "rotation",
+            "option_friendly_name": "Screen Rotation",
+            "option_description": "Select the display rotation angle (Usually 0 degrees).",
+            "option_type": "list",
+            "list_values": [
+              0,
+              90,
+              180,
+              270
+            ],
+            "list_labels": [
+              "0 Degrees",
+              "90 Degrees",
+              "180 Degrees",
+              "270 Degrees"
+            ],
+            "default": 0,
+            "hidden": false
+          },
+          {
+            "option_name": "display_data_filename",
+            "option_friendly_name": "Display Data Filename",
+            "option_description": "JSON file with all of the display data and information.",
+            "option_type": "string",
+            "default": "./display/qtquick_dsi_1280x720t.json",
+            "hidden": false
+          },
+          {
+            "option_name": "input_types_supported",
+            "option_friendly_name": "Input Types Supported",
+            "option_description": "List of input types supported.  Separate multiple types with a comma.",
+            "option_type": "list",
+            "list_values": [
+              [
+                "button"
+              ],
+              [
+                "encoder"
+              ],
+              [
+                "touch"
+              ],
+              [
+                "button",
+                "touch"
+              ],
+              [
+                "encoder",
+                "touch"
+              ],
+              [
+                "none"
+              ]
+            ],
+            "list_labels": [
+              "Button",
+              "Encoder",
+              "Touch",
+              "Touch + Button",
+              "Touch + Encoder",
+              "No Input"
+            ],
+            "default": [
+              "button",
+              "touch"
+            ],
+            "hidden": false
+          }
+        ]
+      },
       "dsi_1280x720t": {
         "friendly_name": "DSI/HDMI Connected Display 1280x720 w/Touch",
         "filename": "dsi_1280x720t",
