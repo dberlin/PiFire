@@ -3,6 +3,7 @@ import QtQuick.Window
 import QtQuick.Controls
 import "."
 import "screens"
+import "Menus.js" as Menus
 
 Window {
 	id: root
@@ -37,17 +38,47 @@ Window {
 
 	property Item dashItem
 
+	function openMenu(name) {
+		if (name === "qrcode")
+			stack.push(qrCodeComponent);
+		else
+			stack.push(menuComponent, {menuName: name});
+	}
+
+	function openInput(name) {
+		stack.push(name === "hold" ? holdComponent : notifyComponent,
+		           name === "hold" ? {} : {origin: name});
+	}
+
 	Component {
 		id: dashComponent
 		DashScreen {
 			Component.onCompleted: root.dashItem = this
-			onOpenMenu: stack.push(menuComponent)
+			onOpenMenu: root.openMenu(Menus.mainVariantForMode(backend.mode))
 		}
 	}
 
-	// Replaced by MenuScreen in Task 7.
 	Component {
 		id: menuComponent
+		MenuScreen {
+			onClose: stack.pop(root.dashItem)
+			onOpenMenu: (name) => root.openMenu(name)
+			onOpenInput: (name) => root.openInput(name)
+		}
+	}
+
+	Component {
+		id: qrCodeComponent
+		QrCodeScreen { onClose: stack.pop(root.dashItem) }
+	}
+
+	// Replaced by real input screens in Task 8.
+	Component {
+		id: holdComponent
+		Rectangle { color: Theme.background }
+	}
+	Component {
+		id: notifyComponent
 		Rectangle { color: Theme.background }
 	}
 }

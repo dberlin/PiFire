@@ -37,6 +37,9 @@ def _create(engine, qml_file):
 	comp = QQmlComponent(engine, QUrl.fromLocalFile(f'display/qml/{qml_file}'))
 	obj = comp.create()
 	assert obj is not None, comp.errorString()
+	# Reparent to the engine so C++ takes ownership and the object is not
+	# garbage-collected out from under the test between assertions.
+	obj.setParent(engine)
 	return obj
 
 
@@ -57,3 +60,27 @@ def test_dash_screen_loads_and_binds_primary():
 	engine = _engine_with_backend(backend)
 	obj = _create(engine, 'screens/DashScreen.qml')
 	assert obj is not None
+
+
+def test_menu_screen_loads_main():
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	obj = _create(engine, 'screens/MenuScreen.qml')
+	obj.setProperty('menuName', 'main')
+	assert obj.property('menuName') == 'main'
+
+
+def test_qrcode_screen_loads():
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	assert _create(engine, 'screens/QrCodeScreen.qml') is not None
+
+
+def test_full_main_qml_with_menu_navigation_loads():
+	_app()
+	backend = _stub_backend()
+	config = {'display_data_filename': './display/qtquick_dsi_1280x720t.json'}
+	engine = qtapp.build_engine(config, backend)
+	assert engine.rootObjects()
