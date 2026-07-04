@@ -19,6 +19,35 @@ Window {
 		initialItem: splashComponent
 	}
 
+	// Button/encoder parity: hardware GPIO handlers call backend.navUp/navDown/
+	// navEnter directly; this maps those (and desktop arrow keys) to QML focus
+	// traversal and activation. A plain Item does not consume touch events, so
+	// this overlay leaves the primary touch path untouched.
+	Item {
+		id: keyNav
+		anchors.fill: parent
+		focus: true
+		Keys.onUpPressed: backend.navUp()
+		Keys.onDownPressed: backend.navDown()
+		Keys.onReturnPressed: backend.navEnter()
+		Keys.onEnterPressed: backend.navEnter()
+	}
+
+	Connections {
+		target: backend
+		function onNavEvent(dir) {
+			var f = root.activeFocusItem;
+			if (dir === "ENTER") {
+				if (f && f.clicked)
+					f.clicked();
+			} else if (f) {
+				var next = f.nextItemInFocusChain(dir === "DOWN");
+				if (next)
+					next.forceActiveFocus();
+			}
+		}
+	}
+
 	Component {
 		id: splashComponent
 		Item {
