@@ -131,7 +131,9 @@ A `Backend(QObject)` instance registered as a context property in the QML engine
 ### QML structure (native redesign)
 
 - `Main.qml` — fullscreen window sized from JSON metadata; a `StackView` /
-  `Loader` screen manager: **Splash → Dash → Menu/Input overlays**.
+  `Loader` screen manager: **Splash → Dash → Menu/Input overlays**. The splash
+  reuses the existing splash image referenced in the metadata (shown as an
+  `Image` for `splash_delay` ms); it is not redesigned.
 - `Theme.qml` (singleton) — palette, fonts, radii, animation durations; the
   single place to tune/modernize visuals.
 - **Dash components (1:1 with flexobjects):** `Gauge.qml` (radial arc via
