@@ -4,9 +4,9 @@ import ".."
 Rectangle {
 	id: hopper
 	property int level: 0
-	property bool enabled: false
+	property bool hopperEnabled: false
 	signal clicked()
-	visible: enabled
+	visible: hopperEnabled
 	height: 44
 	radius: Theme.radius
 	color: Theme.surface

@@ -109,7 +109,7 @@ Item {
 			HopperStatus {
 				Layout.fillWidth: true
 				level: backend.hopperLevel
-				enabled: backend.hopperEnabled
+				hopperEnabled: backend.hopperEnabled
 				onClicked: backend.hopperCheck()
 			}
 		}
