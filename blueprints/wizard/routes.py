@@ -1,5 +1,8 @@
 import os
+import asyncio
 from flask import render_template, request, jsonify, redirect, render_template_string
+from probes.thermoworks_cloud import discover
+from thermoworks_cloud import AuthenticationError
 from common.common import (
 	read_settings,
 	read_control,
@@ -97,6 +100,28 @@ def wizard_page(action=None):
 
 			render_string = "{% from 'probeconfig/_macro_probes_config.html' import render_bt_scan_table %}{{ render_bt_scan_table(itemID, bt_data, error) }}"
 			return render_template_string(render_string, itemID=itemID, bt_data=bt_data, error=error)
+
+		if action == 'thermoworks_discover':
+			email = r.get('email', '')
+			password = r.get('password', '')
+			serialID = r.get('serialID', '')
+			numProbesID = r.get('numProbesID', '')
+			tw_data = []
+			error = None
+
+			try:
+				tw_data = asyncio.run(discover(email, password))
+				if tw_data == []:
+					error = 'No ThermoWorks Cloud devices found for this account.'
+			except AuthenticationError as e:
+				error = f'Could not log in to ThermoWorks Cloud: {e}'
+			except Exception as e:
+				error = f'Something bad happened: {e}'
+
+			render_string = "{% from 'probeconfig/_macro_probes_config.html' import render_thermoworks_scan_table %}{{ render_thermoworks_scan_table(serialID, numProbesID, tw_data, error) }}"
+			return render_template_string(
+				render_string, serialID=serialID, numProbesID=numProbesID, tw_data=tw_data, error=error
+			)
 
 	""" Create Temporary Probe Device/Port Structure for Setup, Use Existing unless First Time Setup """
 	if settings['globals']['first_time_setup']:
