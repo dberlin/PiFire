@@ -54,6 +54,39 @@ async def poll_once(client, device_serial, num_probes):
 	return results
 
 
+async def discover_devices(client):
+	"""Enumerate this account's ThermoWorks devices and each one's channel
+	count. Pure — takes an already-built client, so this is the direct
+	unit-test target; discover() below wires in real auth/network."""
+	user = await client.get_user()
+	devices = await client.get_devices(user.account_id)
+	results = []
+	for device in devices:
+		num_channels = 0
+		for channel in range(1, 10):
+			try:
+				await client.get_device_channel(device.serial, str(channel))
+				num_channels += 1
+			except ResourceNotFoundError:
+				break
+		results.append({
+			'serial': device.serial,
+			'label': device.label,
+			'type': device.type,
+			'num_channels': num_channels,
+		})
+	return results
+
+
+async def discover(email, password):
+	"""Convenience wrapper used by the wizard's discovery route: builds a
+	fresh session/auth/client and delegates to discover_devices()."""
+	async with ClientSession() as session:
+		auth = await AuthFactory(session).build_auth(email, password)
+		client = ThermoworksCloud(auth)
+		return await discover_devices(client)
+
+
 _STALE_MULTIPLIER = 3  # a cached channel reading is considered stale (-> None)
                         # after this many missed poll intervals
 

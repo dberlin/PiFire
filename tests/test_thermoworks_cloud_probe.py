@@ -267,3 +267,41 @@ def test_start_spawns_thread_and_populates_cache(monkeypatch):
 	time.sleep(0.2)
 
 	assert device.get_channel_celsius(1) == pytest.approx(100.0)
+
+
+def test_discover_devices_counts_channels_per_device(monkeypatch):
+	probe = _load_probe(monkeypatch)
+
+	class FakeDevice:
+		def __init__(self, serial, label, dtype):
+			self.serial = serial
+			self.label = label
+			self.type = dtype
+
+	class FakeUser:
+		account_id = 'ACC1'
+
+	class FakeClient:
+		async def get_user(self):
+			return FakeUser()
+
+		async def get_devices(self, account_id):
+			assert account_id == 'ACC1'
+			return [
+				FakeDevice('SN1', 'Grill Signals', 'signals'),
+				FakeDevice('SN2', 'Smoke', 'smoke'),
+			]
+
+		async def get_device_channel(self, serial, channel):
+			channel_num = int(channel)
+			limits = {'SN1': 4, 'SN2': 2}
+			if channel_num > limits[serial]:
+				raise probe.ResourceNotFoundError('not found')
+			return object()
+
+	result = asyncio.run(probe.discover_devices(FakeClient()))
+
+	assert result == [
+		{'serial': 'SN1', 'label': 'Grill Signals', 'type': 'signals', 'num_channels': 4},
+		{'serial': 'SN2', 'label': 'Smoke', 'type': 'smoke', 'num_channels': 2},
+	]
