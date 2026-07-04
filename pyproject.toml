@@ -24,6 +24,7 @@ dependencies = [
     "valkey>=8.0.0",
     "scikit-fuzzy>=0.5.0",
     "scikit-learn>=1.9.0",
+    "thermoworks-cloud>=0.1.13",
     "uuid>=1.30",
     "zeroconf>=0.149.17",
     "do-mpc[full]>=5.1.1",
