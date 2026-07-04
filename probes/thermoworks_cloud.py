@@ -160,3 +160,42 @@ class ThermoworksCloudDevice:
 				self.status['last_error'] = str(exc)
 				self.logger.error(f'thermoworks_cloud: {exc}')
 				await asyncio.sleep(max(self.poll_interval, 60))  # backoff, then retry login
+
+
+class ReadProbes(ProbeInterface):
+	def __init__(self, probe_info, device_info, units):
+		config = device_info['config']
+		self.email = config.get('email', '')
+		self.password = config.get('password', '')
+		self.device_serial = config.get('device_serial', '')
+		self.num_probes = int(config.get('num_probes', 0))
+		self.poll_interval = int(config.get('poll_interval', 30))
+		super().__init__(probe_info, device_info, units)
+
+	def _init_device(self):
+		self.time_delay = 0
+		self.device = ThermoworksCloudDevice(
+			self.email, self.password, self.device_serial,
+			self.num_probes, self.poll_interval,
+		)
+		self.device.start()
+
+	def read_all_ports(self, output_data):
+		for port in self.port_map:
+			channel_number = int(port.replace('TWC', '')) + 1
+			if channel_number > self.num_probes:
+				continue  # unused port beyond this device's discovered channel count
+
+			celsius = self.device.get_channel_celsius(channel_number)
+			output_value = celsius if self.units == 'C' else self._to_fahrenheit(celsius)
+
+			self.output_data['tr'][self.port_map[port]] = 0  # resistance NA
+
+			if port == self.primary_port:
+				self.output_data['primary'][self.port_map[port]] = output_value
+			elif port in self.food_ports:
+				self.output_data['food'][self.port_map[port]] = output_value
+			elif port in self.aux_ports:
+				self.output_data['aux'][self.port_map[port]] = output_value
+
+		return self.output_data

@@ -305,3 +305,78 @@ def test_discover_devices_counts_channels_per_device(monkeypatch):
 		{'serial': 'SN1', 'label': 'Grill Signals', 'type': 'signals', 'num_channels': 4},
 		{'serial': 'SN2', 'label': 'Smoke', 'type': 'smoke', 'num_channels': 2},
 	]
+
+
+def test_init_device_wires_config_into_thermoworks_cloud_device(monkeypatch):
+	probe = _load_probe(monkeypatch)
+
+	captured = {}
+
+	class FakeDevice:
+		def __init__(self, email, password, device_serial, num_probes, poll_interval):
+			captured['args'] = (email, password, device_serial, num_probes, poll_interval)
+
+		def start(self):
+			captured['started'] = True
+
+	monkeypatch.setattr(probe, 'ThermoworksCloudDevice', FakeDevice)
+
+	read_probes = probe.ReadProbes.__new__(probe.ReadProbes)
+	device_info = {
+		'config': {
+			'email': 'user@example.com',
+			'password': 'hunter2',
+			'device_serial': 'SN1',
+			'num_probes': '4',
+			'poll_interval': '45',
+		}
+	}
+	read_probes.email = device_info['config']['email']
+	read_probes.password = device_info['config']['password']
+	read_probes.device_serial = device_info['config']['device_serial']
+	read_probes.num_probes = int(device_info['config']['num_probes'])
+	read_probes.poll_interval = int(device_info['config']['poll_interval'])
+
+	read_probes._init_device()
+
+	assert captured['args'] == ('user@example.com', 'hunter2', 'SN1', 4, 45)
+	assert captured['started'] is True
+
+
+def test_read_all_ports_maps_port_name_to_channel_and_respects_num_probes(monkeypatch):
+	probe = _load_probe(monkeypatch)
+
+	class FakeDevice:
+		def __init__(self):
+			self.readings = {1: 35.0, 3: 77.0}  # TWC0 -> channel 1, TWC2 -> channel 3
+
+		def get_channel_celsius(self, channel_number):
+			return self.readings.get(channel_number)
+
+	read_probes = probe.ReadProbes.__new__(probe.ReadProbes)
+	read_probes.units = 'F'
+	read_probes.num_probes = 3
+	read_probes.device = FakeDevice()
+	# Deliberately skip TWC1 to prove channel# comes from the port name, not
+	# from enumerate() position.
+	read_probes.port_map = {'TWC0': 'Grill', 'TWC2': 'Food1', 'TWC7': 'Extra'}
+	read_probes.primary_port = 'TWC0'
+	read_probes.food_ports = ['TWC2', 'TWC7']
+	read_probes.aux_ports = []
+	read_probes.output_data = {
+		'primary': {'Grill': -999},
+		'food': {'Food1': -999, 'Extra': -999},
+		'aux': {},
+		'tr': {'Grill': -999, 'Food1': -999, 'Extra': -999},
+	}
+
+	result = read_probes.read_all_ports(read_probes.output_data)
+
+	assert result['primary']['Grill'] == read_probes._to_fahrenheit(35.0)
+	assert result['food']['Food1'] == read_probes._to_fahrenheit(77.0)
+	assert result['tr']['Grill'] == 0
+	assert result['tr']['Food1'] == 0
+	# TWC7 -> channel 8, which is beyond num_probes=3, so it's skipped
+	# entirely and its pre-existing sentinel value is untouched.
+	assert result['food']['Extra'] == -999
+	assert result['tr']['Extra'] == -999
