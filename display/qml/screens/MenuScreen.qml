@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Layouts
 import ".."
 import "../components"
 import "../Menus.js" as Menus
@@ -19,43 +18,51 @@ Item {
 	}
 
 	Rectangle {
+		id: card
 		anchors.centerIn: parent
 		width: Math.min(parent.width - 120, 720)
-		height: Math.min(parent.height - 80, contentCol.implicitHeight + 48)
+		height: Math.min(parent.height - 80, 24 + titleText.height + 12 + buttonsCol.implicitHeight + 24)
 		radius: Theme.radius
 		color: Theme.background
 		border.color: Theme.primary
 		border.width: 2
 
-		ColumnLayout {
-			id: contentCol
-			anchors.fill: parent
-			anchors.margins: 24
-			spacing: 12
-			Text {
-				text: screen.menu.title
-				color: Theme.text
-				font.pixelSize: 40
-				font.bold: true
-				Layout.alignment: Qt.AlignHCenter
-			}
-			Flickable {
-				Layout.fillWidth: true
-				Layout.fillHeight: true
-				contentHeight: itemsCol.implicitHeight
-				clip: true
-				ColumnLayout {
-					id: itemsCol
-					width: parent.width
-					spacing: 10
-					Repeater {
-						model: screen.menu.items
-						MenuButton {
-							Layout.fillWidth: true
-							text: modelData.label
-							accent: modelData.action === "cmd_stop" ? Theme.danger : Theme.primary
-							onClicked: screen.activate(modelData)
-						}
+		Text {
+			id: titleText
+			anchors.top: parent.top
+			anchors.topMargin: 24
+			anchors.horizontalCenter: parent.horizontalCenter
+			text: screen.menu.title
+			color: Theme.text
+			font.pixelSize: 40
+			font.bold: true
+		}
+
+		Flickable {
+			id: flick
+			anchors.top: titleText.bottom
+			anchors.left: parent.left
+			anchors.right: parent.right
+			anchors.bottom: parent.bottom
+			anchors.topMargin: 12
+			anchors.leftMargin: 24
+			anchors.rightMargin: 24
+			anchors.bottomMargin: 24
+			contentHeight: buttonsCol.implicitHeight
+			clip: true
+			boundsBehavior: Flickable.StopAtBounds
+
+			Column {
+				id: buttonsCol
+				width: flick.width
+				spacing: 10
+				Repeater {
+					model: screen.menu.items
+					MenuButton {
+						width: buttonsCol.width
+						text: modelData.label
+						accent: modelData.action === "cmd_stop" ? Theme.danger : Theme.primary
+						onClicked: screen.activate(modelData)
 					}
 				}
 			}

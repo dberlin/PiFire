@@ -73,7 +73,7 @@ class ControllerBase:
 		"""
 		Desired re-solve / actuation period in seconds. Return None to use the
 		mode's CycleTime (legacy behavior). Controllers that run faster than the
-		auger cycle (e.g. MPC) return a fixed period such as 1.0.
+		auger cycle (e.g. MPC) return a fixed period such as 5.0.
 		"""
 		return None
 

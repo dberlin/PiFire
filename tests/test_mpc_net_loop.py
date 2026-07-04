@@ -12,7 +12,10 @@ needs_art = pytest.mark.skipif(not os.path.exists(ART), reason='net artifact not
 
 
 def _run(cfg, setpoint, seed=0, minutes=90):
-	c = Controller(cfg, 'C', dict(CYCLE))
+	# This harness advances the plant TS seconds per update(), so the estimator
+	# discretization (control_period) must equal TS regardless of the shipped
+	# default (which is 5.0 for a faster production re-solve cadence).
+	c = Controller({**cfg, 'control_period': TS}, 'C', dict(CYCLE))
 	c.set_target(setpoint)
 	plant = GrillSim(seed=seed)
 	ts, temps = [], []

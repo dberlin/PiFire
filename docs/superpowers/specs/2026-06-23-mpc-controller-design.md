@@ -2,7 +2,8 @@
 
 > This document describes the MPC controller **as built**. The architecture
 > reflects the shipped code — nonlinear radiative grey-box, EKF default, optional
-> neural-net policy, 25 s control period — not the original linear/KF/1 Hz sketch.
+> neural-net policy, 5 s control period over a 25 s prediction step — not the
+> original linear/KF sketch.
 > On a realistic plant the steady band is **~±1 °C RMS** (see **Accuracy**); an
 > intermediate draft reported ~±3–8 °C, but that came from a test plant whose wind
 > model was wildly overstated (×1.6–2.6 heat-loss gusts) — corrected to a realistic
@@ -211,8 +212,10 @@ requires only numpy/scipy.
 ### Control rate
 
 The policy re-solves at a configurable **control period** (`control_period`,
-default **25 s**, matching the Hold auger cycle) — independent of the prediction
-`t_step`. `control.py` calls `get_control_period()` and invokes the controller
+default **5 s**) — independent of the prediction `t_step` (25 s). The estimator
+is discretized at this period, so a shorter period tracks probe measurements more
+frequently; a cadence sweep on the realistic plant put the tightest band at ~5 s
+(RMS ~0.65 °C), with 1 s adding a small steady bias and 25× the solves. `control.py` calls `get_control_period()` and invokes the controller
 once per period in Hold; the estimator discretization tracks the real interval so
 an occasional faster/slower tick is handled correctly. Both policies are far
 faster than the period (NLP ~18 ms, net ~0.1 ms, EKF ~0.3 ms).
@@ -254,8 +257,9 @@ The `mpc` entry in `controller/controllers.json` `metadata`
 exposes a `config` array (same schema the wizard renders for PID). Shipped
 defaults:
 
-- **MPC:** `n_horizon=24`, `t_step=25.0`, `control_period=25.0`, `Q_w=1.0`,
+- **MPC:** `n_horizon=24`, `t_step=25.0`, `control_period=5.0`, `Q_w=1.0`,
   `R_dQ=0.1` (low for fast rise + tight band), `Q_min=5.0`, `Q_max=100.0`.
+
 - **Grey-box model (calibrate per grill):** `C_f=9.0`, `C_c=320.0`, `h_fc=1.3`,
   `h_amb=0.50`, `T_amb=20.0`, `theta=50.0`, `n_delay=4`, `K_Q=3.5`,
   `sigma=1.4e-9`.

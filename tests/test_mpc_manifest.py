@@ -45,7 +45,7 @@ def test_default_controller_config_includes_mpc():
 	finally:
 		os.chdir(cwd)
 	assert 'mpc' in cfg
-	assert cfg['mpc']['control_period'] == 25.0
+	assert cfg['mpc']['control_period'] == 5.0
 	assert cfg['mpc']['theta'] == 50.0
 	assert cfg['mpc']['n_delay'] == 4
 	assert cfg['mpc']['K_Q'] == 3.5

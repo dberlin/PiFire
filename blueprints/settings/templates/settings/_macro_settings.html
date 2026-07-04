@@ -53,7 +53,7 @@
                             {% elif option['option_type'] == 'bool' %}
                                 {{ render_input_bool(option['option_friendly_name'], option['option_name'], value=settings['config'][selected][option['option_name']]) }}
                             {% elif option['option_type'] == 'list' or option['option_type'] == 'numlist' %}
-                                {{ render_input_list(option['option_friendly_name'], option['option_name'], settings['config'][selected][option['option_name']], option['option_list'], option['option_list_labels']) }}
+                                {{ render_input_list(option['option_friendly_name'], option['option_name'], settings['config'][selected][option['option_name']], option['list_values'], option['list_labels']) }}
                             {% else %}
                                 {{ render_input_string(option['option_friendly_name'], option['option_name'], settings['config'][selected][option['option_name']]) }}
                             {% endif %}

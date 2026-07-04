@@ -10,7 +10,10 @@ SETPOINT = 110.0
 
 
 def _run(seed=0, minutes=90, setpoint=SETPOINT):
-	c = Controller(dict(_DEFAULTS), 'C', dict(CYCLE))
+	# This harness advances the plant TS seconds per update(), so the estimator
+	# discretization (control_period) must equal TS regardless of the shipped
+	# default (which is 5.0 for a faster production re-solve cadence).
+	c = Controller({**_DEFAULTS, 'control_period': TS}, 'C', dict(CYCLE))
 	c.set_target(setpoint)
 	plant = GrillSim(seed=seed)  # default H=420 (~600F max), deadtime=20
 	ts, temps = [], []
