@@ -34,6 +34,7 @@ Requirements:
 from thermoworks_cloud import AuthFactory, ThermoworksCloud, ResourceNotFoundError, AuthenticationError
 from aiohttp import ClientSession, ClientError
 
+import asyncio
 import logging
 import threading
 from datetime import datetime, timezone
@@ -96,3 +97,33 @@ class ThermoworksCloudDevice:
 
 	def get_status(self):
 		return self.status
+
+	def start(self):
+		self._thread = threading.Thread(target=self._run_loop, daemon=True)
+		self._thread.start()
+
+	def _run_loop(self):
+		asyncio.new_event_loop().run_until_complete(self._main())
+
+	async def _main(self):
+		while True:
+			try:
+				async with ClientSession() as session:
+					auth = await AuthFactory(session).build_auth(self.email, self.password)
+					client = ThermoworksCloud(auth)
+					self.status['connected'] = True
+					self.status['last_error'] = None
+					while True:
+						channels = await poll_once(client, self.device_serial, self.num_probes)
+						now = datetime.now(timezone.utc)
+						with self._lock:
+							for channel, data in channels.items():
+								if data is not None:
+									self._cache[channel] = (_channel_to_celsius(data), now)
+						self.status['last_poll_time'] = now
+						await asyncio.sleep(self.poll_interval)
+			except Exception as exc:  # AuthenticationError, ClientError, network errors, etc.
+				self.status['connected'] = False
+				self.status['last_error'] = str(exc)
+				self.logger.error(f'thermoworks_cloud: {exc}')
+				await asyncio.sleep(max(self.poll_interval, 60))  # backoff, then retry login

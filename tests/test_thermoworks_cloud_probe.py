@@ -2,6 +2,7 @@ import sys
 import types
 import importlib
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -129,3 +130,140 @@ def test_initial_status_is_disconnected(monkeypatch):
 	assert status['connected'] is False
 	assert status['last_error'] is None
 	assert status['last_poll_time'] is None
+
+
+def test_main_populates_cache_on_success(monkeypatch):
+	probe = _load_probe(monkeypatch)
+
+	class FakeReading:
+		def __init__(self, value, units):
+			self.value = value
+			self.units = units
+
+	class FakeThermoworksCloud:
+		def __init__(self, auth):
+			pass
+
+		async def get_device_channel(self, serial, channel):
+			return FakeReading(value=165.0, units='F')
+
+	class FakeAuth:
+		pass
+
+	class FakeAuthFactory:
+		def __init__(self, session):
+			pass
+
+		async def build_auth(self, email, password):
+			return FakeAuth()
+
+	class FakeClientSession:
+		async def __aenter__(self):
+			return self
+
+		async def __aexit__(self, *exc):
+			return False
+
+	monkeypatch.setattr(probe, 'ClientSession', FakeClientSession)
+	monkeypatch.setattr(probe, 'AuthFactory', FakeAuthFactory)
+	monkeypatch.setattr(probe, 'ThermoworksCloud', FakeThermoworksCloud)
+
+	device = probe.ThermoworksCloudDevice(
+		email='a@b.com', password='pw', device_serial='SN1',
+		num_probes=2, poll_interval=0.01,
+	)
+
+	async def run_briefly():
+		try:
+			await asyncio.wait_for(device._main(), timeout=0.2)
+		except asyncio.TimeoutError:
+			pass
+
+	asyncio.run(run_briefly())
+
+	assert device.status['connected'] is True
+	assert device.status['last_error'] is None
+	assert device.get_channel_celsius(1) == pytest.approx((165.0 - 32) * 5 / 9)
+
+
+def test_main_sets_disconnected_status_on_auth_failure(monkeypatch):
+	probe = _load_probe(monkeypatch)
+
+	class FakeAuthFactory:
+		def __init__(self, session):
+			pass
+
+		async def build_auth(self, email, password):
+			raise probe.AuthenticationError('bad credentials')
+
+	class FakeClientSession:
+		async def __aenter__(self):
+			return self
+
+		async def __aexit__(self, *exc):
+			return False
+
+	monkeypatch.setattr(probe, 'ClientSession', FakeClientSession)
+	monkeypatch.setattr(probe, 'AuthFactory', FakeAuthFactory)
+
+	device = probe.ThermoworksCloudDevice(
+		email='a@b.com', password='wrong', device_serial='SN1',
+		num_probes=1, poll_interval=0.01,
+	)
+
+	async def run_briefly():
+		try:
+			await asyncio.wait_for(device._main(), timeout=0.05)
+		except asyncio.TimeoutError:
+			pass
+
+	asyncio.run(run_briefly())
+
+	assert device.status['connected'] is False
+	assert 'bad credentials' in device.status['last_error']
+
+
+def test_start_spawns_thread_and_populates_cache(monkeypatch):
+	probe = _load_probe(monkeypatch)
+
+	class FakeReading:
+		def __init__(self, value, units):
+			self.value = value
+			self.units = units
+
+	class FakeThermoworksCloud:
+		def __init__(self, auth):
+			pass
+
+		async def get_device_channel(self, serial, channel):
+			return FakeReading(value=100.0, units='C')
+
+	class FakeAuth:
+		pass
+
+	class FakeAuthFactory:
+		def __init__(self, session):
+			pass
+
+		async def build_auth(self, email, password):
+			return FakeAuth()
+
+	class FakeClientSession:
+		async def __aenter__(self):
+			return self
+
+		async def __aexit__(self, *exc):
+			return False
+
+	monkeypatch.setattr(probe, 'ClientSession', FakeClientSession)
+	monkeypatch.setattr(probe, 'AuthFactory', FakeAuthFactory)
+	monkeypatch.setattr(probe, 'ThermoworksCloud', FakeThermoworksCloud)
+
+	device = probe.ThermoworksCloudDevice(
+		email='a@b.com', password='pw', device_serial='SN1',
+		num_probes=1, poll_interval=0.01,
+	)
+	device.start()
+	time.sleep(0.2)
+
+	assert device.get_channel_celsius(1) == pytest.approx(100.0)
