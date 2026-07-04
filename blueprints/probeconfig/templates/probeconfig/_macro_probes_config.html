@@ -185,7 +185,13 @@
                     {{ setting['friendly_name'] }}
                 </td>
 				<td>
-                    {% if setting['label'] == 'probes_list' %} 
+                    {% if setting['label'] == 'device_serial' %}
+                        {% if mode == 'Edit' %}
+                            {{ render_input_thermoworks_discover(moduleSection, mode, setting['label'], defaultConfig[setting['label']]) }}
+                        {% else %}
+                            {{ render_input_thermoworks_discover(moduleSection, mode, setting['label'], setting['default']) }}
+                        {% endif %}
+                    {% elif setting['label'] == 'probes_list' %}
                     <select multiple class="form-control deviceSpecific{{ mode }}" id="{{ moduleSection }}_devspec_{{ setting['label'] }}" name="{{ moduleSection }}_devspec_{{ setting['label'] }}">
                         {% for probe in available_probes %}
                         <option value="{{ probe }}" {% if probe in defaultConfig['probes_list'] %}selected{% endif %}>{{ probe }}</option>
@@ -526,6 +532,84 @@
     </div>
 </div>
 
+{% endmacro %}
+
+{% macro render_input_thermoworks_discover(section, mode, label, default) %}
+
+<div class="input-group mb-3">
+    <input type="text" class="form-control deviceSpecific{{ mode }}"
+    value="{{ default }}" aria-label="{{ label }}" readonly
+    id="{{ section }}_devspec_{{ label }}"
+    name="{{ section }}_devspec_{{ label }}"/>
+    <div class="input-group-append">
+        <button type="button" class="btn btn-success" id="tw_{{ section }}_devspec_{{ label }}_Discover" onclick="scanThermoworksDevices('{{ section }}_devspec_email', '{{ section }}_devspec_password', '{{ section }}_devspec_device_serial', '{{ section }}_devspec_num_probes')">Test Connection</button>
+    </div>
+</div>
+
+<!-- Discover ThermoWorks Cloud Devices Modal -->
+<div class="modal fade power-modal" id="tw_{{ section }}_devspec_{{ label }}_Modal" data-backdrop="false" tabindex="-1" aria-labelledby="tw_{{ section }}_devspec_{{ label }}_Label" aria-hidden="true" >
+    <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+        <div class="modal-header">
+        <h5 class="modal-title" id="tw_{{ section }}_devspec_{{ label }}_Label">ThermoWorks Cloud Devices</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+        </button>
+        </div>
+        <div class="modal-body text-center">
+
+            <div id="tw_{{ section }}_devspec_{{ label }}_Select">
+                <br>
+                <h4>Connecting...</h4>
+                <br>
+                <div class="fa-3x">
+                    <i class="fa-solid fa-magnifying-glass fa-bounce"></i>
+                </div>
+                <br>
+            </div>
+
+        </div>
+        <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" value="" onclick="scanThermoworksDevices('{{ section }}_devspec_email', '{{ section }}_devspec_password', '{{ section }}_devspec_device_serial', '{{ section }}_devspec_num_probes')">Refresh</button>
+        </div>
+    </div>
+    </div>
+</div>
+
+{% endmacro %}
+
+{% macro render_thermoworks_scan_table(serialID, numProbesID, tw_data, error) %}
+    {% if error %}
+        <div class="alert alert-danger" role="alert">
+            {{ error }}
+        </div>
+    {% else %}
+        <table class="table">
+            <thead class="thead-light">
+                <tr>
+                <th scope="col">Label</th>
+                <th scope="col">Type</th>
+                <th scope="col">Serial</th>
+                <th scope="col">Channels</th>
+                <th scope="col"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for device in tw_data %}
+                <tr>
+                    <td class="align-middle">{{ device['label'] }}</td>
+                    <td class="align-middle">{{ device['type'] }}</td>
+                    <td class="align-middle">{{ device['serial'] }}</td>
+                    <td class="align-middle">{{ device['num_channels'] }}</td>
+                    <td class="align-middle">
+                        <button type="button" class="btn btn-primary btn-sm" onclick="selectThermoworksDevice('{{ device['serial'] }}', {{ device['num_channels'] }}, '{{ serialID }}', '{{ numProbesID }}')">Select</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
 {% endmacro %}
 
 {% macro render_bt_scan_table(itemID, bt_data, error) %}

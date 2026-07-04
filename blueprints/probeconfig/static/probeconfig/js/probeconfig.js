@@ -33,6 +33,40 @@ function selectBluetoothDevice(hw_id, itemID) {
 }
 
 //
+// ThermoWorks Cloud Discovery Functions
+//
+function scanThermoworksDevices(emailID, passwordID, serialID, numProbesID) {
+	const modal = '#tw_' + serialID + '_Modal';
+	const modalContent = '#tw_' + serialID + '_Select';
+	const email = $('#' + emailID).val();
+	const password = $('#' + passwordID).val();
+	$(modal).modal('show');
+	// Show connecting text while discovering
+	$(modalContent).html('<br> \
+                <h4>Connecting...</h4> \
+                <br> \
+                <div class="fa-3x"> \
+                    <i class="fa-solid fa-magnifying-glass fa-bounce"></i> \
+                </div> \
+                <br></br>');
+	// Load the discovery results
+	$(modalContent).load("/wizard/thermoworks_discover", {
+		"email": email,
+		"password": password,
+		"serialID": serialID,
+		"numProbesID": numProbesID,
+	});
+}
+
+function selectThermoworksDevice(serial, numChannels, serialID, numProbesID) {
+	const modal = '#tw_' + serialID + '_Modal';
+	$('#' + serialID).val(serial);
+	$('#' + numProbesID).val(numChannels);
+	// Hide the modal
+	$(modal).modal('hide');
+}
+
+//
 // Device Functions
 //
 
