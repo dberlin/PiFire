@@ -72,13 +72,12 @@ Window {
 		QrCodeScreen { onClose: stack.pop(root.dashItem) }
 	}
 
-	// Replaced by real input screens in Task 8.
 	Component {
 		id: holdComponent
-		Rectangle { color: Theme.background }
+		HoldInput { onClose: stack.pop(root.dashItem) }
 	}
 	Component {
 		id: notifyComponent
-		Rectangle { color: Theme.background }
+		NotifyInput { onClose: stack.pop(root.dashItem) }
 	}
 }

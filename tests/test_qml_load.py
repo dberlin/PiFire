@@ -78,6 +78,22 @@ def test_qrcode_screen_loads():
 	assert _create(engine, 'screens/QrCodeScreen.qml') is not None
 
 
+def test_hold_input_loads():
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	assert _create(engine, 'screens/HoldInput.qml') is not None
+
+
+def test_notify_input_loads():
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	obj = _create(engine, 'screens/NotifyInput.qml')
+	obj.setProperty('origin', 'Probe 1')
+	assert obj.property('origin') == 'Probe 1'
+
+
 def test_full_main_qml_with_menu_navigation_loads():
 	_app()
 	backend = _stub_backend()
