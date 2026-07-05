@@ -210,7 +210,7 @@ class MqttNotificationHandler:
 
 		# 		self.control[element] = payload
 		# 		self.control['updated'] = 'yes'
-		# 		write_control(self.control, direct_write=False, origin='mqtt')
+		# 		write_control(self.control, WriteKind.MERGE, origin='mqtt')
 
 		# 		#TODO when switching to HOLD mode we also need to send a setpoint
 
@@ -219,7 +219,7 @@ class MqttNotificationHandler:
 		# 		if (self.control['mode']) == 'Hold':
 		# 			self.control[element] = int(payload)
 		# 			self.control['updated'] = 'yes'
-		# 			write_control(self.control, direct_write=False, origin='mqtt')
+		# 			write_control(self.control, WriteKind.MERGE, origin='mqtt')
 
 		# 	else:
 		# 		pass

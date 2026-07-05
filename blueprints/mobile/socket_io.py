@@ -333,7 +333,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 					settings = deep_update(settings, request)
 					_write_settings(settings, control)
 					control['settings_update'] = True
-					write_control(control, origin='app-socketio')
+					write_control(control, WriteKind.MERGE, origin='app-socketio')
 					return _response(result='OK', data=settings)
 				else:
 					return _response(result='Error', message='Error: Key not found in settings')
@@ -344,7 +344,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 					"""
                         Updating of control input data is now done in common.py > execute_commands() 
                     """
-					write_control(request, origin='app-socketio')
+					write_control(request, WriteKind.MERGE, origin='app-socketio')
 					return _response(result='OK', data=control)
 				else:
 					return _response(result='Error', message='Error: Key not found in control')
@@ -377,7 +377,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 			settings = default_settings()
 			control = default_control()
 			_write_settings(settings, control)
-			write_control(control, origin='app-socketio')
+			write_control(control, WriteKind.MERGE, origin='app-socketio')
 			write_log('Resetting Settings, Control, History to factory defaults.')
 			return _response(result='OK')
 		elif type == 'reboot':
@@ -420,7 +420,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 			_write_settings(settings, control)
 			control['updated'] = True
 			control['units_change'] = True
-			write_control(control, origin='app-socketio')
+			write_control(control, WriteKind.MERGE, origin='app-socketio')
 			write_log('Changed units to Fahrenheit')
 			return _response(result='OK', data=settings)
 		elif type == 'c_units' and settings['globals']['units'] == 'F':
@@ -429,7 +429,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 			_write_settings(settings, control)
 			control['updated'] = True
 			control['units_change'] = True
-			write_control(control, origin='app-socketio')
+			write_control(control, WriteKind.MERGE, origin='app-socketio')
 			write_log('Changed units to Celsius')
 			return _response(result='OK', data=settings)
 		else:
@@ -447,7 +447,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 				pelletdb['log'][now] = request['pellets_action']['profile']
 				control = read_control()
 				control['hopper_check'] = True
-				write_control(control, origin='app-socketio')
+				write_control(control, WriteKind.MERGE, origin='app-socketio')
 				write_pellet_db(pelletdb)
 				return _response(result='OK')
 			else:
@@ -455,7 +455,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 		elif type == 'hopper_check':
 			control = read_control()
 			control['hopper_check'] = True
-			write_control(control, origin='app-socketio')
+			write_control(control, WriteKind.MERGE, origin='app-socketio')
 			return _response(result='OK')
 		elif type == 'edit_brands':
 			if 'delete_brand' in request['pellets_action']:
@@ -500,7 +500,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 				pelletdb['current']['pelletid'] = profile_id
 				control = read_control()
 				control['hopper_check'] = True
-				write_control(control, origin='app-socketio')
+				write_control(control, WriteKind.MERGE, origin='app-socketio')
 				now = str(datetime.now())
 				now = now[0:19]
 				pelletdb['current']['date_loaded'] = now
@@ -565,7 +565,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 					control['notify_data'][index]['shutdown'] = request['timer_action']['timer_shutdown']
 					control['notify_data'][index]['keep_warm'] = request['timer_action']['timer_keep_warm']
 					write_log('Timer started.  Ends at: ' + epoch_to_time(control['timer']['end']))
-					write_control(control, origin='app-socketio')
+					write_control(control, WriteKind.MERGE, origin='app-socketio')
 					return _response(result='OK')
 				else:
 					return _response(result='Error', message='Error: Start time not specified')
@@ -574,14 +574,14 @@ def _post_app_data(action=None, type=None, json_data=None):
 				control['timer']['end'] = (control['timer']['end'] - control['timer']['paused']) + now
 				control['timer']['paused'] = 0
 				write_log('Timer unpaused.  Ends at: ' + epoch_to_time(control['timer']['end']))
-				write_control(control, origin='app-socketio')
+				write_control(control, WriteKind.MERGE, origin='app-socketio')
 				return _response(result='OK')
 		elif type == 'pause_timer':
 			control['notify_data'][index]['req'] = False
 			now = time.time()
 			control['timer']['paused'] = now
 			write_log('Timer paused.')
-			write_control(control, origin='app-socketio')
+			write_control(control, WriteKind.MERGE, origin='app-socketio')
 			return _response(result='OK')
 		elif type == 'stop_timer':
 			control['notify_data'][index]['req'] = False
@@ -591,7 +591,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 			control['notify_data'][index]['shutdown'] = False
 			control['notify_data'][index]['keep_warm'] = False
 			write_log('Timer stopped.')
-			write_control(control, origin='app-socketio')
+			write_control(control, WriteKind.MERGE, origin='app-socketio')
 			return _response(result='OK')
 		else:
 			return _response(result='Error', message='Error: Received request without valid type')
@@ -609,7 +609,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 				control['updated'] = True
 				control['mode'] = 'Recipe'
 				control['recipe']['filename'] = recipe_folder + filename
-				write_control(control, origin='app-socketio')
+				write_control(control, WriteKind.MERGE, origin='app-socketio')
 				return _response(result='OK')
 		else:
 			return _response(result='Error', message='Error: Received request without valid type')
@@ -865,14 +865,14 @@ def _update_notify_data(control, request):
 				updated_notify_data[index]['req'] = False
 
 	control['notify_data'] = updated_notify_data
-	write_control(control, origin='app-socketio')
+	write_control(control, WriteKind.MERGE, origin='app-socketio')
 	return _response(result='OK')
 
 
 def _write_settings(settings, control):
 	control['settings_update'] = True
 	write_settings(settings)
-	write_control(control, origin='app-socketio')
+	write_control(control, WriteKind.MERGE, origin='app-socketio')
 
 
 def _check_control_status():
@@ -946,7 +946,7 @@ def _get_system_info(control):
 		if data['result'] == 'OK':
 			system_info['hardware_info'] = data.get('data', {})
 
-	write_control(control, origin='app-socketio')
+	write_control(control, WriteKind.MERGE, origin='app-socketio')
 
 	info_details = {
 		'wifi_quality_value': control['system']['wifi_quality_value'],

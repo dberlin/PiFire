@@ -3,6 +3,7 @@ from common.common import (
 	read_settings,
 	read_control,
 	write_control,
+	WriteKind,
 	read_tr,
 	read_autotune,
 	write_autotune,
@@ -41,22 +42,22 @@ def tuner_page():
 		if command == 'stop_tuning':
 			if control['tuning_mode']:
 				control['tuning_mode'] = False  # Disable tuning mode
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 			if control['mode'] == 'Monitor':
 				# If in Monitor Mode, stop
 				control['mode'] = 'Stop'  # Go to Stop mode
 				control['updated'] = True
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 		if command == 'read_tr':
 			if not control['tuning_mode']:
 				control['tuning_mode'] = True  # Enable tuning mode
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 
 			if control['mode'] == 'Stop':
 				# Turn on Monitor Mode if the system is stopped
 				control['mode'] = 'Monitor'  # Enable monitor mode
 				control['updated'] = True
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 
 			cur_probe_tr = read_tr()
 			if requestjson['probe_selected'] in cur_probe_tr.keys():
@@ -66,12 +67,12 @@ def tuner_page():
 		if command == 'manual_finish' or command == 'auto_finish':
 			if control['tuning_mode']:
 				control['tuning_mode'] = False  # Disable tuning mode
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 			if control['mode'] == 'Monitor':
 				# If in Monitor Mode, stop
 				control['mode'] = 'Stop'  # Go to Stop mode
 				control['updated'] = True
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 
 			tunerManualHighTemp = requestjson.get('tunerManualHighTemp', 0.1)
 			tunerManualHighTemp = 0 if tunerManualHighTemp == '' else float(tunerManualHighTemp)
@@ -106,7 +107,7 @@ def tuner_page():
 			first_run = False
 			if not control['tuning_mode']:
 				control['tuning_mode'] = True  # Enable tuning mode
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 				read_autotune(flush=True)  # Flush autotune data
 				first_run = True
 
@@ -114,7 +115,7 @@ def tuner_page():
 				# Turn on Monitor Mode if the system is stopped
 				control['mode'] = 'Monitor'  # Enable monitor mode
 				control['updated'] = True
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 
 			status_data = {
 				'current_tr': 0,

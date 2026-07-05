@@ -5,6 +5,7 @@ from common.common import (
 	write_settings,
 	read_control,
 	write_control,
+	WriteKind,
 	read_pellet_db,
 	write_log,
 	read_current,
@@ -186,7 +187,7 @@ def api_page(action=None, arg0=None, arg1=None, arg2=None, arg3=None):
 				"""
 				try:
 					# Update control data with request JSON
-					write_control(request_json, origin='app')
+					write_control(request_json, WriteKind.MERGE, origin='app')
 					return jsonify(
 						{'control': 'success', 'result': 'success', 'message': 'Settings updated successfully.'}
 					), 201

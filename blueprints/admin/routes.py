@@ -10,6 +10,7 @@ from common.common import (
 	write_settings,
 	read_control,
 	write_control,
+	WriteKind,
 	read_pellet_db,
 	write_pellet_db,
 	read_history,
@@ -97,11 +98,11 @@ def admin_page(action=None):
 				write_log('Debug Mode Disabled.')
 				settings['globals']['debug_mode'] = False
 				write_settings(settings)
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 			else:
 				settings['globals']['debug_mode'] = True
 				write_settings(settings)
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 				write_log('Debug Mode Enabled.')
 
 		if 'clearhistory' in response:
@@ -135,7 +136,7 @@ def admin_page(action=None):
 				settings = default_settings()
 				control = default_control()
 				write_settings(settings)
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 				server_status = set_server_status('restarting')
 				restart_scripts()
 				return render_template(
@@ -329,7 +330,7 @@ def admin_page(action=None):
 		else:
 			system_info['hardware_info'] = data.get('data', {})
 
-	write_control(control)
+	write_control(control, WriteKind.MERGE)
 
 	url = request.url_root
 

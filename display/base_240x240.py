@@ -22,7 +22,7 @@ import socket
 import qrcode
 import logging
 from PIL import Image, ImageDraw, ImageFont
-from common import read_control, write_control
+from common import read_control, write_control, WriteKind
 
 
 """
@@ -1065,7 +1065,7 @@ class DisplayBase:
 				control['primary_setpoint'] = self.menu['current']['option']
 				control['updated'] = True
 				control['mode'] = 'Hold'
-				write_control(control, origin='display')
+				write_control(control, WriteKind.MERGE, origin='display')
 				self.menu['current']['mode'] = 'none'
 				self.menu['current']['option'] = 0
 				self.menu_active = False
@@ -1117,7 +1117,7 @@ class DisplayBase:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Startup'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 					return
 				elif selected == 'Monitor':
 					self.display_active = True
@@ -1128,7 +1128,7 @@ class DisplayBase:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Monitor'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 					return
 				elif selected == 'Stop':
 					self.menu['current']['mode'] = 'none'
@@ -1141,7 +1141,7 @@ class DisplayBase:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Stop'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 					return
 				elif selected == 'Power':
 					self.menu['current']['mode'] = 'power_menu'
@@ -1151,7 +1151,7 @@ class DisplayBase:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Stop'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 
 					if 'Off' in selected:
 						self.display_text('Shutdown...')
@@ -1185,7 +1185,7 @@ class DisplayBase:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Shutdown'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 				elif selected == 'Hold':
 					self.display_active = True
 					self.menu_active = True
@@ -1206,7 +1206,7 @@ class DisplayBase:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Smoke'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 					return
 				elif selected == 'SmokePlus':
 					self.menu['current']['mode'] = 'none'
@@ -1218,7 +1218,7 @@ class DisplayBase:
 						control['s_plus'] = False
 					else:
 						control['s_plus'] = True
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 					return
 				elif selected == 'Network':
 					self.display_network()
@@ -1245,7 +1245,7 @@ class DisplayBase:
 					self.menu_time = 0
 					control['updated'] = True
 					control['mode'] = 'Prime'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 				elif 'NextStep' in selected:
 					self.display_active = True
 					self.menu['current']['mode'] = 'none'
@@ -1258,15 +1258,15 @@ class DisplayBase:
 						if control['recipe']['step_data']['triggered'] and control['recipe']['step_data']['pause']:
 							# 'Unpause' Recipe
 							control['recipe']['step_data']['pause'] = False
-							write_control(control, origin='display')
+							write_control(control, WriteKind.MERGE, origin='display')
 						else:
 							# User is forcing next step
 							control['updated'] = True
-							write_control(control, origin='display')
+							write_control(control, WriteKind.MERGE, origin='display')
 					else:
 						# User is forcing next step
 						control['updated'] = True
-						write_control(control, origin='display')
+						write_control(control, WriteKind.MERGE, origin='display')
 
 		# Create canvas
 		img = Image.new('RGBA', (self.WIDTH, self.HEIGHT), color=(0, 0, 0))

@@ -1,6 +1,6 @@
 import datetime
 from flask import render_template, request
-from common.common import read_settings, read_control, read_pellet_db, write_pellet_db, write_control, backup_pellet_db
+from common.common import read_settings, read_control, read_pellet_db, write_pellet_db, write_control, backup_pellet_db, WriteKind
 
 from . import pellets_bp
 
@@ -22,7 +22,7 @@ def pellets_page(action=None):
 				pelletdb['current']['est_usage'] = 0
 				control = read_control()
 				control['hopper_check'] = True
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 				now = str(datetime.datetime.now())
 				now = now[0:19]  # Truncate the microseconds
 				pelletdb['current']['date_loaded'] = now
@@ -33,7 +33,7 @@ def pellets_page(action=None):
 				backup_pellet_db(action='backup')
 	elif request.method == 'GET' and action == 'hopperlevel':
 		control['hopper_check'] = True
-		write_control(control, origin='app')
+		write_control(control, WriteKind.MERGE, origin='app')
 	elif request.method == 'POST' and action == 'editbrands':
 		response = request.form
 		if 'delBrand' in response:
@@ -99,7 +99,7 @@ def pellets_page(action=None):
 				pelletdb['current']['pelletid'] = profile_id
 				control = {}
 				control['hopper_check'] = True
-				write_control(control, origin='app')
+				write_control(control, WriteKind.MERGE, origin='app')
 				now = str(datetime.datetime.now())
 				now = now[0:19]  # Truncate the microseconds
 				pelletdb['current']['date_loaded'] = now

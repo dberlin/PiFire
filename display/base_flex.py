@@ -25,6 +25,7 @@ from PIL import Image
 from common import (
 	read_control,
 	write_control,
+	WriteKind,
 	is_real_hardware,
 	read_generic_json,
 	read_settings,
@@ -704,21 +705,21 @@ class DisplayBase:
 		# print(' > Command Handler Called < ')
 		if 'monitor' in self.command:
 			data = {'updated': True, 'mode': 'Monitor'}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			# print('Sent Monitor Mode Command!')
 			self.display_active = 'dash'
 			self.display_init = True
 
 		if 'startup' in self.command:
 			data = {'updated': True, 'mode': 'Startup'}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			# print('Sent Startup Mode Command!')
 			self.display_active = 'dash'
 			self.display_init = True
 
 		if 'smoke' in self.command:
 			data = {'updated': True, 'mode': 'Smoke'}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			self.display_active = 'dash'
 			self.display_init = True
 
@@ -733,7 +734,7 @@ class DisplayBase:
 
 			if primary_setpoint:
 				data = {'updated': True, 'mode': 'Hold', 'primary_setpoint': primary_setpoint}
-				write_control(data, origin='display')
+				write_control(data, WriteKind.MERGE, origin='display')
 			self.display_active = 'dash'
 			self.display_init = True
 
@@ -754,7 +755,7 @@ class DisplayBase:
 					break
 
 			data = {'notify_data': control['notify_data']}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 
 			self.input_origin = None
 			self.display_active = 'dash'
@@ -762,13 +763,13 @@ class DisplayBase:
 
 		if 'shutdown' in self.command:
 			data = {'updated': True, 'mode': 'Shutdown'}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			self.display_active = 'dash'
 			self.display_init = True
 
 		if 'stop' in self.command:
 			data = {'updated': True, 'mode': 'Stop'}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 
 			self._init_framework()
 			self._zero_dash_data()
@@ -779,19 +780,19 @@ class DisplayBase:
 		if 'splus' in self.command:
 			toggle = False if self.last_status_data.get('s_plus', False) else True
 			data = {'s_plus': toggle}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			self.display_active = 'dash'
 			self.display_init = True
 
 		if 'primestartup' in self.command:
 			data = {'updated': True, 'mode': 'Prime', 'prime_amount': self.command_data, 'next_mode': 'Startup'}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			self.display_active = 'dash'
 			self.display_init = True
 
 		if 'primeonly' in self.command:
 			data = {'updated': True, 'mode': 'Prime', 'prime_amount': self.command_data, 'next_mode': 'Stop'}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			self.display_active = 'dash'
 			self.display_init = True
 
@@ -801,7 +802,7 @@ class DisplayBase:
 			settings['cycle_data']['PMode'] = self.command_data
 			write_settings(settings)
 			data = {'settings_update': True}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 
 			self.display_active = 'dash'
 			self.display_init = True
@@ -813,21 +814,21 @@ class DisplayBase:
 				if data['recipe']['step_data']['triggered'] and data['recipe']['step_data']['pause']:
 					# 'Unpause' Recipe
 					data['recipe']['step_data']['pause'] = False
-					write_control(data, origin='display')
+					write_control(data, WriteKind.MERGE, origin='display')
 				else:
 					# User is forcing next step
 					data['updated'] = True
-					write_control(data, origin='display')
+					write_control(data, WriteKind.MERGE, origin='display')
 			else:
 				# User is forcing next step
 				data['updated'] = True
-				write_control(data, origin='display')
+				write_control(data, WriteKind.MERGE, origin='display')
 			self.display_active = 'dash'
 			self.display_init = True
 
 		if 'reboot' in self.command:
 			data = {'updated': True, 'mode': 'Stop'}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			if self.real_hardware:
 				os.system('sleep 3 && sudo reboot &')
 			else:
@@ -838,7 +839,7 @@ class DisplayBase:
 
 		if 'poweroff' in self.command:
 			data = {'updated': True, 'mode': 'Stop'}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			if self.real_hardware:
 				os.system('sleep 3 && sudo shutdown -h now &')
 			else:
@@ -849,7 +850,7 @@ class DisplayBase:
 
 		if 'restart' in self.command:
 			data = {'updated': True, 'mode': 'Stop'}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			if self.real_hardware:
 				os.system('sleep 3 && sudo service supervisor restart &')
 			else:
@@ -860,7 +861,7 @@ class DisplayBase:
 
 		if 'hopper' in self.command:
 			data = {'hopper_check': True}
-			write_control(data, origin='display')
+			write_control(data, WriteKind.MERGE, origin='display')
 			self.display_active = 'dash'
 			self.display_init = True
 

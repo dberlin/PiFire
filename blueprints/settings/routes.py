@@ -4,6 +4,7 @@ from common.common import (
 	read_control,
 	write_settings,
 	write_control,
+	WriteKind,
 	read_generic_json,
 	generate_uuid,
 	convert_settings_units,
@@ -104,7 +105,7 @@ def settings_page(action=None):
 			control['probe_profile_update'] = True
 			# Take all settings and write them
 			write_settings(settings)
-			write_control(control, origin='app')
+			write_control(control, WriteKind.MERGE, origin='app')
 
 			return jsonify({'result': 'success'})
 		else:
@@ -252,7 +253,7 @@ def settings_page(action=None):
 
 		# Take all settings and write them
 		write_settings(settings)
-		write_control(control, origin='app')
+		write_control(control, WriteKind.MERGE, origin='app')
 
 	if request.method == 'POST' and action == 'editprofile':
 		response = request.form
@@ -305,7 +306,7 @@ def settings_page(action=None):
 					# If this profile is currently in use, update the profile in the control script as well
 					if profile_in_use:
 						control['probe_profile_update'] = True
-						write_control(control, origin='app')
+						write_control(control, WriteKind.MERGE, origin='app')
 				except:
 					event['type'] = 'error'
 					event['text'] = 'Something bad happened when trying to format your inputs.  Try again.'
@@ -444,7 +445,7 @@ def settings_page(action=None):
 		control['settings_update'] = True
 
 		write_settings(settings)
-		write_control(control, origin='app')
+		write_control(control, WriteKind.MERGE, origin='app')
 
 	if request.method == 'POST' and action == 'pwm':
 		response = request.form
@@ -468,7 +469,7 @@ def settings_page(action=None):
 		control['settings_update'] = True
 
 		write_settings(settings)
-		write_control(control, origin='app')
+		write_control(control, WriteKind.MERGE, origin='app')
 
 	if request.method == 'POST' and action == 'startup':
 		response = request.form
@@ -517,7 +518,7 @@ def settings_page(action=None):
 		control['settings_update'] = True
 
 		write_settings(settings)
-		write_control(control, origin='app')
+		write_control(control, WriteKind.MERGE, origin='app')
 
 	if request.method == 'POST' and action == 'history':
 		response = request.form
@@ -629,7 +630,7 @@ def settings_page(action=None):
 		control['settings_update'] = True
 
 		write_settings(settings)
-		write_control(control, origin='app')
+		write_control(control, WriteKind.MERGE, origin='app')
 
 	"""
     Smart Start Settings

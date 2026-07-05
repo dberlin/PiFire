@@ -39,8 +39,8 @@ from common.valkey_handler import ValkeyHandler
 # *****************************************
 
 class WriteKind(Enum):
-	OVERWRITE = 'overwrite'   # replace control:general wholesale (was direct_write=True)
-	MERGE = 'merge'           # queue a partial change, deep-merged on execute (was direct_write=False)
+	OVERWRITE = 'overwrite'   # replace control:general wholesale (legacy True)
+	MERGE = 'merge'           # queue a partial change, deep-merged on execute (legacy False)
 
 # *****************************************
 # Constants and Globals
@@ -2505,7 +2505,7 @@ def is_float(string):
 	return False
 
 
-def process_command(action=None, arglist=[], origin='unknown', direct_write=False):
+def process_command(action=None, arglist=[], origin='unknown', kind=WriteKind.MERGE):
 	"""
 	Process incoming command from API or elsewhere
 	"""
@@ -2628,7 +2628,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 			}
 			"""
 			control['hopper_check'] = True
-			write_control(control, direct_write=direct_write, origin=origin)
+			write_control(control, kind, origin=origin)
 			time.sleep(3)
 			pelletdb = read_pellet_db()
 			data['data']['hopper'] = pelletdb['current']['hopper_level']
@@ -2757,7 +2757,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 				else:
 					control['primary_setpoint'] = float(arglist[1])
 				control['updated'] = True
-				write_control(control, direct_write=direct_write, origin=origin)
+				write_control(control, kind, origin=origin)
 			else:
 				data['result'] = 'ERROR'
 				data['message'] = (
@@ -2772,10 +2772,10 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 				settings = convert_settings_units(arglist[1], settings)
 				write_settings(settings)
 				control['settings_update'] = True
-				write_control(control, direct_write=direct_write, origin=origin)
+				write_control(control, kind, origin=origin)
 				control['updated'] = True
 				control['units_change'] = True
-				write_control(control, direct_write=direct_write, origin=origin)
+				write_control(control, kind, origin=origin)
 				# print(f'Settings Units Changed to {arglist[1]}')
 			else:
 				data['result'] = 'ERROR'
@@ -2791,7 +2791,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 			if arglist[1] in ['startup', 'smoke', 'shutdown', 'stop', 'reignite', 'monitor', 'error', 'manual']:
 				control['mode'] = MODE_MAP[arglist[1]]
 				control['updated'] = True
-				write_control(control, direct_write=direct_write, origin=origin)
+				write_control(control, kind, origin=origin)
 			elif arglist[1] == 'prime':
 				try:
 					if arglist[2] is not None:
@@ -2803,7 +2803,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 								control['next_mode'] = MODE_MAP[arglist[3]]
 							else:
 								control['next_mode'] = 'Stop'
-							write_control(control, direct_write=direct_write, origin=origin)
+							write_control(control, kind, origin=origin)
 						else:
 							data['result'] = 'ERROR'
 							data['message'] = f'Prime amount should be an integer in grams.'
@@ -2822,7 +2822,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 						else:
 							control['primary_setpoint'] = float(arglist[2])
 						control['updated'] = True
-						write_control(control, direct_write=direct_write, origin=origin)
+						write_control(control, kind, origin=origin)
 					else:
 						data['result'] = 'ERROR'
 						data['message'] = f'Set Mode {arglist[1]} with {arglist[2]} failed [not a number].'
@@ -2844,7 +2844,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 						settings['cycle_data']['PMode'] = int(arglist[1])
 						write_settings(settings)
 						control['settings_update'] = True
-						write_control(control, direct_write=False, origin=origin)
+						write_control(control, WriteKind.MERGE, origin=origin)
 					else:
 						data['result'] = 'ERROR'
 						data['message'] = f'Set PMode out of range(0-9): {arglist[1]}'
@@ -2864,7 +2864,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 				control['s_plus'] = True
 			else:
 				control['s_plus'] = False
-			write_control(control, direct_write=direct_write, origin=origin)
+			write_control(control, kind, origin=origin)
 
 		elif arglist[0] == 'lid_open':
 			"""
@@ -2876,7 +2876,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 			else:
 				control['lid_open_toggle'] = True
 
-			write_control(control, direct_write=direct_write, origin=origin)
+			write_control(control, kind, origin=origin)
 
 		elif arglist[0] in ['notify', 'limit_high', 'limit_low']:
 			"""
@@ -2929,7 +2929,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 					else:
 						data['result'] = 'ERROR'
 						data['message'] = f'Notify object update failed.'
-					write_control(control, direct_write=False, origin=origin)
+					write_control(control, WriteKind.MERGE, origin=origin)
 			else:
 				data['result'] = 'ERROR'
 				data['message'] = f'Notify object label was not specified.'
@@ -2944,7 +2944,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 				control['pwm_control'] = True
 			else:
 				control['pwm_control'] = False
-			write_control(control, direct_write=direct_write, origin=origin)
+			write_control(control, kind, origin=origin)
 
 		elif arglist[0] == 'duty_cycle':
 			"""
@@ -2956,7 +2956,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 				duty_cycle = int(arglist[1])
 				if duty_cycle >= 0 and duty_cycle <= 100:
 					control['duty_cycle'] = duty_cycle
-					write_control(control, direct_write=False, origin=origin)
+					write_control(control, WriteKind.MERGE, origin=origin)
 				else:
 					data['result'] = 'ERROR'
 					data['message'] = f'Duty cycle must be an integer between 0-100.'
@@ -2974,7 +2974,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 				control['tuning_mode'] = True
 			else:
 				control['tuning_mode'] = False
-			write_control(control, direct_write=direct_write, origin=origin)
+			write_control(control, kind, origin=origin)
 
 		elif arglist[0] == 'timer':
 			"""
@@ -3005,18 +3005,18 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 					else:
 						control['timer']['end'] = now + 60
 					write_log('Timer started.  Ends at: ' + epoch_to_time(control['timer']['end']))
-					write_control(control, direct_write=direct_write, origin='app')
+					write_control(control, kind, origin='app')
 				else:  # If Timer was paused, restart with new end time.
 					control['timer']['end'] = (control['timer']['end'] - control['timer']['paused']) + now
 					control['timer']['paused'] = 0
 					write_log('Timer unpaused.  Ends at: ' + epoch_to_time(control['timer']['end']))
-					write_control(control, direct_write=direct_write, origin='app')
+					write_control(control, kind, origin='app')
 			elif arglist[1] == 'pause':
 				if control['timer']['start'] != 0:
 					control['notify_data'][index]['req'] = False
 					control['timer']['paused'] = now
 					write_log('Timer paused.')
-					write_control(control, direct_write=direct_write, origin='app')
+					write_control(control, kind, origin='app')
 				else:
 					control['notify_data'][index]['req'] = False
 					control['timer']['start'] = 0
@@ -3025,7 +3025,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 					control['notify_data'][index]['shutdown'] = False
 					control['notify_data'][index]['keep_warm'] = False
 					write_log('Timer cleared.')
-					write_control(control, direct_write=direct_write, origin='app')
+					write_control(control, kind, origin='app')
 			elif arglist[1] == 'stop':
 				control['notify_data'][index]['req'] = False
 				control['timer']['start'] = 0
@@ -3034,19 +3034,19 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 				control['notify_data'][index]['shutdown'] = False
 				control['notify_data'][index]['keep_warm'] = False
 				write_log('Timer stopped.')
-				write_control(control, direct_write=direct_write, origin='app')
+				write_control(control, kind, origin='app')
 			elif arglist[1] == 'shutdown':
 				if arglist[2] == 'true':
 					control['notify_data'][index]['shutdown'] = True
 				else:
 					control['notify_data'][index]['shutdown'] = False
-				write_control(control, direct_write=direct_write, origin=origin)
+				write_control(control, kind, origin=origin)
 			elif arglist[1] == 'keep_warm':
 				if arglist[2] == 'true':
 					control['notify_data'][index]['keep_warm'] = True
 				else:
 					control['notify_data'][index]['keep_warm'] = False
-				write_control(control, direct_write=direct_write, origin=origin)
+				write_control(control, kind, origin=origin)
 			else:
 				data['result'] = 'ERROR'
 				data['message'] = f'Timer command not recognized.'
@@ -3120,7 +3120,7 @@ def process_command(action=None, arglist=[], origin='unknown', direct_write=Fals
 					data['result'] = 'ERROR'
 					data['message'] = f'Manual command not recognized or contained an error.'
 				if control['manual']['change'] in ['power', 'igniter', 'fan', 'auger', 'pwm']:
-					write_control(control, direct_write=direct_write, origin=origin)
+					write_control(control, kind, origin=origin)
 
 			else:
 				data['result'] = 'ERROR'

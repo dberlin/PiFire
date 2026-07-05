@@ -15,7 +15,7 @@ def no_spawn(monkeypatch):
 
 def make_display(monkeypatch):
 	sent = []
-	monkeypatch.setattr(mod, 'write_control', lambda data, origin=None: sent.append(data))
+	monkeypatch.setattr(mod, 'write_control', lambda data, kind=None, origin=None: sent.append(data))
 	cfg = {
 		'display_data_filename': './display/qtquick_dsi_1280x720t.json',
 		'probe_info': {'primary': {'name': 'Grill', 'max_temp': 600}, 'food': [], 'aux': []},

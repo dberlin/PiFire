@@ -26,7 +26,7 @@ import time
 import threading
 import subprocess
 import logging
-from common import create_logger, is_real_hardware, write_control, read_control
+from common import create_logger, is_real_hardware, write_control, read_control, WriteKind
 from notify.notifications import *
 
 """
@@ -93,7 +93,7 @@ class Process_Monitor:
 					control['updated'] = True
 					control['mode'] = 'Error'
 					control['critical_error'] = True
-					write_control(control, direct_write=True, origin='process_monitor')
+					write_control(control, WriteKind.OVERWRITE, origin='process_monitor')
 					# Send notification
 					send_notifications('Control_Process_Stopped')
 					# Log error

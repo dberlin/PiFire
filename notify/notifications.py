@@ -26,6 +26,7 @@ import math
 from common import (
 	write_settings,
 	write_control,
+	WriteKind,
 	create_logger,
 	read_history,
 	read_settings,
@@ -159,7 +160,7 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
 				control['mode'] = 'Reignite'
 				control['updated'] = True
 
-			write_control(control, direct_write=True, origin='notifications')
+			write_control(control, WriteKind.OVERWRITE, origin='notifications')
 
 	return control
 

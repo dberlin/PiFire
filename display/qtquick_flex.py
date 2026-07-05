@@ -20,7 +20,7 @@ import logging
 import multiprocessing
 
 from display.base_flex import DisplayBase
-from common import is_real_hardware, read_control, read_status, write_control
+from common import is_real_hardware, read_control, read_status, write_control, WriteKind
 
 
 class Display(DisplayBase):
@@ -84,7 +84,7 @@ class Display(DisplayBase):
 		if 'hold' in command:
 			temp = int(command_data) if command_data else 0
 			if temp:
-				write_control({'updated': True, 'mode': 'Hold', 'primary_setpoint': temp}, origin='display')
+				write_control({'updated': True, 'mode': 'Hold', 'primary_setpoint': temp}, WriteKind.MERGE, origin='display')
 			return
 		if 'notify' in command:
 			origin = command_data.get('origin') if isinstance(command_data, dict) else None
@@ -95,26 +95,21 @@ class Display(DisplayBase):
 					entry['target'] = target
 					entry['req'] = bool(target)
 					break
-			write_control({'notify_data': control['notify_data']}, origin='display')
+			write_control({'notify_data': control['notify_data']}, WriteKind.MERGE, origin='display')
 			return
 		if command == 'cmd_stop':
-			write_control({'updated': True, 'mode': 'Stop'}, origin='display')
+			write_control({'updated': True, 'mode': 'Stop'}, WriteKind.MERGE, origin='display')
 			return
 		if command == 'cmd_splus':
 			status = read_status()
 			toggle = not bool(status.get('s_plus', False)) if status else True
-			write_control({'s_plus': toggle}, origin='display')
+			write_control({'s_plus': toggle}, WriteKind.MERGE, origin='display')
 			return
 		if command == 'cmd_primestartup':
-			write_control(
-				{'updated': True, 'mode': 'Prime', 'prime_amount': command_data, 'next_mode': 'Startup'},
-				origin='display',
-			)
+			write_control({'updated': True, 'mode': 'Prime', 'prime_amount': command_data, 'next_mode': 'Startup'}, WriteKind.MERGE, origin='display')
 			return
 		if command == 'cmd_primeonly':
-			write_control(
-				{'updated': True, 'mode': 'Prime', 'prime_amount': command_data, 'next_mode': 'Stop'}, origin='display'
-			)
+			write_control({'updated': True, 'mode': 'Prime', 'prime_amount': command_data, 'next_mode': 'Stop'}, WriteKind.MERGE, origin='display')
 			return
 		# Everything else: reuse the inherited handler verbatim.
 		self.command = command

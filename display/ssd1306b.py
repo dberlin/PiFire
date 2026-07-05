@@ -25,7 +25,7 @@ from luma.core.interface.serial import i2c
 from luma.core.render import canvas
 from luma.oled.device import ssd1306
 from PIL import Image, ImageDraw, ImageFont
-from common import read_control, write_control  # Common Library for WebUI and Control Program
+from common import read_control, write_control, WriteKind  # Common Library for WebUI and Control Program
 from gpiozero import Button
 
 """
@@ -380,7 +380,7 @@ class Display:
 				control['primary_setpoint'] = self.menu['current']['option']
 				control['updated'] = True
 				control['mode'] = 'Hold'
-				write_control(control, origin='display')
+				write_control(control, WriteKind.MERGE, origin='display')
 				self.menu['current']['mode'] = 'none'
 				self.menu['current']['option'] = 0
 				self.menu_active = False
@@ -432,7 +432,7 @@ class Display:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Startup'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 				elif selected == 'Monitor':
 					self.menu['current']['mode'] = 'none'
 					self.menu['current']['option'] = 0
@@ -441,7 +441,7 @@ class Display:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Monitor'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 				elif selected == 'Stop':
 					self.menu['current']['mode'] = 'none'
 					self.menu['current']['option'] = 0
@@ -451,7 +451,7 @@ class Display:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Stop'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 				# Active Mode
 				elif selected == 'Shutdown':
 					self.menu['current']['mode'] = 'none'
@@ -462,7 +462,7 @@ class Display:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Shutdown'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 				elif selected == 'Hold':
 					self.menu['current']['mode'] = 'grill_hold_value'
 					if self.units == 'F':
@@ -478,7 +478,7 @@ class Display:
 					control = read_control()
 					control['updated'] = True
 					control['mode'] = 'Smoke'
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 				elif selected == 'SmokePlus':
 					self.menu['current']['mode'] = 'none'
 					self.menu['current']['option'] = 0
@@ -490,7 +490,7 @@ class Display:
 						control['s_plus'] = False
 					else:
 						control['s_plus'] = True
-					write_control(control, origin='display')
+					write_control(control, WriteKind.MERGE, origin='display')
 				elif selected == 'Network':
 					self.display_network()
 
