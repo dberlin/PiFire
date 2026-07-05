@@ -74,16 +74,17 @@ Window {
 			stack.push(menuComponent, {menuName: name});
 	}
 
-	function openInput(name) {
+	function openInput(name, origin) {
 		stack.push(name === "hold" ? holdComponent : notifyComponent,
-		           name === "hold" ? {} : {origin: name});
+		           name === "hold" ? {} : {origin: origin});
 	}
 
 	Component {
 		id: dashComponent
 		DashScreen {
 			Component.onCompleted: root.dashItem = this
-			onOpenMenu: root.openMenu(Menus.mainVariantForMode(backend.mode))
+			onRequestMenu: (name) => root.openMenu(name === "" ? Menus.mainVariantForMode(backend.mode) : name)
+			onRequestInput: (name, origin) => root.openInput(name, origin)
 		}
 	}
 
@@ -92,7 +93,7 @@ Window {
 		MenuScreen {
 			onClose: stack.pop(root.dashItem)
 			onOpenMenu: (name) => root.openMenu(name)
-			onOpenInput: (name) => root.openInput(name)
+			onOpenInput: (name, origin) => root.openInput(name, origin)
 		}
 	}
 
@@ -108,5 +109,25 @@ Window {
 	Component {
 		id: notifyComponent
 		NotifyInput { onClose: stack.pop(root.dashItem) }
+	}
+
+	// Screen-sleep overlay. When the backend reports the display asleep, cover
+	// everything with black; the first touch wakes it (and does not fall through
+	// to whatever is underneath). The child process dims the backlight on
+	// asleepChanged.
+	Rectangle {
+		id: sleepOverlay
+		anchors.fill: parent
+		color: "black"
+		visible: backend.asleep
+		z: 1000
+		MouseArea {
+			anchors.fill: parent
+			onPressed: {
+				backend.registerInteraction();
+				if (root.dashItem)
+					stack.pop(root.dashItem);
+			}
+		}
 	}
 }

@@ -5,14 +5,16 @@ import "../components"
 
 Item {
 	id: dash
-	signal openMenu()
+	// name "" opens the mode-appropriate main menu; a specific name opens that menu.
+	signal requestMenu(string name)
+	signal requestInput(string name, string origin)
 
 	RowLayout {
 		anchors.fill: parent
 		anchors.margins: 24
 		spacing: 24
 
-		// Left column: food probes
+		// Left column: food probes (tap to set notify target)
 		ColumnLayout {
 			Layout.preferredWidth: 320
 			Layout.fillHeight: true
@@ -23,10 +25,12 @@ Item {
 					Layout.fillWidth: true
 					Layout.preferredHeight: 130
 					label: model.name
+					probeName: model.name
 					value: model.temp
 					target: model.target
 					maxValue: model.maxTemp
 					units: backend.units
+					onTapped: dash.requestInput("notify", model.name)
 				}
 			}
 			Item { Layout.fillHeight: true }
@@ -39,21 +43,25 @@ Item {
 			spacing: 16
 			ModeBar {
 				Layout.fillWidth: true
-				mode: backend.mode
-				onClicked: dash.openMenu()
+				mode: backend.modeText
+				onClicked: dash.requestMenu("")
 			}
 			Gauge {
 				Layout.fillWidth: true
 				Layout.fillHeight: true
 				label: backend.primaryName
+				probeName: backend.primaryName
 				value: backend.primaryTemp
 				setpoint: backend.primarySetpoint
+				target: backend.primaryNotifyTarget
 				maxValue: backend.primaryMax
 				units: backend.units
+				onTapped: dash.requestInput("notify", backend.primaryName)
 			}
 			TimerCard {
 				Layout.fillWidth: true
 				timerText: backend.timerText
+				timerLabel: backend.timerLabel
 			}
 			Alert {
 				Layout.fillWidth: true
@@ -62,7 +70,11 @@ Item {
 			}
 			ControlPanel {
 				Layout.fillWidth: true
-				onOpenMenu: dash.openMenu()
+				mode: backend.mode
+				recipe: backend.recipe
+				recipePaused: backend.recipePaused
+				onOpenMenu: (name) => dash.requestMenu(name)
+				onOpenInput: (name, origin) => dash.requestInput(name, origin)
 			}
 		}
 
@@ -74,7 +86,7 @@ Item {
 			MenuButton {
 				text: "☰"
 				Layout.fillWidth: true
-				onClicked: dash.openMenu()
+				onClicked: dash.requestMenu("")
 			}
 			RowLayout {
 				Layout.fillWidth: true
@@ -98,7 +110,8 @@ Item {
 			PModeControl {
 				Layout.fillWidth: true
 				pMode: backend.pMode
-				onClicked: dash.openMenu()
+				active: backend.pModeActive
+				onClicked: dash.requestMenu("pmode")
 			}
 			SmokePlusControl {
 				Layout.fillWidth: true

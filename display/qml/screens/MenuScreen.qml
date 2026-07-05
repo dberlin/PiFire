@@ -2,6 +2,7 @@ import QtQuick
 import ".."
 import "../components"
 import "../Menus.js" as Menus
+import "../Actions.js" as Actions
 
 Item {
 	id: screen
@@ -9,7 +10,7 @@ Item {
 	readonly property var menu: Menus.menuFor(menuName)
 	signal close()
 	signal openMenu(string name)
-	signal openInput(string name)
+	signal openInput(string name, string origin)
 
 	Rectangle {
 		anchors.fill: parent
@@ -62,28 +63,15 @@ Item {
 						width: buttonsCol.width
 						text: modelData.label
 						accent: modelData.action === "cmd_stop" ? Theme.danger : Theme.primary
-						onClicked: screen.activate(modelData)
+						onClicked: Actions.activate(modelData, {
+							backend: backend,
+							openMenu: function (n) { screen.openMenu(n); },
+							openInput: function (n, o) { screen.openInput(n, o); },
+							close: function () { screen.close(); }
+						})
 					}
 				}
 			}
 		}
-	}
-
-	function activate(item) {
-		var a = item.action;
-		if (a === "menu_close") {
-			screen.close();
-			return;
-		}
-		if (a.indexOf("menu_") === 0) {
-			screen.openMenu(a.substring(5));
-			return;
-		}
-		if (a.indexOf("input_") === 0) {
-			screen.openInput(a.substring(6));
-			return;
-		}
-		backend.action(a, item.value !== undefined ? item.value : 0);
-		screen.close();
 	}
 }

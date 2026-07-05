@@ -51,6 +51,23 @@ def build_backend(config):
 	return backend
 
 
+def _make_backlight():
+	"""Return a backlight controller: real on hardware, dummy otherwise."""
+	from pathlib import Path
+
+	from display.qtquick_flex import DummyBacklight
+	from common import is_real_hardware
+
+	if is_real_hardware() and Path('/sys/class/backlight/').exists():
+		try:
+			from rpi_backlight import Backlight
+
+			return Backlight()
+		except Exception:
+			return DummyBacklight()
+	return DummyBacklight()
+
+
 def run_app(config, units):
 	config = dict(config)
 	config.setdefault('units', units)
@@ -59,6 +76,23 @@ def run_app(config, units):
 	engine = build_engine(config, backend)
 	if not engine.rootObjects():
 		raise RuntimeError('Failed to load Main.qml')
+
+	# Backlight sleep/wake driven by the backend's idle state machine.
+	backlight = _make_backlight()
+
+	def _apply_backlight():
+		try:
+			if backend.asleep:
+				backlight.brightness = 0
+				backlight.power = False
+			else:
+				backlight.power = True
+				backlight.brightness = 100
+		except Exception:
+			pass
+
+	backend.asleepChanged.connect(_apply_backlight)
+	_apply_backlight()
 
 	meta = read_generic_json(config['display_data_filename']).get('metadata', {})
 	framerate = meta.get('framerate', 20)

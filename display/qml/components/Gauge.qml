@@ -6,10 +6,15 @@ Item {
 	id: g
 	property real value: 0
 	property real setpoint: 0
+	property real target: 0
 	property real maxValue: 600
 	property string label: ""
 	property string units: "F"
+	property string probeName: ""
 	property color arcColor: Theme.primary
+	signal tapped()
+
+	TapHandler { onTapped: g.tapped() }
 
 	readonly property real _frac: Math.max(0, Math.min(1, value / Math.max(maxValue, 1)))
 	readonly property real _radius: Math.min(width, height) / 2 - 16
@@ -71,6 +76,13 @@ Item {
 			text: "Set " + Math.round(g.setpoint) + "°"
 			color: Theme.primary
 			font.pixelSize: 30
+		}
+		Text {
+			anchors.horizontalCenter: parent.horizontalCenter
+			visible: g.target > 0
+			text: "→ " + Math.round(g.target) + "°"
+			color: Theme.notify
+			font.pixelSize: 26
 		}
 	}
 }

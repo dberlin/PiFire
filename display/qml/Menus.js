@@ -75,9 +75,48 @@ function menuFor(name) {
 	return MENUS[name] || MENUS["main"];
 }
 
+function hasMenu(name) {
+	return MENUS.hasOwnProperty(name);
+}
+
 function mainVariantForMode(mode) {
 	if (mode === "Stop") return "main";
 	if (mode === "Monitor") return "main_active_monitor";
 	if (mode === "Recipe") return "main_active_recipe";
 	return "main_active_normal";
+}
+
+// Dash control-panel buttons by mode, mirroring pygame _update_dash_objects.
+// cmd_none is an inert recipe-state indicator. `active` marks the highlighted
+// button (paused recipe -> Next).
+function controlPanelForMode(mode, recipe, recipePaused) {
+	if (recipe && mode !== "Shutdown") {
+		var typeItem = "None";
+		if (mode === "Startup" || mode === "Reignite") typeItem = "Startup";
+		else if (mode === "Smoke") typeItem = "Smoke";
+		else if (mode === "Hold") typeItem = "Hold";
+		return [
+			{label: "Next", action: "cmd_next_step", active: recipePaused === true},
+			{label: typeItem, action: "cmd_none"},
+			{label: "Stop", action: "cmd_stop"},
+			{label: "Shutdown", action: "cmd_shutdown"}];
+	}
+	if (mode === "Startup" || mode === "Reignite")
+		return [
+			{label: "Startup", action: "cmd_startup"},
+			{label: "Smoke", action: "cmd_smoke"},
+			{label: "Hold", action: "input_hold"},
+			{label: "Stop", action: "cmd_stop"}];
+	if (mode === "Smoke" || mode === "Hold" || mode === "Shutdown")
+		return [
+			{label: "Smoke", action: "cmd_smoke"},
+			{label: "Hold", action: "input_hold"},
+			{label: "Stop", action: "cmd_stop"},
+			{label: "Shutdown", action: "cmd_shutdown"}];
+	// Stop / Prime / Monitor
+	return [
+		{label: "Prime", action: "menu_prime"},
+		{label: "Startup", action: "menu_startup"},
+		{label: "Monitor", action: "cmd_monitor"},
+		{label: "Stop", action: "cmd_stop"}];
 }

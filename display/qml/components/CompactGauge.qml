@@ -2,13 +2,18 @@ import QtQuick
 import ".."
 
 Rectangle {
+	id: cg
 	property string label: ""
 	property real value: 0
 	property real target: 0
 	property real maxValue: 300
 	property string units: "F"
+	property string probeName: ""
+	signal tapped()
 	radius: Theme.radius
 	color: Theme.surface
+
+	TapHandler { onTapped: cg.tapped() }
 	Column {
 		anchors.centerIn: parent
 		spacing: 2
