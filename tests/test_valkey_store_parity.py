@@ -15,10 +15,12 @@ pytestmark = pytest.mark.skipif(not _valkey_available(), reason="no local valkey
 
 
 def test_valkey_store_smoke():
+	# Read-only smoke: exercises the pass-through against a live server
+	# without writing (leaves no residue on a real instance's Valkey).
 	from controller.runtime.store import ValkeyStore
 	s = ValkeyStore()
-	s.read_control()  # smoke: must not raise
-	s.write_generic_key('parity_probe', {'ok': True})
+	assert isinstance(s.read_control(), dict)
+	assert isinstance(s.read_settings(), dict)
 
 
 def test_valkey_display_queue_roundtrip():
