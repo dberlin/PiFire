@@ -31,9 +31,12 @@ class FoodProbeModel(QAbstractListModel):
 
 	def __init__(self, food_info, parent=None):
 		super().__init__(parent)
+		# Live data (F/NT) is keyed by probe *label*; the display name and the
+		# notify origin use probe *name* (matching the pygame flex display).
 		self._rows = [
 			{
 				'name': f.get('name', f'Probe {i + 1}'),
+				'label': f.get('label', f.get('name', f'Probe {i + 1}')),
 				'temp': 0,
 				'target': 0,
 				'maxTemp': f.get('max_temp', 300),
@@ -68,8 +71,8 @@ class FoodProbeModel(QAbstractListModel):
 		nt = in_data.get('NT', {})
 		changed = False
 		for row in self._rows:
-			temp = f.get(row['name'], 0)
-			target = nt.get(row['name'], 0)
+			temp = f.get(row['label'], 0)
+			target = nt.get(row['label'], 0)
 			if row['temp'] != temp or row['target'] != target:
 				row['temp'], row['target'] = temp, target
 				changed = True
@@ -83,11 +86,13 @@ class FoodProbeModel(QAbstractListModel):
 
 class PiFireBackend(QObject):
 	modeChanged = Signal()
+	modeTextChanged = Signal()
 	unitsChanged = Signal()
 	primaryChanged = Signal()
 	hopperChanged = Signal()
 	statusChanged = Signal()
 	timerChanged = Signal()
+	asleepChanged = Signal()
 	navEvent = Signal(str)
 
 	def __init__(self, fetch_fn, command_fn, probe_info, parent=None):
@@ -98,7 +103,9 @@ class PiFireBackend(QObject):
 		self._now = time.time
 		primary = self._probe_info.get('primary', {})
 		self._primary_name = primary.get('name', 'Primary')
+		self._primary_label = primary.get('label', self._primary_name)
 		self._primary_max = primary.get('max_temp', 600)
+		self._primary_notify = 0
 		self._ip_address = self._probe_info.get('ip_address', '') or ''
 		self._food_model = FoodProbeModel(self._probe_info.get('food', []))
 		self._mode = 'Stop'
@@ -116,6 +123,13 @@ class PiFireBackend(QObject):
 		self._recipe = False
 		self._recipe_paused = False
 		self._timer_text = ''
+		self._timer_label = ''
+		self._mode_text = 'Stop'
+		self._p_mode_active = False
+		# Idle / sleep state
+		self.TIMEOUT = 10
+		self._last_interaction = self._now()
+		self._asleep = False
 
 	def _set(self, attr, value, signal):
 		if getattr(self, attr) != value:
@@ -130,9 +144,12 @@ class PiFireBackend(QObject):
 		self._set('_mode', status.get('mode', 'Stop'), self.modeChanged)
 		self._set('_units', status.get('units', 'F'), self.unitsChanged)
 		p = in_data.get('P', {})
-		primary_temp = next(iter(p.values()), 0) if p else 0
+		primary_key = next(iter(p), None)
+		primary_temp = p.get(primary_key, 0) if primary_key is not None else 0
 		self._set('_primary_temp', primary_temp, self.primaryChanged)
 		self._set('_primary_sp', in_data.get('PSP', 0) or 0, self.primaryChanged)
+		nt = in_data.get('NT', {})
+		self._set('_primary_notify', nt.get(primary_key, 0) or 0, self.primaryChanged)
 		outpins = status.get('outpins', {})
 		self._set('_fan', bool(outpins.get('fan', False)), self.statusChanged)
 		self._set('_auger', bool(outpins.get('auger', False)), self.statusChanged)
@@ -145,7 +162,14 @@ class PiFireBackend(QObject):
 		self._set('_hopper_enabled', bool(status.get('hopper_level_enabled', False)), self.hopperChanged)
 		self._set('_hopper_level', max(status.get('hopper_level', 0) or 0, 0), self.hopperChanged)
 		self._food_model.update(in_data)
-		self._update_timer_text(status, self._now())
+		now = self._now()
+		self._update_timer_text(status, now)
+		mode = status.get('mode', 'Stop')
+		recipe = bool(status.get('recipe', False))
+		mode_text = f'Recipe: {mode}' if recipe and mode != 'Shutdown' else mode
+		self._set('_mode_text', mode_text, self.modeTextChanged)
+		self._set('_p_mode_active', mode in ('Startup', 'Reignite', 'Smoke'), self.statusChanged)
+		self._update_idle(mode, now)
 
 	def _update_timer_text(self, status, now):
 		mode = status.get('mode', 'Stop')
@@ -156,11 +180,31 @@ class PiFireBackend(QObject):
 			'Shutdown': 'shutdown_duration',
 		}.get(mode)
 		text = ''
+		label = ''
 		if duration_key and status.get('start_time'):
 			remaining = int(status.get(duration_key, 0) - (now - status['start_time']))
 			remaining = max(remaining, 0)
 			text = f'{remaining // 60:02d}:{remaining % 60:02d}'
+			label = 'Timer'
+		elif mode == 'Hold' and status.get('lid_open_detected') and status.get('lid_open_endtime'):
+			remaining = max(int(status['lid_open_endtime'] - now), 0)
+			text = f'{remaining // 60:02d}:{remaining % 60:02d}'
+			label = 'Lid Pause'
 		self._set('_timer_text', text, self.timerChanged)
+		self._set('_timer_label', label, self.timerChanged)
+
+	def _update_idle(self, mode, now):
+		# The screen never sleeps during an active cook; in Stop it sleeps after
+		# TIMEOUT seconds of no interaction. Leaving Stop auto-wakes.
+		if mode != 'Stop':
+			self._set('_asleep', False, self.asleepChanged)
+		elif now - self._last_interaction > self.TIMEOUT:
+			self._set('_asleep', True, self.asleepChanged)
+
+	@Slot()
+	def registerInteraction(self):
+		self._last_interaction = self._now()
+		self._set('_asleep', False, self.asleepChanged)
 
 	# ---------------- Action slots ----------------
 	@Slot(str, int)
@@ -265,6 +309,18 @@ class PiFireBackend(QObject):
 	def mode(self):
 		return self._mode
 
+	@Property(str, notify=modeTextChanged)
+	def modeText(self):
+		return self._mode_text
+
+	@Property(bool, notify=statusChanged)
+	def pModeActive(self):
+		return self._p_mode_active
+
+	@Property(bool, notify=asleepChanged)
+	def asleep(self):
+		return self._asleep
+
 	@Property(str, notify=unitsChanged)
 	def units(self):
 		return self._units
@@ -280,6 +336,10 @@ class PiFireBackend(QObject):
 	@Property(str, constant=True)
 	def primaryName(self):
 		return self._primary_name
+
+	@Property(float, notify=primaryChanged)
+	def primaryNotifyTarget(self):
+		return float(self._primary_notify)
 
 	@Property(float, constant=True)
 	def primaryMax(self):
@@ -336,3 +396,7 @@ class PiFireBackend(QObject):
 	@Property(str, notify=timerChanged)
 	def timerText(self):
 		return self._timer_text
+
+	@Property(str, notify=timerChanged)
+	def timerLabel(self):
+		return self._timer_label
