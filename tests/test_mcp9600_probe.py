@@ -82,19 +82,19 @@ def test_init_device_defaults(monkeypatch):
 
 
 def test_manifest_mcp9600_entry():
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    manifest = json.load(open(os.path.join(repo_root, 'wizard', 'wizard_manifest.json')))
-    probes = manifest['modules']['probes']
-    assert 'mcp9600_adafruit' in probes
-    entry = probes['mcp9600_adafruit']
+	repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+	manifest = json.load(open(os.path.join(repo_root, 'wizard', 'wizard_manifest.json')))
+	probes = manifest['modules']['probes']
+	assert 'mcp9600_adafruit' in probes
+	entry = probes['mcp9600_adafruit']
 
-    ds = entry['device_specific']
-    assert ds['type'] == 'thermocouple'
-    assert ds['ports'] == ['KTT0']
+	ds = entry['device_specific']
+	assert ds['type'] == 'thermocouple'
+	assert ds['ports'] == ['KTT0']
 
-    labels = [item['label'] for item in ds['config']]
-    assert 'tc_type' in labels
+	labels = [item['label'] for item in ds['config']]
+	assert 'tc_type' in labels
 
-    tc = next(i for i in ds['config'] if i['label'] == 'tc_type')
-    assert tc['list_values'] == ['B', 'E', 'J', 'K', 'N', 'R', 'S', 'T']
-    assert tc['default'] == 'K'
+	tc = next(i for i in ds['config'] if i['label'] == 'tc_type')
+	assert tc['list_values'] == ['B', 'E', 'J', 'K', 'N', 'R', 'S', 'T']
+	assert tc['default'] == 'K'
