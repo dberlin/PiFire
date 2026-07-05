@@ -21,7 +21,7 @@ import time
 import logging
 import os
 import glob
-from probes.temp_queue import TempQueue
+from probes.kalman import TempKalman
 
 """
 *****************************************
@@ -230,9 +230,9 @@ class ProbeInterface:
 
 	def _build_ports(self):
 		"""Build ports objects."""
-		self.port_queues = {}
+		self.port_filters = {}
 		for port in self.port_map:
-			self.port_queues[port] = TempQueue(qlength=10, units=self.units)
+			self.port_filters[port] = TempKalman(units=self.units)
 
 	def _temp_to_resistance(self, temp, probe_profile):
 		"""
@@ -346,13 +346,8 @@ class ProbeInterface:
 				port_values[port], self.probe_profiles[port], port=port
 			)
 
-			""" Enqueue the Temperature Readings to Port Queues """
-			if port_values[port] == None:
-				""" If the read value is None, pass that to the output instead of adding to the queue """
-				output_value = None
-			else:
-				self.port_queues[port].enqueue(port_values[port])
-				output_value = self.port_queues[port].average()
+			""" Filter the Temperature Reading (Kalman); None passes through """
+			output_value = self.port_filters[port].update(port_values[port])
 
 			""" Get average temperature from the queue and store it in the output data structure"""
 			if port == self.primary_port:
