@@ -82,6 +82,9 @@ class TempKalman:
 		p11 += self.q * dt2
 
 		# --- Gate: reject readings too far from the prediction ---
+		# The gate cannot latch open: on a reject we keep the predicted P (grown
+		# by Q), so s grows and the next reading's y^2/s shrinks -- a sustained
+		# real change is admitted within a sample or two.
 		y = reading - self.x
 		s = p00 + self.R
 		if (y * y) / s > self.gate2:
