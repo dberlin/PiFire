@@ -27,11 +27,20 @@ import random
 import logging
 import subprocess
 import threading
+from enum import Enum
 from logging.handlers import RotatingFileHandler
 from collections.abc import Mapping
 from ratelimitingfilter import RateLimitingFilter
 from common.valkey_queue import ValkeyQueue
 from common.valkey_handler import ValkeyHandler
+
+# *****************************************
+# Enums
+# *****************************************
+
+class WriteKind(Enum):
+	OVERWRITE = 'overwrite'   # replace control:general wholesale (was direct_write=True)
+	MERGE = 'merge'           # queue a partial change, deep-merged on execute (was direct_write=False)
 
 # *****************************************
 # Constants and Globals
@@ -877,7 +886,7 @@ def read_control(flush=False):
 			cmdsts.config_set('save', '')
 
 			control = default_control()
-			write_control(control, direct_write=True, origin='common')
+			write_control(control, WriteKind.OVERWRITE, origin='common')
 		else:
 			control = json.loads(cmdsts.get('control:general'))
 	except:
@@ -886,21 +895,24 @@ def read_control(flush=False):
 	return control
 
 
-def write_control(control, direct_write=False, origin='unknown'):
+def write_control(control, kind, origin='unknown'):
 	"""
-	Read Control from Valkey DB
+	Write control to Valkey DB.
 
 	:param control: Control Dictionary
-	:param direct_write:  If set to true, write directly to the control data.  Else, write the control data to a command queue.  Defaults to false.
+	:param kind: WriteKind.OVERWRITE writes control:general directly.
+				 WriteKind.MERGE queues a partial change for deep-merge on execute.
+	:param origin: Source label recorded on merge writes.
 	"""
 	global cmdsts
 
-	if direct_write:
+	if kind is WriteKind.OVERWRITE:
 		cmdsts.set('control:general', json.dumps(control))
-	else:
-		# Add changes to control write queue
+	elif kind is WriteKind.MERGE:
 		control['origin'] = origin
 		cmdsts.rpush('control:write', json.dumps(control))
+	else:
+		raise TypeError(f'write_control: kind must be WriteKind, got {kind!r}')
 
 
 def execute_control_writes():
@@ -919,7 +931,7 @@ def execute_control_writes():
 		command = json.loads(cmdsts.lpop('control:write'))
 		command.pop('origin')
 		control = deep_update(control, command)
-		write_control(control, direct_write=True, origin='writer')
+		write_control(control, WriteKind.OVERWRITE, origin='writer')
 	return status
 
 
