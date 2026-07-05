@@ -21,7 +21,8 @@ Description:
 			'module' : 'mcp9600_adafruit',  # Must be populated for this module to load properly
 			'ports' : ['KTT0'],    			# This is defined in the module, so this does not need to be defined.
 			'config' : {
-				'i2c_bus_addr' : '0x67'		# I2C Bus Address
+				'i2c_bus_addr' : '0x67',	# I2C Bus Address
+				'tc_type' : 'K'				# Thermocouple type K/J/T/N/S/E/B/R (default K)
 			}
 		}
 
@@ -52,7 +53,7 @@ from probes.base import ProbeInterface, resolve_i2c_bus
 class KTTDevice:
 	"""MCP9600 Device Based on the Adafruit Module"""
 
-	def __init__(self, i2c_bus_addr=0x67, i2c_bus_kind='basic', i2c_bus_num=0):
+	def __init__(self, i2c_bus_addr=0x67, i2c_bus_kind='basic', i2c_bus_num=0, tc_type='K'):
 		self.logger = logging.getLogger('control')
 		self.status = {}
 
@@ -62,7 +63,7 @@ class KTTDevice:
 		elif i2c_bus_kind == 'extended':
 			self.i2c = ExtendedI2C(resolve_i2c_bus(i2c_bus_num))
 
-		self.sensor = MCP9600(self.i2c, address=i2c_bus_addr)
+		self.sensor = MCP9600(self.i2c, address=i2c_bus_addr, tctype=tc_type)
 
 	@property
 	def temperature(self):
@@ -82,8 +83,9 @@ class ReadProbes(ProbeInterface):
 		i2c_bus_addr = int(self.device_info['config'].get('i2c_bus_addr', '0x67'), 16)
 		i2c_bus_kind = self.device_info['config'].get('i2c_bus_kind', 'basic')
 		i2c_bus_num = self.device_info['config'].get('i2c_bus_num', 0)
+		tc_type = self.device_info['config'].get('tc_type', 'K')
 		try:
-			self.device = KTTDevice(i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num)
+			self.device = KTTDevice(i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num, tc_type=tc_type)
 		except:
 			self.logger.error('Something went wrong when trying to initialize the MCP9600 device.')
 			raise
