@@ -21,6 +21,7 @@ _TUNING = {
 
 _DT_MIN = 0.01
 _DT_MAX = 1.0
+_NONE_RESET_THRESHOLD = 3
 
 
 class TempKalman:
@@ -40,6 +41,13 @@ class TempKalman:
 		self.none_streak = 0
 
 	def update(self, reading, now=None):
+		if reading is None:
+			self.none_streak += 1
+			if self.none_streak >= _NONE_RESET_THRESHOLD:
+				self.reset()
+			return None
+
+		self.none_streak = 0
 		if now is None:
 			now = time.monotonic()
 
@@ -73,9 +81,14 @@ class TempKalman:
 		p10 += self.q * dt3 / 2.0
 		p11 += self.q * dt2
 
-		# --- Update (measure temperature only, H = [1, 0]) ---
+		# --- Gate: reject readings too far from the prediction ---
 		y = reading - self.x
 		s = p00 + self.R
+		if (y * y) / s > self.gate2:
+			self.P = [[p00, p01], [p10, p11]]
+			return round(self.x, 1)
+
+		# --- Update (measure temperature only, H = [1, 0]) ---
 		k0 = p00 / s
 		k1 = p10 / s
 		self.x += k0 * y
