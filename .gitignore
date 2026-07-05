@@ -107,6 +107,9 @@ debug_*.html
 !tests/
 !tests/**
 
+# ...but never track compiled bytecode, even under tests/
+tests/**/__pycache__/
+
 # approxMPC experiment artifacts
 docs/superpowers/experiments/_ampc_data/
 docs/superpowers/experiments/training/
