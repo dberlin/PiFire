@@ -104,8 +104,7 @@ def test_get_channel_celsius_returns_fresh_value_and_none_when_stale(monkeypatch
 	probe = _load_probe(monkeypatch)
 
 	device = probe.ThermoworksCloudDevice(
-		email='a@b.com', password='pw', device_serial='SN1',
-		num_probes=2, poll_interval=10,
+		email='a@b.com', password='pw', device_serial='SN1', num_probes=2, poll_interval=10
 	)
 
 	fresh_time = datetime.now(timezone.utc)
@@ -122,8 +121,7 @@ def test_initial_status_is_disconnected(monkeypatch):
 	probe = _load_probe(monkeypatch)
 
 	device = probe.ThermoworksCloudDevice(
-		email='a@b.com', password='pw', device_serial='SN1',
-		num_probes=1, poll_interval=10,
+		email='a@b.com', password='pw', device_serial='SN1', num_probes=1, poll_interval=10
 	)
 
 	status = device.get_status()
@@ -169,8 +167,7 @@ def test_main_populates_cache_on_success(monkeypatch):
 	monkeypatch.setattr(probe, 'ThermoworksCloud', FakeThermoworksCloud)
 
 	device = probe.ThermoworksCloudDevice(
-		email='a@b.com', password='pw', device_serial='SN1',
-		num_probes=2, poll_interval=0.01,
+		email='a@b.com', password='pw', device_serial='SN1', num_probes=2, poll_interval=0.01
 	)
 
 	async def run_briefly():
@@ -207,8 +204,7 @@ def test_main_sets_disconnected_status_on_auth_failure(monkeypatch):
 	monkeypatch.setattr(probe, 'AuthFactory', FakeAuthFactory)
 
 	device = probe.ThermoworksCloudDevice(
-		email='a@b.com', password='wrong', device_serial='SN1',
-		num_probes=1, poll_interval=0.01,
+		email='a@b.com', password='wrong', device_serial='SN1', num_probes=1, poll_interval=0.01
 	)
 
 	async def run_briefly():
@@ -260,8 +256,7 @@ def test_start_spawns_thread_and_populates_cache(monkeypatch):
 	monkeypatch.setattr(probe, 'ThermoworksCloud', FakeThermoworksCloud)
 
 	device = probe.ThermoworksCloudDevice(
-		email='a@b.com', password='pw', device_serial='SN1',
-		num_probes=1, poll_interval=0.01,
+		email='a@b.com', password='pw', device_serial='SN1', num_probes=1, poll_interval=0.01
 	)
 	device.start()
 	time.sleep(0.2)
@@ -287,10 +282,7 @@ def test_discover_devices_counts_channels_per_device(monkeypatch):
 
 		async def get_devices(self, account_id):
 			assert account_id == 'ACC1'
-			return [
-				FakeDevice('SN1', 'Grill Signals', 'signals'),
-				FakeDevice('SN2', 'Smoke', 'smoke'),
-			]
+			return [FakeDevice('SN1', 'Grill Signals', 'signals'), FakeDevice('SN2', 'Smoke', 'smoke')]
 
 		async def get_device_channel(self, serial, channel):
 			channel_num = int(channel)
@@ -387,9 +379,7 @@ import os
 
 
 def test_wizard_manifest_has_thermoworks_cloud_entry():
-	manifest_path = os.path.join(
-		os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json'
-	)
+	manifest_path = os.path.join(os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json')
 	with open(manifest_path) as f:
 		manifest = json.load(f)
 
@@ -397,9 +387,7 @@ def test_wizard_manifest_has_thermoworks_cloud_entry():
 
 	assert entry['filename'] == 'thermoworks_cloud'
 	assert entry['device_specific']['type'] == 'network'
-	assert entry['device_specific']['ports'] == [
-		'TWC0', 'TWC1', 'TWC2', 'TWC3', 'TWC4', 'TWC5', 'TWC6', 'TWC7',
-	]
+	assert entry['device_specific']['ports'] == ['TWC0', 'TWC1', 'TWC2', 'TWC3', 'TWC4', 'TWC5', 'TWC6', 'TWC7']
 	assert 'thermoworks-cloud>=0.1.13' in entry['py_dependencies']
 
 	labels = [item['label'] for item in entry['device_specific']['config']]

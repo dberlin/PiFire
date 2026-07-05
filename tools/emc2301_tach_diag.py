@@ -59,7 +59,7 @@ def main():
 	settings = read_settings()
 	fan_cfg = settings['platform'].get('fan_controller', {})
 	if str(fan_cfg.get('chip', 'emc2101')).lower() != 'emc2301':
-		print(f"WARNING: configured fan chip is {fan_cfg.get('chip')!r}, not emc2301.")
+		print(f'WARNING: configured fan chip is {fan_cfg.get("chip")!r}, not emc2301.')
 
 	bus_kind = fan_cfg.get('i2c_bus_kind', 'basic')
 	bus_num = fan_cfg.get('i2c_bus_num', '1')

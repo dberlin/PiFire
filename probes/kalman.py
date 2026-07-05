@@ -14,10 +14,7 @@ import time
 #   R    : measurement variance (sensor noise squared)
 #   q    : white-acceleration process-noise spectral density
 #   gate : reject readings farther than this many sigma from the prediction
-_TUNING = {
-	'F': {'R': 4.0, 'q': 0.5, 'gate': 5.0},
-	'C': {'R': 1.25, 'q': 0.15, 'gate': 5.0},
-}
+_TUNING = {'F': {'R': 4.0, 'q': 0.5, 'gate': 5.0}, 'C': {'R': 1.25, 'q': 0.15, 'gate': 5.0}}
 
 _DT_MIN = 0.01
 _DT_MAX = 1.0
@@ -34,8 +31,8 @@ class TempKalman:
 		self.reset()
 
 	def reset(self):
-		self.x = None			# temperature estimate
-		self.v = 0.0			# rate estimate (deg/sec)
+		self.x = None  # temperature estimate
+		self.v = 0.0  # rate estimate (deg/sec)
 		self.P = [[self.R, 0.0], [0.0, self.R]]
 		self.last_time = None
 		self.none_streak = 0
@@ -96,8 +93,5 @@ class TempKalman:
 		k1 = p10 / s
 		self.x += k0 * y
 		self.v += k1 * y
-		self.P = [
-			[(1 - k0) * p00, (1 - k0) * p01],
-			[p10 - k1 * p00, p11 - k1 * p01],
-		]
+		self.P = [[(1 - k0) * p00, (1 - k0) * p01], [p10 - k1 * p00, p11 - k1 * p01]]
 		return round(self.x, 1)

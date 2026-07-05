@@ -8,6 +8,7 @@ Also asserts the backend exposes the status-driven parity surface, and that the
 dynamic control panel matches pygame's per-mode button sets (evaluated against
 the real Menus.js via a small QML harness so there is no Python copy to drift).
 """
+
 import json
 import os
 from pathlib import Path
@@ -40,9 +41,9 @@ def _pygame_actions():
 			if a.startswith('cmd_'):
 				cmds.add(a)
 			elif a.startswith('menu_'):
-				menus.add(a[len('menu_'):])
+				menus.add(a[len('menu_') :])
 			elif a.startswith('input_'):
-				inputs.add(a[len('input_'):])
+				inputs.add(a[len('input_') :])
 
 	for obj in data['dash']:
 		collect(obj.get('button_list'))
@@ -66,14 +67,13 @@ def _dispatch_probe(monkeypatch):
 	effects = []
 	monkeypatch.setattr(qmod, 'write_control', lambda data, origin=None: effects.append(('write_control', data)))
 	monkeypatch.setattr(qmod, 'read_status', lambda: {'s_plus': False})
-	monkeypatch.setattr(qmod, 'read_control',
-	                    lambda: {'notify_data': [], 'recipe': {'step_data': {}}})
+	monkeypatch.setattr(qmod, 'read_control', lambda: {'notify_data': [], 'recipe': {'step_data': {}}})
 	monkeypatch.setattr(qmod, 'is_real_hardware', lambda: False)
 	# _command_handler (inherited) uses names in base_flex's namespace.
 	import display.base_flex as bf
+
 	monkeypatch.setattr(bf, 'write_control', lambda data, origin=None: effects.append(('write_control', data)))
-	monkeypatch.setattr(bf, 'read_control',
-	                    lambda: {'notify_data': [], 'recipe': {'step_data': {}}, 'updated': False})
+	monkeypatch.setattr(bf, 'read_control', lambda: {'notify_data': [], 'recipe': {'step_data': {}}, 'updated': False})
 	monkeypatch.setattr(bf, 'read_settings', lambda: {'cycle_data': {}})
 	monkeypatch.setattr(bf, 'write_settings', lambda s: effects.append(('write_settings', s)))
 	monkeypatch.setattr(bf, 'read_status', lambda: {'s_plus': False})
@@ -82,8 +82,7 @@ def _dispatch_probe(monkeypatch):
 		pass
 
 	monkeypatch.setattr(bf.requests, 'get', lambda url: effects.append(('requests.get', url)))
-	disp = qmod.Display.for_dispatch(
-		{'display_data_filename': './display/qtquick_dsi_1280x720t.json'}, 'F')
+	disp = qmod.Display.for_dispatch({'display_data_filename': './display/qtquick_dsi_1280x720t.json'}, 'F')
 	return disp, effects
 
 
@@ -106,8 +105,7 @@ def _engine():
 
 
 def _eval_js(engine, expr):
-	qml = ('import QtQuick\nimport "Menus.js" as Menus\n'
-	       'Item { property string result: JSON.stringify(%s) }' % expr)
+	qml = 'import QtQuick\nimport "Menus.js" as Menus\nItem { property string result: JSON.stringify(%s) }' % expr
 	comp = QQmlComponent(engine)
 	comp.setData(qml.encode(), QUrl.fromLocalFile(str(QML_DIR / '_probe.qml')))
 	obj = comp.create()
@@ -153,8 +151,9 @@ EXPECTED_CONTROL_PANEL = {
 def test_control_panel_matches_pygame_per_mode(key, expected):
 	engine = _engine()
 	mode, recipe, paused = key
-	items = _eval_js(engine, 'Menus.controlPanelForMode("%s", %s, %s)'
-	                 % (mode, str(recipe).lower(), str(paused).lower()))
+	items = _eval_js(
+		engine, 'Menus.controlPanelForMode("%s", %s, %s)' % (mode, str(recipe).lower(), str(paused).lower())
+	)
 	assert [i['action'] for i in items] == expected
 
 
@@ -169,8 +168,7 @@ def test_recipe_paused_marks_next_active():
 # Status-behavior surface: backend exposes the parity properties/slots.
 # --------------------------------------------------------------------------
 def test_backend_exposes_parity_surface():
-	b = PiFireBackend(lambda: (None, None), lambda c, d: None,
-	                  {'primary': {'name': 'G'}, 'food': [], 'aux': []})
+	b = PiFireBackend(lambda: (None, None), lambda c, d: None, {'primary': {'name': 'G'}, 'food': [], 'aux': []})
 	meta = b.metaObject()
 	for prop in ['modeText', 'primaryNotifyTarget', 'timerLabel', 'pModeActive', 'asleep']:
 		assert meta.indexOfProperty(prop) >= 0, f'backend missing property {prop}'

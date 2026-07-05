@@ -10,17 +10,10 @@ PiFire Qt Quick Display — Backend Bridge
 
 *****************************************
 """
+
 import time
 
-from PySide6.QtCore import (
-	QAbstractListModel,
-	QModelIndex,
-	QObject,
-	Property,
-	Qt,
-	Signal,
-	Slot,
-)
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Property, Qt, Signal, Slot
 
 
 class FoodProbeModel(QAbstractListModel):
@@ -48,12 +41,7 @@ class FoodProbeModel(QAbstractListModel):
 		return 0 if parent.isValid() else len(self._rows)
 
 	def roleNames(self):
-		return {
-			self.NameRole: b'name',
-			self.TempRole: b'temp',
-			self.TargetRole: b'target',
-			self.MaxRole: b'maxTemp',
-		}
+		return {self.NameRole: b'name', self.TempRole: b'temp', self.TargetRole: b'target', self.MaxRole: b'maxTemp'}
 
 	def data(self, index, role):
 		if not index.isValid():
@@ -78,9 +66,7 @@ class FoodProbeModel(QAbstractListModel):
 				changed = True
 		if changed and self._rows:
 			self.dataChanged.emit(
-				self.index(0, 0),
-				self.index(len(self._rows) - 1, 0),
-				[self.TempRole, self.TargetRole],
+				self.index(0, 0), self.index(len(self._rows) - 1, 0), [self.TempRole, self.TargetRole]
 			)
 
 

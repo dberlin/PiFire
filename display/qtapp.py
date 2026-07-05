@@ -10,6 +10,7 @@ PiFire Qt Quick Display — Application Host
 
 *****************************************
 """
+
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, QUrl

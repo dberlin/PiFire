@@ -3323,11 +3323,7 @@ def get_wifi_quality(interface=None, logger=None):
 		percentage = round((value / maximum) * 100, 2)
 		data['result'] = 'OK'
 		data['message'] = 'Successfully obtained wifi quality data.'
-		data['data'] = {
-			'wifi_quality_value': value,
-			'wifi_quality_max': maximum,
-			'wifi_quality_percentage': percentage,
-		}
+		data['data'] = {'wifi_quality_value': value, 'wifi_quality_max': maximum, 'wifi_quality_percentage': percentage}
 
 	if logger:
 		logger.debug(f'get_wifi_quality called. [data = {data}]')

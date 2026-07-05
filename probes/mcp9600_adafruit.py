@@ -85,7 +85,9 @@ class ReadProbes(ProbeInterface):
 		i2c_bus_num = self.device_info['config'].get('i2c_bus_num', 0)
 		tc_type = self.device_info['config'].get('tc_type', 'K')
 		try:
-			self.device = KTTDevice(i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num, tc_type=tc_type)
+			self.device = KTTDevice(
+				i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num, tc_type=tc_type
+			)
 		except:
 			self.logger.error('Something went wrong when trying to initialize the MCP9600 device.')
 			raise

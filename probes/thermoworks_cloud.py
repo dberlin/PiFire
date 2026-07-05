@@ -69,12 +69,9 @@ async def discover_devices(client):
 				num_channels += 1
 			except ResourceNotFoundError:
 				break
-		results.append({
-			'serial': device.serial,
-			'label': device.label,
-			'type': device.type,
-			'num_channels': num_channels,
-		})
+		results.append(
+			{'serial': device.serial, 'label': device.label, 'type': device.type, 'num_channels': num_channels}
+		)
 	return results
 
 
@@ -88,7 +85,7 @@ async def discover(email, password):
 
 
 _STALE_MULTIPLIER = 3  # a cached channel reading is considered stale (-> None)
-                        # after this many missed poll intervals
+# after this many missed poll intervals
 
 
 def _channel_to_celsius(data):
@@ -175,8 +172,7 @@ class ReadProbes(ProbeInterface):
 	def _init_device(self):
 		self.time_delay = 0
 		self.device = ThermoworksCloudDevice(
-			self.email, self.password, self.device_serial,
-			self.num_probes, self.poll_interval,
+			self.email, self.password, self.device_serial, self.num_probes, self.poll_interval
 		)
 		self.device.start()
 

@@ -5,6 +5,7 @@ Regression test for the dropdowns rendering empty because the template read
 the wrong metadata keys (option_list/option_list_labels) instead of the keys
 controllers.json actually defines (list_values/list_labels).
 """
+
 import json
 import os
 

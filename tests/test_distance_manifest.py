@@ -31,27 +31,12 @@ def test_all_platforms_have_distance_i2c_fields():
 		deps = entry.get('settings_dependencies', {})
 
 		assert 'device_distance_i2c_bus_kind' in deps, name
-		assert deps['device_distance_i2c_bus_kind']['settings'] == [
-			'platform',
-			'devices',
-			'distance',
-			'i2c_bus_kind',
-		]
+		assert deps['device_distance_i2c_bus_kind']['settings'] == ['platform', 'devices', 'distance', 'i2c_bus_kind']
 		assert set(deps['device_distance_i2c_bus_kind']['options']) == {'basic', 'extended'}
 
 		assert 'device_distance_i2c_bus_num' in deps, name
-		assert deps['device_distance_i2c_bus_num']['settings'] == [
-			'platform',
-			'devices',
-			'distance',
-			'i2c_bus_num',
-		]
+		assert deps['device_distance_i2c_bus_num']['settings'] == ['platform', 'devices', 'distance', 'i2c_bus_num']
 
 		assert 'device_distance_address' in deps, name
-		assert deps['device_distance_address']['settings'] == [
-			'platform',
-			'devices',
-			'distance',
-			'address',
-		]
+		assert deps['device_distance_address']['settings'] == ['platform', 'devices', 'distance', 'address']
 		assert '0x29' in deps['device_distance_address']['options']

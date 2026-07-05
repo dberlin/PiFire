@@ -17,10 +17,7 @@ def test_open_sensor_constructs_vl53l0x_at_resolved_address():
 	import distance._tof_base as tof_mod
 	import distance.vl53l0x as vl_mod
 
-	with (
-		mock.patch.object(tof_mod, 'busio'),
-		mock.patch.object(tof_mod, 'board'),
-	):
+	with mock.patch.object(tof_mod, 'busio'), mock.patch.object(tof_mod, 'board'):
 		hopper, VL53L0X = _make_hopper(tof_mod, vl_mod)
 		try:
 			VL53L0X.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x29)
@@ -32,13 +29,10 @@ def test_open_sensor_uses_configured_address():
 	import distance._tof_base as tof_mod
 	import distance.vl53l0x as vl_mod
 
-	with (
-		mock.patch.object(tof_mod, 'busio'),
-		mock.patch.object(tof_mod, 'board'),
-	):
+	with mock.patch.object(tof_mod, 'busio'), mock.patch.object(tof_mod, 'board'):
 		hopper, VL53L0X = _make_hopper(tof_mod, vl_mod, dev_pins={'distance': {'address': '0x2a'}})
 		try:
-			VL53L0X.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x2a)
+			VL53L0X.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x2A)
 		finally:
 			_stop(hopper)
 
@@ -47,10 +41,7 @@ def test_read_distance_mm_returns_range_directly():
 	import distance._tof_base as tof_mod
 	import distance.vl53l0x as vl_mod
 
-	with (
-		mock.patch.object(tof_mod, 'busio'),
-		mock.patch.object(tof_mod, 'board'),
-	):
+	with mock.patch.object(tof_mod, 'busio'), mock.patch.object(tof_mod, 'board'):
 		hopper, VL53L0X = _make_hopper(tof_mod, vl_mod, range_value=123)
 		try:
 			assert hopper._read_distance_mm() == 123

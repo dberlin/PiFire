@@ -44,9 +44,7 @@ def _make_hopper(tof_mod, dev_pins=None, reading_mm=100, empty=22, full=4, read_
 	class TestHopperLevel(FakeSensorMixin, tof_mod.ToFHopperLevel):
 		pass
 
-	return TestHopperLevel(
-		dev_pins or {}, empty=empty, full=full, reading_mm=reading_mm, read_delay=read_delay
-	)
+	return TestHopperLevel(dev_pins or {}, empty=empty, full=full, reading_mm=reading_mm, read_delay=read_delay)
 
 
 def _stop(hopper):
@@ -134,6 +132,6 @@ def test_address_defaults_to_chip_default(tof_mod):
 def test_address_override_parses_hex_string(tof_mod):
 	hopper = _make_hopper(tof_mod, dev_pins={'distance': {'address': '0x2a'}})
 	try:
-		assert hopper.opened_with[1] == 0x2a
+		assert hopper.opened_with[1] == 0x2A
 	finally:
 		_stop(hopper)

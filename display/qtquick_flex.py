@@ -15,6 +15,7 @@ PiFire Qt Quick Display Interface Library
 
 *****************************************
 """
+
 import logging
 import multiprocessing
 
@@ -63,9 +64,7 @@ class Display(DisplayBase):
 
 	def _start_qt_process(self):
 		ctx = multiprocessing.get_context('spawn')
-		self._qt_process = ctx.Process(
-			target=_run_qt_app, args=(self.config, self.units), daemon=True
-		)
+		self._qt_process = ctx.Process(target=_run_qt_app, args=(self.config, self.units), daemon=True)
 		self._qt_process.start()
 
 	# ------------------------------------------------------------------
@@ -85,10 +84,7 @@ class Display(DisplayBase):
 		if 'hold' in command:
 			temp = int(command_data) if command_data else 0
 			if temp:
-				write_control(
-					{'updated': True, 'mode': 'Hold', 'primary_setpoint': temp},
-					origin='display',
-				)
+				write_control({'updated': True, 'mode': 'Hold', 'primary_setpoint': temp}, origin='display')
 			return
 		if 'notify' in command:
 			origin = command_data.get('origin') if isinstance(command_data, dict) else None
@@ -117,8 +113,7 @@ class Display(DisplayBase):
 			return
 		if command == 'cmd_primeonly':
 			write_control(
-				{'updated': True, 'mode': 'Prime', 'prime_amount': command_data, 'next_mode': 'Stop'},
-				origin='display',
+				{'updated': True, 'mode': 'Prime', 'prime_amount': command_data, 'next_mode': 'Stop'}, origin='display'
 			)
 			return
 		# Everything else: reuse the inherited handler verbatim.

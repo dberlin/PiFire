@@ -4,11 +4,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from display.qtbackend import PiFireBackend
 
-PROBE_INFO = {
-	'primary': {'name': 'Grill', 'max_temp': 600},
-	'food': [{'name': 'Probe 1', 'max_temp': 300}],
-	'aux': [],
-}
+PROBE_INFO = {'primary': {'name': 'Grill', 'max_temp': 600}, 'food': [{'name': 'Probe 1', 'max_temp': 300}], 'aux': []}
 
 
 def make_backend(in_data, status_data):
@@ -28,13 +24,7 @@ def make_backend(in_data, status_data):
 
 
 def test_poll_updates_primary_and_mode():
-	in_data = {
-		'P': {'Grill': 225},
-		'F': {'Probe 1': 145},
-		'AUX': {},
-		'PSP': 250,
-		'NT': {'Grill': 0, 'Probe 1': 0},
-	}
+	in_data = {'P': {'Grill': 225}, 'F': {'Probe 1': 145}, 'AUX': {}, 'PSP': 250, 'NT': {'Grill': 0, 'Probe 1': 0}}
 	status = {
 		'mode': 'Hold',
 		'units': 'F',
@@ -61,10 +51,7 @@ def test_poll_updates_primary_and_mode():
 
 
 def test_action_slots_dispatch_expected_commands():
-	b = make_backend(
-		{'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
-		{'mode': 'Stop', 'units': 'F', 'outpins': {}},
-	)
+	b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}})
 	b.startup()
 	b.stop()
 	b.setHold(275)
@@ -80,13 +67,7 @@ def test_action_slots_dispatch_expected_commands():
 
 
 def test_timer_text_counts_down_in_startup():
-	status = {
-		'mode': 'Startup',
-		'units': 'F',
-		'outpins': {},
-		'start_time': 1000.0,
-		'start_duration': 240,
-	}
+	status = {'mode': 'Startup', 'units': 'F', 'outpins': {}, 'start_time': 1000.0, 'start_duration': 240}
 	in_data = {'P': {'Grill': 100}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}
 	b = make_backend(in_data, status)
 	b._now = lambda: 1000.0 + 45  # 45s elapsed -> 195s -> 03:15
@@ -97,10 +78,7 @@ def test_timer_text_counts_down_in_startup():
 def test_food_probe_model_reflects_current_data():
 	info = {
 		'primary': {'name': 'Grill', 'max_temp': 600},
-		'food': [
-			{'name': 'Probe 1', 'max_temp': 300},
-			{'name': 'Probe 2', 'max_temp': 300},
-		],
+		'food': [{'name': 'Probe 1', 'max_temp': 300}, {'name': 'Probe 2', 'max_temp': 300}],
 		'aux': [],
 	}
 
@@ -129,16 +107,11 @@ def test_food_probe_model_reflects_current_data():
 
 def test_data_keyed_by_label_display_by_name():
 	# Live data keyed by probe label; display/notify use probe name.
-	info = {
-		'primary': {'name': 'Grill', 'label': 'P0'},
-		'food': [{'name': 'Brisket', 'label': 'F0'}],
-		'aux': [],
-	}
+	info = {'primary': {'name': 'Grill', 'label': 'P0'}, 'food': [{'name': 'Brisket', 'label': 'F0'}], 'aux': []}
 
 	def fetch_fn():
 		return (
-			{'P': {'P0': 210}, 'F': {'F0': 155}, 'AUX': {}, 'PSP': 225,
-			 'NT': {'P0': 235, 'F0': 190}},
+			{'P': {'P0': 210}, 'F': {'F0': 155}, 'AUX': {}, 'PSP': 225, 'NT': {'P0': 235, 'F0': 190}},
 			{'mode': 'Hold', 'units': 'F', 'outpins': {}},
 		)
 
@@ -151,47 +124,45 @@ def test_data_keyed_by_label_display_by_name():
 	role = {v: k for k, v in model.roleNames().items()}
 	idx = model.index(0, 0)
 	assert model.data(idx, role[b'name']) == 'Brisket'  # display name
-	assert model.data(idx, role[b'temp']) == 155        # looked up by label F0
+	assert model.data(idx, role[b'temp']) == 155  # looked up by label F0
 	assert model.data(idx, role[b'target']) == 190
 
 
 def test_notify_origin_dispatch_uses_name():
-	b = make_backend(
-		{'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
-		{'mode': 'Hold', 'units': 'F', 'outpins': {}},
-	)
+	b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Hold', 'units': 'F', 'outpins': {}})
 	b.setNotify('Brisket', 203)
 	assert ('cmd_notify', {'origin': 'Brisket', 'target': 203}) in b._calls
 
 
 def test_mode_text_shows_recipe_label():
 	b = make_backend(
-		{'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
-		{'mode': 'Hold', 'units': 'F', 'outpins': {}, 'recipe': True},
+		{'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Hold', 'units': 'F', 'outpins': {}, 'recipe': True}
 	)
 	b.poll()
 	assert b.modeText == 'Recipe: Hold'
 	# Recipe label suppressed in Shutdown.
-	b._fetch_fn = lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
-	                       {'mode': 'Shutdown', 'units': 'F', 'outpins': {}, 'recipe': True})
+	b._fetch_fn = lambda: (
+		{'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
+		{'mode': 'Shutdown', 'units': 'F', 'outpins': {}, 'recipe': True},
+	)
 	b.poll()
 	assert b.modeText == 'Shutdown'
 
 
 def test_pmode_active_only_in_startup_smoke():
-	b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
-	                 {'mode': 'Smoke', 'units': 'F', 'outpins': {}})
+	b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Smoke', 'units': 'F', 'outpins': {}})
 	b.poll()
 	assert b.pModeActive is True
-	b._fetch_fn = lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
-	                       {'mode': 'Hold', 'units': 'F', 'outpins': {}})
+	b._fetch_fn = lambda: (
+		{'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
+		{'mode': 'Hold', 'units': 'F', 'outpins': {}},
+	)
 	b.poll()
 	assert b.pModeActive is False
 
 
 def test_hold_lid_open_countdown_timer():
-	status = {'mode': 'Hold', 'units': 'F', 'outpins': {},
-	          'lid_open_detected': True, 'lid_open_endtime': 2000.0}
+	status = {'mode': 'Hold', 'units': 'F', 'outpins': {}, 'lid_open_detected': True, 'lid_open_endtime': 2000.0}
 	b = make_backend({'P': {'Grill': 225}, 'F': {}, 'AUX': {}, 'PSP': 250, 'NT': {}}, status)
 	b._now = lambda: 2000.0 - 65  # 65s remaining -> 01:05
 	b.poll()
@@ -227,10 +198,7 @@ def test_sleep_wake_state_machine():
 
 
 def test_nav_slots_emit_navevent():
-	b = make_backend(
-		{'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
-		{'mode': 'Stop', 'units': 'F', 'outpins': {}},
-	)
+	b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}})
 	events = []
 	b.navEvent.connect(lambda e: events.append(e))
 	b.navUp()
