@@ -4,7 +4,7 @@ import copy
 from abc import ABC, abstractmethod
 from collections import deque
 
-from common.common import WriteKind, deep_update, default_control
+from common.common import WriteKind, deep_update, default_control, default_metrics
 
 
 class Queue(ABC):
@@ -163,7 +163,9 @@ class InMemoryStore(Store):
 		if flush:
 			self._metrics_list = []
 		elif new_metric:
-			self._metrics_list.append({})
+			# Mirrors common.write_metrics's default arg (metrics=default_metrics()):
+			# a fresh metric record starts pre-populated with all known keys, not {}.
+			self._metrics_list.append(metrics if metrics is not None else default_metrics())
 		elif metrics is not None:
 			if not self._metrics_list:
 				self._metrics_list.append({})
