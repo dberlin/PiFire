@@ -51,11 +51,19 @@ def build_backend(config):
 	return backend
 
 
+class DummyBacklight:
+	"""No-op backlight used when no hardware backlight is present."""
+
+	def __init__(self):
+		self.brightness = 100
+		self.power = True
+		self.fade_duration = 1
+
+
 def _make_backlight():
 	"""Return a backlight controller: real on hardware, dummy otherwise."""
 	from pathlib import Path
 
-	from display.qtquick_flex import DummyBacklight
 	from common import is_real_hardware
 
 	if is_real_hardware() and Path('/sys/class/backlight/').exists():

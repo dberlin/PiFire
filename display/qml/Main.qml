@@ -119,12 +119,13 @@ Window {
 		id: sleepOverlay
 		anchors.fill: parent
 		color: "black"
-		visible: backend.asleep
+		visible: backend && backend.asleep
 		z: 1000
 		MouseArea {
 			anchors.fill: parent
 			onPressed: {
-				backend.registerInteraction();
+				if (backend)
+					backend.registerInteraction();
 				if (root.dashItem)
 					stack.pop(root.dashItem);
 			}
