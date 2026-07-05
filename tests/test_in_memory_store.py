@@ -40,3 +40,16 @@ def test_read_control_returns_a_copy():
 	c = s.read_control()
 	c['mode'] = 'Hold'
 	assert s.read_control()['mode'] == 'Stop'
+
+
+def test_write_history_accepts_maxsizelines():
+	s = InMemoryStore()
+	s.write_history({'x': 1}, maxsizelines=100, ext_data=True)
+	assert s.read_history() == [{'x': 1}]
+
+
+def test_write_metrics_positional_flush_matches_common_order():
+	s = InMemoryStore(metrics={'a': 1})
+	# positional 2nd arg is flush (matching common.common order)
+	s.write_metrics(None, True)
+	assert s.read_metrics(all=True) == []

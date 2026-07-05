@@ -69,11 +69,11 @@ class Store(ABC):
 	@abstractmethod
 	def read_history(self, num_items=0, flushhistory=False): ...
 	@abstractmethod
-	def write_history(self, in_data, ext_data=False): ...
+	def write_history(self, in_data, maxsizelines=28800, ext_data=False): ...
 	@abstractmethod
 	def read_metrics(self, all=False): ...
 	@abstractmethod
-	def write_metrics(self, metrics=None, new_metric=False, flush=False): ...
+	def write_metrics(self, metrics=None, flush=False, new_metric=False): ...
 	@abstractmethod
 	def write_tr(self, tr): ...
 	# --- pellet/errors/misc ---
@@ -151,7 +151,7 @@ class InMemoryStore(Store):
 			self._history = []
 		return list(self._history)
 
-	def write_history(self, in_data, ext_data=False):
+	def write_history(self, in_data, maxsizelines=28800, ext_data=False):
 		self._history.append(copy.deepcopy(in_data))
 
 	def read_metrics(self, all=False):
@@ -159,7 +159,7 @@ class InMemoryStore(Store):
 			return list(self._metrics_list)
 		return copy.deepcopy(self._metrics_list[-1]) if self._metrics_list else {}
 
-	def write_metrics(self, metrics=None, new_metric=False, flush=False):
+	def write_metrics(self, metrics=None, flush=False, new_metric=False):
 		if flush:
 			self._metrics_list = []
 		elif new_metric:
