@@ -197,3 +197,100 @@ class InMemoryStore(Store):
 
 	def display_commands(self):
 		return self._displayq
+
+
+from common import common as _c
+from common.valkey_queue import ValkeyQueue
+
+
+class _ValkeyQueueAdapter(Queue):
+	def __init__(self, name):
+		self._q = ValkeyQueue(name)
+
+	def push(self, item):
+		self._q.push(item)
+
+	def pop(self):
+		return self._q.pop()
+
+	def length(self):
+		return self._q.length()
+
+	def list(self):
+		return self._q.list()
+
+	def flush(self):
+		self._q.flush()
+
+
+class ValkeyStore(Store):
+	"""Thin pass-through to common.common — the only production code that touches
+	the module-level Valkey connection."""
+
+	def __init__(self):
+		self._systemq = _ValkeyQueueAdapter('control:systemq')
+		self._systemo = _ValkeyQueueAdapter('control:systemo')
+		self._displayq = _ValkeyQueueAdapter('control:displayq')
+
+	def read_control(self):
+		return _c.read_control()
+
+	def write_control(self, control, kind, origin='control'):
+		_c.write_control(control, kind, origin=origin)
+
+	def execute_control_writes(self):
+		_c.execute_control_writes()
+
+	def read_settings(self):
+		return _c.read_settings()
+
+	def read_status(self, init=False):
+		return _c.read_status(init=init)
+
+	def write_status(self, status):
+		_c.write_status(status)
+
+	def read_current(self, zero_out=False):
+		return _c.read_current(zero_out=zero_out)
+
+	def write_current(self, in_data):
+		_c.write_current(in_data)
+
+	def read_history(self, num_items=0, flushhistory=False):
+		return _c.read_history(num_items, flushhistory=flushhistory)
+
+	def write_history(self, in_data, maxsizelines=28800, ext_data=False):
+		_c.write_history(in_data, maxsizelines=maxsizelines, ext_data=ext_data)
+
+	def read_metrics(self, all=False):
+		return _c.read_metrics(all=all)
+
+	def write_metrics(self, metrics=None, flush=False, new_metric=False):
+		_c.write_metrics(metrics=metrics, flush=flush, new_metric=new_metric)
+
+	def write_tr(self, tr):
+		_c.write_tr(tr)
+
+	def read_pellet_db(self):
+		return _c.read_pellet_db()
+
+	def write_pellet_db(self, db):
+		_c.write_pellet_db(db)
+
+	def read_errors(self, flush=False):
+		return _c.read_errors(flush=flush)
+
+	def write_errors(self, errors):
+		_c.write_errors(errors)
+
+	def write_generic_key(self, key, value):
+		_c.write_generic_key(key, value)
+
+	def system_commands(self):
+		return self._systemq
+
+	def system_output(self):
+		return self._systemo
+
+	def display_commands(self):
+		return self._displayq
