@@ -2523,6 +2523,34 @@
               "hidden": false
             },
             {
+              "label": "tc_type",
+              "friendly_name": "Thermocouple Type",
+              "description": "Thermocouple type. Type K is the most common for cooking.",
+              "type": "list",
+              "list_values": [
+                "B",
+                "E",
+                "J",
+                "K",
+                "N",
+                "R",
+                "S",
+                "T"
+              ],
+              "list_labels": [
+                "Type B",
+                "Type E",
+                "Type J",
+                "Type K",
+                "Type N",
+                "Type R",
+                "Type S",
+                "Type T"
+              ],
+              "default": "K",
+              "hidden": false
+            },
+            {
               "label": "i2c_bus_kind",
               "friendly_name": "I2C Bus Type",
               "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
