@@ -44,12 +44,12 @@ def export_cmd(py, enable_fan):
     return cmd
 
 
-def plan_commands(modes, episodes, workers, skip_sample):
+def plan_commands(modes, episodes, workers, skip_sample, py=sys.executable):
     cmds = []
     for enable_fan in modes:
         if not skip_sample:
-            cmds.append(sample_cmd(sys.executable, enable_fan, episodes, workers))
-        cmds.append(export_cmd(sys.executable, enable_fan))
+            cmds.append(sample_cmd(py, enable_fan, episodes, workers))
+        cmds.append(export_cmd(py, enable_fan))
     return cmds
 
 

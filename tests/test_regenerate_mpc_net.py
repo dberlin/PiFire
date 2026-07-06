@@ -34,3 +34,10 @@ def test_plan_commands_both_orders_sample_before_export_per_mode():
 def test_plan_commands_skip_sample_omits_sampling():
     cmds = rg.plan_commands([True], episodes=500, workers=None, skip_sample=True)
     assert len(cmds) == 1 and 'export_span_net.py' in ' '.join(cmds[0])
+
+
+def test_plan_commands_interpreter_is_injectable():
+    # py is threaded through to every command so the builder is fully injectable
+    cmds = rg.plan_commands([False, True], episodes=500, workers=None,
+                            skip_sample=False, py='DUMMYPY')
+    assert all(cmd[0] == 'DUMMYPY' for cmd in cmds)

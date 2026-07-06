@@ -18,7 +18,7 @@ sys.path.insert(0, os.getcwd())  # repo root for controller
 import numpy as np
 import torch
 from controller.mpc import _DEFAULTS
-from approxmpc_span import build_span_net, Q_ss, SPAN_NPZ, DIDX, ND  # noqa: E402
+from approxmpc_span import build_span_net, Q_ss, DIDX, ND  # noqa: E402
 
 
 def main(data_path, out, enable_fan):

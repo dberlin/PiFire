@@ -11,8 +11,7 @@ TS = 25.0
 
 needs_art = pytest.mark.skipif(not os.path.exists(ART), reason='net artifact not exported')
 
-_FAN_ART = net_path_for(
-    os.path.join(os.path.dirname(__file__), '..', 'controller', 'mpc_policy_net.npz'), True)
+_FAN_ART = net_path_for(ART, True)
 
 
 def _run(cfg, setpoint, seed=0, minutes=90):

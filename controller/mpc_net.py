@@ -66,7 +66,9 @@ class NetPolicy:
 		self.r_mean = float(r_mean)
 		self.r_std = float(r_std)
 		self.calib = {k: float(calib[k]) for k in _CALIB_FLOATS}
-		self.calib.update({k: int(calib[k]) for k in _CALIB_INTS})
+		# tolerate a missing int key (e.g. a legacy calib dict without
+		# enable_fan_input) the same way load() does -> default 0 (fan-off)
+		self.calib.update({k: (int(calib[k]) if k in calib else 0) for k in _CALIB_INTS})
 		self.n_delay = int(calib['n_delay'])
 		self.sp_lo = float(sp_lo)
 		self.sp_hi = float(sp_hi)
