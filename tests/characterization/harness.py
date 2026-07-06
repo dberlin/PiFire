@@ -84,11 +84,18 @@ class _CappedProbes:
 		return getattr(self._probes, name)
 
 
-def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None):
+def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None, store=None):
 	# `runner` is accepted for signature symmetry with `run_mode` (which does
 	# the actual `control.build_runner` monkeypatching around `_work_cycle`);
 	# `make_ctx` itself never constructs a runner, so this is unused here.
-	store = InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
+	#
+	# `store`: when None (the default, used by every InMemoryStore golden
+	# scenario) a fresh InMemoryStore is built and seeded from the args. When
+	# provided (the E2E suite passes a live `ValkeyStore`), it is used as-is --
+	# the caller is responsible for seeding it, since a real store can't be
+	# seeded through a constructor.
+	store = store if store is not None else InMemoryStore(
+		control=control_data, settings=settings, pellet_db=pellet_db)
 	grill = grill or FakeGrillPlatform(
 		dc_fan=settings['platform'].get('dc_fan', False),
 		standalone=settings['platform'].get('standalone', True),
@@ -102,7 +109,7 @@ def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None)
 	return ctx, grill, notifier
 
 
-def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, probe_cap=None, runner=None):
+def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, probe_cap=None, runner=None, store=None):
 	"""Run one `control._work_cycle` invocation hermetically and capture its
 	observable effects.
 
@@ -124,7 +131,7 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
 	migrated to `ControlMode` handlers), so only the runtime reference needs
 	patching now.
 	"""
-	ctx, grill, notifier = make_ctx(settings, control_data, pellet_db, probes, grill)
+	ctx, grill, notifier = make_ctx(settings, control_data, pellet_db, probes, grill, store=store)
 
 	if probe_cap is not None:
 		probes = _CappedProbes(probes, ctx.store, probe_cap)
