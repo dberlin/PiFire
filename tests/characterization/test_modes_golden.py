@@ -100,6 +100,55 @@ def test_startup_exits_on_timer():
 	assert result.notifications == []
 
 
+def test_reignite_exits_on_timer():
+	# Reignite mirrors Startup's timer/exit-temp exit and igniter/auger/fan/
+	# power setup (both share the `mode in ('Startup', 'Reignite')` inline
+	# gates), but -- unlike Startup -- it must NOT write
+	# control['startup_timestamp'] (control.py gates that write with
+	# `if mode == 'Startup':`, excluding Reignite) and must NOT publish the
+	# cycle-ratio MQTT notification (control.py gates that publish with
+	# `if mode in ('Startup', 'Smoke'):`, also excluding Reignite).
+	settings = base_settings()
+	settings['startup']['duration'] = 0.1
+	settings['startup']['startup_exit_temp'] = 0  # disabled, timer must fire first
+	control_data = base_control(mode='Reignite')
+	assert control_data['startup_timestamp'] == 0  # fixture default, pre-run
+	probes = FakeProbes().script([50] * 8)
+	result = run_mode('Reignite', settings=settings, control_data=control_data,
+	                   pellet_db=base_pellet_db(), probes=probes)
+	assert result.final_control['mode'] == 'Reignite'
+	assert result.final_control['updated'] is False
+	# Contrast with Startup: Reignite does NOT write startup_timestamp, so it
+	# stays at the fixture's untouched default instead of being set to a
+	# nonzero clock reading.
+	assert result.final_control['startup_timestamp'] == 0
+	# Reignite is excluded from the Startup/Smoke cycle-ratio MQTT publish.
+	assert result.notifications == []
+	# Setup sequence (fan/power on, igniter on, auger on) is shared with
+	# Startup, then clean-up turns auger/igniter off.
+	assert ('fan_on', (None,)) in result.grill_calls
+	assert ('power_on', ()) in result.grill_calls
+	assert ('igniter_on', ()) in result.grill_calls
+	assert ('auger_on', ()) in result.grill_calls
+	assert result.grill_calls[-2:] == [('auger_off', ()), ('igniter_off', ())]
+
+
+def test_reignite_exits_on_exit_temp():
+	settings = base_settings()
+	settings['startup']['startup_exit_temp'] = 100
+	settings['startup']['duration'] = 100  # large so the timer can't fire first
+	control_data = base_control(mode='Reignite')
+	probes = FakeProbes().script([50, 60, 105, 105, 105])
+	result = run_mode('Reignite', settings=settings, control_data=control_data,
+	                   pellet_db=base_pellet_db(), probes=probes)
+	assert result.final_control['mode'] == 'Reignite'
+	assert result.final_control['updated'] is False
+	assert result.final_control['startup_timestamp'] == 0  # not written by Reignite
+	assert result.notifications == []
+	assert ('igniter_on', ()) in result.grill_calls
+	assert result.grill_calls[-2:] == [('auger_off', ()), ('igniter_off', ())]
+
+
 def test_prime_elapses_after_prime_duration():
 	settings = base_settings()
 	settings['globals']['augerrate'] = 10  # prime_duration = int(prime_amount / augerrate)
