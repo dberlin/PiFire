@@ -1,9 +1,9 @@
 """Structural test for `ControlMode.run()`'s shared skeleton: a trivial
 subclass records every hook invocation and we assert the ORDER matches the
-template method's contract, mirroring control.py's original `_work_cycle`
-block order: setup -> setup_safety -> [loop: on_tick -> status_fragment
-(only when the 0.5s publish gate fires, BEFORE the safety block) ->
-check_safety -> should_exit] -> teardown.
+template method's sense -> safety -> act -> publish contract:
+setup -> setup_safety -> [loop: check_safety -> on_tick -> status_fragment
+(only when the 0.5s publish gate fires, AFTER the merged on_tick) ->
+should_exit] -> teardown.
 
 This complements (does not replace) the characterization oracle in
 tests/characterization/, which is the real behavior-preservation gate.
@@ -37,7 +37,7 @@ class _RecordingMode(ControlMode):
 		self.calls.append('setup_safety')
 		return 'Active'
 
-	def on_tick(self, now, current_output_status):
+	def on_tick(self, now, ptemp, current_output_status):
 		self.calls.append('on_tick')
 
 	def check_safety(self, now, ptemp):
@@ -95,12 +95,14 @@ def test_control_mode_hook_order_one_bounded_tick():
 	mode = _RecordingMode(ctx, WorkCycleState())
 	mode.run()
 
+	# sense -> safety -> act -> publish: check_safety now runs BEFORE the merged
+	# on_tick, and the status-publish gate (status_fragment) runs AFTER it.
 	assert mode.calls == [
 		'setup',
 		'setup_safety',
+		'check_safety',
 		'on_tick',
 		'status_fragment',
-		'check_safety',
 		'should_exit',
 		'teardown',
 	]

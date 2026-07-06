@@ -581,3 +581,54 @@ def test_recipe_overlay_triggered_with_pause_notifies_once_and_continues():
 	assert result.final_control['recipe']['step_data']['notify'] is False
 	# This time the harness's probe-cap is what ended the run, not the Recipe check.
 	assert result.final_control['updated'] is True
+
+
+def test_hold_over_maxtemp_does_not_submit_controller_that_tick():
+	# safety-before-actuation: when max-temp trips, the loop breaks BEFORE the
+	# merged on_tick, so the controller is never advanced on the over-temp tick.
+	# (In the old order on_tick ran before the safety check.)
+	settings = base_settings()
+	settings['safety']['maxtemp'] = 500
+	settings['controller'] = settings.get('controller', {})
+	control_data = base_control(mode='Hold')
+	control_data['primary_setpoint'] = 225
+	probes = FakeProbes().script([550, 550, 550])  # over maxtemp from tick 1
+	runner = FakeControllerRunner(period=0.0).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 4)
+	result = run_mode(
+		'Hold',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		grill=FakeGrillPlatform(),
+		runner=runner,
+	)
+	assert result.final_control['mode'] == 'Error'
+	assert runner.submitted_temps == []  # controller never advanced -- safety first
+
+
+def test_hold_controller_receives_current_tick_ptemp():
+	# sense->act: the controller is submitted an in-loop probe value, not a
+	# pre-loop-only stash. Below maxtemp so the loop runs a few ticks.
+	settings = base_settings()
+	# period=0.0 is falsy, so the controller-submit gate uses cycle_time as its
+	# interval; shrink HoldCycleTime so the gate fires within these few ticks.
+	settings['cycle_data']['HoldCycleTime'] = 0.02
+	control_data = base_control(mode='Hold')
+	control_data['primary_setpoint'] = 225
+	probes = FakeProbes().script([200, 205, 210, 215, 220])
+	runner = FakeControllerRunner(period=0.0).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 8)
+	run_mode(
+		'Hold',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		probe_cap=4,
+		grill=FakeGrillPlatform(),
+		runner=runner,
+	)
+	# Every submitted temp is an in-loop read (200..220), proving on_tick uses
+	# the fresh per-tick ptemp parameter.
+	assert runner.submitted_temps
+	assert all(t in (200, 205, 210, 215, 220) for t in runner.submitted_temps)

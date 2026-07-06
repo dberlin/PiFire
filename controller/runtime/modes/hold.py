@@ -28,23 +28,19 @@ class HoldMode(ControlMode):
 
 	Per-tick, on_tick() first handles the `controller_update` reconfigure
 	request, then runs the Hold-specific controller sub-block (submit the
-	STALE-BY-ONE ptemp -- the same one the inline auger-cycle block used,
-	i.e. from the previous iteration's probe read, since the in-loop probe
-	re-read happens AFTER this block -- to the runner, normalize its output
-	into a cycle ratio + optional fan command, latch `mpc_fan_active` the
-	first time an MPC fan command appears, clamp to u_min/u_max, and decide
-	fan_assist), then the shared (non-Hold) auger-cycle toggle via
-	`_auger_cycle_tick` (Hold overrides `_on_auger_on` to also recompute
-	OnTime/OffTime/CycleTime and publish MQTT PID info -- the shared helper
-	itself is untouched).
-
-	check_safety() stashes ptemp on self.state (needed by on_fan_tick, which
-	has no ptemp parameter) FIRST, unconditionally, THEN re-checks flameout
-	in-loop. on_fan_tick() runs the Hold-only target_temp_achieved latch,
-	lid-open detect/clear, PWM-duty-from-temp-profile (gated
-	`not self.state.mpc_fan_active`), and fan-assist-PID parts, THEN
-	delegates to the shared `_smoke_plus_fan_tick` helper (gated on
+	fresh per-tick ptemp to the runner, normalize its output into a cycle
+	ratio + optional fan command, latch `mpc_fan_active` the first time an MPC
+	fan command appears, clamp to u_min/u_max, and decide fan_assist), then
+	the shared (non-Hold) auger-cycle toggle via `_auger_cycle_tick` (Hold
+	overrides `_on_auger_on` to also recompute OnTime/OffTime/CycleTime and
+	publish MQTT PID info -- the shared helper itself is untouched). It then
+	runs the Hold-only fan work on the same fresh ptemp: the
+	target_temp_achieved latch, lid-open detect/clear, PWM-duty-from-temp-
+	profile (gated `not self.state.mpc_fan_active`), and fan-assist-PID parts,
+	then delegates to the shared `_smoke_plus_fan_tick` helper (gated on
 	target_temp_achieved for Hold, unlike Smoke which always runs it).
+
+	check_safety() re-checks flameout in-loop before any actuation.
 	status_fragment() adds the Hold-only primary_setpoint/lid_open_detected/
 	lid_open_endtime status fields. No mode-specific teardown (Hold is not in
 	the Shutdown/Monitor/Manual/Prime power-off teardown gate, nor the
@@ -128,7 +124,7 @@ class HoldMode(ControlMode):
 
 		return status
 
-	def on_tick(self, now, current_output_status):
+	def on_tick(self, now, ptemp, current_output_status):
 		import control as _control
 
 		ctx = self.ctx
@@ -148,12 +144,8 @@ class HoldMode(ControlMode):
 		# Check to see if it's time to update pid and update if needed.
 		controller_interval = self._runner.control_period() or self.state.cycle_time
 		if (now - self.state.controller_cycle_start) > controller_interval:
-			# NOTE: ptemp here is deliberately STALE-BY-ONE -- the value from
-			# the previous iteration's probe read (self.state.ptemp, stashed
-			# by check_safety at the END of the previous iteration), matching
-			# the inline auger-cycle block's own `ptemp`, which ran BEFORE the
-			# in-loop probe re-read.
-			self._runner.submit(self.state.ptemp)
+			# Submit the fresh per-tick ptemp read at the top of this tick.
+			self._runner.submit(ptemp)
 			_out = self._runner.latest()
 			self.state.controller_output, fan_cmd = _out.cycle_ratio, _out.fan
 			self.state.controller_cycle_start = now
@@ -186,64 +178,8 @@ class HoldMode(ControlMode):
 
 		self._auger_cycle_tick(now, current_output_status)
 
-	def _on_auger_on(self, now):
-		settings = self.settings
-		control = self.control
-
-		self.state.on_time = settings['cycle_data']['HoldCycleTime'] * self.state.cycle_ratio
-		self.state.off_time = settings['cycle_data']['HoldCycleTime'] * (1 - self.state.cycle_ratio)
-		self.state.cycle_time = self.state.on_time + self.state.off_time
-
-		import control as _control
-
-		_control.eventLogger.debug(
-			'On Time = '
-			+ str(self.state.on_time)
-			+ ', OffTime = '
-			+ str(self.state.off_time)
-			+ ', CycleTime = '
-			+ str(self.state.cycle_time)
-			+ ', CycleRatio = '
-			+ str(self.state.cycle_ratio)
-		)
-
-		# publish pid info to mqtt if enabled
-		if settings['notify_services'].get('mqtt') is not None and settings['notify_services']['mqtt']['enabled']:
-			controller_data = self._runner.controller_state()
-			controller_data['cycle_ratio'] = round(self.state.cycle_ratio, 2)
-			self.ctx.notifications.check(settings, control, pid_data=controller_data)
-
-	def check_safety(self, now, ptemp) -> bool:
-		ctx = self.ctx
-		control = self.control
-		self.state.ptemp = ptemp
-
-		verdict = evaluate_flameout(ptemp, control['safety']['startuptemp'], control['safety']['reigniteretries'])
-		if verdict is SafetyVerdict.ERROR:
-			ctx.store.display_commands().push(('text', 'ERROR'))
-			control['mode'] = 'Error'
-			control['updated'] = True
-			ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-			ctx.notifications.send('Grill_Error_02')
-			return True
-		elif verdict is SafetyVerdict.REIGNITE:
-			control['safety']['reigniteretries'] -= 1
-			control['safety']['reignitelaststate'] = self.name
-			ctx.store.display_commands().push(('text', 'Re-Ignite'))
-			control['mode'] = 'Reignite'
-			control['updated'] = True
-			ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-			ctx.notifications.send('Grill_Error_03')
-			return True
-		return False
-
-	def on_fan_tick(self, now, current_output_status):
-		import control as _control
-
-		settings = self.settings
-		control = self.control
+		# ---- Hold-only fan work on the fresh per-tick ptemp ----
 		grill_platform = self.grill
-		ptemp = self.state.ptemp
 
 		# Check if target temperature has been achieved before utilizing Smoke Plus Mode
 		if ptemp >= control['primary_setpoint'] and not self.state.target_temp_achieved:
@@ -335,7 +271,57 @@ class HoldMode(ControlMode):
 				start_fan(grill_platform, settings, control['duty_cycle'])
 				_control.eventLogger.debug('Fan PID: Fan ON')
 
-		self._smoke_plus_fan_tick(now, current_output_status)
+		self._smoke_plus_fan_tick(now, ptemp, current_output_status)
+
+	def _on_auger_on(self, now):
+		settings = self.settings
+		control = self.control
+
+		self.state.on_time = settings['cycle_data']['HoldCycleTime'] * self.state.cycle_ratio
+		self.state.off_time = settings['cycle_data']['HoldCycleTime'] * (1 - self.state.cycle_ratio)
+		self.state.cycle_time = self.state.on_time + self.state.off_time
+
+		import control as _control
+
+		_control.eventLogger.debug(
+			'On Time = '
+			+ str(self.state.on_time)
+			+ ', OffTime = '
+			+ str(self.state.off_time)
+			+ ', CycleTime = '
+			+ str(self.state.cycle_time)
+			+ ', CycleRatio = '
+			+ str(self.state.cycle_ratio)
+		)
+
+		# publish pid info to mqtt if enabled
+		if settings['notify_services'].get('mqtt') is not None and settings['notify_services']['mqtt']['enabled']:
+			controller_data = self._runner.controller_state()
+			controller_data['cycle_ratio'] = round(self.state.cycle_ratio, 2)
+			self.ctx.notifications.check(settings, control, pid_data=controller_data)
+
+	def check_safety(self, now, ptemp) -> bool:
+		ctx = self.ctx
+		control = self.control
+
+		verdict = evaluate_flameout(ptemp, control['safety']['startuptemp'], control['safety']['reigniteretries'])
+		if verdict is SafetyVerdict.ERROR:
+			ctx.store.display_commands().push(('text', 'ERROR'))
+			control['mode'] = 'Error'
+			control['updated'] = True
+			ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
+			ctx.notifications.send('Grill_Error_02')
+			return True
+		elif verdict is SafetyVerdict.REIGNITE:
+			control['safety']['reigniteretries'] -= 1
+			control['safety']['reignitelaststate'] = self.name
+			ctx.store.display_commands().push(('text', 'Re-Ignite'))
+			control['mode'] = 'Reignite'
+			control['updated'] = True
+			ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
+			ctx.notifications.send('Grill_Error_03')
+			return True
+		return False
 
 	def status_fragment(self) -> dict:
 		return {'lid_open_detected': self.state.lid_open_detect, 'lid_open_endtime': self.state.lid_open_expires}

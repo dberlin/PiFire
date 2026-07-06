@@ -121,7 +121,7 @@ class StartupMode(ControlMode):
 		self.state.metrics['auger_cycle_time'] = self.settings['cycle_data']['SmokeOnCycleTime']
 		self.ctx.store.write_metrics(self.state.metrics)
 
-	def on_tick(self, now, current_output_status):
+	def on_tick(self, now, ptemp, current_output_status):
 		self._auger_cycle_tick(now, current_output_status)
 
 	def on_publish(self, now):

@@ -1,13 +1,14 @@
-"""ControlMode template-method base: reproduces the SHARED skeleton of
-control.py's `_work_cycle` (see `.superpowers/sdd/workcycle-map.md`).
+"""ControlMode template-method base: the SHARED skeleton of a single
+control work cycle.
 
 Concrete subclasses (Monitor, Manual, ...) override the hooks below to
-supply their mode-specific behavior. `run()` reproduces every SHARED
-operation from `_work_cycle` in the SAME ORDER: pre-loop setup, the main
-loop body, and teardown. Do not reorder anything here without re-checking
-the blueprint's "Risk notes" section -- several orderings (e.g.
-`current_output_status` captured once before the manual-override block,
-the auger-cycle block running BEFORE the probe re-read) are load-bearing.
+supply their mode-specific behavior. Each tick follows a strict
+sense -> safety -> act -> publish order: read the probes ONCE at the top of
+the tick, run the universal max-temp check and the mode `check_safety`
+BEFORE any actuation, then a single merged `on_tick` that does the
+controller/auger/fan work on that fresh temperature, then publish status and
+history. `current_output_status` is likewise captured once per tick (before
+the manual-override block) and threaded through the whole tick.
 """
 
 import logging
@@ -31,26 +32,22 @@ class ControlMode:
 	    first probe read (unlike setup(), which runs before it). Return
 	    'Active' to allow the loop to run, 'Inactive' to skip it entirely (abort
 	    contract -- teardown still runs).
-	  - on_tick(now, current_output_status): per-iteration mode-specific
-	    control logic. `current_output_status` is captured ONCE per tick
-	    by the shared skeleton, BEFORE the manual-override block, and
-	    passed in here -- never re-fetch it inside a hook.
+	  - on_tick(now, ptemp, current_output_status): per-iteration
+	    mode-specific control/auger/fan logic, run once per tick AFTER the
+	    safety checks. `ptemp` is the fresh probe reading for this tick and
+	    `current_output_status` is captured ONCE per tick by the shared
+	    skeleton, BEFORE the manual-override block -- never re-fetch either
+	    inside a hook. This is the merged control+fan hook: it runs the
+	    controller/auger work and the fan/smoke-plus/lid-open work together.
 	  - on_settings_reload(): called after `self.settings` is reloaded in
 	    the `settings_update` block (default no-op).
 	  - on_publish(now): called immediately after the notifications-check
 	    control rebind, at the cycle-ratio MQTT publish position (default
 	    no-op).
-	  - on_fan_tick(now, current_output_status): called immediately after
-	    check_safety(), at the fan/smoke-plus/lid-open block position
-	    (default no-op). Does not receive `ptemp` directly -- modes that need
-	    it in `on_fan_tick` (e.g. via `_smoke_plus_fan_tick`) must stash it on
-	    `self.state.ptemp` from their own `check_safety` override first. Only
-	    called if `check_safety()` did NOT request an immediate break.
 	  - check_safety(now, ptemp) -> bool: per-iteration mode-specific safety
-	    check. Return True to break the loop IMMEDIATELY (matching the
-	    inline flameout block's own `break`, which happens before the
-	    fan/smoke-plus block ever runs for that iteration) -- default False
-	    (no-op, never breaks).
+	    check, run BEFORE on_tick on the fresh ptemp. Return True to break the
+	    loop IMMEDIATELY, before any actuation happens for this tick -- default
+	    False (no-op, never breaks).
 	  - should_exit(now, ptemp) -> bool: per-iteration mode-specific exit
 	    condition (default False -- rely on the universal breaks).
 	  - status_fragment() -> dict: extra fields merged into status_data at
@@ -76,16 +73,13 @@ class ControlMode:
 	def setup_safety(self, ptemp) -> str:
 		return 'Active'
 
-	def on_tick(self, now, current_output_status):
+	def on_tick(self, now, ptemp, current_output_status):
 		pass
 
 	def on_settings_reload(self):
 		pass
 
 	def on_publish(self, now):
-		pass
-
-	def on_fan_tick(self, now, current_output_status):
 		pass
 
 	def check_safety(self, now, ptemp) -> bool:
@@ -105,10 +99,9 @@ class ControlMode:
 
 	# ---- shared helpers ----
 	def _auger_cycle_tick(self, now, current_output_status):
-		"""Reproduces the SHARED (non-Hold) auger toggle from the legacy
-		auger-cycle block (control.py ~535-575): turn the auger on/off based
-		on elapsed time vs. cycle_time/cycle_ratio, honoring manual overrides
-		and accumulating augerontime metrics on auger-off. Hold overrides
+		"""Shared (non-Hold) auger toggle: turn the auger on/off based on
+		elapsed time vs. cycle_time/cycle_ratio, honoring manual overrides and
+		accumulating augerontime metrics on auger-off. Hold overrides
 		`_on_auger_on` to also recompute OnTime/OffTime/CycleTime and publish
 		MQTT PID info -- that part is NOT reproduced here."""
 		import control as _control
@@ -136,20 +129,17 @@ class ControlMode:
 				self.state.auger_toggle_time = now
 				_control.eventLogger.debug('Cycle Event: Auger Off')
 
-	def _smoke_plus_fan_tick(self, now, current_output_status):
-		"""Reproduces the smoke-plus fan cycling + elif restore chain from the
-		legacy fan block (control.py ~789-870), verbatim aside from self./name
-		substitution. Gated to Smoke always, and Hold only once
-		target_temp_achieved -- Hold's own on_fan_tick handles the Hold-only
-		lid-open/PWM-duty-from-temp/fan-assist parts BEFORE calling this
-		helper. Requires self.state.ptemp to have been set (by check_safety)
-		before this runs."""
+	def _smoke_plus_fan_tick(self, now, ptemp, current_output_status):
+		"""Smoke-plus fan cycling + the elif restore chain. Gated to Smoke
+		always, and Hold only once target_temp_achieved -- Hold's on_tick runs
+		the Hold-only lid-open/PWM-duty-from-temp/fan-assist parts BEFORE
+		calling this helper. `ptemp` is the fresh probe reading for this
+		tick."""
 		import control as _control
 
 		settings = self.settings
 		control = self.control
 		grill_platform = self.grill
-		ptemp = self.state.ptemp
 
 		# If in Smoke Plus Mode but not calling for fan pid control, Cycle the Fan
 		if (
@@ -326,11 +316,6 @@ class ControlMode:
 		# Get initial probe sensor data, temperatures
 		sensor_data = probe_complex.read_probes()
 		ptemp = list(sensor_data['primary'].values())[0]  # Primary Temperature or the Pit Temperature
-		# Stash for on_tick() hooks that need ptemp on the FIRST iteration
-		# (before any in-loop check_safety() has run to refresh it) -- e.g.
-		# HoldMode's controller submit, which needs the stale-by-one ptemp
-		# semantics preserved from the very first tick onward.
-		self.state.ptemp = ptemp
 
 		# ---- mode-specific pre-loop safety check (abort contract) ----
 		status = self.setup_safety(ptemp)
@@ -486,9 +471,6 @@ class ControlMode:
 					control['manual']['output'] = None
 					ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
 
-			# ---- mode-specific per-tick control logic ----
-			self.on_tick(now, current_output_status)
-
 			# Grab current probe profiles if they have changed since the last loop.
 			if control['probe_profile_update']:
 				self.settings = ctx.store.read_settings()
@@ -499,7 +481,7 @@ class ControlMode:
 			# Get probe device info for frontend
 			ctx.store.write_generic_key('probe_device_info', probe_complex.get_device_info())
 
-			# Get temperatures from all probes
+			# ---- SENSE: single fresh probe read for the whole tick ----
 			sensor_data = probe_complex.read_probes()
 			ptemp = list(sensor_data['primary'].values())[0]  # Primary Temperature or the Pit Temperature
 
@@ -520,6 +502,26 @@ class ControlMode:
 			if control['tuning_mode']:
 				ctx.store.write_tr(in_data['probe_history']['tr'])
 
+			# ---- SAFETY (before any actuation) ----
+			# Max Temp Safety Control (UNIVERSAL): trip before the mode tick so
+			# an unsafe temperature breaks the loop without cycling the auger or
+			# advancing the controller.
+			if over_max_temp(ptemp, self.settings['safety']):
+				ctx.store.display_commands().push(('text', 'ERROR'))
+				control['mode'] = 'Error'
+				control['updated'] = True
+				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
+				ctx.notifications.send('Grill_Error_01')
+				break
+
+			# ---- mode-specific per-tick safety check ----
+			if self.check_safety(now, ptemp):
+				break
+
+			# ---- ACT: merged mode-specific per-tick control/auger/fan logic ----
+			self.on_tick(now, ptemp, current_output_status)
+
+			# ---- PUBLISH ----
 			# Every 20 seconds, update ETA for any pending notifications
 			if (now - eta_toggle_time) > 20:
 				eta_toggle_time = ctx.clock.now()
@@ -576,13 +578,6 @@ class ControlMode:
 				ctx.store.write_status(status_data)
 				display_toggle_time = ctx.clock.now()
 
-			# ---- mode-specific per-tick safety check ----
-			if self.check_safety(now, ptemp):
-				break
-
-			# ---- mode-specific fan/smoke-plus/lid-open tick ----
-			self.on_fan_tick(now, current_output_status)
-
 			# Write History & Issue Heartbeat after 3 seconds has passed
 			if (now - temp_toggle_time) > 3:
 				temp_toggle_time = ctx.clock.now()
@@ -592,15 +587,6 @@ class ControlMode:
 
 			# ---- mode-specific per-tick exit condition ----
 			if self.should_exit(now, ptemp):
-				break
-
-			# Max Temp Safety Control (UNIVERSAL)
-			if over_max_temp(ptemp, self.settings['safety']):
-				ctx.store.display_commands().push(('text', 'ERROR'))
-				control['mode'] = 'Error'
-				control['updated'] = True
-				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-				ctx.notifications.send('Grill_Error_01')
 				break
 
 			# End of Loop Recipe Check

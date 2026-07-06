@@ -4,6 +4,7 @@ class FakeControllerRunner:
 		self._i = 0
 		self.target = None
 		self._period = period
+		self.submitted_temps = []
 
 	def script(self, outputs):
 		self._script = list(outputs)
@@ -14,7 +15,7 @@ class FakeControllerRunner:
 		self.target = setpoint
 
 	def submit(self, temp):
-		pass
+		self.submitted_temps.append(temp)
 
 	def reconfigure(self, settings, control):
 		return 'Active'

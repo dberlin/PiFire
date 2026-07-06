@@ -18,14 +18,13 @@ class SmokeMode(ControlMode):
 	loop even starts), THEN applies smart-start (Smoke skips the
 	Startup/Reignite profile-SELECTION sub-branch and just re-applies
 	control['smartstart']['profile_selected'] chosen by a prior Startup/
-	Reignite run). Per-tick, runs the shared (non-Hold) auger-cycle toggle,
-	publishes cycle_ratio to MQTT (shared with Startup), and re-checks
-	flameout in-loop via check_safety (stashing ptemp on self.state for
-	on_fan_tick). on_fan_tick delegates entirely to the shared
+	Reignite run). Per-tick, on_tick runs the shared (non-Hold) auger-cycle
+	toggle then delegates the fan work entirely to the shared
 	`_smoke_plus_fan_tick` helper -- Smoke never touches the Hold-only lid-
 	open/PWM-duty-from-temp/fan-assist parts (target_temp_achieved stays
-	False for Smoke, so that gate structurally excludes it). No mode-specific
-	teardown."""
+	False for Smoke, so that gate structurally excludes it). on_publish
+	publishes cycle_ratio to MQTT (shared with Startup); check_safety
+	re-checks flameout in-loop. No mode-specific teardown."""
 
 	name = 'Smoke'
 
@@ -120,8 +119,9 @@ class SmokeMode(ControlMode):
 		self.state.metrics['auger_cycle_time'] = self.settings['cycle_data']['SmokeOnCycleTime']
 		self.ctx.store.write_metrics(self.state.metrics)
 
-	def on_tick(self, now, current_output_status):
+	def on_tick(self, now, ptemp, current_output_status):
 		self._auger_cycle_tick(now, current_output_status)
+		self._smoke_plus_fan_tick(now, ptemp, current_output_status)
 
 	def on_publish(self, now):
 		pid_data = {'cycle_ratio': round(self.state.cycle_ratio, 2)}
@@ -130,7 +130,6 @@ class SmokeMode(ControlMode):
 	def check_safety(self, now, ptemp) -> bool:
 		ctx = self.ctx
 		control = self.control
-		self.state.ptemp = ptemp
 
 		verdict = evaluate_flameout(ptemp, control['safety']['startuptemp'], control['safety']['reigniteretries'])
 		if verdict is SafetyVerdict.ERROR:
@@ -150,6 +149,3 @@ class SmokeMode(ControlMode):
 			ctx.notifications.send('Grill_Error_03')
 			return True
 		return False
-
-	def on_fan_tick(self, now, current_output_status):
-		self._smoke_plus_fan_tick(now, current_output_status)

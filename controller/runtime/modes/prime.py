@@ -41,7 +41,7 @@ class PrimeMode(ControlMode):
 			self.grill.igniter_on()
 			_control.eventLogger.debug('Igniter ON')
 
-	def on_tick(self, now, current_output_status):
+	def on_tick(self, now, ptemp, current_output_status):
 		self._auger_cycle_tick(now, current_output_status)
 
 	def should_exit(self, now, ptemp) -> bool:
