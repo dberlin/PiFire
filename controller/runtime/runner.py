@@ -7,9 +7,11 @@ commands_fan() so the caller knows whether this controller issues its own fan
 command (MPC) or leaves fan control to the temperature-profile logic.
 `SyncControllerRunner` runs the underlying controller module's `update()`
 synchronously on submit/latest -- control math and probe-read cadence are the
-same cadence. A `ThreadedControllerRunner` could later run the core on its own
-thread and hand back the latest output via `.latest()`, decoupling the two
-cadences; the seam exists for that but no threaded implementation exists yet.
+same cadence. `ThreadedControllerRunner` runs the core on a background thread
+at its own control period and hands back non-blocking snapshots via
+`.latest()`, decoupling control-math cadence from the probe-read cadence.
+`build_runner` selects between the two by the core's `wants_async()` (MPC
+requests the threaded runner; other controllers get the sync runner).
 """
 
 import importlib

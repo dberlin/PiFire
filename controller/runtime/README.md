@@ -62,12 +62,22 @@ for module globals. The context bundles:
 - **Pure logic** (`logic/`) — safety, cycle, smartstart, pwm, fan — is extracted
   as side-effect-free functions with direct unit tests.
 - **`runner.py`** — `SyncControllerRunner` computes the PID/MPC control output
-  inline each cycle.
+  inline each cycle; `ThreadedControllerRunner` runs it on a background thread
+  instead.
 
-## Documented follow-up: `ThreadedControllerRunner`
+## Controller execution: sync vs threaded
 
-The control math currently runs synchronously inside the work cycle
-(`SyncControllerRunner`). The `ControllerRunner` seam was designed so a
-`ThreadedControllerRunner` could run the PID/MPC core on its own thread and hand
-the loop the latest output via `.latest()`, decoupling control-math cadence from
-the probe-read cadence. Not yet implemented; the seam is in place for it.
+The `ControllerRunner` seam (`runner.py`) supports two execution strategies,
+and `build_runner()` picks between them based on the controller core's
+`wants_async()`:
+
+- **`SyncControllerRunner`** runs the underlying controller module's
+  `update()` inline on submit/latest — control math and probe-read cadence
+  are the same cadence. This is the default for controllers that don't
+  request async execution (e.g. PID).
+- **`ThreadedControllerRunner`** runs the core on a background thread at its
+  own control period, decoupling an expensive solve (e.g. MPC) from the
+  loop's probe-read cadence. `submit()`/`latest()` are non-blocking snapshots
+  guarded by a lock; the thread mutates the running core. `HoldMode` submits
+  the latest probe reading every tick and calls `stop()` on the runner during
+  teardown to join the background thread cleanly.
