@@ -24,3 +24,10 @@ def test_controller_base_commands_fan_default_false():
 
 	cb = ControllerBase({}, 'C', {})
 	assert cb.commands_fan() is False
+
+
+def test_controller_base_wants_async_default_false():
+	from controller.base import ControllerBase
+
+	cb = ControllerBase({}, 'C', {})
+	assert cb.wants_async() is False

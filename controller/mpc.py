@@ -250,6 +250,9 @@ class Controller(ControllerBase):
 	def commands_fan(self):
 		return bool(self.cfg.get('enable_fan_input', False))
 
+	def wants_async(self):
+		return True
+
 	def update(self, current):
 		y = _to_c(current, self.units)
 		# 1) estimate states from the measurement

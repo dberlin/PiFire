@@ -81,6 +81,11 @@ class ControllerBase:
 		"""Whether this controller issues fan duty commands (vs. auger-only)."""
 		return False
 
+	def wants_async(self):
+		"""Whether this controller's update() should run on a background thread
+		(expensive solve) rather than inline in the control loop."""
+		return False
+
 	def supported_functions(self):
 		return self.function_list
 

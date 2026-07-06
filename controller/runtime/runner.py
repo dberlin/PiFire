@@ -34,6 +34,10 @@ class ControllerRunner(ABC):
 	def control_period(self): ...
 	@abstractmethod
 	def commands_fan(self): ...
+	@abstractmethod
+	def wants_async(self): ...
+	@abstractmethod
+	def stop(self): ...
 
 
 class SyncControllerRunner(ControllerRunner):
@@ -67,6 +71,12 @@ class SyncControllerRunner(ControllerRunner):
 
 	def commands_fan(self):
 		return self._core.commands_fan()
+
+	def wants_async(self):
+		return self._core.wants_async()
+
+	def stop(self):
+		pass
 
 	def controller_state(self):
 		return dict(self._core.__dict__)

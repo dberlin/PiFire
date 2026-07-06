@@ -75,3 +75,15 @@ def test_build_core_logs_on_load_failure_when_logger_given():
 	assert core is None
 	assert status == 'Inactive'
 	assert len(logger.exceptions) == 1
+
+
+def test_sync_runner_wants_async_reflects_core_and_stop_is_noop():
+	from controller.runtime.runner import SyncControllerRunner
+
+	class _Core:
+		def wants_async(self):
+			return False
+
+	r = SyncControllerRunner(_Core())
+	assert r.wants_async() is False
+	r.stop()  # must exist and be a harmless no-op for the sync runner
