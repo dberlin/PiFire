@@ -34,6 +34,11 @@ from controller.runtime.devices import build_devices
 from controller.runtime.store import ValkeyStore
 from controller.runtime.clock import RealClock
 from controller.runtime.notifier import ValkeyNotifier
+from controller.runtime.logic.safety import startup_temp_bounds, evaluate_flameout, over_max_temp, SafetyVerdict
+from controller.runtime.logic.cycle import smoke_cycle_times, hold_initial_cycle, prime_cycle_times
+from controller.runtime.logic.smartstart import select_profile, profile_cycle
+from controller.runtime.logic.pwm import hold_duty_cycle, ramp_params
+from controller.runtime.logic.fan import clamp_duty, smoke_plus_max_ratio, fan_assist_times
 from os.path import exists
 
 """
@@ -59,8 +64,7 @@ def _start_fan(grill_platform, settings, duty_cycle=None):
 	"""
 	if settings['platform']['dc_fan']:
 		if duty_cycle is not None:
-			adjusted_dc = max(duty_cycle, settings['pwm']['min_duty_cycle'])
-			adjusted_dc = min(adjusted_dc, settings['pwm']['max_duty_cycle'])
+			adjusted_dc = clamp_duty(duty_cycle, settings['pwm'])
 		else:
 			adjusted_dc = settings['pwm']['max_duty_cycle']
 		grill_platform.fan_on(adjusted_dc)
@@ -212,10 +216,9 @@ def _work_cycle(mode, ctx):
 		eventLogger.debug('Auger ON')
 
 	if mode in ('Startup', 'Reignite', 'Smoke'):
-		OnTime = settings['cycle_data']['SmokeOnCycleTime']  # Auger On Time (Default 15s)
-		OffTime = settings['cycle_data']['SmokeOffCycleTime'] + (settings['cycle_data']['PMode'] * 10)  # Auger Off Time
-		CycleTime = OnTime + OffTime  # Total Cycle Time
-		CycleRatio = RawCycleRatio = OnTime / CycleTime  # Ratio of OnTime to CycleTime
+		_ct = smoke_cycle_times(settings['cycle_data'])
+		OnTime, OffTime, CycleTime, CycleRatio = _ct.on_time, _ct.off_time, _ct.cycle_time, _ct.cycle_ratio
+		RawCycleRatio = _ct.cycle_ratio
 		LidOpenDetect = False
 		LidOpenEventExpires = 0
 		# Write Metrics (note these will be overwritten if smart start is enabled)
@@ -225,10 +228,9 @@ def _work_cycle(mode, ctx):
 
 	if mode == 'Hold':
 		# Initialize cycle to minimum ratio.
-		OnTime = settings['cycle_data']['HoldCycleTime'] * settings['cycle_data']['u_min']  # Auger On Time
-		OffTime = settings['cycle_data']['HoldCycleTime'] * (1 - settings['cycle_data']['u_min'])  # Auger Off Time
-		CycleTime = settings['cycle_data']['HoldCycleTime']  # Total Cycle Time
-		CycleRatio = RawCycleRatio = settings['cycle_data']['u_min']  # Ratio of OnTime to CycleTime
+		_ct = hold_initial_cycle(settings['cycle_data'])
+		OnTime, OffTime, CycleTime, CycleRatio = _ct.on_time, _ct.off_time, _ct.cycle_time, _ct.cycle_ratio
+		RawCycleRatio = _ct.cycle_ratio
 		LidOpenDetect = False
 		LidOpenEventExpires = 0
 		"""
@@ -251,11 +253,10 @@ def _work_cycle(mode, ctx):
 	if mode == 'Prime':
 		auger_rate = settings['globals']['augerrate']
 		prime_amount = control['prime_amount']
-		prime_duration = int(prime_amount / auger_rate)  # Auger On Time = Prime Amount (Grams) / (Grams per Second)
-		OnTime = prime_duration
-		OffTime = 1  # Auger Off Time
-		CycleTime = OnTime + OffTime  # Total Cycle Time
-		CycleRatio = RawCycleRatio = OnTime / CycleTime  # Ratio of OnTime to CycleTime
+		_ct = prime_cycle_times(prime_amount, auger_rate)  # Auger On Time = Prime Amount (Grams) / (Grams per Second)
+		prime_duration = int(_ct.on_time)
+		OnTime, OffTime, CycleTime, CycleRatio = _ct.on_time, _ct.off_time, _ct.cycle_time, _ct.cycle_ratio
+		RawCycleRatio = _ct.cycle_ratio
 		""" Allow for the igniter to be turned on during prime mode - user selected """
 		if settings['globals']['prime_ignition'] and control['next_mode'] == 'Startup':
 			grill_platform.igniter_on()
@@ -270,31 +271,30 @@ def _work_cycle(mode, ctx):
 		raw_startup_temp = (
 			ptemp  # This value is needed for the case when the grill starts hot and exit temp has been exceeded
 		)
-		control['safety']['startuptemp'] = int(max((ptemp * 0.9), settings['safety']['minstartuptemp']))
-		control['safety']['startuptemp'] = int(
-			min(control['safety']['startuptemp'], settings['safety']['maxstartuptemp'])
-		)
+		control['safety']['startuptemp'] = startup_temp_bounds(ptemp, settings['safety'])
 		control['safety']['afterstarttemp'] = ptemp
 		ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
 	# Check if the temperature of the grill dropped below the startuptemp
 	elif mode in ('Smoke', 'Hold'):
-		if control['safety']['afterstarttemp'] < control['safety']['startuptemp']:
-			if control['safety']['reigniteretries'] == 0:
-				status = 'Inactive'
-				ctx.store.display_commands().push(('text', 'ERROR'))
-				control['mode'] = 'Error'
-				control['updated'] = True
-				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-				ctx.notifications.send('Grill_Error_02')
-			else:
-				control['safety']['reigniteretries'] -= 1
-				control['safety']['reignitelaststate'] = mode
-				status = 'Inactive'
-				ctx.store.display_commands().push(('text', 'Re-Ignite'))
-				control['mode'] = 'Reignite'
-				control['updated'] = True
-				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-				ctx.notifications.send('Grill_Error_03')
+		verdict = evaluate_flameout(
+			control['safety']['afterstarttemp'], control['safety']['startuptemp'], control['safety']['reigniteretries']
+		)
+		if verdict is SafetyVerdict.ERROR:
+			status = 'Inactive'
+			ctx.store.display_commands().push(('text', 'ERROR'))
+			control['mode'] = 'Error'
+			control['updated'] = True
+			ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
+			ctx.notifications.send('Grill_Error_02')
+		elif verdict is SafetyVerdict.REIGNITE:
+			control['safety']['reigniteretries'] -= 1
+			control['safety']['reignitelaststate'] = mode
+			status = 'Inactive'
+			ctx.store.display_commands().push(('text', 'Re-Ignite'))
+			control['mode'] = 'Reignite'
+			control['updated'] = True
+			ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
+			ctx.notifications.send('Grill_Error_03')
 
 	# Apply Smart Start Settings if Enabled
 	startup_timer = settings['startup']['duration']
@@ -303,33 +303,20 @@ def _work_cycle(mode, ctx):
 		if mode in ('Startup', 'Reignite'):
 			control['smartstart']['startuptemp'] = int(ptemp)
 			# Cycle through profiles, and set profile if startup temperature falls below the minimum temperature
-			for profile_selected in range(0, len(settings['startup']['smartstart']['temp_range_list'])):
-				if (
-					control['smartstart']['startuptemp']
-					< settings['startup']['smartstart']['temp_range_list'][profile_selected]
-				):
-					control['smartstart']['profile_selected'] = profile_selected
-					ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-					break  # Break out of the loop
-				if profile_selected == len(settings['startup']['smartstart']['temp_range_list']) - 1:
-					control['smartstart']['profile_selected'] = profile_selected + 1
-					ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
+			control['smartstart']['profile_selected'] = select_profile(
+				control['smartstart']['startuptemp'], settings['startup']['smartstart']['temp_range_list']
+			)
+			ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
 		# Apply the profile
 		profile_selected = control['smartstart']['profile_selected']
-		OnTime = settings['startup']['smartstart']['profiles'][profile_selected][
-			'augerontime'
-		]  # Auger On Time (Default 15s)
-		OffTime = settings['cycle_data']['SmokeOffCycleTime'] + (
-			settings['startup']['smartstart']['profiles'][profile_selected]['p_mode'] * 10
-		)  # Auger Off Time
-		CycleTime = OnTime + OffTime  # Total Cycle Time
-		CycleRatio = RawCycleRatio = OnTime / CycleTime  # Ratio of OnTime to CycleTime
-		startup_timer = settings['startup']['smartstart']['profiles'][profile_selected]['startuptime']
+		profile = settings['startup']['smartstart']['profiles'][profile_selected]
+		_ct, startup_timer, _mbits = profile_cycle(profile, settings['cycle_data'])
+		OnTime, OffTime, CycleTime, CycleRatio = _ct.on_time, _ct.off_time, _ct.cycle_time, _ct.cycle_ratio
+		RawCycleRatio = _ct.cycle_ratio
 		# Write Metrics
 		metrics['smart_start_profile'] = profile_selected
 		metrics['startup_temp'] = control['smartstart']['startuptemp']
-		metrics['p_mode'] = settings['startup']['smartstart']['profiles'][profile_selected]['p_mode']
-		metrics['auger_cycle_time'] = settings['startup']['smartstart']['profiles'][profile_selected]['augerontime']
+		metrics.update(_mbits)
 		ctx.store.write_metrics(metrics)
 
 	# Set the start time
@@ -405,12 +392,9 @@ def _work_cycle(mode, ctx):
 			else:
 				eventLogger.setLevel(logging.INFO)
 			if mode in ('Startup', 'Reignite', 'Smoke'):
-				OnTime = settings['cycle_data']['SmokeOnCycleTime']  # Auger On Time (Default 15s)
-				OffTime = settings['cycle_data']['SmokeOffCycleTime'] + (
-					settings['cycle_data']['PMode'] * 10
-				)  # Auger Off Time
-				CycleTime = OnTime + OffTime  # Total Cycle Time
-				CycleRatio = RawCycleRatio = OnTime / CycleTime  # Ratio of OnTime to CycleTime
+				_ct = smoke_cycle_times(settings['cycle_data'])
+				OnTime, OffTime, CycleTime, CycleRatio = _ct.on_time, _ct.off_time, _ct.cycle_time, _ct.cycle_ratio
+				RawCycleRatio = _ct.cycle_ratio
 				# Write Metrics (note these will overwrite the previous value)
 				metrics['p_mode'] = settings['cycle_data']['PMode']
 				metrics['auger_cycle_time'] = settings['cycle_data']['SmokeOnCycleTime']
@@ -687,23 +671,25 @@ def _work_cycle(mode, ctx):
 		if mode in ('Startup', 'Reignite'):
 			control['safety']['afterstarttemp'] = ptemp
 		elif mode in ('Smoke', 'Hold'):
-			if ptemp < control['safety']['startuptemp']:
-				if control['safety']['reigniteretries'] == 0:
-					ctx.store.display_commands().push(('text', 'ERROR'))
-					control['mode'] = 'Error'
-					control['updated'] = True
-					ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-					ctx.notifications.send('Grill_Error_02')
-					break
-				else:
-					control['safety']['reigniteretries'] -= 1
-					control['safety']['reignitelaststate'] = mode
-					ctx.store.display_commands().push(('text', 'Re-Ignite'))
-					control['mode'] = 'Reignite'
-					control['updated'] = True
-					ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-					ctx.notifications.send('Grill_Error_03')
-					break
+			verdict = evaluate_flameout(
+				ptemp, control['safety']['startuptemp'], control['safety']['reigniteretries']
+			)
+			if verdict is SafetyVerdict.ERROR:
+				ctx.store.display_commands().push(('text', 'ERROR'))
+				control['mode'] = 'Error'
+				control['updated'] = True
+				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
+				ctx.notifications.send('Grill_Error_02')
+				break
+			elif verdict is SafetyVerdict.REIGNITE:
+				control['safety']['reigniteretries'] -= 1
+				control['safety']['reignitelaststate'] = mode
+				ctx.store.display_commands().push(('text', 'Re-Ignite'))
+				control['mode'] = 'Reignite'
+				control['updated'] = True
+				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
+				ctx.notifications.send('Grill_Error_03')
+				break
 
 		if mode in ('Smoke', 'Hold'):
 			# Check if target temperature has been achieved before utilizing Smoke Plus Mode
@@ -752,22 +738,10 @@ def _work_cycle(mode, ctx):
 				and (now - fan_update_time) > settings['pwm']['update_time']
 			):
 				fan_update_time = now
-				if ptemp > control['primary_setpoint']:
-					control['duty_cycle'] = settings['pwm']['min_duty_cycle']
+				_duty = hold_duty_cycle(control['primary_setpoint'], ptemp, settings['pwm'])
+				if _duty is not None:
+					control['duty_cycle'] = _duty
 					ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-				else:
-					# Cycle through profiles, and set duty cycle if setpoint temp is within range
-					for temp_profile in range(0, len(settings['pwm']['temp_range_list'])):
-						if (control['primary_setpoint'] - ptemp) <= settings['pwm']['temp_range_list'][temp_profile]:
-							duty_cycle = settings['pwm']['profiles'][temp_profile]['duty_cycle']
-							duty_cycle = max(duty_cycle, settings['pwm']['min_duty_cycle'])
-							duty_cycle = min(duty_cycle, settings['pwm']['max_duty_cycle'])
-							control['duty_cycle'] = duty_cycle
-							ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-							break  # Break out of the loop
-						if temp_profile == len(settings['pwm']['temp_range_list']) - 1:
-							control['duty_cycle'] = settings['pwm']['max_duty_cycle']
-							ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
 
 			# This added section allows for additional pid control by controlling the fan.
 			# Implemented for AC fans and DC fans not using PWM Control.
@@ -782,19 +756,19 @@ def _work_cycle(mode, ctx):
 				# If smoke plus mode is active set max fan ratio to smoke plus ratio otherwise set to 1.
 				if control['s_plus']:
 					total_fan_cycle = settings['smoke_plus']['on_time'] + settings['smoke_plus']['off_time']
-					max_fan_ratio = settings['smoke_plus']['on_time'] / total_fan_cycle
 				else:
 					total_fan_cycle = CycleTime
-					max_fan_ratio = 1
+				max_fan_ratio = smoke_plus_max_ratio(settings['smoke_plus'], control['s_plus'])
 
 				# Divide the pid output by the u_min.
 				# This way when we are at u_min our fan will be at 100% fan ratio and will drop proportionally down to 0 as controller_output drops.
 				# If pid is returning negative values the best we can do is shut off the fan so set min to 0.
 				#
 				controller_output_adjusted = max(0, controller_output / settings['cycle_data']['u_min'])
-				FanRatio = controller_output_adjusted * max_fan_ratio
-				fan_on_time = total_fan_cycle * FanRatio
-				fan_off_time = total_fan_cycle * (1 - FanRatio)
+				_ft = fan_assist_times(controller_output, total_fan_cycle, max_fan_ratio, settings['cycle_data']['u_min'])
+				FanRatio = _ft.ratio
+				fan_on_time = _ft.on_time
+				fan_off_time = _ft.off_time
 				eventLogger.debug(
 					f'Fan PID: Fan ON, controller_output: {controller_output}, controller_output_adjusted: {controller_output_adjusted}'
 				)
@@ -839,11 +813,7 @@ def _work_cycle(mode, ctx):
 						and (mode == 'Smoke' or (mode == 'Hold' and not control['pwm_control']))
 						and settings['smoke_plus']['fan_ramp']
 					):
-						on_time = settings['smoke_plus']['on_time']
-						max_duty_cycle = settings['pwm']['max_duty_cycle']
-						min_duty_cycle = settings['pwm']['min_duty_cycle']
-						sp_duty_cycle = settings['smoke_plus']['duty_cycle']
-						grill_platform.pwm_fan_ramp(on_time, min_duty_cycle, max_duty_cycle * (sp_duty_cycle / 100))
+						grill_platform.pwm_fan_ramp(*ramp_params(settings['smoke_plus'], settings['pwm']))
 						pwm_fan_ramping = True
 						eventLogger.debug('Smoke Plus: Fan Ramping Up')
 					else:
@@ -936,7 +906,7 @@ def _work_cycle(mode, ctx):
 			break
 
 		# Max Temp Safety Control
-		if ptemp > settings['safety']['maxtemp']:
+		if over_max_temp(ptemp, settings['safety']):
 			ctx.store.display_commands().push(('text', 'ERROR'))
 			control['mode'] = 'Error'
 			control['updated'] = True
