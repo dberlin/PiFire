@@ -44,19 +44,10 @@ control.eventLogger = logging.getLogger('characterization')
 control.controlLogger = logging.getLogger('characterization')
 
 
-# --- Pitfall 2: no-op Process_Monitor stand-in (no thread, no supervisorctl) ---
-class _NoopMonitor:
-	def __init__(self, *a, **k):
-		pass
-
-	def start_monitor(self):
-		pass
-
-	def heartbeat(self):
-		pass
-
-	def stop_monitor(self):
-		pass
+# --- Pitfall 2: Process_Monitor spawns a heartbeat thread + shells out to
+# supervisorctl. It is neutralized globally for all tests by the autouse
+# `_neutralize_process_monitor` fixture in tests/conftest.py (which no-ops the
+# shared class's methods), so nothing here needs to patch it. ---
 
 
 @dataclass
@@ -131,15 +122,14 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
 		probes = _CappedProbes(probes, ctx.store, probe_cap)
 		ctx.devices.probe_complex = probes
 
-	prev_monitor = control.Process_Monitor
-	control.Process_Monitor = _NoopMonitor
+	# Process_Monitor is neutralized globally by the autouse fixture in
+	# tests/conftest.py, so we only need to (optionally) inject a fake runner.
 	prev_build_runner = control.build_runner
 	if runner is not None:
 		control.build_runner = lambda *a, **k: (runner, 'Active')
 	try:
 		control._work_cycle(mode, ctx)
 	finally:
-		control.Process_Monitor = prev_monitor
 		control.build_runner = prev_build_runner
 
 	return CaptureResult(
