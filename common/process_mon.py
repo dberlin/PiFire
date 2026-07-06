@@ -69,9 +69,9 @@ class Process_Monitor:
 		self.active = True
 
 	def stop_monitor(self):
-		self.active = False
-
-	def kill_monitor(self):
+		# Terminate the heartbeat thread. base.run() builds a fresh
+		# Process_Monitor per work cycle, so stopping always means "done with
+		# this one" -- there is no restart-the-same-instance case to preserve.
 		self.active = False
 		self.kill = True
 
