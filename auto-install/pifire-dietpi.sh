@@ -124,7 +124,7 @@ echo "**                                                                     **"
 echo "**      Installing Dependencies... (This could take several minutes)   **" | tee -a ~/logs/pifire_install.log
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
-$SUDO apt install python3-dev python3-pip python3-venv python3-scipy python3-rpi-lgpio build-essential nginx git supervisor ttf-mscorefonts-installer valkey-server gfortran libatlas-base-dev libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluez bluez-firmware libnss-mdns -y 2>&1 | tee -a ~/logs/pifire_install.log
+$SUDO apt install python3-dev python3-pip python3-venv python3-scipy python3-rpi-lgpio build-essential nginx git supervisor ttf-mscorefonts-installer valkey-server gfortran libatlas-base-dev libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluez bluez-firmware libnss-mdns cage seatd -y 2>&1 | tee -a ~/logs/pifire_install.log
 
 # Grab project files
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
@@ -168,6 +168,13 @@ $SUDO usermod -a -G gpio $USER
 $SUDO usermod -a -G spi $USER
 $SUDO usermod -a -G video $USER
 $SUDO adduser $USER i2c
+
+# Seat access for the cage Wayland compositor (QtQuick displays).
+$SUDO systemctl enable --now seatd 2>&1 | tee -a ~/logs/pifire_install.log
+for grp in video input render seat; do
+    $SUDO usermod -a -G "$grp" $USER 2>/dev/null || true
+    $SUDO usermod -a -G "$grp" root 2>/dev/null || true
+done
 
 $SUDO " + Enabling and Starting Bluetooth service"
 $SUDO systemctl enable bluetooth.service 

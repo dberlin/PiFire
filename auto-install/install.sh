@@ -195,7 +195,7 @@ echo "**      Installing Dependencies... (This could take several minutes)   **"
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
 # Install dependencies, exit if failed
-$SUDO apt install python3-dev python3-pip python3-venv python3-scipy nginx git supervisor ttf-mscorefonts-installer valkey-server gfortran libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluetooth bluez -y 2>&1 | tee -a ~/logs/pifire_install.log
+$SUDO apt install python3-dev python3-pip python3-venv python3-scipy nginx git supervisor ttf-mscorefonts-installer valkey-server gfortran libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluetooth bluez cage seatd -y 2>&1 | tee -a ~/logs/pifire_install.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo " !! Failed to install dependencies. Installation cannot continue." | tee -a ~/logs/pifire_install.log
     exit 1
@@ -247,9 +247,15 @@ echo ""
 echo " + Setting Up PiFire Group"
 cd /usr/local/bin
 $SUDO groupadd pifire 
-$SUDO usermod -a -G pifire $USER 
-$SUDO usermod -a -G pifire root 
-# Change ownership to group=pifire for all files/directories in pifire 
+$SUDO usermod -a -G pifire $USER
+$SUDO usermod -a -G pifire root
+# Seat access for the cage Wayland compositor (QtQuick displays).
+$SUDO systemctl enable --now seatd 2>&1 | tee -a ~/logs/pifire_install.log
+for grp in video input render seat; do
+    $SUDO usermod -a -G "$grp" $USER 2>/dev/null || true
+    $SUDO usermod -a -G "$grp" root 2>/dev/null || true
+done
+# Change ownership to group=pifire for all files/directories in pifire
 $SUDO chown -R $USER:pifire pifire 
 # Change ability for pifire group to read/write/execute 
 $SUDO chmod -R 777 /usr/local/bin

@@ -120,7 +120,7 @@ $SUDO dnf -y install \
     python3 python3-devel python3-pip python3-scipy \
     gcc gcc-c++ make gcc-gfortran openblas-devel lapack-devel \
     openjpeg glib2-devel \
-    nginx git supervisor valkey \
+    nginx git supervisor valkey cage seatd \
     bluez bluez-libs-devel \
     cabextract curl dejavu-sans-fonts fontconfig 2>&1 | tee -a "$LOG"
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
@@ -169,6 +169,14 @@ log " + Setting up the pifire group and permissions"
 $SUDO groupadd -f pifire
 $SUDO usermod -a -G pifire "$USER"
 $SUDO usermod -a -G pifire root
+
+# Seat access for the cage Wayland compositor (QtQuick displays).
+$SUDO systemctl enable --now seatd 2>&1 | tee -a "$LOG" || log " ! seatd not enabled (continuing)."
+for grp in video input render seat; do
+    $SUDO usermod -a -G "$grp" "$USER" 2>/dev/null || true
+    $SUDO usermod -a -G "$grp" root 2>/dev/null || true
+done
+
 $SUDO chown -R "$USER":pifire /usr/local/bin/pifire
 $SUDO chmod -R 775 /usr/local/bin/pifire
 
