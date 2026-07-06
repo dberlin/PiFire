@@ -1,6 +1,8 @@
+import os
 import time
 import numpy as np
-from controller.mpc import Controller
+import pytest
+from controller.mpc import Controller, _DEFAULTS
 
 CONFIG = dict(
 	n_horizon=20,
@@ -69,3 +71,20 @@ def test_warm_solve_under_budget():
 		c.update(100.0)
 	avg_ms = (time.perf_counter() - t0) / 20 * 1e3
 	assert avg_ms < 200.0  # >=1 Hz with wide margin (x86 ~8 ms)
+
+
+_SHIPPED = os.path.join(os.path.dirname(__file__), '..', 'controller', 'mpc_policy_net.npz')
+
+
+@pytest.mark.skipif(not os.path.exists(_SHIPPED), reason='shipped net artifact absent')
+def test_fan_on_derives_fan_suffixed_path_and_falls_back(capsys):
+	# base points at a valid fan-off artifact; its _fan sibling does not exist.
+	# Under enable_fan_input=True the loader must look for the _fan path (not the
+	# base) and, finding it absent, fall back to the NLP.
+	cfg = {**_DEFAULTS, 'policy': 'net', 'enable_fan_input': True, 'policy_net_path': _SHIPPED}
+	c = Controller(cfg, 'C', dict(CYCLE))
+	assert c._net is None  # fell back to NLP
+	out = capsys.readouterr().out
+	assert '_fan.npz' in out  # tried the fan-on path, not the base
+	c.set_target(150.0)
+	assert c.update(150.0)['fan']['duty'] is not None  # fan-on -> allocator returns a duty, no raise

@@ -170,9 +170,10 @@ class Controller(ControllerBase):
 
 	def _load_net_policy(self, cfg):
 		"""Load the numpy net policy, or return None to fall back to the NLP."""
-		from controller.mpc_net import NetPolicy
+		from controller.mpc_net import NetPolicy, net_path_for
 
-		path = cfg.get('policy_net_path')
+		base = cfg.get('policy_net_path')
+		path = net_path_for(base, bool(cfg.get('enable_fan_input'))) if base else base
 		if not path or not os.path.exists(path):
 			print(f'[mpc] policy=net but artifact not found ({path}); using NLP')
 			return None
