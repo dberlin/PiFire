@@ -1,4 +1,6 @@
-"""Pure smart-start profile selection/cycle calculations extracted from control.py. No I/O."""
+"""Pure smart-start profile selection/cycle calculations used by StartupMode
+and SmokeMode (controller/runtime/modes/) to pick a temperature-range profile
+and derive its auger on/off cycle timing. No I/O."""
 
 from controller.runtime.logic.cycle import CycleTimes
 

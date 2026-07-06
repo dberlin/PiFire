@@ -1,16 +1,18 @@
 """Controller orchestrator: the outer control-process loop.
 
-Extracted from control.py's `__main__` so the mode-dispatch loop is testable in
-isolation. `Controller.tick()` is exactly one iteration of the old `while True`
-loop; `Controller.run()` is `setup()` + the loop.
+`Controller` owns the persistent per-process state (settings/control/status/
+pelletdb/last-switch-state) and dispatches to per-mode work cycles.
+`Controller.tick()` is one iteration: poll the on/off switch, refresh
+status/probe-device info, apply pending control/settings/notification/hopper
+changes, then -- if a mode change is pending -- run the requested mode's work
+cycle via `work_cycle()`/`run_work_cycle()` and hand off to `next_mode()`.
+`Controller.run()` is `setup()` followed by `while True: tick(); sleep(0.1)`
+(RealClock in production).
 
-FAITHFUL EXTRACTION: the old loop called bare module-level datastore functions
-(`read_control`, `write_control`, `read_metrics`, ...). Those are routed here
-through `self.ctx.store`, which in production is `ValkeyStore` -- a thin
-pass-through to the very same `common.common` functions -- so behavior is
-identical in production, while tests inject an `InMemoryStore`. Likewise
-`time.time()`/`time.sleep()` go through `self.ctx.clock` (RealClock delegates to
-`time`, so prod is unchanged; tests inject a ManualClock).
+All datastore access goes through `self.ctx.store` (a `Store`; production uses
+`ValkeyStore`, tests inject `InMemoryStore`), and all timing goes through
+`self.ctx.clock` (`RealClock` in production, `ManualClock` in tests), so the
+loop is deterministic and testable without a real Valkey server or wall clock.
 
 Notification/cookfile helpers (`check_notify`, `send_notifications`,
 `create_cookfile`) and `os.system` remain module-level references so tests can
@@ -51,9 +53,11 @@ _MODE_HANDLERS = {
 
 
 def run_work_cycle(mode, ctx):
-	"""Run a single per-mode work cycle. Module-level so it can be exercised in
-	isolation (the characterization/E2E harness runs one cycle at a time)
-	without constructing a full Controller."""
+	"""Run a single per-mode work cycle: look up the `ControlMode` subclass for
+	`mode` in `_MODE_HANDLERS`, construct it with a fresh `WorkCycleState`, and
+	run it to completion. Module-level so it can be exercised in isolation (the
+	characterization/E2E harness runs one cycle at a time) without constructing
+	a full Controller."""
 	return _MODE_HANDLERS[mode](ctx, WorkCycleState()).run()
 
 
@@ -67,14 +71,14 @@ class Controller:
 		self.dist_device = ctx.devices.dist_device
 		self.eventLogger = ctx.event_log
 		self.controlLogger = ctx.control_log
-		# Persistent loop state (was module-level locals in control.py __main__).
+		# Persistent loop state, held across tick() calls for the process lifetime.
 		self.settings = ctx.store.read_settings()
 		self.control = None
 		self.status = None
 		self.pelletdb = None
 		self.last = None
 
-	# --- work-cycle dispatch helpers (were module functions in control.py) ---
+	# --- work-cycle dispatch helpers ---
 
 	def work_cycle(self, mode):
 		"""Run one per-mode work cycle."""
@@ -194,13 +198,12 @@ class Controller:
 		self.grill_platform.cleanup()
 
 	def setup(self):
-		"""Pre-loop initialization (was inline before `while True` in __main__)."""
+		"""One-time initialization run before the main loop starts."""
 		store = self.ctx.store
 
-		# Initial hopper-level check on boot. (Restores a pre-loop block that was
-		# dropped during the refactor -- without it `pelletdb` is unbound the
-		# first time the loop calls check_notify, and the boot-time hopper read
-		# never happens.)
+		# Initial hopper-level check on boot. Without this, `pelletdb` is unbound
+		# the first time the loop calls check_notify, and the boot-time hopper
+		# read never happens.
 		self.pelletdb = store.read_pellet_db()
 		self.pelletdb['current']['hopper_level'] = self.dist_device.get_level(override=True)
 		store.write_pellet_db(self.pelletdb)
@@ -220,7 +223,7 @@ class Controller:
 
 		# Bind `control` before the loop so the iteration-1 switch check has it
 		# (the entry point already flushed control; boot_to_monitor may have just
-		# updated it). Matches the pre-loop `control` binding in the old __main__.
+		# updated it).
 		self.control = store.read_control()
 
 	def run(self):

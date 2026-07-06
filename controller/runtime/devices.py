@@ -1,9 +1,10 @@
-"""Hardware device construction. Moved verbatim (prototype-fallback try/except
-logic and all) from control.py's __main__ block. build_devices() builds the
-grill platform, probe complex, and distance sensor for the controller
-process; build_display() builds only the display for the separate display
-process (Phase 8) -- kept apart so the two processes never touch each
-other's hardware."""
+"""Hardware device construction, with prototype-fallback try/except logic:
+each device module is imported dynamically from settings, and if it fails to
+load or configure, a simulated "none" fallback is substituted and the failure
+is recorded to the errors list/logs. build_devices() builds the grill
+platform, probe complex, and distance sensor for the controller process;
+build_display() builds only the display for the separate display process --
+kept apart so the two processes never touch each other's hardware."""
 
 import importlib
 
@@ -23,16 +24,17 @@ from controller.runtime.context import Devices
 
 def build_display(settings, *, errors, event_log, control_log):
 	"""
-	Construct the display device, using the same prototype-fallback logic
-	that used to live in control.py's __main__ block. Used by the display.py
-	process. NOT called by the controller (build_devices) -- the display
-	process must never touch grill/probe/distance hardware, and the
-	controller must never touch the display.
+	Construct the display device with prototype-fallback logic: import the
+	configured display module, falling back to the simulated "none" display
+	(and recording the failure) if import or configuration fails. Used by the
+	display process (display_process.py). NOT called by the controller
+	(build_devices) -- the display process must never touch grill/probe/
+	distance hardware, and the controller must never touch the display.
 
 	:param settings: Settings dictionary
 	:param errors: Errors list to append to (and persist via write_errors)
-	:param event_log: Event logger (was module-global eventLogger)
-	:param control_log: Control logger (was module-global controlLogger)
+	:param event_log: Event logger
+	:param control_log: Control logger
 	:return: (display_or_None, errors)
 	"""
 	units = settings['globals']['units']
@@ -103,18 +105,19 @@ def build_display(settings, *, errors, event_log, control_log):
 def build_devices(settings, *, errors, event_log, control_log):
 	"""
 	Construct the grill platform, probe complex, and distance/hopper-level
-	devices, using the same prototype-fallback logic that used to live in
-	control.py's __main__ block.
+	devices, with the same prototype-fallback logic as build_display(): import
+	each configured device module, falling back to a simulated device (and
+	recording the failure) if import or configuration fails.
 
-	Does NOT construct the display -- that is display.py's job via
+	Does NOT construct the display -- that is the display process's job via
 	build_display(). The controller process must stay headless with respect
 	to the display so that the two processes never race on the same
 	hardware.
 
 	:param settings: Settings dictionary
 	:param errors: Errors list to append to (and persist via write_errors)
-	:param event_log: Event logger (was module-global eventLogger)
-	:param control_log: Control logger (was module-global controlLogger)
+	:param event_log: Event logger
+	:param control_log: Control logger
 	:return: (Devices, errors)
 	"""
 	platform_config = settings['platform']

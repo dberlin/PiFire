@@ -49,11 +49,11 @@ for module globals. The context bundles:
 
 ## Control flow
 
-- **`Controller`** (`controller.py`) is the outer loop, extracted from
-  `control.py`'s old `__main__`. `Controller.tick()` is exactly one loop
-  iteration (switch poll, notifications/timers/hopper/settings handling, and the
-  mode-dispatch block); `Controller.run()` is `setup()` + `while True: tick()`.
-  Its orchestration is pinned by `tests/characterization/test_controller_loop_golden.py`.
+- **`Controller`** (`controller.py`) is the outer loop. `Controller.tick()` is
+  exactly one loop iteration (switch poll, notifications/timers/hopper/settings
+  handling, and the mode-dispatch block); `Controller.run()` is `setup()` +
+  `while True: tick()`. Its orchestration is pinned by
+  `tests/characterization/test_controller_loop_golden.py`.
 - **Mode handlers** (`modes/`) are a template-method state machine. `ControlMode`
   (`modes/base.py`) reproduces the shared per-cycle skeleton; each mode
   (Monitor, Manual, Prime, Startup, Reignite, Smoke, Hold, Shutdown) overrides

@@ -1,4 +1,7 @@
-"""Pure fan-timing calculations extracted from control.py. No I/O."""
+"""Pure fan-timing calculations and the shared start_fan() helper used by the
+mode handlers (controller/runtime/modes/) for fan-assist/smoke-plus timing and
+turning the fan on (AC or duty-cycled DC). No I/O beyond the grill_platform
+call in start_fan()."""
 
 from dataclasses import dataclass
 

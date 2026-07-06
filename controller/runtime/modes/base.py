@@ -22,10 +22,10 @@ from controller.runtime.system_commands import process_system_commands
 
 
 class ControlMode:
-	"""Template-method base for a single `_work_cycle` invocation.
+	"""Template-method base for a single mode work cycle.
 
-	Subclasses set `name` (matches the legacy `mode` string) and override
-	hooks with safe no-op defaults:
+	Subclasses set `name` (the control `mode` string this class handles, e.g.
+	'Smoke', 'Hold') and override hooks with safe no-op defaults:
 	  - setup(): pre-loop mode-specific configuration (fan/power, cycle
 	    params, runner, ...).
 	  - setup_safety(ptemp) -> str: pre-loop safety check, called AFTER the

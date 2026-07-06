@@ -1,4 +1,6 @@
-"""Pure auger cycle-time calculations extracted from _work_cycle. No I/O."""
+"""Pure auger cycle-time calculations used by the per-mode setup/on_settings_reload
+hooks in controller/runtime/modes/ to derive on_time/off_time/cycle_time/ratio
+from settings. No I/O."""
 
 from dataclasses import dataclass
 

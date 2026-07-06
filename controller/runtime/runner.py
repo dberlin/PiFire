@@ -1,5 +1,16 @@
-"""Temperature-controller execution seam (PID/MPC/etc). Sync impl == today's
-inline behavior; a ThreadedControllerRunner may be added later for MPC."""
+"""Temperature-controller execution seam (PID/MPC/etc).
+
+`ControllerRunner` is the abstract interface `HoldMode.on_tick` drives:
+set_target/submit/latest to run the control math, reconfigure() to rebuild the
+core on a settings change, control_period() for the mode's poll interval, and
+commands_fan() so the caller knows whether this controller issues its own fan
+command (MPC) or leaves fan control to the temperature-profile logic.
+`SyncControllerRunner` runs the underlying controller module's `update()`
+synchronously on submit/latest -- control math and probe-read cadence are the
+same cadence. A `ThreadedControllerRunner` could later run the core on its own
+thread and hand back the latest output via `.latest()`, decoupling the two
+cadences; the seam exists for that but no threaded implementation exists yet.
+"""
 
 import importlib
 from abc import ABC, abstractmethod

@@ -93,11 +93,10 @@ class HoldMode(ControlMode):
 			+ str(self.state.cycle.ratio)
 		)
 
-		# Initialize the cycle start time to now. base.run() has not yet set
-		# self.state.timers.start_time (that happens after setup_safety(), later in
-		# the shared pre-loop) -- mirror StartupMode's approach and take our
-		# own reading here, matching the inline's single `start_time =
-		# ctx.clock.now()` reused for both.
+		# Initialize the cycle start time to now. `ControlMode.run()` has not yet
+		# set self.state.timers.start_time (that happens after setup_safety(),
+		# later in the shared pre-loop) -- like StartupMode, take our own
+		# ctx.clock.now() reading here rather than depending on that later value.
 		self.state.controller.cycle_start = self.ctx.clock.now()
 
 	def setup_safety(self, ptemp) -> str:
@@ -161,9 +160,10 @@ class HoldMode(ControlMode):
 			)
 			# Controllers that command the fan directly (MPC) route the duty
 			# through control['duty_cycle'] so the PWM apply path below uses it.
-			# controller.controls_fan (set at setup from the controller's
-			# commands_fan() capability) already suppresses the legacy
-			# temperature-profile fan logic so it cannot overwrite the MPC command.
+			# self.state.controller.controls_fan (set at setup from the
+			# controller's commands_fan() capability) suppresses the
+			# temperature-profile fan logic below so it cannot overwrite the
+			# MPC-issued fan command.
 			if fan_cmd is not None and settings['platform']['dc_fan'] and control['pwm_control']:
 				self.state.controller.fan_duty = fan_cmd['duty']
 				control['duty_cycle'] = self.state.controller.fan_duty

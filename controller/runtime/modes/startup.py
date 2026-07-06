@@ -17,9 +17,8 @@ class StartupMode(ControlMode):
 	shared (non-Hold) auger-cycle toggle and publishes `self.state.cycle.ratio`
 	to MQTT. check_safety() just tracks afterstarttemp (no write -- teardown
 	does the write). should_exit() recomputes the smart-start-vs-normal
-	`self.state.startup.timer`/exit_temp each tick (mirrors the control.py
-	loop-body recompute, not just the setup-time value) and exits on timer
-	elapsed or exit_temp reached."""
+	`self.state.startup.timer`/exit_temp on every tick (not just once at setup)
+	and exits when the timer elapses or exit_temp is reached."""
 
 	name = 'Startup'
 
@@ -100,13 +99,11 @@ class StartupMode(ControlMode):
 		"""Startup writes control['startup_timestamp'] at the start of the run.
 		Overridden as a no-op by ReigniteMode (which doesn't reset it).
 
-		NOTE: this runs from setup_safety(), which base.run() calls BEFORE it
-		sets self.state.timers.start_time (that happens later in the shared
-		pre-loop). The inline control.py code computes `start_time =
-		ctx.clock.now()` once and reuses that same value for both the loop's
-		start_time and control['startup_timestamp'] -- so here we take our own
-		ctx.clock.now() reading rather than reading self.state.timers.start_time
-		(which is still its 0.0 default at this point)."""
+		NOTE: this runs from setup_safety(), which `ControlMode.run()` calls
+		BEFORE it sets self.state.timers.start_time (that happens later in the
+		shared pre-loop). We therefore take our own ctx.clock.now() reading here
+		rather than reading self.state.timers.start_time (which is still its 0.0
+		default at this point)."""
 		self.control['startup_timestamp'] = self.ctx.clock.now()
 		self.ctx.store.write_control(self.control, WriteKind.OVERWRITE, origin='control')
 

@@ -1,4 +1,6 @@
-"""Pure PWM duty-cycle/ramp calculations extracted from control.py. No I/O."""
+"""Pure PWM duty-cycle/ramp calculations used by HoldMode
+(controller/runtime/modes/hold.py) to derive DC-fan duty cycle and ramp
+parameters from probe temperature and settings. No I/O."""
 
 
 def hold_duty_cycle(setpoint, ptemp, pwm_settings):
@@ -13,9 +15,8 @@ def hold_duty_cycle(setpoint, ptemp, pwm_settings):
 		if temp_profile == len(pwm_settings['temp_range_list']) - 1:
 			return pwm_settings['max_duty_cycle']
 	# temp_range_list is empty: the loop body never runs and there is no
-	# explicit return, so this implicitly returns None. This mirrors
-	# control.py, where the equivalent for-loop would never assign
-	# control['duty_cycle'] in that case.
+	# explicit return, so this implicitly returns None and the caller leaves
+	# control['duty_cycle'] unchanged.
 
 
 def ramp_params(smoke_plus, pwm_settings):

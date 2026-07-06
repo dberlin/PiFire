@@ -29,12 +29,10 @@ class SmokeMode(ControlMode):
 	name = 'Smoke'
 
 	def setup(self):
-		# NOTE: the Recipe-mode trigger setup (inline ~136-160, gated
-		# `control['mode']=='Recipe' and mode in ('Smoke','Hold')`) is already
-		# reproduced UNCONDITIONALLY in base.run()'s shared pre-loop section
-		# (base.py ~262-291, gated on `mode in ['Smoke', 'Hold']` using the
-		# same `self.name`) -- it runs for every ControlMode subclass, so it
-		# is NOT duplicated here.
+		# NOTE: Recipe-mode trigger setup (gated on `control['mode'] == 'Recipe'
+		# and self.name in ('Smoke', 'Hold')`) lives in the shared pre-loop
+		# section of `ControlMode.run()` (base.py), which runs for every
+		# ControlMode subclass -- it is not duplicated here.
 		import control as _control
 
 		start_fan(self.grill, self.settings)

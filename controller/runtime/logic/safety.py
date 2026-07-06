@@ -1,4 +1,6 @@
-"""Pure safety decisions extracted from _work_cycle. No I/O."""
+"""Pure safety decisions used by the per-mode safety checks (setup_safety,
+check_safety) in controller/runtime/modes/. No I/O -- callers own reading
+control/settings and writing the resulting mode/status changes."""
 
 from enum import Enum
 
