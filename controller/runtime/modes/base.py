@@ -70,6 +70,42 @@ class ControlMode:
 	def teardown(self, ptemp):
 		pass
 
+	def _on_auger_on(self, now):
+		pass
+
+	# ---- shared helpers ----
+	def _auger_cycle_tick(self, now, current_output_status):
+		"""Reproduces the SHARED (non-Hold) auger toggle from the legacy
+		auger-cycle block (control.py ~535-575): turn the auger on/off based
+		on elapsed time vs. cycle_time/cycle_ratio, honoring manual overrides
+		and accumulating augerontime metrics on auger-off. Hold overrides
+		`_on_auger_on` to also recompute OnTime/OffTime/CycleTime and publish
+		MQTT PID info -- that part is NOT reproduced here."""
+		import control as _control
+
+		if self.state.manual_override['auger'] < now:
+			self.state.manual_override['auger'] = 0
+			# If Auger is OFF and time since toggle is greater than Off Time
+			if not current_output_status['auger'] and (now - self.state.auger_toggle_time) > (
+				self.state.cycle_time * (1 - self.state.cycle_ratio)
+			):
+				self.grill.auger_on()
+				self.state.auger_toggle_time = now
+				_control.eventLogger.debug('Cycle Event: Auger On')
+				self._on_auger_on(now)
+
+			# If Auger is ON and time since toggle is greater than On Time
+			if current_output_status['auger'] and (now - self.state.auger_toggle_time) > (
+				self.state.cycle_time * self.state.cycle_ratio
+			):
+				self.grill.auger_off()
+				# Add auger ON time to the metrics
+				self.state.metrics['augerontime'] += now - self.state.auger_toggle_time
+				self.ctx.store.write_metrics(self.state.metrics)
+				# Set current last toggle time to now
+				self.state.auger_toggle_time = now
+				_control.eventLogger.debug('Cycle Event: Auger Off')
+
 	# ---- shared skeleton ----
 	def run(self):
 		import control as _control  # module globals: eventLogger, _process_system_commands
@@ -177,6 +213,7 @@ class ControlMode:
 		eta_toggle_time = start_time
 		# Set time since toggle for auger
 		auger_toggle_time = start_time
+		self.state.auger_toggle_time = start_time
 		# Set time since toggle for display
 		display_toggle_time = start_time
 		# Initializing Start Time for Fan
@@ -192,6 +229,7 @@ class ControlMode:
 
 		# Clear Manual Overrides
 		manual_override = {'igniter': 0, 'auger': 0, 'fan': 0, 'power': 0, 'pwm': 0}
+		self.state.manual_override = manual_override
 
 		# ============ Main Work Cycle ============
 		while status == 'Active':
