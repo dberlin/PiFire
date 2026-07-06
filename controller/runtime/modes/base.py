@@ -46,6 +46,7 @@ class ControlMode:
 		self.grill = ctx.devices.grill_platform
 		self.probe_complex = ctx.devices.probe_complex
 		self.dist_device = ctx.devices.dist_device
+		self.settings = None
 
 	# ---- hooks (safe defaults) ----
 	def setup(self):
@@ -87,7 +88,7 @@ class ControlMode:
 		status = 'Active'
 
 		# Setup Cycle Parameters
-		settings = ctx.store.read_settings()
+		self.settings = ctx.store.read_settings()
 		control = ctx.store.read_control()
 		pelletdb = ctx.store.read_pellet_db()
 		control['hopper_check'] = True
@@ -130,8 +131,8 @@ class ControlMode:
 		last = grill_platform.get_input_status()
 
 		# Set DC fan frequency if it has changed since init
-		if settings['platform']['dc_fan']:
-			pwm_frequency = settings['pwm']['frequency']
+		if self.settings['platform']['dc_fan']:
+			pwm_frequency = self.settings['pwm']['frequency']
 			frequency_status = grill_platform.get_output_status()
 			if not pwm_frequency == frequency_status['frequency']:
 				grill_platform.set_pwm_frequency(pwm_frequency)
@@ -144,16 +145,16 @@ class ControlMode:
 		self.setup()
 
 		ctx.store.write_metrics(new_metric=True)
-		metrics = ctx.store.read_metrics()
-		metrics['mode'] = mode
-		metrics['smokeplus'] = control['s_plus']
-		metrics['primary_setpoint'] = control['primary_setpoint']
-		metrics['pellet_level_start'] = pelletdb['current']['hopper_level']
+		self.state.metrics = ctx.store.read_metrics()
+		self.state.metrics['mode'] = mode
+		self.state.metrics['smokeplus'] = control['s_plus']
+		self.state.metrics['primary_setpoint'] = control['primary_setpoint']
+		self.state.metrics['pellet_level_start'] = pelletdb['current']['hopper_level']
 		current_pellet_id = pelletdb['current']['pelletid']
 		pellet_brand = pelletdb['archive'][current_pellet_id]['brand']
 		pellet_type = pelletdb['archive'][current_pellet_id]['wood']
-		metrics['pellet_brand_type'] = f'{pellet_brand} {pellet_type}'
-		ctx.store.write_metrics(metrics)
+		self.state.metrics['pellet_brand_type'] = f'{pellet_brand} {pellet_type}'
+		ctx.store.write_metrics(self.state.metrics)
 
 		# Get initial probe sensor data, temperatures
 		sensor_data = probe_complex.read_probes()
@@ -164,7 +165,7 @@ class ControlMode:
 
 		# Apply Smart Start Settings if Enabled (default; Startup/Reignite/Smoke
 		# override self.state.startup_timer from their own setup())
-		self.state.startup_timer = settings['startup']['duration']
+		self.state.startup_timer = self.settings['startup']['duration']
 
 		# Set the start time
 		start_time = ctx.clock.now()
@@ -209,16 +210,16 @@ class ControlMode:
 			if control['settings_update']:
 				control['settings_update'] = False
 				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-				settings = ctx.store.read_settings()
-				if settings['globals']['debug_mode']:
+				self.settings = ctx.store.read_settings()
+				if self.settings['globals']['debug_mode']:
 					_control.eventLogger.setLevel(logging.DEBUG)
 				else:
 					_control.eventLogger.setLevel(logging.INFO)
 
 			# Check if user changed hopper levels and update if required
 			if control['distance_update']:
-				empty = settings['pelletlevel']['empty']
-				full = settings['pelletlevel']['full']
+				empty = self.settings['pelletlevel']['empty']
+				full = self.settings['pelletlevel']['full']
 				dist_device.update_distances(empty, full)
 				control['distance_update'] = False
 				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
@@ -237,7 +238,7 @@ class ControlMode:
 				_control.eventLogger.info('Hopper Level Checked @ ' + str(pelletdb['current']['hopper_level']) + '%')
 
 			# Check for update in ON/OFF Switch
-			if not settings['platform']['standalone'] and last != grill_platform.get_input_status():
+			if not self.settings['platform']['standalone'] and last != grill_platform.get_input_status():
 				last = grill_platform.get_input_status()
 				if not last:
 					_control.eventLogger.info('Switch set to off, going to monitor mode.')
@@ -249,10 +250,10 @@ class ControlMode:
 
 			current_output_status = grill_platform.get_output_status()
 
-			if mode == 'Manual' or settings['safety']['allow_manual_changes']:
+			if mode == 'Manual' or self.settings['safety']['allow_manual_changes']:
 				if control['manual']['change'] in ['power', 'igniter', 'fan', 'auger', 'pwm']:
 					if mode != 'Manual':
-						override_time = now + settings['safety']['manual_override_time']
+						override_time = now + self.settings['safety']['manual_override_time']
 					else:
 						override_time = 0
 
@@ -293,7 +294,7 @@ class ControlMode:
 						manual_override['power'] = override_time
 
 					if (
-						settings['platform']['dc_fan']
+						self.settings['platform']['dc_fan']
 						and control['manual']['change'] == 'pwm'
 						and current_output_status['fan']
 						and not control['manual']['pwm'] == current_output_status['pwm']
@@ -313,10 +314,10 @@ class ControlMode:
 
 			# Grab current probe profiles if they have changed since the last loop.
 			if control['probe_profile_update']:
-				settings = ctx.store.read_settings()
+				self.settings = ctx.store.read_settings()
 				control['probe_profile_update'] = False
 				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
-				probe_complex.update_probe_profiles(settings['probe_settings']['probe_map']['probe_info'])
+				probe_complex.update_probe_profiles(self.settings['probe_settings']['probe_map']['probe_info'])
 
 			# Get probe device info for frontend
 			ctx.store.write_generic_key('probe_device_info', probe_complex.get_device_info())
@@ -330,7 +331,7 @@ class ControlMode:
 			in_data['notify_targets'] = ctx.notifications.get_targets(control['notify_data'])
 
 			# If Extended Data Mode is Enabled, Populate Extra Data Here
-			if settings['globals']['ext_data']:
+			if self.settings['globals']['ext_data']:
 				in_data['ext_data'] = {}
 				in_data['ext_data']['CR'] = 0
 				in_data['ext_data']['RCR'] = 0
@@ -349,7 +350,7 @@ class ControlMode:
 			else:
 				update_eta = False
 			control = ctx.notifications.check(
-				settings, control, in_data=in_data, pelletdb=pelletdb, grill_platform=grill_platform, update_eta=update_eta
+				self.settings, control, in_data=in_data, pelletdb=pelletdb, grill_platform=grill_platform, update_eta=update_eta
 			)
 
 			# Send Current Status / Temperature Data to Display Device every 0.5 second
@@ -357,19 +358,19 @@ class ControlMode:
 				status_data['notify_data'] = control['notify_data']
 				status_data['timer'] = control['timer']
 				status_data['s_plus'] = control['s_plus']
-				status_data['hopper_level_enabled'] = False if settings['modules']['dist'] == 'none' else True
+				status_data['hopper_level_enabled'] = False if self.settings['modules']['dist'] == 'none' else True
 				status_data['hopper_level'] = pelletdb['current']['hopper_level']
-				status_data['units'] = settings['globals']['units']
+				status_data['units'] = self.settings['globals']['units']
 				status_data['mode'] = mode
 				status_data['recipe'] = True if control['mode'] == 'Recipe' else False
 				status_data['start_time'] = start_time
 				status_data['start_duration'] = self.state.startup_timer
-				status_data['shutdown_duration'] = settings['shutdown']['shutdown_duration']
+				status_data['shutdown_duration'] = self.settings['shutdown']['shutdown_duration']
 				status_data['prime_duration'] = 0
 				status_data['prime_amount'] = 0
 				status_data['lid_open_detected'] = False
 				status_data['lid_open_endtime'] = 0
-				status_data['p_mode'] = metrics.get('p_mode', None)
+				status_data['p_mode'] = self.state.metrics.get('p_mode', None)
 				status_data['startup_timestamp'] = control['startup_timestamp']
 				if control['mode'] == 'Recipe':
 					status_data['recipe_paused'] = (
@@ -381,7 +382,7 @@ class ControlMode:
 					status_data['recipe_paused'] = False
 				status_data['outpins'] = {}
 				current = grill_platform.get_output_status()
-				for item in settings['platform']['outputs']:
+				for item in self.settings['platform']['outputs']:
 					try:
 						status_data['outpins'][item] = current[item]
 					except KeyError:
@@ -397,7 +398,7 @@ class ControlMode:
 			# Write History & Issue Heartbeat after 3 seconds has passed
 			if (now - temp_toggle_time) > 3:
 				temp_toggle_time = ctx.clock.now()
-				ext_data = True if settings['globals']['ext_data'] else False
+				ext_data = True if self.settings['globals']['ext_data'] else False
 				ctx.store.write_history(in_data, ext_data=ext_data)
 				monitor.heartbeat()
 
@@ -406,7 +407,7 @@ class ControlMode:
 				break
 
 			# Max Temp Safety Control (UNIVERSAL)
-			if over_max_temp(ptemp, settings['safety']):
+			if over_max_temp(ptemp, self.settings['safety']):
 				ctx.store.display_commands().push(('text', 'ERROR'))
 				control['mode'] = 'Error'
 				control['updated'] = True
@@ -446,13 +447,13 @@ class ControlMode:
 
 		# Save Pellets Used
 		pelletdb = ctx.store.read_pellet_db()
-		pelletdb['current']['est_usage'] += metrics['augerontime'] * settings['globals']['augerrate']
+		pelletdb['current']['est_usage'] += self.state.metrics['augerontime'] * self.settings['globals']['augerrate']
 		ctx.store.write_pellet_db(pelletdb)
 
 		# Log the end time
-		metrics['endtime'] = ctx.clock.now() * 1000
-		metrics['pellet_level_end'] = pelletdb['current']['hopper_level']
-		ctx.store.write_metrics(metrics)
+		self.state.metrics['endtime'] = ctx.clock.now() * 1000
+		self.state.metrics['pellet_level_end'] = pelletdb['current']['hopper_level']
+		ctx.store.write_metrics(self.state.metrics)
 
 		monitor.stop_monitor()
 

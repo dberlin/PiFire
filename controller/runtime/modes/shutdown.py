@@ -12,15 +12,13 @@ class ShutdownMode(ControlMode):
 	name = 'Shutdown'
 
 	def setup(self):
-		settings = self.ctx.store.read_settings()
-		start_fan(self.grill, settings)
+		start_fan(self.grill, self.settings)
 		self.grill.power_on()
 		import control as _control
 		_control.eventLogger.debug('Power ON, Fan ON, Igniter OFF, Auger OFF')
 
 	def should_exit(self, now, ptemp) -> bool:
-		settings = self.ctx.store.read_settings()
-		return (now - self.state.start_time) > settings['shutdown']['shutdown_duration']
+		return (now - self.state.start_time) > self.settings['shutdown']['shutdown_duration']
 
 	def teardown(self, ptemp):
 		self.grill.fan_off()
