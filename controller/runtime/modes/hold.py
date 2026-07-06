@@ -17,9 +17,10 @@ class HoldMode(ControlMode):
 	most intricate mode: it owns a ControllerRunner (PID/MPC) built at setup
 	and reconfigured on `control['controller_update']`, its own auger-cycle
 	timing driven by the controller's cycle_ratio output (not the plain
-	elapsed-time toggle used by other cycling modes), an MPC-fan sticky latch
-	(`self.state.controller.controls_fan`), lid-open detection, and the
-	PWM-duty-from-temp-profile / fan-assist-PID fan control paths.
+	elapsed-time toggle used by other cycling modes), a setup-time fan-ownership
+	capability (`self.state.controller.controls_fan`, from the runner's
+	`commands_fan()`), lid-open detection, and the PWM-duty-from-temp-profile /
+	fan-assist-PID fan control paths.
 
 	setup_safety() runs the pre-loop flameout check FIRST (evaluate_flameout
 	against the carried-over afterstarttemp/startuptemp -- can abort into
@@ -29,8 +30,8 @@ class HoldMode(ControlMode):
 	Per-tick, on_tick() first handles the `controller_update` reconfigure
 	request, then runs the Hold-specific controller sub-block (submit the
 	fresh per-tick ptemp to the runner, normalize its output into a cycle
-	ratio + optional fan command, latch `self.state.controller.controls_fan`
-	the first time an MPC fan command appears, clamp to u_min/u_max, and
+	ratio + optional fan command, route an MPC fan command into
+	`control['duty_cycle']` when one arrives, clamp to u_min/u_max, and
 	decide fan_assist), then the shared (non-Hold) auger-cycle toggle via
 	`_auger_cycle_tick` (Hold overrides `_on_auger_on` to also recompute
 	OnTime/OffTime/CycleTime and publish MQTT PID info -- the shared helper
@@ -69,12 +70,17 @@ class HoldMode(ControlMode):
 		self.state.lid.open_detected = False
 		self.state.lid.expires = 0
 		self.state.target_temp_achieved = False
-		self.state.controller.controls_fan = False
 
 		# Load Controller Module (i.e. PID)
 		self._runner, self._controller_status = _runner_mod.build_runner(
 			self.settings, self.control, logger=self.ctx.control_log
 		)
+
+		# Fan ownership is a setup-time capability of the controller (e.g. MPC
+		# with enable_fan_input), not a runtime latch -- this closes a startup
+		# window where the temp-profile fan path could run before the
+		# controller's first fan command.
+		self.state.controller.controls_fan = self._runner.commands_fan() if self._runner is not None else False
 
 		_control.eventLogger.debug(
 			'On Time = '
@@ -155,11 +161,11 @@ class HoldMode(ControlMode):
 			)
 			# Controllers that command the fan directly (MPC) route the duty
 			# through control['duty_cycle'] so the PWM apply path below uses it.
-			# Setting controller.controls_fan also suppresses the legacy
+			# controller.controls_fan (set at setup from the controller's
+			# commands_fan() capability) already suppresses the legacy
 			# temperature-profile fan logic so it cannot overwrite the MPC command.
 			if fan_cmd is not None and settings['platform']['dc_fan'] and control['pwm_control']:
 				self.state.controller.fan_duty = fan_cmd['duty']
-				self.state.controller.controls_fan = True
 				control['duty_cycle'] = self.state.controller.fan_duty
 				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
 			# If ratio is less than min set auger ratio to min and control further via fan.

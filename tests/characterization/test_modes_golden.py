@@ -403,13 +403,15 @@ def test_hold_fan_assist_cycles_fan_via_pid_path():
 
 
 def test_hold_controller_fan_duty_sticky_latch_suppresses_temp_profile():
-	# Pins CURRENT behavior of the `controller_fan_duty` sticky latch
-	# (control.py ~510-526 sets it from an MPC fan command; ~733-744's
-	# temp-profile PWM path is gated `controller_fan_duty is None`, so once an
-	# MPC command has been seen even once, later plain-float controller
-	# outputs (no 'fan' key) do NOT re-enable the temp-profile path for the
-	# rest of this _work_cycle invocation -- it stays latched at the last MPC
-	# duty rather than reverting to (or ever computing) a temp-profile value.
+	# Pins CURRENT behavior: once a fan-owning controller (MPC) has issued a
+	# fan command, later plain-float controller outputs (no 'fan' key) do NOT
+	# re-enable the temp-profile path for the rest of this _work_cycle
+	# invocation -- it stays latched at the last MPC duty rather than
+	# reverting to (or ever computing) a temp-profile value.
+	# re-frozen: capability now holds from tick 1 (Task 4), so the runner must
+	# declare commands_fan=True to represent "this is a fan-owning MPC" --
+	# suppression is no longer a runtime latch that only engages after the
+	# first fan command arrives.
 	settings = base_settings()
 	settings['platform']['dc_fan'] = True
 	settings['pwm']['update_time'] = 0  # temp-profile branch would fire every tick if unlatched
@@ -420,7 +422,7 @@ def test_hold_controller_fan_duty_sticky_latch_suppresses_temp_profile():
 	# latch didn't suppress it.
 	probes = FakeProbes().script([210] * 30)
 	grill = FakeGrillPlatform(dc_fan=True)
-	runner = FakeControllerRunner(period=0.01).script(
+	runner = FakeControllerRunner(period=0.01, commands_fan=True).script(
 		[
 			NormalizedOutput(cycle_ratio=0.5, fan={'duty': 42}),
 			NormalizedOutput(cycle_ratio=0.5, fan=None),
@@ -441,6 +443,34 @@ def test_hold_controller_fan_duty_sticky_latch_suppresses_temp_profile():
 	assert result.final_control['duty_cycle'] == 42
 	set_duty_calls = [c for c in result.grill_calls if c[0] == 'set_duty_cycle']
 	assert set_duty_calls == [('set_duty_cycle', (42,))]  # never overwritten to 75
+
+
+def test_hold_mpc_commands_fan_suppresses_temp_profile_from_first_tick():
+	# Startup window: an MPC that commands the fan must suppress the temp-profile
+	# duty from tick 1, BEFORE its first controller interval elapses.
+	settings = base_settings()
+	settings['platform']['dc_fan'] = True
+	settings['pwm']['update_time'] = 0  # temp-profile branch would fire every tick
+	control_data = base_control(mode='Hold')
+	control_data['pwm_control'] = True
+	control_data['primary_setpoint'] = 225
+	probes = FakeProbes().script([210] * 8)
+	grill = FakeGrillPlatform(dc_fan=True)
+	runner = FakeControllerRunner(period=999, commands_fan=True).script(
+		[NormalizedOutput(cycle_ratio=0.5, fan=None)] * 8  # never reaches a fan command in-window
+	)
+	result = run_mode(
+		'Hold',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		probe_cap=6,
+		grill=grill,
+		runner=runner,
+	)
+	# Temp-profile duty (would be 75 for setpoint-ptemp=15) must NOT be applied.
+	assert ('set_duty_cycle', (75,)) not in result.grill_calls
 
 
 def test_smoke_plus_cycles_fan_on_and_off():

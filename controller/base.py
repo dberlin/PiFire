@@ -77,6 +77,10 @@ class ControllerBase:
 		"""
 		return None
 
+	def commands_fan(self):
+		"""Whether this controller issues fan duty commands (vs. auger-only)."""
+		return False
+
 	def supported_functions(self):
 		return self.function_list
 

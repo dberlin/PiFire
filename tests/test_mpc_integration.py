@@ -17,3 +17,10 @@ def test_normalize_handles_float_and_dict():
 	# dict without fan
 	ratio, fan = normalize_controller_output({'cycle_ratio': 0.5})
 	assert ratio == 0.5 and fan is None
+
+
+def test_controller_base_commands_fan_default_false():
+	from controller.base import ControllerBase
+
+	cb = ControllerBase({}, 'C', {})
+	assert cb.commands_fan() is False

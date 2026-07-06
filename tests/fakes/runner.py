@@ -1,10 +1,11 @@
 class FakeControllerRunner:
-	def __init__(self, period=None):
+	def __init__(self, period=None, commands_fan=False):
 		self._script = []
 		self._i = 0
 		self.target = None
 		self._period = period
 		self.submitted_temps = []
+		self._commands_fan = commands_fan
 
 	def script(self, outputs):
 		self._script = list(outputs)
@@ -22,6 +23,9 @@ class FakeControllerRunner:
 
 	def control_period(self):
 		return self._period
+
+	def commands_fan(self):
+		return self._commands_fan
 
 	def latest(self):
 		if not self._script:

@@ -247,6 +247,9 @@ class Controller(ControllerBase):
 	def get_control_period(self):
 		return float(self.cfg['control_period'])
 
+	def commands_fan(self):
+		return bool(self.cfg.get('enable_fan_input', False))
+
 	def update(self, current):
 		y = _to_c(current, self.units)
 		# 1) estimate states from the measurement

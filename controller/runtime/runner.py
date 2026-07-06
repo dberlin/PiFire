@@ -21,6 +21,8 @@ class ControllerRunner(ABC):
 	def reconfigure(self, settings, control): ...
 	@abstractmethod
 	def control_period(self): ...
+	@abstractmethod
+	def commands_fan(self): ...
 
 
 class SyncControllerRunner(ControllerRunner):
@@ -51,6 +53,9 @@ class SyncControllerRunner(ControllerRunner):
 
 	def control_period(self):
 		return self._core.get_control_period()
+
+	def commands_fan(self):
+		return self._core.commands_fan()
 
 	def controller_state(self):
 		return dict(self._core.__dict__)
