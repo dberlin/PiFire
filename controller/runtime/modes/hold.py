@@ -80,10 +80,14 @@ class HoldMode(ControlMode):
 		)
 
 		_control.eventLogger.debug(
-			'On Time = ' + str(self.state.on_time)
-			+ ', OffTime = ' + str(self.state.off_time)
-			+ ', CycleTime = ' + str(self.state.cycle_time)
-			+ ', CycleRatio = ' + str(self.state.cycle_ratio)
+			'On Time = '
+			+ str(self.state.on_time)
+			+ ', OffTime = '
+			+ str(self.state.off_time)
+			+ ', CycleTime = '
+			+ str(self.state.cycle_time)
+			+ ', CycleRatio = '
+			+ str(self.state.cycle_ratio)
 		)
 
 		# Initialize the cycle start time to now. base.run() has not yet set
@@ -191,18 +195,20 @@ class HoldMode(ControlMode):
 		self.state.cycle_time = self.state.on_time + self.state.off_time
 
 		import control as _control
+
 		_control.eventLogger.debug(
-			'On Time = ' + str(self.state.on_time)
-			+ ', OffTime = ' + str(self.state.off_time)
-			+ ', CycleTime = ' + str(self.state.cycle_time)
-			+ ', CycleRatio = ' + str(self.state.cycle_ratio)
+			'On Time = '
+			+ str(self.state.on_time)
+			+ ', OffTime = '
+			+ str(self.state.off_time)
+			+ ', CycleTime = '
+			+ str(self.state.cycle_time)
+			+ ', CycleRatio = '
+			+ str(self.state.cycle_ratio)
 		)
 
 		# publish pid info to mqtt if enabled
-		if (
-			settings['notify_services'].get('mqtt') is not None
-			and settings['notify_services']['mqtt']['enabled']
-		):
+		if settings['notify_services'].get('mqtt') is not None and settings['notify_services']['mqtt']['enabled']:
 			controller_data = self._runner.controller_state()
 			controller_data['cycle_ratio'] = round(self.state.cycle_ratio, 2)
 			self.ctx.notifications.check(settings, control, pid_data=controller_data)
@@ -317,7 +323,9 @@ class HoldMode(ControlMode):
 			_control.eventLogger.debug(
 				f'Fan PID: Fan ON, controller_output: {self.state.controller_output}, controller_output_adjusted: {controller_output_adjusted}'
 			)
-			_control.eventLogger.debug(f'Fan ratio: {fan_ratio}, Fan on time: {fan_on_time}, Fan off time: {fan_off_time}')
+			_control.eventLogger.debug(
+				f'Fan ratio: {fan_ratio}, Fan on time: {fan_on_time}, Fan off time: {fan_off_time}'
+			)
 			if (now - self.state.fan_cycle_toggle_time) > fan_on_time and current_output_status['fan']:
 				grill_platform.fan_off()
 				self.state.fan_cycle_toggle_time = now
@@ -330,7 +338,4 @@ class HoldMode(ControlMode):
 		self._smoke_plus_fan_tick(now, current_output_status)
 
 	def status_fragment(self) -> dict:
-		return {
-			'lid_open_detected': self.state.lid_open_detect,
-			'lid_open_endtime': self.state.lid_open_expires,
-		}
+		return {'lid_open_detected': self.state.lid_open_detect, 'lid_open_endtime': self.state.lid_open_expires}

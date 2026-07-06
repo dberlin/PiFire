@@ -9,6 +9,7 @@ display.py would make it permanently unreachable via `from display import
 ...` (the package always wins), so it is named display_process.py instead.
 Run it directly as a script, e.g. `python display_process.py`.
 """
+
 import logging
 
 from common import read_settings, create_logger
@@ -56,9 +57,7 @@ if __name__ == '__main__':
 		'events', filename='./logs/events.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level
 	)
 
-	display_device, _errors = build_display(
-		settings, errors=[], event_log=eventLogger, control_log=controlLogger
-	)
+	display_device, _errors = build_display(settings, errors=[], event_log=eventLogger, control_log=controlLogger)
 
 	eventLogger.info('PiFire Display Process started.')
 

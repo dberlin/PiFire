@@ -16,6 +16,7 @@ Notification/cookfile helpers (`check_notify`, `send_notifications`,
 `create_cookfile`) and `os.system` remain module-level references so tests can
 monkeypatch them.
 """
+
 import os
 
 from common.common import WriteKind, default_control
@@ -320,7 +321,9 @@ class Controller:
 			)
 			# Clear control flag
 			self.control['updated'] = False  # Reset Control Updated to False
-			store.write_control(self.control, WriteKind.OVERWRITE, origin='control')  # Commit change in 'updated' status to the file
+			store.write_control(
+				self.control, WriteKind.OVERWRITE, origin='control'
+			)  # Commit change in 'updated' status to the file
 
 			if self.control['units_change']:
 				self.eventLogger.debug('Changing Base Units.')
@@ -409,7 +412,9 @@ class Controller:
 				self.work_cycle('Prime')
 				# Select Next Mode
 				self.settings = settings = store.read_settings()
-				self.next_mode(self.control['next_mode'], setpoint=settings['startup']['start_to_mode']['primary_setpoint'])
+				self.next_mode(
+					self.control['next_mode'], setpoint=settings['startup']['start_to_mode']['primary_setpoint']
+				)
 
 			# Startup (startup sequence)
 			elif self.control['mode'] == 'Startup':
@@ -428,7 +433,9 @@ class Controller:
 					store.write_control(self.control, WriteKind.OVERWRITE, origin='control')
 					# Call Work Cycle for Prime Mode
 					self.work_cycle('Prime')
-					self.control = store.read_control()  # Refresh control in case any changes were made during the cycle
+					self.control = (
+						store.read_control()
+					)  # Refresh control in case any changes were made during the cycle
 					if self.control['mode'] in ['Prime', 'Startup']:
 						self.control['updated'] = False
 						self.control['mode'] = 'Startup'
@@ -441,7 +448,9 @@ class Controller:
 					self.work_cycle('Startup')
 					# Select Next Mode
 					self.settings = settings = store.read_settings()
-					self.next_mode(self.control['next_mode'], setpoint=settings['startup']['start_to_mode']['primary_setpoint'])
+					self.next_mode(
+						self.control['next_mode'], setpoint=settings['startup']['start_to_mode']['primary_setpoint']
+					)
 
 			# Smoke (smoke cycle)
 			elif self.control['mode'] == 'Smoke':
@@ -475,9 +484,7 @@ class Controller:
 
 			# Recipe Mode
 			elif self.control['mode'] == 'Recipe':
-				self.recipe_mode(
-					start_step=self.control['recipe']['start_step'],
-				)
+				self.recipe_mode(start_step=self.control['recipe']['start_step'])
 
 			# Reignite (reignite sequence)
 			elif self.control['mode'] == 'Reignite':

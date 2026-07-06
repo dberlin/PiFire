@@ -26,6 +26,7 @@ Other pitfalls handled here (see task brief):
      `supervisorctl` on timeout. We monkeypatch `control.Process_Monitor` to
      a no-op stand-in for the duration of `run_mode`.
 """
+
 import logging
 from dataclasses import dataclass, field
 
@@ -95,8 +96,7 @@ def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None,
 	# provided (the E2E suite passes a live `ValkeyStore`), it is used as-is --
 	# the caller is responsible for seeding it, since a real store can't be
 	# seeded through a constructor.
-	store = store if store is not None else InMemoryStore(
-		control=control_data, settings=settings, pellet_db=pellet_db)
+	store = store if store is not None else InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
 	grill = grill or FakeGrillPlatform(
 		dc_fan=settings['platform'].get('dc_fan', False),
 		standalone=settings['platform'].get('standalone', True),
@@ -105,7 +105,9 @@ def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None,
 	notifier = FakeNotifier()
 	ctx = ControllerContext(
 		devices=Devices(grill_platform=grill, probe_complex=probes, dist_device=FakeDistance()),
-		store=store, notifications=notifier, clock=ManualClock(),
+		store=store,
+		notifications=notifier,
+		clock=ManualClock(),
 	)
 	return ctx, grill, notifier
 

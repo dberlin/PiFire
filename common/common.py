@@ -38,9 +38,11 @@ from common.valkey_handler import ValkeyHandler
 # Enums
 # *****************************************
 
+
 class WriteKind(Enum):
-	OVERWRITE = 'overwrite'   # replace control:general wholesale (legacy True)
-	MERGE = 'merge'           # queue a partial change, deep-merged on execute (legacy False)
+	OVERWRITE = 'overwrite'  # replace control:general wholesale (legacy True)
+	MERGE = 'merge'  # queue a partial change, deep-merged on execute (legacy False)
+
 
 # *****************************************
 # Constants and Globals

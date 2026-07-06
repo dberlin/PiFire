@@ -54,4 +54,5 @@ class PrimeMode(ControlMode):
 		self.grill.fan_off()
 		self.grill.power_off()
 		import control as _control
+
 		_control.eventLogger.debug('Fan OFF, Power OFF')

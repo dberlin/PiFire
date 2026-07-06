@@ -18,6 +18,7 @@ locks in the pre-loop hopper check that the mode-extraction refactor had dropped
 (without it, pelletdb went unbound before the loop's first check_notify and the
 boot-time hopper level was never read). See Controller.setup().
 """
+
 import logging
 
 import controller.runtime.controller as controller_mod
@@ -58,16 +59,18 @@ class _RecordingDistance(FakeDistance):
 def make_controller(settings, control_data, pellet_db, *, grill=None, dist=None, clock=None):
 	store = InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
 	grill = grill or FakeGrillPlatform(
-		standalone=settings['platform'].get('standalone', True),
-		outputs=tuple(settings['platform']['outputs']),
+		standalone=settings['platform'].get('standalone', True), outputs=tuple(settings['platform']['outputs'])
 	)
 	dist = dist or _RecordingDistance()
 	notifier = FakeNotifier()
 	logger = logging.getLogger('characterization')
 	ctx = ControllerContext(
 		devices=Devices(grill_platform=grill, probe_complex=FakeProbes().script([70] * 4), dist_device=dist),
-		store=store, notifications=notifier, clock=clock or ManualClock(),
-		event_log=logger, control_log=logger,
+		store=store,
+		notifications=notifier,
+		clock=clock or ManualClock(),
+		event_log=logger,
+		control_log=logger,
 	)
 	c = Controller(ctx)
 	return c, ctx, store, grill, dist, notifier
@@ -105,6 +108,7 @@ class _FakeOs:
 # setup()
 # --------------------------------------------------------------------------
 
+
 def test_setup_runs_initial_hopper_check_and_binds_pelletdb(monkeypatch):
 	# REGRESSION GUARD: the pre-loop hopper check (dropped during the mode
 	# extraction) must run in setup(), binding pelletdb and reading the level.
@@ -141,6 +145,7 @@ def test_setup_no_boot_to_monitor_leaves_mode(monkeypatch):
 # --------------------------------------------------------------------------
 # tick(): mode dispatch (spied)
 # --------------------------------------------------------------------------
+
 
 def test_tick_smoke_dispatches_work_cycle_then_next_mode(monkeypatch):
 	_neutralize_externals(monkeypatch)
@@ -227,6 +232,7 @@ def test_tick_shutdown_sets_next_mode_stop_and_dispatches(monkeypatch):
 # tick(): Stop / Error cleanup
 # --------------------------------------------------------------------------
 
+
 def test_tick_stop_mode_cleanup(monkeypatch):
 	_neutralize_externals(monkeypatch)
 	settings = base_settings()
@@ -276,6 +282,7 @@ def test_tick_error_mode_cleanup(monkeypatch):
 # tick(): switch, timer, hopper, settings
 # --------------------------------------------------------------------------
 
+
 def test_tick_switch_off_triggers_stop(monkeypatch):
 	_neutralize_externals(monkeypatch)
 	settings = base_settings()
@@ -300,9 +307,7 @@ def test_tick_timer_expiry_sends_notification(monkeypatch):
 	control_data = base_control(mode='Stop')
 	control_data['updated'] = False
 	control_data['timer'] = {'start': 1, 'paused': 0, 'end': 5}
-	control_data['notify_data'] = [
-		{'type': 'timer', 'req': True, 'shutdown': True, 'keep_warm': True}
-	]
+	control_data['notify_data'] = [{'type': 'timer', 'req': True, 'shutdown': True, 'keep_warm': True}]
 	clock = ManualClock(start=10)  # now (10) >= end (5)
 	c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db(), clock=clock)
 	_spy_dispatch(c)

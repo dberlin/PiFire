@@ -1,5 +1,6 @@
 """State-access seam. ValkeyStore is the ONLY production code touching common's
 global Valkey funcs; InMemoryStore is the hermetic test double."""
+
 import copy
 from abc import ABC, abstractmethod
 from collections import deque
@@ -97,8 +98,7 @@ class Store(ABC):
 
 
 class InMemoryStore(Store):
-	def __init__(self, control=None, settings=None, status=None, current=None,
-				 pellet_db=None, metrics=None):
+	def __init__(self, control=None, settings=None, status=None, current=None, pellet_db=None, metrics=None):
 		self._control = copy.deepcopy(control) if control is not None else default_control()
 		self._settings = copy.deepcopy(settings) if settings is not None else {}
 		self._status = copy.deepcopy(status) if status is not None else {}
@@ -109,7 +109,7 @@ class InMemoryStore(Store):
 		self._errors = []
 		self._generic = {}
 		self._tr = []
-		self._write_queue = deque()   # pending MERGE partials
+		self._write_queue = deque()  # pending MERGE partials
 		self._systemq = _DequeQueue()
 		self._systemo = _DequeQueue()
 		self._displayq = _DequeQueue()

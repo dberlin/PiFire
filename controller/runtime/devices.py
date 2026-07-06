@@ -4,6 +4,7 @@ grill platform, probe complex, and distance sensor for the controller
 process; build_display() builds only the display for the separate display
 process (Phase 8) -- kept apart so the two processes never touch each
 other's hardware."""
+
 import importlib
 
 from common import (

@@ -15,6 +15,7 @@ class ShutdownMode(ControlMode):
 		start_fan(self.grill, self.settings)
 		self.grill.power_on()
 		import control as _control
+
 		_control.eventLogger.debug('Power ON, Fan ON, Igniter OFF, Auger OFF')
 
 	def should_exit(self, now, ptemp) -> bool:
@@ -24,4 +25,5 @@ class ShutdownMode(ControlMode):
 		self.grill.fan_off()
 		self.grill.power_off()
 		import control as _control
+
 		_control.eventLogger.debug('Fan OFF, Power OFF')

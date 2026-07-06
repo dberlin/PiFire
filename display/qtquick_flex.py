@@ -84,7 +84,9 @@ class Display(DisplayBase):
 		if 'hold' in command:
 			temp = int(command_data) if command_data else 0
 			if temp:
-				write_control({'updated': True, 'mode': 'Hold', 'primary_setpoint': temp}, WriteKind.MERGE, origin='display')
+				write_control(
+					{'updated': True, 'mode': 'Hold', 'primary_setpoint': temp}, WriteKind.MERGE, origin='display'
+				)
 			return
 		if 'notify' in command:
 			origin = command_data.get('origin') if isinstance(command_data, dict) else None
@@ -106,10 +108,18 @@ class Display(DisplayBase):
 			write_control({'s_plus': toggle}, WriteKind.MERGE, origin='display')
 			return
 		if command == 'cmd_primestartup':
-			write_control({'updated': True, 'mode': 'Prime', 'prime_amount': command_data, 'next_mode': 'Startup'}, WriteKind.MERGE, origin='display')
+			write_control(
+				{'updated': True, 'mode': 'Prime', 'prime_amount': command_data, 'next_mode': 'Startup'},
+				WriteKind.MERGE,
+				origin='display',
+			)
 			return
 		if command == 'cmd_primeonly':
-			write_control({'updated': True, 'mode': 'Prime', 'prime_amount': command_data, 'next_mode': 'Stop'}, WriteKind.MERGE, origin='display')
+			write_control(
+				{'updated': True, 'mode': 'Prime', 'prime_amount': command_data, 'next_mode': 'Stop'},
+				WriteKind.MERGE,
+				origin='display',
+			)
 			return
 		# Everything else: reuse the inherited handler verbatim.
 		self.command = command

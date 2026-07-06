@@ -1,5 +1,6 @@
 """Temperature-controller execution seam (PID/MPC/etc). Sync impl == today's
 inline behavior; a ThreadedControllerRunner may be added later for MPC."""
+
 import importlib
 from abc import ABC, abstractmethod
 from collections import namedtuple
@@ -64,8 +65,8 @@ def _build_core(settings, control, logger=None):
 			logger.exception('Error occurred loading controller module. Trace dump: ')
 		return None, 'Inactive'
 	core = module.Controller(
-		settings['controller']['config'][controller_type],
-		settings['globals']['units'], settings['cycle_data'])
+		settings['controller']['config'][controller_type], settings['globals']['units'], settings['cycle_data']
+	)
 	core.set_target(control['primary_setpoint'])
 	return core, 'Active'
 

@@ -2,10 +2,18 @@ from controller.runtime.runner import SyncControllerRunner, NormalizedOutput, bu
 
 
 class _Core:
-	def __init__(self): self.target = None; self.period = 5.0
-	def set_target(self, sp): self.target = sp
-	def update(self, temp): return {'cycle_ratio': 0.4, 'fan': {'duty': 60}}
-	def get_control_period(self): return self.period
+	def __init__(self):
+		self.target = None
+		self.period = 5.0
+
+	def set_target(self, sp):
+		self.target = sp
+
+	def update(self, temp):
+		return {'cycle_ratio': 0.4, 'fan': {'duty': 60}}
+
+	def get_control_period(self):
+		return self.period
 
 
 def test_sync_runner_normalizes_dict_output():
@@ -19,14 +27,19 @@ def test_sync_runner_normalizes_dict_output():
 
 def test_sync_runner_float_output_has_no_fan():
 	class FloatCore(_Core):
-		def update(self, temp): return 0.25
+		def update(self, temp):
+			return 0.25
+
 	out = SyncControllerRunner(FloatCore()).latest_from(190.0)
 	assert out.cycle_ratio == 0.25 and out.fan is None
 
 
 class _RecordingLogger:
-	def __init__(self): self.exceptions = []
-	def exception(self, msg): self.exceptions.append(msg)
+	def __init__(self):
+		self.exceptions = []
+
+	def exception(self, msg):
+		self.exceptions.append(msg)
 
 
 def test_build_runner_logs_on_load_failure_when_logger_given():

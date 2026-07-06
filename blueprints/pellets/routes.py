@@ -1,6 +1,14 @@
 import datetime
 from flask import render_template, request
-from common.common import read_settings, read_control, read_pellet_db, write_pellet_db, write_control, backup_pellet_db, WriteKind
+from common.common import (
+	read_settings,
+	read_control,
+	read_pellet_db,
+	write_pellet_db,
+	write_control,
+	backup_pellet_db,
+	WriteKind,
+)
 
 from . import pellets_bp
 

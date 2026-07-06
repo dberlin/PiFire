@@ -9,6 +9,7 @@ the blueprint's "Risk notes" section -- several orderings (e.g.
 `current_output_status` captured once before the manual-override block,
 the auger-cycle block running BEFORE the probe re-read) are load-bearing.
 """
+
 import logging
 
 from common.common import WriteKind
@@ -165,7 +166,9 @@ class ControlMode:
 				if not current_output_status['fan']:
 					start_fan(grill_platform, settings, control['duty_cycle'])
 					_control.eventLogger.debug('Smoke Plus: Over or Under Temp Fan ON')
-			elif (now - self.state.fan_cycle_toggle_time) > settings['smoke_plus']['on_time'] and current_output_status['fan']:
+			elif (now - self.state.fan_cycle_toggle_time) > settings['smoke_plus']['on_time'] and current_output_status[
+				'fan'
+			]:
 				if self.state.manual_override['fan'] < now:
 					self.state.manual_override['fan'] = 0
 					grill_platform.fan_off()
@@ -524,7 +527,12 @@ class ControlMode:
 			else:
 				update_eta = False
 			control = ctx.notifications.check(
-				self.settings, control, in_data=in_data, pelletdb=pelletdb, grill_platform=grill_platform, update_eta=update_eta
+				self.settings,
+				control,
+				in_data=in_data,
+				pelletdb=pelletdb,
+				grill_platform=grill_platform,
+				update_eta=update_eta,
 			)
 			self.control = control
 			self.on_publish(now)

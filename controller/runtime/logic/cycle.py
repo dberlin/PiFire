@@ -1,4 +1,5 @@
 """Pure auger cycle-time calculations extracted from _work_cycle. No I/O."""
+
 from dataclasses import dataclass
 
 

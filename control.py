@@ -21,6 +21,7 @@ Description: This script starts at boot, initializes the datastore and
  Controller(ctx).run().
 ==============================================================================
 """
+
 import logging
 import atexit
 from common import *  # Common Module for WebUI and Control Program
@@ -55,6 +56,7 @@ if __name__ == '__main__':
 	# AttributeError on the first mode log). Alias `control` to this running
 	# module so those imports see the bound loggers.
 	import sys
+
 	sys.modules['control'] = sys.modules['__main__']
 
 	settings = read_settings(init=True)
@@ -89,9 +91,7 @@ if __name__ == '__main__':
 
 	eventLogger.info('Flushing Valkey DB and creating new control structure')
 
-	devices, errors = build_devices(
-		settings, errors=errors, event_log=eventLogger, control_log=controlLogger
-	)
+	devices, errors = build_devices(settings, errors=errors, event_log=eventLogger, control_log=controlLogger)
 
 	# Build the injected context used by the controller / mode functions instead of bare globals
 	ctx = ControllerContext(

@@ -30,9 +30,7 @@ class _FakeLogger:
 def test_build_devices_prototype_platform_headless():
 	from controller.runtime.devices import build_devices
 
-	devices, errors = build_devices(
-		_proto_settings(), errors=[], event_log=_FakeLogger(), control_log=_FakeLogger()
-	)
+	devices, errors = build_devices(_proto_settings(), errors=[], event_log=_FakeLogger(), control_log=_FakeLogger())
 	assert devices.grill_platform is not None
 	assert devices.probe_complex is not None
 	assert devices.dist_device is not None
@@ -43,7 +41,5 @@ def test_build_display_prototype_none():
 
 	settings = _proto_settings()
 	settings['display'] = {'config': {'none': {}}}
-	display, errors = build_display(
-		settings, errors=[], event_log=_FakeLogger(), control_log=_FakeLogger()
-	)
+	display, errors = build_display(settings, errors=[], event_log=_FakeLogger(), control_log=_FakeLogger())
 	assert display is not None

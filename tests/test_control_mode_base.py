@@ -8,6 +8,7 @@ check_safety -> should_exit] -> teardown.
 This complements (does not replace) the characterization oracle in
 tests/characterization/, which is the real behavior-preservation gate.
 """
+
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
@@ -65,7 +66,9 @@ def _make_ctx():
 	notifier = FakeNotifier()
 	ctx = ControllerContext(
 		devices=Devices(grill_platform=grill, probe_complex=probes, dist_device=FakeDistance()),
-		store=store, notifications=notifier, clock=ManualClock(),
+		store=store,
+		notifications=notifier,
+		clock=ManualClock(),
 	)
 	return ctx
 

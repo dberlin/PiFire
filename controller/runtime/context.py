@@ -1,5 +1,6 @@
 # controller/runtime/context.py
 """Bundle of everything a control cycle needs. Passed instead of globals."""
+
 from dataclasses import dataclass
 
 
@@ -12,9 +13,9 @@ class Devices:
 
 @dataclass
 class ControllerContext:
-	devices: object            # Devices
-	store: object              # Store
-	notifications: object      # Notifier
-	clock: object              # Clock
+	devices: object  # Devices
+	store: object  # Store
+	notifications: object  # Notifier
+	clock: object  # Clock
 	event_log: object = None
 	control_log: object = None

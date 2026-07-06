@@ -39,9 +39,10 @@ restored -- both are rewritten sub-second by the live control loop (metrics
 flushing also matches the existing parity suite), so any residue is transient
 and immediately clobbered when a real instance resumes.
 """
+
 import pytest
 
-valkey = pytest.importorskip("valkey")
+valkey = pytest.importorskip('valkey')
 
 
 def _valkey_available():
@@ -52,7 +53,7 @@ def _valkey_available():
 		return False
 
 
-pytestmark = pytest.mark.skipif(not _valkey_available(), reason="no local valkey-server")
+pytestmark = pytest.mark.skipif(not _valkey_available(), reason='no local valkey-server')
 
 import common.common as _ccommon
 from common.common import WriteKind
@@ -66,8 +67,9 @@ from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.runner import FakeControllerRunner
 
 
-def run_valkey_scenario(monkeypatch, mode, *, settings, control_data, pellet_db,
-                        probes, grill=None, probe_cap=None, runner=None):
+def run_valkey_scenario(
+	monkeypatch, mode, *, settings, control_data, pellet_db, probes, grill=None, probe_cap=None, runner=None
+):
 	"""Seed a live ValkeyStore, run one work cycle against it, restore residue.
 
 	Returns the same `CaptureResult` shape as the InMemoryStore harness, so
@@ -96,9 +98,17 @@ def run_valkey_scenario(monkeypatch, mode, *, settings, control_data, pellet_db,
 		store.write_control(control_data, WriteKind.OVERWRITE)
 		store.write_pellet_db(pellet_db)
 
-		return run_mode(mode, settings=settings, control_data=control_data,
-		                pellet_db=pellet_db, probes=probes, grill=grill,
-		                probe_cap=probe_cap, runner=runner, store=store)
+		return run_mode(
+			mode,
+			settings=settings,
+			control_data=control_data,
+			pellet_db=pellet_db,
+			probes=probes,
+			grill=grill,
+			probe_cap=probe_cap,
+			runner=runner,
+			store=store,
+		)
 	finally:
 		# Best-effort restore. write_status assumes a fully-formed payload, so
 		# only write back a snapshot that was actually present -- on a fresh
@@ -114,9 +124,9 @@ def test_e2e_smoke_over_maxtemp_triggers_error_and_notifies(monkeypatch):
 	settings['safety']['maxtemp'] = 500
 	probes = FakeProbes().script([550, 550, 550])
 	control_data = base_control(mode='Smoke')
-	result = run_valkey_scenario(monkeypatch, 'Smoke', settings=settings,
-	                              control_data=control_data, pellet_db=base_pellet_db(),
-	                              probes=probes)
+	result = run_valkey_scenario(
+		monkeypatch, 'Smoke', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes
+	)
 	assert result.final_control['mode'] == 'Error'
 	assert 'Grill_Error_01' in result.notifications
 	# display queue round-trips through JSON in real Valkey -> list, not tuple.
@@ -130,9 +140,9 @@ def test_e2e_smoke_flameout_with_retries_triggers_reignite(monkeypatch):
 	control_data['safety']['afterstarttemp'] = 100
 	control_data['safety']['reigniteretries'] = 2
 	probes = FakeProbes().script([100, 100, 100])
-	result = run_valkey_scenario(monkeypatch, 'Smoke', settings=settings,
-	                              control_data=control_data, pellet_db=base_pellet_db(),
-	                              probes=probes)
+	result = run_valkey_scenario(
+		monkeypatch, 'Smoke', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes
+	)
 	assert result.final_control['mode'] == 'Reignite'
 	assert result.final_control['safety']['reigniteretries'] == 1  # decremented
 	assert result.final_control['safety']['reignitelaststate'] == 'Smoke'
@@ -147,9 +157,9 @@ def test_e2e_smoke_flameout_without_retries_triggers_error(monkeypatch):
 	control_data['safety']['afterstarttemp'] = 100
 	control_data['safety']['reigniteretries'] = 0
 	probes = FakeProbes().script([100, 100, 100])
-	result = run_valkey_scenario(monkeypatch, 'Smoke', settings=settings,
-	                              control_data=control_data, pellet_db=base_pellet_db(),
-	                              probes=probes)
+	result = run_valkey_scenario(
+		monkeypatch, 'Smoke', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes
+	)
 	assert result.final_control['mode'] == 'Error'
 	assert result.final_control['safety']['reigniteretries'] == 0
 	assert 'Grill_Error_02' in result.notifications
@@ -168,9 +178,16 @@ def test_e2e_hold_pwm_duty_from_temp_profile(monkeypatch):
 	control_data['primary_setpoint'] = 225
 	probes = FakeProbes().script([210] * 8)
 	grill = FakeGrillPlatform(dc_fan=True)
-	result = run_valkey_scenario(monkeypatch, 'Hold', settings=settings,
-	                              control_data=control_data, pellet_db=base_pellet_db(),
-	                              probes=probes, probe_cap=6, grill=grill)
+	result = run_valkey_scenario(
+		monkeypatch,
+		'Hold',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		probe_cap=6,
+		grill=grill,
+	)
 	assert result.final_control['duty_cycle'] == 75
 	assert ('set_duty_cycle', (75,)) in result.grill_calls
 
@@ -182,9 +199,9 @@ def test_e2e_prime_elapses_after_prime_duration(monkeypatch):
 	control_data['prime_amount'] = 10  # -> prime_duration = 1 (tiny)
 	control_data['next_mode'] = 'Startup'
 	probes = FakeProbes().script([70] * 5)
-	result = run_valkey_scenario(monkeypatch, 'Prime', settings=settings,
-	                              control_data=control_data, pellet_db=base_pellet_db(),
-	                              probes=probes)
+	result = run_valkey_scenario(
+		monkeypatch, 'Prime', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes
+	)
 	assert result.final_control['mode'] == 'Prime'
 	assert result.final_control['updated'] is False
 	assert ('power_on', ()) in result.grill_calls

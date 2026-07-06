@@ -1,6 +1,6 @@
 import pytest
 
-valkey = pytest.importorskip("valkey")
+valkey = pytest.importorskip('valkey')
 
 
 def _valkey_available():
@@ -11,13 +11,14 @@ def _valkey_available():
 		return False
 
 
-pytestmark = pytest.mark.skipif(not _valkey_available(), reason="no local valkey-server")
+pytestmark = pytest.mark.skipif(not _valkey_available(), reason='no local valkey-server')
 
 
 def test_valkey_store_smoke():
 	# Read-only smoke: exercises the pass-through against a live server
 	# without writing (leaves no residue on a real instance's Valkey).
 	from controller.runtime.store import ValkeyStore
+
 	s = ValkeyStore()
 	assert isinstance(s.read_control(), dict)
 	assert isinstance(s.read_settings(), dict)
@@ -25,6 +26,7 @@ def test_valkey_store_smoke():
 
 def test_valkey_display_queue_roundtrip():
 	from controller.runtime.store import ValkeyStore
+
 	s = ValkeyStore()
 	s.display_commands().flush()
 	s.display_commands().push(['text', 'ERROR'])
@@ -36,12 +38,13 @@ def test_valkey_write_metrics_new_metric_without_metrics_does_not_crash():
 	# common's default_metrics() (passing None crashed on metrics['starttime']).
 	# The control loop calls this at the start of every work cycle.
 	from controller.runtime.store import ValkeyStore
+
 	s = ValkeyStore()
-	s.write_metrics(flush=True)          # reset metrics list
-	s.write_metrics(new_metric=True)     # must NOT raise
+	s.write_metrics(flush=True)  # reset metrics list
+	s.write_metrics(new_metric=True)  # must NOT raise
 	current = s.read_metrics()
 	assert isinstance(current, dict)
-	assert 'starttime' in current        # populated from default_metrics() + starttime
+	assert 'starttime' in current  # populated from default_metrics() + starttime
 
 
 def test_valkey_control_write_semantics_parity():
@@ -50,6 +53,7 @@ def test_valkey_control_write_semantics_parity():
 	# server. Saves and restores control:general so it leaves no residue.
 	from common.common import WriteKind
 	from controller.runtime.store import ValkeyStore
+
 	s = ValkeyStore()
 	saved = s.read_control()
 	try:
@@ -71,6 +75,7 @@ def test_valkey_write_metrics_replace_last_parity():
 	# write_metrics(metrics) with new_metric=False replaces the last record
 	# (rpop+rpush), matching InMemoryStore's replace-last behavior.
 	from controller.runtime.store import ValkeyStore
+
 	s = ValkeyStore()
 	s.write_metrics(flush=True)
 	s.write_metrics(new_metric=True)

@@ -8,6 +8,7 @@ here. Individual tests may override further, but should not make things
 *larger* without re-checking the scenario still terminates (or bounding it
 via the probe-cap technique described in harness.py).
 """
+
 import copy
 
 from common.common import default_settings, default_control, default_pellets

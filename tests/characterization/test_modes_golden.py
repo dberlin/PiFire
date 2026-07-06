@@ -15,6 +15,7 @@ passes `probe_cap=` to bound modes with no natural exit (Smoke steady-state,
 Hold, Monitor, Manual) via the harness's capped-probe injection. No scenario
 here can loop indefinitely.
 """
+
 from tests.characterization.harness import run_mode
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.fakes.probes import FakeProbes
@@ -28,8 +29,7 @@ def test_smoke_over_maxtemp_triggers_error_and_notifies():
 	settings['safety']['maxtemp'] = 500
 	probes = FakeProbes().script([550, 550, 550])
 	control_data = base_control(mode='Smoke')
-	result = run_mode('Smoke', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes)
+	result = run_mode('Smoke', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes)
 	assert result.final_control['mode'] == 'Error'
 	assert 'Grill_Error_01' in result.notifications
 	assert ('text', 'ERROR') in result.display_commands
@@ -45,8 +45,7 @@ def test_smoke_flameout_with_retries_triggers_reignite():
 	control_data['safety']['afterstarttemp'] = 100
 	control_data['safety']['reigniteretries'] = 2
 	probes = FakeProbes().script([100, 100, 100])
-	result = run_mode('Smoke', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes)
+	result = run_mode('Smoke', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes)
 	assert result.final_control['mode'] == 'Reignite'
 	assert result.final_control['safety']['reigniteretries'] == 1  # decremented
 	assert result.final_control['safety']['reignitelaststate'] == 'Smoke'
@@ -61,8 +60,7 @@ def test_smoke_flameout_without_retries_triggers_error():
 	control_data['safety']['afterstarttemp'] = 100
 	control_data['safety']['reigniteretries'] = 0
 	probes = FakeProbes().script([100, 100, 100])
-	result = run_mode('Smoke', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes)
+	result = run_mode('Smoke', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes)
 	assert result.final_control['mode'] == 'Error'
 	assert result.final_control['safety']['reigniteretries'] == 0
 	assert 'Grill_Error_02' in result.notifications
@@ -75,8 +73,9 @@ def test_startup_exits_on_exit_temp():
 	settings['startup']['duration'] = 100  # large so the timer can't fire first
 	control_data = base_control(mode='Startup')
 	probes = FakeProbes().script([50, 60, 105, 105, 105])
-	result = run_mode('Startup', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes)
+	result = run_mode(
+		'Startup', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes
+	)
 	# Natural timer/temp exits break the loop without setting control['updated'];
 	# only the Error/Reignite/mode-change paths do that.
 	assert result.final_control['mode'] == 'Startup'
@@ -93,8 +92,9 @@ def test_startup_exits_on_timer():
 	settings['startup']['startup_exit_temp'] = 0  # disabled, timer must fire first
 	control_data = base_control(mode='Startup')
 	probes = FakeProbes().script([50] * 8)
-	result = run_mode('Startup', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes)
+	result = run_mode(
+		'Startup', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes
+	)
 	assert result.final_control['mode'] == 'Startup'
 	assert result.final_control['updated'] is False
 	assert result.notifications == []
@@ -114,8 +114,9 @@ def test_reignite_exits_on_timer():
 	control_data = base_control(mode='Reignite')
 	assert control_data['startup_timestamp'] == 0  # fixture default, pre-run
 	probes = FakeProbes().script([50] * 8)
-	result = run_mode('Reignite', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes)
+	result = run_mode(
+		'Reignite', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes
+	)
 	assert result.final_control['mode'] == 'Reignite'
 	assert result.final_control['updated'] is False
 	# Contrast with Startup: Reignite does NOT write startup_timestamp, so it
@@ -139,8 +140,9 @@ def test_reignite_exits_on_exit_temp():
 	settings['startup']['duration'] = 100  # large so the timer can't fire first
 	control_data = base_control(mode='Reignite')
 	probes = FakeProbes().script([50, 60, 105, 105, 105])
-	result = run_mode('Reignite', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes)
+	result = run_mode(
+		'Reignite', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes
+	)
 	assert result.final_control['mode'] == 'Reignite'
 	assert result.final_control['updated'] is False
 	assert result.final_control['startup_timestamp'] == 0  # not written by Reignite
@@ -156,8 +158,7 @@ def test_prime_elapses_after_prime_duration():
 	control_data['prime_amount'] = 10  # -> prime_duration = 1 (tiny)
 	control_data['next_mode'] = 'Startup'
 	probes = FakeProbes().script([70] * 5)
-	result = run_mode('Prime', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes)
+	result = run_mode('Prime', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes)
 	assert result.final_control['mode'] == 'Prime'
 	assert result.final_control['updated'] is False
 	# Prime mode: fan off, power on for the cycle; clean-up turns fan/power off.
@@ -172,8 +173,9 @@ def test_shutdown_elapses_after_shutdown_duration():
 	settings['shutdown']['shutdown_duration'] = 0.1
 	control_data = base_control(mode='Shutdown')
 	probes = FakeProbes().script([150] * 5)
-	result = run_mode('Shutdown', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes)
+	result = run_mode(
+		'Shutdown', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes
+	)
 	assert result.final_control['mode'] == 'Shutdown'
 	assert result.final_control['updated'] is False
 	assert result.grill_calls[-2:] == [('fan_off', ()), ('power_off', ())]
@@ -189,8 +191,9 @@ def test_smoke_auger_cycles_on_and_off():
 	settings['cycle_data']['PMode'] = 0
 	control_data = base_control(mode='Smoke')
 	probes = FakeProbes().script([200])  # steady temp; never trips safety/maxtemp
-	result = run_mode('Smoke', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=30)
+	result = run_mode(
+		'Smoke', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes, probe_cap=30
+	)
 	auger_calls = [c for c in result.grill_calls if c[0] in ('auger_on', 'auger_off')]
 	names = [c[0] for c in auger_calls]
 	on_count = names.count('auger_on')
@@ -212,12 +215,11 @@ def test_monitor_idles_powered_off_and_bounded_by_probe_cap():
 	settings = base_settings()
 	control_data = base_control(mode='Monitor')
 	probes = FakeProbes().script([120])
-	result = run_mode('Monitor', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=30)
+	result = run_mode(
+		'Monitor', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes, probe_cap=30
+	)
 	# Monitor starts powered off and stays that way.
-	assert result.grill_calls[:4] == [
-		('igniter_off', ()), ('auger_off', ()), ('fan_off', ()), ('power_off', ())
-	]
+	assert result.grill_calls[:4] == [('igniter_off', ()), ('auger_off', ()), ('fan_off', ()), ('power_off', ())]
 	assert result.grill_calls[-2:] == [('fan_off', ()), ('power_off', ())]
 	assert ('power_on', ()) not in result.grill_calls
 	assert result.final_control['mode'] == 'Monitor'
@@ -230,8 +232,9 @@ def test_manual_override_fan_on_applies_and_records_grill_call():
 	control_data['manual']['change'] = 'fan'
 	control_data['manual']['output'] = True
 	probes = FakeProbes().script([120])
-	result = run_mode('Manual', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=5)
+	result = run_mode(
+		'Manual', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes, probe_cap=5
+	)
 	assert ('fan_on', (None,)) in result.grill_calls
 	# The manual request is consumed (cleared) after being applied.
 	assert result.final_control['manual']['change'] is None
@@ -248,8 +251,9 @@ def test_hold_lid_open_stops_auger_and_fan():
 	# Reach setpoint first (arms target_temp_achieved), then a sharp temp drop
 	# triggers the lid-open detector.
 	probes = FakeProbes().script([230, 230, 230] + [150] * 10)
-	result = run_mode('Hold', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=13)
+	result = run_mode(
+		'Hold', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes, probe_cap=13
+	)
 	# Lid-open response: auger_off immediately followed by fan_off.
 	names = [c[0] for c in result.grill_calls]
 	fan_off_idx = names.index('fan_off')
@@ -270,8 +274,9 @@ def test_startup_smartstart_selects_profile_by_temp():
 	control_data = base_control(mode='Startup')
 	# 70 falls under temp_range_list[1]=80 (not under [0]=60) -> profile index 1.
 	probes = FakeProbes().script([70] * 10)
-	result = run_mode('Startup', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=8)
+	result = run_mode(
+		'Startup', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes, probe_cap=8
+	)
 	profile = settings['startup']['smartstart']['profiles'][1]
 	assert result.final_control['smartstart']['profile_selected'] == 1
 	assert result.final_control['smartstart']['startuptemp'] == 70
@@ -295,8 +300,14 @@ def test_manual_override_auger_igniter_power_record_grill_calls():
 		control_data['manual']['change'] = change
 		control_data['manual']['output'] = True
 		probes = FakeProbes().script([120])
-		result = run_mode('Manual', settings=settings, control_data=control_data,
-		                   pellet_db=base_pellet_db(), probes=probes, probe_cap=5)
+		result = run_mode(
+			'Manual',
+			settings=settings,
+			control_data=control_data,
+			pellet_db=base_pellet_db(),
+			probes=probes,
+			probe_cap=5,
+		)
 		assert (f'{change}_on', ()) in result.grill_calls
 		assert result.final_control['manual']['change'] is None
 		assert result.final_control['manual']['output'] is None
@@ -317,8 +328,15 @@ def test_manual_override_pwm_sets_duty_cycle():
 	control_data['manual']['pwm'] = 55
 	probes = FakeProbes().script([120] * 8)
 	grill = FakeGrillPlatform(dc_fan=True)
-	result = run_mode('Hold', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=5, grill=grill)
+	result = run_mode(
+		'Hold',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		probe_cap=5,
+		grill=grill,
+	)
 	assert ('set_duty_cycle', (55,)) in result.grill_calls
 	# Manual PWM request is consumed: reset to 100 per control.py line 502.
 	assert result.final_control['manual']['pwm'] == 100
@@ -336,8 +354,15 @@ def test_hold_pwm_duty_from_temp_profile():
 	# setpoint - ptemp = 15 -> temp_range_list [3,7,10,15] index 3 -> duty 75.
 	probes = FakeProbes().script([210] * 8)
 	grill = FakeGrillPlatform(dc_fan=True)
-	result = run_mode('Hold', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=6, grill=grill)
+	result = run_mode(
+		'Hold',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		probe_cap=6,
+		grill=grill,
+	)
 	assert result.final_control['duty_cycle'] == 75
 	assert ('set_duty_cycle', (75,)) in result.grill_calls
 
@@ -358,12 +383,17 @@ def test_hold_fan_assist_cycles_fan_via_pid_path():
 	control_data['primary_setpoint'] = 225
 	probes = FakeProbes().script([230] * 60)  # >= setpoint: arms target_temp_achieved
 	grill = FakeGrillPlatform(dc_fan=True)
-	runner = FakeControllerRunner(period=0.01).script(
-		[NormalizedOutput(cycle_ratio=0.02, fan=None)] * 60
+	runner = FakeControllerRunner(period=0.01).script([NormalizedOutput(cycle_ratio=0.02, fan=None)] * 60)
+	result = run_mode(
+		'Hold',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		probe_cap=50,
+		grill=grill,
+		runner=runner,
 	)
-	result = run_mode('Hold', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=50,
-	                   grill=grill, runner=runner)
 	fan_calls = [c[0] for c in result.grill_calls if c[0] in ('fan_on', 'fan_off')]
 	# More than the single setup fan_on: the assist path is actively cycling.
 	assert fan_calls.count('fan_on') >= 2
@@ -390,15 +420,24 @@ def test_hold_controller_fan_duty_sticky_latch_suppresses_temp_profile():
 	# latch didn't suppress it.
 	probes = FakeProbes().script([210] * 30)
 	grill = FakeGrillPlatform(dc_fan=True)
-	runner = FakeControllerRunner(period=0.01).script([
-		NormalizedOutput(cycle_ratio=0.5, fan={'duty': 42}),
-		NormalizedOutput(cycle_ratio=0.5, fan=None),
-		NormalizedOutput(cycle_ratio=0.5, fan=None),
-		NormalizedOutput(cycle_ratio=0.5, fan=None),
-	])
-	result = run_mode('Hold', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=20,
-	                   grill=grill, runner=runner)
+	runner = FakeControllerRunner(period=0.01).script(
+		[
+			NormalizedOutput(cycle_ratio=0.5, fan={'duty': 42}),
+			NormalizedOutput(cycle_ratio=0.5, fan=None),
+			NormalizedOutput(cycle_ratio=0.5, fan=None),
+			NormalizedOutput(cycle_ratio=0.5, fan=None),
+		]
+	)
+	result = run_mode(
+		'Hold',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		probe_cap=20,
+		grill=grill,
+		runner=runner,
+	)
 	assert result.final_control['duty_cycle'] == 42
 	set_duty_calls = [c for c in result.grill_calls if c[0] == 'set_duty_cycle']
 	assert set_duty_calls == [('set_duty_cycle', (42,))]  # never overwritten to 75
@@ -420,8 +459,15 @@ def test_smoke_plus_cycles_fan_on_and_off():
 	control_data['s_plus'] = True
 	probes = FakeProbes().script([190] * 40)
 	grill = FakeGrillPlatform(dc_fan=True)
-	result = run_mode('Smoke', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=30, grill=grill)
+	result = run_mode(
+		'Smoke',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		probe_cap=30,
+		grill=grill,
+	)
 	fan_calls = [c[0] for c in result.grill_calls if c[0] in ('fan_on', 'fan_off')]
 	assert fan_calls.count('fan_on') >= 3
 	assert fan_calls.count('fan_off') >= 3
@@ -443,11 +489,18 @@ def test_hold_lid_open_clears_and_restores_fan_after_pause_time():
 	control_data['primary_setpoint'] = 225
 	probes = FakeProbes().script([230, 230, 230] + [150] * 5 + [230] * 20)
 	grill = FakeGrillPlatform()
-	result = run_mode('Hold', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=28, grill=grill)
+	result = run_mode(
+		'Hold',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		probe_cap=28,
+		grill=grill,
+	)
 	names = [c[0] for c in result.grill_calls]
 	fan_off_idx = names.index('fan_off')
-	assert 'fan_on' in names[fan_off_idx + 1:]  # fan restored after the pause elapses
+	assert 'fan_on' in names[fan_off_idx + 1 :]  # fan restored after the pause elapses
 	assert result.final_control['mode'] == 'Hold'
 
 
@@ -464,8 +517,15 @@ def test_hold_lid_open_manual_toggle_stops_auger_and_fan():
 	control_data['lid_open_toggle'] = True
 	probes = FakeProbes().script([220] * 15)
 	grill = FakeGrillPlatform()
-	result = run_mode('Hold', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=10, grill=grill)
+	result = run_mode(
+		'Hold',
+		settings=settings,
+		control_data=control_data,
+		pellet_db=base_pellet_db(),
+		probes=probes,
+		probe_cap=10,
+		grill=grill,
+	)
 	names = [c[0] for c in result.grill_calls]
 	fan_off_idx = names.index('fan_off')
 	assert names[fan_off_idx - 1] == 'auger_off'
@@ -488,8 +548,9 @@ def test_recipe_overlay_triggered_without_pause_breaks_and_notifies():
 		'notify': True,
 	}
 	probes = FakeProbes().script([190] * 10)
-	result = run_mode('Smoke', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=8)
+	result = run_mode(
+		'Smoke', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes, probe_cap=8
+	)
 	assert result.final_control['mode'] == 'Recipe'
 	assert 'Recipe_Step_Message' in result.notifications
 	# Broke via the Recipe check itself, not the harness's probe-cap injection.
@@ -512,8 +573,9 @@ def test_recipe_overlay_triggered_with_pause_notifies_once_and_continues():
 		'notify': True,
 	}
 	probes = FakeProbes().script([190] * 10)
-	result = run_mode('Smoke', settings=settings, control_data=control_data,
-	                   pellet_db=base_pellet_db(), probes=probes, probe_cap=8)
+	result = run_mode(
+		'Smoke', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes, probe_cap=8
+	)
 	assert result.final_control['mode'] == 'Recipe'
 	assert result.notifications == ['Recipe_Step_Message']  # sent exactly once
 	assert result.final_control['recipe']['step_data']['notify'] is False

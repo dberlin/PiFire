@@ -1,4 +1,5 @@
 """Pure safety decisions extracted from _work_cycle. No I/O."""
+
 from enum import Enum
 
 

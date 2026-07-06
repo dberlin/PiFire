@@ -14,10 +14,12 @@ class ManualMode(ControlMode):
 		self.grill.fan_off()
 		self.grill.power_off()
 		import control as _control
+
 		_control.eventLogger.debug('Power OFF, Fan OFF, Igniter OFF, Auger OFF')
 
 	def teardown(self, ptemp):
 		self.grill.fan_off()
 		self.grill.power_off()
 		import control as _control
+
 		_control.eventLogger.debug('Fan OFF, Power OFF')

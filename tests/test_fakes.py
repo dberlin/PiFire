@@ -15,8 +15,12 @@ def test_grill_records_calls_and_toggles_output():
 
 def test_probes_yield_scripted_sequence():
 	p = FakeProbes()
-	p.script([{'primary': {'Grill': 100}, 'food': {}, 'aux': {}, 'tr': {}},
-	          {'primary': {'Grill': 110}, 'food': {}, 'aux': {}, 'tr': {}}])
+	p.script(
+		[
+			{'primary': {'Grill': 100}, 'food': {}, 'aux': {}, 'tr': {}},
+			{'primary': {'Grill': 110}, 'food': {}, 'aux': {}, 'tr': {}},
+		]
+	)
 	assert list(p.read_probes()['primary'].values())[0] == 100
 	assert list(p.read_probes()['primary'].values())[0] == 110
 

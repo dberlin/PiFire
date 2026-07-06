@@ -1,4 +1,5 @@
 """Injectable time source so the control loop is deterministically testable."""
+
 import time
 from abc import ABC, abstractmethod
 

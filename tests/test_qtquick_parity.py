@@ -65,14 +65,18 @@ PYGAME_CMDS, PYGAME_MENUS, PYGAME_INPUTS = _pygame_actions()
 # --------------------------------------------------------------------------
 def _dispatch_probe(monkeypatch):
 	effects = []
-	monkeypatch.setattr(qmod, 'write_control', lambda data, kind=None, origin=None: effects.append(('write_control', data)))
+	monkeypatch.setattr(
+		qmod, 'write_control', lambda data, kind=None, origin=None: effects.append(('write_control', data))
+	)
 	monkeypatch.setattr(qmod, 'read_status', lambda: {'s_plus': False})
 	monkeypatch.setattr(qmod, 'read_control', lambda: {'notify_data': [], 'recipe': {'step_data': {}}})
 	monkeypatch.setattr(qmod, 'is_real_hardware', lambda: False)
 	# _command_handler (inherited) uses names in base_flex's namespace.
 	import display.base_flex as bf
 
-	monkeypatch.setattr(bf, 'write_control', lambda data, kind=None, origin=None: effects.append(('write_control', data)))
+	monkeypatch.setattr(
+		bf, 'write_control', lambda data, kind=None, origin=None: effects.append(('write_control', data))
+	)
 	monkeypatch.setattr(bf, 'read_control', lambda: {'notify_data': [], 'recipe': {'step_data': {}}, 'updated': False})
 	monkeypatch.setattr(bf, 'read_settings', lambda: {'cycle_data': {}})
 	monkeypatch.setattr(bf, 'write_settings', lambda s: effects.append(('write_settings', s)))

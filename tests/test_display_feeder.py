@@ -4,11 +4,20 @@ from display_process import DisplayFeeder
 
 
 class _FakeDisplay:
-	def __init__(self): self.calls = []
-	def display_status(self, i, s): self.calls.append(('status', i, s))
-	def display_text(self, t): self.calls.append(('text', t))
-	def clear_display(self): self.calls.append(('clear',))
-	def display_splash(self): self.calls.append(('splash',))
+	def __init__(self):
+		self.calls = []
+
+	def display_status(self, i, s):
+		self.calls.append(('status', i, s))
+
+	def display_text(self, t):
+		self.calls.append(('text', t))
+
+	def clear_display(self):
+		self.calls.append(('clear',))
+
+	def display_splash(self):
+		self.calls.append(('splash',))
 
 
 def test_feeder_pushes_status_and_drains_display_queue():
