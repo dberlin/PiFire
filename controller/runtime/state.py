@@ -17,6 +17,7 @@ class WorkCycleState:
 	prime_amount: float = 0.0
 	startup_timer: float = 0.0
 	raw_startup_temp: float = 0.0
+	ptemp: float = 0.0
 
 	# Optional default
 	controller_fan_duty: float | None = None

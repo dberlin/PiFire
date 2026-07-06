@@ -13,6 +13,8 @@ import logging
 
 from common.common import WriteKind
 from common.process_mon import Process_Monitor
+from controller.runtime.logic.fan import start_fan
+from controller.runtime.logic.pwm import ramp_params
 from controller.runtime.logic.safety import over_max_temp
 
 
@@ -38,8 +40,15 @@ class ControlMode:
 	    no-op).
 	  - on_fan_tick(now, current_output_status): called immediately after
 	    check_safety(), at the fan/smoke-plus/lid-open block position
-	    (default no-op).
-	  - check_safety(now, ptemp): per-iteration mode-specific safety check.
+	    (default no-op). Does not receive `ptemp` directly -- modes that need
+	    it in `on_fan_tick` (e.g. via `_smoke_plus_fan_tick`) must stash it on
+	    `self.state.ptemp` from their own `check_safety` override first. Only
+	    called if `check_safety()` did NOT request an immediate break.
+	  - check_safety(now, ptemp) -> bool: per-iteration mode-specific safety
+	    check. Return True to break the loop IMMEDIATELY (matching the
+	    inline flameout block's own `break`, which happens before the
+	    fan/smoke-plus block ever runs for that iteration) -- default False
+	    (no-op, never breaks).
 	  - should_exit(now, ptemp) -> bool: per-iteration mode-specific exit
 	    condition (default False -- rely on the universal breaks).
 	  - status_fragment() -> dict: extra fields merged into status_data at
@@ -77,8 +86,8 @@ class ControlMode:
 	def on_fan_tick(self, now, current_output_status):
 		pass
 
-	def check_safety(self, now, ptemp):
-		pass
+	def check_safety(self, now, ptemp) -> bool:
+		return False
 
 	def should_exit(self, now, ptemp) -> bool:
 		return False
@@ -124,6 +133,104 @@ class ControlMode:
 				# Set current last toggle time to now
 				self.state.auger_toggle_time = now
 				_control.eventLogger.debug('Cycle Event: Auger Off')
+
+	def _smoke_plus_fan_tick(self, now, current_output_status):
+		"""Reproduces the smoke-plus fan cycling + elif restore chain from the
+		legacy fan block (control.py ~789-870), verbatim aside from self./name
+		substitution. Gated to Smoke always, and Hold only once
+		target_temp_achieved -- Hold's own on_fan_tick handles the Hold-only
+		lid-open/PWM-duty-from-temp/fan-assist parts BEFORE calling this
+		helper. Requires self.state.ptemp to have been set (by check_safety)
+		before this runs."""
+		import control as _control
+
+		settings = self.settings
+		control = self.control
+		grill_platform = self.grill
+		ptemp = self.state.ptemp
+
+		# If in Smoke Plus Mode but not calling for fan pid control, Cycle the Fan
+		if (
+			(self.name == 'Smoke' or (self.name == 'Hold' and self.state.target_temp_achieved))
+			and control['s_plus']
+			and not self.state.fan_assist
+			and not self.state.lid_open_detect
+		):
+			# If Temperature is > settings['smoke_plus']['max_temp']
+			# or Temperature is < settings['smoke_plus']['min_temp'] then turn on fan
+			if (
+				ptemp > settings['smoke_plus']['max_temp'] or ptemp < settings['smoke_plus']['min_temp']
+			) and self.state.manual_override['fan'] < now:
+				if not current_output_status['fan']:
+					start_fan(grill_platform, settings, control['duty_cycle'])
+					_control.eventLogger.debug('Smoke Plus: Over or Under Temp Fan ON')
+			elif (now - self.state.fan_cycle_toggle_time) > settings['smoke_plus']['on_time'] and current_output_status['fan']:
+				if self.state.manual_override['fan'] < now:
+					self.state.manual_override['fan'] = 0
+					grill_platform.fan_off()
+					self.state.fan_cycle_toggle_time = now
+					_control.eventLogger.debug('Smoke Plus: Fan OFF')
+			elif (
+				(now - self.state.fan_cycle_toggle_time) > settings['smoke_plus']['off_time']
+				and not current_output_status['fan']
+			) and self.state.manual_override['fan'] < now:
+				self.state.fan_cycle_toggle_time = now
+				if (
+					settings['platform']['dc_fan']
+					and (self.name == 'Smoke' or (self.name == 'Hold' and not control['pwm_control']))
+					and settings['smoke_plus']['fan_ramp']
+				):
+					grill_platform.pwm_fan_ramp(*ramp_params(settings['smoke_plus'], settings['pwm']))
+					self.state.pwm_fan_ramping = True
+					_control.eventLogger.debug('Smoke Plus: Fan Ramping Up')
+				else:
+					start_fan(grill_platform, settings, control['duty_cycle'])
+					_control.eventLogger.debug('Smoke Plus: Fan ON')
+
+		# If Smoke Plus was disabled when fan is OFF return fan to ON
+		elif (
+			not current_output_status['fan']
+			and not control['s_plus']
+			and not self.state.fan_assist
+			and not self.state.lid_open_detect
+			and self.state.manual_override['fan'] < now
+		):
+			start_fan(grill_platform, settings, control['duty_cycle'])
+			_control.eventLogger.debug('Smoke Plus: Fan Returned to On')
+
+		# If Smoke Plus was disabled while fan was ramping return it to the correct duty cycle
+		elif (
+			settings['platform']['dc_fan']
+			and current_output_status['pwm'] != control['duty_cycle']
+			and not control['s_plus']
+			and self.state.pwm_fan_ramping
+			and self.state.manual_override['fan'] < now
+		):
+			self.state.pwm_fan_ramping = False
+			grill_platform.set_duty_cycle(control['duty_cycle'])
+			_control.eventLogger.debug('Smoke Plus: Fan Returned to ' + str(control['duty_cycle']) + '% duty cycle')
+
+		# Set Fan Duty Cycle based on Average Grill Temp Using Profile
+		elif (
+			settings['platform']['dc_fan']
+			and control['pwm_control']
+			and current_output_status['pwm'] != control['duty_cycle']
+			and self.state.manual_override['fan'] < now
+		):
+			grill_platform.set_duty_cycle(control['duty_cycle'])
+			_control.eventLogger.debug('Temp Fan Control: Fan Set to ' + str(control['duty_cycle']) + '% duty cycle')
+
+		# If PWM Fan Control is turned off check current Duty Cycle and set back to max_duty_cycle if required
+		elif (
+			settings['platform']['dc_fan']
+			and not control['pwm_control']
+			and current_output_status['pwm'] != settings['pwm']['max_duty_cycle']
+			and self.state.manual_override['fan'] < now
+		):
+			control['duty_cycle'] = settings['pwm']['max_duty_cycle']
+			self.ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
+			grill_platform.set_duty_cycle(control['duty_cycle'])
+			_control.eventLogger.debug('Temp Fan Control: Set to OFF, Fan Returned to Max Duty Cycle')
 
 	# ---- shared skeleton ----
 	def run(self):
@@ -238,6 +345,7 @@ class ControlMode:
 		display_toggle_time = start_time
 		# Initializing Start Time for Fan
 		fan_cycle_toggle_time = start_time
+		self.state.fan_cycle_toggle_time = start_time
 		# Set time since toggle for hopper check
 		hopper_toggle_time = start_time
 		# Set time since fan speed update
@@ -455,7 +563,8 @@ class ControlMode:
 				display_toggle_time = ctx.clock.now()
 
 			# ---- mode-specific per-tick safety check ----
-			self.check_safety(now, ptemp)
+			if self.check_safety(now, ptemp):
+				break
 
 			# ---- mode-specific fan/smoke-plus/lid-open tick ----
 			self.on_fan_tick(now, current_output_status)
