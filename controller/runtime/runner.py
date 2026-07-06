@@ -42,8 +42,8 @@ class SyncControllerRunner(ControllerRunner):
 		self.submit(temp)
 		return self.latest()
 
-	def reconfigure(self, settings, control):
-		core, status = _build_core(settings, control)
+	def reconfigure(self, settings, control, logger=None):
+		core, status = _build_core(settings, control, logger=logger)
 		if status == 'Active':
 			self._core = core
 		return status
@@ -55,11 +55,13 @@ class SyncControllerRunner(ControllerRunner):
 		return dict(self._core.__dict__)
 
 
-def _build_core(settings, control):
+def _build_core(settings, control, logger=None):
 	try:
 		controller_type = settings['controller']['selected']
 		module = importlib.import_module(f'controller.{controller_type}')
 	except Exception:
+		if logger is not None:
+			logger.exception('Error occurred loading controller module. Trace dump: ')
 		return None, 'Inactive'
 	core = module.Controller(
 		settings['controller']['config'][controller_type],
@@ -68,8 +70,8 @@ def _build_core(settings, control):
 	return core, 'Active'
 
 
-def build_runner(settings, control):
-	core, status = _build_core(settings, control)
+def build_runner(settings, control, logger=None):
+	core, status = _build_core(settings, control, logger=logger)
 	if core is None:
 		return None, status
 	return SyncControllerRunner(core), status

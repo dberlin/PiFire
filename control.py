@@ -20,7 +20,6 @@ Description: This script will start at boot, initialize the relays and
 ==============================================================================
 """
 import logging
-import importlib
 import atexit
 from common import *  # Common Module for WebUI and Control Program
 from common.process_mon import Process_Monitor
@@ -29,7 +28,7 @@ from notify.notifications import *
 from file_mgmt.recipes import convert_recipe_units
 from file_mgmt.cookfile import create_cookfile
 from file_mgmt.common import read_json_file_data
-from controller.base import normalize_controller_output
+from controller.runtime.runner import build_runner
 from controller.runtime.context import ControllerContext
 from controller.runtime.devices import build_devices
 from controller.runtime.store import ValkeyStore
@@ -67,31 +66,6 @@ def _start_fan(grill_platform, settings, duty_cycle=None):
 		grill_platform.fan_on(adjusted_dc)
 	else:
 		grill_platform.fan_on()
-
-
-def _init_controller(settings, control):
-	"""
-	Initialize the controller module and create a Controller object.
-
-	:param settings: Settings dictionary
-	:param control: Control dictionary
-	:return: Tuple of (controllerCore object, status string)
-	"""
-	status = 'Active'
-	try:
-		controller_type = settings['controller']['selected']
-		controller_module = importlib.import_module(f'controller.{controller_type}')
-	except:
-		controlLogger.exception(f'Error occurred loading controller module({controller_type}). Trace dump: ')
-		status = 'Inactive'
-		return None, status
-
-	controllerCore = controller_module.Controller(
-		settings['controller']['config'][controller_type], settings['globals']['units'], settings['cycle_data']
-	)
-	controllerCore.set_target(control['primary_setpoint'])  # Initialize with Set Point for grill
-
-	return controllerCore, status
 
 
 def _process_system_commands(ctx):
@@ -260,7 +234,7 @@ def _work_cycle(mode, ctx):
 		"""
 			Load Controller Module (i.e. PID)
 		"""
-		controllerCore, controller_status = _init_controller(settings, control)
+		runner, controller_status = build_runner(settings, control, logger=ctx.control_log)
 		if controller_status == 'Inactive':
 			status = 'Inactive'
 		eventLogger.debug(
@@ -403,9 +377,9 @@ def _work_cycle(mode, ctx):
 	# Clear Manual Overrides
 	manual_override = {'igniter': 0, 'auger': 0, 'fan': 0, 'power': 0, 'pwm': 0}
 
-	pid_output = 0
-	mpc_fan_duty = None  # set when an MPC-style controller commands the fan (PWM builds)
-	ControlFanPid = False
+	controller_output = 0
+	controller_fan_duty = None  # set when an MPC-style controller commands the fan (PWM builds)
+	fan_assist = False
 
 	# ============ Main Work Cycle ============
 	while status == 'Active':
@@ -447,7 +421,7 @@ def _work_cycle(mode, ctx):
 			ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
 			# Reinitialize the controller with the updated settings
 			settings = ctx.store.read_settings()
-			controllerCore, controller_status = _init_controller(settings, control)
+			controller_status = runner.reconfigure(settings, control, logger=ctx.control_log)
 			if controller_status == 'Active':
 				eventLogger.info('Controller reinitialized with updated settings')
 
@@ -551,19 +525,20 @@ def _work_cycle(mode, ctx):
 		if mode in ('Startup', 'Reignite', 'Smoke', 'Hold', 'Prime'):
 			if mode == 'Hold':
 				# Check to see if it's time to update pid and update if needed.
-				controller_interval = controllerCore.get_control_period() or CycleTime
+				controller_interval = runner.control_period() or CycleTime
 				if (now - controllerCycleStart) > controller_interval:
-					raw_output = controllerCore.update(ptemp)
-					pid_output, fan_cmd = normalize_controller_output(raw_output)
+					runner.submit(ptemp)
+					_out = runner.latest()
+					controller_output, fan_cmd = _out.cycle_ratio, _out.fan
 					controllerCycleStart = now
-					CycleRatio = RawCycleRatio = settings['cycle_data']['u_min'] if LidOpenDetect else pid_output
+					CycleRatio = RawCycleRatio = settings['cycle_data']['u_min'] if LidOpenDetect else controller_output
 					# Controllers that command the fan directly (MPC) route the duty
 					# through control['duty_cycle'] so the PWM apply path below uses it.
-					# Setting mpc_fan_duty also suppresses the legacy temperature-profile
+					# Setting controller_fan_duty also suppresses the legacy temperature-profile
 					# fan logic so it cannot overwrite the MPC command.
 					if fan_cmd is not None and settings['platform']['dc_fan'] and control['pwm_control']:
-						mpc_fan_duty = fan_cmd['duty']
-						control['duty_cycle'] = mpc_fan_duty
+						controller_fan_duty = fan_cmd['duty']
+						control['duty_cycle'] = controller_fan_duty
 						ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
 					# If ratio is less than min set auger ratio to min and control further via fan.
 					if CycleRatio < settings['cycle_data']['u_min']:
@@ -572,11 +547,11 @@ def _work_cycle(mode, ctx):
 						# It is not compatible with PWM control on DC fans (too many variables).
 						# To use FanPid Control with DC fans, disable PWM control and enable FanPidEnabled in settings.
 						if settings['cycle_data'].get('FanPidEnabled', False) and not control['pwm_control']:
-							ControlFanPid = True
+							fan_assist = True
 						else:
-							ControlFanPid = False
+							fan_assist = False
 					else:
-						ControlFanPid = False
+						fan_assist = False
 					# Don't set ratio over maximum.
 					CycleRatio = min(CycleRatio, settings['cycle_data']['u_max'])
 			if manual_override['auger'] < now:
@@ -607,9 +582,9 @@ def _work_cycle(mode, ctx):
 							settings['notify_services'].get('mqtt') != None
 							and settings['notify_services']['mqtt']['enabled']
 						):
-							pid_data = controllerCore.__dict__
-							pid_data['cycle_ratio'] = round(CycleRatio, 2)
-							ctx.notifications.check(settings, control, pid_data=pid_data)
+							controller_data = runner.controller_state()
+							controller_data['cycle_ratio'] = round(CycleRatio, 2)
+							ctx.notifications.check(settings, control, pid_data=controller_data)
 
 				# If Auger is ON and time since toggle is greater than On Time
 				if current_output_status['auger'] and (now - auger_toggle_time) > (CycleTime * CycleRatio):
@@ -773,7 +748,7 @@ def _work_cycle(mode, ctx):
 				settings['platform']['dc_fan']
 				and mode == 'Hold'
 				and control['pwm_control']
-				and mpc_fan_duty is None
+				and controller_fan_duty is None
 				and (now - fan_update_time) > settings['pwm']['update_time']
 			):
 				fan_update_time = now
@@ -800,7 +775,7 @@ def _work_cycle(mode, ctx):
 			if (
 				mode == 'Hold'
 				and target_temp_achieved
-				and ControlFanPid
+				and fan_assist
 				and not LidOpenDetect
 				and not control['pwm_control']
 			):
@@ -813,15 +788,15 @@ def _work_cycle(mode, ctx):
 					max_fan_ratio = 1
 
 				# Divide the pid output by the u_min.
-				# This way when we are at u_min our fan will be at 100% fan ratio and will drop proportionally down to 0 as pid_output drops.
+				# This way when we are at u_min our fan will be at 100% fan ratio and will drop proportionally down to 0 as controller_output drops.
 				# If pid is returning negative values the best we can do is shut off the fan so set min to 0.
 				#
-				pid_output_adjusted = max(0, pid_output / settings['cycle_data']['u_min'])
-				FanRatio = pid_output_adjusted * max_fan_ratio
+				controller_output_adjusted = max(0, controller_output / settings['cycle_data']['u_min'])
+				FanRatio = controller_output_adjusted * max_fan_ratio
 				fan_on_time = total_fan_cycle * FanRatio
 				fan_off_time = total_fan_cycle * (1 - FanRatio)
 				eventLogger.debug(
-					f'Fan PID: Fan ON, pid_output: {pid_output}, pid_output_adjusted: {pid_output_adjusted}'
+					f'Fan PID: Fan ON, controller_output: {controller_output}, controller_output_adjusted: {controller_output_adjusted}'
 				)
 				eventLogger.debug(f'Fan ratio: {FanRatio}, Fan on time: {fan_on_time}, Fan off time: {fan_off_time}')
 				if (now - fan_cycle_toggle_time) > fan_on_time and current_output_status['fan']:
@@ -837,7 +812,7 @@ def _work_cycle(mode, ctx):
 			if (
 				(mode == 'Smoke' or (mode == 'Hold' and target_temp_achieved))
 				and control['s_plus']
-				and not ControlFanPid
+				and not fan_assist
 				and not LidOpenDetect
 			):
 				# If Temperature is > settings['smoke_plus']['max_temp']
@@ -879,7 +854,7 @@ def _work_cycle(mode, ctx):
 			elif (
 				not current_output_status['fan']
 				and not control['s_plus']
-				and not ControlFanPid
+				and not fan_assist
 				and not LidOpenDetect
 				and manual_override['fan'] < now
 			):

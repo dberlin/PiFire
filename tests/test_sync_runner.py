@@ -1,4 +1,4 @@
-from controller.runtime.runner import SyncControllerRunner, NormalizedOutput
+from controller.runtime.runner import SyncControllerRunner, NormalizedOutput, build_runner, _build_core
 
 
 class _Core:
@@ -22,3 +22,43 @@ def test_sync_runner_float_output_has_no_fan():
 		def update(self, temp): return 0.25
 	out = SyncControllerRunner(FloatCore()).latest_from(190.0)
 	assert out.cycle_ratio == 0.25 and out.fan is None
+
+
+class _RecordingLogger:
+	def __init__(self): self.exceptions = []
+	def exception(self, msg): self.exceptions.append(msg)
+
+
+def test_build_runner_logs_on_load_failure_when_logger_given():
+	settings = {'controller': {'selected': 'does_not_exist', 'config': {}}, 'globals': {'units': 'F'}, 'cycle_data': {}}
+	control = {'primary_setpoint': 225}
+	logger = _RecordingLogger()
+
+	runner, status = build_runner(settings, control, logger=logger)
+
+	assert runner is None
+	assert status == 'Inactive'
+	assert len(logger.exceptions) == 1
+	assert 'Error occurred loading controller module' in logger.exceptions[0]
+
+
+def test_build_runner_does_not_require_logger():
+	settings = {'controller': {'selected': 'does_not_exist', 'config': {}}, 'globals': {'units': 'F'}, 'cycle_data': {}}
+	control = {'primary_setpoint': 225}
+
+	runner, status = build_runner(settings, control)
+
+	assert runner is None
+	assert status == 'Inactive'
+
+
+def test_build_core_logs_on_load_failure_when_logger_given():
+	settings = {'controller': {'selected': 'does_not_exist', 'config': {}}, 'globals': {'units': 'F'}, 'cycle_data': {}}
+	control = {'primary_setpoint': 225}
+	logger = _RecordingLogger()
+
+	core, status = _build_core(settings, control, logger=logger)
+
+	assert core is None
+	assert status == 'Inactive'
+	assert len(logger.exceptions) == 1
