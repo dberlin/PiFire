@@ -92,7 +92,10 @@ class _CappedProbes:
 		return getattr(self._probes, name)
 
 
-def make_ctx(settings, control_data, pellet_db, probes, grill=None):
+def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None):
+	# `runner` is accepted for signature symmetry with `run_mode` (which does
+	# the actual `control.build_runner` monkeypatching around `_work_cycle`);
+	# `make_ctx` itself never constructs a runner, so this is unused here.
 	store = InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
 	grill = grill or FakeGrillPlatform(
 		dc_fan=settings['platform'].get('dc_fan', False),
@@ -107,7 +110,7 @@ def make_ctx(settings, control_data, pellet_db, probes, grill=None):
 	return ctx, grill, notifier
 
 
-def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, probe_cap=None):
+def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, probe_cap=None, runner=None):
 	"""Run one `control._work_cycle` invocation hermetically and capture its
 	observable effects.
 
@@ -115,6 +118,12 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
 	`_CappedProbes` above. Pick a value comfortably larger than the number of
 	iterations needed to exercise the behavior under test (e.g. enough for a
 	couple of auger on/off cycles) but bounded so the test can't hang.
+
+	`runner`: if set, monkeypatches `control.build_runner` for the duration of
+	the call so Hold mode uses this object (e.g. a scripted
+	`FakeControllerRunner`) instead of constructing a real PID/MPC core. Lets
+	Hold-mode scenarios pin the runner's `.latest()` output deterministically
+	without depending on real controller math.
 	"""
 	ctx, grill, notifier = make_ctx(settings, control_data, pellet_db, probes, grill)
 
@@ -124,10 +133,14 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
 
 	prev_monitor = control.Process_Monitor
 	control.Process_Monitor = _NoopMonitor
+	prev_build_runner = control.build_runner
+	if runner is not None:
+		control.build_runner = lambda *a, **k: (runner, 'Active')
 	try:
 		control._work_cycle(mode, ctx)
 	finally:
 		control.Process_Monitor = prev_monitor
+		control.build_runner = prev_build_runner
 
 	return CaptureResult(
 		grill_calls=grill.calls,
