@@ -111,18 +111,18 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
 	iterations needed to exercise the behavior under test (e.g. enough for a
 	couple of auger on/off cycles) but bounded so the test can't hang.
 
-	`runner`: if set, monkeypatches `control.build_runner` for the duration of
-	the call so Hold mode uses this object (e.g. a scripted
+	`runner`: if set, monkeypatches `controller.runtime.runner.build_runner` for
+	the duration of the call so Hold mode uses this object (e.g. a scripted
 	`FakeControllerRunner`) instead of constructing a real PID/MPC core. Lets
 	Hold-mode scenarios pin the runner's `.latest()` output deterministically
 	without depending on real controller math.
 
 	NOTE: HoldMode (controller/runtime/modes/hold.py) calls
 	`controller.runtime.runner.build_runner(...)` directly (a patchable
-	module-level reference), NOT `control.build_runner` -- the legacy inline
-	Hold code (now dead, left in place per the strangler-migration
-	convention) is what used `control.build_runner`. Both are patched here so
-	injection reaches HoldMode regardless of which path is live.
+	module-level reference). The legacy inline Hold code in `control.py` that
+	used to call `control.build_runner` has been deleted (all modes are
+	migrated to `ControlMode` handlers), so only the runtime reference needs
+	patching now.
 	"""
 	ctx, grill, notifier = make_ctx(settings, control_data, pellet_db, probes, grill)
 
@@ -132,16 +132,13 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
 
 	# Process_Monitor is neutralized globally by the autouse fixture in
 	# tests/conftest.py, so we only need to (optionally) inject a fake runner.
-	prev_build_runner = control.build_runner
 	prev_runtime_build_runner = controller.runtime.runner.build_runner
 	if runner is not None:
 		fake_build_runner = lambda *a, **k: (runner, 'Active')
-		control.build_runner = fake_build_runner
 		controller.runtime.runner.build_runner = fake_build_runner
 	try:
 		control._work_cycle(mode, ctx)
 	finally:
-		control.build_runner = prev_build_runner
 		controller.runtime.runner.build_runner = prev_runtime_build_runner
 
 	return CaptureResult(
