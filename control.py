@@ -38,10 +38,11 @@ from controller.runtime.logic.safety import startup_temp_bounds, evaluate_flameo
 from controller.runtime.logic.cycle import smoke_cycle_times, hold_initial_cycle, prime_cycle_times
 from controller.runtime.logic.smartstart import select_profile, profile_cycle
 from controller.runtime.logic.pwm import hold_duty_cycle, ramp_params
-from controller.runtime.logic.fan import clamp_duty, smoke_plus_max_ratio, fan_assist_times
+from controller.runtime.logic.fan import clamp_duty, smoke_plus_max_ratio, fan_assist_times, start_fan
 from controller.runtime.state import WorkCycleState
 from controller.runtime.modes.monitor import MonitorMode
 from controller.runtime.modes.manual import ManualMode
+from controller.runtime.modes.shutdown import ShutdownMode
 from os.path import exists
 
 """
@@ -56,23 +57,6 @@ from os.path import exists
  	Function Definitions
 *****************************************
 """
-
-
-def _start_fan(grill_platform, settings, duty_cycle=None):
-	"""
-	Check for DC Fan and set duty cycle when turning ON otherwise turn AC fan ON normally.
-
-	:param settings: Settings
-	:param duty_cycle: Duty Cycle to set. If not provided will be set to max_duty_cycle (dc_fan only)
-	"""
-	if settings['platform']['dc_fan']:
-		if duty_cycle is not None:
-			adjusted_dc = clamp_duty(duty_cycle, settings['pwm'])
-		else:
-			adjusted_dc = settings['pwm']['max_duty_cycle']
-		grill_platform.fan_on(adjusted_dc)
-	else:
-		grill_platform.fan_on()
 
 
 def _process_system_commands(ctx):
@@ -103,8 +87,8 @@ def _process_system_commands(ctx):
 		system_output.push(result)
 
 
-_MIGRATED_MODES = frozenset({'Monitor', 'Manual'})
-_MODE_HANDLERS = {'Monitor': MonitorMode, 'Manual': ManualMode}
+_MIGRATED_MODES = frozenset({'Monitor', 'Manual', 'Shutdown'})
+_MODE_HANDLERS = {'Monitor': MonitorMode, 'Manual': ManualMode, 'Shutdown': ShutdownMode}
 
 
 def _work_cycle(mode, ctx):
@@ -192,9 +176,9 @@ def _work_cycle(mode, ctx):
 			and settings['platform']['dc_fan']
 			and settings['startup'].get('pwm_duty_cycle') is not None
 		):
-			_start_fan(grill_platform, settings, duty_cycle=settings['startup']['pwm_duty_cycle'])
+			start_fan(grill_platform, settings, duty_cycle=settings['startup']['pwm_duty_cycle'])
 		else:
-			_start_fan(grill_platform, settings)
+			start_fan(grill_platform, settings)
 		grill_platform.power_on()
 		eventLogger.debug('Power ON, Fan ON, Igniter OFF, Auger OFF')
 	elif mode in ('Prime'):
@@ -726,7 +710,7 @@ def _work_cycle(mode, ctx):
 			if mode == 'Hold':
 				if LidOpenDetect and ctx.clock.now() > LidOpenEventExpires:
 					LidOpenDetect = False
-					_start_fan(grill_platform, settings, control['duty_cycle'])
+					start_fan(grill_platform, settings, control['duty_cycle'])
 				if control['lid_open_toggle']:
 					control['lid_open_toggle'] = False
 					ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
@@ -789,7 +773,7 @@ def _work_cycle(mode, ctx):
 					eventLogger.debug('Fan PID: Fan OFF')
 				elif (now - fan_cycle_toggle_time) > fan_off_time and not current_output_status['fan']:
 					fan_cycle_toggle_time = now
-					_start_fan(grill_platform, settings, control['duty_cycle'])
+					start_fan(grill_platform, settings, control['duty_cycle'])
 					eventLogger.debug('Fan PID: Fan ON')
 
 			# If in Smoke Plus Mode but not calling for fan pid control, Cycle the Fan
@@ -805,7 +789,7 @@ def _work_cycle(mode, ctx):
 					ptemp > settings['smoke_plus']['max_temp'] or ptemp < settings['smoke_plus']['min_temp']
 				) and manual_override['fan'] < now:
 					if not current_output_status['fan']:
-						_start_fan(grill_platform, settings, control['duty_cycle'])
+						start_fan(grill_platform, settings, control['duty_cycle'])
 						eventLogger.debug('Smoke Plus: Over or Under Temp Fan ON')
 				elif (now - fan_cycle_toggle_time) > settings['smoke_plus']['on_time'] and current_output_status['fan']:
 					if manual_override['fan'] < now:
@@ -827,7 +811,7 @@ def _work_cycle(mode, ctx):
 						pwm_fan_ramping = True
 						eventLogger.debug('Smoke Plus: Fan Ramping Up')
 					else:
-						_start_fan(grill_platform, settings, control['duty_cycle'])
+						start_fan(grill_platform, settings, control['duty_cycle'])
 						eventLogger.debug('Smoke Plus: Fan ON')
 
 			# If Smoke Plus was disabled when fan is OFF return fan to ON
@@ -838,7 +822,7 @@ def _work_cycle(mode, ctx):
 				and not LidOpenDetect
 				and manual_override['fan'] < now
 			):
-				_start_fan(grill_platform, settings, control['duty_cycle'])
+				start_fan(grill_platform, settings, control['duty_cycle'])
 				eventLogger.debug('Smoke Plus: Fan Returned to On')
 
 			# If Smoke Plus was disabled while fan was ramping return it to the correct duty cycle

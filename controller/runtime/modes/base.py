@@ -168,6 +168,7 @@ class ControlMode:
 
 		# Set the start time
 		start_time = ctx.clock.now()
+		self.state.start_time = start_time
 
 		# Set time since toggle for temperature
 		temp_toggle_time = start_time

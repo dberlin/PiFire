@@ -29,3 +29,20 @@ def fan_assist_times(controller_output, total_fan_cycle, max_fan_ratio, u_min):
 	on_time = total_fan_cycle * ratio
 	off_time = total_fan_cycle * (1 - ratio)
 	return FanTimes(on_time=on_time, off_time=off_time, ratio=ratio)
+
+
+def start_fan(grill_platform, settings, duty_cycle=None):
+	"""
+	Check for DC Fan and set duty cycle when turning ON otherwise turn AC fan ON normally.
+
+	:param settings: Settings
+	:param duty_cycle: Duty Cycle to set. If not provided will be set to max_duty_cycle (dc_fan only)
+	"""
+	if settings['platform']['dc_fan']:
+		if duty_cycle is not None:
+			adjusted_dc = clamp_duty(duty_cycle, settings['pwm'])
+		else:
+			adjusted_dc = settings['pwm']['max_duty_cycle']
+		grill_platform.fan_on(adjusted_dc)
+	else:
+		grill_platform.fan_on()
