@@ -10,15 +10,16 @@ class StartupMode(ControlMode):
 	"""Startup mode: fan+power on at setup (shared branch with Reignite/Smoke/
 	Hold/Shutdown, plus the Startup/Reignite dc_fan pwm_duty_cycle special
 	case); igniter+auger ON at setup; initializes the smoke-cycle timing
-	(shared init path with Reignite/Smoke). Safety baseline (raw_startup_temp,
-	startuptemp bounds, afterstarttemp) and smart-start profile selection are
-	computed post-probe-read in setup_safety(), since they need the initial
-	ptemp. Per-tick, runs the shared (non-Hold) auger-cycle toggle and
-	publishes cycle_ratio to MQTT. check_safety() just tracks afterstarttemp
-	(no write -- teardown does the write). should_exit() recomputes the
-	smart-start-vs-normal startup_timer/exit_temp each tick (mirrors the
-	control.py loop-body recompute, not just the setup-time value) and exits
-	on timer elapsed or exit_temp reached."""
+	(shared init path with Reignite/Smoke). Safety baseline
+	(`self.state.startup.raw_temp`, startuptemp bounds, afterstarttemp) and
+	smart-start profile selection are computed post-probe-read in
+	setup_safety(), since they need the initial ptemp. Per-tick, runs the
+	shared (non-Hold) auger-cycle toggle and publishes `self.state.cycle.ratio`
+	to MQTT. check_safety() just tracks afterstarttemp (no write -- teardown
+	does the write). should_exit() recomputes the smart-start-vs-normal
+	`self.state.startup.timer`/exit_temp each tick (mirrors the control.py
+	loop-body recompute, not just the setup-time value) and exits on timer
+	elapsed or exit_temp reached."""
 
 	name = 'Startup'
 
@@ -44,13 +45,13 @@ class StartupMode(ControlMode):
 
 	def _init_smoke_cycle(self):
 		_ct = smoke_cycle_times(self.settings['cycle_data'])
-		self.state.on_time = _ct.on_time
-		self.state.off_time = _ct.off_time
-		self.state.cycle_time = _ct.cycle_time
-		self.state.cycle_ratio = _ct.cycle_ratio
-		self.state.raw_cycle_ratio = _ct.cycle_ratio
-		self.state.lid_open_detect = False
-		self.state.lid_open_expires = 0
+		self.state.cycle.on_time = _ct.on_time
+		self.state.cycle.off_time = _ct.off_time
+		self.state.cycle.cycle_time = _ct.cycle_time
+		self.state.cycle.ratio = _ct.cycle_ratio
+		self.state.cycle.raw_ratio = _ct.cycle_ratio
+		self.state.lid.open_detected = False
+		self.state.lid.expires = 0
 		# Write Metrics (note these will be overwritten if smart start is enabled)
 		self.state.metrics['p_mode'] = self.settings['cycle_data']['PMode']
 		self.state.metrics['auger_cycle_time'] = self.settings['cycle_data']['SmokeOnCycleTime']
@@ -59,7 +60,7 @@ class StartupMode(ControlMode):
 	def setup_safety(self, ptemp) -> str:
 		# This value is needed for the case when the grill starts hot and exit
 		# temp has been exceeded
-		self.state.raw_startup_temp = ptemp
+		self.state.startup.raw_temp = ptemp
 		self.control['safety']['startuptemp'] = startup_temp_bounds(ptemp, self.settings['safety'])
 		self.control['safety']['afterstarttemp'] = ptemp
 		self.ctx.store.write_control(self.control, WriteKind.OVERWRITE, origin='control')
@@ -79,12 +80,12 @@ class StartupMode(ControlMode):
 			profile_selected = self.control['smartstart']['profile_selected']
 			profile = self.settings['startup']['smartstart']['profiles'][profile_selected]
 			_ct, startup_timer, _mbits = profile_cycle(profile, self.settings['cycle_data'])
-			self.state.on_time = _ct.on_time
-			self.state.off_time = _ct.off_time
-			self.state.cycle_time = _ct.cycle_time
-			self.state.cycle_ratio = _ct.cycle_ratio
-			self.state.raw_cycle_ratio = _ct.cycle_ratio
-			self.state.startup_timer = startup_timer
+			self.state.cycle.on_time = _ct.on_time
+			self.state.cycle.off_time = _ct.off_time
+			self.state.cycle.cycle_time = _ct.cycle_time
+			self.state.cycle.ratio = _ct.cycle_ratio
+			self.state.cycle.raw_ratio = _ct.cycle_ratio
+			self.state.startup.timer = startup_timer
 			# Write Metrics
 			self.state.metrics['smart_start_profile'] = profile_selected
 			self.state.metrics['startup_temp'] = self.control['smartstart']['startuptemp']
@@ -100,22 +101,22 @@ class StartupMode(ControlMode):
 		Overridden as a no-op by ReigniteMode (which doesn't reset it).
 
 		NOTE: this runs from setup_safety(), which base.run() calls BEFORE it
-		sets self.state.start_time (that happens later in the shared
+		sets self.state.timers.start_time (that happens later in the shared
 		pre-loop). The inline control.py code computes `start_time =
 		ctx.clock.now()` once and reuses that same value for both the loop's
 		start_time and control['startup_timestamp'] -- so here we take our own
-		ctx.clock.now() reading rather than reading self.state.start_time
+		ctx.clock.now() reading rather than reading self.state.timers.start_time
 		(which is still its 0.0 default at this point)."""
 		self.control['startup_timestamp'] = self.ctx.clock.now()
 		self.ctx.store.write_control(self.control, WriteKind.OVERWRITE, origin='control')
 
 	def on_settings_reload(self):
 		_ct = smoke_cycle_times(self.settings['cycle_data'])
-		self.state.on_time = _ct.on_time
-		self.state.off_time = _ct.off_time
-		self.state.cycle_time = _ct.cycle_time
-		self.state.cycle_ratio = _ct.cycle_ratio
-		self.state.raw_cycle_ratio = _ct.cycle_ratio
+		self.state.cycle.on_time = _ct.on_time
+		self.state.cycle.off_time = _ct.off_time
+		self.state.cycle.cycle_time = _ct.cycle_time
+		self.state.cycle.ratio = _ct.cycle_ratio
+		self.state.cycle.raw_ratio = _ct.cycle_ratio
 		# Write Metrics (note these will overwrite the previous value)
 		self.state.metrics['p_mode'] = self.settings['cycle_data']['PMode']
 		self.state.metrics['auger_cycle_time'] = self.settings['cycle_data']['SmokeOnCycleTime']
@@ -125,7 +126,7 @@ class StartupMode(ControlMode):
 		self._auger_cycle_tick(now, current_output_status)
 
 	def on_publish(self, now):
-		pid_data = {'cycle_ratio': round(self.state.cycle_ratio, 2)}
+		pid_data = {'cycle_ratio': round(self.state.cycle.ratio, 2)}
 		self.ctx.notifications.check(self.settings, self.control, pid_data=pid_data)
 
 	def check_safety(self, now, ptemp):
@@ -138,7 +139,7 @@ class StartupMode(ControlMode):
 			profile_selected = control['smartstart']['profile_selected']
 			startup_timer = settings['startup']['smartstart']['profiles'][profile_selected]['startuptime']
 			# Check case where the grill starts hot (perhaps due to previous failure)
-			if self.state.raw_startup_temp >= settings['startup']['smartstart']['exit_temp']:
+			if self.state.startup.raw_temp >= settings['startup']['smartstart']['exit_temp']:
 				exit_temp = 0  # Force ignite
 			else:
 				exit_temp = settings['startup']['smartstart']['exit_temp']
@@ -146,14 +147,14 @@ class StartupMode(ControlMode):
 			startup_timer = settings['startup']['duration']
 			exit_temp = settings['startup']['startup_exit_temp']
 			# Check case where the grill starts hot (perhaps due to previous failure)
-			if self.state.raw_startup_temp >= settings['startup']['startup_exit_temp']:
+			if self.state.startup.raw_temp >= settings['startup']['startup_exit_temp']:
 				exit_temp = 0  # Force ignite
 			else:
 				exit_temp = settings['startup']['startup_exit_temp']
 
-		self.state.startup_timer = startup_timer
+		self.state.startup.timer = startup_timer
 
-		if (now - self.state.start_time) > startup_timer:
+		if (now - self.state.timers.start_time) > startup_timer:
 			return True
 
 		if (exit_temp != 0) and (ptemp >= exit_temp):

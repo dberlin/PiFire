@@ -48,13 +48,13 @@ class SmokeMode(ControlMode):
 
 	def _init_smoke_cycle(self):
 		_ct = smoke_cycle_times(self.settings['cycle_data'])
-		self.state.on_time = _ct.on_time
-		self.state.off_time = _ct.off_time
-		self.state.cycle_time = _ct.cycle_time
-		self.state.cycle_ratio = _ct.cycle_ratio
-		self.state.raw_cycle_ratio = _ct.cycle_ratio
-		self.state.lid_open_detect = False
-		self.state.lid_open_expires = 0
+		self.state.cycle.on_time = _ct.on_time
+		self.state.cycle.off_time = _ct.off_time
+		self.state.cycle.cycle_time = _ct.cycle_time
+		self.state.cycle.ratio = _ct.cycle_ratio
+		self.state.cycle.raw_ratio = _ct.cycle_ratio
+		self.state.lid.open_detected = False
+		self.state.lid.expires = 0
 		# Write Metrics (note these will be overwritten if smart start is enabled)
 		self.state.metrics['p_mode'] = self.settings['cycle_data']['PMode']
 		self.state.metrics['auger_cycle_time'] = self.settings['cycle_data']['SmokeOnCycleTime']
@@ -93,12 +93,12 @@ class SmokeMode(ControlMode):
 			profile_selected = control['smartstart']['profile_selected']
 			profile = settings['startup']['smartstart']['profiles'][profile_selected]
 			_ct, startup_timer, _mbits = profile_cycle(profile, settings['cycle_data'])
-			self.state.on_time = _ct.on_time
-			self.state.off_time = _ct.off_time
-			self.state.cycle_time = _ct.cycle_time
-			self.state.cycle_ratio = _ct.cycle_ratio
-			self.state.raw_cycle_ratio = _ct.cycle_ratio
-			self.state.startup_timer = startup_timer
+			self.state.cycle.on_time = _ct.on_time
+			self.state.cycle.off_time = _ct.off_time
+			self.state.cycle.cycle_time = _ct.cycle_time
+			self.state.cycle.ratio = _ct.cycle_ratio
+			self.state.cycle.raw_ratio = _ct.cycle_ratio
+			self.state.startup.timer = startup_timer
 			# Write Metrics
 			self.state.metrics['smart_start_profile'] = profile_selected
 			self.state.metrics['startup_temp'] = control['smartstart']['startuptemp']
@@ -109,11 +109,11 @@ class SmokeMode(ControlMode):
 
 	def on_settings_reload(self):
 		_ct = smoke_cycle_times(self.settings['cycle_data'])
-		self.state.on_time = _ct.on_time
-		self.state.off_time = _ct.off_time
-		self.state.cycle_time = _ct.cycle_time
-		self.state.cycle_ratio = _ct.cycle_ratio
-		self.state.raw_cycle_ratio = _ct.cycle_ratio
+		self.state.cycle.on_time = _ct.on_time
+		self.state.cycle.off_time = _ct.off_time
+		self.state.cycle.cycle_time = _ct.cycle_time
+		self.state.cycle.ratio = _ct.cycle_ratio
+		self.state.cycle.raw_ratio = _ct.cycle_ratio
 		# Write Metrics (note these will overwrite the previous value)
 		self.state.metrics['p_mode'] = self.settings['cycle_data']['PMode']
 		self.state.metrics['auger_cycle_time'] = self.settings['cycle_data']['SmokeOnCycleTime']
@@ -124,7 +124,7 @@ class SmokeMode(ControlMode):
 		self._smoke_plus_fan_tick(now, ptemp, current_output_status)
 
 	def on_publish(self, now):
-		pid_data = {'cycle_ratio': round(self.state.cycle_ratio, 2)}
+		pid_data = {'cycle_ratio': round(self.state.cycle.ratio, 2)}
 		self.ctx.notifications.check(self.settings, self.control, pid_data=pid_data)
 
 	def check_safety(self, now, ptemp) -> bool:

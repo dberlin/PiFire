@@ -26,15 +26,15 @@ class PrimeMode(ControlMode):
 
 		control = self.ctx.store.read_control()
 		auger_rate = self.settings['globals']['augerrate']
-		self.state.prime_amount = control['prime_amount']
+		self.state.prime.amount = control['prime_amount']
 		# Auger On Time = Prime Amount (Grams) / (Grams per Second)
-		_ct = prime_cycle_times(self.state.prime_amount, auger_rate)
-		self.state.prime_duration = int(_ct.on_time)
-		self.state.on_time = _ct.on_time
-		self.state.off_time = _ct.off_time
-		self.state.cycle_time = _ct.cycle_time
-		self.state.cycle_ratio = _ct.cycle_ratio
-		self.state.raw_cycle_ratio = _ct.cycle_ratio
+		_ct = prime_cycle_times(self.state.prime.amount, auger_rate)
+		self.state.prime.duration = int(_ct.on_time)
+		self.state.cycle.on_time = _ct.on_time
+		self.state.cycle.off_time = _ct.off_time
+		self.state.cycle.cycle_time = _ct.cycle_time
+		self.state.cycle.ratio = _ct.cycle_ratio
+		self.state.cycle.raw_ratio = _ct.cycle_ratio
 
 		# Allow for the igniter to be turned on during prime mode - user selected
 		if self.settings['globals']['prime_ignition'] and control['next_mode'] == 'Startup':
@@ -45,10 +45,10 @@ class PrimeMode(ControlMode):
 		self._auger_cycle_tick(now, current_output_status)
 
 	def should_exit(self, now, ptemp) -> bool:
-		return (now - self.state.start_time) > self.state.prime_duration
+		return (now - self.state.timers.start_time) > self.state.prime.duration
 
 	def status_fragment(self) -> dict:
-		return {'prime_duration': self.state.prime_duration, 'prime_amount': self.state.prime_amount}
+		return {'prime_duration': self.state.prime.duration, 'prime_amount': self.state.prime.amount}
 
 	def teardown(self, ptemp):
 		self.grill.fan_off()

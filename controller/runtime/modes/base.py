@@ -109,24 +109,24 @@ class ControlMode:
 		if self.state.manual_override['auger'] < now:
 			self.state.manual_override['auger'] = 0
 			# If Auger is OFF and time since toggle is greater than Off Time
-			if not current_output_status['auger'] and (now - self.state.auger_toggle_time) > (
-				self.state.cycle_time * (1 - self.state.cycle_ratio)
+			if not current_output_status['auger'] and (now - self.state.timers.auger_toggle) > (
+				self.state.cycle.cycle_time * (1 - self.state.cycle.ratio)
 			):
 				self.grill.auger_on()
-				self.state.auger_toggle_time = now
+				self.state.timers.auger_toggle = now
 				_control.eventLogger.debug('Cycle Event: Auger On')
 				self._on_auger_on(now)
 
 			# If Auger is ON and time since toggle is greater than On Time
-			if current_output_status['auger'] and (now - self.state.auger_toggle_time) > (
-				self.state.cycle_time * self.state.cycle_ratio
+			if current_output_status['auger'] and (now - self.state.timers.auger_toggle) > (
+				self.state.cycle.cycle_time * self.state.cycle.ratio
 			):
 				self.grill.auger_off()
 				# Add auger ON time to the metrics
-				self.state.metrics['augerontime'] += now - self.state.auger_toggle_time
+				self.state.metrics['augerontime'] += now - self.state.timers.auger_toggle
 				self.ctx.store.write_metrics(self.state.metrics)
 				# Set current last toggle time to now
-				self.state.auger_toggle_time = now
+				self.state.timers.auger_toggle = now
 				_control.eventLogger.debug('Cycle Event: Auger Off')
 
 	def _smoke_plus_fan_tick(self, now, ptemp, current_output_status):
@@ -145,8 +145,8 @@ class ControlMode:
 		if (
 			(self.name == 'Smoke' or (self.name == 'Hold' and self.state.target_temp_achieved))
 			and control['s_plus']
-			and not self.state.fan_assist
-			and not self.state.lid_open_detect
+			and not self.state.fan.assist
+			and not self.state.lid.open_detected
 		):
 			# If Temperature is > settings['smoke_plus']['max_temp']
 			# or Temperature is < settings['smoke_plus']['min_temp'] then turn on fan
@@ -156,26 +156,26 @@ class ControlMode:
 				if not current_output_status['fan']:
 					start_fan(grill_platform, settings, control['duty_cycle'])
 					_control.eventLogger.debug('Smoke Plus: Over or Under Temp Fan ON')
-			elif (now - self.state.fan_cycle_toggle_time) > settings['smoke_plus']['on_time'] and current_output_status[
+			elif (now - self.state.fan.cycle_toggle_time) > settings['smoke_plus']['on_time'] and current_output_status[
 				'fan'
 			]:
 				if self.state.manual_override['fan'] < now:
 					self.state.manual_override['fan'] = 0
 					grill_platform.fan_off()
-					self.state.fan_cycle_toggle_time = now
+					self.state.fan.cycle_toggle_time = now
 					_control.eventLogger.debug('Smoke Plus: Fan OFF')
 			elif (
-				(now - self.state.fan_cycle_toggle_time) > settings['smoke_plus']['off_time']
+				(now - self.state.fan.cycle_toggle_time) > settings['smoke_plus']['off_time']
 				and not current_output_status['fan']
 			) and self.state.manual_override['fan'] < now:
-				self.state.fan_cycle_toggle_time = now
+				self.state.fan.cycle_toggle_time = now
 				if (
 					settings['platform']['dc_fan']
 					and (self.name == 'Smoke' or (self.name == 'Hold' and not control['pwm_control']))
 					and settings['smoke_plus']['fan_ramp']
 				):
 					grill_platform.pwm_fan_ramp(*ramp_params(settings['smoke_plus'], settings['pwm']))
-					self.state.pwm_fan_ramping = True
+					self.state.fan.pwm_ramping = True
 					_control.eventLogger.debug('Smoke Plus: Fan Ramping Up')
 				else:
 					start_fan(grill_platform, settings, control['duty_cycle'])
@@ -185,8 +185,8 @@ class ControlMode:
 		elif (
 			not current_output_status['fan']
 			and not control['s_plus']
-			and not self.state.fan_assist
-			and not self.state.lid_open_detect
+			and not self.state.fan.assist
+			and not self.state.lid.open_detected
 			and self.state.manual_override['fan'] < now
 		):
 			start_fan(grill_platform, settings, control['duty_cycle'])
@@ -197,10 +197,10 @@ class ControlMode:
 			settings['platform']['dc_fan']
 			and current_output_status['pwm'] != control['duty_cycle']
 			and not control['s_plus']
-			and self.state.pwm_fan_ramping
+			and self.state.fan.pwm_ramping
 			and self.state.manual_override['fan'] < now
 		):
-			self.state.pwm_fan_ramping = False
+			self.state.fan.pwm_ramping = False
 			grill_platform.set_duty_cycle(control['duty_cycle'])
 			_control.eventLogger.debug('Smoke Plus: Fan Returned to ' + str(control['duty_cycle']) + '% duty cycle')
 
@@ -321,29 +321,27 @@ class ControlMode:
 		status = self.setup_safety(ptemp)
 
 		# Apply Smart Start Settings if Enabled (default; Startup/Reignite/Smoke
-		# override self.state.startup_timer from their own setup())
-		self.state.startup_timer = self.settings['startup']['duration']
+		# override self.state.startup.timer from their own setup())
+		self.state.startup.timer = self.settings['startup']['duration']
 
 		# Set the start time
 		start_time = ctx.clock.now()
-		self.state.start_time = start_time
+		self.state.timers.start_time = start_time
 
 		# Set time since toggle for temperature
-		temp_toggle_time = start_time
+		self.state.timers.temp_toggle = start_time
 		# Set time since toggle for checking ETA
-		eta_toggle_time = start_time
+		self.state.timers.eta_toggle = start_time
 		# Set time since toggle for auger
-		auger_toggle_time = start_time
-		self.state.auger_toggle_time = start_time
+		self.state.timers.auger_toggle = start_time
 		# Set time since toggle for display
-		display_toggle_time = start_time
+		self.state.timers.display_toggle = start_time
 		# Initializing Start Time for Fan
-		fan_cycle_toggle_time = start_time
-		self.state.fan_cycle_toggle_time = start_time
+		self.state.fan.cycle_toggle_time = start_time
 		# Set time since toggle for hopper check
-		hopper_toggle_time = start_time
+		self.state.timers.hopper_toggle = start_time
 		# Set time since fan speed update
-		fan_update_time = start_time
+		self.state.fan.update_time = start_time
 
 		# Setup Display Data
 		status_data = {}
@@ -387,7 +385,7 @@ class ControlMode:
 				ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
 
 			# Check hopper level when requested or every 300 seconds
-			if control['hopper_check'] or (now - hopper_toggle_time) > 60:
+			if control['hopper_check'] or (now - self.state.timers.hopper_toggle) > 60:
 				pelletdb = ctx.store.read_pellet_db()
 				override = False
 				if control['hopper_check']:
@@ -396,7 +394,7 @@ class ControlMode:
 					override = True
 				pelletdb['current']['hopper_level'] = dist_device.get_level(override=override)
 				ctx.store.write_pellet_db(pelletdb)
-				hopper_toggle_time = now
+				self.state.timers.hopper_toggle = now
 				_control.eventLogger.info('Hopper Level Checked @ ' + str(pelletdb['current']['hopper_level']) + '%')
 
 			# Check for update in ON/OFF Switch
@@ -523,8 +521,8 @@ class ControlMode:
 
 			# ---- PUBLISH ----
 			# Every 20 seconds, update ETA for any pending notifications
-			if (now - eta_toggle_time) > 20:
-				eta_toggle_time = ctx.clock.now()
+			if (now - self.state.timers.eta_toggle) > 20:
+				self.state.timers.eta_toggle = ctx.clock.now()
 				update_eta = True
 			else:
 				update_eta = False
@@ -540,7 +538,7 @@ class ControlMode:
 			self.on_publish(now)
 
 			# Send Current Status / Temperature Data to Display Device every 0.5 second
-			if (now - display_toggle_time) > 0.5:
+			if (now - self.state.timers.display_toggle) > 0.5:
 				status_data['notify_data'] = control['notify_data']
 				status_data['timer'] = control['timer']
 				status_data['s_plus'] = control['s_plus']
@@ -550,7 +548,7 @@ class ControlMode:
 				status_data['mode'] = mode
 				status_data['recipe'] = True if control['mode'] == 'Recipe' else False
 				status_data['start_time'] = start_time
-				status_data['start_duration'] = self.state.startup_timer
+				status_data['start_duration'] = self.state.startup.timer
 				status_data['shutdown_duration'] = self.settings['shutdown']['shutdown_duration']
 				status_data['prime_duration'] = 0
 				status_data['prime_amount'] = 0
@@ -576,11 +574,11 @@ class ControlMode:
 				# ---- mode-specific status fields ----
 				status_data.update(self.status_fragment())
 				ctx.store.write_status(status_data)
-				display_toggle_time = ctx.clock.now()
+				self.state.timers.display_toggle = ctx.clock.now()
 
 			# Write History & Issue Heartbeat after 3 seconds has passed
-			if (now - temp_toggle_time) > 3:
-				temp_toggle_time = ctx.clock.now()
+			if (now - self.state.timers.temp_toggle) > 3:
+				self.state.timers.temp_toggle = ctx.clock.now()
 				ext_data = True if self.settings['globals']['ext_data'] else False
 				ctx.store.write_history(in_data, ext_data=ext_data)
 				monitor.heartbeat()

@@ -19,7 +19,7 @@ class ShutdownMode(ControlMode):
 		_control.eventLogger.debug('Power ON, Fan ON, Igniter OFF, Auger OFF')
 
 	def should_exit(self, now, ptemp) -> bool:
-		return (now - self.state.start_time) > self.settings['shutdown']['shutdown_duration']
+		return (now - self.state.timers.start_time) > self.settings['shutdown']['shutdown_duration']
 
 	def teardown(self, ptemp):
 		self.grill.fan_off()
