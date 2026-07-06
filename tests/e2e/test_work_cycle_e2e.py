@@ -33,9 +33,11 @@ RUN INSTRUCTIONS:
 Without a reachable server the whole module SKIPS (same gate as the parity
 suite, tests/test_valkey_store_parity.py).
 
-RESIDUE: each scenario snapshots and restores control:general, status, and
-current so a real instance is left as it was found. Metrics are flushed (and
-not restored), matching the existing parity suite's treatment of metrics.
+RESIDUE: each scenario snapshots and restores control:general and status so a
+real instance is left as it was found. control:current and metrics are not
+restored -- both are rewritten sub-second by the live control loop (metrics
+flushing also matches the existing parity suite), so any residue is transient
+and immediately clobbered when a real instance resumes.
 """
 import pytest
 
@@ -73,10 +75,12 @@ def run_valkey_scenario(monkeypatch, mode, *, settings, control_data, pellet_db,
 	queue's JSON tuple->list round-trip -- see module docstring)."""
 	store = ValkeyStore()
 
-	# Snapshot the grill-critical keys so a real instance is left untouched.
+	# Snapshot the keys we can faithfully restore so a real instance is left as
+	# found. (control:current is intentionally not snapshotted: read_current()
+	# returns a transformed P/F/AUX/... payload that write_current() can't
+	# round-trip, and the live loop rewrites it sub-second anyway.)
 	saved_control = store.read_control()
 	saved_status = store.read_status()
-	saved_current = store.read_current()
 
 	# Settings are file-backed in PiFire, not Valkey-backed: inject the
 	# scenario's settings so every ctx.store.read_settings() (-> common.read_settings)
@@ -96,16 +100,13 @@ def run_valkey_scenario(monkeypatch, mode, *, settings, control_data, pellet_db,
 		                pellet_db=pellet_db, probes=probes, grill=grill,
 		                probe_cap=probe_cap, runner=runner, store=store)
 	finally:
-		# Best-effort restore. write_status/write_current assume a fully-formed
-		# payload, so only write back a snapshot that was actually present --
-		# on a fresh Valkey these keys are empty and there is nothing to restore
-		# (the test's final status/current simply remain, harmless on a
-		# dev/test instance).
+		# Best-effort restore. write_status assumes a fully-formed payload, so
+		# only write back a snapshot that was actually present -- on a fresh
+		# Valkey status is empty and there is nothing to restore (the test's
+		# final status simply remains, harmless on a dev/test instance).
 		store.write_control(saved_control, WriteKind.OVERWRITE)
 		if saved_status:
 			store.write_status(saved_status)
-		if saved_current and 'probe_history' in saved_current:
-			store.write_current(saved_current)
 
 
 def test_e2e_smoke_over_maxtemp_triggers_error_and_notifies(monkeypatch):
