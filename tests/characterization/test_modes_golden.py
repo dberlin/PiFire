@@ -587,13 +587,25 @@ def test_hold_over_maxtemp_does_not_submit_controller_that_tick():
 	# safety-before-actuation: when max-temp trips, the loop breaks BEFORE the
 	# merged on_tick, so the controller is never advanced on the over-temp tick.
 	# (In the old order on_tick ran before the safety check.)
+	#
+	# The submit gate is `(now - controller_cycle_start) > (control_period() or
+	# cycle_time)`. controller_cycle_start is pinned to 0 in HoldMode.setup(),
+	# and under ManualClock tick 1 always has now == 0, so the gate can never
+	# fire on tick 1 no matter the settings. To actually exercise the
+	# safety-vs-actuation ordering we need the gate armed by tick 2: a small
+	# period=0.01 (< the 0.05 ManualClock.sleep step) guarantees
+	# (0.05 - 0) > 0.01 on tick 2. The probe script has a leading 200 because
+	# base.run() does one pre-loop read_probes() (for setup_safety) before the
+	# main loop starts consuming the script -- so index 0 is the pre-loop
+	# read, index 1 is tick 1 (200, under maxtemp), index 2 is tick 2 (550,
+	# over maxtemp, gate now armed).
 	settings = base_settings()
 	settings['safety']['maxtemp'] = 500
 	settings['controller'] = settings.get('controller', {})
 	control_data = base_control(mode='Hold')
 	control_data['primary_setpoint'] = 225
-	probes = FakeProbes().script([550, 550, 550])  # over maxtemp from tick 1
-	runner = FakeControllerRunner(period=0.0).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 4)
+	probes = FakeProbes().script([200, 200, 550, 550])  # [pre-loop, tick1 (under), tick2 (over), ...]
+	runner = FakeControllerRunner(period=0.01).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 4)
 	result = run_mode(
 		'Hold',
 		settings=settings,
@@ -604,6 +616,13 @@ def test_hold_over_maxtemp_does_not_submit_controller_that_tick():
 		runner=runner,
 	)
 	assert result.final_control['mode'] == 'Error'
+	# NEW (sense->safety->act) order: tick 2's over-temp trips safety and
+	# breaks BEFORE on_tick runs, so the armed gate never gets to submit --
+	# submitted_temps stays empty for the whole run (tick 1 didn't arm it
+	# either). OLD order ran on_tick (and its submit gate) BEFORE the
+	# in-loop probe re-read/safety check, submitting the STALE prior-tick
+	# ptemp (200) on tick 2 before over_max_temp(550) broke the loop at the
+	# end of that same iteration -- i.e. OLD order produces [200], not [].
 	assert runner.submitted_temps == []  # controller never advanced -- safety first
 
 
@@ -628,7 +647,9 @@ def test_hold_controller_receives_current_tick_ptemp():
 		grill=FakeGrillPlatform(),
 		runner=runner,
 	)
-	# Every submitted temp is an in-loop read (200..220), proving on_tick uses
-	# the fresh per-tick ptemp parameter.
-	assert runner.submitted_temps
-	assert all(t in (200, 205, 210, 215, 220) for t in runner.submitted_temps)
+	# Exact fresh-ptemp sequence, proving on_tick uses THIS tick's ptemp
+	# parameter rather than a stale prior-tick reading. The OLD (stale) order
+	# submitted the previous iteration's probe value at each gate-fire --
+	# under this same setup it produced [205, 210], one step behind the
+	# sequence below.
+	assert runner.submitted_temps == [210, 215]
