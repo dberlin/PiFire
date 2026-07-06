@@ -13,6 +13,7 @@ cadences; the seam exists for that but no threaded implementation exists yet.
 """
 
 import importlib
+import threading
 from abc import ABC, abstractmethod
 from collections import namedtuple
 
@@ -82,6 +83,87 @@ class SyncControllerRunner(ControllerRunner):
 		return dict(self._core.__dict__)
 
 
+_UNSET = object()
+
+
+class ThreadedControllerRunner(ControllerRunner):
+	"""Runs core.update() on a background thread at the core's control period, so
+	an expensive solve never blocks the caller. submit()/latest() are
+	non-blocking snapshots; the running core is mutated only by the thread."""
+
+	def __init__(self, core):
+		self._core = core
+		self._lock = threading.Lock()
+		self._temp = None
+		self._output = NormalizedOutput(cycle_ratio=0.0, fan=None)
+		self._pending_target = _UNSET
+		self._pending_core = None
+		self._state_snapshot = dict(core.__dict__)
+		self._control_period = core.get_control_period()
+		self._commands_fan = core.commands_fan()
+		self._stop_event = threading.Event()
+		self._thread = threading.Thread(target=self._loop, daemon=True)
+		self._thread.start()
+
+	def _loop(self):
+		while not self._stop_event.is_set():
+			with self._lock:
+				temp = self._temp
+				target = self._pending_target
+				self._pending_target = _UNSET
+				new_core = self._pending_core
+				self._pending_core = None
+			if new_core is not None:
+				self._core = new_core
+			if target is not _UNSET:
+				self._core.set_target(target)
+			if temp is not None:
+				raw = self._core.update(temp)
+				ratio, fan = normalize_controller_output(raw)
+				snap = dict(self._core.__dict__)
+				with self._lock:
+					self._output = NormalizedOutput(cycle_ratio=ratio, fan=fan)
+					self._state_snapshot = snap
+			# Interruptible sleep; wait(None/0) would block forever, so floor it.
+			self._stop_event.wait(self._control_period or 1.0)
+
+	def set_target(self, setpoint):
+		with self._lock:
+			self._pending_target = setpoint
+
+	def submit(self, temp):
+		with self._lock:
+			self._temp = temp
+
+	def latest(self):
+		with self._lock:
+			return self._output
+
+	def reconfigure(self, settings, control, logger=None):
+		core, status = _build_core(settings, control, logger=logger)
+		if status == 'Active':
+			with self._lock:
+				self._pending_core = core
+		return status
+
+	def control_period(self):
+		return self._control_period
+
+	def commands_fan(self):
+		return self._commands_fan
+
+	def wants_async(self):
+		return True
+
+	def controller_state(self):
+		with self._lock:
+			return dict(self._state_snapshot)
+
+	def stop(self):
+		self._stop_event.set()
+		self._thread.join(timeout=2.0)
+
+
 def _build_core(settings, control, logger=None):
 	try:
 		controller_type = settings['controller']['selected']
@@ -101,4 +183,6 @@ def build_runner(settings, control, logger=None):
 	core, status = _build_core(settings, control, logger=logger)
 	if core is None:
 		return None, status
+	if core.wants_async():
+		return ThreadedControllerRunner(core), status
 	return SyncControllerRunner(core), status
