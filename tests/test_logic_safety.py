@@ -15,6 +15,13 @@ def test_evaluate_flameout():
     assert evaluate_flameout(180, 200, 2) is SafetyVerdict.REIGNITE
 
 
+def test_evaluate_flameout_at_exact_boundary_is_ok():
+    # ptemp exactly == startup_temp must be OK (pins the >= vs > edge, so a
+    # future flip to > would be caught rather than silently changing behavior).
+    assert evaluate_flameout(200, 200, 0) is SafetyVerdict.OK
+    assert evaluate_flameout(200, 200, 5) is SafetyVerdict.OK
+
+
 def test_over_max_temp():
     assert over_max_temp(501, {'maxtemp': 500}) is True
     assert over_max_temp(500, {'maxtemp': 500}) is False
