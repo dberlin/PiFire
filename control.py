@@ -268,8 +268,8 @@ if __name__ == '__main__':
 
 	eventLogger.info('Flushing Valkey DB and creating new control structure')
 
-	devices, _display, errors = build_devices(
-		settings, include_display=False, errors=errors, event_log=eventLogger, control_log=controlLogger
+	devices, errors = build_devices(
+		settings, errors=errors, event_log=eventLogger, control_log=controlLogger
 	)
 	grill_platform = devices.grill_platform
 	probe_complex = devices.probe_complex
