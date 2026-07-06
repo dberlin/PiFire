@@ -49,14 +49,20 @@ def _ensure_runtime_dir(path):
 def main():
 	settings = read_settings()
 	argv, env_updates = build_launch_argv(settings, os.environ)
-	if 'XDG_RUNTIME_DIR' in env_updates:
-		_ensure_runtime_dir(env_updates['XDG_RUNTIME_DIR'])
+	log = logging.getLogger('display_launch')
+	logging.basicConfig()
+	runtime_dir = env_updates.get('XDG_RUNTIME_DIR')
+	if runtime_dir:
+		try:
+			_ensure_runtime_dir(runtime_dir)
+		except OSError:
+			log.exception('Failed to prepare XDG_RUNTIME_DIR: %s', runtime_dir)
+			sys.exit(1)
 	os.environ.update(env_updates)
 	try:
 		os.execvp(argv[0], argv)
 	except OSError:
-		logging.basicConfig()
-		logging.getLogger('display_launch').exception('Failed to exec: %s', ' '.join(argv))
+		log.exception('Failed to exec: %s', ' '.join(argv))
 		sys.exit(1)
 
 
