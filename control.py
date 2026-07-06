@@ -44,6 +44,7 @@ from controller.runtime.modes.monitor import MonitorMode
 from controller.runtime.modes.manual import ManualMode
 from controller.runtime.modes.shutdown import ShutdownMode
 from controller.runtime.modes.prime import PrimeMode
+from controller.runtime.modes.startup import StartupMode
 from os.path import exists
 
 """
@@ -88,8 +89,14 @@ def _process_system_commands(ctx):
 		system_output.push(result)
 
 
-_MIGRATED_MODES = frozenset({'Monitor', 'Manual', 'Shutdown', 'Prime'})
-_MODE_HANDLERS = {'Monitor': MonitorMode, 'Manual': ManualMode, 'Shutdown': ShutdownMode, 'Prime': PrimeMode}
+_MIGRATED_MODES = frozenset({'Monitor', 'Manual', 'Shutdown', 'Prime', 'Startup'})
+_MODE_HANDLERS = {
+	'Monitor': MonitorMode,
+	'Manual': ManualMode,
+	'Shutdown': ShutdownMode,
+	'Prime': PrimeMode,
+	'Startup': StartupMode,
+}
 
 
 def _work_cycle(mode, ctx):

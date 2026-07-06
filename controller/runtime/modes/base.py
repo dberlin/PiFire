@@ -23,8 +23,9 @@ class ControlMode:
 	hooks with safe no-op defaults:
 	  - setup(): pre-loop mode-specific configuration (fan/power, cycle
 	    params, runner, ...).
-	  - setup_safety() -> str: pre-loop safety check. Return 'Active' to
-	    allow the loop to run, 'Inactive' to skip it entirely (abort
+	  - setup_safety(ptemp) -> str: pre-loop safety check, called AFTER the
+	    first probe read (unlike setup(), which runs before it). Return
+	    'Active' to allow the loop to run, 'Inactive' to skip it entirely (abort
 	    contract -- teardown still runs).
 	  - on_tick(now, current_output_status): per-iteration mode-specific
 	    control logic. `current_output_status` is captured ONCE per tick
@@ -61,7 +62,7 @@ class ControlMode:
 	def setup(self):
 		pass
 
-	def setup_safety(self) -> str:
+	def setup_safety(self, ptemp) -> str:
 		return 'Active'
 
 	def on_tick(self, now, current_output_status):
@@ -216,7 +217,7 @@ class ControlMode:
 		ptemp = list(sensor_data['primary'].values())[0]  # Primary Temperature or the Pit Temperature
 
 		# ---- mode-specific pre-loop safety check (abort contract) ----
-		status = self.setup_safety()
+		status = self.setup_safety(ptemp)
 
 		# Apply Smart Start Settings if Enabled (default; Startup/Reignite/Smoke
 		# override self.state.startup_timer from their own setup())

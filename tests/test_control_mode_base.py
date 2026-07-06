@@ -32,7 +32,7 @@ class _RecordingMode(ControlMode):
 	def setup(self):
 		self.calls.append('setup')
 
-	def setup_safety(self):
+	def setup_safety(self, ptemp):
 		self.calls.append('setup_safety')
 		return 'Active'
 
