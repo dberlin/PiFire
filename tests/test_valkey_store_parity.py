@@ -29,3 +29,16 @@ def test_valkey_display_queue_roundtrip():
 	s.display_commands().flush()
 	s.display_commands().push(['text', 'ERROR'])
 	assert s.display_commands().drain() == [['text', 'ERROR']]
+
+
+def test_valkey_write_metrics_new_metric_without_metrics_does_not_crash():
+	# Regression: write_metrics(new_metric=True) with no metrics must defer to
+	# common's default_metrics() (passing None crashed on metrics['starttime']).
+	# The control loop calls this at the start of every work cycle.
+	from controller.runtime.store import ValkeyStore
+	s = ValkeyStore()
+	s.write_metrics(flush=True)          # reset metrics list
+	s.write_metrics(new_metric=True)     # must NOT raise
+	current = s.read_metrics()
+	assert isinstance(current, dict)
+	assert 'starttime' in current        # populated from default_metrics() + starttime

@@ -268,7 +268,13 @@ class ValkeyStore(Store):
 		return _c.read_metrics(all=all)
 
 	def write_metrics(self, metrics=None, flush=False, new_metric=False):
-		_c.write_metrics(metrics=metrics, flush=flush, new_metric=new_metric)
+		# When metrics is None, defer to common.write_metrics's own
+		# default_metrics() default rather than overriding it with None
+		# (passing None would crash the new_metric path on metrics['starttime']).
+		if metrics is None:
+			_c.write_metrics(flush=flush, new_metric=new_metric)
+		else:
+			_c.write_metrics(metrics=metrics, flush=flush, new_metric=new_metric)
 
 	def write_tr(self, tr):
 		_c.write_tr(tr)
