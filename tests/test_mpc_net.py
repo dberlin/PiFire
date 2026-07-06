@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import pytest
-from controller.mpc_net import NetPolicy
+from controller.mpc_net import NetPolicy, net_path_for
 from controller.mpc import _DEFAULTS
 
 ART = os.path.join(os.path.dirname(__file__), '..', 'controller', 'mpc_policy_net.npz')
@@ -52,3 +52,24 @@ def test_matches_config_rejects_recalibration():
 	bad2 = dict(_DEFAULTS)
 	bad2['n_delay'] = int(_DEFAULTS['n_delay']) + 1
 	assert not p.matches_config(bad2)
+
+
+def test_net_path_for_fan_off_returns_base():
+	assert net_path_for('./controller/mpc_policy_net.npz', False) == './controller/mpc_policy_net.npz'
+
+
+def test_net_path_for_fan_on_inserts_suffix():
+	assert net_path_for('./controller/mpc_policy_net.npz', True) == './controller/mpc_policy_net_fan.npz'
+
+
+def test_net_path_for_handles_dotted_dirs():
+	# dots in the directory must not confuse the extension split
+	assert net_path_for('/opt/pi.fire/models/net.npz', True) == '/opt/pi.fire/models/net_fan.npz'
+
+
+def test_legacy_artifact_defaults_to_fan_off():
+	# the shipped artifact predates the flag; it must load and read as fan-off (0)
+	p = NetPolicy.load(ART)
+	assert p.calib['enable_fan_input'] == 0
+	assert p.matches_config({**_DEFAULTS, 'enable_fan_input': False})
+	assert not p.matches_config({**_DEFAULTS, 'enable_fan_input': True})

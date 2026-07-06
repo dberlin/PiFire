@@ -25,6 +25,7 @@
 *****************************************
 """
 
+import os
 import numpy as np
 
 _KELVIN = 273.15
@@ -46,7 +47,15 @@ _CALIB_FLOATS = (
 	'Q_min',
 	'Q_max',
 )
-_CALIB_INTS = ('n_delay', 'n_horizon')
+_CALIB_INTS = ('n_delay', 'n_horizon', 'enable_fan_input')
+
+
+def net_path_for(base_path, enable_fan):
+	"""Fan-off uses base_path as-is; fan-on uses the _fan-suffixed sibling."""
+	if not enable_fan:
+		return base_path
+	root, ext = os.path.splitext(base_path)
+	return f'{root}_fan{ext}'
 
 
 class NetPolicy:
@@ -68,7 +77,8 @@ class NetPolicy:
 		L = int(z['n_layers'])
 		weights = [(z[f'W{i}'].astype(float), z[f'b{i}'].astype(float)) for i in range(L)]
 		calib = {k: float(z[k]) for k in _CALIB_FLOATS}
-		calib.update({k: int(z[k]) for k in _CALIB_INTS})
+		# enable_fan_input was added later; legacy artifacts lack it -> fan-off (0)
+		calib.update({k: (int(z[k]) if k in z.files else 0) for k in _CALIB_INTS})
 		return cls(
 			weights,
 			z['x_mean'].astype(float),
