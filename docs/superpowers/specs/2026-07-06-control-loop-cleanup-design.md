@@ -27,9 +27,20 @@ and `kill = True` so the thread exits its outer loop. Delete `kill_monitor()`.
 work cycle builds a new monitor, there is no "restart the same instance" use case
 to preserve.
 
+**Also in this task — remove the test-only workarounds.** Once `stop_monitor()`
+actually ends the thread, the autouse `_neutralize_process_monitor` fixture in
+`tests/conftest.py` (which no-ops `_heartbeat_check`) is no longer needed — remove
+it. Also remove the `faulthandler.enable(...)` / `faulthandler.register(SIGUSR1)`
+debug lines added while diagnosing the old hang; keep only the `sys.path` insert
+`conftest.py` legitimately needs. No belt-and-suspenders.
+
 **Validation.** Unit test: a monitor's thread is not alive shortly after
-`stop_monitor()`. Full suite green. (The autouse conftest fixture that no-ops
-`_heartbeat_check` stays — it is independent belt-and-suspenders.)
+`stop_monitor()`. Run the full suite and confirm it still exits cleanly with the
+fixture removed (every characterization/E2E work cycle reaches `teardown()` ->
+`stop_monitor()` via the probe-cap clean loop break, so no thread lingers). If any
+path constructs a monitor without reaching teardown and leaks, prefer making
+`base.run()` call `stop_monitor()` in a `finally` (correctness, not
+belt-and-suspenders) over re-adding the fixture.
 
 ---
 
@@ -168,6 +179,24 @@ temp-profile fan path on `not self.state.controller.controls_fan` from tick 1. T
 MPC fan command is still applied when it arrives; only the *suppression* of the
 temp profile now holds from the start. Rename the flag `mpc_fan_active` ->
 `controls_fan` to match its new (capability, not latched) meaning.
+
+**`normalize_controller_output` is NOT removed by this.** The capability is
+orthogonal to output parsing: `normalize_controller_output`
+(`controller/base.py`, used only by `SyncControllerRunner.latest()` and
+`tests/test_mpc_integration.py`) still coerces the *heterogeneous* controller
+returns — legacy pid/pid_ac/pid_clamping/pid_parallel/fuzzy return a **bare
+float**, MPC returns a **dict** — into a cycle ratio, and surfaces the fan **duty
+value** to apply when `controls_fan`. The capability only removes the *runtime
+fan-presence* logic: normalize's fan-nulling branch and Hold's `fan_cmd is not
+None` check both collapse into the setup-time `controls_fan`. So we **simplify**
+normalize (drop the fan-nulling; the runner surfaces the raw fan for Hold to read
+under the capability gate) but keep the float/dict ratio coercion. Update
+`test_mpc_integration.py` accordingly.
+
+**Deferred (separate task, out of this plan unless requested):** fully deleting
+`normalize_controller_output` by standardizing every controller's `update()`
+return to one uniform shape (~10 controller files) — broad and risky; not bundled
+here.
 
 **Validation.** New golden scenario: Hold + MPC-that-commands-fan + `pwm_control`
 + `dc_fan`, before the first controller interval elapses — assert the
