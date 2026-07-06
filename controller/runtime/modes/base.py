@@ -16,6 +16,7 @@ from common.process_mon import Process_Monitor
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
 from controller.runtime.logic.safety import over_max_temp
+from controller.runtime.system_commands import process_system_commands
 
 
 class ControlMode:
@@ -234,7 +235,7 @@ class ControlMode:
 
 	# ---- shared skeleton ----
 	def run(self):
-		import control as _control  # module globals: eventLogger, _process_system_commands
+		import control as _control  # module global: eventLogger
 
 		ctx = self.ctx
 		mode = self.name
@@ -372,7 +373,7 @@ class ControlMode:
 			control = ctx.store.read_control()
 			self.control = control
 
-			_control._process_system_commands(ctx)
+			process_system_commands(ctx)
 
 			# Check if new mode has been requested
 			if control['updated']:

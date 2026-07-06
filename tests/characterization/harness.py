@@ -38,6 +38,7 @@ from tests.fakes.distance import FakeDistance
 from tests.fakes.notifier import FakeNotifier
 import control
 import controller.runtime.runner
+import controller.runtime.controller as controller_mod
 
 
 # --- Pitfall 1: loggers are normally bound in `if __name__ == '__main__':` ---
@@ -144,7 +145,7 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
 		fake_build_runner = lambda *a, **k: (runner, 'Active')
 		controller.runtime.runner.build_runner = fake_build_runner
 	try:
-		control._work_cycle(mode, ctx)
+		controller_mod.run_work_cycle(mode, ctx)
 	finally:
 		controller.runtime.runner.build_runner = prev_runtime_build_runner
 

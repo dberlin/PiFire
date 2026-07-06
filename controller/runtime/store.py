@@ -49,7 +49,7 @@ class _DequeQueue(Queue):
 class Store(ABC):
 	# --- control ---
 	@abstractmethod
-	def read_control(self): ...
+	def read_control(self, flush=False): ...
 	@abstractmethod
 	def write_control(self, control, kind, origin='control'): ...
 	@abstractmethod
@@ -114,7 +114,15 @@ class InMemoryStore(Store):
 		self._systemo = _DequeQueue()
 		self._displayq = _DequeQueue()
 
-	def read_control(self):
+	def read_control(self, flush=False):
+		if flush:
+			# Mirror common.read_control(flush=True): reset control to defaults
+			# and discard pending writes + system-command queues. (The Valkey
+			# persistence-config toggle is a no-op for the in-memory fake.)
+			self._control = default_control()
+			self._write_queue.clear()
+			self._systemq.flush()
+			self._systemo.flush()
 		return copy.deepcopy(self._control)
 
 	def write_control(self, control, kind, origin='control'):
@@ -234,8 +242,8 @@ class ValkeyStore(Store):
 		self._systemo = _ValkeyQueueAdapter('control:systemo')
 		self._displayq = _ValkeyQueueAdapter('control:displayq')
 
-	def read_control(self):
-		return _c.read_control()
+	def read_control(self, flush=False):
+		return _c.read_control(flush=flush)
 
 	def write_control(self, control, kind, origin='control'):
 		_c.write_control(control, kind, origin=origin)
