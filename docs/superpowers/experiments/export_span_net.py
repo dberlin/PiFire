@@ -10,7 +10,7 @@ computed reference (state,u_prev,T_set)->Q pairs so a numpy-only test can verify
 forward fidelity without torch.
 """
 
-import warnings, sys, os
+import warnings, sys, os, argparse
 
 warnings.filterwarnings('ignore')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for approxmpc_span
@@ -20,11 +20,9 @@ import torch
 from controller.mpc import _DEFAULTS
 from approxmpc_span import build_span_net, Q_ss, SPAN_NPZ, DIDX, ND  # noqa: E402
 
-OUT = './controller/mpc_policy_net.npz'
 
-
-def main():
-	net, stats = build_span_net()
+def main(data_path, out, enable_fan):
+	net, stats = build_span_net(data_path=data_path)
 	xm, xs, rm, rs = stats
 	# extract Linear layers from the torch Sequential, transpose W to [in,out]
 	layers = [m for m in net.net if isinstance(m, torch.nn.Linear)]
@@ -42,8 +40,11 @@ def main():
 	for k in _CALIB_FLOATS:
 		blob[k] = np.float32(_DEFAULTS[k])
 	for k in _CALIB_INTS:
-		blob[k] = np.int64(_DEFAULTS[k])
-	z = np.load(SPAN_NPZ)
+		# enable_fan_input reflects the mode this artifact was trained for,
+		# not the _DEFAULTS value (always False)
+		val = bool(enable_fan) if k == 'enable_fan_input' else _DEFAULTS[k]
+		blob[k] = np.int64(val)
+	z = np.load(data_path)
 	blob['sp_lo'] = np.float32(z['sp_lo'])
 	blob['sp_hi'] = np.float32(z['sp_hi'])
 
@@ -63,13 +64,16 @@ def main():
 	blob['ref_set'] = TS.astype(np.float32)
 	blob['ref_Q'] = Qref.astype(np.float32)
 
-	np.savez_compressed(OUT, **blob)
-	sz = os.path.getsize(OUT) / 1024
-	print(
-		f'exported {OUT} ({sz:.0f} KB): {len(layers)} layers, '
-		f'input dim {blob["x_mean"].shape[0]}, span [{blob["sp_lo"]:.0f},{blob["sp_hi"]:.0f}]C'
-	)
+	np.savez_compressed(out, **blob)
+	sz = os.path.getsize(out) / 1024
+	print(f'exported {out} ({sz:.0f} KB): {len(layers)} layers, fan={bool(enable_fan)}, '
+	      f'span [{blob["sp_lo"]:.0f},{blob["sp_hi"]:.0f}]C')
 
 
 if __name__ == '__main__':
-	main()
+	ap = argparse.ArgumentParser()
+	ap.add_argument('--data', default='./docs/superpowers/experiments/_ampc_data/pifire_span.npz')
+	ap.add_argument('--out', default='./controller/mpc_policy_net.npz')
+	ap.add_argument('--enable-fan', action='store_true')
+	a = ap.parse_args()
+	main(a.data, a.out, a.enable_fan)

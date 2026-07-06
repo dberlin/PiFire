@@ -167,9 +167,9 @@ def _episode(arg):
 # cases). T_set is logged per sample; the spanning net takes it as an input and
 # the analytic Q_ss(d, T_set) feedforward generalizes across the range for free.
 def _episode_span(arg):
-	ep_seed, minutes, dither, sp_lo, sp_hi = arg
+	ep_seed, minutes, dither, sp_lo, sp_hi, enable_fan = arg
 	rng = np.random.default_rng(ep_seed)
-	c = Controller(dict(_DEFAULTS), 'C', dict(CYCLE))
+	c = Controller({**_DEFAULTS, 'enable_fan_input': bool(enable_fan)}, 'C', dict(CYCLE))
 	cfg = c.cfg
 	qmin, qmax = cfg['Q_min'], cfg['Q_max']
 	plant = GrillSim(seed=ep_seed)
@@ -226,9 +226,11 @@ def _episode_span(arg):
 	return np.array(Xh), np.array(Up), np.array(Ts), np.array(Q)
 
 
-def sample_span(episodes=150, workers=None, seed=0, minutes=120, dither=8.0, sp_lo=100.0, sp_hi=290.0, out=OUT_SPAN):
+def sample_span(episodes=150, workers=None, seed=0, minutes=120, dither=8.0,
+                sp_lo=100.0, sp_hi=290.0, out=OUT_SPAN, enable_fan=False):
 	workers = workers or max(1, (os.cpu_count() or 2) - 2)
-	args = [(seed * 100000 + e, minutes, dither, sp_lo, sp_hi) for e in range(episodes)]
+	args = [(seed * 100000 + e, minutes, dither, sp_lo, sp_hi, bool(enable_fan))
+	        for e in range(episodes)]
 	t0 = time.perf_counter()
 	ctx = mp.get_context('fork')
 	with ctx.Pool(processes=workers) as pool:
@@ -239,11 +241,13 @@ def sample_span(episodes=150, workers=None, seed=0, minutes=120, dither=8.0, sp_
 	Ts = np.concatenate([r[2] for r in results])
 	U0 = np.concatenate([r[3] for r in results])
 	os.makedirs(os.path.dirname(out), exist_ok=True)
-	np.savez_compressed(out, X0=X0, u_prev=Up, t_set=Ts, u0=U0, sp_lo=sp_lo, sp_hi=sp_hi)
+	np.savez_compressed(out, X0=X0, u_prev=Up, t_set=Ts, u0=U0, sp_lo=sp_lo, sp_hi=sp_hi,
+	                     enable_fan=np.int64(bool(enable_fan)))
 	print(
 		f'span: {episodes} episodes [{sp_lo:.0f},{sp_hi:.0f}]C on {workers} workers in '
 		f'{dt:.0f}s -> {len(U0)} samples ({len(U0) / dt:.0f}/s) | '
-		f'T_set [{Ts.min():.0f},{Ts.max():.0f}] u0 [{U0.min():.1f},{U0.max():.1f}] mean {U0.mean():.1f}'
+		f'T_set [{Ts.min():.0f},{Ts.max():.0f}] u0 [{U0.min():.1f},{U0.max():.1f}] mean {U0.mean():.1f} | '
+		f'fan={enable_fan}'
 	)
 	print(f'saved {out}')
 	return out
@@ -315,6 +319,8 @@ if __name__ == '__main__':
 	ap.add_argument('--dither', type=float, default=8.0)
 	ap.add_argument('--sp-lo', type=float, default=100.0)
 	ap.add_argument('--sp-hi', type=float, default=290.0)
+	ap.add_argument('--enable-fan', action='store_true', help='span: sample with the MPC driving the fan')
+	ap.add_argument('--out', default=None, help='override output .npz path')
 	ap.add_argument('--seed', type=int, default=0)
 	a = ap.parse_args()
 	if a.mode == 'box':
@@ -332,4 +338,6 @@ if __name__ == '__main__':
 			minutes=a.minutes or 120,
 			sp_lo=a.sp_lo,
 			sp_hi=a.sp_hi,
+			out=a.out or (OUT_SPAN.replace('.npz', '_fan.npz') if a.enable_fan else OUT_SPAN),
+			enable_fan=a.enable_fan,
 		)
