@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 import numpy as np
 import pytest
@@ -77,14 +78,17 @@ _SHIPPED = os.path.join(os.path.dirname(__file__), '..', 'controller', 'mpc_poli
 
 
 @pytest.mark.skipif(not os.path.exists(_SHIPPED), reason='shipped net artifact absent')
-def test_fan_on_derives_fan_suffixed_path_and_falls_back(capsys):
-	# base points at a valid fan-off artifact; its _fan sibling does not exist.
-	# Under enable_fan_input=True the loader must look for the _fan path (not the
-	# base) and, finding it absent, fall back to the NLP.
-	cfg = {**_DEFAULTS, 'policy': 'net', 'enable_fan_input': True, 'policy_net_path': _SHIPPED}
+def test_fan_on_derives_fan_suffixed_path_and_falls_back(tmp_path, capsys):
+	# Hermetic: copy the valid fan-off artifact to an isolated base whose _fan
+	# sibling does not exist, so the test is independent of what ships in
+	# controller/ (a real fan-on artifact now exists there).
+	base = tmp_path / 'mpc_policy_net.npz'
+	shutil.copy(_SHIPPED, base)               # valid fan-off artifact at base path
+	# NB: no tmp_path/mpc_policy_net_fan.npz is created
+	cfg = {**_DEFAULTS, 'policy': 'net', 'enable_fan_input': True, 'policy_net_path': str(base)}
 	c = Controller(cfg, 'C', dict(CYCLE))
-	assert c._net is None  # fell back to NLP
+	assert c._net is None                      # fan-on sibling absent -> NLP fallback
 	out = capsys.readouterr().out
-	assert '_fan.npz' in out  # tried the fan-on path, not the base
+	assert '_fan.npz' in out                   # tried the fan-on path, not the base
 	c.set_target(150.0)
-	assert c.update(150.0)['fan']['duty'] is not None  # fan-on -> allocator returns a duty, no raise
+	assert c.update(150.0)['fan']['duty'] is not None
