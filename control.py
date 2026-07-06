@@ -1190,7 +1190,7 @@ if __name__ == '__main__':
 
 	eventLogger.info('Flushing Valkey DB and creating new control structure')
 
-	devices, display_device, errors = build_devices(
+	devices, _display, errors = build_devices(
 		settings, include_display=False, errors=errors, event_log=eventLogger, control_log=controlLogger
 	)
 	grill_platform = devices.grill_platform
@@ -1359,8 +1359,7 @@ if __name__ == '__main__':
 
 				if control['mode'] == 'Stop':
 					eventLogger.info('Stop Mode Started.')
-					if display_device:
-						display_device.clear_display()  # When in error mode, leave the display showing ERROR
+					ctx.store.display_commands().push(('clear', None))
 					control['status'] = 'inactive'
 					# Reset Control to Defaults
 					control = read_control(flush=True)
@@ -1387,8 +1386,7 @@ if __name__ == '__main__':
 					]  # Reset retry counter to default
 					write_control(control, WriteKind.OVERWRITE, origin='control')
 					time.sleep(3)
-					if display_device:
-						display_device.clear_display()
+					ctx.store.display_commands().push(('clear', None))
 
 				read_current(zero_out=True)  # Zero out the current values
 
