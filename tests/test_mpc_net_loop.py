@@ -3,12 +3,16 @@ import numpy as np
 import pytest
 from controller.mpc import Controller, _DEFAULTS
 from controller.grill_sim import GrillSim
+from controller.mpc_net import net_path_for
 
 ART = os.path.join(os.path.dirname(__file__), '..', 'controller', 'mpc_policy_net.npz')
 CYCLE = {'u_min': 0.1, 'u_max': 0.9, 'HoldCycleTime': 25}
 TS = 25.0
 
 needs_art = pytest.mark.skipif(not os.path.exists(ART), reason='net artifact not exported')
+
+_FAN_ART = net_path_for(
+    os.path.join(os.path.dirname(__file__), '..', 'controller', 'mpc_policy_net.npz'), True)
 
 
 def _run(cfg, setpoint, seed=0, minutes=90):
@@ -86,3 +90,27 @@ def test_net_calibration_mismatch_falls_back_to_nlp():
 	c = Controller(cfg, 'C', dict(CYCLE))
 	assert c._net is None
 	assert c.mpc is not None
+
+
+@pytest.mark.skipif(not os.path.exists(_FAN_ART), reason='fan-on net artifact not exported')
+def test_fan_on_net_is_offset_free():
+	# net policy + enable_fan_input=True should hold offset-free, matching the
+	# regime it was trained on (fan-on closed-loop states).
+	cfg = {**_DEFAULTS, 'control_period': 25.0, 'policy': 'net', 'enable_fan_input': True}
+	c = Controller(cfg, 'C', dict(CYCLE))
+	assert c._net is not None and c._net.calib['enable_fan_input'] == 1
+	c.set_target(190.0)
+	plant = GrillSim(seed=0)
+	ts, temps = [], []
+	for w in range(int(75 * 60 / 25)):
+		out = c.update(plant.measured())
+		ratio = float(np.clip(out['cycle_ratio'], CYCLE['u_min'], CYCLE['u_max']))
+		fan = out['fan']['duty'] if out['fan']['duty'] is not None else 100.0
+		on = int(round(ratio * 25))
+		for s in range(25):
+			plant.step(auger_on=(s < on), fan_frac=fan / 100.0)
+			ts.append(w * 25 + s); temps.append(plant.true_Tc)
+	ts, temps = np.array(ts), np.array(temps)
+	err = temps[ts >= 1800] - 190.0
+	assert abs(np.mean(err)) <= 0.5   # offset-free (fan-on net; prior mismatch was ~0.4-0.9)
+	assert np.sqrt(np.mean(err**2)) <= 2.0
