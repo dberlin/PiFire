@@ -81,9 +81,13 @@ def test_sync_runner_wants_async_reflects_core_and_stop_is_noop():
 	from controller.runtime.runner import SyncControllerRunner
 
 	class _Core:
-		def wants_async(self):
-			return False
+		def __init__(self, wants):
+			self._wants = wants
 
-	r = SyncControllerRunner(_Core())
-	assert r.wants_async() is False
-	r.stop()  # must exist and be a harmless no-op for the sync runner
+		def wants_async(self):
+			return self._wants
+
+	# Delegates to the core (not hardcoded): True core -> True, False core -> False.
+	assert SyncControllerRunner(_Core(True)).wants_async() is True
+	assert SyncControllerRunner(_Core(False)).wants_async() is False
+	SyncControllerRunner(_Core(False)).stop()  # exists + harmless no-op for the sync runner
