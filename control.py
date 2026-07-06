@@ -39,6 +39,9 @@ from controller.runtime.logic.cycle import smoke_cycle_times, hold_initial_cycle
 from controller.runtime.logic.smartstart import select_profile, profile_cycle
 from controller.runtime.logic.pwm import hold_duty_cycle, ramp_params
 from controller.runtime.logic.fan import clamp_duty, smoke_plus_max_ratio, fan_assist_times
+from controller.runtime.state import WorkCycleState
+from controller.runtime.modes.monitor import MonitorMode
+from controller.runtime.modes.manual import ManualMode
 from os.path import exists
 
 """
@@ -100,6 +103,10 @@ def _process_system_commands(ctx):
 		system_output.push(result)
 
 
+_MIGRATED_MODES = frozenset({'Monitor', 'Manual'})
+_MODE_HANDLERS = {'Monitor': MonitorMode, 'Manual': ManualMode}
+
+
 def _work_cycle(mode, ctx):
 	"""
 	Work Cycle Function
@@ -107,6 +114,9 @@ def _work_cycle(mode, ctx):
 	:param mode: Requested Mode
 	:param ctx: ControllerContext
 	"""
+	if mode in _MIGRATED_MODES:
+		return _MODE_HANDLERS[mode](ctx, WorkCycleState()).run()
+
 	grill_platform = ctx.devices.grill_platform
 	probe_complex = ctx.devices.probe_complex
 	dist_device = ctx.devices.dist_device
