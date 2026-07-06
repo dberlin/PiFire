@@ -145,3 +145,15 @@ def test_build_runner_selects_sync_for_non_async_core(monkeypatch):
 	r, status = build_runner({}, {})
 	assert isinstance(r, SyncControllerRunner)
 	r.stop()  # no-op
+
+
+def test_hold_teardown_stops_threaded_runner():
+	from controller.runtime.modes.hold import HoldMode
+
+	core = FakeCore()
+	runner = ThreadedControllerRunner(core)
+	thread = runner._thread
+	hold = HoldMode.__new__(HoldMode)
+	hold._runner = runner
+	hold.teardown(70.0)
+	assert not thread.is_alive()

@@ -147,11 +147,13 @@ class HoldMode(ControlMode):
 			if self._controller_status == 'Active':
 				_control.eventLogger.info('Controller reinitialized with updated settings')
 
+		# Feed the runner every tick so a threaded core always has a fresh temp
+		# to solve; for the synchronous runner this just stores the latest temp,
+		# so the value read at the gate below is unchanged.
+		self._runner.submit(ptemp)
 		# Check to see if it's time to update pid and update if needed.
 		controller_interval = self._runner.control_period() or self.state.cycle.cycle_time
 		if (now - self.state.controller.cycle_start) > controller_interval:
-			# Submit the fresh per-tick ptemp read at the top of this tick.
-			self._runner.submit(ptemp)
 			_out = self._runner.latest()
 			self.state.controller.output, fan_cmd = _out.cycle_ratio, _out.fan
 			self.state.controller.cycle_start = now
@@ -332,3 +334,9 @@ class HoldMode(ControlMode):
 
 	def status_fragment(self) -> dict:
 		return {'lid_open_detected': self.state.lid.open_detected, 'lid_open_endtime': self.state.lid.expires}
+
+	def teardown(self, ptemp):
+		# Stop the controller runner's background thread (no-op for the
+		# synchronous runner). Guard against a failed build leaving no runner.
+		if self._runner is not None:
+			self._runner.stop()

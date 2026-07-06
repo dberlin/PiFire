@@ -616,26 +616,27 @@ def test_recipe_overlay_triggered_with_pause_notifies_once_and_continues():
 def test_hold_over_maxtemp_does_not_submit_controller_that_tick():
 	# safety-before-actuation: when max-temp trips, the loop breaks BEFORE the
 	# merged on_tick, so the controller is never advanced on the over-temp tick.
-	# (In the old order on_tick ran before the safety check.)
+	# (In the old order on_tick -- and its submit -- ran before the safety
+	# check.)
 	#
-	# The submit gate is `(now - controller_cycle_start) > (control_period() or
-	# cycle_time)`. controller_cycle_start is pinned to 0 in HoldMode.setup(),
-	# and under ManualClock tick 1 always has now == 0, so the gate can never
-	# fire on tick 1 no matter the settings. To actually exercise the
-	# safety-vs-actuation ordering we need the gate armed by tick 2: a small
-	# period=0.01 (< the 0.05 ManualClock.sleep step) guarantees
-	# (0.05 - 0) > 0.01 on tick 2. The probe script has a leading 200 because
-	# base.run() does one pre-loop read_probes() (for setup_safety) before the
-	# main loop starts consuming the script -- so index 0 is the pre-loop
-	# read, index 1 is tick 1 (200, under maxtemp), index 2 is tick 2 (550,
-	# over maxtemp, gate now armed).
+	# Every-tick submit means submit() no longer depends on the
+	# `(now - controller_cycle_start) > (control_period() or cycle_time)` gate
+	# at all -- it runs unconditionally at the top of on_tick. So we use a
+	# huge period (1000.0) to keep that gate CLOSED for the whole run: this
+	# isolates the discriminator to on_tick's own submit call, not gate
+	# timing. Under the NEW order, on_tick still runs (and still submits) on
+	# every under-maxtemp tick regardless of the closed gate, producing
+	# [200, 210, 220]. Under the OLD order, submit lived INSIDE that gate, so
+	# with the gate held closed nothing is ever submitted ([]) -- a
+	# regression back to gated (or on_tick-before-safety) submission would
+	# collapse this back toward [] or reintroduce 550.
 	settings = base_settings()
 	settings['safety']['maxtemp'] = 500
 	settings['controller'] = settings.get('controller', {})
 	control_data = base_control(mode='Hold')
 	control_data['primary_setpoint'] = 225
-	probes = FakeProbes().script([200, 200, 550, 550])  # [pre-loop, tick1 (under), tick2 (over), ...]
-	runner = FakeControllerRunner(period=0.01).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 4)
+	probes = FakeProbes().script([200, 200, 210, 220, 550])  # [pre-loop, tick1..3 (under), tick4 (over)]
+	runner = FakeControllerRunner(period=1000.0).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 6)
 	result = run_mode(
 		'Hold',
 		settings=settings,
@@ -646,14 +647,10 @@ def test_hold_over_maxtemp_does_not_submit_controller_that_tick():
 		runner=runner,
 	)
 	assert result.final_control['mode'] == 'Error'
-	# NEW (sense->safety->act) order: tick 2's over-temp trips safety and
-	# breaks BEFORE on_tick runs, so the armed gate never gets to submit --
-	# submitted_temps stays empty for the whole run (tick 1 didn't arm it
-	# either). OLD order ran on_tick (and its submit gate) BEFORE the
-	# in-loop probe re-read/safety check, submitting the STALE prior-tick
-	# ptemp (200) on tick 2 before over_max_temp(550) broke the loop at the
-	# end of that same iteration -- i.e. OLD order produces [200], not [].
-	assert runner.submitted_temps == []  # controller never advanced -- safety first
+	# Every under-maxtemp in-loop tick's fresh ptemp was submitted, but the
+	# over-maxtemp tick's 550 never was -- it trips safety and breaks before
+	# on_tick runs.
+	assert runner.submitted_temps == [200, 210, 220]
 
 
 def test_hold_controller_receives_current_tick_ptemp():
@@ -677,9 +674,13 @@ def test_hold_controller_receives_current_tick_ptemp():
 		grill=FakeGrillPlatform(),
 		runner=runner,
 	)
-	# Exact fresh-ptemp sequence, proving on_tick uses THIS tick's ptemp
-	# parameter rather than a stale prior-tick reading. The OLD (stale) order
-	# submitted the previous iteration's probe value at each gate-fire --
-	# under this same setup it produced [205, 210], one step behind the
+	# Exact fresh-ptemp sequence: every-tick submit means EVERY in-loop tick's
+	# fresh ptemp reaches the controller (not just the ticks where the
+	# control-period gate fires). The OLD (stale, gated-submit) order
+	# submitted only at each gate-fire, and used the PREVIOUS iteration's
+	# probe value (self.state.ptemp, stashed by check_safety at the end of
+	# the prior tick) rather than this tick's fresh ptemp -- empirically
+	# verified (pre-sense->safety->act commit a68b3bb) to produce [205, 210]
+	# under this exact setup: one entry short and one step behind the
 	# sequence below.
-	assert runner.submitted_temps == [210, 215]
+	assert runner.submitted_temps == [205, 210, 215]
