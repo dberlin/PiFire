@@ -506,6 +506,102 @@ git commit -F <msgfile>   # "test(mpc): closed-loop offset-free check for fan-on
 
 ---
 
+### Task 6: Committed net-regeneration wrapper tool + README (user-requested)
+
+**Files:**
+- Create: `tools/regenerate_mpc_net.py`
+- Create: `tools/README.md`
+- Test: `tests/test_regenerate_mpc_net.py`
+
+**Rationale:** The sample→train→export pipeline is committed but buried in `docs/superpowers/experiments/` among ~25 spike scripts, with no discoverable entry point. Net artifacts go stale (`matches_config` → NLP fallback) after a grill recalibration (`update_mpc.py`), and the only recovery is knowing that three specific scripts form an ordered pipeline. This task adds ONE discoverable, documented wrapper. Decision (user): wrapper only, leave the three stage scripts where they are.
+
+**Interfaces:**
+- Produces (pure, testable helpers so the orchestration is unit-tested without running heavy compute):
+  - `sample_cmd(py, enable_fan, episodes, workers) -> list[str]` — the `sample_mpc.py --mode span [--enable-fan] -e N [-w W]` argv.
+  - `export_cmd(py, enable_fan) -> list[str]` — the `export_span_net.py --data <span[_fan].npz> --out <mpc_policy_net[_fan].npz> [--enable-fan]` argv, deriving the dataset path from the span-dataset convention and the artifact path via `net_path_for('./controller/mpc_policy_net.npz', enable_fan)`.
+  - `plan_commands(modes, episodes, workers, skip_sample) -> list[list[str]]` — the ordered argv list for the selected modes (`modes` ⊆ `{False, True}` for fan-off/fan-on).
+- CLI: `python tools/regenerate_mpc_net.py [--mode {fan-off,fan-on,both}] [--episodes N] [--workers W] [--skip-sample] [--dry-run]`. Default `--mode both`, `--episodes 500`. `--dry-run` prints the commands (via `plan_commands`) without executing. `--skip-sample` omits the sample step (retrain+export from an existing dataset). After a real (non-dry) run it prints the acceptance-gate reminder.
+
+**Constants (module level), so the test and the CLI agree:**
+- `BASE_ARTIFACT = './controller/mpc_policy_net.npz'`
+- `SPAN_DATA = './docs/superpowers/experiments/_ampc_data/pifire_span.npz'` and its `_fan` sibling via the same `_fan`-before-`.npz` rule.
+- `SAMPLER = 'docs/superpowers/experiments/sample_mpc.py'`, `EXPORTER = 'docs/superpowers/experiments/export_span_net.py'`.
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/test_regenerate_mpc_net.py`:
+
+```python
+import sys
+sys.path.insert(0, 'tools')
+import regenerate_mpc_net as rg
+
+
+def test_export_cmd_fan_on_uses_fan_paths_and_flag():
+    cmd = rg.export_cmd('py', True)
+    assert '--enable-fan' in cmd
+    assert any(a.endswith('pifire_span_fan.npz') for a in cmd)
+    assert any(a.endswith('mpc_policy_net_fan.npz') for a in cmd)
+
+
+def test_export_cmd_fan_off_uses_base_paths_no_flag():
+    cmd = rg.export_cmd('py', False)
+    assert '--enable-fan' not in cmd
+    assert any(a.endswith('pifire_span.npz') and not a.endswith('_fan.npz') for a in cmd)
+    assert any(a.endswith('mpc_policy_net.npz') and not a.endswith('_fan.npz') for a in cmd)
+
+
+def test_sample_cmd_carries_episodes_and_fan_flag():
+    on = rg.sample_cmd('py', True, 500, None)
+    assert '--enable-fan' in on and '500' in on and '--mode' in on and 'span' in on
+    off = rg.sample_cmd('py', False, 300, 8)
+    assert '--enable-fan' not in off and '300' in off and '8' in off
+
+
+def test_plan_commands_both_orders_sample_before_export_per_mode():
+    cmds = rg.plan_commands([False, True], episodes=500, workers=None, skip_sample=False)
+    # 4 commands: sample-off, export-off, sample-on, export-on
+    assert len(cmds) == 4
+    assert 'sample_mpc.py' in ' '.join(cmds[0]) and 'export_span_net.py' in ' '.join(cmds[1])
+
+
+def test_plan_commands_skip_sample_omits_sampling():
+    cmds = rg.plan_commands([True], episodes=500, workers=None, skip_sample=True)
+    assert len(cmds) == 1 and 'export_span_net.py' in ' '.join(cmds[0])
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `./.venv/bin/python -m pytest tests/test_regenerate_mpc_net.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'regenerate_mpc_net'`.
+
+- [ ] **Step 3: Implement `tools/regenerate_mpc_net.py`**
+
+Pure helpers build argv from the constants; `net_path_for` (imported from `controller.mpc_net`, adding the repo root to `sys.path`) derives the fan-on artifact path; `main()` parses args, calls `plan_commands`, and either prints them (`--dry-run`) or runs each with `subprocess.run(cmd, check=True)` using `sys.executable`. Deriving the dataset `_fan` path reuses the same suffix rule. After a real run, print: `Acceptance gate: run scratchpad fan ablation; fan-on net should hit |bias|<=0.10C, RMS<=0.72C (5s control period, 110-288C).` Keep it small and single-responsibility.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `./.venv/bin/python -m pytest tests/test_regenerate_mpc_net.py -v`
+Expected: PASS (5 tests).
+
+- [ ] **Step 5: Smoke the CLI dry-run**
+
+Run: `./.venv/bin/python tools/regenerate_mpc_net.py --mode both --dry-run`
+Expected: prints 4 commands (sample+export for each mode), executes nothing.
+
+- [ ] **Step 6: Write `tools/README.md`**
+
+Document: what the net policy is and that artifacts embed the grey-box calibration; WHEN to regenerate (after recalibrating the grill via `update_mpc.py`, which changes the calibration so `matches_config` fails and the MPC falls back to the NLP policy); the one-command usage (`python tools/regenerate_mpc_net.py --mode both`), the per-mode/`--skip-sample`/`--dry-run` options; that the `.npz` sample datasets are gitignored while the two `controller/mpc_policy_net*.npz` artifacts are committed; and the acceptance gate.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add tools/regenerate_mpc_net.py tools/README.md tests/test_regenerate_mpc_net.py
+git commit -F <msgfile>   # "feat(tools): one-command MPC net-policy regeneration wrapper + docs"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:**
