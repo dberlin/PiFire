@@ -259,9 +259,11 @@ def test_start_spawns_thread_and_populates_cache(monkeypatch):
 		email='a@b.com', password='pw', device_serial='SN1', num_probes=1, poll_interval=0.01
 	)
 	device.start()
-	time.sleep(0.2)
-
-	assert device.get_channel_celsius(1) == pytest.approx(100.0)
+	try:
+		time.sleep(0.2)
+		assert device.get_channel_celsius(1) == pytest.approx(100.0)
+	finally:
+		device.stop()  # stop the background loop so it doesn't linger past the test
 
 
 def test_discover_devices_counts_channels_per_device(monkeypatch):

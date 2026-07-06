@@ -114,6 +114,9 @@ class ThermoworksCloudDevice:
 		self._lock = threading.Lock()
 		self.status = {'connected': False, 'last_error': None, 'last_poll_time': None}
 
+		self._thread = None
+		self._stopped = False
+
 	def get_channel_celsius(self, channel_number):
 		with self._lock:
 			entry = self._cache.get(channel_number)
@@ -129,21 +132,34 @@ class ThermoworksCloudDevice:
 		return self.status
 
 	def start(self):
+		self._stopped = False
 		self._thread = threading.Thread(target=self._run_loop, daemon=True)
 		self._thread.start()
+
+	def stop(self):
+		"""Signal the background poll loop to exit and join its thread.
+
+		The loops in _main() check self._stopped, so the thread finishes its
+		current poll interval and returns cleanly (no lingering event loop at
+		interpreter shutdown, which otherwise delays process/test exit).
+		"""
+		self._stopped = True
+		thread = self._thread
+		if thread is not None:
+			thread.join(timeout=2)
 
 	def _run_loop(self):
 		asyncio.new_event_loop().run_until_complete(self._main())
 
 	async def _main(self):
-		while True:
+		while not self._stopped:
 			try:
 				async with ClientSession() as session:
 					auth = await AuthFactory(session).build_auth(self.email, self.password)
 					client = ThermoworksCloud(auth)
 					self.status['connected'] = True
 					self.status['last_error'] = None
-					while True:
+					while not self._stopped:
 						channels = await poll_once(client, self.device_serial, self.num_probes)
 						now = datetime.now(timezone.utc)
 						with self._lock:
