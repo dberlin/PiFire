@@ -27,6 +27,7 @@ class WorkCycleState:
 	lid_open_detect: bool = False
 	target_temp_achieved: bool = False
 	pwm_fan_ramping: bool = False
+	mpc_fan_active: bool = False
 
 	# Toggle timestamps (all float 0.0)
 	start_time: float = 0.0

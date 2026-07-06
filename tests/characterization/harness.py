@@ -37,6 +37,7 @@ from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.distance import FakeDistance
 from tests.fakes.notifier import FakeNotifier
 import control
+import controller.runtime.runner
 
 
 # --- Pitfall 1: loggers are normally bound in `if __name__ == '__main__':` ---
@@ -115,6 +116,13 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
 	`FakeControllerRunner`) instead of constructing a real PID/MPC core. Lets
 	Hold-mode scenarios pin the runner's `.latest()` output deterministically
 	without depending on real controller math.
+
+	NOTE: HoldMode (controller/runtime/modes/hold.py) calls
+	`controller.runtime.runner.build_runner(...)` directly (a patchable
+	module-level reference), NOT `control.build_runner` -- the legacy inline
+	Hold code (now dead, left in place per the strangler-migration
+	convention) is what used `control.build_runner`. Both are patched here so
+	injection reaches HoldMode regardless of which path is live.
 	"""
 	ctx, grill, notifier = make_ctx(settings, control_data, pellet_db, probes, grill)
 
@@ -125,12 +133,16 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
 	# Process_Monitor is neutralized globally by the autouse fixture in
 	# tests/conftest.py, so we only need to (optionally) inject a fake runner.
 	prev_build_runner = control.build_runner
+	prev_runtime_build_runner = controller.runtime.runner.build_runner
 	if runner is not None:
-		control.build_runner = lambda *a, **k: (runner, 'Active')
+		fake_build_runner = lambda *a, **k: (runner, 'Active')
+		control.build_runner = fake_build_runner
+		controller.runtime.runner.build_runner = fake_build_runner
 	try:
 		control._work_cycle(mode, ctx)
 	finally:
 		control.build_runner = prev_build_runner
+		controller.runtime.runner.build_runner = prev_runtime_build_runner
 
 	return CaptureResult(
 		grill_calls=grill.calls,

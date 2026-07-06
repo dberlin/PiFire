@@ -322,6 +322,11 @@ class ControlMode:
 		# Get initial probe sensor data, temperatures
 		sensor_data = probe_complex.read_probes()
 		ptemp = list(sensor_data['primary'].values())[0]  # Primary Temperature or the Pit Temperature
+		# Stash for on_tick() hooks that need ptemp on the FIRST iteration
+		# (before any in-loop check_safety() has run to refresh it) -- e.g.
+		# HoldMode's controller submit, which needs the stale-by-one ptemp
+		# semantics preserved from the very first tick onward.
+		self.state.ptemp = ptemp
 
 		# ---- mode-specific pre-loop safety check (abort contract) ----
 		status = self.setup_safety(ptemp)

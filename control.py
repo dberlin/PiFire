@@ -47,6 +47,7 @@ from controller.runtime.modes.prime import PrimeMode
 from controller.runtime.modes.startup import StartupMode
 from controller.runtime.modes.reignite import ReigniteMode
 from controller.runtime.modes.smoke import SmokeMode
+from controller.runtime.modes.hold import HoldMode
 from os.path import exists
 
 """
@@ -91,7 +92,7 @@ def _process_system_commands(ctx):
 		system_output.push(result)
 
 
-_MIGRATED_MODES = frozenset({'Monitor', 'Manual', 'Shutdown', 'Prime', 'Startup', 'Reignite', 'Smoke'})
+_MIGRATED_MODES = frozenset({'Monitor', 'Manual', 'Shutdown', 'Prime', 'Startup', 'Reignite', 'Smoke', 'Hold'})
 _MODE_HANDLERS = {
 	'Monitor': MonitorMode,
 	'Manual': ManualMode,
@@ -100,6 +101,7 @@ _MODE_HANDLERS = {
 	'Startup': StartupMode,
 	'Reignite': ReigniteMode,
 	'Smoke': SmokeMode,
+	'Hold': HoldMode,
 }
 
 
