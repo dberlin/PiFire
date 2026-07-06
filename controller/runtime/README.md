@@ -55,7 +55,7 @@ for module globals. The context bundles:
   `while True: tick()`. Its orchestration is pinned by
   `tests/characterization/test_controller_loop_golden.py`.
 - **Mode handlers** (`modes/`) are a template-method state machine. `ControlMode`
-  (`modes/base.py`) reproduces the shared per-cycle skeleton; each mode
+  (`modes/base.py`) defines the shared per-cycle skeleton; each mode
   (Monitor, Manual, Prime, Startup, Reignite, Smoke, Hold, Shutdown) overrides
   hooks. The inner work cycle is pinned by
   `tests/characterization/test_modes_golden.py` (the golden-master oracle).
