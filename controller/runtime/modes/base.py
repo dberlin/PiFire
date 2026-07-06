@@ -30,6 +30,14 @@ class ControlMode:
 	    control logic. `current_output_status` is captured ONCE per tick
 	    by the shared skeleton, BEFORE the manual-override block, and
 	    passed in here -- never re-fetch it inside a hook.
+	  - on_settings_reload(): called after `self.settings` is reloaded in
+	    the `settings_update` block (default no-op).
+	  - on_publish(now): called immediately after the notifications-check
+	    control rebind, at the cycle-ratio MQTT publish position (default
+	    no-op).
+	  - on_fan_tick(now, current_output_status): called immediately after
+	    check_safety(), at the fan/smoke-plus/lid-open block position
+	    (default no-op).
 	  - check_safety(now, ptemp): per-iteration mode-specific safety check.
 	  - should_exit(now, ptemp) -> bool: per-iteration mode-specific exit
 	    condition (default False -- rely on the universal breaks).
@@ -47,6 +55,7 @@ class ControlMode:
 		self.probe_complex = ctx.devices.probe_complex
 		self.dist_device = ctx.devices.dist_device
 		self.settings = None
+		self.control = None
 
 	# ---- hooks (safe defaults) ----
 	def setup(self):
@@ -56,6 +65,15 @@ class ControlMode:
 		return 'Active'
 
 	def on_tick(self, now, current_output_status):
+		pass
+
+	def on_settings_reload(self):
+		pass
+
+	def on_publish(self, now):
+		pass
+
+	def on_fan_tick(self, now, current_output_status):
 		pass
 
 	def check_safety(self, now, ptemp):
@@ -126,6 +144,7 @@ class ControlMode:
 		# Setup Cycle Parameters
 		self.settings = ctx.store.read_settings()
 		control = ctx.store.read_control()
+		self.control = control
 		pelletdb = ctx.store.read_pellet_db()
 		control['hopper_check'] = True
 		ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
@@ -237,6 +256,7 @@ class ControlMode:
 
 			ctx.store.execute_control_writes()
 			control = ctx.store.read_control()
+			self.control = control
 
 			_control._process_system_commands(ctx)
 
@@ -253,6 +273,7 @@ class ControlMode:
 					_control.eventLogger.setLevel(logging.DEBUG)
 				else:
 					_control.eventLogger.setLevel(logging.INFO)
+				self.on_settings_reload()
 
 			# Check if user changed hopper levels and update if required
 			if control['distance_update']:
@@ -390,6 +411,8 @@ class ControlMode:
 			control = ctx.notifications.check(
 				self.settings, control, in_data=in_data, pelletdb=pelletdb, grill_platform=grill_platform, update_eta=update_eta
 			)
+			self.control = control
+			self.on_publish(now)
 
 			# Send Current Status / Temperature Data to Display Device every 0.5 second
 			if (now - display_toggle_time) > 0.5:
@@ -432,6 +455,9 @@ class ControlMode:
 
 			# ---- mode-specific per-tick safety check ----
 			self.check_safety(now, ptemp)
+
+			# ---- mode-specific fan/smoke-plus/lid-open tick ----
+			self.on_fan_tick(now, current_output_status)
 
 			# Write History & Issue Heartbeat after 3 seconds has passed
 			if (now - temp_toggle_time) > 3:
