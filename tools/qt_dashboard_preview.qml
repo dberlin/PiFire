@@ -223,6 +223,8 @@ Window {
             // ----- Left: food probes (collapses when none) -----
             ColumnLayout {
                 Layout.preferredWidth: 298
+                Layout.minimumWidth: 298
+                Layout.maximumWidth: 298
                 Layout.fillHeight: true
                 spacing: 12
                 visible: win.probeCount > 0
@@ -281,12 +283,14 @@ Window {
             // ----- Center -----
             ColumnLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 380
                 Layout.fillHeight: true
                 spacing: 14
 
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.minimumHeight: 300
                     color: win.cardCol; radius: 22; border.color: win.borderCol
                     clip: true
 
@@ -366,6 +370,7 @@ Window {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 52
+                    Layout.maximumHeight: 52
                     spacing: 14
                     Rectangle {
                         Layout.fillWidth: true; Layout.fillHeight: true
@@ -395,6 +400,7 @@ Window {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 82
+                    Layout.maximumHeight: 82
                     spacing: 12
                     Repeater {
                         model: win.controlButtons(win.mode)
@@ -412,6 +418,8 @@ Window {
             // ----- Right -----
             ColumnLayout {
                 Layout.preferredWidth: 300
+                Layout.minimumWidth: 300
+                Layout.maximumWidth: 300
                 Layout.fillHeight: true
                 spacing: 14
 
@@ -523,6 +531,7 @@ Window {
                     id: dutyRow
                     Layout.fillWidth: true
                     Layout.preferredHeight: 64
+                    Layout.maximumHeight: 64
                     spacing: 14
                     readonly property bool hold: win.mode === "Hold"
                     readonly property bool rightOn: hold ? win.fanOn : win.c.cooking

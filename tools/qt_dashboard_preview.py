@@ -28,12 +28,16 @@ QML = os.path.join(HERE, 'qt_dashboard_preview.qml')
 
 def main():
 	check = '--check' in sys.argv
-	if check:
+	shot = None
+	if '--shot' in sys.argv:
+		shot = sys.argv[sys.argv.index('--shot') + 1]
+	if check or shot:
 		os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 	from PySide6.QtCore import QUrl, QTimer
 	from PySide6.QtGui import QGuiApplication
 	from PySide6.QtQml import QQmlApplicationEngine
+	from PySide6.QtQuick import QQuickWindow  # noqa: F401 — registers the QQuickWindow wrapper
 
 	app = QGuiApplication(sys.argv)
 	engine = QQmlApplicationEngine()
@@ -46,6 +50,18 @@ def main():
 		print('OK: qt_dashboard_preview.qml loaded')
 		# Give the scene one event-loop pass, then quit.
 		QTimer.singleShot(0, app.quit)
+		return app.exec()
+
+	if shot:
+		root = engine.rootObjects()[0]
+
+		def _grab():
+			img = root.grabWindow()
+			img.save(shot)
+			print(f'wrote {shot}', flush=True)
+			app.quit()
+
+		QTimer.singleShot(900, _grab)
 		return app.exec()
 
 	# Echo the on-screen FPS to the terminal once per second.
