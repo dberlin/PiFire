@@ -112,6 +112,10 @@ class PiFireBackend(QObject):
 		self._timer_label = ''
 		self._mode_text = 'Stop'
 		self._p_mode_active = False
+		self._auger_duty = 0
+		self._fan_duty = 0
+		self._food_count = len(self._probe_info.get('food', []))
+		self._cook_elapsed_text = '00:00'
 		# Idle / sleep state
 		self.TIMEOUT = 10
 		self._last_interaction = self._now()
@@ -142,6 +146,8 @@ class PiFireBackend(QObject):
 		self._set('_igniter', bool(outpins.get('igniter', False)), self.statusChanged)
 		self._set('_p_mode', status.get('p_mode', 0), self.statusChanged)
 		self._set('_s_plus', bool(status.get('s_plus', False)), self.statusChanged)
+		self._set('_auger_duty', int(round((status.get('cycle_ratio', 0) or 0) * 100)), self.statusChanged)
+		self._set('_fan_duty', int(status.get('fan_duty', 0) or 0), self.statusChanged)
 		self._set('_lid_open', bool(status.get('lid_open_detected', False)), self.statusChanged)
 		self._set('_recipe', bool(status.get('recipe', False)), self.statusChanged)
 		self._set('_recipe_paused', bool(status.get('recipe_paused', False)), self.statusChanged)
@@ -150,6 +156,7 @@ class PiFireBackend(QObject):
 		self._food_model.update(in_data)
 		now = self._now()
 		self._update_timer_text(status, now)
+		self._update_cook_elapsed(status, now)
 		mode = status.get('mode', 'Stop')
 		recipe = bool(status.get('recipe', False))
 		mode_text = f'Recipe: {mode}' if recipe and mode != 'Shutdown' else mode
@@ -178,6 +185,16 @@ class PiFireBackend(QObject):
 			label = 'Lid Pause'
 		self._set('_timer_text', text, self.timerChanged)
 		self._set('_timer_label', label, self.timerChanged)
+
+	def _update_cook_elapsed(self, status, now):
+		ts = status.get('startup_timestamp', 0) or 0
+		if ts and status.get('mode', 'Stop') not in ('Stop', 'Monitor'):
+			secs = max(int(now - ts), 0)
+			h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
+			text = (f'{h}:' if h else '') + f'{m:02d}:{s:02d}'
+		else:
+			text = '00:00'
+		self._set('_cook_elapsed_text', text, self.timerChanged)
 
 	def _update_idle(self, mode, now):
 		# The screen never sleeps during an active cook; in Stop it sleeps after
@@ -350,6 +367,22 @@ class PiFireBackend(QObject):
 	@Property(int, notify=statusChanged)
 	def pMode(self):
 		return self._p_mode
+
+	@Property(int, notify=statusChanged)
+	def augerDuty(self):
+		return self._auger_duty
+
+	@Property(int, notify=statusChanged)
+	def fanDuty(self):
+		return self._fan_duty
+
+	@Property(int, constant=True)
+	def foodProbeCount(self):
+		return self._food_count
+
+	@Property(str, notify=timerChanged)
+	def cookElapsedText(self):
+		return self._cook_elapsed_text
 
 	@Property(bool, notify=statusChanged)
 	def smokePlus(self):

@@ -205,3 +205,34 @@ def test_nav_slots_emit_navevent():
 	b.navDown()
 	b.navEnter()
 	assert events == ['UP', 'DOWN', 'ENTER']
+
+
+def test_poll_exposes_duty_cycles():
+	in_data = {'P': {'Grill': 225}, 'F': {}, 'AUX': {}, 'PSP': 250, 'NT': {}}
+	status = {'mode': 'Hold', 'units': 'F', 'outpins': {'fan': True}, 'cycle_ratio': 0.35, 'fan_duty': 100}
+	b = make_backend(in_data, status)
+	b.poll()
+	assert b.augerDuty == 35
+	assert b.fanDuty == 100
+
+
+def test_food_probe_count_reflects_config():
+	# PROBE_INFO has one food probe.
+	b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}})
+	assert b.foodProbeCount == 1
+	none = PiFireBackend(lambda: (None, None), lambda c, d: None, {'primary': {'name': 'Grill'}, 'food': [], 'aux': []})
+	assert none.foodProbeCount == 0
+
+
+def test_cook_elapsed_text_counts_up_else_zero():
+	status = {'mode': 'Smoke', 'units': 'F', 'outpins': {}, 'startup_timestamp': 1000.0}
+	b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, status)
+	b._now = lambda: 1000.0 + 125  # 2:05 elapsed
+	b.poll()
+	assert b.cookElapsedText == '02:05'
+	b._fetch_fn = lambda: (
+		{'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
+		{'mode': 'Stop', 'units': 'F', 'outpins': {}, 'startup_timestamp': 0},
+	)
+	b.poll()
+	assert b.cookElapsedText == '00:00'
