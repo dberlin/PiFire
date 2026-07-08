@@ -30,6 +30,39 @@ FlexObject_TypeMap = {
 }
 
 """
+Accent palette resolver for flex dashboard themes
+"""
+
+
+def _hex(h):
+	h = h.lstrip('#')
+	return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), 255)
+
+
+_ACCENTS = {
+	'Ember': {
+		'accent': _hex('ff8a2b'),
+		'glow': _hex('ff7a1a'),
+		'arc': [_hex('ff5e1a')[:3], _hex('ff8a2b')[:3], _hex('ffc24b')[:3]],
+	},
+	'Ice': {
+		'accent': _hex('3cc7d0'),
+		'glow': _hex('2ec5d3'),
+		'arc': [_hex('1f9fb8')[:3], _hex('35c7d0')[:3], _hex('7ef0d2')[:3]],
+	},
+	'Crimson': {
+		'accent': _hex('ff6a5a'),
+		'glow': _hex('ff5a4d'),
+		'arc': [_hex('e11d48')[:3], _hex('ff5a4d')[:3], _hex('ff9f43')[:3]],
+	},
+}
+
+
+def resolve_accent(name):
+	return _ACCENTS.get(name, _ACCENTS['Ember'])
+
+
+"""
 Display Flex Object Class Definition 
 """
 
