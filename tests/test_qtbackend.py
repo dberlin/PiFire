@@ -224,6 +224,30 @@ def test_food_probe_count_reflects_config():
 	assert none.foodProbeCount == 0
 
 
+def test_accent_theme_updates_live_and_throttles():
+	state = {'accent': 'Ember'}
+	b = PiFireBackend(
+		lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}}),
+		lambda c, d: None,
+		PROBE_INFO,
+		accent_fn=lambda: state['accent'],
+	)
+	clock = {'t': 1000.0}
+	b._now = lambda: clock['t']
+	events = []
+	b.accentThemeChanged.connect(lambda: events.append(b.accentTheme))
+	b.poll()
+	assert b.accentTheme == 'Ember'
+	state['accent'] = 'Ice'
+	clock['t'] = 1000.5
+	b.poll()
+	assert b.accentTheme == 'Ember'
+	clock['t'] = 1002.0
+	b.poll()
+	assert b.accentTheme == 'Ice'
+	assert 'Ice' in events
+
+
 def test_cook_elapsed_text_counts_up_else_zero():
 	status = {'mode': 'Smoke', 'units': 'F', 'outpins': {}, 'startup_timestamp': 1000.0}
 	b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, status)

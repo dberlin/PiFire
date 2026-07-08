@@ -45,9 +45,19 @@ def build_engine(config, backend):
 def build_backend(config):
 	"""Construct the backend wired to the framework's data + command layer."""
 	from display.qtquick_flex import Display
+	from common import read_settings_valkey
+
+	def _accent_fn():
+		try:
+			s = read_settings_valkey()
+			module = s['modules']['display']
+			return s['display']['config'][module].get('accent_theme', 'Ember')
+		except Exception:
+			return 'Ember'
 
 	dispatcher = Display.for_dispatch(config, config.get('units', 'F'))
-	backend = PiFireBackend(_fetch, dispatcher._dispatch_command, config.get('probe_info', {}))
+	backend = PiFireBackend(_fetch, dispatcher._dispatch_command, config.get('probe_info', {}), accent_fn=_accent_fn)
+	backend._accent_theme = config.get('accent_theme', 'Ember')
 	backend._ip_address = config.get('ip_address', '') or backend.ipAddress
 	return backend
 

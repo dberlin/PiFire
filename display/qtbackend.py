@@ -80,13 +80,17 @@ class PiFireBackend(QObject):
 	timerChanged = Signal()
 	asleepChanged = Signal()
 	navEvent = Signal(str)
+	accentThemeChanged = Signal()
 
-	def __init__(self, fetch_fn, command_fn, probe_info, parent=None):
+	def __init__(self, fetch_fn, command_fn, probe_info, accent_fn=None, parent=None):
 		super().__init__(parent)
 		self._fetch_fn = fetch_fn
 		self._command_fn = command_fn
 		self._probe_info = probe_info or {}
 		self._now = time.time
+		self._accent_fn = accent_fn
+		self._accent_theme = 'Ember'
+		self._last_accent_check = 0.0
 		primary = self._probe_info.get('primary', {})
 		self._primary_name = primary.get('name', 'Primary')
 		self._primary_label = primary.get('label', self._primary_name)
@@ -163,6 +167,9 @@ class PiFireBackend(QObject):
 		self._set('_mode_text', mode_text, self.modeTextChanged)
 		self._set('_p_mode_active', mode in ('Startup', 'Reignite', 'Smoke'), self.statusChanged)
 		self._update_idle(mode, now)
+		if self._accent_fn is not None and (now - self._last_accent_check) >= 1.0:
+			self._last_accent_check = now
+			self._set('_accent_theme', self._accent_fn() or 'Ember', self.accentThemeChanged)
 
 	def _update_timer_text(self, status, now):
 		mode = status.get('mode', 'Stop')
@@ -419,3 +426,7 @@ class PiFireBackend(QObject):
 	@Property(str, notify=timerChanged)
 	def timerLabel(self):
 		return self._timer_label
+
+	@Property(str, notify=accentThemeChanged)
+	def accentTheme(self):
+		return self._accent_theme
