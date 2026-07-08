@@ -138,3 +138,19 @@ def test_gauge_loads_with_setpoint_marker_and_mode_pill():
 	assert obj.property('modeLabel') == 'HOLD'
 	marker = obj.findChild(QObject, 'setpointMarker')
 	assert marker is not None, 'expected a setpointMarker child in Gauge.qml'
+
+
+def test_header_bar_loads_with_menu_signal_and_clock():
+	# HeaderBar.qml: live dot + wordmark + IP + clock + hamburger. Loads against a
+	# real backend (ipAddress/mode) and exposes menuRequested() + a clock property
+	# driven by its own Timer.
+	_app()
+	backend = _stub_backend(status={'mode': 'Hold', 'units': 'F', 'outpins': {}})
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/HeaderBar.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	assert obj.property('height') == 58
+	assert obj.metaObject().indexOfSignal('menuRequested()') >= 0
+	assert obj.property('clock') is not None
