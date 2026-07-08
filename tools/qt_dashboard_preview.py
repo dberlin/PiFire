@@ -9,9 +9,11 @@ Needs only PySide6 (>=6.11) — no other PiFire deps. The system interpreter has
 it (`/usr/bin/python3`); the project .venv does not.
 
 Usage:
-    /usr/bin/python3 tools/qt_dashboard_preview.py            # windowed preview
-    uv run --with pyside6 python tools/qt_dashboard_preview.py  # if PySide6 isn't on this interpreter
-    /usr/bin/python3 tools/qt_dashboard_preview.py --check     # load + exit (offscreen syntax check)
+    /usr/bin/python3 tools/qt_dashboard_preview.py                 # windowed preview (1280x720)
+    /usr/bin/python3 tools/qt_dashboard_preview.py --size 1920x1080  # scales the 1280x720 design to fit
+    uv run --with pyside6 python tools/qt_dashboard_preview.py      # if PySide6 isn't on this interpreter
+    /usr/bin/python3 tools/qt_dashboard_preview.py --check          # load + exit (offscreen syntax check)
+    /usr/bin/python3 tools/qt_dashboard_preview.py --shot out.png   # render one frame to a PNG (offscreen)
 
 Controls (in the window):
     click / M  cycle mode          A  cycle accent
@@ -34,6 +36,11 @@ def main():
 	if check or shot:
 		os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
+	view_w, view_h = 1280, 720
+	if '--size' in sys.argv:
+		spec = sys.argv[sys.argv.index('--size') + 1]
+		view_w, view_h = (int(v) for v in spec.lower().split('x'))
+
 	from PySide6.QtCore import QUrl, QTimer
 	from PySide6.QtGui import QGuiApplication
 	from PySide6.QtQml import QQmlApplicationEngine
@@ -41,6 +48,8 @@ def main():
 
 	app = QGuiApplication(sys.argv)
 	engine = QQmlApplicationEngine()
+	engine.rootContext().setContextProperty('viewW', view_w)
+	engine.rootContext().setContextProperty('viewH', view_h)
 	engine.load(QUrl.fromLocalFile(QML))
 	if not engine.rootObjects():
 		print('ERROR: failed to load qt_dashboard_preview.qml', file=sys.stderr)

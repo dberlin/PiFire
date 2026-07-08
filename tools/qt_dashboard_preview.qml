@@ -15,8 +15,10 @@ import QtQuick.Layouts
 
 Window {
     id: win
-    width: 1280
-    height: 720
+    // viewW/viewH are set by the runner (default 1280x720). Set larger to see the
+    // design scale uniformly onto a bigger 16:9 screen.
+    width: typeof viewW !== "undefined" ? viewW : 1280
+    height: typeof viewH !== "undefined" ? viewH : 720
     visible: true
     color: "#0d0b09"
     title: "PiFire Dashboard — FPS Preview"
@@ -134,6 +136,17 @@ Window {
     FontLoader { id: barlowCond; source: "../static/font/BarlowSemiCondensed-Bold.ttf" }
     property string sans: barlow.status === FontLoader.Ready ? barlow.name : "sans-serif"
     property string cond: barlowCond.status === FontLoader.Ready ? barlowCond.name : sans
+
+    // ---------------- Scaled design canvas ----------------
+    // Everything below is authored at exactly 1280x720 and scaled uniformly to the
+    // window, so the SAME design reuses crisply on larger 16:9 screens (the planned
+    // followup: the real host reads the screen size and drives this scale).
+    Item {
+        id: canvas
+        width: 1280
+        height: 720
+        anchors.centerIn: parent
+        scale: Math.min(win.width / 1280, win.height / 720)
 
     // ---------------- Background ----------------
     Rectangle {
@@ -604,6 +617,8 @@ Window {
             }
         }
     }
+    }
+    // ---------------- end scaled design canvas ----------------
 
     // ---------------- Click-through mode cycle ----------------
     MouseArea {
