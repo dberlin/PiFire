@@ -143,20 +143,10 @@ Window {
             GradientStop { position: 1.0; color: "#1c140d" }
         }
     }
-    Rectangle {  // bottom warm glow
-        width: 820; height: 420; radius: 210
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: -180
-        color: win.glowCol
-        opacity: 0.16
-        SequentialAnimation on opacity {
-            running: win.animate && win.c.cooking
-            loops: Animation.Infinite
-            NumberAnimation { to: 0.24; duration: 1600; easing.type: Easing.InOutQuad }
-            NumberAnimation { to: 0.12; duration: 1600; easing.type: Easing.InOutQuad }
-        }
-    }
+    // NOTE: the design has a soft radial glow along the bottom edge (CSS blur).
+    // QML needs QtQuick.Effects/RadialGradient for that; a hard-edged shape reads
+    // as a stray oval, so the preview omits it. The real build renders the glow
+    // properly (Qt) / bakes it into the background PNG (pygame).
 
     // ---------------- Root layout ----------------
     ColumnLayout {
@@ -330,16 +320,28 @@ Window {
                         }
                     }
 
-                    // Setpoint marker
-                    Item {
+                    // Setpoint marker — same angle convention as the arc (135° + 270°·frac,
+                    // measured clockwise from 3 o'clock, screen y-down), drawn as a radial line.
+                    Shape {
+                        id: spMarker
                         anchors.centerIn: gauge
                         width: gauge.width; height: gauge.height
                         visible: win.c.sp > 0
-                        rotation: 135 + 270 * Math.max(0, Math.min(1, win.c.sp / 600))
-                        Rectangle {
-                            width: 4; height: 26; radius: 2; color: win.setpointCol
-                            x: parent.width / 2 - 2
-                            y: parent.height / 2 - gauge.r - 5
+                        antialiasing: true
+                        property real a: (135 + 270 * Math.max(0, Math.min(1, win.c.sp / 600))) * Math.PI / 180
+                        property real cx: width / 2
+                        property real cy: height / 2
+                        ShapePath {
+                            strokeColor: win.setpointCol
+                            strokeWidth: 4
+                            capStyle: ShapePath.RoundCap
+                            fillColor: "transparent"
+                            startX: spMarker.cx + (gauge.r - 13) * Math.cos(spMarker.a)
+                            startY: spMarker.cy + (gauge.r - 13) * Math.sin(spMarker.a)
+                            PathLine {
+                                x: spMarker.cx + (gauge.r + 9) * Math.cos(spMarker.a)
+                                y: spMarker.cy + (gauge.r + 9) * Math.sin(spMarker.a)
+                            }
                         }
                     }
 
