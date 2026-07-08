@@ -15,18 +15,38 @@ RowLayout {
 
 	Repeater {
 		model: Menus.controlPanelForMode(panel.mode, panel.recipe, panel.recipePaused)
-		MenuButton {
+		Rectangle {
+			id: btn
 			Layout.fillWidth: true
-			text: modelData.label
+			Layout.fillHeight: true
+			radius: 16
+			color: mouse.pressed ? Qt.darker(Theme.card, 1.3) : Theme.card
+			border.width: 2
+			border.color: (modelData.action === "cmd_stop" || modelData.action === "cmd_shutdown")
+				? Theme.dangerColor
+				: (modelData.active ? Theme.okColor : Theme.accentColor)
+			opacity: enabled ? 1.0 : 0.4
 			enabled: modelData.action !== "cmd_none"
-			accent: (modelData.action === "cmd_stop" || modelData.action === "cmd_shutdown")
-				? Theme.danger
-				: (modelData.active ? Theme.ok : Theme.primary)
-			onClicked: Actions.activate(modelData, {
-				backend: backend,
-				openMenu: function (n) { panel.openMenu(n); },
-				openInput: function (n, o) { panel.openInput(n, o); }
-			})
+
+			Text {
+				anchors.centerIn: parent
+				text: modelData.label
+				font.family: Theme.sans
+				font.pixelSize: 25
+				font.bold: true
+				color: Theme.textColor
+			}
+
+			MouseArea {
+				id: mouse
+				anchors.fill: parent
+				enabled: btn.enabled
+				onClicked: Actions.activate(modelData, {
+					backend: backend,
+					openMenu: function (n) { panel.openMenu(n); },
+					openInput: function (n, o) { panel.openInput(n, o); }
+				})
+			}
 		}
 	}
 }

@@ -276,6 +276,90 @@ def test_hopper_card_loads_and_visible_follows_hopper_enabled():
 	assert obj2.property('visible') == False
 
 
+def test_cook_time_bar_shows_elapsed_when_no_timer_running():
+	# CookTimeBar.qml (Task 14, D2): with no active timer (backend.timerText == ""),
+	# shows the "COOK TIME" label and backend.cookElapsedText as the value.
+	_app()
+	backend = _stub_backend(status={'mode': 'Hold', 'units': 'F', 'outpins': {}})
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/CookTimeBar.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	assert backend.timerText == ''
+	label = obj.findChild(QObject, 'cookTimeLabel')
+	value = obj.findChild(QObject, 'cookTimeValue')
+	assert label is not None, 'expected a cookTimeLabel child in CookTimeBar.qml'
+	assert value is not None, 'expected a cookTimeValue child in CookTimeBar.qml'
+	assert label.property('text') == 'COOK TIME'
+	assert value.property('text') == backend.cookElapsedText
+
+
+def test_cook_time_bar_shows_countdown_when_timer_running():
+	# CookTimeBar.qml (Task 14, D2): when a timer is active (backend.timerText
+	# non-empty), shows backend.timerLabel / backend.timerText instead.
+	_app()
+	backend = _stub_backend(status={'mode': 'Hold', 'units': 'F', 'outpins': {}})
+	backend._timer_text = '04:32'
+	backend._timer_label = 'SHUTDOWN'
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/CookTimeBar.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	label = obj.findChild(QObject, 'cookTimeLabel')
+	value = obj.findChild(QObject, 'cookTimeValue')
+	assert label.property('text') == 'SHUTDOWN'
+	assert value.property('text') == '04:32'
+
+
+def test_alert_pill_has_fixed_width_and_keeps_message_shown_props():
+	# Alert.qml (Task 14 restyle): keeps its message/shown public props, is a
+	# fixed-width pill (Layout.preferredWidth: 210) so DashScreen's cook-time bar
+	# can reflow to fill the space when the alert is hidden. Wrapped in a real
+	# RowLayout so the Layout.preferredWidth attached property actually applies
+	# (it's inert/unreadable on a standalone item with no Layout parent).
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine)
+	comp.setData(
+		b'import QtQuick; import QtQuick.Layouts; import "components" as C;'
+		b'RowLayout { Item { Layout.fillWidth: true }'
+		b' C.Alert { id: a; objectName: "alert"; message: "LID OPEN"; shown: true } }',
+		QUrl.fromLocalFile('display/qml/probe.qml'),
+	)
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	alert = obj.findChild(QObject, 'alert')
+	assert alert is not None
+	assert alert.property('message') == 'LID OPEN'
+	assert alert.property('shown') == True
+	assert alert.property('visible') == True
+	assert alert.property('width') == 210
+	alert.setProperty('shown', False)
+	assert alert.property('visible') == False
+
+
+def test_control_panel_loads_and_preserves_wiring():
+	# ControlPanel.qml (Task 14 restyle): visuals change but the Repeater model,
+	# Actions.activate wiring, and openMenu/openInput signals are unchanged.
+	_app()
+	backend = _stub_backend(status={'mode': 'Hold', 'units': 'F', 'outpins': {}})
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/ControlPanel.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	obj.setProperty('mode', 'Hold')
+	obj.setProperty('recipe', False)
+	obj.setProperty('recipePaused', False)
+	assert obj.metaObject().indexOfSignal('openMenu(QString)') >= 0
+	assert obj.metaObject().indexOfSignal('openInput(QString,QString)') >= 0
+	assert obj.property('mode') == 'Hold'
+
+
 def test_duty_pill_loads_with_label_value_highlighted():
 	# DutyPill.qml: presentational pill with label/value/highlighted props.
 	# Used by DashScreen (Task 15) to show duty cycles and status.
