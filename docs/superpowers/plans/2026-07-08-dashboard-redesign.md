@@ -29,6 +29,32 @@
 
 ---
 
+## Conditional visibility (design `sc-if`/`sc-for` → plan)
+
+Every appear/disappear directive in `docs/design/PiFire Dashboard.dc.html`, and where each is honored. This table is authoritative — a component is not "done" until its row's behavior is verified.
+
+| Design directive | Meaning | QtQuick | pygame |
+|---|---|---|---|
+| `sc-if hasProbes` | left food-probe column appears only when food probes exist | Task 15: whole column `visible: backend.foodProbeCount > 0`; an invisible `RowLayout` child is dropped, so the center gauge (`Layout.fillWidth`) flexes into the space | Task 24/25: hide the `FOOD PROBES` label + every `probe_card_N` slot with no configured probe. Fixed layout → center does **not** reflow (documented compromise) |
+| `sc-for probeCards` | one card per configured food probe | Task 15: `Repeater { model: backend.foodProbes }` | Task 25: up to 5 `probe_card_N` slots; unused ones hidden (Task 24) |
+| `sc-if hasSetpoint` | gauge `SET n°` line only when setpoint > 0 | Task 8: line `visible: setpoint > 0` | Task 18: draw `SET n°` only when `sp > 0` |
+| setpoint marker `spOpacity` | radial setpoint marker only when setpoint > 0 | Task 8: marker `visible: setpoint > 0` | Task 18: draw marker only when `sp > 0` |
+| `sc-if lidOpen` | `LID OPEN` pill; cook-time bar reflows to full width when absent | Task 14/15: `Alert { visible: shown; shown: backend.lidOpen }` with a fixed `Layout.preferredWidth: 210`, and `CookTimeBar { Layout.fillWidth: true }` so cook-time expands when the alert is hidden | Task 24/25: a `lid_alert` object drawn only when `lid_open_detected`; the cook-time object keeps its fixed width (no reflow) |
+| `sc-for btns` | mode-dependent control buttons (1, 2, or 4) | Task 14: `ControlPanel` `Repeater` over `Menus.controlPanelForMode(mode, recipe, recipePaused)`; each button `Layout.fillWidth: true` for even division regardless of count | Task 23/25: `button_row` renders the variable set, subdividing its width evenly by button count |
+
+State-driven switches (not `sc-if`, but must still flip correctly):
+
+| State | Behavior | QtQuick | pygame |
+|---|---|---|---|
+| Hold vs other cooking mode | duty pills → `AUGER/FAN DUTY` vs `P-MODE/SMOKE+` | Task 15 | Task 24 |
+| fan/auger/igniter active | icon color + animation on only when active | Task 11 | Task 19 |
+| cooking | header live dot green (else grey); mode glow animates only when cooking | Task 9 / Task 8 | Task 22 / Task 18 |
+| hopper level | fill color + label by threshold (<15 red, <35 amber, else green) | Task 13 | Task 21 |
+
+**Two behaviors the design does not specify — resolved in Open Decisions (see end of plan) before the affected task runs.**
+
+---
+
 ## Phase 0 — Control-layer duty data
 
 ### Task 1: Publish `cycle_ratio` and `fan_duty` in status_data
@@ -350,8 +376,8 @@ git commit -m "feat(display): add ember dashboard background (1280x720)"
 - Test: `tests/test_qtbackend.py`
 
 **Interfaces:**
-- Consumes: `status['cycle_ratio']`, `status['fan_duty']` (Task 1).
-- Produces: `backend.augerDuty` (int %, `round(cycle_ratio*100)`), `backend.fanDuty` (int %), both `notify=statusChanged`. Consumed by `DutyPill` (Task 12).
+- Consumes: `status['cycle_ratio']`, `status['fan_duty']` (Task 1); `probe_info['food']` (constructor).
+- Produces: `backend.augerDuty` (int %, `round(cycle_ratio*100)`), `backend.fanDuty` (int %), both `notify=statusChanged`; `backend.foodProbeCount` (int, `constant` — `len(probe_info['food'])`). `augerDuty`/`fanDuty` consumed by `DutyPill` (Task 12); `foodProbeCount` consumed by `DashScreen` (Task 15) to collapse the food-probe column when there are no food probes.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -366,6 +392,15 @@ def test_poll_exposes_duty_cycles():
     b.poll()
     assert b.augerDuty == 35
     assert b.fanDuty == 100
+
+
+def test_food_probe_count_reflects_config():
+    # PROBE_INFO has one food probe.
+    b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}})
+    assert b.foodProbeCount == 1
+    none = PiFireBackend(lambda: (None, None), lambda c, d: None,
+                         {'primary': {'name': 'Grill'}, 'food': [], 'aux': []})
+    assert none.foodProbeCount == 0
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -375,11 +410,12 @@ Expected: FAIL (`AttributeError: augerDuty`).
 
 - [ ] **Step 3: Implement**
 
-In `display/qtbackend.py` `__init__`, add near the other status fields:
+In `display/qtbackend.py` `__init__`, add near the other status fields (the food count is derived once from `probe_info`, which is fixed at construction):
 
 ```python
         self._auger_duty = 0
         self._fan_duty = 0
+        self._food_count = len(self._probe_info.get('food', []))
 ```
 
 In `poll()`, after the existing `_set('_s_plus', ...)` line:
@@ -399,6 +435,10 @@ Add the properties near `pMode`:
     @Property(int, notify=statusChanged)
     def fanDuty(self):
         return self._fan_duty
+
+    @Property(int, constant=True)
+    def foodProbeCount(self):
+        return self._food_count
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -803,7 +843,7 @@ hamburger button (three bars) with `TapHandler { onTapped: header.menuRequested(
 - [ ] **Step 2: Run** → FAIL against the new expectations.
 - [ ] **Step 3: Implement** — Rebuild the layout to the design's header + 3-column structure:
   - Root `ColumnLayout`: `HeaderBar { onMenuRequested: dash.requestMenu("") }` then a `RowLayout` body (margins 16–18, spacing 16).
-  - **Left column** (width 298): "FOOD PROBES" label + `Repeater { model: backend.foodProbes; ProbeCard { name: model.name; temp: model.temp; target: model.target; maxTemp: model.maxTemp; units: backend.units; onTapped: dash.requestInput("notify", model.name) } }`.
+  - **Left column** (width 298) — the whole column collapses when there are no food probes so the center gauge flexes into the space, matching the design's `<sc-if hasProbes>`. Wrap it in a `ColumnLayout { Layout.preferredWidth: 298; visible: backend.foodProbeCount > 0 }` (an invisible `RowLayout` child is dropped from the layout, so `Layout.fillWidth` center expands): "FOOD PROBES" label + `Repeater { model: backend.foodProbes; ProbeCard { name: model.name; temp: model.temp; target: model.target; maxTemp: model.maxTemp; units: backend.units; onTapped: dash.requestInput("notify", model.name) } }`.
   - **Center column:** `Gauge { value: backend.primaryTemp; setpoint: backend.primarySetpoint; target: backend.primaryNotifyTarget; maxValue: backend.primaryMax; units: backend.units; modeLabel: backend.modeText; onTapped: dash.requestInput("notify", backend.primaryName) }`, then `RowLayout { CookTimeBar; Alert { shown: backend.lidOpen; message: "LID OPEN" } }`, then `ControlPanel { mode: backend.mode; recipe: backend.recipe; recipePaused: backend.recipePaused; onOpenMenu: (n)=>dash.requestMenu(n); onOpenInput: (n,o)=>dash.requestInput(n,o) }`.
   - **Right column** (width 300): `SystemCard {}`, a `RowLayout` of two `DutyPill`s computed from mode:
     ```qml
@@ -931,7 +971,7 @@ Each: **Steps** = write failing render/behaviour test → run FAIL → implement
     - `header_bar` — set `data['clock']` from `time.strftime('%H:%M')` and `data['ip']` from the display IP; set the live-dot cooking flag from `mode`.
     - `system_card` — set fan/auger/igniter active flags from `status_data['outpins']`.
     - `hopper_vertical` — set `data['level']` from `hopper_level`.
-    - `probe_card_N` — set temp/target from `in_data['F']`/`NT` (reuse the existing food-gauge mapping from `_configure_dash`).
+    - `probe_card_N` — set temp/target from `in_data['F']`/`NT` (reuse the existing food-gauge mapping from `_configure_dash`). **No-probes handling:** at build, hide any `probe_card_N` slot (and the `FOOD PROBES` label) that has no configured probe in `probe_info['food']` — set the object inactive/skip so it does not draw. (The pygame layout is fixed absolute-position, so the center gauge does not reflow into the vacated space the way QtQuick does; hiding the empty slots is the essential-motion compromise. Note this limitation in the commit.)
     Follow the existing "only update on change vs `last_status_data`/`last_in_data`" pattern already in the method.
 - [ ] **Step 4: Run** → PASS.
 - [ ] **Step 5: ruff + commit** — `git commit -m "feat(display): wire live data + accent into the ember dash objects"`
@@ -978,6 +1018,29 @@ Run `python tools/generate_dsi_layout.py` to regenerate `display/dsi_1280x720t.j
 - [ ] **Step 3: pygame render smoke** — build the 1280×720 flex `Display` in a headless/dummy pygame video mode (`SDL_VIDEODRIVER=dummy`), feed representative `in_data`/`status_data` for Stop/Smoke/Hold, run one composite frame, and assert the canvas is 1280×720 and no exception is raised. Mirror any existing pygame display smoke test if present.
 - [ ] **Step 4: Use the `verify` skill** to drive the affected flow and observe behavior (both displays), per repo practice.
 - [ ] **Step 5: Final commit** if any fixups — `git commit -m "test(display): verify ember dashboard on both stacks"`
+
+---
+
+## Open Decisions (resolve before the affected task runs)
+
+The design leaves two behaviors unspecified; the plan currently assumes the **recommended** option. Change the referenced task if you pick the alternative.
+
+### D1 — Hopper card when the pellet sensor is disabled (`hopperEnabled == false`)
+
+The design always renders the hopper (no `sc-if`), but PiFire hides it when there is no distance/hopper sensor (`settings['modules']['dist'] == 'none'`). Existing displays already hide it.
+- **Recommended (assumed):** hide the hopper card when `hopperEnabled` is false — Qt Task 13 `HopperCard { visible: backend.hopperEnabled }`; pygame Task 21/24 skip drawing `hopper_vertical`. The right column keeps the System card + duty pills; the vacated hopper area is empty (Qt: pills stay top-anchored; pygame: fixed slot left blank).
+- **Alternative:** always show it with a "—/NA" placeholder when disabled.
+
+### D2 — "Cook Time" semantics (elapsed vs. the startup/shutdown countdown)
+
+The design's `COOK TIME` shows **elapsed** cook time and has **no** startup/shutdown/prime countdown anywhere. PiFire's backend exposes a **countdown** (`timerText`/`timerLabel` for Startup/Reignite/Prime/Shutdown/lid-pause), not elapsed. Dropping the countdown is a functional regression (users watch the startup countdown).
+- **Recommended (assumed):** the bar shows the **active countdown** (`timerLabel + timerText`) whenever one is running, and otherwise shows **elapsed** cook time. This keeps the startup/shutdown countdown within the design's single bar. Requires exposing elapsed cook time:
+  - **Task 5 add-on (Qt):** a `cookElapsedText` property computed in `poll()` from `status['startup_timestamp']` (or `start_time`) — `"" ` when not cooking, else `H:MM:SS` since cook start. `CookTimeBar` (Task 14) shows `timerText` when non-empty else `cookElapsedText`, with the label switching accordingly.
+  - **pygame (Task 24):** the `cook_time`/`timer` object shows the countdown when active else the elapsed string (compute elapsed from `startup_timestamp` in `_update_dash_objects`).
+- **Alternative A:** faithful — elapsed only, no countdown at all (accept the regression).
+- **Alternative B:** show elapsed in the bar and keep the countdown as a second, `sc-if`-style element that appears only when a timer is active (e.g. reuse the LID-OPEN slot).
+
+Until D2 is decided, treat Task 14's "consumes `timerText`" as provisional — it must not silently replace elapsed cook time with the countdown.
 
 ---
 
