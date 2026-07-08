@@ -4460,6 +4460,24 @@
               "touch"
             ],
             "hidden": false
+          },
+          {
+            "option_name": "accent_theme",
+            "option_friendly_name": "Accent Theme",
+            "option_description": "Dashboard accent color theme.",
+            "option_type": "list",
+            "list_values": [
+              "Ember",
+              "Ice",
+              "Crimson"
+            ],
+            "list_labels": [
+              "Ember",
+              "Ice",
+              "Crimson"
+            ],
+            "default": "Ember",
+            "hidden": false
           }
         ]
       },
@@ -4532,6 +4550,16 @@
               "No Input"
             ],
             "default": ["button", "touch"],
+            "hidden": false
+          },
+          {
+            "option_name": "accent_theme",
+            "option_friendly_name": "Accent Theme",
+            "option_description": "Dashboard accent color theme.",
+            "option_type": "list",
+            "list_values": ["Ember", "Ice", "Crimson"],
+            "list_labels": ["Ember", "Ice", "Crimson"],
+            "default": "Ember",
             "hidden": false
           }
         ]

@@ -37,3 +37,12 @@ def test_default_display_config_includes_entry():
 		os.chdir(cwd)
 	assert 'qtquick_dsi_1280x720t' in config
 	assert config['qtquick_dsi_1280x720t']['display_data_filename'] == './display/qtquick_dsi_1280x720t.json'
+
+
+def test_accent_theme_option_present():
+	opts = _manifest()['modules']['display']['qtquick_dsi_1280x720t']['config']
+	names = [o['option_name'] for o in opts]
+	assert 'accent_theme' in names
+	accent = next(o for o in opts if o['option_name'] == 'accent_theme')
+	assert accent['default'] == 'Ember'
+	assert set(accent['list_values']) == {'Ember', 'Ice', 'Crimson'}
