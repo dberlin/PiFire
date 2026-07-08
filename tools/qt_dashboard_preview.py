@@ -5,9 +5,13 @@ Loads tools/qt_dashboard_preview.qml with a built-in simulator (no Redis, no
 control stack). An on-screen counter reports rendered FPS; the terminal also
 prints it once per second.
 
+Needs only PySide6 (>=6.11) — no other PiFire deps. The system interpreter has
+it (`/usr/bin/python3`); the project .venv does not.
+
 Usage:
-    python tools/qt_dashboard_preview.py           # windowed preview
-    python tools/qt_dashboard_preview.py --check    # load + exit (CI syntax check, offscreen)
+    /usr/bin/python3 tools/qt_dashboard_preview.py            # windowed preview
+    uv run --with pyside6 python tools/qt_dashboard_preview.py  # if PySide6 isn't on this interpreter
+    /usr/bin/python3 tools/qt_dashboard_preview.py --check     # load + exit (offscreen syntax check)
 
 Controls (in the window):
     click / M  cycle mode          A  cycle accent
