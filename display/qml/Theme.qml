@@ -21,6 +21,12 @@ QtObject {
 	readonly property color trackColor: "#2a241d"
 	readonly property color cookingColor: "#ffd23f"
 
+	// SystemCard tokens (design-verbatim, fixed regardless of accent)
+	readonly property color igniterColor: "#ff7a1a"
+	readonly property color iconIdle:     "#57514a"
+	readonly property color dotIdle:      "#4a443c"
+	readonly property color rowLabel:     "#cfc6b8"
+
 	// Accent-derived tokens
 	readonly property color accentColor: accent === "Ice" ? "#3cc7d0" : accent === "Crimson" ? "#ff6a5a" : "#ff8a2b"
 	readonly property color glowColor:   accent === "Ice" ? "#2ec5d3" : accent === "Crimson" ? "#ff5a4d" : "#ff7a1a"

@@ -159,6 +159,74 @@ def test_probe_card_loads_with_name_temp_target_and_tapped_signal():
 	assert obj.metaObject().indexOfSignal('tapped()') >= 0
 
 
+def test_fan_icon_loads_with_active_prop():
+	# FanIcon.qml: self-contained spinning three-blade fan icon. Exposes
+	# active/animate props; spins only when both are true (verified by parity
+	# of load, not by pixel output).
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/FanIcon.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	assert obj.property('active') == False
+	obj.setProperty('active', True)
+	assert obj.property('active') == True
+	assert obj.property('animate') == True
+
+
+def test_auger_icon_loads_with_active_prop():
+	# AugerIcon.qml: clipped scrolling screw + falling pellets.
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/AugerIcon.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	assert obj.property('active') == False
+	obj.setProperty('active', True)
+	assert obj.property('active') == True
+
+
+def test_igniter_icon_loads_with_active_prop():
+	# IgniterIcon.qml: flame coil with flicker + rising heat waves.
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/IgniterIcon.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	assert obj.property('active') == False
+	obj.setProperty('active', True)
+	assert obj.property('active') == True
+
+
+def test_system_card_loads_with_rows_bound_to_backend():
+	# SystemCard.qml: fan/auger/igniter rows, each with an icon bound to
+	# backend.fanOn/augerOn/igniterOn, and a tap toggles the matching backend
+	# command. Consumed by DashScreen (Task 15).
+	_app()
+	backend = _stub_backend(
+		in_data={'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
+		status={'mode': 'Hold', 'units': 'F', 'outpins': {'fan': True, 'auger': False, 'igniter': False}},
+	)
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/SystemCard.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	fan_icon = obj.findChild(QObject, 'sysFanIcon')
+	auger_icon = obj.findChild(QObject, 'sysAugerIcon')
+	igniter_icon = obj.findChild(QObject, 'sysIgniterIcon')
+	assert fan_icon is not None, 'expected a sysFanIcon child in SystemCard.qml'
+	assert auger_icon is not None, 'expected a sysAugerIcon child in SystemCard.qml'
+	assert igniter_icon is not None, 'expected a sysIgniterIcon child in SystemCard.qml'
+	assert fan_icon.property('active') == backend.fanOn
+
+
 def test_header_bar_loads_with_menu_signal_and_clock():
 	# HeaderBar.qml: live dot + wordmark + IP + clock + hamburger. Loads against a
 	# real backend (ipAddress/mode) and exposes menuRequested() + a clock property
