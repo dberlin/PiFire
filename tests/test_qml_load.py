@@ -140,6 +140,25 @@ def test_gauge_loads_with_setpoint_marker_and_mode_pill():
 	assert marker is not None, 'expected a setpointMarker child in Gauge.qml'
 
 
+def test_probe_card_loads_with_name_temp_target_and_tapped_signal():
+	# ProbeCard.qml: self-contained food-probe card (name/temp/target/maxTemp/units
+	# props, tapped() signal). Consumed by DashScreen's food-probe Repeater (Task 15).
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/ProbeCard.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	obj.setProperty('name', 'Brisket')
+	obj.setProperty('temp', 165)
+	obj.setProperty('target', 203)
+	assert obj.property('name') == 'Brisket'
+	assert obj.property('temp') == 165
+	assert obj.property('target') == 203
+	assert obj.metaObject().indexOfSignal('tapped()') >= 0
+
+
 def test_header_bar_loads_with_menu_signal_and_clock():
 	# HeaderBar.qml: live dot + wordmark + IP + clock + hamburger. Loads against a
 	# real backend (ipAddress/mode) and exposes menuRequested() + a clock property
