@@ -107,7 +107,15 @@ function controlPanelForMode(mode, recipe, recipePaused) {
 			{label: "Smoke", action: "cmd_smoke"},
 			{label: "Hold", action: "input_hold"},
 			{label: "Stop", action: "cmd_stop"}];
-	if (mode === "Smoke" || mode === "Hold" || mode === "Shutdown")
+	if (mode === "Smoke" || mode === "Hold")
+		return [
+			{label: "Set Temp", action: "input_hold"},
+			(mode === "Smoke"
+				? {label: "Hold", action: "input_hold"}
+				: {label: "Smoke", action: "cmd_smoke"}),
+			{label: "Stop", action: "cmd_stop"},
+			{label: "Shutdown", action: "cmd_shutdown"}];
+	if (mode === "Shutdown")
 		return [
 			{label: "Smoke", action: "cmd_smoke"},
 			{label: "Hold", action: "input_hold"},

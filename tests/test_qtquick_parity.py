@@ -136,7 +136,10 @@ def test_every_pygame_input_has_a_qt_screen():
 
 
 # --------------------------------------------------------------------------
-# Control-panel parity: per-mode button sets match pygame _update_dash_objects.
+# Control-panel parity: per-mode button sets match pygame _update_dash_objects,
+# except Smoke/Hold: the 1280x720 redesigned dash uses a Set Temp + mode-switch
+# set on both stacks (pygame button_row will match it), so those two entries
+# no longer mirror the shared pygame control_panel.
 # --------------------------------------------------------------------------
 EXPECTED_CONTROL_PANEL = {
 	('Stop', False, False): ['menu_prime', 'menu_startup', 'cmd_monitor', 'cmd_stop'],
@@ -144,8 +147,8 @@ EXPECTED_CONTROL_PANEL = {
 	('Monitor', False, False): ['menu_prime', 'menu_startup', 'cmd_monitor', 'cmd_stop'],
 	('Startup', False, False): ['cmd_startup', 'cmd_smoke', 'input_hold', 'cmd_stop'],
 	('Reignite', False, False): ['cmd_startup', 'cmd_smoke', 'input_hold', 'cmd_stop'],
-	('Smoke', False, False): ['cmd_smoke', 'input_hold', 'cmd_stop', 'cmd_shutdown'],
-	('Hold', False, False): ['cmd_smoke', 'input_hold', 'cmd_stop', 'cmd_shutdown'],
+	('Smoke', False, False): ['input_hold', 'input_hold', 'cmd_stop', 'cmd_shutdown'],
+	('Hold', False, False): ['input_hold', 'cmd_smoke', 'cmd_stop', 'cmd_shutdown'],
 	('Shutdown', False, False): ['cmd_smoke', 'input_hold', 'cmd_stop', 'cmd_shutdown'],
 	('Hold', True, False): ['cmd_next_step', 'cmd_none', 'cmd_stop', 'cmd_shutdown'],
 }

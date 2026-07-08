@@ -25,6 +25,11 @@
 - **Base palette (verbatim):** page bg `#0c0a09`, radial body bg `#241a12→#16110d→#0d0b09`, card `#1a1611`, inset `#14100c`, card border `rgba(255,255,255,0.05)`, text `#f4ede2`, dim text `#8a7f70`/`#7d7264`, label `#b7ac9c`, setpoint blue `#6cc8ff`, ok green `#5ec96f`, warn amber `#ffb020`, danger `#ff5a4d`.
 - **Fonts:** Barlow (400/500/600/700) + Barlow Semi Condensed (500/600/700/800), OFL, bundled under `static/font/`.
 - **Duty-pill rule:** Hold mode → `AUGER DUTY n%` / `FAN DUTY n%`; every other cooking mode → `P-MODE P-n` / `SMOKE+ ON|OFF`.
+- **Control-button set (updated 2026-07-08 per user):** for the redesigned 1280×720 dash on BOTH stacks, the active-cooking control buttons are `Set Temp · <mode-switch> · Stop · Shutdown`:
+  - Smoke mode: `Set Temp`(`input_hold`) · `Hold`(`input_hold`) · `Stop`(`cmd_stop`) · `Shutdown`(`cmd_shutdown`) — actions `['input_hold','input_hold','cmd_stop','cmd_shutdown']`.
+  - Hold mode: `Set Temp`(`input_hold`) · `Smoke`(`cmd_smoke`) · `Stop`(`cmd_stop`) · `Shutdown`(`cmd_shutdown`) — actions `['input_hold','cmd_smoke','cmd_stop','cmd_shutdown']`.
+  - Other modes (Startup/Reignite, Stop/Prime/Monitor, Shutdown, recipe) keep PiFire's existing `controlPanelForMode` sets, unchanged.
+  - Qt: change `display/qml/Menus.js` `controlPanelForMode` (Smoke/Hold branch) + update `tests/test_qtquick_parity.py` `EXPECTED_CONTROL_PANEL` for `Smoke`/`Hold`. pygame (Task 23 `button_row`): produce the SAME per-mode set for 1280×720; the shared pygame `control_panel` used by other resolutions is NOT changed. The Qt↔pygame parity invariant now covers the 1280×720 dash's new set.
 - **Gauge geometry (verbatim):** 270° sweep, arc start angle 135°, radius 90 in a 220×220 viewBox, `stroke-dasharray 424.12 565.49`; setpoint marker is a radial tick at the setpoint fraction.
 
 ---
