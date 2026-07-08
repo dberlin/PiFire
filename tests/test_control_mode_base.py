@@ -106,3 +106,23 @@ def test_control_mode_hook_order_one_bounded_tick():
 		'should_exit',
 		'teardown',
 	]
+
+
+def test_status_publishes_duty_fields():
+	ctx = _make_ctx()
+	real_now = ctx.clock.now
+	calls = {'n': 0}
+
+	def _now():
+		calls['n'] += 1
+		return real_now() if calls['n'] == 1 else real_now() + 0.6
+
+	ctx.clock.now = _now
+	mode = _RecordingMode(ctx, WorkCycleState())
+	mode.run()
+	status = ctx.store.read_status()
+	assert 'cycle_ratio' in status
+	assert 'fan_duty' in status
+	# Default state: no auger ratio set, DC fan disabled, fan output off.
+	assert status['cycle_ratio'] == 0.0
+	assert status['fan_duty'] == 0

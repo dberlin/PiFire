@@ -2369,6 +2369,8 @@ def read_status(init=False):
 			'p_mode': 0,
 			'recipe_paused': False,
 			'outpins': {'auger': False, 'fan': False, 'igniter': False, 'power': False},
+			'cycle_ratio': 0,
+			'fan_duty': 0,
 		}
 		write_status(status)
 	else:

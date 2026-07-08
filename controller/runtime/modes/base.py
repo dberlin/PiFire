@@ -571,6 +571,11 @@ class ControlMode:
 						status_data['outpins'][item] = current[item]
 					except KeyError:
 						continue
+				status_data['cycle_ratio'] = round(self.state.cycle.ratio, 2)
+				if self.settings['platform'].get('dc_fan'):
+					status_data['fan_duty'] = int(control.get('duty_cycle', 0) or 0)
+				else:
+					status_data['fan_duty'] = 100 if status_data['outpins'].get('fan') else 0
 				# ---- mode-specific status fields ----
 				status_data.update(self.status_fragment())
 				ctx.store.write_status(status_data)
