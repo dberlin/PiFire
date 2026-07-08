@@ -3,7 +3,7 @@ from pathlib import Path
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
-from PySide6.QtCore import QObject, QUrl
+from PySide6.QtCore import QObject, QUrl, qInstallMessageHandler
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
@@ -60,6 +60,70 @@ def test_dash_screen_loads_and_binds_primary():
 	engine = _engine_with_backend(backend)
 	obj = _create(engine, 'screens/DashScreen.qml')
 	assert obj is not None
+
+
+def test_dash_screen_declares_menu_and_input_signals():
+	# Main.qml's dashComponent binds onRequestMenu/onRequestInput on DashScreen
+	# (display/qml/Main.qml); the ember rebuild must preserve both exactly.
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	obj = _create(engine, 'screens/DashScreen.qml')
+	meta = obj.metaObject()
+	assert meta.indexOfSignal('requestMenu(QString)') >= 0
+	assert meta.indexOfSignal('requestInput(QString,QString)') >= 0
+
+
+def test_dash_screen_assembles_new_ember_components_with_no_qml_warnings():
+	# Task 15: DashScreen is rebuilt from the header + 3-column ember layout,
+	# composed from the real components built in Tasks 8-14 (not the retired
+	# ModeBar/TimerCard/StatusIcon/PModeControl/SmokePlusControl/MenuButton
+	# set). Assert each new component actually landed in the tree (via
+	# objectNames those components already expose) and that assembling them
+	# against a live backend produces no QML warnings.
+	_app()
+	warnings = []
+	qInstallMessageHandler(lambda mode, ctx, msg: warnings.append(str(msg)))
+	try:
+		backend = _stub_backend(
+			in_data={'P': {'Grill': 225}, 'F': {'Probe1': 100}, 'AUX': {}, 'PSP': 250, 'NT': {'Probe1': 200}},
+			status={'mode': 'Hold', 'units': 'F', 'outpins': {'fan': True, 'auger': False, 'igniter': False}},
+			probe_info={
+				'primary': {'name': 'Grill', 'max_temp': 600},
+				'food': [{'name': 'Probe1', 'label': 'Probe1', 'max_temp': 300}],
+				'aux': [],
+			},
+		)
+		engine = _engine_with_backend(backend)
+		obj = _create(engine, 'screens/DashScreen.qml')
+	finally:
+		qInstallMessageHandler(None)
+
+	assert warnings == [], f'DashScreen produced QML warnings: {warnings}'
+	# Gauge (setpointMarker), CookTimeBar (cookTimeLabel/cookTimeValue), and
+	# SystemCard (sysFanIcon/sysAugerIcon/sysIgniterIcon) each stamp an
+	# objectName on a child that only exists inside that component.
+	assert obj.findChild(QObject, 'setpointMarker') is not None, 'expected the Gauge in the center column'
+	assert obj.findChild(QObject, 'cookTimeLabel') is not None, 'expected the CookTimeBar in the center column'
+	assert obj.findChild(QObject, 'cookTimeValue') is not None, 'expected the CookTimeBar in the center column'
+	assert obj.findChild(QObject, 'sysFanIcon') is not None, 'expected the SystemCard in the right column'
+	assert obj.findChild(QObject, 'sysAugerIcon') is not None, 'expected the SystemCard in the right column'
+	assert obj.findChild(QObject, 'sysIgniterIcon') is not None, 'expected the SystemCard in the right column'
+
+
+def test_dash_screen_left_column_collapses_with_no_food_probes():
+	# Left column (ColumnLayout) is bound visible: backend.foodProbeCount > 0
+	# so the center gauge column can flex into the freed width.
+	_app()
+	backend = _stub_backend(probe_info={'primary': {'name': 'Grill', 'max_temp': 600}, 'food': [], 'aux': []})
+	assert backend.foodProbeCount == 0
+	engine = _engine_with_backend(backend)
+	obj = _create(engine, 'screens/DashScreen.qml')
+	# The left ColumnLayout is the first child of the body RowLayout, which is
+	# itself the second child of the root ColumnLayout (after HeaderBar).
+	body_row = obj.children()[0].children()[1]
+	left_column = body_row.children()[0]
+	assert left_column.property('visible') is False
 
 
 def test_menu_screen_loads_main():
