@@ -3,7 +3,7 @@ from pathlib import Path
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QObject, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
@@ -118,3 +118,23 @@ def test_theme_exposes_accent_tokens():
 		assert theme.property('arcStop0') is not None
 		assert theme.property('arcStop1') is not None
 		assert theme.property('arcStop2') is not None
+
+
+def test_gauge_loads_with_setpoint_marker_and_mode_pill():
+	# Gauge.qml (ember restyle): loads with value/setpoint/maxValue bound, exposes
+	# a setpointMarker child (radial line drawn at the setpoint angle) and accepts
+	# the new modeLabel prop that feeds the mode pill.
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/Gauge.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	obj.setProperty('value', 225)
+	obj.setProperty('maxValue', 600)
+	obj.setProperty('setpoint', 250)
+	obj.setProperty('modeLabel', 'HOLD')
+	assert obj.property('modeLabel') == 'HOLD'
+	marker = obj.findChild(QObject, 'setpointMarker')
+	assert marker is not None, 'expected a setpointMarker child in Gauge.qml'
