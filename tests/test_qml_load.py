@@ -243,6 +243,39 @@ def test_header_bar_loads_with_menu_signal_and_clock():
 	assert obj.property('clock') is not None
 
 
+def test_hopper_card_loads_and_visible_follows_hopper_enabled():
+	# HopperCard.qml: vertical-fill hopper level card bound to
+	# backend.hopperLevel/backend.hopperEnabled, exposes checkRequested() (Task 15
+	# wires it to backend.hopperCheck()). The whole card is hidden when the pellet
+	# sensor is disabled (D1). Uses two separately-constructed backends (rather than
+	# mutating+re-signalling one already-created root item) because a QQuickItem
+	# created standalone via QQmlComponent.create() with no window does not re-run
+	# its `visible` binding on a later notify signal — that's an offscreen/no-window
+	# test-harness artifact (confirmed against a windowed QQuickView), not a bug in
+	# the component; initial-creation bindings evaluate correctly either way.
+	_app()
+	enabled_backend = _stub_backend(
+		status={'mode': 'Stop', 'units': 'F', 'outpins': {}, 'hopper_level_enabled': True, 'hopper_level': 42}
+	)
+	engine = _engine_with_backend(enabled_backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/HopperCard.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	assert obj.metaObject().indexOfSignal('checkRequested()') >= 0
+	assert obj.property('visible') == True
+
+	disabled_backend = _stub_backend(
+		status={'mode': 'Stop', 'units': 'F', 'outpins': {}, 'hopper_level_enabled': False}
+	)
+	engine2 = _engine_with_backend(disabled_backend)
+	comp2 = QQmlComponent(engine2, QUrl.fromLocalFile('display/qml/components/HopperCard.qml'))
+	obj2 = comp2.create()
+	assert obj2 is not None, comp2.errorString()
+	obj2.setParent(engine2)
+	assert obj2.property('visible') == False
+
+
 def test_duty_pill_loads_with_label_value_highlighted():
 	# DutyPill.qml: presentational pill with label/value/highlighted props.
 	# Used by DashScreen (Task 15) to show duty cycles and status.
