@@ -210,7 +210,8 @@ Window {
             Layout.bottomMargin: 18
             spacing: 16
 
-            // ----- Left: food probes (collapses when none) -----
+            // ----- Left: food probes (collapses when none). Fixed-width panel:
+            // pin the width so RowLayout can't derive it from child content. -----
             ColumnLayout {
                 Layout.preferredWidth: 298
                 Layout.minimumWidth: 298
@@ -231,19 +232,24 @@ Window {
                         property var row: probeModel.get(index)
                         property bool done: row.target > 0 && row.temp >= row.target - 1
                         Column {
-                            anchors.fill: parent
-                            anchors.margins: 16
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 2
-                            Row {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.leftMargin: 18
+                            anchors.rightMargin: 18
+                            spacing: 4
+                            // header: name (left) + target (right) via anchors — no width feedback
+                            Item {
                                 width: parent.width
+                                height: nameT.implicitHeight
                                 Text {
+                                    id: nameT
+                                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                                     text: row.pname.toUpperCase(); font.family: win.sans; font.pixelSize: 15
                                     font.letterSpacing: 1.5; color: "#b7ac9c"
                                 }
-                                Item { width: parent.width - x - tgt.width; height: 1 }
                                 Text {
-                                    id: tgt
+                                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                                     text: row.target > 0 ? "→ " + row.target + "°" : "AMBIENT"
                                     font.family: win.sans; font.pixelSize: 15
                                     color: row.target > 0 ? (done ? win.okCol : "#ffd23f") : win.labelCol
@@ -270,17 +276,15 @@ Window {
                 Item { Layout.fillHeight: true }
             }
 
-            // ----- Center -----
+            // ----- Center (absorbs horizontal slack via fillWidth) -----
             ColumnLayout {
                 Layout.fillWidth: true
-                Layout.minimumWidth: 380
                 Layout.fillHeight: true
                 spacing: 14
 
-                Rectangle {
+                Rectangle {  // gauge card: absorbs vertical slack in the center column
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: 300
                     color: win.cardCol; radius: 22; border.color: win.borderCol
                     clip: true
 
@@ -417,7 +421,7 @@ Window {
                 }
             }
 
-            // ----- Right -----
+            // ----- Right (fixed-width panel; pinned) -----
             ColumnLayout {
                 Layout.preferredWidth: 300
                 Layout.minimumWidth: 300
@@ -567,11 +571,18 @@ Window {
                     readonly property color hopCol: win.hopper < 15 ? win.dangerCol : win.hopper < 35 ? win.warnCol : win.okCol
                     Column {
                         anchors.fill: parent; anchors.margins: 16; spacing: 12
-                        Row {
+                        Item {
                             width: parent.width
-                            Text { text: "HOPPER"; font.family: win.sans; font.pixelSize: 13; font.letterSpacing: 2.5; color: win.labelCol }
-                            Item { width: parent.width - x - hp.width; height: 1 }
-                            Text { id: hp; text: Math.round(win.hopper) + "%"; font.family: win.cond; font.pixelSize: 34; font.bold: true; color: hopperCard.hopCol }
+                            height: hp.implicitHeight
+                            Text {
+                                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                                text: "HOPPER"; font.family: win.sans; font.pixelSize: 13; font.letterSpacing: 2.5; color: win.labelCol
+                            }
+                            Text {
+                                id: hp
+                                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                text: Math.round(win.hopper) + "%"; font.family: win.cond; font.pixelSize: 34; font.bold: true; color: hopperCard.hopCol
+                            }
                         }
                         Rectangle {
                             width: parent.width; height: parent.height - 78; radius: 14
