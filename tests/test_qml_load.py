@@ -241,3 +241,23 @@ def test_header_bar_loads_with_menu_signal_and_clock():
 	assert obj.property('height') == 58
 	assert obj.metaObject().indexOfSignal('menuRequested()') >= 0
 	assert obj.property('clock') is not None
+
+
+def test_duty_pill_loads_with_label_value_highlighted():
+	# DutyPill.qml: presentational pill with label/value/highlighted props.
+	# Used by DashScreen (Task 15) to show duty cycles and status.
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/components/DutyPill.qml'))
+	obj = comp.create()
+	assert obj is not None, comp.errorString()
+	obj.setParent(engine)
+	obj.setProperty('label', 'AUGER DUTY')
+	obj.setProperty('value', '42%')
+	obj.setProperty('highlighted', False)
+	assert obj.property('label') == 'AUGER DUTY'
+	assert obj.property('value') == '42%'
+	assert obj.property('highlighted') == False
+	obj.setProperty('highlighted', True)
+	assert obj.property('highlighted') == True
