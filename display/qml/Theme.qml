@@ -18,6 +18,7 @@ QtObject {
 	readonly property color okColor:     "#5ec96f"
 	readonly property color warn:        "#ffb020"
 	readonly property color dangerColor: "#ff5a4d"
+	readonly property color trackColor: "#2a241d"
 
 	// Accent-derived tokens
 	readonly property color accentColor: accent === "Ice" ? "#3cc7d0" : accent === "Crimson" ? "#ff6a5a" : "#ff8a2b"

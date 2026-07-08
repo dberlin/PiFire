@@ -56,7 +56,7 @@ Item {
 	Shape {
 		anchors.fill: parent
 		ShapePath {
-			strokeColor: "#2a241d"
+			strokeColor: Theme.trackColor
 			strokeWidth: 22
 			fillColor: "transparent"
 			capStyle: ShapePath.RoundCap
