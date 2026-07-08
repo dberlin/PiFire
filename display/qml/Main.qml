@@ -19,6 +19,8 @@ Window {
 		initialItem: splashComponent
 	}
 
+	Binding { target: Theme; property: "accent"; value: backend ? backend.accentTheme : "Ember" }
+
 	// Button/encoder parity: hardware GPIO handlers call backend.navUp/navDown/
 	// navEnter directly; this maps those (and desktop arrow keys) to QML focus
 	// traversal and activation. A plain Item does not consume touch events, so

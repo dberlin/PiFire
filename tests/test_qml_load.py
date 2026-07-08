@@ -100,3 +100,21 @@ def test_full_main_qml_with_menu_navigation_loads():
 	config = {'display_data_filename': './display/qtquick_dsi_1280x720t.json'}
 	engine = qtapp.build_engine(config, backend)
 	assert engine.rootObjects()
+
+
+def test_theme_exposes_accent_tokens():
+	# Load Theme singleton and assert the new accent tokens resolve for each accent.
+	_app()
+	backend = _stub_backend()
+	engine = _engine_with_backend(backend)
+	comp = QQmlComponent(engine, QUrl.fromLocalFile('display/qml/Theme.qml'))
+	theme = comp.create()
+	assert theme is not None, comp.errorString()
+	theme.setParent(engine)
+	for accent in ('Ember', 'Ice', 'Crimson'):
+		theme.setProperty('accent', accent)
+		assert theme.property('accentColor') is not None
+		assert theme.property('glowColor') is not None
+		assert theme.property('arcStop0') is not None
+		assert theme.property('arcStop1') is not None
+		assert theme.property('arcStop2') is not None
