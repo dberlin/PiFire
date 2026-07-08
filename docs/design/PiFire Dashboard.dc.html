@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#0c0a09;}
+  *{box-sizing:border-box;}
+  a{color:#ff8a2b;} a:hover{color:#ffb066;}
+  @keyframes pf-spin { to { transform: rotate(360deg); } }
+  @keyframes pf-augerFeed { to { transform: translateX(-16px); } }
+  @keyframes pf-pellet { 0%{transform:translateY(-14px);opacity:0} 25%{opacity:1} 80%{opacity:1} 100%{transform:translateY(11px);opacity:0} }
+  @keyframes pf-flicker { 0%,100%{opacity:1} 40%{opacity:.62} 55%{opacity:.92} 72%{opacity:.55} 85%{opacity:.85} }
+  @keyframes pf-heat { 0%{transform:translateY(2px) scaleX(1);opacity:0} 30%{opacity:.7} 100%{transform:translateY(-16px) scaleX(1.3);opacity:0} }
+  @keyframes pf-glow { 0%,100%{opacity:.30;transform:scale(1)} 50%{opacity:.62;transform:scale(1.06)} }
+  @keyframes pf-blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+</style>
+</helmet>
+<div style="width:1280px;height:720px;position:relative;overflow:hidden;background:radial-gradient(120% 90% at 50% 118%, #241a12 0%, #16110d 42%, #0d0b09 100%);font-family:'Barlow',system-ui,sans-serif;color:#f4ede2;display:flex;flex-direction:column;">
+
+  <div style="position:absolute;left:50%;bottom:-160px;transform:translateX(-50%);width:820px;height:420px;border-radius:50%;background:radial-gradient(closest-side, {{ glowColor }}, transparent 70%);filter:blur(14px);opacity:.28;pointer-events:none;"></div>
+
+  <div style="height:58px;flex:0 0 58px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;border-bottom:1px solid rgba(255,255,255,0.06);position:relative;z-index:2;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="width:12px;height:12px;border-radius:50%;background:{{ liveColor }};box-shadow:0 0 10px {{ liveColor }};animation: pf-blink 2.4s ease-in-out infinite;"></div>
+      <span style="font:700 20px 'Barlow';letter-spacing:.5px;color:#f4ede2;">Pi<span style="color:{{ accent }};">Fire</span></span>
+      <span style="font:600 12px 'Barlow';letter-spacing:2px;color:#7d7264;text-transform:uppercase;padding-left:8px;border-left:1px solid rgba(255,255,255,0.08);margin-left:2px;">Controller</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:18px;">
+      <span style="font:600 13px 'Barlow';letter-spacing:1px;color:#8a7f70;">{{ ipAddress }}</span>
+      <span style="font:600 22px 'Barlow Semi Condensed';color:#cfc6b8;font-variant-numeric:tabular-nums;">{{ clock }}</span>
+      <div style="width:44px;height:44px;border-radius:12px;background:#1d1813;border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;">
+        <div style="width:20px;height:2px;background:#cfc6b8;border-radius:2px;"></div>
+        <div style="width:20px;height:2px;background:#cfc6b8;border-radius:2px;"></div>
+        <div style="width:20px;height:2px;background:#cfc6b8;border-radius:2px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex:1;display:flex;gap:16px;padding:16px 18px 18px;position:relative;z-index:1;min-height:0;">
+
+    <sc-if value="{{ hasProbes }}" hint-placeholder-val="{{ true }}">
+    <div style="width:298px;flex:0 0 298px;display:flex;flex-direction:column;gap:12px;min-height:0;">
+      <div style="font:600 13px 'Barlow';letter-spacing:2.5px;color:#7d7264;text-transform:uppercase;padding-left:4px;">Food Probes</div>
+      <sc-for list="{{ probeCards }}" as="row" hint-placeholder-count="3">
+        <div style="background:#1a1611;border:1px solid rgba(255,255,255,0.05);border-radius:18px;padding:15px 18px;display:flex;flex-direction:column;gap:2px;position:relative;overflow:hidden;flex:1;justify-content:center;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;">
+            <span style="font:600 15px 'Barlow';letter-spacing:1.5px;color:#b7ac9c;text-transform:uppercase;">{{ row.name }}</span>
+            <span style="font:600 15px 'Barlow';color:{{ row.tgtColor }};">{{ row.targetStr }}</span>
+          </div>
+          <div style="display:flex;align-items:baseline;font-family:'Barlow Semi Condensed';font-variant-numeric:tabular-nums;line-height:0.92;">
+            <span style="font-size:66px;font-weight:800;color:#f4ede2;">{{ row.temp }}</span>
+            <span style="font-size:26px;font-weight:600;color:#8a7f70;margin-left:2px;">°{{ row.unit }}</span>
+          </div>
+          <div style="height:6px;border-radius:6px;background:rgba(255,255,255,0.06);margin-top:8px;overflow:hidden;">
+            <div style="height:100%;border-radius:6px;width:{{ row.barPct }}%;background:{{ row.barColor }};transition:width .9s ease;"></div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    </sc-if>
+
+    <div style="flex:1;display:flex;flex-direction:column;gap:14px;min-width:0;">
+      <div style="background:#1a1611;border:1px solid rgba(255,255,255,0.05);border-radius:22px;flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+        <div style="position:absolute;width:360px;height:360px;border-radius:50%;background:radial-gradient(closest-side, {{ glowColor }}, transparent 68%);opacity:.3;filter:blur(6px);animation: {{ glowAnim }};"></div>
+        <svg width="392" height="392" viewBox="0 0 220 220" style="position:relative;">
+          <defs>
+            <linearGradient id="pfEmber" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0" stop-color="#ff5e1a"></stop><stop offset="0.55" stop-color="#ff8a2b"></stop><stop offset="1" stop-color="#ffc24b"></stop>
+            </linearGradient>
+            <linearGradient id="pfIce" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0" stop-color="#1f9fb8"></stop><stop offset="0.6" stop-color="#35c7d0"></stop><stop offset="1" stop-color="#7ef0d2"></stop>
+            </linearGradient>
+            <linearGradient id="pfCrimson" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0" stop-color="#e11d48"></stop><stop offset="0.6" stop-color="#ff5a4d"></stop><stop offset="1" stop-color="#ff9f43"></stop>
+            </linearGradient>
+          </defs>
+          <circle cx="110" cy="110" r="90" fill="none" stroke="#2a241d" stroke-width="16" stroke-linecap="round" stroke-dasharray="424.12 565.49" transform="rotate(135 110 110)"></circle>
+          <circle cx="110" cy="110" r="90" fill="none" stroke="{{ gaugeGrad }}" stroke-width="16" stroke-linecap="round" stroke-dasharray="424.12 565.49" stroke-dashoffset="{{ gaugeOffset }}" transform="rotate(135 110 110)" style="transition:stroke-dashoffset .9s ease;filter:drop-shadow(0 0 7px {{ glowColor }});"></circle>
+          <line x1="{{ spx1 }}" y1="{{ spy1 }}" x2="{{ spx2 }}" y2="{{ spy2 }}" stroke="#6cc8ff" stroke-width="4" stroke-linecap="round" stroke-opacity="{{ spOpacity }}"></line>
+        </svg>
+        <div style="position:absolute;display:flex;flex-direction:column;align-items:center;gap:2px;">
+          <div style="font:600 14px 'Barlow';letter-spacing:4px;color:#7d7264;text-transform:uppercase;">Grill</div>
+          <div style="display:flex;align-items:baseline;font-family:'Barlow Semi Condensed';font-variant-numeric:tabular-nums;line-height:0.9;">
+            <span style="font-size:112px;font-weight:800;color:#f8f2e8;">{{ tempInt }}</span>
+            <span style="font-size:40px;font-weight:600;color:#8a7f70;margin-left:4px;">°{{ units }}</span>
+          </div>
+          <sc-if value="{{ hasSetpoint }}" hint-placeholder-val="{{ true }}">
+            <div style="font:600 20px 'Barlow';letter-spacing:1px;color:#6cc8ff;margin-top:2px;white-space:nowrap;">SET {{ spStr }}°</div>
+          </sc-if>
+          <div style="margin-top:12px;padding:6px 20px;border-radius:999px;background:{{ modeBg }};border:1.5px solid {{ modeBorder }};font:700 17px 'Barlow';letter-spacing:3px;color:{{ modeText }};text-transform:uppercase;white-space:nowrap;">{{ modeLabel }}</div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:14px;height:52px;flex:0 0 52px;">
+        <div style="flex:1;background:#1a1611;border:1px solid rgba(255,255,255,0.05);border-radius:14px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;">
+          <span style="font:600 12px 'Barlow';letter-spacing:2px;color:#7d7264;text-transform:uppercase;">Cook Time</span>
+          <span style="font:700 26px 'Barlow Semi Condensed';font-variant-numeric:tabular-nums;color:#cfc6b8;">{{ cookTime }}</span>
+        </div>
+        <sc-if value="{{ lidOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:0 0 210px;border-radius:14px;background:rgba(255,90,77,0.14);border:1.5px solid #ff5a4d;display:flex;align-items:center;justify-content:center;font:700 20px 'Barlow';letter-spacing:2px;color:#ff8b82;animation: pf-blink 1s ease-in-out infinite;">LID OPEN</div>
+        </sc-if>
+      </div>
+
+      <div style="display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:12px;height:82px;flex:0 0 82px;">
+        <sc-for list="{{ btns }}" as="b" hint-placeholder-count="4">
+          <div style="border-radius:16px;display:flex;align-items:center;justify-content:center;font:700 25px 'Barlow';letter-spacing:.5px;border:2px solid {{ b.border }};background:{{ b.bg }};color:{{ b.text }};cursor:pointer;">{{ b.label }}</div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="width:300px;flex:0 0 300px;display:flex;flex-direction:column;gap:14px;min-height:0;">
+
+      <div style="background:#1a1611;border:1px solid rgba(255,255,255,0.05);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:10px;">
+        <div style="font:600 13px 'Barlow';letter-spacing:2.5px;color:#7d7264;text-transform:uppercase;">System</div>
+
+        <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;background:#14100c;border-radius:13px;border:1px solid {{ fanEdge }};">
+          <div style="width:64px;display:flex;justify-content:center;align-items:center;">
+            <svg width="46" height="46" viewBox="0 0 100 100">
+              <g style="transform-origin:50px 50px;animation: {{ fanAnim }};">
+                <path d="M50 50 Q 28 30 34 10 Q 50 4 50 50 Z" fill="{{ fanColor }}"></path>
+                <path d="M50 50 Q 78 42 92 58 Q 88 76 50 50 Z" fill="{{ fanColor }}"></path>
+                <path d="M50 50 Q 44 78 24 84 Q 10 72 50 50 Z" fill="{{ fanColor }}"></path>
+              </g>
+              <circle cx="50" cy="50" r="8" fill="#14100c" stroke="{{ fanColor }}" stroke-width="3"></circle>
+            </svg>
+          </div>
+          <div style="flex:1;">
+            <div style="font:600 17px 'Barlow';letter-spacing:1.5px;color:#cfc6b8;">FAN</div>
+            <div style="font:600 13px 'Barlow';letter-spacing:2px;color:{{ fanColor }};">{{ fanStatus }}</div>
+          </div>
+          <div style="width:9px;height:9px;border-radius:50%;background:{{ fanDot }};box-shadow:0 0 8px {{ fanDot }};"></div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;background:#14100c;border-radius:13px;border:1px solid {{ augerEdge }};">
+          <div style="width:64px;display:flex;justify-content:center;align-items:center;">
+            <svg width="66" height="40" viewBox="0 0 120 60">
+              <defs><clipPath id="pfAugerClip"><rect x="10" y="18" width="100" height="26" rx="13"></rect></clipPath></defs>
+              <g clip-path="url(#pfAugerClip)">
+                <rect x="10" y="18" width="100" height="26" fill="#0e0b08"></rect>
+                <g style="animation: {{ augerAnim }};">
+                  <path d="M-40 46 L-14 14 M-24 46 L2 14 M-8 46 L18 14 M8 46 L34 14 M24 46 L50 14 M40 46 L66 14 M56 46 L82 14 M72 46 L98 14 M88 46 L114 14 M104 46 L130 14 M120 46 L146 14 M136 46 L162 14" stroke="{{ augerColor }}" stroke-width="6" stroke-linecap="round"></path>
+                </g>
+              </g>
+              <rect x="10" y="18" width="100" height="26" rx="13" fill="none" stroke="{{ augerStroke }}" stroke-width="2.5"></rect>
+              <g style="animation: {{ pelletAnim }};">
+                <circle cx="30" cy="10" r="3.4" fill="{{ augerColor }}"></circle>
+              </g>
+              <g style="animation: {{ pelletAnim2 }};">
+                <circle cx="40" cy="10" r="3.4" fill="{{ augerColor }}"></circle>
+              </g>
+            </svg>
+          </div>
+          <div style="flex:1;">
+            <div style="font:600 17px 'Barlow';letter-spacing:1.5px;color:#cfc6b8;">AUGER</div>
+            <div style="font:600 13px 'Barlow';letter-spacing:2px;color:{{ augerColor }};">{{ augerStatus }}</div>
+          </div>
+          <div style="width:9px;height:9px;border-radius:50%;background:{{ augerDot }};box-shadow:0 0 8px {{ augerDot }};"></div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;background:#14100c;border-radius:13px;border:1px solid {{ ignEdge }};">
+          <div style="width:64px;display:flex;justify-content:center;align-items:center;position:relative;">
+            <svg width="60" height="40" viewBox="0 0 100 60">
+              <g style="animation: {{ heatAnim }};transform-origin:50px 30px;">
+                <path d="M30 40 Q 34 26 38 40" fill="none" stroke="#ff9f43" stroke-width="3" stroke-linecap="round"></path>
+                <path d="M50 42 Q 54 26 58 42" fill="none" stroke="#ff7a1a" stroke-width="3" stroke-linecap="round"></path>
+                <path d="M68 40 Q 72 28 76 40" fill="none" stroke="#ffb066" stroke-width="3" stroke-linecap="round"></path>
+              </g>
+              <path d="M8 40 C 16 14 30 14 34 40 C 38 56 50 56 54 40 C 58 14 72 14 76 40 C 80 56 92 56 92 40" fill="none" stroke="{{ ignColor }}" stroke-width="6" stroke-linecap="round" style="filter: drop-shadow(0 0 6px {{ ignGlow }});animation: {{ ignAnim }};"></path>
+            </svg>
+          </div>
+          <div style="flex:1;">
+            <div style="font:600 17px 'Barlow';letter-spacing:1.5px;color:#cfc6b8;">IGNITER</div>
+            <div style="font:600 13px 'Barlow';letter-spacing:2px;color:{{ ignColor }};">{{ ignStatus }}</div>
+          </div>
+          <div style="width:9px;height:9px;border-radius:50%;background:{{ ignDot }};box-shadow:0 0 8px {{ ignDot }};"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:14px;height:64px;flex:0 0 64px;">
+        <div style="flex:1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:{{ pillLBg }};border:1.5px solid {{ pillLBorder }};">
+          <span style="font:600 10px 'Barlow';letter-spacing:1.5px;color:{{ pillLLabelColor }};white-space:nowrap;">{{ pillLLabel }}</span>
+          <span style="font:800 24px 'Barlow Semi Condensed';color:{{ pillLValColor }};white-space:nowrap;line-height:1;">{{ pillLValue }}</span>
+        </div>
+        <div style="flex:1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:{{ pillRBg }};border:1.5px solid {{ pillRBorder }};">
+          <span style="font:600 10px 'Barlow';letter-spacing:1.5px;color:{{ pillRLabelColor }};white-space:nowrap;">{{ pillRLabel }}</span>
+          <span style="font:800 24px 'Barlow Semi Condensed';color:{{ pillRValColor }};white-space:nowrap;line-height:1;">{{ pillRValue }}</span>
+        </div>
+      </div>
+
+      <div style="flex:1;background:#1a1611;border:1px solid rgba(255,255,255,0.05);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:12px;min-height:0;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <span style="font:600 13px 'Barlow';letter-spacing:2.5px;color:#7d7264;text-transform:uppercase;">Hopper</span>
+          <span style="font:800 34px 'Barlow Semi Condensed';font-variant-numeric:tabular-nums;color:{{ hopperColor }};line-height:1;">{{ hopperPct }}%</span>
+        </div>
+        <div style="flex:1;min-height:0;position:relative;border-radius:14px;background:rgba(255,255,255,0.045);overflow:hidden;border:1px solid rgba(255,255,255,0.04);">
+          <div style="position:absolute;left:0;right:0;bottom:0;height:{{ hopperPct }}%;background:linear-gradient(180deg, {{ hopperColor2 }}, {{ hopperColor }});transition:height .9s ease;"></div>
+          <div style="position:absolute;left:0;right:0;bottom:0;height:{{ hopperPct }}%;transition:height .9s ease;background-image:radial-gradient(circle at 3px 3px, rgba(0,0,0,0.16) 1.6px, transparent 1.8px);background-size:11px 11px;opacity:.55;"></div>
+        </div>
+        <div style="font:600 12px 'Barlow';letter-spacing:2px;color:{{ hopperLabelColor }};text-transform:uppercase;">{{ hopperLabel }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
