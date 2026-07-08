@@ -880,7 +880,14 @@ hamburger button (three bars) with `TapHandler { onTapped: header.menuRequested(
 
 - [ ] **Step 1: Write the failing test** — extend `tests/test_qml_load.py` to load the full `Main.qml` engine and assert `DashScreen` instantiates and still declares `requestMenu`/`requestInput`. If `tests/test_qtquick_parity.py` asserts a set of dash element `objectName`s, update its expected set to the new components (HeaderBar, ProbeCard×N, Gauge, CookTimeBar, ControlPanel, SystemCard, DutyPill×2, HopperCard).
 - [ ] **Step 2: Run** → FAIL against the new expectations.
-- [ ] **Step 3: Implement** — Rebuild the layout to the design's header + 3-column structure:
+- [ ] **Step 3: Implement** — Rebuild the layout to the design's header + 3-column structure.
+
+  **Layout sizing (critical — verified in the preview, `tools/qt_dashboard_preview.qml`):** `Layout.preferredWidth`/`preferredHeight` on a `ColumnLayout`/`RowLayout` are overridden by child implicit sizes, which collapses the center column and overgrows fixed rows. **Pin** every fixed-size region:
+  - Side columns: `Layout.preferredWidth: 298`/`300` **plus** `Layout.minimumWidth` and `Layout.maximumWidth` equal to it. Center column: `Layout.fillWidth: true` + a `Layout.minimumWidth` (~380).
+  - Fixed-height rows (cook-time row, control-buttons row, duty-pill row): `Layout.preferredHeight` **plus** `Layout.maximumHeight` equal to it, so only the gauge card (center) and hopper card (right) absorb vertical slack via `Layout.fillHeight`.
+  - The gauge card and hopper card: `Layout.fillHeight: true` + a `Layout.minimumHeight` so their content (the 392px gauge, the vertical fill) is never clipped.
+
+  Structure:
   - Root `ColumnLayout`: `HeaderBar { onMenuRequested: dash.requestMenu("") }` then a `RowLayout` body (margins 16–18, spacing 16).
   - **Left column** (width 298) — the whole column collapses when there are no food probes so the center gauge flexes into the space, matching the design's `<sc-if hasProbes>`. Wrap it in a `ColumnLayout { Layout.preferredWidth: 298; visible: backend.foodProbeCount > 0 }` (an invisible `RowLayout` child is dropped from the layout, so `Layout.fillWidth` center expands): "FOOD PROBES" label + `Repeater { model: backend.foodProbes; ProbeCard { name: model.name; temp: model.temp; target: model.target; maxTemp: model.maxTemp; units: backend.units; onTapped: dash.requestInput("notify", model.name) } }`.
   - **Center column:** `Gauge { value: backend.primaryTemp; setpoint: backend.primarySetpoint; target: backend.primaryNotifyTarget; maxValue: backend.primaryMax; units: backend.units; modeLabel: backend.modeText; onTapped: dash.requestInput("notify", backend.primaryName) }`, then `RowLayout { CookTimeBar; Alert { shown: backend.lidOpen; message: "LID OPEN" } }`, then `ControlPanel { mode: backend.mode; recipe: backend.recipe; recipePaused: backend.recipePaused; onOpenMenu: (n)=>dash.requestMenu(n); onOpenInput: (n,o)=>dash.requestInput(n,o) }`.
