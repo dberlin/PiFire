@@ -376,8 +376,8 @@ git commit -m "feat(display): add ember dashboard background (1280x720)"
 - Test: `tests/test_qtbackend.py`
 
 **Interfaces:**
-- Consumes: `status['cycle_ratio']`, `status['fan_duty']` (Task 1); `probe_info['food']` (constructor).
-- Produces: `backend.augerDuty` (int %, `round(cycle_ratio*100)`), `backend.fanDuty` (int %), both `notify=statusChanged`; `backend.foodProbeCount` (int, `constant` — `len(probe_info['food'])`). `augerDuty`/`fanDuty` consumed by `DutyPill` (Task 12); `foodProbeCount` consumed by `DashScreen` (Task 15) to collapse the food-probe column when there are no food probes.
+- Consumes: `status['cycle_ratio']`, `status['fan_duty']` (Task 1); `status['startup_timestamp']`, `status['mode']`; `probe_info['food']` (constructor).
+- Produces: `backend.augerDuty` (int %, `round(cycle_ratio*100)`), `backend.fanDuty` (int %), both `notify=statusChanged`; `backend.foodProbeCount` (int, `constant` — `len(probe_info['food'])`); `backend.cookElapsedText` (str `H:MM:SS`/`00:00`, `notify=timerChanged` — D2). `augerDuty`/`fanDuty` → `DutyPill` (Task 12); `foodProbeCount` → `DashScreen` (Task 15, collapse food column); `cookElapsedText` → `CookTimeBar` (Task 14).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -401,6 +401,20 @@ def test_food_probe_count_reflects_config():
     none = PiFireBackend(lambda: (None, None), lambda c, d: None,
                          {'primary': {'name': 'Grill'}, 'food': [], 'aux': []})
     assert none.foodProbeCount == 0
+
+
+def test_cook_elapsed_text_counts_up_else_zero():
+    status = {'mode': 'Smoke', 'units': 'F', 'outpins': {}, 'startup_timestamp': 1000.0}
+    b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, status)
+    b._now = lambda: 1000.0 + 125  # 2:05 elapsed
+    b.poll()
+    assert b.cookElapsedText == '02:05'
+    b._fetch_fn = lambda: (
+        {'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
+        {'mode': 'Stop', 'units': 'F', 'outpins': {}, 'startup_timestamp': 0},
+    )
+    b.poll()
+    assert b.cookElapsedText == '00:00'
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -416,6 +430,7 @@ In `display/qtbackend.py` `__init__`, add near the other status fields (the food
         self._auger_duty = 0
         self._fan_duty = 0
         self._food_count = len(self._probe_info.get('food', []))
+        self._cook_elapsed_text = '00:00'
 ```
 
 In `poll()`, after the existing `_set('_s_plus', ...)` line:
@@ -423,6 +438,26 @@ In `poll()`, after the existing `_set('_s_plus', ...)` line:
 ```python
         self._set('_auger_duty', int(round((status.get('cycle_ratio', 0) or 0) * 100)), self.statusChanged)
         self._set('_fan_duty', int(status.get('fan_duty', 0) or 0), self.statusChanged)
+```
+
+In `poll()`, after the existing `self._update_timer_text(status, now)` call, add the elapsed update:
+
+```python
+        self._update_cook_elapsed(status, now)
+```
+
+Add the helper method (near `_update_timer_text`):
+
+```python
+    def _update_cook_elapsed(self, status, now):
+        ts = status.get('startup_timestamp', 0) or 0
+        if ts and status.get('mode', 'Stop') not in ('Stop', 'Monitor'):
+            secs = max(int(now - ts), 0)
+            h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
+            text = (f'{h}:' if h else '') + f'{m:02d}:{s:02d}'
+        else:
+            text = '00:00'
+        self._set('_cook_elapsed_text', text, self.timerChanged)
 ```
 
 Add the properties near `pMode`:
@@ -439,6 +474,10 @@ Add the properties near `pMode`:
     @Property(int, constant=True)
     def foodProbeCount(self):
         return self._food_count
+
+    @Property(str, notify=timerChanged)
+    def cookElapsedText(self):
+        return self._cook_elapsed_text
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -821,8 +860,8 @@ hamburger button (three bars) with `TapHandler { onTapped: header.menuRequested(
 - Test: `tests/test_qml_load.py`
 
 **Interfaces:**
-- `CookTimeBar` consumes `backend.timerText`/`timerLabel`; renders the `Cook Time  H:MM:SS` row.
-- `Alert` restyled to the design's blinking `LID OPEN` pill (keep props `message`, `shown`).
+- `CookTimeBar` (D2): shows the active countdown when running, else elapsed cook time. Label + value bind as `backend.timerText.length > 0 ? backend.timerLabel : "COOK TIME"` and `backend.timerText.length > 0 ? backend.timerText : backend.cookElapsedText`. `Layout.fillWidth: true` so it expands when the LID OPEN alert is hidden.
+- `Alert` restyled to the design's blinking `LID OPEN` pill (keep props `message`, `shown`); `visible: shown`, fixed `Layout.preferredWidth: 210` so it takes the design's fixed slot and the cook-time bar reflows to full width when it's hidden.
 - `ControlPanel` restyled to the design's large bordered buttons; **data-driven button set unchanged** (`Menus.controlPanelForMode(mode, recipe, recipePaused)`), signals `openMenu`/`openInput` unchanged.
 
 - [ ] **Step 1–2:** failing load test (assert `CookTimeBar.qml` instantiates; assert restyled `Alert`/`ControlPanel` still instantiate with their existing props).
@@ -970,7 +1009,9 @@ Each: **Steps** = write failing render/behaviour test → run FAIL → implement
     - `duty_pill_left`/`duty_pill_right` — compute mode-aware `label`/`value`/`highlight` (Hold → auger/fan duty from `cycle_ratio*100`/`fan_duty`; else P-MODE/SMOKE+).
     - `header_bar` — set `data['clock']` from `time.strftime('%H:%M')` and `data['ip']` from the display IP; set the live-dot cooking flag from `mode`.
     - `system_card` — set fan/auger/igniter active flags from `status_data['outpins']`.
-    - `hopper_vertical` — set `data['level']` from `hopper_level`.
+    - `hopper_vertical` — set `data['level']` from `hopper_level`. **D1:** when `hopper_level_enabled` is false, mark the object hidden/skip drawing (leave the slot blank).
+    - `cook_time` (**D2**) — show the active countdown when a timer is running (reuse the existing timer-seconds computation from the current `timer` branch, formatted with its label), else show elapsed cook time computed from `status_data['startup_timestamp']` (`H:MM:SS`, `00:00` when `startup_timestamp` is 0 or mode in `Stop`/`Monitor`) with label `COOK TIME`.
+    - `lid_alert` (**sc-if lidOpen**) — active/drawn only when `status_data['lid_open_detected']`; otherwise not drawn (the fixed cook-time slot does not reflow — documented compromise).
     - `probe_card_N` — set temp/target from `in_data['F']`/`NT` (reuse the existing food-gauge mapping from `_configure_dash`). **No-probes handling:** at build, hide any `probe_card_N` slot (and the `FOOD PROBES` label) that has no configured probe in `probe_info['food']` — set the object inactive/skip so it does not draw. (The pygame layout is fixed absolute-position, so the center gauge does not reflow into the vacated space the way QtQuick does; hiding the empty slots is the essential-motion compromise. Note this limitation in the commit.)
     Follow the existing "only update on change vs `last_status_data`/`last_in_data`" pattern already in the method.
 - [ ] **Step 4: Run** → PASS.
@@ -989,10 +1030,10 @@ Each: **Steps** = write failing render/behaviour test → run FAIL → implement
 - Produces: `display/dsi_1280x720t.json` whose `profile_1.dash` is the ember redesign (header + 3 columns using the new types), `metadata.dash_background` = the ember PNG; `profile_2` and 1024×768 unchanged.
 
 - [ ] **Step 1: Write the failing tests** —
-  - In `tests/test_dsi_1280x720t_layout.py`, assert the new dash contains objects named `header_bar`, `probe_card_0`..`probe_card_4`, `primary_gauge` (type `gauge_ember`), `cook_time`, `button_row`, `system_card`, `duty_pill_left`, `duty_pill_right`, `hopper_vertical`; every object's `position`+`size` fits within `[0,0,1280,720]`; and `metadata.dash_background` endswith `background_ember_1280x720.png`.
+  - In `tests/test_dsi_1280x720t_layout.py`, assert the new dash contains objects named `header_bar`, `probe_card_0`..`probe_card_4`, `primary_gauge` (type `gauge_ember`), `cook_time`, `lid_alert`, `button_row`, `system_card`, `duty_pill_left`, `duty_pill_right`, `hopper_vertical`; every object's `position`+`size` fits within `[0,0,1280,720]`; and `metadata.dash_background` endswith `background_ember_1280x720.png`.
   - Keep `test_reproduces_committed_1024x768_byte_for_byte` unchanged (guards the untouched resolution).
 - [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement** — In `tools/generate_dsi_layout.py`, add `_dashboard_1280x720()` returning the bespoke `profile_1.dash` list (absolute 1280×720 coordinates transcribed from the design: header `[0,0,1280,58]`; left column x≈18 w≈298 with a label + 5 probe cards; center gauge card + cook-time/lid row + button row; right column x≈962 w≈300 with system card, two duty pills, hopper). Then in `build`, after the scale pass:
+- [ ] **Step 3: Implement** — In `tools/generate_dsi_layout.py`, add `_dashboard_1280x720()` returning the bespoke `profile_1.dash` list (absolute 1280×720 coordinates transcribed from the design: header `[0,0,1280,58]`; left column x≈18 w≈298 with a label + 5 probe cards; center gauge card + cook-time bar with an adjacent fixed `lid_alert` slot + button row; right column x≈962 w≈300 with system card, two duty pills, hopper). Then in `build`, after the scale pass:
 
 ```python
     if (width, height) == (1280, 720):
@@ -1021,26 +1062,19 @@ Run `python tools/generate_dsi_layout.py` to regenerate `display/dsi_1280x720t.j
 
 ---
 
-## Open Decisions (resolve before the affected task runs)
+## Open Decisions — RESOLVED (2026-07-08)
 
-The design leaves two behaviors unspecified; the plan currently assumes the **recommended** option. Change the referenced task if you pick the alternative.
+### D1 — Hopper card when the pellet sensor is disabled → **HIDE**
 
-### D1 — Hopper card when the pellet sensor is disabled (`hopperEnabled == false`)
+When `hopperEnabled == false` (i.e. `settings['modules']['dist'] == 'none'`), hide the hopper card. Qt Task 13: `HopperCard { visible: backend.hopperEnabled }`. pygame Task 21/24: skip drawing `hopper_vertical`. The right column keeps the System card + duty pills; the vacated hopper area is left empty (Qt: pills stay top-anchored; pygame: fixed slot left blank).
 
-The design always renders the hopper (no `sc-if`), but PiFire hides it when there is no distance/hopper sensor (`settings['modules']['dist'] == 'none'`). Existing displays already hide it.
-- **Recommended (assumed):** hide the hopper card when `hopperEnabled` is false — Qt Task 13 `HopperCard { visible: backend.hopperEnabled }`; pygame Task 21/24 skip drawing `hopper_vertical`. The right column keeps the System card + duty pills; the vacated hopper area is empty (Qt: pills stay top-anchored; pygame: fixed slot left blank).
-- **Alternative:** always show it with a "—/NA" placeholder when disabled.
+### D2 — "Cook Time" → **active countdown when one is running, else elapsed cook time**
 
-### D2 — "Cook Time" semantics (elapsed vs. the startup/shutdown countdown)
+The bar shows the active countdown (`timerLabel + timerText`, for Startup/Reignite/Prime/Shutdown/lid-pause) whenever `timerText` is non-empty; otherwise it shows elapsed cook time labeled `COOK TIME`. This preserves the startup/shutdown countdown within the design's single bar. Implemented as:
+- **Qt (Task 5):** add a `cookElapsedText` property, computed in `poll()` from `status['startup_timestamp']` — `"00:00"` when not cooking (timestamp `0`/mode `Stop`), else `H:MM:SS` since cook start. `CookTimeBar` (Task 14) binds label+value to `timerText` when non-empty, else `"COOK TIME"` + `cookElapsedText`.
+- **pygame (Task 24):** the cook-time object shows the countdown when a timer is active, else the elapsed string computed from `startup_timestamp` in `_update_dash_objects`.
 
-The design's `COOK TIME` shows **elapsed** cook time and has **no** startup/shutdown/prime countdown anywhere. PiFire's backend exposes a **countdown** (`timerText`/`timerLabel` for Startup/Reignite/Prime/Shutdown/lid-pause), not elapsed. Dropping the countdown is a functional regression (users watch the startup countdown).
-- **Recommended (assumed):** the bar shows the **active countdown** (`timerLabel + timerText`) whenever one is running, and otherwise shows **elapsed** cook time. This keeps the startup/shutdown countdown within the design's single bar. Requires exposing elapsed cook time:
-  - **Task 5 add-on (Qt):** a `cookElapsedText` property computed in `poll()` from `status['startup_timestamp']` (or `start_time`) — `"" ` when not cooking, else `H:MM:SS` since cook start. `CookTimeBar` (Task 14) shows `timerText` when non-empty else `cookElapsedText`, with the label switching accordingly.
-  - **pygame (Task 24):** the `cook_time`/`timer` object shows the countdown when active else the elapsed string (compute elapsed from `startup_timestamp` in `_update_dash_objects`).
-- **Alternative A:** faithful — elapsed only, no countdown at all (accept the regression).
-- **Alternative B:** show elapsed in the bar and keep the countdown as a second, `sc-if`-style element that appears only when a timer is active (e.g. reuse the LID-OPEN slot).
-
-Until D2 is decided, treat Task 14's "consumes `timerText`" as provisional — it must not silently replace elapsed cook time with the countdown.
+(Verify `startup_timestamp` resets to `0` on Stop; if it does not, gate elapsed on `mode not in ('Stop','Monitor')`.)
 
 ---
 
