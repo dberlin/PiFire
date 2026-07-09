@@ -31,6 +31,7 @@ FlexObject_TypeMap = {
 	'hopper_status': 'HopperStatus',
 	'probe_card': 'ProbeCard',
 	'gauge_ember': 'GaugeEmber',
+	'system_card': 'SystemCard',
 }
 
 """
@@ -824,6 +825,151 @@ class GaugeEmber(FlexObject):
 		canvas.paste(gauge, (0, 0), gauge)
 
 		return canvas
+
+
+class SystemCard(FlexObject):
+	def __init__(self, objectType, objectData, background):
+		super().__init__(objectType, objectData, background)
+
+	def _row_specs(self):
+		"""Ordered row specs: (data key, label, FA glyph, active text, inactive text)."""
+		return [
+			('fan', 'FAN', '', 'RUNNING', 'IDLE'),  # Font Awesome Fan Icon
+			('auger', 'AUGER', '', 'FEEDING', 'IDLE'),  # Font Awesome Right Chevron Arrows Icon
+			('igniter', 'IGNITER', '', 'HOT', 'OFF'),  # Font Awesome Flame Icon
+		]
+
+	def _draw_icon_glyph(self, char_id, color, box_size, rotation=0):
+		"""Renders a single FA glyph centered in a square box, optionally rotated
+		using the same in-place rotate/crop approach as StatusIcon's fan-spin."""
+		font_size = max(10, round(box_size * 0.62))
+		icon = self._create_icon(char_id, font_size, color)
+		icon_bbox = icon.getbbox()
+		if rotation:
+			icon = icon.rotate(rotation)
+			icon = icon.crop(icon_bbox)
+		canvas = Image.new('RGBA', (box_size, box_size))
+		paste_x = (box_size - icon.size[0]) // 2
+		paste_y = (box_size - icon.size[1]) // 2
+		canvas.paste(icon, (paste_x, paste_y), icon)
+		return canvas
+
+	def _draw_object(self, rotation=0):
+		output_size = self.objectData['size']
+		size = (300, 300)  # Working Canvas Size
+
+		accent = self.objectData.get('accent', resolve_accent('Ember'))
+		data = self.objectData.get('data', {})
+
+		card_fill = (26, 22, 17, 255)  # #1a1611
+		row_fill = (20, 16, 12, 255)  # #14100c
+		title_color = (125, 114, 100, 255)  # #7d7264 (dim label)
+		label_color = (207, 198, 184, 255)  # #cfc6b8
+		dim_color = (125, 114, 100, 255)  # #7d7264
+		grey_icon = (87, 81, 74, 255)  # #57514a
+		ignite_color = (255, 122, 26, 255)  # #ff7a1a
+		dot_active = (94, 201, 111, 255)  # #5ec96f
+		dot_inactive = (74, 68, 60, 255)  # #4a443c
+		row_border_default = (255, 255, 255, 22)
+
+		card = Image.new('RGBA', size)
+		draw = ImageDraw.Draw(card)
+
+		# Card background + subtle border
+		draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, fill=card_fill)
+		draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, outline=(255, 255, 255, 30), width=2)
+
+		# Title
+		title = self._draw_text('SYSTEM', './static/font/Barlow-SemiBold.ttf', 20, title_color)
+		card.paste(title, (26, 20), title)
+
+		rows = self._row_specs()
+		row_left = 20
+		row_width = size[0] - (2 * row_left)
+		row_gap = 10
+		row_top = 20 + title.size[1] + 14
+		bottom_margin = 18
+		row_height = (size[1] - row_top - bottom_margin - (row_gap * (len(rows) - 1))) // len(rows)
+
+		icon_col_width = 60
+		text_left = row_left + icon_col_width + 12
+		dot_radius = 5
+		dot_right_margin = 18
+
+		y = row_top
+		for key, label, char_id, active_text, inactive_text in rows:
+			active = bool(data.get(key, False))
+			active_tint = ignite_color if key == 'igniter' else accent['accent']
+
+			row_rect = (row_left, y, row_left + row_width, y + row_height)
+			border_color = tuple(active_tint[:3]) + (140,) if active else row_border_default
+			draw.rounded_rectangle(row_rect, radius=13, fill=row_fill, outline=border_color, width=2)
+
+			# Icon (fan glyph rotates via the animation step when active)
+			icon_color = active_tint if active else grey_icon
+			icon_box_size = row_height - 16
+			icon_rotation = rotation if (key == 'fan' and active) else 0
+			icon_canvas = self._draw_icon_glyph(char_id, icon_color, icon_box_size, rotation=icon_rotation)
+			icon_x = row_left + (icon_col_width - icon_box_size) // 2
+			icon_y = y + (row_height - icon_box_size) // 2
+			card.paste(icon_canvas, (icon_x, icon_y), icon_canvas)
+
+			# Label
+			label_canvas = self._draw_text(label, './static/font/Barlow-SemiBold.ttf', 17, label_color)
+			label_y = y + 12
+			card.paste(label_canvas, (text_left, label_y), label_canvas)
+
+			# Status text
+			status_text = active_text if active else inactive_text
+			status_color = active_tint if active else dim_color
+			status_canvas = self._draw_text(status_text, './static/font/Barlow-SemiBold.ttf', 13, status_color)
+			status_y = label_y + label_canvas.size[1] + 4
+			card.paste(status_canvas, (text_left, status_y), status_canvas)
+
+			# Status dot
+			dot_color = dot_active if active else dot_inactive
+			dot_cx = row_left + row_width - dot_right_margin
+			dot_cy = y + (row_height // 2)
+			draw.ellipse(
+				(dot_cx - dot_radius, dot_cy - dot_radius, dot_cx + dot_radius, dot_cy + dot_radius), fill=dot_color
+			)
+
+			y += row_height + row_gap
+
+		# Resize to configured output size
+		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
+		card = card.resize(output_size)
+		canvas.paste(card, (0, 0), card)
+
+		return canvas
+
+	def _animate_object(self):
+		if self.objectState['animation_start']:
+			self.objectState['animation_start'] = False  # Run animation start only once
+			self.objectState['animation_rotation'] = 0  # Set initial rotation
+
+		# Fan spins while running, so increase rotation by 15 degrees on each step
+		if self.objectData.get('data', {}).get('fan'):
+			self.objectState['animation_rotation'] = (self.objectState.get('animation_rotation', 0) + 15) % 360
+		else:
+			self.objectState['animation_rotation'] = 0
+
+		return self._draw_object(rotation=self.objectState['animation_rotation'])
+
+	def _define_touch_areas(self):
+		"""Subdivides the card into three stacked touch rows (fan/auger/igniter),
+		modeled on ControlPanel._define_touch_areas but split vertically."""
+		row_count = len(self.objectData['button_list'])
+		spacing = int(self.objectData['size'][1] / row_count)
+		self.objectData['touch_areas'] = []
+		for index in range(0, row_count):
+			x_left = self.objectData['position'][0]
+			y_top = self.objectData['position'][1] + (index * spacing)
+			width = self.objectData['size'][0]
+			height = spacing
+			touch_area = Rect(x_left, y_top, width, height)
+			# Create button rectangle / touch area and append to list
+			self.objectData['touch_areas'].append(touch_area)
 
 
 class ModeBar(FlexObject):
