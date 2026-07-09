@@ -27,6 +27,7 @@ FlexObject_TypeMap = {
 	'splus_control': 'SPlusStatus',
 	'p_mode_control': 'PModeStatus',
 	'hopper_status': 'HopperStatus',
+	'probe_card': 'ProbeCard',
 }
 
 """
@@ -544,6 +545,85 @@ class GaugeCompact(FlexObject):
 		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
 		gauge = gauge.resize(output_size)
 		canvas.paste(gauge, (0, 0), gauge)
+
+		return canvas
+
+
+class ProbeCard(FlexObject):
+	def __init__(self, objectType, objectData, background):
+		super().__init__(objectType, objectData, background)
+
+	def _draw_object(self):
+		output_size = self.objectData['size']
+		size = (400, 220)  # Working Canvas Size
+
+		accent = self.objectData.get('accent', resolve_accent('Ember'))
+		data = self.objectData.get('data', {})
+		name = data.get('name', '')
+		temp = data.get('temp', 0)
+		target = data.get('target', 0)
+		units = self.objectData.get('units', 'F')
+
+		dim_color = (183, 172, 156, 255)
+		light_color = (244, 237, 226, 255)
+		cooking_color = (255, 210, 63, 255)
+		done_color = (94, 201, 111, 255)
+		ambient_color = (125, 114, 100, 255)
+
+		done = target > 0 and temp >= target - 1
+
+		card = Image.new('RGBA', size)
+		draw = ImageDraw.Draw(card)
+
+		# Card background + subtle border
+		draw.rounded_rectangle((15, 15, size[0] - 15, size[1] - 15), radius=20, fill=(26, 22, 17, 255))
+		draw.rounded_rectangle((15, 15, size[0] - 15, size[1] - 15), radius=20, outline=(255, 255, 255, 30), width=2)
+
+		# Top row: probe name (left)
+		name_label = self._draw_text(name.upper(), './static/font/Barlow-SemiBold.ttf', 26, dim_color)
+		card.paste(name_label, (35, 28), name_label)
+
+		# Top row: target string (right aligned)
+		if target > 0:
+			target_text = f'→ {round(target)}°'
+			target_color = done_color if done else cooking_color
+		else:
+			target_text = 'AMBIENT'
+			target_color = ambient_color
+		target_label = self._draw_text(target_text, './static/font/Barlow-SemiBold.ttf', 26, target_color)
+		target_x = size[0] - 35 - target_label.size[0]
+		card.paste(target_label, (target_x, 28), target_label)
+
+		# Big temperature
+		temp_label = self._draw_text(round(temp), './static/font/BarlowSemiCondensed-Bold.ttf', 90, light_color)
+		card.paste(temp_label, (35, 75), temp_label)
+
+		# Units, smaller/dim, following the big temp
+		units_label = self._draw_text(f'°{units}', './static/font/Barlow-SemiBold.ttf', 34, dim_color)
+		units_x = 35 + temp_label.size[0] + 8
+		units_y = 75 + temp_label.size[1] - units_label.size[1]
+		card.paste(units_label, (units_x, units_y), units_label)
+
+		# Progress bar near the bottom
+		bar_track = (35, 178, size[0] - 35, 188)
+		draw.rounded_rectangle(bar_track, radius=5, fill=(60, 54, 46, 255))
+
+		if target > 0:
+			fraction = max(0.0, min(1.0, temp / target))
+		else:
+			fraction = 0.0
+
+		if fraction > 0:
+			fill_color = done_color if done else accent['accent']
+			bar_width = bar_track[2] - bar_track[0]
+			fill_x = bar_track[0] + int(bar_width * fraction)
+			if fill_x > bar_track[0]:
+				draw.rounded_rectangle((bar_track[0], bar_track[1], fill_x, bar_track[3]), radius=5, fill=fill_color)
+
+		# Resize to configured output size
+		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
+		card = card.resize(output_size)
+		canvas.paste(card, (0, 0), card)
 
 		return canvas
 
