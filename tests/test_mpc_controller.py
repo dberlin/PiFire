@@ -83,12 +83,12 @@ def test_fan_on_derives_fan_suffixed_path_and_falls_back(tmp_path, capsys):
 	# sibling does not exist, so the test is independent of what ships in
 	# controller/ (a real fan-on artifact now exists there).
 	base = tmp_path / 'mpc_policy_net.npz'
-	shutil.copy(_SHIPPED, base)               # valid fan-off artifact at base path
+	shutil.copy(_SHIPPED, base)  # valid fan-off artifact at base path
 	# NB: no tmp_path/mpc_policy_net_fan.npz is created
 	cfg = {**_DEFAULTS, 'policy': 'net', 'enable_fan_input': True, 'policy_net_path': str(base)}
 	c = Controller(cfg, 'C', dict(CYCLE))
-	assert c._net is None                      # fan-on sibling absent -> NLP fallback
+	assert c._net is None  # fan-on sibling absent -> NLP fallback
 	out = capsys.readouterr().out
-	assert '_fan.npz' in out                   # tried the fan-on path, not the base
+	assert '_fan.npz' in out  # tried the fan-on path, not the base
 	c.set_target(150.0)
 	assert c.update(150.0)['fan']['duty'] is not None

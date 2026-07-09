@@ -66,8 +66,10 @@ def main(data_path, out, enable_fan):
 
 	np.savez_compressed(out, **blob)
 	sz = os.path.getsize(out) / 1024
-	print(f'exported {out} ({sz:.0f} KB): {len(layers)} layers, fan={bool(enable_fan)}, '
-	      f'span [{blob["sp_lo"]:.0f},{blob["sp_hi"]:.0f}]C')
+	print(
+		f'exported {out} ({sz:.0f} KB): {len(layers)} layers, fan={bool(enable_fan)}, '
+		f'span [{blob["sp_lo"]:.0f},{blob["sp_hi"]:.0f}]C'
+	)
 
 
 if __name__ == '__main__':

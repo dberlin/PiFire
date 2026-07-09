@@ -108,8 +108,9 @@ def test_fan_on_net_is_offset_free():
 		on = int(round(ratio * 25))
 		for s in range(25):
 			plant.step(auger_on=(s < on), fan_frac=fan / 100.0)
-			ts.append(w * 25 + s); temps.append(plant.true_Tc)
+			ts.append(w * 25 + s)
+			temps.append(plant.true_Tc)
 	ts, temps = np.array(ts), np.array(temps)
 	err = temps[ts >= 1800] - 190.0
-	assert abs(np.mean(err)) <= 0.5   # offset-free (fan-on net; prior mismatch was ~0.4-0.9)
+	assert abs(np.mean(err)) <= 0.5  # offset-free (fan-on net; prior mismatch was ~0.4-0.9)
 	assert np.sqrt(np.mean(err**2)) <= 2.0

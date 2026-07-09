@@ -226,11 +226,19 @@ def _episode_span(arg):
 	return np.array(Xh), np.array(Up), np.array(Ts), np.array(Q)
 
 
-def sample_span(episodes=150, workers=None, seed=0, minutes=120, dither=8.0,
-                sp_lo=100.0, sp_hi=290.0, out=OUT_SPAN, enable_fan=False):
+def sample_span(
+	episodes=150,
+	workers=None,
+	seed=0,
+	minutes=120,
+	dither=8.0,
+	sp_lo=100.0,
+	sp_hi=290.0,
+	out=OUT_SPAN,
+	enable_fan=False,
+):
 	workers = workers or max(1, (os.cpu_count() or 2) - 2)
-	args = [(seed * 100000 + e, minutes, dither, sp_lo, sp_hi, bool(enable_fan))
-	        for e in range(episodes)]
+	args = [(seed * 100000 + e, minutes, dither, sp_lo, sp_hi, bool(enable_fan)) for e in range(episodes)]
 	t0 = time.perf_counter()
 	ctx = mp.get_context('fork')
 	with ctx.Pool(processes=workers) as pool:
@@ -241,8 +249,9 @@ def sample_span(episodes=150, workers=None, seed=0, minutes=120, dither=8.0,
 	Ts = np.concatenate([r[2] for r in results])
 	U0 = np.concatenate([r[3] for r in results])
 	os.makedirs(os.path.dirname(out), exist_ok=True)
-	np.savez_compressed(out, X0=X0, u_prev=Up, t_set=Ts, u0=U0, sp_lo=sp_lo, sp_hi=sp_hi,
-	                     enable_fan=np.int64(bool(enable_fan)))
+	np.savez_compressed(
+		out, X0=X0, u_prev=Up, t_set=Ts, u0=U0, sp_lo=sp_lo, sp_hi=sp_hi, enable_fan=np.int64(bool(enable_fan))
+	)
 	print(
 		f'span: {episodes} episodes [{sp_lo:.0f},{sp_hi:.0f}]C on {workers} workers in '
 		f'{dt:.0f}s -> {len(U0)} samples ({len(U0) / dt:.0f}/s) | '
