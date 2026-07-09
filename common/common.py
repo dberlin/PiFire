@@ -2374,7 +2374,11 @@ def read_status(init=False):
 		}
 		write_status(status)
 	else:
-		status = json.loads(cmdsts.get('control:status'))
+		# Match InMemoryStore semantics: absent status reads back as {} (falsy),
+		# not a crash. In production the controller seeds status via init=True
+		# before any init=False reader runs; this guards the pre-seed/fresh-DB case.
+		raw = cmdsts.get('control:status')
+		status = json.loads(raw) if raw is not None else {}
 
 	return status
 
