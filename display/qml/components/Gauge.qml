@@ -165,7 +165,7 @@ Item {
 			Text {
 				id: pillText
 				anchors.centerIn: parent
-				text: g.modeLabel
+				text: g.modeLabel.toUpperCase()
 				font.family: Theme.sans
 				font.pixelSize: 17
 				font.bold: true
