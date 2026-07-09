@@ -35,6 +35,7 @@ FlexObject_TypeMap = {
 	'duty_pill': 'DutyPill',
 	'hopper_vertical': 'HopperVertical',
 	'header_bar': 'HeaderBar',
+	'button_row': 'ButtonRow',
 }
 
 """
@@ -2527,3 +2528,98 @@ class HeaderBar(FlexObject):
 		scaled_rect = self._scale_touch_area(hamburger_rect, self.WORKING_SIZE, output_size)
 		translated_rect = self._transform_touch_area(scaled_rect, self.objectData['position'])
 		self.objectData['touch_areas'] = [Rect(translated_rect)]
+
+
+class ButtonRow(FlexObject):
+	"""Row of N equal-width mode-dependent control buttons at the bottom of
+	the center column (e.g. Set Temp / Hold / Stop / Shutdown).
+
+	Presentational only - base_flex computes the button set for the current
+	operating mode (button_type/button_list) and which one, if any, should
+	be shown active (button_active); this widget renders the row and
+	subdivides touch so each button maps to its own action.
+	"""
+
+	WORKING_SIZE = (1200, 164)
+	GAP = 24
+	RADIUS = 32
+	BORDER_WIDTH = 4
+
+	DANGER_ACTIONS = ('cmd_stop', 'cmd_shutdown')
+
+	def __init__(self, objectType, objectData, background):
+		super().__init__(objectType, objectData, background)
+
+	def _border_color(self, label, action, active, accent):
+		if action in self.DANGER_ACTIONS:
+			return (255, 90, 77, 255)  # #ff5a4d - danger
+		if active and label == active:
+			return (94, 201, 111, 255)  # #5ec96f - ok / active
+		return accent['accent']
+
+	def _draw_object(self):
+		output_size = self.objectData['size']
+		size = self.WORKING_SIZE  # Working Canvas Size
+
+		accent = self.objectData.get('accent', resolve_accent('Ember'))
+		button_type = self.objectData.get('button_type', [])
+		button_list = self.objectData.get('button_list', [])
+		active = self.objectData.get('button_active', '')
+
+		fill_color = (29, 24, 19, 255)  # #1d1813
+		text_color = (232, 223, 209, 255)  # #e8dfd1
+		active_fill = _lerp_color(fill_color[:3], (94, 201, 111), 0.16) + (255,)  # subtle green tint
+
+		row = Image.new('RGBA', size)
+		draw = ImageDraw.Draw(row)
+
+		count = len(button_type)
+		if count > 0:
+			button_width = (size[0] - self.GAP * (count - 1)) // count
+
+			for index in range(count):
+				label = button_type[index]
+				action = button_list[index] if index < len(button_list) else ''
+
+				left = index * (button_width + self.GAP)
+				right = left + button_width if index < count - 1 else size[0]
+
+				border_color = self._border_color(label, action, active, accent)
+				btn_fill = (
+					active_fill if (active and label == active and action not in self.DANGER_ACTIONS) else fill_color
+				)
+
+				draw.rounded_rectangle((left, 0, right, size[1]), radius=self.RADIUS, fill=btn_fill)
+				draw.rounded_rectangle(
+					(left, 0, right, size[1]), radius=self.RADIUS, outline=border_color, width=self.BORDER_WIDTH
+				)
+
+				label_canvas = self._draw_text(str(label), './static/font/Barlow-SemiBold.ttf', 46, text_color)
+				label_x = left + ((right - left) - label_canvas.size[0]) // 2
+				label_y = (size[1] - label_canvas.size[1]) // 2
+				row.paste(label_canvas, (label_x, label_y), label_canvas)
+
+		# Resize to configured output size
+		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
+		row = row.resize(output_size)
+		canvas.paste(row, (0, 0), row)
+
+		return canvas
+
+	def _define_touch_areas(self):
+		"""Subdivides the row into N evenly-spaced touch areas, one per
+		button, so touch_areas[i] maps to button_list[i]."""
+		button_list = self.objectData.get('button_list', [])
+		count = len(button_list)
+		self.objectData['touch_areas'] = []
+		if count == 0:
+			return
+
+		spacing = int(self.objectData['size'][0] / count)
+		for index in range(count):
+			x_left = self.objectData['position'][0] + (index * spacing)
+			y_top = self.objectData['position'][1]
+			width = spacing
+			height = self.objectData['size'][1]
+			touch_area = Rect(x_left, y_top, width, height)
+			self.objectData['touch_areas'].append(touch_area)
