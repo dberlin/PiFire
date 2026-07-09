@@ -33,6 +33,7 @@ FlexObject_TypeMap = {
 	'gauge_ember': 'GaugeEmber',
 	'system_card': 'SystemCard',
 	'duty_pill': 'DutyPill',
+	'hopper_vertical': 'HopperVertical',
 }
 
 """
@@ -2252,5 +2253,121 @@ class DutyPill(FlexObject):
 		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
 		pill = pill.resize(output_size)
 		canvas.paste(pill, (0, 0), pill)
+
+		return canvas
+
+
+class HopperVertical(FlexObject):
+	"""Ember pellet-hopper card: header + big percentage, a tall vertical fill
+	bar (bottom-anchored) and a threshold-colored status label."""
+
+	def __init__(self, objectType, objectData, background):
+		super().__init__(objectType, objectData, background)
+
+	def _draw_letterspaced_text(self, text, font_name, font_size, color, spacing):
+		"""Draws text with extra spacing between glyphs, bottom-aligned per glyph."""
+		space_width = max(4, round(font_size * 0.35))
+		parts = []
+		for char in text:
+			if char == ' ':
+				parts.append(('space', space_width))
+			else:
+				parts.append(('glyph', self._draw_text(char, font_name, font_size, color)))
+
+		max_height = max((glyph.size[1] for kind, glyph in parts if kind == 'glyph'), default=0)
+		total_width = sum((glyph.size[0] if kind == 'glyph' else glyph) for kind, glyph in parts) + spacing * max(
+			0, len(parts) - 1
+		)
+
+		if total_width <= 0 or max_height <= 0:
+			return Image.new('RGBA', (1, 1))
+
+		canvas = Image.new('RGBA', (total_width, max_height))
+		x = 0
+		for index, (kind, glyph) in enumerate(parts):
+			if kind == 'glyph':
+				canvas.paste(glyph, (x, max_height - glyph.size[1]), glyph)
+				x += glyph.size[0]
+			else:
+				x += glyph
+			if index < len(parts) - 1:
+				x += spacing
+		return canvas
+
+	def _threshold(self, level):
+		"""Returns (color, status_label) for the given pellet level (0-100)."""
+		if level < 15:
+			return (255, 90, 77, 255), 'REFILL PELLETS'  # #ff5a4d
+		elif level < 35:
+			return (255, 176, 32, 255), 'RUNNING LOW'  # #ffb020
+		else:
+			return (94, 201, 111, 255), 'LEVEL OK'  # #5ec96f
+
+	def _draw_object(self):
+		output_size = self.objectData['size']
+		size = (300, 300)  # Working Canvas Size
+
+		self.objectData.get('accent', resolve_accent('Ember'))
+		data = self.objectData.get('data', {})
+		level = max(0, min(100, int(data.get('level', 0))))
+
+		dim_color = (125, 114, 100, 255)  # #7d7264
+		track_fill = (255, 255, 255, 36)  # translucent light fill (~0.14 alpha)
+		threshold_color, status_text = self._threshold(level)
+
+		card = Image.new('RGBA', size)
+		draw = ImageDraw.Draw(card)
+
+		# Card background + subtle border
+		draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, fill=(26, 22, 17, 255))
+		draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, outline=(255, 255, 255, 30), width=2)
+
+		# Header row: "HOPPER" label (left)
+		header_left = 26
+		header_top = 22
+		label_canvas = self._draw_text('HOPPER', './static/font/Barlow-SemiBold.ttf', 20, dim_color)
+		card.paste(label_canvas, (header_left, header_top), label_canvas)
+
+		# Header row: big percentage (right aligned, threshold colored, no arrow)
+		pct_text = f'{level}%'
+		pct_canvas = self._draw_text(pct_text, './static/font/BarlowSemiCondensed-Bold.ttf', 44, threshold_color)
+		pct_x = size[0] - 26 - pct_canvas.size[0]
+		pct_y = header_top - ((pct_canvas.size[1] - label_canvas.size[1]) // 2)
+		card.paste(pct_canvas, (pct_x, pct_y), pct_canvas)
+
+		header_bottom = max(header_top + label_canvas.size[1], pct_y + pct_canvas.size[1]) + 14
+
+		# Status label at the bottom, uppercase letter-spaced
+		status_canvas = self._draw_letterspaced_text(
+			status_text, './static/font/Barlow-SemiBold.ttf', 15, threshold_color, spacing=3
+		)
+		status_bottom_margin = 20
+		status_y = size[1] - status_bottom_margin - status_canvas.size[1]
+		status_x = (size[0] - status_canvas.size[0]) // 2
+		card.paste(status_canvas, (status_x, status_y), status_canvas)
+
+		# Vertical fill bar: tall rounded track between the header and the status label
+		bar_top_margin = 14
+		bar_bottom_margin = 14
+		track_left = size[0] // 2 - 34
+		track_right = size[0] // 2 + 34
+		track_top = header_bottom + bar_top_margin
+		track_bottom = status_y - bar_bottom_margin
+		track_radius = (track_right - track_left) // 2
+
+		draw.rounded_rectangle((track_left, track_top, track_right, track_bottom), radius=track_radius, fill=track_fill)
+
+		track_height = max(0, track_bottom - track_top)
+		fill_height = round(track_height * (level / 100))
+		if fill_height > 0:
+			fill_top = track_bottom - fill_height
+			draw.rounded_rectangle(
+				(track_left, fill_top, track_right, track_bottom), radius=track_radius, fill=threshold_color
+			)
+
+		# Resize to configured output size
+		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
+		card = card.resize(output_size)
+		canvas.paste(card, (0, 0), card)
 
 		return canvas
