@@ -41,10 +41,26 @@ Display base class definition
 """
 
 
+# FlexObject types added for the "ember" dashboard redesign (Tasks 16-23).
+# Objects of these types receive the resolved accent palette at build time.
+NEW_EMBER_FLEX_TYPES = {
+	'probe_card',
+	'gauge_ember',
+	'system_card',
+	'duty_pill',
+	'hopper_vertical',
+	'header_bar',
+	'button_row',
+}
+
+
 class DisplayBase:
 	def __init__(self, dev_pins, buttonslevel='HIGH', rotation=0, units='F', config={}):
 		# Init Global Variables and Constants
 		self.config = config
+
+		# Ember dashboard accent palette (Task 24), used by the new flex object types.
+		self.accent = resolve_accent(self.config.get('accent_theme', 'Ember'))
 
 		self.dev_pins = dev_pins
 		self.units = units
@@ -363,6 +379,22 @@ class DisplayBase:
 				object_data['data']['level'] = self.status_data[
 					'hopper_level'
 				]  # Add the current hopper level to the object
+
+			if (
+				self.status_data.get('hopper_level_enabled', False) == False
+				and object_data['type'] == 'hopper_vertical'
+			):
+				# D1: Hopper level reporting is not enabled - skip the ember hopper card entirely
+				continue
+			if self.status_data.get('hopper_level', None) != None and object_data['type'] == 'hopper_vertical':
+				object_data.setdefault('data', {})
+				object_data['data']['level'] = self.status_data['hopper_level']
+				object_data['data']['enabled'] = self.status_data.get('hopper_level_enabled', False)
+
+			if object_data['type'] in NEW_EMBER_FLEX_TYPES:
+				# Inject the resolved accent palette (Task 24) for the new ember dash objects
+				object_data['accent'] = self.accent
+
 			FlexObject_ClassName = FlexObject_TypeMap[object_data['type']]
 			FlexObject_Constructor = globals()[FlexObject_ClassName]
 			self.display_object_list.append(FlexObject_Constructor(object_data['type'], object_data, background))
@@ -372,14 +404,22 @@ class DisplayBase:
 		num_food_probes = min(len(self.config['probe_info']['food']), self.display_data['metadata']['max_food_probes'])
 		self.food_probe_label_map = {}
 		self.food_probe_name_map = {}
+		# Ember dashboard probe_card_N slots (Task 24) mirror the food_probe_gauge_N mapping above.
+		self.probe_card_label_map = {}
+		self.probe_card_name_map = {}
 		for index in range(num_food_probes):
 			self.food_probe_label_map[f'food_probe_gauge_{index}'] = self.config['probe_info']['food'][index]['label']
 			self.food_probe_name_map[f'food_probe_gauge_{index}'] = self.config['probe_info']['food'][index]['name']
+			self.probe_card_label_map[f'probe_card_{index}'] = self.config['probe_info']['food'][index]['label']
+			self.probe_card_name_map[f'probe_card_{index}'] = self.config['probe_info']['food'][index]['name']
 
 		""" Remove Unused Food Probes & Rename Used Food Probes"""
 		display_data_dash_list = []
 		for object in self.display_data[self.display_profile]['dash']:
 			if 'food_probe_gauge_' in object['name'] and object['name'] not in list(self.food_probe_label_map.keys()):
+				pass
+			elif 'probe_card_' in object['name'] and object['name'] not in list(self.probe_card_label_map.keys()):
+				# D1/no-probes handling: hide any probe_card slot with no configured food probe
 				pass
 			else:
 				if 'food_probe_gauge_' in object['name']:
@@ -387,6 +427,11 @@ class DisplayBase:
 					object['label'] = self.food_probe_name_map[object['name']]
 					object['units'] = self.units
 					object['button_value'] = [object['label']]
+				elif 'probe_card_' in object['name']:
+					""" Rename Displayed Probe Cards """
+					object.setdefault('data', {})
+					object['data']['name'] = self.probe_card_name_map[object['name']]
+					object['units'] = self.units
 				elif object['name'] == 'primary_gauge':
 					object['label'] = self.config['probe_info']['primary']['name']
 					object['button_value'] = [object['label']]
@@ -394,6 +439,130 @@ class DisplayBase:
 				display_data_dash_list.append(object)
 
 		self.display_data[self.display_profile]['dash'] = display_data_dash_list
+
+	"""
+    ============== Ember Dashboard Helpers (Task 24) =============
+
+    Pure(ish) helpers that compute the live-data payload for the new ember
+    flex objects. Kept as staticmethods so they can be unit-tested directly
+    without constructing a full DisplayBase (which requires pygame/config).
+    """
+
+	@staticmethod
+	def _button_row_for_mode(mode, recipe, recipe_paused):
+		"""Returns (button_type, button_list, button_active) for the button_row
+		object, mirroring the existing control_panel branch and Qt's
+		Menus.controlPanelForMode (display/qml/Menus.js)."""
+		if recipe and mode != 'Shutdown':
+			type_item = 'Error'
+			if mode in ('Startup', 'Reignite'):
+				type_item = 'Startup'
+			elif mode == 'Smoke':
+				type_item = 'Smoke'
+			elif mode == 'Hold':
+				type_item = 'Hold'
+			button_type = ['Next', type_item, 'Stop', 'Shutdown']
+			button_list = ['cmd_next_step', 'cmd_none', 'cmd_stop', 'cmd_shutdown']
+			button_active = 'Next' if recipe_paused else mode
+			return button_type, button_list, button_active
+
+		if mode in ('Startup', 'Reignite'):
+			return ['Startup', 'Smoke', 'Hold', 'Stop'], ['cmd_startup', 'cmd_smoke', 'input_hold', 'cmd_stop'], mode
+		if mode == 'Smoke':
+			return (
+				['Set Temp', 'Hold', 'Stop', 'Shutdown'],
+				['input_hold', 'input_hold', 'cmd_stop', 'cmd_shutdown'],
+				mode,
+			)
+		if mode == 'Hold':
+			return (
+				['Set Temp', 'Smoke', 'Stop', 'Shutdown'],
+				['input_hold', 'cmd_smoke', 'cmd_stop', 'cmd_shutdown'],
+				mode,
+			)
+		if mode == 'Shutdown':
+			return (
+				['Smoke', 'Hold', 'Stop', 'Shutdown'],
+				['cmd_smoke', 'input_hold', 'cmd_stop', 'cmd_shutdown'],
+				mode,
+			)
+		# Stop / Prime / Monitor
+		return ['Prime', 'Startup', 'Monitor', 'Stop'], ['menu_prime', 'menu_startup', 'cmd_monitor', 'cmd_stop'], mode
+
+	@staticmethod
+	def _duty_pills(status_data):
+		"""Returns (left_data, right_data) dicts for duty_pill_left/duty_pill_right:
+		AUGER/FAN DUTY while Hold is active, otherwise P-MODE/SMOKE+."""
+		mode = status_data.get('mode', 'Stop')
+		outpins = status_data.get('outpins', {})
+		if mode == 'Hold':
+			left = {
+				'label': 'AUGER DUTY',
+				'value': f'{round(status_data.get("cycle_ratio", 0) * 100)}%',
+				'highlight': False,
+			}
+			right = {
+				'label': 'FAN DUTY',
+				'value': f'{round(status_data.get("fan_duty", 0))}%',
+				'highlight': bool(outpins.get('fan', False)),
+			}
+		else:
+			left = {'label': 'P-MODE', 'value': f'P-{status_data.get("p_mode", 0)}', 'highlight': False}
+			s_plus = bool(status_data.get('s_plus', False))
+			right = {'label': 'SMOKE+', 'value': 'ON' if s_plus else 'OFF', 'highlight': s_plus}
+		return left, right
+
+	@staticmethod
+	def _timer_seconds_and_label(status_data, now):
+		"""Mirrors the countdown computation used by the legacy 'timer' dash
+		branch (Prime/Startup/Reignite/Shutdown countdown, or Hold lid-open
+		pause countdown). Returns (seconds, label); seconds is 0 and label is
+		'' when no countdown is active."""
+		mode = status_data.get('mode', 'Stop')
+		if mode in ('Prime', 'Startup', 'Reignite', 'Shutdown'):
+			if mode in ('Startup', 'Reignite'):
+				duration = status_data.get('start_duration', 0)
+			elif mode == 'Prime':
+				duration = status_data.get('prime_duration', 0)
+			else:
+				duration = status_data.get('shutdown_duration', 0)
+			countdown = int(duration - (now - status_data.get('start_time', now)))
+			return max(countdown, 0), 'Timer'
+		elif mode == 'Hold' and status_data.get('lid_open_detected'):
+			countdown = int(status_data.get('lid_open_endtime', now) - now)
+			return max(countdown, 0), 'Lid Pause'
+		return 0, ''
+
+	@staticmethod
+	def _cook_time_data(status_data, now):
+		"""Returns {'label':..., 'value':...} for the cook_time object (D2):
+		the active countdown (mm:ss) when a timer is running, else the
+		elapsed cook time (H:MM:SS) computed from startup_timestamp, mirroring
+		display/qtbackend.py's _update_timer_text/_update_cook_elapsed.
+
+		NOTE: Task 25 (the bespoke 1280x720 layout, not yet written as of this
+		task) has not yet defined the FlexObject type/contract for the
+		'cook_time' object name. This shape (data.label/data.value) matches
+		the duty_pill contract as the closest existing analog; if Task 25
+		instead reuses the 'timer' type (TimerStatus), that widget reads
+		top-level 'label' and data['seconds'] rather than data['value'], so
+		_update_dash_objects also mirrors 'label' at the top level for
+		compatibility. This should be revisited once Task 25 lands.
+		"""
+		seconds, label = DisplayBase._timer_seconds_and_label(status_data, now)
+		if seconds > 0:
+			value = f'{seconds // 60:02d}:{seconds % 60:02d}'
+			return {'label': label, 'value': value}
+
+		timestamp = status_data.get('startup_timestamp', 0) or 0
+		mode = status_data.get('mode', 'Stop')
+		if timestamp and mode not in ('Stop', 'Monitor'):
+			elapsed = max(int(now - timestamp), 0)
+			hours, minutes, secs = elapsed // 3600, (elapsed % 3600) // 60, elapsed % 60
+			value = (f'{hours}:' if hours else '') + f'{minutes:02d}:{secs:02d}'
+		else:
+			value = '00:00'
+		return {'label': 'COOK TIME', 'value': value}
 
 	def _build_dash_map(self):
 		"""Setup dash object mapping"""
@@ -461,6 +630,22 @@ class DisplayBase:
 						object_data['button_type'] = ['Prime', 'Startup', 'Monitor', 'Stop']
 
 					self.display_object_list[self.dash_map['control_panel']].update_object_data(object_data)
+				""" Button Row Update (ember dash) """
+				if 'button_row' in self.dash_map.keys():
+					object_data = self.display_object_list[self.dash_map['button_row']].get_object_data()
+					button_type, button_list, button_active = self._button_row_for_mode(
+						self.status_data['mode'], self.status_data['recipe'], self.status_data['recipe_paused']
+					)
+					object_data['button_type'] = button_type
+					object_data['button_list'] = button_list
+					object_data['button_active'] = button_active
+					self.display_object_list[self.dash_map['button_row']].update_object_data(object_data)
+				""" Primary Gauge Mode Label Update (ember dash - gauge_ember) """
+				if 'primary_gauge' in self.dash_map.keys():
+					object_data = self.display_object_list[self.dash_map['primary_gauge']].get_object_data()
+					object_data.setdefault('data', {})
+					object_data['data']['mode_label'] = self.status_data['mode'].upper()
+					self.display_object_list[self.dash_map['primary_gauge']].update_object_data(object_data)
 				""" Lid Open Button Update """
 				if 'lid_open_button' in self.dash_map.keys() and self.status_data['mode'] == 'Hold':
 					object_data = self.display_object_list[self.dash_map['lid_open_button']].get_object_data()
@@ -469,6 +654,22 @@ class DisplayBase:
 					else:
 						object_data['active'] = False
 					self.display_object_list[self.dash_map['lid_open_button']].update_object_data(object_data)
+
+			""" Header Bar Update (ember dash) - clock/IP/live-cooking-dot, independent of mode change """
+			if 'header_bar' in self.dash_map.keys():
+				object_data = self.display_object_list[self.dash_map['header_bar']].get_object_data()
+				object_data.setdefault('data', {})
+				new_clock = time.strftime('%H:%M')
+				new_cooking = self.status_data['mode'] in ('Startup', 'Reignite', 'Smoke', 'Hold', 'Recipe')
+				if (
+					object_data['data'].get('clock') != new_clock
+					or object_data['data'].get('ip') != self.ip_address
+					or object_data['data'].get('cooking') != new_cooking
+				):
+					object_data['data']['ip'] = self.ip_address
+					object_data['data']['clock'] = new_clock
+					object_data['data']['cooking'] = new_cooking
+					self.display_object_list[self.dash_map['header_bar']].update_object_data(object_data)
 
 			if self.last_in_data != {}:
 				""" Update Primary Gauge Values """
@@ -492,6 +693,10 @@ class DisplayBase:
 				""" Update Food Probe Gauges and Values """
 				food_gauge_keys = list(self.food_probe_label_map.keys())
 				for gauge in food_gauge_keys:
+					if gauge not in self.dash_map.keys():
+						# Layouts built entirely around probe_card_N (ember dash) have no
+						# food_probe_gauge_N objects at all - nothing to update here.
+						continue
 					key = self.food_probe_label_map[gauge]
 					if (
 						self.last_in_data['F'][key] != self.in_data['F'][key]
@@ -504,6 +709,29 @@ class DisplayBase:
 						object_data['temps'][2] = 0  # There is no set temp for food probes
 						object_data['units'] = self.units
 						self.display_object_list[self.dash_map[gauge]].update_object_data(object_data)
+
+				""" Update Probe Cards (ember dash) """
+				probe_card_keys = list(self.probe_card_label_map.keys())
+				for card in probe_card_keys:
+					if card not in self.dash_map.keys():
+						continue
+					key = self.probe_card_label_map[card]
+					if (
+						self.last_in_data['F'][key] != self.in_data['F'][key]
+						or self.last_in_data['NT'][key] != self.in_data['NT'][key]
+					):
+						""" Update this probe card """
+						object_data = self.display_object_list[self.dash_map[card]].get_object_data()
+						object_data.setdefault('data', {})
+						object_data['data']['name'] = self.probe_card_name_map[card]
+						object_data['data']['temp'] = (
+							self.in_data['F'][key] if self.in_data['F'][key] is not None else 0
+						)
+						object_data['data']['target'] = (
+							self.in_data['NT'][key] if self.in_data['NT'][key] is not None else 0
+						)
+						object_data['units'] = self.units
+						self.display_object_list[self.dash_map[card]].update_object_data(object_data)
 
 			""" Update Output Status Icons """
 			if self.last_status_data.get('outpins') is None:
@@ -529,6 +757,18 @@ class DisplayBase:
 						object_data['animation_enabled'] = True if self.status_data['outpins'][output] else False
 						object_data['active'] = True if self.status_data['outpins'][output] else False
 						self.display_object_list[self.dash_map['igniter_status']].update_object_data(object_data)
+
+			""" Update System Card (ember dash - fan/auger/igniter combined) """
+			if 'system_card' in self.dash_map.keys() and self.status_data['outpins'] != self.last_status_data.get(
+				'outpins'
+			):
+				object_data = self.display_object_list[self.dash_map['system_card']].get_object_data()
+				object_data['data'] = {
+					'fan': bool(self.status_data['outpins'].get('fan', False)),
+					'auger': bool(self.status_data['outpins'].get('auger', False)),
+					'igniter': bool(self.status_data['outpins'].get('igniter', False)),
+				}
+				self.display_object_list[self.dash_map['system_card']].update_object_data(object_data)
 
 			""" Update Timer Output """
 			if self.status_data['mode'] in ['Prime', 'Startup', 'Reignite', 'Shutdown']:
@@ -574,6 +814,17 @@ class DisplayBase:
 						object_data['data']['seconds'] = 0
 						self.display_object_list[self.dash_map['timer']].update_object_data(object_data)
 
+			""" Update Cook Time (ember dash, D2) - active countdown, else elapsed cook time """
+			if 'cook_time' in self.dash_map.keys():
+				object_data = self.display_object_list[self.dash_map['cook_time']].get_object_data()
+				new_data = self._cook_time_data(self.status_data, time.time())
+				if object_data.get('data') != new_data:
+					object_data.setdefault('data', {})
+					object_data['data']['label'] = new_data['label']
+					object_data['data']['value'] = new_data['value']
+					object_data['label'] = new_data['label']  # top-level fallback if type is 'timer'-like
+					self.display_object_list[self.dash_map['cook_time']].update_object_data(object_data)
+
 			""" In Hold Mode, Check Lid Indicator """
 			if (
 				self.status_data['mode'] in ['Hold']
@@ -586,6 +837,14 @@ class DisplayBase:
 				else:
 					object_data['active'] = False
 				self.display_object_list[self.dash_map['lid_indicator']].update_object_data(object_data)
+
+			""" Lid Alert Update (ember dash) - active only while lid_open_detected, mirrors lid_indicator """
+			if 'lid_alert' in self.dash_map.keys():
+				object_data = self.display_object_list[self.dash_map['lid_alert']].get_object_data()
+				new_active = bool(self.status_data.get('lid_open_detected', False))
+				if object_data.get('active') != new_active:
+					object_data['active'] = new_active
+					self.display_object_list[self.dash_map['lid_alert']].update_object_data(object_data)
 
 			""" In Hold Mode, Show Lid Indicator Button (when lid_open_detected is False)"""
 			if (
@@ -644,6 +903,32 @@ class DisplayBase:
 				object_data['data']['level'] = min(object_data['data']['level'], 100)
 
 				self.display_object_list[self.dash_map['hopper']].update_object_data(object_data)
+
+			""" Update Hopper Vertical (ember dash) - D1: object is absent from dash_map entirely
+			when hopper_level_enabled is False (see _build_objects), so this naturally no-ops then. """
+			if (
+				self.status_data['hopper_level'] != self.last_status_data.get('hopper_level', None)
+				and 'hopper_vertical' in self.dash_map.keys()
+			):
+				object_data = self.display_object_list[self.dash_map['hopper_vertical']].get_object_data()
+				object_data.setdefault('data', {})
+				object_data['data']['level'] = max(min(self.status_data['hopper_level'], 100), 0)
+				object_data['data']['enabled'] = self.status_data.get('hopper_level_enabled', False)
+				self.display_object_list[self.dash_map['hopper_vertical']].update_object_data(object_data)
+
+			""" Update Duty Pills (ember dash) - AUGER/FAN DUTY in Hold, else P-MODE/SMOKE+ """
+			if 'duty_pill_left' in self.dash_map.keys() or 'duty_pill_right' in self.dash_map.keys():
+				left_data, right_data = self._duty_pills(self.status_data)
+				if 'duty_pill_left' in self.dash_map.keys():
+					object_data = self.display_object_list[self.dash_map['duty_pill_left']].get_object_data()
+					if object_data.get('data') != left_data:
+						object_data['data'] = left_data
+						self.display_object_list[self.dash_map['duty_pill_left']].update_object_data(object_data)
+				if 'duty_pill_right' in self.dash_map.keys():
+					object_data = self.display_object_list[self.dash_map['duty_pill_right']].get_object_data()
+					if object_data.get('data') != right_data:
+						object_data['data'] = right_data
+						self.display_object_list[self.dash_map['duty_pill_right']].update_object_data(object_data)
 
 			""" After all the updates, update the last states/data """
 			self.last_in_data = self.in_data.copy()
