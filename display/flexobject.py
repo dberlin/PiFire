@@ -585,7 +585,7 @@ class ProbeCard(FlexObject):
 
 		# Top row: target string (right aligned)
 		if target > 0:
-			target_text = f'→ {round(target)}°'
+			target_text = f'{round(target)}°'
 			target_color = done_color if done else cooking_color
 		else:
 			target_text = 'AMBIENT'
@@ -593,6 +593,20 @@ class ProbeCard(FlexObject):
 		target_label = self._draw_text(target_text, './static/font/Barlow-SemiBold.ttf', 26, target_color)
 		target_x = size[0] - 35 - target_label.size[0]
 		card.paste(target_label, (target_x, 28), target_label)
+
+		# Draw triangle to the left of target when target > 0
+		if target > 0:
+			# Triangle pointing right, positioned to the left of the target text
+			triangle_size = 10  # px
+			triangle_left_x = target_x - triangle_size - 4  # 4px spacing
+			triangle_center_y = 28 + 13  # Center vertically with text (~half of font size)
+			# Right-pointing triangle: point right, base on left
+			triangle_points = [
+				(triangle_left_x, triangle_center_y - triangle_size // 2),  # top-left
+				(triangle_left_x, triangle_center_y + triangle_size // 2),  # bottom-left
+				(triangle_left_x + triangle_size, triangle_center_y),  # right point
+			]
+			draw.polygon(triangle_points, fill=target_color)
 
 		# Big temperature
 		temp_label = self._draw_text(round(temp), './static/font/BarlowSemiCondensed-Bold.ttf', 90, light_color)
