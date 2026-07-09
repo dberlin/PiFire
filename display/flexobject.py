@@ -2,6 +2,8 @@
 Imported Libraries
 """
 
+import math
+
 import qrcode
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from display.flexrect import Rect
@@ -28,6 +30,7 @@ FlexObject_TypeMap = {
 	'p_mode_control': 'PModeStatus',
 	'hopper_status': 'HopperStatus',
 	'probe_card': 'ProbeCard',
+	'gauge_ember': 'GaugeEmber',
 }
 
 """
@@ -638,6 +641,187 @@ class ProbeCard(FlexObject):
 		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
 		card = card.resize(output_size)
 		canvas.paste(card, (0, 0), card)
+
+		return canvas
+
+
+def _lerp_color(color_a, color_b, fraction):
+	"""Linearly interpolate between two RGB tuples."""
+	return tuple(round(color_a[i] + (color_b[i] - color_a[i]) * fraction) for i in range(3))
+
+
+def _gradient_color(stops, fraction):
+	"""Interpolate a color across a 3-stop gradient (0.0 - 1.0)."""
+	fraction = max(0.0, min(1.0, fraction))
+	if fraction <= 0.5:
+		return _lerp_color(stops[0], stops[1], fraction * 2)
+	return _lerp_color(stops[1], stops[2], (fraction - 0.5) * 2)
+
+
+class GaugeEmber(FlexObject):
+	def __init__(self, objectType, objectData, background):
+		super().__init__(objectType, objectData, background)
+
+	def _draw_object(self):
+		"""
+		Draws the redesigned "ember" style center gauge: a 270 degree arc gauge
+		with an approximated gradient sweep, a soft glow, a setpoint tick and
+		centered temperature/mode readouts.
+
+		Returns:
+		    Image: The image canvas with the gauge drawn on it.
+		"""
+		output_size = self.objectData['size']
+
+		size = (500, 500)  # Working Canvas Size
+
+		accent = self.objectData.get('accent', resolve_accent('Ember'))
+		data = self.objectData.get('data', {})
+		mode_label = str(data.get('mode_label', '')).upper()
+
+		temps = self.objectData['temps']
+		current_temp = temps[0]
+		setpoint = temps[2] if len(temps) > 2 else 0
+		max_temp = self.objectData['max_temp'] or 1
+		units = self.objectData['units']
+		label = self.objectData['label']
+		glow_enabled = self.objectData.get('glow', True)
+
+		track_color = (42, 36, 29, 255)
+		label_color = (125, 114, 100, 255)
+		light_color = (248, 242, 232, 255)
+		dim_color = (138, 127, 112, 255)
+		setpoint_color = (108, 200, 255, 255)
+
+		gauge = Image.new('RGBA', size)
+		draw = ImageDraw.Draw(gauge)
+
+		# Card background + subtle border
+		margin = round(size[0] * 0.03)
+		radius = round(size[0] * 0.055)
+		draw.rounded_rectangle(
+			(margin, margin, size[0] - margin, size[1] - margin), radius=radius, fill=(26, 22, 17, 255)
+		)
+		draw.rounded_rectangle(
+			(margin, margin, size[0] - margin, size[1] - margin), radius=radius, outline=(255, 255, 255, 30), width=2
+		)
+
+		# Arc geometry - matches the GaugeCircle 270 degree sweep starting at 135 degrees
+		arc_width = round(size[0] * 0.075)
+		arc_margin = round(size[0] * 0.09)
+		coords = (arc_margin, arc_margin, size[0] - arc_margin, size[1] - arc_margin)
+		start_deg = 135
+		fraction = max(0.0, min(1.0, current_temp / max_temp))
+		end_deg = start_deg + (270 * fraction)
+
+		# Background/track arc (full sweep)
+		draw.arc(coords, start=start_deg, end=start_deg + 270, fill=track_color, width=arc_width)
+
+		# Soft glow behind the value arc, approximated with a blurred copy of the arc
+		if glow_enabled and fraction > 0:
+			glow_layer = Image.new('RGBA', size)
+			glow_draw = ImageDraw.Draw(glow_layer)
+			glow_color = tuple(accent['glow'][:3]) + (160,)
+			glow_draw.arc(
+				coords, start=start_deg, end=end_deg, fill=glow_color, width=arc_width + round(size[0] * 0.03)
+			)
+			glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=round(size[0] * 0.025)))
+			gauge = Image.alpha_composite(gauge, glow_layer)
+			draw = ImageDraw.Draw(gauge)
+
+		# Value arc - approximate the ember gradient by drawing short interpolated segments
+		if fraction > 0:
+			segment_count = max(8, round(48 * fraction))
+			for index in range(segment_count):
+				seg_start = start_deg + (end_deg - start_deg) * (index / segment_count)
+				seg_end = start_deg + (end_deg - start_deg) * ((index + 1) / segment_count) + 0.75
+				seg_fraction = (index + 0.5) / segment_count
+				seg_color = _gradient_color(accent['arc'], seg_fraction) + (255,)
+				draw.arc(coords, start=seg_start, end=seg_end, fill=seg_color, width=arc_width)
+
+		# Setpoint tick - short radial line at the setpoint angle
+		if setpoint > 0:
+			center = (size[0] / 2, size[1] / 2)
+			radius_outer = (size[0] / 2) - arc_margin + (arc_width / 2) + round(size[0] * 0.02)
+			radius_inner = (size[0] / 2) - arc_margin - (arc_width / 2) - round(size[0] * 0.02)
+
+			set_fraction = max(0.0, min(1.0, setpoint / max_temp))
+			angle_rad = math.radians(start_deg + (270 * set_fraction))
+			x1 = center[0] + radius_inner * math.cos(angle_rad)
+			y1 = center[1] + radius_inner * math.sin(angle_rad)
+			x2 = center[0] + radius_outer * math.cos(angle_rad)
+			y2 = center[1] + radius_outer * math.sin(angle_rad)
+			draw.line((x1, y1, x2, y2), fill=setpoint_color, width=round(size[0] * 0.012))
+
+		# Center content: label, big temp + units, SET line, mode pill - stacked and centered
+		pieces = []
+
+		label_text = label.upper()
+		if len(label_text) > 10:
+			label_text = label_text[0:10]
+		label_canvas = self._draw_text(
+			label_text, './static/font/Barlow-SemiBold.ttf', round(size[0] * 0.046), label_color
+		)
+		pieces.append(label_canvas)
+
+		temp_canvas = self._draw_text(
+			round(current_temp), './static/font/BarlowSemiCondensed-Bold.ttf', round(size[0] * 0.22), light_color
+		)
+		units_canvas = self._draw_text(
+			f'°{units}', './static/font/Barlow-SemiBold.ttf', round(size[0] * 0.072), dim_color
+		)
+		temp_row = Image.new(
+			'RGBA',
+			(
+				temp_canvas.width + units_canvas.width + round(size[0] * 0.016),
+				max(temp_canvas.height, units_canvas.height),
+			),
+		)
+		temp_row.paste(temp_canvas, (0, 0), temp_canvas)
+		temp_row.paste(
+			units_canvas,
+			(temp_canvas.width + round(size[0] * 0.016), temp_row.height - units_canvas.height),
+			units_canvas,
+		)
+		pieces.append(temp_row)
+
+		if setpoint > 0:
+			set_canvas = self._draw_text(
+				f'SET {round(setpoint)}°', './static/font/Barlow-SemiBold.ttf', round(size[0] * 0.06), setpoint_color
+			)
+			pieces.append(set_canvas)
+
+		if mode_label:
+			pill_text = self._draw_text(
+				mode_label, './static/font/Barlow-SemiBold.ttf', round(size[0] * 0.056), accent['accent']
+			)
+			pad_x, pad_y = round(size[0] * 0.045), round(size[0] * 0.02)
+			pill_size = (pill_text.width + 2 * pad_x, pill_text.height + 2 * pad_y)
+			pill_canvas = Image.new('RGBA', pill_size)
+			pill_draw = ImageDraw.Draw(pill_canvas)
+			tint = tuple(accent['accent'][:3]) + (40,)
+			pill_draw.rounded_rectangle(
+				(0, 0, pill_size[0] - 1, pill_size[1] - 1),
+				radius=pill_size[1] // 2,
+				fill=tint,
+				outline=accent['accent'],
+				width=2,
+			)
+			pill_canvas.paste(pill_text, (pad_x, pad_y), pill_text)
+			pieces.append(pill_canvas)
+
+		gap = round(size[1] * 0.022)
+		total_height = sum(piece.height for piece in pieces) + gap * (len(pieces) - 1)
+		y = round((size[1] - total_height) / 2)
+		for piece in pieces:
+			x = round((size[0] - piece.width) / 2)
+			gauge.paste(piece, (x, y), piece)
+			y += piece.height + gap
+
+		# Resize to configured output size
+		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
+		gauge = gauge.resize(output_size)
+		canvas.paste(gauge, (0, 0), gauge)
 
 		return canvas
 
