@@ -32,6 +32,7 @@ FlexObject_TypeMap = {
 	'probe_card': 'ProbeCard',
 	'gauge_ember': 'GaugeEmber',
 	'system_card': 'SystemCard',
+	'duty_pill': 'DutyPill',
 }
 
 """
@@ -2156,5 +2157,100 @@ class HopperStatus(FlexObject):
 		resized = canvas.resize(output_size)
 		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
 		canvas.paste(resized, (0, 0), resized)
+
+		return canvas
+
+
+class DutyPill(FlexObject):
+	"""A small labeled-value pill, e.g. P-MODE/SMOKE+ or AUGER/FAN DUTY.
+
+	Presentational only - the label/value/highlight are computed upstream
+	(base_flex) and passed in via objectData['data'].
+	"""
+
+	def __init__(self, objectType, objectData, background):
+		super().__init__(objectType, objectData, background)
+
+	def _draw_letterspaced_text(self, text, font_name, font_size, color, spacing):
+		"""Draws text with extra spacing between glyphs, bottom-aligned per glyph."""
+		space_width = max(4, round(font_size * 0.35))
+		parts = []
+		for char in text:
+			if char == ' ':
+				parts.append(('space', space_width))
+			else:
+				parts.append(('glyph', self._draw_text(char, font_name, font_size, color)))
+
+		max_height = max((glyph.size[1] for kind, glyph in parts if kind == 'glyph'), default=0)
+		total_width = sum((glyph.size[0] if kind == 'glyph' else glyph) for kind, glyph in parts) + spacing * max(
+			0, len(parts) - 1
+		)
+
+		if total_width <= 0 or max_height <= 0:
+			return Image.new('RGBA', (1, 1))
+
+		canvas = Image.new('RGBA', (total_width, max_height))
+		x = 0
+		for index, (kind, glyph) in enumerate(parts):
+			if kind == 'glyph':
+				canvas.paste(glyph, (x, max_height - glyph.size[1]), glyph)
+				x += glyph.size[0]
+			else:
+				x += glyph
+			if index < len(parts) - 1:
+				x += spacing
+		return canvas
+
+	def _draw_object(self):
+		output_size = self.objectData['size']
+		size = (350, 160)  # Working Canvas Size
+
+		accent = self.objectData.get('accent', resolve_accent('Ember'))
+		data = self.objectData.get('data', {})
+		label = str(data.get('label', '')).upper()
+		value = str(data.get('value', ''))
+		highlight = bool(data.get('highlight', False))
+
+		if highlight:
+			bg_fill = (94, 201, 111, 36)  # #5ec96f @ ~0.14
+			border_color = (94, 201, 111, 255)  # #5ec96f
+			label_color = (143, 224, 154, 255)  # #8fe09a
+			value_color = (143, 224, 154, 255)  # #8fe09a
+		else:
+			bg_fill = (26, 22, 17, 255)  # #1a1611
+			border_color = (255, 255, 255, 13)  # rgba(255,255,255,0.05)
+			label_color = (125, 114, 100, 255)  # #7d7264
+			value_color = accent['accent']
+
+		pill = Image.new('RGBA', size)
+		draw = ImageDraw.Draw(pill)
+
+		margin = 8
+		radius = (size[1] - (2 * margin)) // 2
+		draw.rounded_rectangle((margin, margin, size[0] - margin, size[1] - margin), radius=radius, fill=bg_fill)
+		draw.rounded_rectangle(
+			(margin, margin, size[0] - margin, size[1] - margin), radius=radius, outline=border_color, width=2
+		)
+
+		label_canvas = self._draw_letterspaced_text(
+			label, './static/font/Barlow-SemiBold.ttf', 22, label_color, spacing=4
+		)
+		value_canvas = self._draw_text(value, './static/font/BarlowSemiCondensed-Bold.ttf', 60, value_color)
+
+		gap = 10
+		content_height = label_canvas.size[1] + gap + value_canvas.size[1]
+		content_top = (size[1] - content_height) // 2
+
+		label_x = (size[0] - label_canvas.size[0]) // 2
+		pill.paste(label_canvas, (label_x, content_top), label_canvas)
+
+		value_x = (size[0] - value_canvas.size[0]) // 2
+		value_y = content_top + label_canvas.size[1] + gap
+		pill.paste(value_canvas, (value_x, value_y), value_canvas)
+
+		# Resize to configured output size
+		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
+		pill = pill.resize(output_size)
+		canvas.paste(pill, (0, 0), pill)
 
 		return canvas
