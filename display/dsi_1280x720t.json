@@ -4,7 +4,7 @@
     "screen_width": 1280,
     "screen_height": 720,
     "framerate": 20,
-    "dash_background": "./static/img/display/background.png",
+    "dash_background": "./static/img/display/background_ember_1280x720.png",
     "splash_image": "./static/img/display/splash_800x480.png",
     "splash_delay": 500,
     "max_food_probes": 5,
@@ -14,580 +14,219 @@
     "home": [],
     "dash": [
       {
-        "name": "primary_gauge",
-        "type": "gauge",
+        "name": "header_bar",
+        "type": "header_bar",
         "position": [
-          378,
-          75
-        ],
-        "animation_enabled": true,
-        "size": [
-          525,
-          525
-        ],
-        "fg_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "bg_color": [
-          25,
-          25,
-          25,
-          255
-        ],
-        "sp_color": [
           0,
-          200,
-          255,
-          255
-        ],
-        "np_color": [
-          255,
-          255,
-          0,
-          255
-        ],
-        "glow": true,
-        "font": "trebuc.ttf",
-        "temps": [
-          0,
-          0,
-          0
-        ],
-        "label": "Primary",
-        "units": "F",
-        "max_temp": 600,
-        "data": {},
-        "button_list": [
-          "input_notify"
-        ],
-        "button_value": [],
-        "touch_areas": []
-      },
-      {
-        "name": "control_panel",
-        "type": "control_panel",
-        "position": [
-          340,
-          570
-        ],
-        "animation_enabled": false,
-        "glow": false,
-        "size": [
-          600,
-          150
-        ],
-        "label": "control_panel",
-        "data": {},
-        "button_list": [
-          "menu_prime",
-          "menu_startup",
-          "cmd_monitor",
-          "cmd_stop"
-        ],
-        "button_type": [
-          "Prime",
-          "Startup",
-          "Monitor",
-          "Stop"
-        ],
-        "button_active": "Stop",
-        "touch_areas": []
-      },
-      {
-        "name": "food_probe_gauge_0",
-        "type": "gauge_compact",
-        "position": [
-          40,
-          82
-        ],
-        "animation_enabled": false,
-        "size": [
-          330,
-          165
-        ],
-        "fg_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "bg_color": [
-          25,
-          25,
-          25,
-          255
-        ],
-        "sp_color": [
-          0,
-          200,
-          255,
-          255
-        ],
-        "np_color": [
-          255,
-          255,
-          0,
-          255
-        ],
-        "glow": false,
-        "font": "trebuc.ttf",
-        "temps": [
-          0,
-          0,
-          0
-        ],
-        "label": "Food Probe",
-        "units": "F",
-        "max_temp": 300,
-        "data": {},
-        "button_list": [
-          "input_notify"
-        ],
-        "button_value": [],
-        "touch_areas": []
-      },
-      {
-        "name": "food_probe_gauge_1",
-        "type": "gauge_compact",
-        "position": [
-          910,
-          82
-        ],
-        "animation_enabled": false,
-        "size": [
-          330,
-          165
-        ],
-        "fg_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "bg_color": [
-          25,
-          25,
-          25,
-          255
-        ],
-        "sp_color": [
-          0,
-          200,
-          255,
-          255
-        ],
-        "np_color": [
-          255,
-          255,
-          0,
-          255
-        ],
-        "glow": false,
-        "font": "trebuc.ttf",
-        "temps": [
-          0,
-          0,
-          0
-        ],
-        "label": "Food Probe",
-        "units": "F",
-        "max_temp": 300,
-        "data": {},
-        "button_list": [
-          "input_notify"
-        ],
-        "button_value": [],
-        "touch_areas": []
-      },
-      {
-        "name": "food_probe_gauge_2",
-        "type": "gauge_compact",
-        "position": [
-          40,
-          240
-        ],
-        "animation_enabled": false,
-        "size": [
-          330,
-          165
-        ],
-        "fg_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "bg_color": [
-          25,
-          25,
-          25,
-          255
-        ],
-        "sp_color": [
-          0,
-          200,
-          255,
-          255
-        ],
-        "np_color": [
-          255,
-          255,
-          0,
-          255
-        ],
-        "glow": false,
-        "font": "trebuc.ttf",
-        "temps": [
-          0,
-          0,
-          0
-        ],
-        "label": "Food Probe",
-        "units": "F",
-        "max_temp": 300,
-        "data": {},
-        "button_list": [
-          "input_notify"
-        ],
-        "button_value": [],
-        "touch_areas": []
-      },
-      {
-        "name": "food_probe_gauge_3",
-        "type": "gauge_compact",
-        "position": [
-          910,
-          240
-        ],
-        "animation_enabled": false,
-        "size": [
-          330,
-          165
-        ],
-        "fg_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "bg_color": [
-          25,
-          25,
-          25,
-          255
-        ],
-        "sp_color": [
-          0,
-          200,
-          255,
-          255
-        ],
-        "np_color": [
-          255,
-          255,
-          0,
-          255
-        ],
-        "glow": false,
-        "font": "trebuc.ttf",
-        "temps": [
-          0,
-          0,
-          0
-        ],
-        "label": "Food Probe",
-        "units": "F",
-        "max_temp": 300,
-        "data": {},
-        "button_list": [
-          "input_notify"
-        ],
-        "button_value": [],
-        "touch_areas": []
-      },
-      {
-        "name": "food_probe_gauge_4",
-        "type": "gauge_compact",
-        "position": [
-          40,
-          412
-        ],
-        "animation_enabled": false,
-        "size": [
-          330,
-          165
-        ],
-        "fg_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "bg_color": [
-          25,
-          25,
-          25,
-          255
-        ],
-        "sp_color": [
-          0,
-          200,
-          255,
-          255
-        ],
-        "np_color": [
-          255,
-          255,
-          0,
-          255
-        ],
-        "glow": false,
-        "font": "trebuc.ttf",
-        "temps": [
-          0,
-          0,
-          0
-        ],
-        "label": "Food Probe",
-        "units": "F",
-        "max_temp": 300,
-        "data": {},
-        "button_list": [
-          "input_notify"
-        ],
-        "button_value": [],
-        "touch_areas": []
-      },
-      {
-        "name": "mode_bar",
-        "type": "mode_bar",
-        "position": [
-          340,
           0
         ],
         "animation_enabled": false,
         "size": [
-          600,
-          90
-        ],
-        "fg_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "bg_color": [
-          0,
-          0,
-          0,
-          100
+          1280,
+          58
         ],
         "glow": false,
-        "font": "trebuc.ttf",
-        "label": "mode_bar",
-        "text": "Stop",
-        "data": {},
-        "touch_areas": []
-      },
-      {
-        "name": "fan_status",
-        "type": "status_icon",
-        "position": [
-          55,
-          8
-        ],
-        "animation_enabled": false,
-        "size": [
-          75,
-          75
-        ],
-        "glow": true,
-        "icon": "Fan",
-        "label": "fan_status",
-        "active": false,
-        "inactive_color": [
-          128,
-          128,
-          128,
-          128
-        ],
-        "active_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "rotation": 0,
-        "button_list": [
-          "cmd_fan_toggle"
-        ],
-        "button_value": [],
-        "data": {},
-        "touch_areas": []
-      },
-      {
-        "name": "auger_status",
-        "type": "status_icon",
-        "position": [
-          168,
-          8
-        ],
-        "animation_enabled": false,
-        "size": [
-          75,
-          75
-        ],
-        "glow": true,
-        "icon": "Auger",
-        "label": "auger_status",
-        "active": false,
-        "inactive_color": [
-          128,
-          128,
-          128,
-          128
-        ],
-        "active_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "rotation": 0,
-        "button_list": [
-          "cmd_auger_toggle"
-        ],
-        "button_value": [],
-        "data": {},
-        "touch_areas": []
-      },
-      {
-        "name": "igniter_status",
-        "type": "status_icon",
-        "position": [
-          265,
-          8
-        ],
-        "animation_enabled": false,
-        "size": [
-          75,
-          75
-        ],
-        "glow": true,
-        "icon": "Igniter",
-        "label": "igniter_status",
-        "active": false,
-        "inactive_color": [
-          128,
-          128,
-          128,
-          128
-        ],
-        "active_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "rotation": 0,
-        "button_list": [
-          "cmd_igniter_toggle"
-        ],
-        "button_value": [],
-        "data": {},
-        "touch_areas": []
-      },
-      {
-        "name": "menu_icon",
-        "type": "menu_icon",
-        "position": [
-          1150,
-          8
-        ],
-        "animation_enabled": false,
-        "size": [
-          75,
-          75
-        ],
-        "glow": false,
-        "icon": "Hamburger",
-        "label": "menu_icon",
-        "color": [
-          255,
-          255,
-          255,
-          255
-        ],
+        "data": {
+          "ip": "",
+          "clock": "",
+          "cooking": false
+        },
         "button_list": [
           "menu_main"
         ],
         "button_value": [],
-        "data": {},
         "touch_areas": []
       },
       {
-        "name": "timer",
-        "type": "timer",
+        "name": "probe_card_0",
+        "type": "probe_card",
         "position": [
-          40,
-          570
+          18,
+          74
         ],
         "animation_enabled": false,
         "size": [
-          300,
-          150
+          298,
+          116
         ],
         "glow": false,
-        "label": "Timer",
-        "fg_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "bg_color": [
-          0,
-          0,
-          0,
-          100
-        ],
-        "button_list": [],
-        "button_value": [],
         "data": {
-          "seconds": 0
+          "name": "",
+          "temp": 0,
+          "target": 0
         },
-        "touch_areas": []
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "units": "F"
       },
       {
-        "name": "lid_indicator",
-        "type": "alert",
+        "name": "probe_card_1",
+        "type": "probe_card",
         "position": [
-          940,
-          570
+          18,
+          202
         ],
         "animation_enabled": false,
         "size": [
-          300,
-          150
+          298,
+          116
         ],
         "glow": false,
-        "label": "Lid Open Detected",
-        "active": false,
-        "fg_color": [
-          0,
-          200,
-          0,
-          255
+        "data": {
+          "name": "",
+          "temp": 0,
+          "target": 0
+        },
+        "button_list": [
+          "input_notify"
         ],
-        "bg_color": [
-          0,
+        "button_value": [],
+        "touch_areas": [],
+        "units": "F"
+      },
+      {
+        "name": "probe_card_2",
+        "type": "probe_card",
+        "position": [
+          18,
+          330
+        ],
+        "animation_enabled": false,
+        "size": [
+          298,
+          116
+        ],
+        "glow": false,
+        "data": {
+          "name": "",
+          "temp": 0,
+          "target": 0
+        },
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "units": "F"
+      },
+      {
+        "name": "probe_card_3",
+        "type": "probe_card",
+        "position": [
+          18,
+          458
+        ],
+        "animation_enabled": false,
+        "size": [
+          298,
+          116
+        ],
+        "glow": false,
+        "data": {
+          "name": "",
+          "temp": 0,
+          "target": 0
+        },
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "units": "F"
+      },
+      {
+        "name": "probe_card_4",
+        "type": "probe_card",
+        "position": [
+          18,
+          586
+        ],
+        "animation_enabled": false,
+        "size": [
+          298,
+          116
+        ],
+        "glow": false,
+        "data": {
+          "name": "",
+          "temp": 0,
+          "target": 0
+        },
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "units": "F"
+      },
+      {
+        "name": "primary_gauge",
+        "type": "gauge_ember",
+        "position": [
+          332,
+          74
+        ],
+        "animation_enabled": true,
+        "size": [
+          614,
+          452
+        ],
+        "glow": true,
+        "data": {
+          "mode_label": ""
+        },
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "temps": [
           0,
           0,
           0
         ],
+        "max_temp": 600,
+        "units": "F",
+        "label": "Grill"
+      },
+      {
+        "name": "cook_time",
+        "type": "duty_pill",
+        "position": [
+          332,
+          538
+        ],
+        "animation_enabled": false,
+        "size": [
+          400,
+          52
+        ],
+        "glow": false,
+        "data": {
+          "label": "",
+          "value": "",
+          "highlight": false
+        },
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "lid_alert",
+        "type": "alert",
+        "position": [
+          736,
+          538
+        ],
+        "animation_enabled": false,
+        "size": [
+          210,
+          52
+        ],
+        "glow": false,
         "data": {
           "text": [
             "Lid Open",
@@ -596,178 +235,128 @@
         },
         "button_list": [],
         "button_value": [],
-        "touch_areas": []
+        "touch_areas": [],
+        "label": "Lid Open Detected",
+        "active": false,
+        "fg_color": [
+          255,
+          90,
+          77,
+          255
+        ],
+        "bg_color": [
+          26,
+          22,
+          17,
+          220
+        ]
       },
       {
-        "name": "lid_open_button",
-        "type": "button",
+        "name": "button_row",
+        "type": "button_row",
         "position": [
-          940,
-          0
+          332,
+          602
         ],
         "animation_enabled": false,
         "size": [
-          90,
-          90
+          614,
+          100
         ],
         "glow": false,
-        "label": "Lid Open Toggle",
-        "active": false,
-        "active_color": [
-          0,
-          200,
-          0,
-          255
+        "data": {},
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": [],
+        "button_type": [],
+        "button_active": ""
+      },
+      {
+        "name": "system_card",
+        "type": "system_card",
+        "position": [
+          962,
+          74
         ],
-        "inactive_color": [
-          255,
-          255,
-          255,
-          200
+        "animation_enabled": true,
+        "size": [
+          300,
+          230
         ],
-        "font": "trebuc.ttf",
+        "glow": false,
         "data": {
-          "text": [
-            "Lid Open",
-            "Pause"
-          ],
-          "active_icon": "\uf52b",
-          "inactive_icon": "\uf52a",
-          "image": ""
+          "fan": false,
+          "auger": false,
+          "igniter": false
         },
         "button_list": [
-          "cmd_lid_open"
+          "cmd_fan_toggle",
+          "cmd_auger_toggle",
+          "cmd_igniter_toggle"
         ],
         "button_value": [],
         "touch_areas": []
       },
       {
-        "name": "p_mode",
-        "type": "p_mode_control",
+        "name": "duty_pill_left",
+        "type": "duty_pill",
         "position": [
-          940,
-          570
+          962,
+          318
+        ],
+        "animation_enabled": false,
+        "size": [
+          143,
+          64
+        ],
+        "glow": false,
+        "data": {
+          "label": "",
+          "value": "",
+          "highlight": false
+        },
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "duty_pill_right",
+        "type": "duty_pill",
+        "position": [
+          1119,
+          318
+        ],
+        "animation_enabled": false,
+        "size": [
+          143,
+          64
+        ],
+        "glow": false,
+        "data": {
+          "label": "",
+          "value": "",
+          "highlight": false
+        },
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "hopper_vertical",
+        "type": "hopper_vertical",
+        "position": [
+          962,
+          396
         ],
         "animation_enabled": false,
         "size": [
           300,
-          150
+          306
         ],
         "glow": false,
-        "label": "P-Mode",
-        "active": false,
-        "fg_color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "bg_color": [
-          0,
-          0,
-          0,
-          0
-        ],
         "data": {
-          "pmode": 0
-        },
-        "button_list": [
-          "menu_pmode"
-        ],
-        "button_value": [],
-        "touch_areas": []
-      },
-      {
-        "name": "smoke_plus",
-        "type": "splus_control",
-        "position": [
-          1045,
-          0
-        ],
-        "animation_enabled": false,
-        "size": [
-          90,
-          90
-        ],
-        "glow": false,
-        "label": "P-Mode",
-        "active": false,
-        "active_color": [
-          200,
-          0,
-          200,
-          225
-        ],
-        "inactive_color": [
-          255,
-          255,
-          255,
-          100
-        ],
-        "data": {},
-        "button_list": [
-          "cmd_splus"
-        ],
-        "touch_areas": [],
-        "button_value": [
-          "on"
-        ]
-      },
-      {
-        "name": "hopper",
-        "type": "hopper_status",
-        "position": [
-          910,
-          412
-        ],
-        "animation_enabled": false,
-        "size": [
-          330,
-          165
-        ],
-        "glow": false,
-        "label": "Hopper Level",
-        "active": false,
-        "color": [
-          255,
-          255,
-          255,
-          255
-        ],
-        "color_levels": [
-          [
-            225,
-            50,
-            50,
-            255
-          ],
-          [
-            225,
-            150,
-            50,
-            255
-          ],
-          [
-            225,
-            225,
-            50,
-            255
-          ],
-          [
-            50,
-            225,
-            50,
-            255
-          ],
-          [
-            255,
-            255,
-            255,
-            255
-          ]
-        ],
-        "data": {
-          "level": 100
+          "level": 0,
+          "enabled": true
         },
         "button_list": [
           "cmd_hopper_level"

@@ -55,6 +55,139 @@ def _scale_obj(obj, scale, xoff, yoff):
 		obj['size'] = [round(w * scale), round(h * scale)]
 
 
+def _flex_obj(name, obj_type, position, size, **extra):
+	"""Common FlexObject schema keys every dash object needs (see
+	display/flexobject.py::FlexObject and display/base_flex.py::_draw_objects,
+	both of which access 'animation_enabled'/'glow' directly)."""
+	obj = {
+		'name': name,
+		'type': obj_type,
+		'position': list(position),
+		'animation_enabled': False,
+		'size': list(size),
+		'glow': False,
+		'data': {},
+		'button_list': [],
+		'button_value': [],
+		'touch_areas': [],
+	}
+	obj.update(extra)
+	return obj
+
+
+def _dashboard_1280x720():
+	"""Bespoke ember-style profile_1.dash for the 1280x720 DSI display (Task 25),
+	built from the new flexobject types (Tasks 17-23) wired up by
+	display/base_flex.py (Task 24). Decoupled from the 800x480 scaler used by
+	every other resolution/profile.
+
+	Layout (see .superpowers/sdd/progress.md "pygame flexobject data
+	contracts" for the per-type data shapes):
+	  - header_bar spans the full width at the top.
+	  - Left column: 5 stacked probe_card_N food-probe cards.
+	  - Center column: the big gauge_ember primary gauge, a cook_time pill,
+	    a lid_alert, and the mode-dependent button_row.
+	  - Right column: system_card (fan/auger/igniter), two duty_pill status
+	    pills, and the hopper_vertical pellet-level card.
+
+	'cook_time' uses type 'duty_pill': base_flex._cook_time_data() feeds it
+	{'label': ..., 'value': ...} (see display/base_flex.py), which is exactly
+	the DutyPill data contract (data={label,value,highlight}, with
+	'highlight' defaulting to False when absent). The existing 'timer' type
+	(TimerStatus) does not fit - it reads data['seconds'] and only shows a
+	live countdown ("Ns"), so it can't render the pre-formatted mm:ss/H:MM:SS
+	elapsed-cook-time string cook_time also needs to display.
+	"""
+	dash = [
+		_flex_obj(
+			'header_bar',
+			'header_bar',
+			[0, 0],
+			[1280, 58],
+			data={'ip': '', 'clock': '', 'cooking': False},
+			button_list=['menu_main'],
+		)
+	]
+	probe_card_y = [74, 202, 330, 458, 586]
+	for index, y in enumerate(probe_card_y):
+		dash.append(
+			_flex_obj(
+				f'probe_card_{index}',
+				'probe_card',
+				[18, y],
+				[298, 116],
+				units='F',
+				data={'name': '', 'temp': 0, 'target': 0},
+				button_list=['input_notify'],
+			)
+		)
+	dash.append(
+		_flex_obj(
+			'primary_gauge',
+			'gauge_ember',
+			[332, 74],
+			[614, 452],
+			animation_enabled=True,
+			glow=True,
+			temps=[0, 0, 0],
+			max_temp=600,
+			units='F',
+			label='Grill',
+			data={'mode_label': ''},
+			button_list=['input_notify'],
+		)
+	)
+	dash.append(
+		_flex_obj('cook_time', 'duty_pill', [332, 538], [400, 52], data={'label': '', 'value': '', 'highlight': False})
+	)
+	dash.append(
+		_flex_obj(
+			'lid_alert',
+			'alert',
+			[736, 538],
+			[210, 52],
+			label='Lid Open Detected',
+			active=False,
+			fg_color=[255, 90, 77, 255],
+			bg_color=[26, 22, 17, 220],
+			data={'text': ['Lid Open', 'Detected']},
+		)
+	)
+	dash.append(_flex_obj('button_row', 'button_row', [332, 602], [614, 100], button_type=[], button_active=''))
+	dash.append(
+		_flex_obj(
+			'system_card',
+			'system_card',
+			[962, 74],
+			[300, 230],
+			animation_enabled=True,
+			data={'fan': False, 'auger': False, 'igniter': False},
+			button_list=['cmd_fan_toggle', 'cmd_auger_toggle', 'cmd_igniter_toggle'],
+		)
+	)
+	dash.append(
+		_flex_obj(
+			'duty_pill_left', 'duty_pill', [962, 318], [143, 64], data={'label': '', 'value': '', 'highlight': False}
+		)
+	)
+	dash.append(
+		_flex_obj(
+			'duty_pill_right', 'duty_pill', [1119, 318], [143, 64], data={'label': '', 'value': '', 'highlight': False}
+		)
+	)
+	dash.append(
+		_flex_obj(
+			'hopper_vertical',
+			'hopper_vertical',
+			[962, 396],
+			[300, 306],
+			data={'level': 0, 'enabled': True},
+			button_list=['cmd_hopper_level'],
+		)
+	)
+	return dash
+
+
 def build(width, height):
 	with open(SOURCE_PATH) as f:
 		src = json.load(f)
@@ -75,6 +208,14 @@ def build(width, height):
 		for section in ('menus', 'input'):
 			for obj in prof.get(section, {}).values():
 				_scale_obj(obj, scale, xoff, yoff)
+
+	if (width, height) == (1280, 720):
+		# Bespoke ember dashboard (Task 25) - decoupled from the 800x480 scaler.
+		# Only profile_1.dash and the dash background change; profile_2 and
+		# profile_1's home/menus/input stay the scaled 800x480-derived values.
+		data['profile_1']['dash'] = _dashboard_1280x720()
+		data['metadata']['dash_background'] = './static/img/display/background_ember_1280x720.png'
+
 	return data
 
 
