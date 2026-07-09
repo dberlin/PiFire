@@ -34,6 +34,7 @@ FlexObject_TypeMap = {
 	'system_card': 'SystemCard',
 	'duty_pill': 'DutyPill',
 	'hopper_vertical': 'HopperVertical',
+	'header_bar': 'HeaderBar',
 }
 
 """
@@ -2371,3 +2372,158 @@ class HopperVertical(FlexObject):
 		canvas.paste(card, (0, 0), card)
 
 		return canvas
+
+
+class HeaderBar(FlexObject):
+	"""Top header bar: live dot, PiFire wordmark, CONTROLLER label, IP address,
+	clock and a hamburger menu button. The hamburger button is the only touch
+	target on the bar - the rest of the header does not open the menu."""
+
+	WORKING_SIZE = (1280, 58)
+	PADDING = 22
+	HAMBURGER_SIZE = 44
+
+	def __init__(self, objectType, objectData, background):
+		super().__init__(objectType, objectData, background)
+
+	def _draw_letterspaced_text(self, text, font_name, font_size, color, spacing):
+		"""Draws text with extra spacing between glyphs, bottom-aligned per glyph."""
+		space_width = max(4, round(font_size * 0.35))
+		parts = []
+		for char in text:
+			if char == ' ':
+				parts.append(('space', space_width))
+			else:
+				parts.append(('glyph', self._draw_text(char, font_name, font_size, color)))
+
+		max_height = max((glyph.size[1] for kind, glyph in parts if kind == 'glyph'), default=0)
+		total_width = sum((glyph.size[0] if kind == 'glyph' else glyph) for kind, glyph in parts) + spacing * max(
+			0, len(parts) - 1
+		)
+
+		if total_width <= 0 or max_height <= 0:
+			return Image.new('RGBA', (1, 1))
+
+		canvas = Image.new('RGBA', (total_width, max_height))
+		x = 0
+		for index, (kind, glyph) in enumerate(parts):
+			if kind == 'glyph':
+				canvas.paste(glyph, (x, max_height - glyph.size[1]), glyph)
+				x += glyph.size[0]
+			else:
+				x += glyph
+			if index < len(parts) - 1:
+				x += spacing
+		return canvas
+
+	def _hamburger_rect_working(self):
+		"""Returns (left, top, width, height) of the hamburger button in working-canvas coords."""
+		box_size = self.HAMBURGER_SIZE
+		left = self.WORKING_SIZE[0] - self.PADDING - box_size
+		top = (self.WORKING_SIZE[1] - box_size) // 2
+		return (left, top, box_size, box_size)
+
+	def _draw_object(self):
+		output_size = self.objectData['size']
+		size = self.WORKING_SIZE  # Working Canvas Size
+
+		accent = self.objectData.get('accent', resolve_accent('Ember'))
+		data = self.objectData.get('data', {})
+		ip_address = str(data.get('ip', ''))
+		clock_text = str(data.get('clock', ''))
+		cooking = bool(data.get('cooking', False))
+
+		light_color = (244, 237, 226, 255)  # #f4ede2
+		dim_color = (125, 114, 100, 255)  # #7d7264
+		ip_color = (138, 127, 112, 255)  # #8a7f70
+		clock_color = (207, 198, 184, 255)  # #cfc6b8
+		hairline_color = (255, 255, 255, 15)  # rgba(255,255,255,0.06)
+		separator_color = (255, 255, 255, 20)  # rgba(255,255,255,0.08)
+		live_active = (94, 201, 111, 255)  # #5ec96f
+		live_idle = (125, 114, 100, 255)  # #7d7264
+		hamburger_fill = (29, 24, 19, 255)  # #1d1813
+		hamburger_bar_color = (207, 198, 184, 255)  # #cfc6b8
+
+		card = Image.new('RGBA', size)
+		draw = ImageDraw.Draw(card)
+
+		# Bottom hairline
+		draw.line([(0, size[1] - 1), (size[0], size[1] - 1)], fill=hairline_color, width=1)
+
+		# --- Left cluster: live dot + wordmark + CONTROLLER label ---
+		x = self.PADDING
+		dot_diameter = 12
+		dot_top = (size[1] - dot_diameter) // 2
+		dot_color = live_active if cooking else live_idle
+		draw.ellipse((x, dot_top, x + dot_diameter, dot_top + dot_diameter), fill=dot_color)
+		x += dot_diameter + 12
+
+		pi_label = self._draw_text('Pi', './static/font/Barlow-SemiBold.ttf', 20, light_color)
+		fire_label = self._draw_text('Fire', './static/font/Barlow-SemiBold.ttf', 20, accent['accent'])
+		wordmark_height = max(pi_label.size[1], fire_label.size[1])
+		wordmark_y = (size[1] - wordmark_height) // 2
+		card.paste(pi_label, (x, wordmark_y), pi_label)
+		x += pi_label.size[0]
+		card.paste(fire_label, (x, wordmark_y), fire_label)
+		x += fire_label.size[0]
+
+		x += 12
+		separator_top = (size[1] // 2) - 7
+		separator_bottom = (size[1] // 2) + 7
+		draw.line([(x, separator_top), (x, separator_bottom)], fill=separator_color, width=1)
+		x += 1 + 10
+
+		controller_label = self._draw_letterspaced_text(
+			'CONTROLLER', './static/font/Barlow-SemiBold.ttf', 12, dim_color, spacing=2
+		)
+		controller_y = (size[1] - controller_label.size[1]) // 2
+		card.paste(controller_label, (x, controller_y), controller_label)
+
+		# --- Right cluster: IP, clock, hamburger button ---
+		hamburger_left, hamburger_top, hamburger_size, _ = self._hamburger_rect_working()
+		draw.rounded_rectangle(
+			(hamburger_left, hamburger_top, hamburger_left + hamburger_size, hamburger_top + hamburger_size),
+			radius=12,
+			fill=hamburger_fill,
+			outline=separator_color,
+			width=1,
+		)
+		bar_width = 20
+		bar_height = 2
+		bar_gap = 4
+		bars_total_height = (bar_height * 3) + (bar_gap * 2)
+		bars_top = hamburger_top + (hamburger_size - bars_total_height) // 2
+		bar_x = hamburger_left + (hamburger_size - bar_width) // 2
+		for bar_index in range(3):
+			bar_y = bars_top + bar_index * (bar_height + bar_gap)
+			draw.rounded_rectangle(
+				(bar_x, bar_y, bar_x + bar_width, bar_y + bar_height), radius=1, fill=hamburger_bar_color
+			)
+
+		clock_label = self._draw_text(clock_text, './static/font/BarlowSemiCondensed-SemiBold.ttf', 22, clock_color)
+		clock_right = hamburger_left - 18
+		clock_x = clock_right - clock_label.size[0]
+		clock_y = (size[1] - clock_label.size[1]) // 2
+		card.paste(clock_label, (clock_x, clock_y), clock_label)
+
+		ip_label = self._draw_text(ip_address, './static/font/Barlow-SemiBold.ttf', 13, ip_color)
+		ip_right = clock_x - 18
+		ip_x = ip_right - ip_label.size[0]
+		ip_y = (size[1] - ip_label.size[1]) // 2
+		card.paste(ip_label, (ip_x, ip_y), ip_label)
+
+		# Resize to configured output size
+		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
+		card = card.resize(output_size)
+		canvas.paste(card, (0, 0), card)
+
+		return canvas
+
+	def _define_touch_areas(self):
+		"""Restricts the touch area to the hamburger button only, so the rest of
+		the header bar is not a menu tap target."""
+		hamburger_rect = self._hamburger_rect_working()
+		output_size = self.objectData['size']
+		scaled_rect = self._scale_touch_area(hamburger_rect, self.WORKING_SIZE, output_size)
+		translated_rect = self._transform_touch_area(scaled_rect, self.objectData['position'])
+		self.objectData['touch_areas'] = [Rect(translated_rect)]
