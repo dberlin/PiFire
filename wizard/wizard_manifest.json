@@ -493,7 +493,7 @@
           },
           "device_distance_i2c_bus_kind": {
             "friendly_name": "Distance Sensor I2C Bus Type",
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
             "options": {
               "basic": "Basic (integrated I2C bus)",
               "extended": "Extended (numbered / bridge bus)"
@@ -526,7 +526,7 @@
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
-            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "description": "I2C address of the VL53L0X/VL53L4CD/VL53L1X distance sensor. All default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
             "options": {
               "0x29": "0x29 (default)",
               "0x2a": "0x2A",
@@ -831,7 +831,7 @@
           },
           "device_distance_i2c_bus_kind": {
             "friendly_name": "Distance Sensor I2C Bus Type",
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
             "options": {
               "basic": "Basic (integrated I2C bus)",
               "extended": "Extended (numbered / bridge bus)"
@@ -864,7 +864,7 @@
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
-            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "description": "I2C address of the VL53L0X/VL53L4CD/VL53L1X distance sensor. All default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
             "options": {
               "0x29": "0x29 (default)",
               "0x2a": "0x2A",
@@ -1115,7 +1115,7 @@
           },
           "device_distance_i2c_bus_kind": {
             "friendly_name": "Distance Sensor I2C Bus Type",
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
             "options": {
               "basic": "Basic (integrated I2C bus)",
               "extended": "Extended (numbered / bridge bus)"
@@ -1148,7 +1148,7 @@
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
-            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "description": "I2C address of the VL53L0X/VL53L4CD/VL53L1X distance sensor. All default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
             "options": {
               "0x29": "0x29 (default)",
               "0x2a": "0x2A",
@@ -1363,7 +1363,7 @@
           },
           "device_distance_i2c_bus_kind": {
             "friendly_name": "Distance Sensor I2C Bus Type",
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
             "options": {
               "basic": "Basic (integrated I2C bus)",
               "extended": "Extended (numbered / bridge bus)"
@@ -1396,7 +1396,7 @@
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
-            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "description": "I2C address of the VL53L0X/VL53L4CD/VL53L1X distance sensor. All default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
             "options": {
               "0x29": "0x29 (default)",
               "0x2a": "0x2A",
@@ -1609,7 +1609,7 @@
           },
           "device_distance_i2c_bus_kind": {
             "friendly_name": "Distance Sensor I2C Bus Type",
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
             "options": {
               "basic": "Basic (integrated I2C bus)",
               "extended": "Extended (numbered / bridge bus)"
@@ -1642,7 +1642,7 @@
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
-            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "description": "I2C address of the VL53L0X/VL53L4CD/VL53L1X distance sensor. All default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
             "options": {
               "0x29": "0x29 (default)",
               "0x2a": "0x2A",
@@ -1796,7 +1796,7 @@
           },
           "device_distance_i2c_bus_kind": {
             "friendly_name": "Distance Sensor I2C Bus Type",
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD); ignored by the HCSR04.",
+            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
             "options": {
               "basic": "Basic (integrated I2C bus)",
               "extended": "Extended (numbered / bridge bus)"
@@ -1829,7 +1829,7 @@
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
-            "description": "I2C address of the VL53L0X/VL53L4CD distance sensor. Both default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
+            "description": "I2C address of the VL53L0X/VL53L4CD/VL53L1X distance sensor. All default to 0x29; only change this if the sensor's address has been reassigned externally (e.g. via XSHUT-based remapping for multi-sensor setups).",
             "options": {
               "0x29": "0x29 (default)",
               "0x2a": "0x2A",
@@ -4663,6 +4663,18 @@
         "image": "vl53l4cd.png",
         "reboot_required": false,
         "py_dependencies": ["adafruit-circuitpython-vl53l4cd"],
+        "apt_dependencies": [],
+        "command_list": [],
+        "settings_dependencies": {}
+      },
+      "vl53l1x": {
+        "friendly_name": "VL53L1X Time of Flight Distance Sensor",
+        "filename": "vl53l1x",
+        "description": "The VL53L1X is a longer-range Time-of-Flight (ToF) laser-ranging module (up to ~4m) via Adafruit's CircuitPython library, a good option for taller hoppers than the VL53L0X/VL53L4CD can reach.",
+        "default": false,
+        "image": "vl53l1x.png",
+        "reboot_required": false,
+        "py_dependencies": ["adafruit-circuitpython-vl53l1x"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {}

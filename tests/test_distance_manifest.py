@@ -24,6 +24,15 @@ def test_vl53l4cd_entry_present():
 	assert entry['image'] == 'vl53l4cd.png'
 
 
+def test_vl53l1x_entry_present():
+	manifest = _manifest()
+	entry = manifest['modules']['distance']['vl53l1x']
+	assert entry['filename'] == 'vl53l1x'
+	assert entry['py_dependencies'] == ['adafruit-circuitpython-vl53l1x']
+	assert entry['apt_dependencies'] == []
+	assert entry['image'] == 'vl53l1x.png'
+
+
 def test_all_platforms_have_distance_i2c_fields():
 	manifest = _manifest()
 	platforms = manifest['modules']['grillplatform']

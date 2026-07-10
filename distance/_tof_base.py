@@ -5,8 +5,8 @@
 # *****************************************
 #
 # Description: Shared threading / hopper-percentage-calculation / I2C-bus
-#   resolution logic for the VL53L0X and VL53L4CD time-of-flight distance
-#   sensors. Each sensor module subclasses ToFHopperLevel and implements
+#   resolution logic for the VL53L0X, VL53L4CD and VL53L1X time-of-flight
+#   distance sensors. Each sensor module subclasses ToFHopperLevel and implements
 #   _open_sensor, _read_distance_mm, and (optionally) _close_sensor.
 #
 # *****************************************

@@ -47,7 +47,7 @@ Just as with the PiSmoker project, I had a few goals in mind.  I also wanted to 
 * Save temperature history for all probes / set points to a cook file that can be updated with images, notes, and even downloaded to your devices.
 * Wood Pellet Tracking Manager - Now includes estimates of pellet usage.
 * Pellet Level Sensor Support
-	* VL53L0X or VL53L4CD Time of Flight Sensor (recommended) - installed via Adafruit's CircuitPython libraries
+	* VL53L0X, VL53L4CD, or VL53L1X Time of Flight Sensor (recommended) - installed via Adafruit's CircuitPython libraries
 	* HCSR04 Ultrasonic Sensor
 * Socket IO for Android Application Support _(GitHub User [@weberbox](https://github.com/weberbox) has made a Android client app under development here: [https://github.com/weberbox/PiFire-Android](https://github.com/weberbox/PiFire-Android))_ 
 * Recipes / Recipe Mode - Integrated recipe creation and a new mode for developing a recipe 'program' that will control the grill for you and follow the recipe that was programmed.  
