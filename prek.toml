@@ -1,0 +1,8 @@
+[[repos]]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.15.20" # Ruff version.
+hooks = [
+
+  # Run the formatter.
+  { id = "ruff-format", types_or = ["python", "pyi"] },
+]
