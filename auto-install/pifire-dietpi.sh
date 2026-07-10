@@ -5,11 +5,11 @@
 # !WARNING! This script is experimental! Use at your own risk.
 #
 # Many thanks to the PiVPN project (pivpn.io) for much of the inspiration for this script
-# Run from https://raw.githubusercontent.com/nebhead/pifire/master/auto-install/pifire-dietpi.sh
+# Run from https://raw.githubusercontent.com/dberlin/pifire/massive-reworks-and-new-ui/auto-install/pifire-dietpi.sh
 #
 # Install with this command (from your Pi):
 #
-# curl https://raw.githubusercontent.com/nebhead/pifire/main/auto-install/pifire-dietpi.sh | bash
+# curl https://raw.githubusercontent.com/dberlin/pifire/massive-reworks-and-new-ui/auto-install/pifire-dietpi.sh | bash
 #
 # Pre-Requisites: 
 #       Do not run as ROOT (or with SUDO)
@@ -136,13 +136,13 @@ cd /usr/local/bin
 
 # Check if -dev option is used
 if [ "$1" = "-dev" ]; then
-    echo " + Cloning development branch..." | tee -a ~/logs/pifire_install.log
+    echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log
     # Replace the below command to fetch development branch
-    $SUDO git clone --depth 1 --branch development https://github.com/nebhead/pifire 2>&1 | tee -a ~/logs/pifire_install.log
+    $SUDO git clone --depth 1 --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a ~/logs/pifire_install.log
 else
-    echo " + Cloning main branch..." | tee -a ~/logs/pifire_install.log 2>&1 | tee -a ~/logs/pifire_install.log
+    echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log 2>&1 | tee -a ~/logs/pifire_install.log
     # Use a shallow clone to reduce download size
-    $SUDO git clone --depth 1 https://github.com/nebhead/pifire
+    $SUDO git clone --depth 1 --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire
 fi
 
 # Setup Python VENV & Install Python dependencies

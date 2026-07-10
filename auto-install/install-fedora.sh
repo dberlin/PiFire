@@ -16,7 +16,7 @@
 #     best-effort since they are not in the Fedora repos
 #
 # Install with this command (from your Fedora machine):
-#   curl https://raw.githubusercontent.com/nebhead/pifire/main/auto-install/install-fedora.sh | bash
+#   curl https://raw.githubusercontent.com/dberlin/pifire/massive-reworks-and-new-ui/auto-install/install-fedora.sh | bash
 #
 # Usage:
 #   ./install-fedora.sh [-dev]
@@ -157,11 +157,11 @@ cd /usr/local/bin
 if [[ -d /usr/local/bin/pifire ]]; then
     log " ! /usr/local/bin/pifire already exists; leaving it in place."
 elif [[ "$DEV_REPO" == "true" ]]; then
-    log " + Cloning development branch..."
-    $SUDO git clone --depth 1 --branch development https://github.com/nebhead/pifire 2>&1 | tee -a "$LOG"
+    log " + Cloning massive-reworks-and-new-ui branch..."
+    $SUDO git clone --depth 1 --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a "$LOG"
 else
-    log " + Cloning main branch..."
-    $SUDO git clone --depth 1 https://github.com/nebhead/pifire 2>&1 | tee -a "$LOG"
+    log " + Cloning massive-reworks-and-new-ui branch..."
+    $SUDO git clone --depth 1 --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a "$LOG"
 fi
 
 # --- pifire group / ownership / sudoers -----------------------------------

@@ -5,7 +5,7 @@
 #
 # Install with this command (from your Pi):
 #
-# curl https://raw.githubusercontent.com/nebhead/pifire/main/auto-install/install.sh | bash
+# curl https://raw.githubusercontent.com/dberlin/pifire/massive-reworks-and-new-ui/auto-install/install.sh | bash
 #
 # NOTE: Pre-Requisites to run Raspi-Config first.  See README.md.
 # 
@@ -19,7 +19,7 @@
 #          This is useful for testing new features or bug fixes that are not yet in the main branch.
 #          If this option is not used, the main branch will be installed by default.
 #          Note: This option is ignored if -dev is also used.
-#          Example usage: curl https://raw.githubusercontent.com/nebhead/pifire/development/auto-install/install.sh | bash -s -- -devrepo
+#          Example usage: curl https://raw.githubusercontent.com/dberlin/pifire/massive-reworks-and-new-ui/auto-install/install.sh | bash -s -- -devrepo
 # -venv: Use this option to force vanilla venv install
 # -uv:   Use this option to force the use of UV 
 
@@ -54,7 +54,7 @@ if [[ $DEV_INSTALLER == "true" ]]; then
         fi
     done
     echo " + Passing through arguments to development branch installer: ${passthrough_args[*]}" | tee -a ~/logs/pifire_install.log
-    curl -SL https://raw.githubusercontent.com/nebhead/pifire/development/auto-install/install.sh | bash -s -- -devrepo "${passthrough_args[@]}"
+    curl -SL https://raw.githubusercontent.com/dberlin/pifire/massive-reworks-and-new-ui/auto-install/install.sh | bash -s -- -devrepo "${passthrough_args[@]}"
     exit 0
 elif [[ $DEV_REPO == "true" ]]; then
     echo " + Running installation script from development branch based on version $INSTALL_SCRIPT_VERSION..." | tee -a ~/logs/pifire_install.log
@@ -227,13 +227,13 @@ cd /usr/local/bin
 
 # Check if -devrepo option is used
 if [[ $DEV_REPO == "true" ]]; then
-    echo " + Cloning development branch..." | tee -a ~/logs/pifire_install.log
+    echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log
     # Replace the below command to fetch development branch
-    $SUDO git clone --depth 1 --branch development https://github.com/nebhead/pifire 2>&1 | tee -a ~/logs/pifire_install.log
+    $SUDO git clone --depth 1 --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a ~/logs/pifire_install.log
 else
-    echo " + Cloning main branch..." | tee -a ~/logs/pifire_install.log 2>&1 | tee -a ~/logs/pifire_install.log
+    echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log 2>&1 | tee -a ~/logs/pifire_install.log
     # Use a shallow clone to reduce download size
-    $SUDO git clone --depth 1 https://github.com/nebhead/pifire
+    $SUDO git clone --depth 1 --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire
 fi
 
 # Setup Python VENV & Install Python dependencies
