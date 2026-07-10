@@ -17,6 +17,71 @@
  Provides the do-mpc model used by the controller and a Kalman filter over the
  same augmented linear model used as the state/disturbance estimator.
 
+ -----------------------------------------------------------------------------
+ Continuous-time dynamics (temperatures in degrees C, time in seconds)
+
+     dT_f/dt = (K_Q * heat_in - h_fc * (T_f - T_c)) / C_f
+     dT_c/dt = (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb)
+                - sigma * ((T_c+273.15)^4 - (T_amb+273.15)^4) + d) / C_c
+     dd/dt   = 0                                 (integrating disturbance)
+
+ where heat_in = Q when n_delay == 0, else the tail of the transport-lag chain.
+
+ -----------------------------------------------------------------------------
+ Physical / model parameters (shared by the builder and all three estimators)
+
+   C_f     Firepot thermal capacitance. Sets the firepot time constant: how
+           much heat it takes to move T_f. Small C_f -> fast, twitchy firepot.
+           (calibrated, ~O(10); loosely W*s per degree C in the abstract-Q frame)
+   C_c     Chamber thermal capacitance. The big lumped mass the meat sees;
+           sets how sluggishly chamber temperature responds.  (~O(300))
+   h_fc    Firepot<->chamber conductance. Couples the two masses: how fast heat
+           flows from the hot firepot into the chamber air.  (W per degree C)
+   h_amb   Chamber->ambient conductance. The (linear) heat-loss term to the
+           outside world -- larger h_amb means more heat leaks out per degree
+           of chamber-over-ambient, so the grill needs more fuel to hold temp.
+           This is the dominant driver of steady-state fuel demand.  (W per degree C)
+   T_amb   Ambient (outside-air) temperature in degrees C. Sets the loss
+           reference: chamber loses heat proportional to (T_c - T_amb), so a
+           cold day raises fuel demand. Also seeds the estimator's initial
+           T_f/T_c guess.
+   sigma   Radiative-loss coefficient (Stefan-Boltzmann-like) on the chamber.
+           Adds a (T_c^4 - T_amb^4) loss that only matters at high temp, where
+           it captures the extra fuel needed at searing temps that a purely
+           linear h_amb underpredicts. sigma == 0 -> purely linear model (and
+           GreyBoxEKF then reduces exactly to GreyBoxKF).
+   K_Q     Firing-rate heat gain: maps the abstract scalar firing rate Q into
+           actual heat into the firepot, calibrated to this grill's power. Q and
+           K_Q are redundant with C_f for the steady gain, so fits pin C_f and
+           tune K_Q (see update_mpc.py).
+   theta   Mean input transport deadtime in seconds (feed -> combustion ->
+           sensor). Only used when n_delay > 0.
+   n_delay Number of first-order lag states approximating that deadtime as an
+           Erlang chain (each lag has time constant theta / n_delay). 0 disables
+           deadtime modeling; larger n_delay -> sharper (more plug-flow) delay.
+
+ Estimator (Kalman / EKF) tuning parameters
+
+   t_step  Real interval in seconds between update() calls (the control period).
+           The discretization is matched to this cadence, so changing the
+           control rate keeps the estimator consistent.
+   q_temp  Process-noise variance on the temperature/lag states. Higher ->
+           trust the model less, track the measurement faster (noisier).
+   q_dist  Process-noise variance on the disturbance state d. Deliberately
+           small: a fast d chases unmeasured noise; a slow d gives clean
+           offset-free bias correction.
+   r_meas  Measurement-noise variance on the chamber-temp sensor. Higher ->
+           smooth harder, trust each reading less.
+   x0      Optional initial state vector; defaults to [0..0, T_amb, T_amb, 0].
+
+ MHE-only tuning parameters (moving-horizon estimator)
+
+   mhe_horizon   Number of past steps in the estimation window.
+   pw_state / pw_dist   Process-noise weights (inverse-variance) for the state
+                        and disturbance in the MHE objective.
+   px_state / px_dist   Arrival-cost (prior) weights on the state and
+                        disturbance at the start of the horizon.
+
 *****************************************
 """
 
@@ -37,6 +102,13 @@ def _rad_loss(T_c, T_amb, sigma):
 
 
 def build_do_mpc_model(*, C_f, C_c, h_fc, h_amb, T_amb, theta=0.0, n_delay=0, K_Q=1.0, sigma=0.0):
+	"""Build the do-mpc continuous model of the augmented grey-box plant.
+
+	Parameters are the physical/model parameters documented in the module
+	docstring: capacitances C_f/C_c, conductances h_fc/h_amb, ambient T_amb,
+	firing-rate gain K_Q, radiative coefficient sigma, and the optional
+	transport-delay pair (theta mean deadtime, n_delay lag states).
+	"""
 	import do_mpc
 
 	model = do_mpc.model.Model('continuous')
@@ -69,6 +141,9 @@ class GreyBoxKF:
 	enters as an affine input (held at 1). `t_step` is the real interval between
 	update() calls (i.e. the control period) - the discretization matches the
 	cadence so faster control re-solves are estimated correctly.
+
+	See the module docstring for the meaning of every constructor parameter
+	(C_f, C_c, h_fc, h_amb, T_amb, ... and the q_temp/q_dist/r_meas tuning).
 	"""
 
 	def __init__(
@@ -140,6 +215,9 @@ class GreyBoxEKF:
 	like the MHE but ~us/step (one small expm) instead of an NLP solve. Same
 	integrating-disturbance state d gives offset-free tracking, and the same
 	update(Q_applied, y) interface as GreyBoxKF / GreyBoxMHE.
+
+	See the module docstring for the meaning of every constructor parameter
+	(the physical C_f/C_c/h_fc/h_amb/T_amb/sigma set plus q_temp/q_dist/r_meas).
 	"""
 
 	def __init__(
@@ -235,6 +313,10 @@ class GreyBoxMHE:
 	offset-free tracking. Required for the nonlinear (radiative) model, where a
 	linear Kalman filter does not apply. Same update(Q_applied, y) interface as
 	GreyBoxKF.
+
+	See the module docstring for the meaning of every constructor parameter: the
+	physical set (C_f/C_c/h_fc/h_amb/T_amb/sigma/K_Q/theta/n_delay) plus the
+	MHE-only tuning (mhe_horizon, pw_state/pw_dist, px_state/px_dist, r_meas).
 	"""
 
 	def __init__(
