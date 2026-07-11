@@ -59,6 +59,33 @@ def test_transaction_rolls_back_on_error(ds):
 	assert ds.connection().execute("SELECT COUNT(*) FROM kv WHERE key='a'").fetchone()[0] == 0
 
 
+def test_schema_lazy_without_init(tmp_path):
+	"""Regression test: accessors must work on a fresh DB even without calling
+	init() first, matching Valkey's always-available semantics."""
+	datastore._reset_for_tests(str(tmp_path / 'fresh.db'))
+	try:
+		datastore.set_blob('k', '{"a":1}')
+		assert datastore.get_blob('k') == '{"a":1}'
+
+		names = {r[0] for r in datastore.connection().execute("SELECT name FROM sqlite_master WHERE type='table'")}
+		for t in [
+			'kv',
+			'history',
+			'metrics',
+			'logs',
+			'queue_control_write',
+			'queue_systemq',
+			'queue_systemo',
+			'queue_displayq',
+			'queue_autotune',
+			'list_warnings',
+			'list_users_connected',
+		]:
+			assert t in names, t
+	finally:
+		datastore._reset_for_tests(None)
+
+
 def test_reset_for_tests_restores_db_path_on_none(tmp_path):
 	"""Regression test: _reset_for_tests(None) restores original DB_PATH."""
 	original_db_path = datastore.DB_PATH

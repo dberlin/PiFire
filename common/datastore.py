@@ -59,6 +59,12 @@ def _queue_ddl():
 	return '\n'.join(ddl)
 
 
+def _ensure_schema(conn):
+	conn.executescript(SCHEMA + _queue_ddl())
+	if conn.execute('PRAGMA user_version').fetchone()[0] == 0:
+		conn.execute('PRAGMA user_version=1')
+
+
 def connection():
 	conn = getattr(_local, 'conn', None)
 	if conn is None:
@@ -68,6 +74,7 @@ def connection():
 		conn.execute('PRAGMA busy_timeout=5000')
 		conn.execute('PRAGMA foreign_keys=ON')
 		conn.isolation_level = None  # autocommit; we manage txns explicitly
+		_ensure_schema(conn)
 		_local.conn = conn
 	return conn
 
@@ -106,10 +113,7 @@ class transaction:
 
 
 def init():
-	conn = connection()
-	conn.executescript(SCHEMA + _queue_ddl())
-	if conn.execute('PRAGMA user_version').fetchone()[0] == 0:
-		conn.execute('PRAGMA user_version=1')
+	connection()
 	_first_boot_import()  # filled in Task 13
 
 
