@@ -13,6 +13,32 @@ _ORIGINAL_DB_PATH = DB_PATH
 
 _local = threading.local()
 
+# history table DDL (schema v4). `{name}` is templated so the pre-v4
+# migration below can rebuild it under a temporary name (history_new) with an
+# identical schema before swapping it in, preserving existing rows.
+#
+# psp (primary setpoint) uses NUMERIC affinity rather than REAL: SQLite's
+# NUMERIC affinity stores an integer literal as INTEGER and a real literal as
+# REAL, so ints round-trip as ints instead of being coerced to floats.
+# primary_setpoint is always written as an int (e.g. 225); REAL affinity
+# would silently coerce it to a float (225.0) on round-trip.
+_HISTORY_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS {name} (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             INTEGER NOT NULL,
+    psp            NUMERIC,
+    primary_temps  TEXT NOT NULL CHECK(json_valid(primary_temps)),
+    food_temps     TEXT NOT NULL CHECK(json_valid(food_temps)),
+    aux_temps      TEXT NOT NULL CHECK(json_valid(aux_temps)),
+    notify_targets TEXT NOT NULL CHECK(json_valid(notify_targets)),
+    ext_data       TEXT CHECK(ext_data IS NULL OR json_valid(ext_data))
+);
+"""
+
+_HISTORY_INDEX_DDL = 'CREATE INDEX IF NOT EXISTS ix_history_ts ON history(ts);\n'
+
+_HISTORY_DDL = _HISTORY_TABLE_DDL.format(name='history') + _HISTORY_INDEX_DDL
+
 # Columnar metrics schema (schema v3). Columns mirror common.metrics_items in
 # order; `seq` is a surrogate PK so it doesn't clash with the metrics 'id'
 # field (a uuid string). Defined separately so the v1->v3 migration below can
@@ -58,18 +84,8 @@ CREATE TABLE IF NOT EXISTS kv (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL CHECK(json_valid(value))
 );
-CREATE TABLE IF NOT EXISTS history (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts             INTEGER NOT NULL,
-    psp            REAL,
-    primary_temps  TEXT NOT NULL CHECK(json_valid(primary_temps)),
-    food_temps     TEXT NOT NULL CHECK(json_valid(food_temps)),
-    aux_temps      TEXT NOT NULL CHECK(json_valid(aux_temps)),
-    notify_targets TEXT NOT NULL CHECK(json_valid(notify_targets)),
-    ext_data       TEXT CHECK(ext_data IS NULL OR json_valid(ext_data))
-);
-CREATE INDEX IF NOT EXISTS ix_history_ts ON history(ts);
 """
+	+ _HISTORY_DDL
 	+ _METRICS_DDL
 	+ """
 CREATE TABLE IF NOT EXISTS logs (
@@ -100,6 +116,22 @@ def _queue_ddl():
 	return '\n'.join(ddl)
 
 
+def _migrate_history_to_numeric_psp(conn):
+	"""Rebuild `history` in place with NUMERIC-affinity psp, preserving rows.
+	Unlike metrics (transient, per-cook), history is durable, so this cannot
+	drop-and-recreate: it builds a shadow table with the corrected schema,
+	copies every row across (which normalizes any REAL-coerced values like
+	225.0 back to 225 on re-insert through the NUMERIC column), then swaps it
+	in for the original."""
+	conn.executescript(_HISTORY_TABLE_DDL.format(name='history_new'))
+	conn.execute(
+		'INSERT INTO history_new (id, ts, psp, primary_temps, food_temps, aux_temps, notify_targets, ext_data) '
+		'SELECT id, ts, psp, primary_temps, food_temps, aux_temps, notify_targets, ext_data FROM history'
+	)
+	conn.executescript('DROP TABLE history;\nALTER TABLE history_new RENAME TO history;')
+	conn.execute(_HISTORY_INDEX_DDL)
+
+
 def _ensure_schema(conn):
 	conn.executescript(SCHEMA + _queue_ddl())
 	version = conn.execute('PRAGMA user_version').fetchone()[0]
@@ -112,8 +144,13 @@ def _ensure_schema(conn):
 		# Metrics are per-cook/transient, so dropping in-progress metrics on
 		# this one-time upgrade is acceptable.
 		conn.executescript('DROP TABLE IF EXISTS metrics;' + _METRICS_DDL)
-	if version < 3:
-		conn.execute('PRAGMA user_version=3')
+	if 0 < version < 4:
+		# Pre-v4 DB: history.psp used REAL affinity, coercing integer
+		# primary_setpoint values (e.g. 225) to floats (225.0) on round-trip.
+		# history is durable, so rebuild-and-swap instead of drop+recreate.
+		_migrate_history_to_numeric_psp(conn)
+	if version < 4:
+		conn.execute('PRAGMA user_version=4')
 
 
 def connection():

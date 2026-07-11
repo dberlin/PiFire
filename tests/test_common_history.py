@@ -43,3 +43,14 @@ def test_history_ext_data_roundtrip(ds):
 	c.write_history(d, ext_data=True)
 	row = c.read_history()[0]
 	assert row['EXD'] == {'k': 1}
+
+
+def test_history_psp_roundtrips_as_int(ds):
+	"""Regression: history.psp must use NUMERIC (not REAL) affinity so an
+	integer primary_setpoint (e.g. 225) round-trips as an int, not 225.0.
+	This mirrors the metrics REAL-affinity bug fixed earlier, applied to the
+	history table's psp column (the history chart's setpoint series)."""
+	c.write_history(dict(SAMPLE, primary_setpoint=225))
+	row = c.read_history()[0]
+	assert isinstance(row['PSP'], int)
+	assert row['PSP'] == 225
