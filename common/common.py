@@ -1481,11 +1481,17 @@ def remove_connected_user(client_id):
 	SqliteMembershipList('list_users_connected').remove(client_id)
 
 
-def read_pellet_db_file(filename='pelletdb.json'):
+def read_pellet_db_file(filename='pelletdb.json', retry_count=0):
 	"""
 	Read Pellet DataBase from file
 
 	:param filename: Filename to use (default pelletdb.json)
+	:param retry_count: Recursion guard for the corrupt-file self-repair path
+		below (mirrors read_settings_file's retry_count<5 pattern). The
+		self-repair calls backup_pellet_db(action='restore'), which calls
+		back into this function against the backup file -- if that backup is
+		ALSO corrupt, this bounds the resulting recursion instead of letting
+		it run away (RecursionError) when every backup on record is corrupt.
 	"""
 
 	pelletdb = default_pellets()
@@ -1501,7 +1507,12 @@ def read_pellet_db_file(filename='pelletdb.json'):
 		return pelletdb
 	except:
 		""" Restore PelletDB from backup if available """
-		pelletdb_struct = backup_pellet_db(action='restore')
+		if retry_count < 5:
+			pelletdb_struct = backup_pellet_db(action='restore', retry_count=retry_count + 1)
+		else:
+			# Backup is also corrupt/unreadable after repeated attempts --
+			# stop recursing and fall back to defaults.
+			return default_pellets()
 
 	# Overlay the read values over the top of the default values
 	#  This ensures that any NEW fields are captured.
@@ -1557,8 +1568,13 @@ def write_pellets_store(pelletdb):
 	datastore.set_blob('pellets:general', json.dumps(pelletdb))
 
 
-def backup_pellet_db(action='backup'):
-	"""Backup & Restore Pellet Database"""
+def backup_pellet_db(action='backup', retry_count=0):
+	"""Backup & Restore Pellet Database
+
+	:param retry_count: Forwarded to read_pellet_db_file() on the 'restore'
+		path, so repeated corrupt-backup self-repair recursion is bounded
+		(see read_pellet_db_file).
+	"""
 	backup_manifest = read_generic_json('./backups/manifest.json')
 	if backup_manifest == {}:
 		backup_manifest = {'server_settings': {}, 'pelletdb': {'current': ''}}
@@ -1588,7 +1604,7 @@ def backup_pellet_db(action='backup'):
 			warning = f'There was an issue with loading the Pellet Database (possibly corruption).  Restoring from the following backup file: {backup_pelletdb}.'
 			# Read the backup FILE (not SQLite -- that's the current,
 			# possibly corrupt, state we're recovering from).
-			pelletdb = read_pellet_db_file(filename=pelletdb_backup_file)
+			pelletdb = read_pellet_db_file(filename=pelletdb_backup_file, retry_count=retry_count)
 			write_pellet_db(pelletdb)
 		else:
 			warning = f'There was an issue with loading the Pellet Database (possibly corruption).  No backups found, setting to defaults.'

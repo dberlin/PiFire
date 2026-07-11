@@ -122,13 +122,19 @@ def _migrate_history_to_numeric_psp(conn):
 	drop-and-recreate: it builds a shadow table with the corrected schema,
 	copies every row across (which normalizes any REAL-coerced values like
 	225.0 back to 225 on re-insert through the NUMERIC column), then swaps it
-	in for the original."""
-	conn.executescript(_HISTORY_TABLE_DDL.format(name='history_new'))
+	in for the original.
+
+	Callers must run this inside a `transaction(conn)` block so the whole
+	rebuild commits or rolls back as one unit. Each DDL statement is issued
+	via `execute()` (not `executescript()`, which implicitly commits any
+	pending transaction before running) so it stays inside that transaction."""
+	conn.execute(_HISTORY_TABLE_DDL.format(name='history_new'))
 	conn.execute(
 		'INSERT INTO history_new (id, ts, psp, primary_temps, food_temps, aux_temps, notify_targets, ext_data) '
 		'SELECT id, ts, psp, primary_temps, food_temps, aux_temps, notify_targets, ext_data FROM history'
 	)
-	conn.executescript('DROP TABLE history;\nALTER TABLE history_new RENAME TO history;')
+	conn.execute('DROP TABLE history')
+	conn.execute('ALTER TABLE history_new RENAME TO history')
 	conn.execute(_HISTORY_INDEX_DDL)
 
 
@@ -148,7 +154,19 @@ def _ensure_schema(conn):
 		# Pre-v4 DB: history.psp used REAL affinity, coercing integer
 		# primary_setpoint values (e.g. 225) to floats (225.0) on round-trip.
 		# history is durable, so rebuild-and-swap instead of drop+recreate.
-		_migrate_history_to_numeric_psp(conn)
+		# Wrapped in a single explicit transaction (SQLite DDL is
+		# transactional) so a crash mid-rebuild rolls back cleanly, leaving
+		# user_version unbumped -- the whole migration retries from scratch
+		# on the next connect instead of leaving a half-built history_new
+		# table or a dropped-but-not-renamed history table around.
+		#
+		# Pass `conn` explicitly (transaction(conn), not transaction()):
+		# we're still inside connection()'s call to _ensure_schema() here,
+		# before _local.conn is assigned, so a bare transaction() would call
+		# connection() again and recurse into _ensure_schema() on a second,
+		# separate sqlite3 connection.
+		with transaction(conn):
+			_migrate_history_to_numeric_psp(conn)
 	if version < 4:
 		conn.execute('PRAGMA user_version=4')
 
@@ -200,10 +218,19 @@ def execute_write(sql, params=()):
 
 class transaction:
 	"""`with transaction() as conn:` — BEGIN IMMEDIATE / COMMIT / ROLLBACK,
-	retrying only the BEGIN on BUSY."""
+	retrying only the BEGIN on BUSY.
+
+	`transaction(conn)` reuses an already-open connection instead of calling
+	`connection()`. Needed by `_ensure_schema()`, which runs during
+	`connection()` itself (before `_local.conn` is assigned) -- calling the
+	no-arg form there would recurse into `connection()` -> `_ensure_schema()`
+	on a brand new sqlite3 connection instead of joining the one being set up."""
+
+	def __init__(self, conn=None):
+		self._conn = conn
 
 	def __enter__(self):
-		self.conn = connection()
+		self.conn = self._conn if self._conn is not None else connection()
 		_retry(lambda: self.conn.execute('BEGIN IMMEDIATE'))
 		return self.conn
 

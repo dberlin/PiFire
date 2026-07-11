@@ -260,6 +260,39 @@ def test_backup_restore_settings_round_trip(fresh, backups_dir):
 	assert c.read_settings()['globals']['grill_name'] == 'BACKUP_ROUND_TRIP_SENTINEL'
 
 
+def test_read_pellet_db_file_corrupt_backup_does_not_recurse_infinitely(fresh, backups_dir):
+	"""FIX: read_pellet_db_file's self-repair path (corrupt/missing
+	pelletdb.json -> backup_pellet_db(action='restore') -> read_pellet_db_file
+	against the backup file) must not recurse without bound if the recorded
+	backup is ALSO corrupt -- unlike read_settings_file (which guards its own
+	analogous retry with retry_count<5), read_pellet_db_file previously had no
+	guard at all, so a corrupt primary file + a corrupt backup file would
+	recurse forever (RecursionError) instead of falling back to defaults."""
+	from common import common as c
+
+	# Record a corrupt file as the current pellet DB backup.
+	backup_file = os.path.join(backups_dir, 'PelletDB_corrupt.json')
+	with open(backup_file, 'w') as fh:
+		fh.write('{not valid json')
+	manifest_path = os.path.join(backups_dir, 'manifest.json')
+	with open(manifest_path, 'w') as fh:
+		json.dump({'server_settings': {}, 'pelletdb': {'current': backup_file}}, fh)
+
+	# Corrupt primary pelletdb.json triggers the self-repair path.
+	primary_file = str(fresh / 'pelletdb.json')
+	with open(primary_file, 'w') as fh:
+		fh.write('{also not valid json')
+
+	# The call must return (not hang/RecursionError) and fall back to
+	# defaults. default_pellets() embeds a timestamp-based pelletid, so
+	# compare structurally on the stable default fields rather than exact
+	# equality against a freshly generated default_pellets().
+	result = c.read_pellet_db_file(filename=primary_file)
+	assert result['current']['hopper_level'] == 100
+	assert result['woods'] == c.default_pellets()['woods']
+	assert result['current']['est_usage'] == 0
+
+
 def test_backup_restore_pellet_db_round_trip(fresh, backups_dir):
 	"""FIX 3: backup_pellet_db('backup') must write the CURRENT SQLite pellet
 	DB out to the backup file (not a stale pelletdb.json copy);

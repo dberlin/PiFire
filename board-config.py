@@ -21,6 +21,8 @@ import os
 import json
 import subprocess
 
+from common.common import read_settings
+
 """
 ==============================================================================
  Globals
@@ -39,7 +41,7 @@ log_level = logging.DEBUG
 def set_pwm_gpio():
 	result = 'Setting the PWM pin: '
 	try:
-		settings = read_generic_json('settings.json')
+		settings = read_settings()
 		pin = settings['platform']['outputs']['pwm']
 		system_type = settings['platform']['system_type']
 	except:
@@ -62,7 +64,7 @@ def set_pwm_gpio():
 def set_onewire_gpio():
 	result = 'Setting the 1Wire pin: '
 	try:
-		settings = read_generic_json('settings.json')
+		settings = read_settings()
 		pin = settings['platform']['system']['1WIRE']
 		system_type = settings['platform']['system_type']
 	except:
@@ -85,7 +87,7 @@ def set_onewire_gpio():
 def set_backlight():
 	result = 'Enabling Backlight Control for DSI Touch Display: '
 	try:
-		settings = read_generic_json('settings.json')
+		settings = read_settings()
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
@@ -107,7 +109,7 @@ def set_backlight():
 def enable_spi():
 	result = 'Enabling SPI: '
 	try:
-		settings = read_generic_json('settings.json')
+		settings = read_settings()
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
@@ -128,7 +130,7 @@ def enable_spi():
 def enable_i2c():
 	result = 'Enabling I2C: '
 	try:
-		settings = read_generic_json('settings.json')
+		settings = read_settings()
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
@@ -153,7 +155,7 @@ def enable_i2c():
 def set_i2c_speed(baud=100000):
 	result = f'Setting I2C speed ({baud} Baud): '
 	try:
-		settings = read_generic_json('settings.json')
+		settings = read_settings()
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
@@ -175,7 +177,7 @@ def set_i2c_speed(baud=100000):
 def enable_gpio_shutdown():
 	result = 'Enabling the GPIO Shutdown pin: '
 	try:
-		settings = read_generic_json('settings.json')
+		settings = read_settings()
 		pin = settings['platform']['inputs']['shutdown']
 		system_type = settings['platform']['system_type']
 	except:
