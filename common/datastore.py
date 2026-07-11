@@ -118,7 +118,17 @@ def init():
 
 
 def _first_boot_import():
-	pass  # Task 13
+	import json
+
+	from common import common as c  # deferred to avoid import cycle
+
+	with transaction() as conn:
+		if conn.execute("SELECT 1 FROM kv WHERE key='settings:general'").fetchone() is None:
+			settings = c.read_settings_file()  # the FILE reader, not SQLite
+			conn.execute("INSERT INTO kv(key,value) VALUES('settings:general',?)", (json.dumps(settings),))
+		if conn.execute("SELECT 1 FROM kv WHERE key='pellets:general'").fetchone() is None:
+			pelletdb = c.read_pellet_db_file()  # the FILE reader, not SQLite
+			conn.execute("INSERT INTO kv(key,value) VALUES('pellets:general',?)", (json.dumps(pelletdb),))
 
 
 def _reset_for_tests(path):
