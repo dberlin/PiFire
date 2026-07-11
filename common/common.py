@@ -1053,9 +1053,8 @@ def read_settings_file(filename='settings.json', init=False, retry_count=0):
 		json_data_file.close()
 
 	except IOError, OSError:
-		""" Settings file not found, create a new default settings file """
+		""" Settings file not found, return default settings """
 		settings = default_settings()
-		write_settings(settings)
 		return settings
 	except ValueError:
 		# A ValueError Exception occurs when multiple accesses collide, this code attempts a retry.
@@ -1070,7 +1069,6 @@ def read_settings_file(filename='settings.json', init=False, retry_count=0):
 			settings_default = default_settings()
 			settings = restore_settings(settings_default)
 			init = True
-			write_settings(settings)
 
 	if init:
 		# Get latest settings format
@@ -1124,9 +1122,6 @@ def read_settings_file(filename='settings.json', init=False, retry_count=0):
 		settings['history_page']['probe_config'] = default_probe_config(
 			settings
 		)  # Fix issue with probe_configs resetting to defaults
-
-		if update_settings or filename != 'settings.json':  # If any of the keys were added, then write back the changes
-			write_settings(settings)
 
 	return settings
 
@@ -1462,8 +1457,7 @@ def read_pellet_db_file(filename='pelletdb.json'):
 		pelletdb_struct = json.loads(json_data_string)
 		json_data_file.close()
 	except IOError, OSError:
-		# Issue with reading JSON, so create one/write new one
-		write_pellet_db(pelletdb)
+		# File not found, return default pellet database
 		return pelletdb
 	except:
 		""" Restore PelletDB from backup if available """
@@ -1478,10 +1472,6 @@ def read_pellet_db_file(filename='pelletdb.json'):
 			pelletdb[key] = pelletdb_struct[key].copy()
 		else:
 			update_db = True
-
-	# If any of the keys were added or if restoring from file, then write back the changes
-	if update_db or filename != 'pelletdb.json':
-		write_pellet_db(pelletdb)
 
 	return pelletdb
 
