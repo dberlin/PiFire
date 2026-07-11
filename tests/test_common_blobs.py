@@ -68,3 +68,28 @@ def test_connected_users_add_remove(ds):
 	assert c.read_connected_users() == ['sidB']
 	c.read_connected_users(flush=True)
 	assert c.read_connected_users() == []
+
+
+def test_flush_control_clears_only_control_not_history(ds):
+	# seed history + a control blob + a queued write
+	c.write_history(
+		{'probe_history': {'primary': {'G': 1}, 'food': {}, 'aux': {}}, 'primary_setpoint': 1, 'notify_targets': {}}
+	)
+	c.write_control({'mode': 'Hold'}, c.WriteKind.OVERWRITE, origin='t')
+	c.write_control({'x': 1}, c.WriteKind.MERGE, origin='t')
+	control = c.read_control(flush=True)
+	assert control == c.default_control()  # reseeded default
+	from common.sqlite_queue import SqliteQueue
+
+	assert SqliteQueue('queue_control_write').length() == 0  # queue cleared
+	assert len(c.read_history()) == 1  # history untouched
+
+
+def test_wizard_install_status_roundtrip(ds):
+	c.set_wizard_install_status(50, 'Running', 'log')
+	assert c.get_wizard_install_status() == (50, 'Running', 'log')
+
+
+def test_read_generic_key_roundtrip(ds):
+	c.write_generic_key('some_key', {'a': 1})
+	assert c.read_generic_key('some_key') == {'a': 1}

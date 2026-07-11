@@ -21,7 +21,6 @@ import io
 import json
 import re
 import math
-import valkey
 import uuid
 import random
 import logging
@@ -31,9 +30,9 @@ from enum import Enum
 from logging.handlers import RotatingFileHandler
 from collections.abc import Mapping
 from ratelimitingfilter import RateLimitingFilter
-from common.valkey_handler import ValkeyHandler
 from common import datastore
 from common.sqlite_queue import SqliteQueue, SqliteMembershipList
+from common.sqlite_log_handler import SqliteLogHandler
 
 # *****************************************
 # Enums
@@ -64,9 +63,6 @@ COLOR_LIST = [
 	('rgb(255, 210, 0, 1)', 'rgb(255, 255, 0, 1)'),  # Yellow
 	('rgb(255, 126, 0, 1)', 'rgb(255, 126, 64, 1)'),  # Orange
 ]
-
-# Setup Command / Status database connection Global
-cmdsts = valkey.StrictValkey('localhost', 6379, charset='utf-8', decode_responses=True)
 
 
 """
@@ -105,11 +101,11 @@ def create_logger(
 		rotating_handler.addFilter(ratelimit)
 		logger.addHandler(rotating_handler)
 
-		# ValkeyHandler
-		valkey_handler = ValkeyHandler(cmdsts, 'logs:' + name)
-		valkey_handler.setFormatter(formatter)
-		valkey_handler.addFilter(ratelimit)
-		logger.addHandler(valkey_handler)
+		# SqliteLogHandler
+		sqlite_handler = SqliteLogHandler(name)
+		sqlite_handler.setFormatter(formatter)
+		sqlite_handler.addFilter(ratelimit)
+		logger.addHandler(sqlite_handler)
 	return logger
 
 
@@ -870,6 +866,22 @@ def generate_uuid():
 	return str(generated_uuid)
 
 
+def _flush_control():
+	"""
+	Clear the control queues and control blob keys (NOT history/current), then
+	reseed default_control().
+
+	:return: The reseeded default control dictionary.
+	"""
+	for table in ('queue_control_write', 'queue_systemq', 'queue_systemo'):
+		datastore.execute_write(f'DELETE FROM {table}')
+	for key in ('control:general', 'control:command'):
+		datastore.delete_blob(key)
+	control = default_control()
+	write_control(control, WriteKind.OVERWRITE, origin='common')
+	return control
+
+
 def read_control(flush=False):
 	"""
 	Read Control from SQLite DB
@@ -878,7 +890,7 @@ def read_control(flush=False):
 	:return: control
 	"""
 	if flush:
-		return _flush_control()  # Task 12
+		return _flush_control()
 	raw = datastore.get_blob('control:general')
 	return json.loads(raw) if raw is not None else default_control()
 
@@ -1606,37 +1618,15 @@ def write_event(settings, event):
 
 def read_events_valkey(flush=False):
 	"""
-	Read Events from Valkey DB
+	Read Events from SQLite DB
 
 	:param flush: True to clean events. False otherwise
 	:return: events_list
 	"""
-	global cmdsts
-
-	events_list = []
-
-	try:
-		if flush:
-			cmdsts.delete('logs:events')
-
-		if not (cmdsts.exists('logs:events')):
-			events, num_events = read_events()
-			events_list = []
-			for item in range(min(num_events, 60)):
-				event = {'date': events[item][0], 'time': events[item][1], 'message': events[item][2].strip('\n')}
-				events_list.append(event)
-				cmdsts.lpush('logs:events', ' '.join(events[item]))
-		else:
-			events_list = []
-			for item in cmdsts.lrange('logs:events', 0, -1):
-				item_list = item.split(' ', 2)
-				event = {'date': item_list[0], 'time': item_list[1], 'message': item_list[2].strip('\n')}
-				events_list.append(event)
-	except:
-		event = 'Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.'
-		write_log(event)
-
-	return events_list
+	if flush:
+		datastore.clear_log('events')
+		return []
+	return datastore.read_log('events')
 
 
 def read_history(num_items=0, flushhistory=False):
@@ -1999,53 +1989,54 @@ def read_wizard(filename='wizard/wizard_manifest.json'):
 	return wizard
 
 
+def _read_json_key_or_none(key):
+	raw = datastore.get_blob(key)
+	return json.loads(raw) if raw is not None else None
+
+
 def load_wizard_install_info():
 	"""
-	Load Wizard Install Info from Valkey DB
+	Load Wizard Install Info from SQLite DB
 
 	:return: wizard_install_info
 	"""
-	global cmdsts
-	wizard_install_info = json.loads(cmdsts.get('wizard:install'))
-	return wizard_install_info
+	return json.loads(datastore.get_blob('wizard:install'))
 
 
 def store_wizard_install_info(wizard_install_info):
 	"""
-	Write Wizard Install Info to Valkey DB
+	Write Wizard Install Info to SQLite DB
 
 	:param wizard_install_info: Wizard Install Info
 	:return:
 	"""
-	global cmdsts
-	cmdsts.set('wizard:install', json.dumps(wizard_install_info))
+	datastore.set_blob('wizard:install', json.dumps(wizard_install_info))
 
 
 def get_wizard_install_status():
 	"""
-	Read Wizard Install Status from Valkey DB
+	Read Wizard Install Status from SQLite DB
 
 	:return: Wizard Install (Percent, Status, Output)
 	"""
-	global cmdsts
-	percent = cmdsts.get('wizard:percent')
-	status = cmdsts.get('wizard:status')
-	output = cmdsts.get('wizard:output')
-	return (percent, status, output)
+	return (
+		_read_json_key_or_none('wizard:percent'),
+		_read_json_key_or_none('wizard:status'),
+		_read_json_key_or_none('wizard:output'),
+	)
 
 
 def set_wizard_install_status(percent, status, output):
 	"""
-	Write Wizard Install Status to Valkey DB
+	Write Wizard Install Status to SQLite DB
 
 	:param percent: Percent Complete
 	:param status: Current Status
 	:param output: Output
 	"""
-	global cmdsts
-	cmdsts.set('wizard:percent', percent)
-	cmdsts.set('wizard:status', status)
-	cmdsts.set('wizard:output', output)
+	datastore.set_blob('wizard:percent', json.dumps(percent))
+	datastore.set_blob('wizard:status', json.dumps(status))
+	datastore.set_blob('wizard:output', json.dumps(output))
 
 
 def read_updater_manifest(filename='updater/updater_manifest.json'):
@@ -2078,29 +2069,28 @@ def read_updater_manifest(filename='updater/updater_manifest.json'):
 
 def get_updater_install_status():
 	"""
-	Read Updater Install Status from Valkey DB
+	Read Updater Install Status from SQLite DB
 
 	:return: Wizard Updater (Percent, Status, Output)
 	"""
-	global cmdsts
-	percent = cmdsts.get('updater:percent')
-	status = cmdsts.get('updater:status')
-	output = cmdsts.get('updater:output')
-	return (percent, status, output)
+	return (
+		_read_json_key_or_none('updater:percent'),
+		_read_json_key_or_none('updater:status'),
+		_read_json_key_or_none('updater:output'),
+	)
 
 
 def set_updater_install_status(percent, status, output):
 	"""
-	Write Updater Install Status to Valkey DB
+	Write Updater Install Status to SQLite DB
 
 	:param percent: Percent Complete
 	:param status: Current Status
 	:param output: Output
 	"""
-	global cmdsts
-	cmdsts.set('updater:percent', percent)
-	cmdsts.set('updater:status', status)
-	cmdsts.set('updater:output', output)
+	datastore.set_blob('updater:percent', json.dumps(percent))
+	datastore.set_blob('updater:status', json.dumps(status))
+	datastore.set_blob('updater:output', json.dumps(output))
 
 
 def process_metrics(metrics_data, augerrate=0.3):
@@ -3115,14 +3105,10 @@ def set_nested_key_value(data, key_list, value):
 
 def read_generic_key(key):
 	"""
-	Read generic data from Valkey DB
+	Read generic data from SQLite DB
 	:param key: key name
 	"""
-	global cmdsts
-
-	value = json.loads(cmdsts.get(key))
-
-	return value
+	return json.loads(datastore.get_blob(key))
 
 
 def write_generic_key(key, value):
