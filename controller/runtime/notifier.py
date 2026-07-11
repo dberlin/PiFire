@@ -12,7 +12,7 @@ class Notifier(ABC):
 	def get_targets(self, notify_data): ...
 
 
-class ValkeyNotifier(Notifier):
+class LiveNotifier(Notifier):
 	def send(self, name):
 		from notify.notifications import send_notifications
 

@@ -240,7 +240,7 @@ def test_backup_restore_settings_round_trip(fresh, backups_dir):
 	datastore.init()
 	settings = c.default_settings()
 	settings['globals']['grill_name'] = 'BACKUP_ROUND_TRIP_SENTINEL'
-	c.write_settings_valkey(settings)
+	c.write_settings_store(settings)
 
 	backup_file = c.backup_settings()
 	assert os.path.exists(backup_file)
@@ -251,7 +251,7 @@ def test_backup_restore_settings_round_trip(fresh, backups_dir):
 
 	# Blow away the current SQLite state to prove restore reads the file,
 	# not whatever happens to already be current.
-	c.write_settings_valkey(c.default_settings())
+	c.write_settings_store(c.default_settings())
 	assert c.read_settings()['globals']['grill_name'] == ''
 
 	restored = c.restore_settings(c.default_settings())
@@ -269,7 +269,7 @@ def test_backup_restore_pellet_db_round_trip(fresh, backups_dir):
 	datastore.init()
 	pelletdb = c.default_pellets()
 	pelletdb['current']['hopper_level'] = 13
-	c.write_pellets_valkey(pelletdb)
+	c.write_pellets_store(pelletdb)
 
 	backup_file = c.backup_pellet_db(action='backup')
 	assert os.path.exists(backup_file)
@@ -277,7 +277,7 @@ def test_backup_restore_pellet_db_round_trip(fresh, backups_dir):
 		backed_up = json.load(fh)
 	assert backed_up['current']['hopper_level'] == 13
 
-	c.write_pellets_valkey(c.default_pellets())
+	c.write_pellets_store(c.default_pellets())
 	assert c.read_pellet_db()['current']['hopper_level'] != 13
 
 	restored = c.backup_pellet_db(action='restore')

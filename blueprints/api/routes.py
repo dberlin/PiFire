@@ -51,7 +51,7 @@ def api_page(action=None, arg0=None, arg1=None, arg2=None, arg3=None):
 			control = read_control()
 			return jsonify({'control': control}), 201
 		elif action == 'current':
-			""" Only fetch data from ValkeyDB or locally available, to improve performance """
+			""" Only fetch data from the datastore or locally available, to improve performance """
 			current_temps = read_current()  # Get current temperatures
 			control = read_control()  # Get status of control
 			display = read_status()  # Get status of display items

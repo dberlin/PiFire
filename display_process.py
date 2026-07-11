@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PiFire Display Process -- renders from Valkey, independent of the controller.
+"""PiFire Display Process -- renders from the datastore, independent of the controller.
 
 Note: this file cannot be named display.py -- a top-level display/ package
 (display drivers: display.none, display.ili9341f, etc.) already exists in

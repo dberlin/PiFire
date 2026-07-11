@@ -45,11 +45,11 @@ def build_engine(config, backend):
 def build_backend(config):
 	"""Construct the backend wired to the framework's data + command layer."""
 	from display.qtquick_flex import Display
-	from common import read_settings_valkey
+	from common import read_settings_store
 
 	def _accent_fn():
 		try:
-			s = read_settings_valkey()
+			s = read_settings_store()
 			module = s['modules']['display']
 			return s['display']['config'][module].get('accent_theme', 'Ember')
 		except Exception:

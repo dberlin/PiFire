@@ -12,7 +12,7 @@ cycle via `work_cycle()`/`run_work_cycle()` and hand off to `next_mode()`.
 All datastore access goes through `self.ctx.store` (a `Store`; production uses
 `SqliteStore`, tests inject `InMemoryStore`), and all timing goes through
 `self.ctx.clock` (`RealClock` in production, `ManualClock` in tests), so the
-loop is deterministic and testable without a real Valkey server or wall clock.
+loop is deterministic and testable without a real SQLite datastore or wall clock.
 
 Notification/cookfile helpers (`check_notify`, `send_notifications`,
 `create_cookfile`) and `os.system` remain module-level references so tests can

@@ -177,7 +177,7 @@ def test_read_generic_key_roundtrip(ds):
 	assert c.read_generic_key('some_key') == {'a': 1}
 
 
-def test_read_events_valkey_returns_dicts(ds, monkeypatch):
+def test_read_events_records_returns_dicts(ds, monkeypatch):
 	fake_events = [[f'2024-01-0{i}', f'0{i}:00:00', f'message {i}\n'] for i in range(1, 5)]
 
 	def fake_read_events(legacy=True):
@@ -185,7 +185,7 @@ def test_read_events_valkey_returns_dicts(ds, monkeypatch):
 
 	monkeypatch.setattr(c, 'read_events', fake_read_events)
 
-	result = c.read_events_valkey()
+	result = c.read_events_records()
 
 	assert isinstance(result, list)
 	assert len(result) == len(fake_events)
@@ -196,7 +196,7 @@ def test_read_events_valkey_returns_dicts(ds, monkeypatch):
 		assert event['message'] == fake_events[idx][2].strip('\n')
 
 
-def test_read_events_valkey_caps_at_60(ds, monkeypatch):
+def test_read_events_records_caps_at_60(ds, monkeypatch):
 	fake_events = [[f'2024-01-01', '00:00:00', f'message {i}\n'] for i in range(100)]
 
 	def fake_read_events(legacy=True):
@@ -204,10 +204,10 @@ def test_read_events_valkey_caps_at_60(ds, monkeypatch):
 
 	monkeypatch.setattr(c, 'read_events', fake_read_events)
 
-	result = c.read_events_valkey()
+	result = c.read_events_records()
 
 	assert len(result) == 60
 
 
-def test_read_events_valkey_flush_clears_and_returns_empty(ds):
-	assert c.read_events_valkey(flush=True) == []
+def test_read_events_records_flush_clears_and_returns_empty(ds):
+	assert c.read_events_records(flush=True) == []

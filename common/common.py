@@ -1191,7 +1191,7 @@ def read_settings(filename='settings.json', init=False, retry_count=0):
 	:param init: Unused; kept for signature compatibility.
 	:param retry_count: Unused; kept for signature compatibility.
 	"""
-	return read_settings_valkey()
+	return read_settings_store()
 
 
 def write_settings(settings):
@@ -1202,10 +1202,10 @@ def write_settings(settings):
 	"""
 	settings['lastupdated']['time'] = math.trunc(time.time())
 
-	write_settings_valkey(settings)
+	write_settings_store(settings)
 
 
-def read_settings_valkey(init=False):
+def read_settings_store(init=False):
 	if init:
 		settings = read_settings()
 		datastore.set_blob('settings:general', json.dumps(settings))
@@ -1224,7 +1224,7 @@ def read_settings_valkey(init=False):
 	return settings
 
 
-def write_settings_valkey(settings):
+def write_settings_store(settings):
 	"""
 	Write Settings to SQLite DB
 
@@ -1274,7 +1274,7 @@ def restore_settings(settings_default):
 		warning = f'Something failed when reading the "settings.json" file.  Resetting settings to defaults, since no backup settings files were found.'
 		settings = settings_default
 	# Make the recovered settings the new current state in SQLite.
-	write_settings_valkey(settings)
+	write_settings_store(settings)
 	write_warning(warning)
 	write_log(warning)
 	return settings
@@ -1522,7 +1522,7 @@ def read_pellet_db(filename='pelletdb.json'):
 
 	:param filename: Unused; kept for signature compatibility.
 	"""
-	return read_pellets_valkey()
+	return read_pellets_store()
 
 
 def write_pellet_db(pelletdb):
@@ -1531,16 +1531,16 @@ def write_pellet_db(pelletdb):
 
 	:param pelletdb: Pellet Database
 	"""
-	write_pellets_valkey(pelletdb)
+	write_pellets_store(pelletdb)
 
 
-def read_pellets_valkey(init=False):
+def read_pellets_store(init=False):
 	if init:
 		pelletdb = read_pellet_db()
 		datastore.set_blob('pellets:general', json.dumps(pelletdb))
 
 	if not datastore.exists_blob('pellets:general'):
-		# Self-heal like read_settings_valkey(); see comment there.
+		# Self-heal like read_settings_store(); see comment there.
 		pelletdb = default_pellets()
 	else:
 		pelletdb = json.loads(datastore.get_blob('pellets:general'))
@@ -1548,7 +1548,7 @@ def read_pellets_valkey(init=False):
 	return pelletdb
 
 
-def write_pellets_valkey(pelletdb):
+def write_pellets_store(pelletdb):
 	"""
 	Write Settings to SQLite DB
 
@@ -1700,7 +1700,7 @@ def write_event(settings, event):
 		write_log(event)
 
 
-def read_events_valkey(flush=False):
+def read_events_records(flush=False):
 	"""
 	Read Events from events.log and return a list of event dictionaries.
 
@@ -2419,7 +2419,7 @@ def read_probe_status(probe_info):
 		status = read_probe_status(probe_info)
 		# Returns structured status information for all probes
 	"""
-	# Get current device status information from Valkey
+	# Get current device status information from the datastore
 	probe_device_info = read_generic_key('probe_device_info')
 	# print(f'Probe Device Info: {probe_device_info}')
 

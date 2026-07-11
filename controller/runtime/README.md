@@ -17,7 +17,7 @@ PiFire runs as three independent supervisor programs (see
 | `webapp` | Flask/Gunicorn | Web UI. |
 
 The controller and display never call each other. They communicate **only
-through Valkey**:
+through the shared SQLite datastore**:
 
 - The controller writes `status` / `current` (probe temps, setpoints, mode) and
   pushes display commands onto the **`control:displayq`** queue
@@ -25,8 +25,8 @@ through Valkey**:
 - `DisplayFeeder` (`display_process.py`) polls `status`/`current` and drains
   `control:displayq`, calling the display driver. It holds no controller state.
 
-Because the display is just another Valkey consumer, it can be restarted,
-disabled, or replaced without touching the controller.
+Because the display just reads from the datastore like any other consumer, it
+can be restarted, disabled, or replaced without touching the controller.
 
 ## Testability seams
 
@@ -34,14 +34,14 @@ The control loop takes a `ControllerContext` (`context.py`) instead of reaching
 for module globals. The context bundles:
 
 - **`store`** (`store.py`) — all datastore access behind a `Store` ABC.
-  `ValkeyStore` is the only production code that touches `common.common`'s
-  global Valkey functions; `InMemoryStore` is the hermetic test double. A parity
-  suite (`tests/test_valkey_store_parity.py`) and an end-to-end suite
-  (`tests/e2e/`) pin the two to identical semantics against a real
-  `valkey-server`.
+  `SqliteStore` is the only production code that touches `common.common`'s
+  global SQLite-backed accessor functions; `InMemoryStore` is the hermetic
+  test double. A parity suite (`tests/test_sqlite_store_parity.py`) and an
+  end-to-end suite (`tests/e2e/`) pin the two to identical semantics against
+  the real SQLite datastore.
 - **`clock`** (`clock.py`) — `RealClock` in production, `ManualClock` in tests,
   so timers and sleeps are deterministic.
-- **`notifications`** (`notifier.py`) — `ValkeyNotifier` in production,
+- **`notifications`** (`notifier.py`) — `LiveNotifier` in production,
   `FakeNotifier` in tests.
 - **`devices`** (`context.py` / `devices.py`) — grill platform, probes, distance
   sensor; built by `build_devices()`. `build_display()` builds the display for

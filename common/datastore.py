@@ -228,7 +228,7 @@ def _first_boot_import():
 	# INSERT ... ON CONFLICT DO UPDATE (not a plain INSERT): read_settings_file
 	# (via its init=True overlay) can itself detect a corrupted settings.json
 	# and call restore_settings(), which persists the recovered settings to
-	# SQLite immediately (write_settings_valkey). That nested write lands on
+	# SQLite immediately (write_settings_store). That nested write lands on
 	# this same thread-local connection/transaction, so by the time we get
 	# here the row may already exist -- upsert keeps this idempotent instead
 	# of raising a PRIMARY KEY IntegrityError.

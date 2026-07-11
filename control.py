@@ -30,7 +30,7 @@ from controller.runtime.context import ControllerContext
 from controller.runtime.devices import build_devices
 from controller.runtime.store import SqliteStore
 from controller.runtime.clock import RealClock
-from controller.runtime.notifier import ValkeyNotifier
+from controller.runtime.notifier import LiveNotifier
 from controller.runtime.controller import Controller
 
 
@@ -89,16 +89,16 @@ if __name__ == '__main__':
 	eventLogger.info(event_message)
 	controlLogger.info(event_message)
 
-	# Flush Valkey DB and create JSON structure
+	# Flush datastore and create JSON structure
 	control = read_control(flush=True)
-	# Delete Valkey DB for history / current
+	# Delete datastore entries for history / current
 	read_history(0, flushhistory=True)
 	# Flush metrics DB for tracking certain metrics
 	write_metrics(flush=True)
 	# Create/Flush errors list
 	errors = read_errors(flush=True)
 
-	eventLogger.info('Flushing Valkey DB and creating new control structure')
+	eventLogger.info('Flushing datastore and creating new control structure')
 
 	devices, errors = build_devices(settings, errors=errors, event_log=eventLogger, control_log=controlLogger)
 
@@ -106,7 +106,7 @@ if __name__ == '__main__':
 	ctx = ControllerContext(
 		devices=devices,
 		store=SqliteStore(),
-		notifications=ValkeyNotifier(),
+		notifications=LiveNotifier(),
 		clock=RealClock(),
 		event_log=eventLogger,
 		control_log=controlLogger,

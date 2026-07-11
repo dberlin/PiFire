@@ -117,7 +117,7 @@ class InMemoryStore(Store):
 	def read_control(self, flush=False):
 		if flush:
 			# Mirror common.read_control(flush=True): reset control to defaults
-			# and discard pending writes + system-command queues. (The Valkey
+			# and discard pending writes + system-command queues. (The datastore
 			# persistence-config toggle is a no-op for the in-memory fake.)
 			self._control = default_control()
 			self._write_queue.clear()

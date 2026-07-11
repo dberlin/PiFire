@@ -32,13 +32,13 @@ thread = None
 
 """
 ==============================================================================
- Flush Valkey DB's and create Settings / PelletDB / Connected Users / Events
+ Flush datastore and create Settings / PelletDB / Connected Users / Events
 ==============================================================================
 """
-read_settings_valkey(init=True)
-read_pellets_valkey(init=True)
+read_settings_store(init=True)
+read_pellets_store(init=True)
 read_connected_users(flush=True)
-read_events_valkey(flush=True)
+read_events_records(flush=True)
 
 recipe_folder = Config.RECIPE_FOLDER
 
@@ -121,13 +121,13 @@ def _emit_app_data(event, force_refresh):
 				check_control_time = now
 				_check_control_status()
 
-			settings = read_settings_valkey()
-			pelletdb = read_pellets_valkey()
+			settings = read_settings_store()
+			pelletdb = read_pellets_store()
 			uuid = settings['server_info']['uuid']
 
 			pellet_data = {'uuid': uuid, 'pellets': pelletdb}
 
-			event_data = {'uuid': uuid, 'events': read_events_valkey()}
+			event_data = {'uuid': uuid, 'events': read_events_records()}
 
 			dash_data = _get_dash_data(settings, pelletdb)
 
@@ -225,23 +225,23 @@ def _get_dash_data(settings, pelletdb):
 
 
 def _get_app_data(action=None, arg01=None, arg02=None):
-	settings = read_settings_valkey()
+	settings = read_settings_store()
 
 	if action == 'settings_data':
 		return _response(result='OK', data=settings)
 
 	elif action == 'dash_data':
-		pelletdb = read_pellets_valkey()
+		pelletdb = read_pellets_store()
 		return _response(result='OK', data=_get_dash_data(settings, pelletdb))
 
 	elif action == 'pellets_data':
-		return _response(result='OK', data={'uuid': settings['server_info']['uuid'], 'pellets': read_pellets_valkey()})
+		return _response(result='OK', data={'uuid': settings['server_info']['uuid'], 'pellets': read_pellets_store()})
 
 	elif action == 'events_data':
-		return _response(result='OK', data={'uuid': settings['server_info']['uuid'], 'events': read_events_valkey()})
+		return _response(result='OK', data={'uuid': settings['server_info']['uuid'], 'events': read_events_records()})
 
 	elif action == 'hopper_level':
-		return _response(result='OK', data=read_pellets_valkey()['current']['hopper_level'])
+		return _response(result='OK', data=read_pellets_store()['current']['hopper_level'])
 
 	elif action == 'info_data':
 		system_info = _get_system_info(read_control())
@@ -318,7 +318,7 @@ def _get_app_data(action=None, arg01=None, arg02=None):
 
 
 def _post_app_data(action=None, type=None, json_data=None):
-	settings = read_settings_valkey()
+	settings = read_settings_store()
 
 	if json_data is not None:
 		request = json.loads(json_data)
@@ -365,7 +365,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 			os.system('rm pelletdb.json')
 			return _response(result='OK')
 		elif type == 'clear_pelletdb_log':
-			pelletdb = read_pellets_valkey()
+			pelletdb = read_pellets_store()
 			pelletdb['log'].clear()
 			write_pellet_db(pelletdb)
 			write_log('Clearing Pellet Database Log.')
@@ -436,7 +436,7 @@ def _post_app_data(action=None, type=None, json_data=None):
 			return _response(result='Error', message='Error: Units could not be changed')
 
 	elif action == 'pellets_action':
-		pelletdb = read_pellets_valkey()
+		pelletdb = read_pellets_store()
 		if type == 'load_profile':
 			if 'profile' in request['pellets_action']:
 				pelletdb['current']['pelletid'] = request['pellets_action']['profile']

@@ -39,8 +39,8 @@ from common.common import (  # noqa: E402
 	write_current,
 	write_generic_key,
 	write_history,
-	write_pellets_valkey,
-	write_settings_valkey,
+	write_pellets_store,
+	write_settings_store,
 	write_status,
 )
 
@@ -50,8 +50,8 @@ datastore.init()
 _SEEDED_GRILL_NAME = 'T18 Seeded Grill'
 _seed_settings = default_settings()
 _seed_settings['globals']['grill_name'] = _SEEDED_GRILL_NAME
-write_settings_valkey(_seed_settings)
-write_pellets_valkey(default_pellets())
+write_settings_store(_seed_settings)
+write_pellets_store(default_pellets())
 write_status(read_status(init=True))
 write_control(default_control(), WriteKind.OVERWRITE, origin='test')
 # read_probe_status() (used by the /api/current route) reads this generic
@@ -143,7 +143,7 @@ def test_api_settings_post_writes_through_to_sqlite():
 def test_settings_free_function_roundtrip():
 	settings = default_settings()
 	settings['globals']['grill_name'] = 'T18 Free-Function Grill'
-	write_settings_valkey(settings)
+	write_settings_store(settings)
 
 	assert read_settings()['globals']['grill_name'] == 'T18 Free-Function Grill'
 
