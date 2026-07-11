@@ -71,3 +71,15 @@ def test_reset_for_tests_restores_db_path_on_none(tmp_path):
 	datastore._reset_for_tests(None)
 	assert datastore.DB_PATH == original_db_path
 	assert datastore.DB_PATH.endswith('pifire.db')
+
+
+def test_blob_roundtrip_and_missing(ds):
+	assert ds.get_blob('k') is None  # missing -> None (matches Valkey)
+	ds.set_blob('k', '{"a": 1}')
+	assert ds.get_blob('k') == '{"a": 1}'
+	assert ds.exists_blob('k') is True
+	ds.set_blob('k', '{"a": 2}')  # overwrite
+	assert ds.get_blob('k') == '{"a": 2}'
+	ds.delete_blob('k')
+	assert ds.get_blob('k') is None
+	assert ds.exists_blob('k') is False

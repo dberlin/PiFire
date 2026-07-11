@@ -125,3 +125,22 @@ def _reset_for_tests(path):
 		conn.close()
 		_local.conn = None
 	DB_PATH = path if path is not None else _ORIGINAL_DB_PATH
+
+
+def get_blob(key):
+	row = connection().execute('SELECT value FROM kv WHERE key=?', (key,)).fetchone()
+	return None if row is None else row[0]
+
+
+def set_blob(key, value_str):
+	execute_write(
+		'INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value_str)
+	)
+
+
+def delete_blob(key):
+	execute_write('DELETE FROM kv WHERE key=?', (key,))
+
+
+def exists_blob(key):
+	return connection().execute('SELECT 1 FROM kv WHERE key=?', (key,)).fetchone() is not None
