@@ -10,7 +10,7 @@ cycle via `work_cycle()`/`run_work_cycle()` and hand off to `next_mode()`.
 (RealClock in production).
 
 All datastore access goes through `self.ctx.store` (a `Store`; production uses
-`ValkeyStore`, tests inject `InMemoryStore`), and all timing goes through
+`SqliteStore`, tests inject `InMemoryStore`), and all timing goes through
 `self.ctx.clock` (`RealClock` in production, `ManualClock` in tests), so the
 loop is deterministic and testable without a real Valkey server or wall clock.
 

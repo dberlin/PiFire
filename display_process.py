@@ -14,7 +14,7 @@ import logging
 
 from common import read_settings, create_logger
 from controller.runtime.devices import build_display
-from controller.runtime.store import ValkeyStore
+from controller.runtime.store import SqliteStore
 from controller.runtime.clock import RealClock
 
 
@@ -61,4 +61,4 @@ if __name__ == '__main__':
 
 	eventLogger.info('PiFire Display Process started.')
 
-	DisplayFeeder(display_device, ValkeyStore(), RealClock()).run()
+	DisplayFeeder(display_device, SqliteStore(), RealClock()).run()

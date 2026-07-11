@@ -53,3 +53,17 @@ def test_write_metrics_positional_flush_matches_common_order():
 	# positional 2nd arg is flush (matching common.common order)
 	s.write_metrics(None, True)
 	assert s.read_metrics(all=True) == []
+
+
+def test_in_memory_history_cap():
+	from controller.runtime.store import InMemoryStore
+
+	s = InMemoryStore()
+	sample = {
+		'probe_history': {'primary': {'G': 1}, 'food': {}, 'aux': {}},
+		'primary_setpoint': 1,
+		'notify_targets': {},
+	}
+	for _ in range(5):
+		s.write_history(sample, maxsizelines=3)
+	assert len(s.read_history()) == 3  # was unbounded; must now cap

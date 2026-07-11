@@ -93,7 +93,7 @@ def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None,
 	#
 	# `store`: when None (the default, used by every InMemoryStore golden
 	# scenario) a fresh InMemoryStore is built and seeded from the args. When
-	# provided (the E2E suite passes a live `ValkeyStore`), it is used as-is --
+	# provided (the E2E suite passes a `SqliteStore`), it is used as-is --
 	# the caller is responsible for seeding it, since a real store can't be
 	# seeded through a constructor.
 	store = store if store is not None else InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)

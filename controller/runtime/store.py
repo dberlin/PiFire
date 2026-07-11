@@ -1,5 +1,5 @@
-"""State-access seam. ValkeyStore is the ONLY production code touching common's
-global Valkey funcs; InMemoryStore is the hermetic test double."""
+"""State-access seam. SqliteStore is the ONLY production code touching common's
+global SQLite-backed funcs; InMemoryStore is the hermetic test double."""
 
 import copy
 from abc import ABC, abstractmethod
@@ -161,6 +161,8 @@ class InMemoryStore(Store):
 
 	def write_history(self, in_data, maxsizelines=28800, ext_data=False):
 		self._history.append(copy.deepcopy(in_data))
+		if len(self._history) > maxsizelines:
+			self._history = self._history[-maxsizelines:]
 
 	def read_metrics(self, all=False):
 		if all:
@@ -210,12 +212,12 @@ class InMemoryStore(Store):
 
 
 from common import common as _c
-from common.valkey_queue import ValkeyQueue
+from common.sqlite_queue import SqliteQueue
 
 
-class _ValkeyQueueAdapter(Queue):
-	def __init__(self, name):
-		self._q = ValkeyQueue(name)
+class _SqliteQueueAdapter(Queue):
+	def __init__(self, table):
+		self._q = SqliteQueue(table)
 
 	def push(self, item):
 		self._q.push(item)
@@ -233,14 +235,14 @@ class _ValkeyQueueAdapter(Queue):
 		self._q.flush()
 
 
-class ValkeyStore(Store):
+class SqliteStore(Store):
 	"""Thin pass-through to common.common — the only production code that touches
-	the module-level Valkey connection."""
+	the module-level SQLite connection."""
 
 	def __init__(self):
-		self._systemq = _ValkeyQueueAdapter('control:systemq')
-		self._systemo = _ValkeyQueueAdapter('control:systemo')
-		self._displayq = _ValkeyQueueAdapter('control:displayq')
+		self._systemq = _SqliteQueueAdapter('queue_systemq')
+		self._systemo = _SqliteQueueAdapter('queue_systemo')
+		self._displayq = _SqliteQueueAdapter('queue_displayq')
 
 	def read_control(self, flush=False):
 		return _c.read_control(flush=flush)

@@ -27,7 +27,7 @@ import atexit
 from common import *  # Common Module for WebUI and Control Program
 from controller.runtime.context import ControllerContext
 from controller.runtime.devices import build_devices
-from controller.runtime.store import ValkeyStore
+from controller.runtime.store import SqliteStore
 from controller.runtime.clock import RealClock
 from controller.runtime.notifier import ValkeyNotifier
 from controller.runtime.controller import Controller
@@ -96,7 +96,7 @@ if __name__ == '__main__':
 	# Build the injected context used by the controller / mode functions instead of bare globals
 	ctx = ControllerContext(
 		devices=devices,
-		store=ValkeyStore(),
+		store=SqliteStore(),
 		notifications=ValkeyNotifier(),
 		clock=RealClock(),
 		event_log=eventLogger,
