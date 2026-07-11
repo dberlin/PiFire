@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 
 from common import datastore
-from common.sqlite_queue import SqliteQueue
+from common.sqlite_queue import SqliteQueue, SqliteMembershipList
 
 
 @pytest.fixture
@@ -38,3 +38,15 @@ def test_json_queue_rejects_via_check(ds):
 	# raw (non-JSON) insert into a JSON queue table must be rejected by the CHECK
 	with pytest.raises(sqlite3.IntegrityError):
 		datastore.execute_write("INSERT INTO queue_control_write(value) VALUES('raw')")
+
+
+def test_membership_add_remove(ds):
+	m = SqliteMembershipList('list_users_connected')
+	m.add('sidA')
+	m.add('sidB')
+	m.add('sidA')  # duplicate allowed (matches rpush)
+	assert sorted(m.list()) == ['sidA', 'sidA', 'sidB']
+	m.remove('sidA')  # removes ALL "sidA" (lrem count=0)
+	assert m.list() == ['sidB']
+	m.flush()
+	assert m.list() == []

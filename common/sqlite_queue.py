@@ -57,3 +57,24 @@ class SqliteQueue:
 
 	def flush(self):
 		datastore.execute_write(f'DELETE FROM {self.table}')
+
+
+class SqliteMembershipList:
+	"""Raw-string membership list with remove-by-value (Valkey lrem count=0)."""
+
+	def __init__(self, table):
+		_check_table(table)
+		self.table = table
+
+	def add(self, value):
+		datastore.execute_write(f'INSERT INTO {self.table}(value) VALUES(?)', (value,))
+
+	def remove(self, value):
+		datastore.execute_write(f'DELETE FROM {self.table} WHERE value=?', (value,))
+
+	def list(self):
+		rows = datastore.connection().execute(f'SELECT value FROM {self.table} ORDER BY id').fetchall()
+		return [r[0] for r in rows]
+
+	def flush(self):
+		datastore.execute_write(f'DELETE FROM {self.table}')
