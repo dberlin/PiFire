@@ -917,23 +917,78 @@ def write_control(control, kind, origin='unknown'):
 		raise TypeError(f'write_control: kind must be WriteKind, got {kind!r}')
 
 
+def strip_null_members(obj, _stripped=None, _prefix=''):
+	"""Recursively drop dict keys whose value is None so a json_patch() merge
+	ignores them instead of deleting the target key.
+
+	json_patch() implements RFC 7386 JSON Merge Patch, where a null MEMBER of the
+	patch object deletes that key from the target. PiFire's merge contract (which
+	historically used deep_update) only ever adds or overwrites keys -- it never
+	deletes -- so nulls are stripped before patching.
+
+	Lists are returned unchanged: json_patch replaces arrays atomically and never
+	walks their elements, so nulls nested inside arrays (e.g. notify_data[*].eta)
+	are preserved exactly, matching the old deep_update behavior of overwriting a
+	list wholesale.
+
+	If `_stripped` (a list) is passed in, the dotted path of every dropped key is
+	appended to it, so callers can report which partials still carry nulls. After
+	the base.py None->False cleanup no PiFire-internal path should trip this, so a
+	non-empty result flags a source still to be fixed (see execute_control_writes).
+	"""
+	if isinstance(obj, Mapping):
+		result = {}
+		for key, value in obj.items():
+			if value is None:
+				if _stripped is not None:
+					_stripped.append(f'{_prefix}{key}')
+				continue
+			result[key] = strip_null_members(value, _stripped, f'{_prefix}{key}.')
+		return result
+	return obj
+
+
 def execute_control_writes():
 	"""
-	Execute Control Writes in Queue from SQLite DB
+	Execute Control Writes in Queue from SQLite DB.
+
+	Each queued MERGE partial is deep-merged into control:general via SQLite's
+	json_patch(). Null-valued keys in a partial are stripped first (see
+	strip_null_members) so the merge only ever adds or overwrites keys -- never
+	deletes -- preserving the historical deep_update contract.
 
 	:param None
 
 	:return status : 'OK', 'ERROR'
 	"""
 	q = SqliteQueue('queue_control_write')
+	# Seed the base row if absent so the first merge on a fresh/flushed DB isn't
+	# silently dropped by the UPDATE below (mirrors read_control()'s default
+	# fallback, which the old read-modify-write path relied on).
+	if q.length() > 0 and datastore.get_blob('control:general') is None:
+		datastore.set_blob('control:general', json.dumps(default_control()))
 	while q.length() > 0:
-		control = read_control()
 		command = q.pop()
 		if command is None:
 			break
-		command.pop('origin', None)
-		control = deep_update(control, command)
-		write_control(control, WriteKind.OVERWRITE, origin='writer')
+		origin = command.pop('origin', None)
+		stripped = []
+		patch = strip_null_members(command, stripped)
+		if stripped:
+			# Temporary diagnostic: after the base.py None->False cleanup, no
+			# PiFire-internal MERGE should carry nulls. A hit here means a source
+			# is still sending them (or a client did via /api/control) -- fix that
+			# source, then this strip + log can be removed. Logged at ERROR so it
+			# surfaces even when control.log is at its production ERROR level.
+			logging.getLogger('control').error(
+				'execute_control_writes: stripped null member(s) %s from MERGE partial (origin=%r); '
+				'json_patch would delete these keys. Fix the source to stop sending nulls.',
+				stripped,
+				origin,
+			)
+		datastore.execute_write(
+			"UPDATE kv SET value = json_patch(value, ?) WHERE key = 'control:general'", (json.dumps(patch),)
+		)
 	return 'OK'
 
 

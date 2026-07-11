@@ -5,7 +5,7 @@ import copy
 from abc import ABC, abstractmethod
 from collections import deque
 
-from common.common import WriteKind, deep_update, default_control, default_metrics
+from common.common import WriteKind, deep_update, default_control, default_metrics, strip_null_members
 
 
 class Queue(ABC):
@@ -137,7 +137,9 @@ class InMemoryStore(Store):
 		while self._write_queue:
 			partial = self._write_queue.popleft()
 			partial.pop('origin', None)
-			self._control = deep_update(self._control, partial)
+			# Mirror common.execute_control_writes: strip null members so the merge
+			# only adds/overwrites keys (json_patch parity), never deletes.
+			self._control = deep_update(self._control, strip_null_members(partial))
 
 	def read_settings(self):
 		return copy.deepcopy(self._settings)

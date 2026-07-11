@@ -236,9 +236,9 @@ def test_manual_override_fan_on_applies_and_records_grill_call():
 		'Manual', settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes, probe_cap=5
 	)
 	assert ('fan_on', (None,)) in result.grill_calls
-	# The manual request is consumed (cleared) after being applied.
-	assert result.final_control['manual']['change'] is None
-	assert result.final_control['manual']['output'] is None
+	# The manual request is consumed (cleared to False) after being applied.
+	assert result.final_control['manual']['change'] is False
+	assert result.final_control['manual']['output'] is False
 
 
 def test_hold_lid_open_stops_auger_and_fan():
@@ -309,8 +309,8 @@ def test_manual_override_auger_igniter_power_record_grill_calls():
 			probe_cap=5,
 		)
 		assert (f'{change}_on', ()) in result.grill_calls
-		assert result.final_control['manual']['change'] is None
-		assert result.final_control['manual']['output'] is None
+		assert result.final_control['manual']['change'] is False
+		assert result.final_control['manual']['output'] is False
 
 
 def test_manual_override_pwm_sets_duty_cycle():

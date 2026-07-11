@@ -465,8 +465,12 @@ class ControlMode:
 						manual_override['pwm'] = override_time
 						control['manual']['pwm'] = 100  # Reset PWM
 
-					control['manual']['change'] = None
-					control['manual']['output'] = None
+					# Reset to False (not None) to match default_control()'s seed and
+					# keep control free of dict-nested nulls: every consumer treats
+					# these as falsy (== 'pwm', `in [...]`, truthiness), so behavior is
+					# identical, and a null here would be a delete under json_patch merge.
+					control['manual']['change'] = False
+					control['manual']['output'] = False
 					ctx.store.write_control(control, WriteKind.OVERWRITE, origin='control')
 
 			# Grab current probe profiles if they have changed since the last loop.
