@@ -1,6 +1,7 @@
 """SQLite datastore: thread-local connection, schema, transactions, first-boot
 import. The only module that opens the database; common.py talks to it."""
 
+import json
 import os
 import sqlite3
 import threading
@@ -171,3 +172,23 @@ def read_log(name, num=0):
 
 def clear_log(name):
 	execute_write('DELETE FROM logs WHERE name=?', (name,))
+
+
+def export_config(key, path):
+	"""Write the kv blob at `key` to `path` as pretty-printed JSON."""
+	raw = get_blob(key)
+	if raw is None:
+		raise KeyError(f'{key} not present in datastore')
+	with open(path, 'w') as fh:
+		fh.write(json.dumps(json.loads(raw), indent=2, sort_keys=True))
+
+
+def import_config(key, path):
+	"""Read a JSON file at `path`, validate it, and store it at the kv blob `key`."""
+	with open(path) as fh:
+		text = fh.read()
+	try:
+		obj = json.loads(text)
+	except json.JSONDecodeError as e:
+		raise ValueError(f'{path} is not valid JSON: {e}') from e
+	set_blob(key, json.dumps(obj))

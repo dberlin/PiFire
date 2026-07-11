@@ -32,3 +32,25 @@ def test_first_boot_idempotent(fresh, monkeypatch):
 	datastore.set_blob('settings:general', json.dumps({'v': 999}))  # simulate runtime edit
 	datastore.init()  # must NOT re-import
 	assert json.loads(datastore.get_blob('settings:general'))['v'] == 999
+
+
+def test_export_import_roundtrip(fresh):
+	datastore.init()
+	datastore.set_blob('settings:general', json.dumps({'globals': {'units': 'C'}}))
+	p = str(fresh / 'out.json')
+	datastore.export_config('settings:general', p)
+	assert json.load(open(p))['globals']['units'] == 'C'
+	# edit the file, re-import
+	d = json.load(open(p))
+	d['globals']['units'] = 'F'
+	json.dump(d, open(p, 'w'))
+	datastore.import_config('settings:general', p)
+	assert json.loads(datastore.get_blob('settings:general'))['globals']['units'] == 'F'
+
+
+def test_import_rejects_malformed(fresh):
+	datastore.init()
+	p = str(fresh / 'bad.json')
+	open(p, 'w').write('{not json')
+	with pytest.raises(ValueError):
+		datastore.import_config('settings:general', p)
