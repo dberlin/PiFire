@@ -1618,15 +1618,20 @@ def write_event(settings, event):
 
 def read_events_valkey(flush=False):
 	"""
-	Read Events from SQLite DB
+	Read Events from events.log and return a list of event dictionaries.
 
 	:param flush: True to clean events. False otherwise
-	:return: events_list
+	:return: events_list - list of {'date':, 'time':, 'message':} dicts
 	"""
 	if flush:
 		datastore.clear_log('events')
 		return []
-	return datastore.read_log('events')
+
+	events, num_events = read_events()
+	events_list = []
+	for item in range(min(num_events, 60)):
+		events_list.append({'date': events[item][0], 'time': events[item][1], 'message': events[item][2].strip('\n')})
+	return events_list
 
 
 def read_history(num_items=0, flushhistory=False):
