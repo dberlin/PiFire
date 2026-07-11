@@ -180,7 +180,14 @@ def connection():
 		conn.execute('PRAGMA busy_timeout=5000')
 		conn.execute('PRAGMA foreign_keys=ON')
 		conn.isolation_level = None  # autocommit; we manage txns explicitly
-		_ensure_schema(conn)
+		try:
+			_ensure_schema(conn)
+		except Exception:
+			# Don't leak the freshly-opened connection (and its WAL lock) if
+			# schema setup/migration fails -- _local.conn is never assigned in
+			# that case, so nothing else would close it for us.
+			conn.close()
+			raise
 		_local.conn = conn
 	return conn
 

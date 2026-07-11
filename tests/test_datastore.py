@@ -190,6 +190,11 @@ def test_metrics_v1_blob_db_migrates_to_columnar(tmp_path):
 		assert 'seq' in cols
 		assert 'mode' in cols
 		assert 'data' not in cols
+		# Symmetry with the v2->v4 migration test below: pellet_level_start
+		# must have NUMERIC affinity (not REAL), so integer values round-trip
+		# as ints instead of being coerced to floats.
+		affinities = {r[1]: r[2] for r in conn.execute('PRAGMA table_info(metrics)')}
+		assert affinities['pellet_level_start'] == 'NUMERIC'
 		# Table is empty post-migration (in-progress metric loss is expected).
 		assert conn.execute('SELECT COUNT(*) FROM metrics').fetchone()[0] == 0
 	finally:
@@ -309,6 +314,93 @@ CREATE TABLE history (
 		from common import common as c
 
 		assert isinstance(c.read_history()[0]['PSP'], int)
+	finally:
+		datastore._reset_for_tests(None)
+
+
+def test_history_migration_crash_mid_rebuild_rolls_back(tmp_path, monkeypatch):
+	"""Regression/atomicity guard: a crash partway through the history rebuild
+	(after history_new is created and populated, but before the swap finishes)
+	must roll back cleanly -- the original `history` table (and its row) must
+	survive untouched, `user_version` must NOT be bumped to 4, and no leftover
+	`history_new` shadow table must remain. This is only true because
+	`_migrate_history_to_numeric_psp` runs inside `transaction(conn)` using
+	plain `execute()` calls; if a future edit switched it to `executescript()`
+	(which implicitly commits before each statement) the rollback guarantee
+	would break and this test would catch it -- either by the injected fault
+	no longer firing (executescript doesn't go through Connection.execute) or
+	by leftover state surviving the crash."""
+	db_path = str(tmp_path / 'crash_history.db')
+	conn = sqlite3.connect(db_path)
+	try:
+		conn.executescript(
+			"""
+CREATE TABLE history (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             INTEGER NOT NULL,
+    psp            REAL,
+    primary_temps  TEXT NOT NULL CHECK(json_valid(primary_temps)),
+    food_temps     TEXT NOT NULL CHECK(json_valid(food_temps)),
+    aux_temps      TEXT NOT NULL CHECK(json_valid(aux_temps)),
+    notify_targets TEXT NOT NULL CHECK(json_valid(notify_targets)),
+    ext_data       TEXT CHECK(ext_data IS NULL OR json_valid(ext_data))
+);
+"""
+		)
+		conn.execute(
+			'INSERT INTO history(ts, psp, primary_temps, food_temps, aux_temps, notify_targets) '
+			"VALUES (1000, 225.0, '{\"Grill\": 225}', '{}', '{}', '{}')"
+		)
+		conn.execute('PRAGMA user_version=3')
+		conn.commit()
+	finally:
+		conn.close()
+
+	datastore._reset_for_tests(db_path)
+	try:
+		# sqlite3.Connection is a C-level type and can't be monkeypatched
+		# directly -- subclass it (supported via the `factory=` kwarg to
+		# sqlite3.connect) and override execute() to inject the fault.
+		class _CrashingConnection(sqlite3.Connection):
+			def execute(self, sql, *args, **kwargs):
+				# Fires right after history_new is created+populated, before
+				# the DROP/RENAME swap -- the worst point mid-rebuild to crash.
+				if isinstance(sql, str) and sql.strip() == 'DROP TABLE history':
+					raise RuntimeError('injected crash mid-rebuild')
+				return super().execute(sql, *args, **kwargs)
+
+		orig_connect = sqlite3.connect
+
+		def crashing_connect(*args, **kwargs):
+			kwargs['factory'] = _CrashingConnection
+			return orig_connect(*args, **kwargs)
+
+		with monkeypatch.context() as m:
+			m.setattr(datastore.sqlite3, 'connect', crashing_connect)
+			with pytest.raises(RuntimeError, match='injected crash mid-rebuild'):
+				datastore.connection()
+
+		# Inspect the DB file directly (a fresh, unpatched connection) to
+		# prove the rollback actually held on disk.
+		check = sqlite3.connect(db_path)
+		try:
+			assert check.execute('PRAGMA user_version').fetchone()[0] == 3  # NOT bumped
+			names = {r[0] for r in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+			assert 'history' in names  # original table still present
+			assert 'history_new' not in names  # no leftover shadow table
+
+			row = check.execute('SELECT ts, psp, primary_temps FROM history').fetchone()
+			assert row == (1000, 225.0, '{"Grill": 225}')  # original row untouched
+		finally:
+			check.close()
+
+		# A clean reconnect (no injected failure) must complete the migration.
+		datastore._reset_for_tests(db_path)  # drop any cached connection, keep the file
+		conn2 = datastore.connection()
+		assert conn2.execute('PRAGMA user_version').fetchone()[0] == 4
+		row2 = conn2.execute('SELECT ts, psp, primary_temps FROM history').fetchone()
+		assert row2 == (1000, 225, '{"Grill": 225}')
+		assert isinstance(row2[1], int)
 	finally:
 		datastore._reset_for_tests(None)
 
