@@ -12,13 +12,13 @@
 # *****************************************
 
 import threading
+import logging
 import time
 
 import board
 import busio
 from adafruit_extended_bus import ExtendedI2C
 
-from common import create_logger
 from probes.base import resolve_i2c_bus
 
 
@@ -26,7 +26,7 @@ class ToFHopperLevel:
 	default_address = 0x29
 
 	def __init__(self, dev_pins, empty=22, full=4, debug=False):
-		self.logger = create_logger('events')
+		self.logger = logging.getLogger('events')
 		self.empty = empty  # Empty is greater than distance measured for empty
 		self.full = full  # Full is less than or equal to the minimum full distance.
 		self.debug = debug

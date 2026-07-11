@@ -16,8 +16,10 @@
 ==============================
 """
 
+import logging
+
 from gpiozero.threads import GPIOThread
-from common import is_float, create_logger, get_os_info
+from common import is_float, get_os_info
 
 """
 	==============================
@@ -28,7 +30,7 @@ from common import is_float, create_logger, get_os_info
 
 class GrillPlatform:
 	def __init__(self, config):
-		self.logger = create_logger('control')
+		self.logger = logging.getLogger('control')
 		try:
 			self.out_pins = config.get('outputs', None)  # Pins to control the PiFire outputs
 			self.in_pins = config.get('inputs', None)  # Pins for input

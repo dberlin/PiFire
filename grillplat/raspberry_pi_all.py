@@ -32,8 +32,9 @@
 ==============================
 """
 
+import logging
 import subprocess
-from common import is_float, create_logger, get_os_info, get_wifi_quality
+from common import is_float, get_os_info, get_wifi_quality
 from gpiozero import OutputDevice
 from gpiozero import Button
 from gpiozero.threads import GPIOThread
@@ -48,7 +49,7 @@ from rpi_hardware_pwm import HardwarePWM
 
 class GrillPlatform:
 	def __init__(self, config):
-		self.logger = create_logger('control')
+		self.logger = logging.getLogger('control')
 		try:
 			self.out_pins = config.get('outputs', None)  # Pins to control the PiFire outputs
 			self.in_pins = config.get('inputs', None)  # Pins for input

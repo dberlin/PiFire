@@ -24,10 +24,9 @@
 """
 
 import glob
+import logging
 import os
 import threading
-
-from common import create_logger
 
 import board
 import busio
@@ -109,7 +108,7 @@ _DEFAULT_OUTPUTS = {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}
 
 class GrillPlatform(SystemCommandsMixin):
 	def __init__(self, config):
-		self.logger = create_logger('control')
+		self.logger = logging.getLogger('control')
 		self.config = config
 
 		outputs = config.get('outputs', {}) or {}

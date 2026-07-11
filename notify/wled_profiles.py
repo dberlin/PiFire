@@ -20,6 +20,7 @@ Profile Mapping:
 - Night Mode: Very dim amber glow
 """
 
+import logging
 import requests
 import json
 import time
@@ -282,16 +283,9 @@ class WLEDProfileManager:
 
 		self.settings = settings or {}
 
-		# Import logger locally to avoid circular imports
-		try:
-			from common import create_logger
-
-			self.logger = create_logger('control')
-		except ImportError:
-			# Fallback if common module not available
-			import logging
-
-			self.logger = logging.getLogger('wled_profiles')
+		# Consumer of the shared 'control' logger, configured by the control
+		# process entry point (control.py).
+		self.logger = logging.getLogger('control')
 
 		self.profile_numbers = self._get_profile_numbers()
 

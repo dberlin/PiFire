@@ -48,6 +48,7 @@ Required settings format:
 }
 """
 
+import logging
 import time
 import requests
 from notify.wled_profiles import WLEDProfileManager, WLED_COLORS, WLED_EFFECTS
@@ -98,16 +99,9 @@ class WLEDNotificationHandler:
 			self.device_address = self.device_address.replace('https://', '')
 		self.device_address = self.device_address.strip().rstrip('/')
 
-		# Import logger locally to avoid circular imports
-		try:
-			from common import create_logger
-
-			self.logger = create_logger('control')
-		except ImportError:
-			# Fallback if common module not available
-			import logging
-
-			self.logger = logging.getLogger('wled_handler')
+		# Consumer of the shared 'control' logger, configured by the control
+		# process entry point (control.py).
+		self.logger = logging.getLogger('control')
 
 		self.last_updated = time.time()
 		self.last_mode = None

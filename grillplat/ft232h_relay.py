@@ -16,10 +16,9 @@
 #
 # *****************************************
 
+import logging
 import os
 import threading
-
-from common import create_logger
 
 import busio
 from adafruit_emc2101.emc2101_lut import EMC2101_LUT
@@ -78,7 +77,7 @@ class _Relay:
 
 class GrillPlatform(SystemCommandsMixin):
 	def __init__(self, config):
-		self.logger = create_logger('control')
+		self.logger = logging.getLogger('control')
 		self.config = config
 
 		outputs = config.get('outputs', {}) or {}
