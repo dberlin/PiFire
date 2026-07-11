@@ -860,9 +860,12 @@ Expected: FAIL (accessors still reference `cmdsts`; `AttributeError`/`NameError`
 
 - [ ] **Step 3: Implement the rewrites**
 
-Delete `import valkey` and the `cmdsts = valkey.StrictValkey(...)` line
-(`common/common.py:24, 68`). Add near the top: `from common import datastore`
-and `from common.sqlite_queue import SqliteQueue, SqliteMembershipList`.
+**Keep** `import valkey` and the `cmdsts = valkey.StrictValkey(...)` line for
+now — Tasks 8–12 have not migrated the other accessors yet, and they still call
+`cmdsts`. Deleting it here would break every un-migrated accessor. The
+`cmdsts`/`import valkey` removal is deferred to Task 12, after all accessors are
+on SQLite. Here, only ADD near the top: `from common import datastore` and
+`from common.sqlite_queue import SqliteQueue, SqliteMembershipList`.
 Rewrite each accessor body:
 
 ```python
@@ -1441,10 +1444,26 @@ def read_events_valkey(flush=False):
     return datastore.read_log("events")
 ```
 
+**Now remove the Valkey connection from `common.py` (deferred from Task 7).** By
+this point every accessor is on SQLite, so `cmdsts` has no remaining users.
+Delete `import valkey` (`common.py:24`) and the `cmdsts = valkey.StrictValkey(...)`
+line (`common.py:68`). Then grep to confirm nothing in `common.py` still
+references `cmdsts` or `config_set`:
+
+```bash
+grep -nE "cmdsts|config_set|import valkey" common/common.py   # must print nothing
+```
+
+If the grep finds a straggler accessor still using `cmdsts`, that accessor was
+missed by Tasks 7–11 — migrate it to `datastore`/`SqliteQueue` the same way
+before proceeding (report it as a concern).
+
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `pytest tests/test_common_blobs.py::test_flush_control_clears_only_control_not_history -v`
-Expected: PASS.
+Expected: PASS. Then run the full suite `pytest -q` (the two valkey-backed
+suites skip while `valkey-server` is down) and confirm no `common.py` import
+error and no `NameError: cmdsts`.
 
 - [ ] **Step 5: Commit**
 
