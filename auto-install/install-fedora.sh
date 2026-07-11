@@ -115,12 +115,12 @@ log "*************************************************************************"
 log "**  Installing dependencies...                                        **"
 log "*************************************************************************"
 # Build toolchain + scientific libs (scipy/scikit-learn), web stack, supervisor,
-# valkey (redis-compatible), bluetooth, image libs, and DejaVu fonts.
+# bluetooth, image libs, and DejaVu fonts.
 $SUDO dnf -y install \
     python3 python3-devel python3-pip python3-scipy \
     gcc gcc-c++ make gcc-gfortran openblas-devel lapack-devel \
     openjpeg glib2-devel \
-    nginx git supervisor valkey cage seatd \
+    nginx git supervisor cage seatd \
     bluez bluez-libs-devel \
     cabextract curl dejavu-sans-fonts fontconfig 2>&1 | tee -a "$LOG"
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
@@ -144,10 +144,6 @@ fi
 log " + Enabling Bluetooth"
 command -v rfkill >/dev/null 2>&1 && $SUDO rfkill unblock bluetooth 2>&1 | tee -a "$LOG"
 $SUDO systemctl enable --now bluetooth 2>&1 | tee -a "$LOG" || log " ! bluetooth service not enabled (continuing)."
-
-# Valkey (redis-compatible) service.
-log " + Enabling valkey"
-$SUDO systemctl enable --now valkey 2>&1 | tee -a "$LOG" || log " ! valkey service not enabled (continuing)."
 
 # --- Clone PiFire ----------------------------------------------------------
 log "*************************************************************************"

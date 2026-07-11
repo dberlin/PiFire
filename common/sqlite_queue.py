@@ -1,6 +1,6 @@
 """List-backed queues on SQLite, one table per queue. API-compatible with the
-old ValkeyQueue (push/pop/length/list/flush). Plus SqliteMembershipList for the
-users:connected remove-by-value case."""
+old Redis/Valkey-style queue helper (push/pop/length/list/flush). Plus
+SqliteMembershipList for the users:connected remove-by-value case."""
 
 import json
 

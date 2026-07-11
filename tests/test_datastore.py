@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sqlite3
+import subprocess
 
 import pytest
 
@@ -125,3 +126,28 @@ def test_log_handler_and_read(ds):
 	assert ds.read_log('events') == ['second', 'first']
 	ds.clear_log('events')
 	assert ds.read_log('events') == []
+
+
+def test_no_valkey_references_in_source():
+	hits = subprocess.run(
+		[
+			'grep',
+			'-rIl',
+			'-e',
+			'import valkey',
+			'-e',
+			'cmdsts',
+			'-e',
+			'ValkeyQueue',
+			'-e',
+			'ValkeyHandler',
+			'--include=*.py',
+			'common',
+			'controller',
+			'blueprints',
+			'control.py',
+		],
+		capture_output=True,
+		text=True,
+	).stdout.strip()
+	assert hits == '', f'stale Valkey references in: {hits}'

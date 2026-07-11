@@ -22,7 +22,6 @@ dependencies = [
     "pillow>=12.2.0",
     "psutil>=7.2.2",
     "ratelimitingfilter>=1.5",
-    "valkey>=6.0.0",
     "scikit-fuzzy>=0.5.0",
     "scikit-learn>=1.9.0",
     "thermoworks-cloud>=0.1.13",

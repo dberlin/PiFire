@@ -124,7 +124,7 @@ echo "**                                                                     **"
 echo "**      Installing Dependencies... (This could take several minutes)   **" | tee -a ~/logs/pifire_install.log
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
-$SUDO apt install python3-dev python3-pip python3-venv python3-scipy python3-rpi-lgpio build-essential nginx git supervisor ttf-mscorefonts-installer valkey-server gfortran libatlas-base-dev libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluez bluez-firmware libnss-mdns cage seatd -y 2>&1 | tee -a ~/logs/pifire_install.log
+$SUDO apt install python3-dev python3-pip python3-venv python3-scipy python3-rpi-lgpio build-essential nginx git supervisor ttf-mscorefonts-installer gfortran libatlas-base-dev libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluez bluez-firmware libnss-mdns cage seatd -y 2>&1 | tee -a ~/logs/pifire_install.log
 
 # Grab project files
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
