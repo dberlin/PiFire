@@ -39,3 +39,13 @@ def test_errors_and_current_status_roundtrip(ds):
 	assert c.read_errors() == ['e1']
 	c.write_status({'mode': 'Hold'})
 	assert c.read_status() == {'mode': 'Hold'}
+
+
+def test_autotune_uses_queue(ds):
+	c.read_autotune(flush=True)
+	c.write_autotune({'tr': 1})
+	c.write_autotune({'tr': 2})
+	assert c.read_autotune() == [{'tr': 1}, {'tr': 2}]
+	assert c.read_autotune(size_only=True) == 2
+	c.read_autotune(flush=True)
+	assert c.read_autotune() == []

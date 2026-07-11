@@ -31,7 +31,6 @@ from enum import Enum
 from logging.handlers import RotatingFileHandler
 from collections.abc import Mapping
 from ratelimitingfilter import RateLimitingFilter
-from common.valkey_queue import ValkeyQueue
 from common.valkey_handler import ValkeyHandler
 from common import datastore
 from common.sqlite_queue import SqliteQueue, SqliteMembershipList
@@ -1849,28 +1848,17 @@ def read_tr():
 
 
 def write_autotune(data):
-	global cmdsts
-	# Push data string to the list in the last position
-	cmdsts.rpush('control:autotune', json.dumps(data))
+	SqliteQueue('queue_autotune').push(data)
 
 
 def read_autotune(flush=False, size_only=False):
-	global cmdsts
-
-	output_data = []
-	# If a flushhistory is requested, then flush the control:history key (and data)
+	q = SqliteQueue('queue_autotune')
 	if flush:
-		if cmdsts.exists('control:autotune'):
-			cmdsts.delete('control:autotune')
-	elif size_only:
-		size = cmdsts.llen('control:autotune')
-		return size
-	elif cmdsts.exists('control:autotune'):
-		autotune_data = cmdsts.lrange('control:autotune', 0, -1)
-		for datapoint in autotune_data:
-			output_data.append(json.loads(datapoint))
-
-	return output_data
+		q.flush()
+		return []
+	if size_only:
+		return q.length()
+	return q.list()
 
 
 def convert_temp(units, temp):
@@ -2261,7 +2249,7 @@ def seconds_to_string(seconds):
 
 
 def get_system_command_output(requested='supported_commands', timeout=1):
-	system_output = ValkeyQueue('control:systemo')
+	system_output = SqliteQueue('queue_systemo')
 	endtime = timeout + time.time()
 	while time.time() < endtime:
 		while system_output.length() > 0:
@@ -3136,7 +3124,7 @@ def process_command(action=None, arglist=[], origin='unknown', kind=WriteKind.ME
 	elif action == 'sys':
 		""" System Control Commands """
 
-		system_command_queue = ValkeyQueue('control:systemq')
+		system_command_queue = SqliteQueue('queue_systemq')
 		system_command_queue.push(arglist)
 
 	else:
