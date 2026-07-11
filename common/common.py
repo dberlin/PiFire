@@ -967,58 +967,49 @@ def write_warning(warning):
 
 def read_metrics(all=False):
 	"""
-	Read Metrics from Valkey DB
+	Read Metrics from SQLite DB
 
 	:param all: True to read entire list. False for top of list.
 	"""
-	global cmdsts
-
-	if not (cmdsts.exists('metrics:general')):
-		write_metrics(flush=True)
-		return []
-
+	conn = datastore.connection()
 	if all:
-		# Read entire list of Metrics
-		llength = cmdsts.llen('metrics:general')
-		metrics = cmdsts.lrange('metrics:general', 0, -1)
-		metrics_list = []
-		for index in range(0, llength):
-			metrics_list.append(json.loads(metrics[index]))
-		return metrics_list
+		# Read entire list of Metrics, in insertion order
+		rows = conn.execute('SELECT data FROM metrics ORDER BY id').fetchall()
+		return [json.loads(row[0]) for row in rows]
 
-	# Read current Metrics Record (i.e. top of the list)
-	return json.loads(cmdsts.lindex('metrics:general', -1))
+	# Read current Metrics Record (i.e. last one written)
+	row = conn.execute('SELECT data FROM metrics ORDER BY id DESC LIMIT 1').fetchone()
+	return json.loads(row[0]) if row else default_metrics()
 
 
-def write_metrics(metrics=default_metrics(), flush=False, new_metric=False):
+def write_metrics(metrics=None, flush=False, new_metric=False):
 	"""
-	Write metrics to Valkey DB
+	Write metrics to SQLite DB
 
 	:param metrics: Metrics Data
 	:param flush: True to clear metrics. False otherwise
 	:param new_metric:
 	"""
-	global cmdsts
+	if metrics is None:
+		metrics = default_metrics()
 
-	if flush or not (cmdsts.exists('metrics:general')):
-		# Remove all metrics structures in Valkey DB
-		cmdsts.delete('metrics:general')
-
-		# The following set's no persistence so that we don't get writes to the disk / SDCard
-		cmdsts.config_set('appendonly', 'no')
-		cmdsts.config_set('save', '')
-		if not flush:
-			new_metric = True
-		else:
-			return
+	if flush:
+		datastore.execute_write('DELETE FROM metrics')
+		return
 
 	if new_metric:
 		metrics['starttime'] = time.time() * 1000
 		metrics['id'] = generate_uuid()
-		cmdsts.rpush('metrics:general', json.dumps(metrics))
-	else:
-		cmdsts.rpop('metrics:general')
-		cmdsts.rpush('metrics:general', json.dumps(metrics))
+		datastore.execute_write('INSERT INTO metrics(data) VALUES(?)', (json.dumps(metrics),))
+		return
+
+	# Replace the last record (or insert if the table is empty)
+	with datastore.transaction() as conn:
+		row = conn.execute('SELECT id FROM metrics ORDER BY id DESC LIMIT 1').fetchone()
+		if row is None:
+			conn.execute('INSERT INTO metrics(data) VALUES(?)', (json.dumps(metrics),))
+		else:
+			conn.execute('UPDATE metrics SET data=? WHERE id=?', (json.dumps(metrics), row[0]))
 
 
 def read_settings_file(filename='settings.json', init=False, retry_count=0):
