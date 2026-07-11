@@ -1,0 +1,17 @@
+{
+  "after_execute": {
+    "mode": "Stop",
+    "nested": {
+      "a": 1,
+      "b": 9,
+      "c": 3
+    }
+  },
+  "before_execute": {
+    "mode": "Stop",
+    "nested": {
+      "a": 1,
+      "b": 2
+    }
+  }
+}

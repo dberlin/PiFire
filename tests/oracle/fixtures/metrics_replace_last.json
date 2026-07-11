@@ -1,0 +1,27 @@
+{
+  "all_len": 1,
+  "last": {
+    "auger_cycle_time": 0,
+    "augerontime": 0,
+    "augerontime_c": 0,
+    "endtime": 0,
+    "endtime_c": 0,
+    "estusage_i": "",
+    "estusage_m": "",
+    "fanontime": 0,
+    "fanontime_c": 0,
+    "id": 0,
+    "mode": "Hold",
+    "p_mode": 0,
+    "pellet_brand_type": "",
+    "pellet_level_end": 0,
+    "pellet_level_start": 0,
+    "primary_setpoint": 0,
+    "smart_start_profile": 0,
+    "smokeplus": true,
+    "starttime": 0,
+    "starttime_c": 0,
+    "startup_temp": 0,
+    "timeinmode": 0
+  }
+}
