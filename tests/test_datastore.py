@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sqlite3
 
@@ -83,3 +84,17 @@ def test_blob_roundtrip_and_missing(ds):
 	ds.delete_blob('k')
 	assert ds.get_blob('k') is None
 	assert ds.exists_blob('k') is False
+
+
+def test_log_handler_and_read(ds):
+	from common.sqlite_log_handler import SqliteLogHandler
+
+	logger = logging.getLogger('t_events')
+	logger.setLevel(logging.INFO)
+	logger.addHandler(SqliteLogHandler('events'))
+	logger.info('first')
+	logger.info('second')
+	assert ds.read_log('events', num=1) == ['second']  # newest-first, limited
+	assert ds.read_log('events') == ['second', 'first']
+	ds.clear_log('events')
+	assert ds.read_log('events') == []

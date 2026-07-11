@@ -144,3 +144,16 @@ def delete_blob(key):
 
 def exists_blob(key):
 	return connection().execute('SELECT 1 FROM kv WHERE key=?', (key,)).fetchone() is not None
+
+
+def read_log(name, num=0):
+	sql = 'SELECT message FROM logs WHERE name=? ORDER BY id DESC'
+	params = (name,)
+	if num > 0:
+		sql += ' LIMIT ?'
+		params = (name, num)
+	return [r[0] for r in connection().execute(sql, params).fetchall()]
+
+
+def clear_log(name):
+	execute_write('DELETE FROM logs WHERE name=?', (name,))
