@@ -117,3 +117,8 @@ docs/superpowers/experiments/training/
 
 # externally-generated sample dumps
 pifire_from_other_machine_samples.npz
+
+# SQLite datastore (runtime state; never committed)
+pifire.db
+pifire.db-wal
+pifire.db-shm
