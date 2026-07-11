@@ -13,34 +13,41 @@ _ORIGINAL_DB_PATH = DB_PATH
 
 _local = threading.local()
 
-# Columnar metrics schema (schema v2). Columns mirror common.metrics_items in
+# Columnar metrics schema (schema v3). Columns mirror common.metrics_items in
 # order; `seq` is a surrogate PK so it doesn't clash with the metrics 'id'
-# field (a uuid string). Defined separately so the v1->v2 migration below can
+# field (a uuid string). Defined separately so the v1->v3 migration below can
 # reuse the exact same DDL when recreating the table.
+#
+# Numeric columns that conventionally hold integer values use NUMERIC affinity
+# rather than REAL: SQLite's NUMERIC affinity stores an integer literal as
+# INTEGER and a real literal as REAL, so ints round-trip as ints instead of
+# being coerced to floats (REAL affinity would turn e.g. pellet_level_start=87
+# into 87.0). smart_start_profile/p_mode/smokeplus are always-integer flags
+# and stay INTEGER; the *_c display columns and other strings stay TEXT.
 _METRICS_DDL = """
 CREATE TABLE IF NOT EXISTS metrics (
     seq                 INTEGER PRIMARY KEY AUTOINCREMENT,
     id                  TEXT,
-    starttime           REAL,
+    starttime           NUMERIC,
     starttime_c         TEXT,
-    endtime             REAL,
+    endtime             NUMERIC,
     endtime_c           TEXT,
-    timeinmode          REAL,
+    timeinmode          NUMERIC,
     mode                TEXT,
-    augerontime         REAL,
+    augerontime         NUMERIC,
     augerontime_c       TEXT,
     estusage_m          TEXT,
     estusage_i          TEXT,
-    fanontime           REAL,
+    fanontime           NUMERIC,
     fanontime_c         TEXT,
     smokeplus           INTEGER,
-    primary_setpoint    REAL,
+    primary_setpoint    NUMERIC,
     smart_start_profile INTEGER,
-    startup_temp        REAL,
+    startup_temp        NUMERIC,
     p_mode              INTEGER,
-    auger_cycle_time    REAL,
-    pellet_level_start  REAL,
-    pellet_level_end    REAL,
+    auger_cycle_time    NUMERIC,
+    pellet_level_start  NUMERIC,
+    pellet_level_end    NUMERIC,
     pellet_brand_type   TEXT
 );
 """
@@ -96,14 +103,17 @@ def _queue_ddl():
 def _ensure_schema(conn):
 	conn.executescript(SCHEMA + _queue_ddl())
 	version = conn.execute('PRAGMA user_version').fetchone()[0]
-	if version == 1:
-		# Pre-fast-follow DB: metrics is still the old (id, data) JSON blob
-		# table -- CREATE TABLE IF NOT EXISTS above left it untouched. Metrics
-		# are per-cook/transient, so dropping in-progress metrics on this
-		# one-time upgrade is acceptable.
+	if 0 < version < 3:
+		# Pre-v3 DB: either the old (id, data) JSON blob metrics table (v1,
+		# untouched by CREATE TABLE IF NOT EXISTS above), or a v2 columnar
+		# metrics table whose numeric columns used REAL affinity (which
+		# coerces integer values like pellet_level_start=87 to 87.0 on
+		# round-trip). Recreate with the current (NUMERIC-affinity) DDL.
+		# Metrics are per-cook/transient, so dropping in-progress metrics on
+		# this one-time upgrade is acceptable.
 		conn.executescript('DROP TABLE IF EXISTS metrics;' + _METRICS_DDL)
-	if version < 2:
-		conn.execute('PRAGMA user_version=2')
+	if version < 3:
+		conn.execute('PRAGMA user_version=3')
 
 
 def connection():

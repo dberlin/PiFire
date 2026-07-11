@@ -63,13 +63,13 @@ def test_metrics_roundtrip_all_fields(ds):
 	m['fanontime'] = 33.0
 	m['fanontime_c'] = '33 s'
 	m['smokeplus'] = False
-	m['primary_setpoint'] = 250
+	m['primary_setpoint'] = 225
 	m['smart_start_profile'] = 2
-	m['startup_temp'] = 75
+	m['startup_temp'] = 165
 	m['p_mode'] = 3
 	m['auger_cycle_time'] = 8
-	m['pellet_level_start'] = 90
-	m['pellet_level_end'] = 80
+	m['pellet_level_start'] = 87
+	m['pellet_level_end'] = 92
 	m['pellet_brand_type'] = 'Generic-Alder'
 
 	c.write_metrics(m, new_metric=True)
@@ -81,3 +81,20 @@ def test_metrics_roundtrip_all_fields(ds):
 		assert result[key] == m[key], key
 	assert isinstance(result['smokeplus'], bool)
 	assert result['smokeplus'] is False
+
+	# Regression: SQLite REAL-affinity columns silently coerce integer inputs
+	# to floats on round-trip (87 -> 87.0), which then render as "87.0" in
+	# the UI (cookfile detail page, CSV export, event totals). NUMERIC
+	# affinity must preserve the input's Python type instead. `==` alone
+	# does not catch this (87 == 87.0 is True in Python), so assert type.
+	for key in ('pellet_level_start', 'pellet_level_end', 'primary_setpoint', 'startup_temp'):
+		assert isinstance(result[key], int), f'{key} should round-trip as int, got {type(result[key])}'
+
+	# A genuinely-float field must still come back as float.
+	m2 = c.default_metrics()
+	m2['auger_cycle_time'] = 0.3
+	c.write_metrics(m2, new_metric=True)
+	result2 = c.read_metrics()
+	assert isinstance(result2['auger_cycle_time'], float)
+	assert result2['auger_cycle_time'] == 0.3
+	assert isinstance(result2['starttime'], float)  # stamped by new_metric=True via time.time()

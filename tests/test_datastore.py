@@ -167,7 +167,7 @@ def test_retry_uncontended_case_unchanged():
 def test_metrics_v1_blob_db_migrates_to_columnar(tmp_path):
 	"""Regression: an existing pre-fast-follow DB (old blob metrics(id, data)
 	table, user_version=1) must be upgraded in place to the columnar schema
-	on next connect, with schema version bumped to 2. In-progress metric loss
+	on next connect, with schema version bumped to 3. In-progress metric loss
 	is expected/acceptable on this one-time upgrade."""
 	db_path = str(tmp_path / 'v1.db')
 	conn = sqlite3.connect(db_path)
@@ -184,7 +184,7 @@ def test_metrics_v1_blob_db_migrates_to_columnar(tmp_path):
 	datastore._reset_for_tests(db_path)
 	try:
 		conn = datastore.connection()
-		assert conn.execute('PRAGMA user_version').fetchone()[0] == 2
+		assert conn.execute('PRAGMA user_version').fetchone()[0] == 3
 		cols = {r[1] for r in conn.execute('PRAGMA table_info(metrics)')}
 		assert 'seq' in cols
 		assert 'mode' in cols
@@ -195,18 +195,58 @@ def test_metrics_v1_blob_db_migrates_to_columnar(tmp_path):
 		datastore._reset_for_tests(None)
 
 
-def test_metrics_v2_migration_idempotent(tmp_path):
-	"""A DB already at schema version 2 must not be touched again on
-	reconnect (idempotent migration)."""
+def test_metrics_v2_real_affinity_db_migrates_to_numeric(tmp_path):
+	"""Regression: a DB already upgraded to the columnar schema at v2 (numeric
+	metric columns declared REAL) must be rebuilt in place with NUMERIC
+	affinity on next connect, with schema version bumped to 3. REAL affinity
+	silently coerced integer values (e.g. pellet_level_start=87) to floats
+	(87.0) on round-trip; NUMERIC affinity fixes that."""
 	db_path = str(tmp_path / 'v2.db')
+	conn = sqlite3.connect(db_path)
+	try:
+		conn.executescript(
+			"""
+CREATE TABLE metrics (
+    seq                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  TEXT,
+    starttime           REAL,
+    mode                TEXT,
+    pellet_level_start  REAL,
+    pellet_level_end    REAL
+);
+"""
+		)
+		conn.execute("INSERT INTO metrics(id, mode, pellet_level_start) VALUES ('abc', 'Hold', 87)")
+		conn.execute('PRAGMA user_version=2')
+		conn.commit()
+	finally:
+		conn.close()
+
 	datastore._reset_for_tests(db_path)
 	try:
 		conn = datastore.connection()
-		assert conn.execute('PRAGMA user_version').fetchone()[0] == 2
+		assert conn.execute('PRAGMA user_version').fetchone()[0] == 3
+		cols = {r[1]: r[2] for r in conn.execute('PRAGMA table_info(metrics)')}
+		assert cols['pellet_level_start'] == 'NUMERIC'
+		assert cols['starttime'] == 'NUMERIC'
+		# Table is empty post-migration (in-progress metric loss is expected).
+		assert conn.execute('SELECT COUNT(*) FROM metrics').fetchone()[0] == 0
+	finally:
+		datastore._reset_for_tests(None)
+
+
+def test_metrics_v3_migration_idempotent(tmp_path):
+	"""A DB already at schema version 3 must not be touched again on
+	reconnect (idempotent migration)."""
+	db_path = str(tmp_path / 'v3.db')
+	datastore._reset_for_tests(db_path)
+	try:
+		conn = datastore.connection()
+		assert conn.execute('PRAGMA user_version').fetchone()[0] == 3
 		datastore.execute_write("INSERT INTO metrics(id, mode) VALUES ('abc', 'Hold')")
 		datastore._reset_for_tests(db_path)  # drop cached connection, keep file
 		conn = datastore.connection()  # reconnect -> _ensure_schema runs again
-		assert conn.execute('PRAGMA user_version').fetchone()[0] == 2
+		assert conn.execute('PRAGMA user_version').fetchone()[0] == 3
 		# Row must survive: idempotent migration must not re-drop the table.
 		assert conn.execute('SELECT mode FROM metrics WHERE id=?', ('abc',)).fetchone()[0] == 'Hold'
 	finally:
