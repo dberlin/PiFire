@@ -946,40 +946,23 @@ def write_errors(errors):
 
 def read_warnings():
 	"""
-	Read Warnings from Valkey DB and then burn them
+	Read Warnings from SQLite DB and then burn them
 
 	:return: warnings
 	"""
-	global cmdsts
-
-	try:
-		if not (cmdsts.exists('warnings')):
-			warnings = []
-		else:
-			# Read list of warnings
-			warnings = cmdsts.lrange('warnings', 0, -1)
-			# Remove all warnings in Valkey DB
-			cmdsts.delete('warnings')
-	except:
-		warnings = ['Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.']
-		write_log(warnings[0])
-
+	q = SqliteQueue('list_warnings', raw=True)
+	warnings = q.list()
+	q.flush()
 	return warnings
 
 
 def write_warning(warning):
 	"""
-	Write a warning to Valkey DB
+	Write a warning to SQLite DB
 
-	:param warnings: Warnings List
+	:param warning: Warning string
 	"""
-	global cmdsts
-
-	try:
-		cmdsts.rpush('warnings', warning)
-	except:
-		event = 'Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.'
-		write_log(event)
+	SqliteQueue('list_warnings', raw=True).push(warning)
 
 
 def read_metrics(all=False):
@@ -1387,57 +1370,33 @@ def downgrade_settings(settings, settings_default):
 
 def read_connected_users(flush=False):
 	"""
-	Read Connected Users from Valkey DB
+	Read Connected Users from SQLite DB
 
 	:param flush: True to clean connected_users. False otherwise
 	:return: connected_users (List of Client ID's)
 	"""
-	global cmdsts
-
-	try:
-		if flush:
-			cmdsts.delete('users:connected')
-
-		if not (cmdsts.exists('users:connected')):
-			connected_users = []
-		else:
-			# Read list of users
-			connected_users = cmdsts.lrange('users:connected', 0, -1)
-	except:
-		event = 'Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.'
-		write_log(event)
-
-	return connected_users
+	m = SqliteMembershipList('list_users_connected')
+	if flush:
+		m.flush()
+	return m.list()
 
 
 def write_connected_user(client_id):
 	"""
-	Write a Connected User to Valkey DB
+	Write a Connected User to SQLite DB
 
 	:param client_id: Users Client ID from Socket IO/Flask
 	"""
-	global cmdsts
-
-	try:
-		cmdsts.rpush('users:connected', client_id)
-	except:
-		event = 'Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.'
-		write_log(event)
+	SqliteMembershipList('list_users_connected').add(client_id)
 
 
 def remove_connected_user(client_id):
 	"""
-	Removes a Connected User to Valkey DB
+	Removes a Connected User from SQLite DB
 
 	:param client_id: Users Client ID from Socket IO/Flask
 	"""
-	global cmdsts
-
-	try:
-		cmdsts.lrem('users:connected', 0, client_id)
-	except:
-		event = 'Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.'
-		write_log(event)
+	SqliteMembershipList('list_users_connected').remove(client_id)
 
 
 def read_pellet_db_file(filename='pelletdb.json'):

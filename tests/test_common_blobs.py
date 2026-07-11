@@ -49,3 +49,22 @@ def test_autotune_uses_queue(ds):
 	assert c.read_autotune(size_only=True) == 2
 	c.read_autotune(flush=True)
 	assert c.read_autotune() == []
+
+
+def test_warnings_read_and_clear_matches_oracle(ds):
+	exp = _oracle('warnings')
+	c.write_warning('first')
+	c.write_warning('second')
+	assert c.read_warnings() == exp['read1']
+	assert c.read_warnings() == exp['read2_after_clear']
+
+
+def test_connected_users_add_remove(ds):
+	assert c.read_connected_users() == []
+	c.write_connected_user('sidA')
+	c.write_connected_user('sidB')
+	assert sorted(c.read_connected_users()) == ['sidA', 'sidB']
+	c.remove_connected_user('sidA')
+	assert c.read_connected_users() == ['sidB']
+	c.read_connected_users(flush=True)
+	assert c.read_connected_users() == []
