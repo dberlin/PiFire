@@ -1650,38 +1650,24 @@ def read_events_valkey(flush=False):
 
 def read_history(num_items=0, flushhistory=False):
 	"""
-	Read history from Valkey DB and populate a list of data
+	Read history from the datastore and populate a list of data
 
 	:param num_items: Items from end of the history (set to 0 for all items)
 	:param flushhistory: True=flush history & current, False=normal history read
 	:return: List of history dictionaries (each list item is timestamped 'T')
 	"""
-	global cmdsts
-
-	datalist = []  # Initialize data list
-
-	# If a flushhistory is requested, then flush the control:history key (and data)
 	if flushhistory:
-		if cmdsts.exists('control:history'):
-			cmdsts.delete('control:history')  # deletes the history
-			read_current(zero_out=True)  # zero-out current data
-			write_metrics(flush=True)
-	else:
-		if cmdsts.exists('control:history'):
-			list_length = cmdsts.llen('control:history')
+		datastore.execute_write('DELETE FROM history')  # deletes the history
+		read_current(zero_out=True)  # zero-out current data
+		write_metrics(flush=True)
+		return []
 
-			if ((num_items > 0) and (list_length < num_items)) or (num_items == 0):
-				list_start = 0
-			else:
-				list_start = list_length - num_items
+	sql = 'SELECT ts,psp,primary_temps,food_temps,aux_temps,notify_targets,ext_data FROM history ORDER BY id'
+	rows = datastore.connection().execute(sql).fetchall()
+	if num_items > 0:
+		rows = rows[-num_items:]
 
-			data = cmdsts.lrange('control:history', list_start, -1)
-
-			""" Unpack data to list of dictionaries """
-			for index in range(len(data)):
-				datalist.append(json.loads(data[index]))
-
-	return datalist
+	return [_history_row_to_dict(row) for row in rows]
 
 
 def unpack_history(datalist):
@@ -1706,35 +1692,45 @@ def unpack_history(datalist):
 	return temp_dict
 
 
+def _history_row_to_dict(row):
+	ts, psp, p, f, aux, nt, exd = row
+	d = {'T': ts, 'P': json.loads(p), 'F': json.loads(f), 'PSP': psp, 'NT': json.loads(nt), 'AUX': json.loads(aux)}
+	if exd is not None:
+		d['EXD'] = json.loads(exd)
+	return d
+
+
 def write_history(in_data, maxsizelines=28800, ext_data=False):
 	"""
-	Write History to Valkey DB
+	Write History to the datastore
 
 	:param in_data: History data to be written to the database
 	:param maxsizelines: Maximum Line Size (Default 28800)
 	:param ext_data: Extended data to be written to the databse
 	"""
 
-	global cmdsts
+	ts = int(time.time() * 1000)
+	exd = json.dumps(in_data['ext_data']) if ext_data else None
 
-	# Create data structure for current temperature data and timestamp
-	datastruct = {}
-	datastruct['T'] = int(time.time() * 1000)
-	datastruct['P'] = in_data['probe_history']['primary']  # Contains primary probe temperature [key:value]
-	datastruct['F'] = in_data['probe_history']['food']  # Contains food probe temperature(s) [key:value pairs]
-	datastruct['PSP'] = in_data['primary_setpoint']  # Setpoint for the primary probe (non-notify setpoint) [value]
-	datastruct['NT'] = in_data['notify_targets']  # Notification Target Temps for all probes
-	datastruct['AUX'] = in_data['probe_history']['aux']  # Contains auxilliary probe temperature history [key:value]
-
-	if ext_data:
-		datastruct['EXD'] = in_data['ext_data']
-
-	# Push data string to the list in the last position
-	cmdsts.rpush('control:history', json.dumps(datastruct))
-
-	# Check if the list has exceeded maxsizelines, and pop the first item from the list if it has
-	if cmdsts.llen('control:history') > maxsizelines:
-		cmdsts.lpop('control:history')
+	with datastore.transaction() as conn:
+		conn.execute(
+			'INSERT INTO history(ts,psp,primary_temps,food_temps,aux_temps,'
+			'notify_targets,ext_data) VALUES(?,?,?,?,?,?,?)',
+			(
+				ts,
+				in_data['primary_setpoint'],  # Setpoint for the primary probe (non-notify setpoint) [value]
+				json.dumps(in_data['probe_history']['primary']),  # primary probe temperature [key:value]
+				json.dumps(in_data['probe_history']['food']),  # food probe temperature(s) [key:value pairs]
+				json.dumps(in_data['probe_history']['aux']),  # auxilliary probe temperature history [key:value]
+				json.dumps(in_data['notify_targets']),  # Notification Target Temps for all probes
+				exd,
+			),
+		)
+		count = conn.execute('SELECT COUNT(*) FROM history').fetchone()[0]
+		if count > maxsizelines:
+			conn.execute(
+				'DELETE FROM history WHERE id IN (SELECT id FROM history ORDER BY id LIMIT ?)', (count - maxsizelines,)
+			)
 
 
 def write_current(in_data):
