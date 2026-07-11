@@ -128,6 +128,42 @@ def test_log_handler_and_read(ds):
 	assert ds.read_log('events') == []
 
 
+def test_retry_bounded_by_wall_clock_deadline(monkeypatch):
+	"""FIX 4: _retry must not burn through all `attempts` when each attempt
+	itself is slow (e.g. blocked inside SQLite's busy_timeout) -- it must
+	give up once the wall-clock deadline is exceeded, well short of the
+	worst-case attempts*busy_timeout (50 * 5s ~= 4min)."""
+	calls = []
+	fake_time = [0.0]
+
+	def fake_monotonic():
+		return fake_time[0]
+
+	def fake_sleep(secs):
+		fake_time[0] += secs
+
+	def always_busy():
+		calls.append(1)
+		fake_time[0] += 1.0  # simulate ~1s blocked inside this attempt
+		raise sqlite3.OperationalError('database is locked')
+
+	monkeypatch.setattr(datastore.time, 'monotonic', fake_monotonic)
+	monkeypatch.setattr(datastore.time, 'sleep', fake_sleep)
+
+	with pytest.raises(sqlite3.OperationalError, match='deadline'):
+		datastore._retry(always_busy, attempts=50, deadline_s=10.0)
+
+	# Each simulated attempt costs >=1s; hitting the 10s deadline must stop
+	# retries well short of all 50 attempts.
+	assert len(calls) < 50
+
+
+def test_retry_uncontended_case_unchanged():
+	"""Common case: no contention, first attempt succeeds immediately --
+	the deadline machinery must not add overhead or change behavior."""
+	assert datastore._retry(lambda: 42) == 42
+
+
 def test_no_valkey_references_in_source():
 	hits = subprocess.run(
 		[

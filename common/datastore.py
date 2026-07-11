@@ -80,12 +80,27 @@ def connection():
 	return conn
 
 
-def _retry(fn, attempts=50):
+_RETRY_DEADLINE_S = 10.0  # wall-clock cap: a fire-control loop can't afford ~4min
+
+
+def _retry(fn, attempts=50, deadline_s=_RETRY_DEADLINE_S):
+	"""Retry `fn` on SQLITE_BUSY/LOCKED, bounded by both an attempt count and a
+	wall-clock deadline. Each individual attempt can itself block up to
+	busy_timeout (5s, set in connection()) inside SQLite before raising
+	OperationalError to us, so the attempt-count bound alone is not enough to
+	keep worst-case latency bounded (50 attempts * 5s = ~4min); the deadline
+	check below stops us from starting another attempt once we're out of
+	budget, regardless of how many attempts remain."""
+	start = time.monotonic()
 	for i in range(attempts):
 		try:
 			return fn()
 		except sqlite3.OperationalError as e:
 			if 'locked' in str(e).lower() or 'busy' in str(e).lower():
+				if time.monotonic() - start >= deadline_s:
+					raise sqlite3.OperationalError(
+						f'SQLITE_BUSY: retry deadline ({deadline_s}s) exceeded after {i + 1} attempt(s)'
+					) from e
 				time.sleep(0.005 * (i + 1))
 				continue
 			raise
@@ -123,13 +138,25 @@ def _first_boot_import():
 
 	from common import common as c  # deferred to avoid import cycle
 
+	# INSERT ... ON CONFLICT DO UPDATE (not a plain INSERT): read_settings_file
+	# (via its init=True overlay) can itself detect a corrupted settings.json
+	# and call restore_settings(), which persists the recovered settings to
+	# SQLite immediately (write_settings_valkey). That nested write lands on
+	# this same thread-local connection/transaction, so by the time we get
+	# here the row may already exist -- upsert keeps this idempotent instead
+	# of raising a PRIMARY KEY IntegrityError.
+	upsert = 'INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value'
 	with transaction() as conn:
 		if conn.execute("SELECT 1 FROM kv WHERE key='settings:general'").fetchone() is None:
-			settings = c.read_settings_file()  # the FILE reader, not SQLite
-			conn.execute("INSERT INTO kv(key,value) VALUES('settings:general',?)", (json.dumps(settings),))
+			# init=True applies the same version-overlay / upgrade_settings()
+			# path a live read_settings(init=True) would apply, so imported
+			# settings gain new default fields and get upgraded in place
+			# instead of being stored as a stale, un-migrated snapshot.
+			settings = c.read_settings_file(init=True)  # the FILE reader, not SQLite
+			conn.execute(upsert, ('settings:general', json.dumps(settings)))
 		if conn.execute("SELECT 1 FROM kv WHERE key='pellets:general'").fetchone() is None:
 			pelletdb = c.read_pellet_db_file()  # the FILE reader, not SQLite
-			conn.execute("INSERT INTO kv(key,value) VALUES('pellets:general',?)", (json.dumps(pelletdb),))
+			conn.execute(upsert, ('pellets:general', json.dumps(pelletdb)))
 
 
 def _reset_for_tests(path):

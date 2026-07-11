@@ -24,8 +24,17 @@ from flask_mobility import Mobility
 from flask_socketio import SocketIO
 from flask_qrcode import QRcode
 from werkzeug.exceptions import InternalServerError
+from common import datastore
 from common.common import read_settings, is_real_hardware, create_logger
 import logging
+
+# First-boot migration: import existing settings.json / pelletdb.json into
+# SQLite if it hasn't happened yet. Must run before the first settings read
+# below (and before any blueprint route can be hit). This is the ONLY trigger
+# of that import in production (control.py calls it too; it is idempotent,
+# so running it from both independently-supervised processes, in either
+# order, is safe).
+datastore.init()
 
 """
 ==============================================================================

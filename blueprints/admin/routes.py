@@ -7,11 +7,13 @@ from werkzeug.utils import secure_filename
 from common.common import (
 	process_command,
 	read_settings,
+	read_settings_file,
 	write_settings,
 	read_control,
 	write_control,
 	WriteKind,
 	read_pellet_db,
+	read_pellet_db_file,
 	write_pellet_db,
 	read_history,
 	write_log,
@@ -159,7 +161,12 @@ def admin_page(action=None):
 				errors.append("There was an error restoring pellet database.  Restore file wasn't specified or found")
 
 		if 'download_settings' in response:
-			return send_file('settings.json', as_attachment=True, max_age=0)
+			# settings.json is not kept in sync -- SQLite is the source of
+			# truth at runtime. Write the current settings out to a temp
+			# file to download, same pattern as 'download_control' below.
+			filename = '/tmp/settings.json'
+			write_generic_json(settings, filename)
+			return send_file(filename, as_attachment=True, max_age=0)
 
 		if 'download_control' in response:
 			filename = '/tmp/control_general.json'
@@ -180,7 +187,7 @@ def admin_page(action=None):
 			local_file = request.form['localfile']
 
 			if local_file != 'none':
-				new_settings = read_settings(filename=BACKUP_PATH + local_file)
+				new_settings = read_settings_file(filename=BACKUP_PATH + local_file)
 				write_settings(new_settings)
 				server_status = set_server_status('restarting')
 				restart_scripts()
@@ -197,7 +204,7 @@ def admin_page(action=None):
 					filename = secure_filename(remote_file.filename)
 					remote_file.save(os.path.join(current_app.config['UPLOAD_FOLDER'], filename))
 					success.append('Successfully restored settings.')
-					new_settings = read_settings(filename=BACKUP_PATH + filename)
+					new_settings = read_settings_file(filename=BACKUP_PATH + filename)
 					write_settings(new_settings)
 					server_status = set_server_status('restarting')
 					restart_scripts()
@@ -224,7 +231,7 @@ def admin_page(action=None):
 			local_file = request.form['localfile']
 
 			if local_file != 'none':
-				pelletdb = read_pellet_db(filename=BACKUP_PATH + local_file)
+				pelletdb = read_pellet_db_file(filename=BACKUP_PATH + local_file)
 				write_pellet_db(pelletdb)
 				success.append('Successfully restored pellet database.')
 			elif remote_file.filename != '':
@@ -234,7 +241,7 @@ def admin_page(action=None):
 					filename = secure_filename(remote_file.filename)
 					remote_file.save(os.path.join(current_app.config['UPLOAD_FOLDER'], filename))
 					success.append('Successfully restored pellet database.')
-					pelletdb = read_pellet_db(filename=BACKUP_PATH + filename)
+					pelletdb = read_pellet_db_file(filename=BACKUP_PATH + filename)
 					write_pellet_db(pelletdb)
 				else:
 					errors.append(

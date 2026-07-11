@@ -1162,18 +1162,20 @@ def write_settings_valkey(settings):
 
 
 def backup_settings():
-	# Copy current settings file to a backup copy in /[BACKUP_PATH]/PiFire_[DATE]_[TIME].json
+	# Write the CURRENT settings (SQLite is the source of truth at runtime, the
+	# settings.json file is not kept in sync) to a backup copy in
+	# /[BACKUP_PATH]/PiFire_[DATE]_[TIME].json
 	time_now = datetime.datetime.now()
 	time_str = time_now.strftime('%m-%d-%y_%H%M%S')  # Truncate the microseconds
 	backup_file = BACKUP_PATH + 'PiFire_' + time_str + '.json'
-	os.system(f'cp settings.json {backup_file}')
+	settings = read_settings()
+	write_generic_json(settings, backup_file)
 	# Save a path to the backup copy in the updater_manifest.json
 	backup_manifest = read_generic_json('./backups/manifest.json')
 	if backup_manifest == {}:
 		backup_manifest = {'server_settings': {}}
 		write_generic_json(backup_manifest, './backups/manifest.json')
 
-	settings = read_generic_json('settings.json')
 	server_version = settings['versions']['server']
 	backup_manifest['server_settings'][server_version] = backup_file
 	write_generic_json(backup_manifest, 'backups/manifest.json')
@@ -1193,10 +1195,14 @@ def restore_settings(settings_default):
 	backup_settings_file = backup_manifest['server_settings'].get(server_version, None)
 	if backup_settings_file is not None:
 		warning = f'Something failed when reading the "settings.json" file.  Restoring settings from the following backup settings file: {backup_settings_file}.'
-		settings = read_settings(filename=backup_settings_file)
+		# Read the backup FILE (not SQLite -- that's the current, possibly
+		# corrupt/absent, state we're recovering from).
+		settings = read_settings_file(filename=backup_settings_file)
 	else:
 		warning = f'Something failed when reading the "settings.json" file.  Resetting settings to defaults, since no backup settings files were found.'
 		settings = settings_default
+	# Make the recovered settings the new current state in SQLite.
+	write_settings_valkey(settings)
 	write_warning(warning)
 	write_log(warning)
 	return settings
@@ -1362,7 +1368,8 @@ def downgrade_settings(settings, settings_default):
 	backup_settings_file = backup_manifest['server_settings'].get(server_version, None)
 	if backup_settings_file is not None:
 		warning = f'Downgrade server version detected. [{settings["versions"]["server"]} -> {settings_default["versions"]["server"]}] Restoring settings from the following backup settings file: {backup_settings_file}.'
-		settings = read_settings(filename=backup_settings_file)
+		# Read the backup FILE (not SQLite); same fix as restore_settings().
+		settings = read_settings_file(filename=backup_settings_file)
 	else:
 		warning = f'Downgrade server version detected. [{settings["versions"]["server"]} -> {settings_default["versions"]["server"]}] Resetting settings to defaults, since no backup settings files were found.'
 		settings = settings_default
@@ -1493,7 +1500,10 @@ def backup_pellet_db(action='backup'):
 		time_now = datetime.datetime.now()
 		time_str = time_now.strftime('%m-%d-%y_%H%M%S')  # Truncate the microseconds
 		backup_file = BACKUP_PATH + 'PelletDB_' + time_str + '.json'
-		os.system(f'cp pelletdb.json {backup_file}')
+		# Write the CURRENT pellet DB (SQLite is the source of truth at
+		# runtime, pelletdb.json is not kept in sync) directly to the backup file.
+		pelletdb = read_pellet_db()
+		write_generic_json(pelletdb, backup_file)
 		backup_manifest['pelletdb']['current'] = backup_file
 		message = f'Pellet DB has been backed up to the following file: {backup_file}'
 		write_generic_json(backup_manifest, './backups/manifest.json')
@@ -1504,7 +1514,9 @@ def backup_pellet_db(action='backup'):
 		if backup_pelletdb is not None:
 			pelletdb_backup_file = backup_pelletdb
 			warning = f'There was an issue with loading the Pellet Database (possibly corruption).  Restoring from the following backup file: {backup_pelletdb}.'
-			pelletdb = read_pellet_db(filename=pelletdb_backup_file)
+			# Read the backup FILE (not SQLite -- that's the current,
+			# possibly corrupt, state we're recovering from).
+			pelletdb = read_pellet_db_file(filename=pelletdb_backup_file)
 			write_pellet_db(pelletdb)
 		else:
 			warning = f'There was an issue with loading the Pellet Database (possibly corruption).  No backups found, setting to defaults.'
