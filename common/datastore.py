@@ -8,6 +8,7 @@ import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get('PIFIRE_DB_PATH', os.path.join(_HERE, '..', 'pifire.db'))
+_ORIGINAL_DB_PATH = DB_PATH
 
 _local = threading.local()
 
@@ -123,5 +124,4 @@ def _reset_for_tests(path):
 	if conn is not None:
 		conn.close()
 		_local.conn = None
-	if path is not None:
-		DB_PATH = path
+	DB_PATH = path if path is not None else _ORIGINAL_DB_PATH

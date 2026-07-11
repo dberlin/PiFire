@@ -56,3 +56,18 @@ def test_transaction_rolls_back_on_error(ds):
 			conn.execute("INSERT INTO kv(key,value) VALUES('a','1')")
 			raise RuntimeError('boom')
 	assert ds.connection().execute("SELECT COUNT(*) FROM kv WHERE key='a'").fetchone()[0] == 0
+
+
+def test_reset_for_tests_restores_db_path_on_none(tmp_path):
+	"""Regression test: _reset_for_tests(None) restores original DB_PATH."""
+	original_db_path = datastore.DB_PATH
+	temp_db_path = str(tmp_path / 'temp.db')
+
+	# Set to temp path
+	datastore._reset_for_tests(temp_db_path)
+	assert datastore.DB_PATH == temp_db_path
+
+	# Reset to None should restore original
+	datastore._reset_for_tests(None)
+	assert datastore.DB_PATH == original_db_path
+	assert datastore.DB_PATH.endswith('pifire.db')
