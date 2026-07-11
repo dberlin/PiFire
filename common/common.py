@@ -33,6 +33,8 @@ from collections.abc import Mapping
 from ratelimitingfilter import RateLimitingFilter
 from common.valkey_queue import ValkeyQueue
 from common.valkey_handler import ValkeyHandler
+from common import datastore
+from common.sqlite_queue import SqliteQueue, SqliteMembershipList
 
 # *****************************************
 # Enums
@@ -871,108 +873,76 @@ def generate_uuid():
 
 def read_control(flush=False):
 	"""
-	Read Control from Valkey DB
+	Read Control from SQLite DB
 
 	:param flush: True to clean control. False otherwise
 	:return: control
 	"""
-	global cmdsts
-
-	try:
-		if flush:
-			# Remove all control structures in Valkey DB (not history or current)
-			cmdsts.delete('control:general')
-			cmdsts.delete('control:command')
-			cmdsts.delete('control:write')
-			cmdsts.delete('control:systemq')
-			cmdsts.delete('control:systemo')
-			# The following set's no persistence so that we don't get writes to the disk / SDCard
-			cmdsts.config_set('appendonly', 'no')
-			cmdsts.config_set('save', '')
-
-			control = default_control()
-			write_control(control, WriteKind.OVERWRITE, origin='common')
-		else:
-			control = json.loads(cmdsts.get('control:general'))
-	except:
-		control = default_control()
-
-	return control
+	if flush:
+		return _flush_control()  # Task 12
+	raw = datastore.get_blob('control:general')
+	return json.loads(raw) if raw is not None else default_control()
 
 
 def write_control(control, kind, origin='unknown'):
 	"""
-	Write control to Valkey DB.
+	Write control to SQLite DB.
 
 	:param control: Control Dictionary
 	:param kind: WriteKind.OVERWRITE writes control:general directly.
 				 WriteKind.MERGE queues a partial change for deep-merge on execute.
 	:param origin: Source label recorded on merge writes.
 	"""
-	global cmdsts
-
 	if kind is WriteKind.OVERWRITE:
-		cmdsts.set('control:general', json.dumps(control))
+		datastore.set_blob('control:general', json.dumps(control))
 	elif kind is WriteKind.MERGE:
 		control['origin'] = origin
-		cmdsts.rpush('control:write', json.dumps(control))
+		SqliteQueue('queue_control_write').push(control)
 	else:
 		raise TypeError(f'write_control: kind must be WriteKind, got {kind!r}')
 
 
 def execute_control_writes():
 	"""
-	Execute Control Writes in Queue from Valkey DB
+	Execute Control Writes in Queue from SQLite DB
 
 	:param None
 
 	:return status : 'OK', 'ERROR'
 	"""
-	global cmdsts
-
-	status = 'OK'
-	while cmdsts.llen('control:write') > 0:
+	q = SqliteQueue('queue_control_write')
+	while q.length() > 0:
 		control = read_control()
-		command = json.loads(cmdsts.lpop('control:write'))
-		command.pop('origin')
+		command = q.pop()
+		if command is None:
+			break
+		command.pop('origin', None)
 		control = deep_update(control, command)
 		write_control(control, WriteKind.OVERWRITE, origin='writer')
-	return status
+	return 'OK'
 
 
 def read_errors(flush=False):
 	"""
-	Read Errors from Valkey DB
+	Read Errors from SQLite DB
 
 	:param flush: True to clear errors. False otherwise
 	:return: errors
 	"""
-	global cmdsts
-
-	try:
-		if flush:
-			# Remove all error structures in Valkey DB
-			cmdsts.delete('errors')
-
-			errors = []
-			write_errors(errors)
-		else:
-			errors = json.loads(cmdsts.get('errors'))
-	except:
-		errors = ['Unable to reach Valkey database.  You may need to reinstall PiFire or enable valkey-server.']
-
-	return errors
+	if flush:
+		write_errors([])
+		return []
+	raw = datastore.get_blob('errors')
+	return json.loads(raw) if raw is not None else []
 
 
 def write_errors(errors):
 	"""
-	Write Errors to Valkey DB
+	Write Errors to SQLite DB
 
 	:param errors: Errors
 	"""
-	global cmdsts
-
-	cmdsts.set('errors', json.dumps(errors))
+	datastore.set_blob('errors', json.dumps(errors))
 
 
 def read_warnings():
@@ -1069,7 +1039,7 @@ def write_metrics(metrics=default_metrics(), flush=False, new_metric=False):
 		cmdsts.rpush('metrics:general', json.dumps(metrics))
 
 
-def read_settings(filename='settings.json', init=False, retry_count=0):
+def read_settings_file(filename='settings.json', init=False, retry_count=0):
 	"""
 	Read Settings from file
 
@@ -1094,7 +1064,7 @@ def read_settings(filename='settings.json', init=False, retry_count=0):
 		json_data_file.close()
 		# Retry Reading Settings
 		if retry_count < 5:
-			settings = read_settings(filename=filename, retry_count=retry_count + 1)
+			settings = read_settings_file(filename=filename, retry_count=retry_count + 1)
 		else:
 			""" Undefined settings file load error, indicates corruption """
 			settings_default = default_settings()
@@ -1161,44 +1131,54 @@ def read_settings(filename='settings.json', init=False, retry_count=0):
 	return settings
 
 
+def read_settings(filename='settings.json', init=False, retry_count=0):
+	"""
+	Read Settings from SQLite DB (source of truth at runtime).
+
+	:param filename: Unused; kept for signature compatibility.
+	:param init: Unused; kept for signature compatibility.
+	:param retry_count: Unused; kept for signature compatibility.
+	"""
+	return read_settings_valkey()
+
+
 def write_settings(settings):
 	"""
-	Write all settings to JSON file
+	Write all settings to SQLite DB (source of truth at runtime).
 
 	:param settings: Settings
-
 	"""
 	settings['lastupdated']['time'] = math.trunc(time.time())
 
 	write_settings_valkey(settings)
 
-	json_data_string = json.dumps(settings, indent=2, sort_keys=True)
-	with open('settings.json', 'w') as settings_file:
-		settings_file.write(json_data_string)
-
 
 def read_settings_valkey(init=False):
-	global cmdsts
-
 	if init:
 		settings = read_settings()
-		cmdsts.set('settings:general', json.dumps(settings))
+		datastore.set_blob('settings:general', json.dumps(settings))
 
-	if not cmdsts.exists('settings:general'):
-		settings = {}
+	if not datastore.exists_blob('settings:general'):
+		# Self-heal like read_control()/default_control(): callers throughout the
+		# codebase (is_real_hardware(), default_control(), the mobile blueprint,
+		# etc.) assume read_settings() always returns a fully-populated dict.
+		# Before this SQLite source-of-truth split, that guarantee came from the
+		# settings.json file always existing; now it must come from here until
+		# the first-boot import (Task 13) seeds settings:general at startup.
+		settings = default_settings()
 	else:
-		settings = json.loads(cmdsts.get('settings:general'))
+		settings = json.loads(datastore.get_blob('settings:general'))
 
 	return settings
 
 
 def write_settings_valkey(settings):
 	"""
-	Write Settings to Valkey DB
+	Write Settings to SQLite DB
 
 	:param settings: Settings
 	"""
-	cmdsts.set('settings:general', json.dumps(settings))
+	datastore.set_blob('settings:general', json.dumps(settings))
 
 
 def backup_settings():
@@ -1466,7 +1446,7 @@ def remove_connected_user(client_id):
 		write_log(event)
 
 
-def read_pellet_db(filename='pelletdb.json'):
+def read_pellet_db_file(filename='pelletdb.json'):
 	"""
 	Read Pellet DataBase from file
 
@@ -1506,40 +1486,45 @@ def read_pellet_db(filename='pelletdb.json'):
 	return pelletdb
 
 
+def read_pellet_db(filename='pelletdb.json'):
+	"""
+	Read Pellet DataBase from SQLite DB (source of truth at runtime).
+
+	:param filename: Unused; kept for signature compatibility.
+	"""
+	return read_pellets_valkey()
+
+
 def write_pellet_db(pelletdb):
 	"""
-	Write Pellet DataBase to JSON file
+	Write Pellet DataBase to SQLite DB (source of truth at runtime).
 
 	:param pelletdb: Pellet Database
 	"""
 	write_pellets_valkey(pelletdb)
-	json_data_string = json.dumps(pelletdb, indent=2, sort_keys=True)
-	with open('pelletdb.json', 'w') as json_file:
-		json_file.write(json_data_string)
 
 
 def read_pellets_valkey(init=False):
-	global cmdsts
-
 	if init:
 		pelletdb = read_pellet_db()
-		cmdsts.set('pellets:general', json.dumps(pelletdb))
+		datastore.set_blob('pellets:general', json.dumps(pelletdb))
 
-	if not cmdsts.exists('pellets:general'):
-		pelletdb = {}
+	if not datastore.exists_blob('pellets:general'):
+		# Self-heal like read_settings_valkey(); see comment there.
+		pelletdb = default_pellets()
 	else:
-		pelletdb = json.loads(cmdsts.get('pellets:general'))
+		pelletdb = json.loads(datastore.get_blob('pellets:general'))
 
 	return pelletdb
 
 
 def write_pellets_valkey(pelletdb):
 	"""
-	Write Settings to Valkey DB
+	Write Settings to SQLite DB
 
 	:param settings: Settings
 	"""
-	cmdsts.set('pellets:general', json.dumps(pelletdb))
+	datastore.set_blob('pellets:general', json.dumps(pelletdb))
 
 
 def backup_pellet_db(action='backup'):
@@ -1810,8 +1795,6 @@ def write_current(in_data):
 
 	:param in_data: dictionary containing current temperatures
 	"""
-	global cmdsts
-
 	current = {}
 	current['P'] = in_data['probe_history']['primary']
 	current['F'] = in_data['probe_history']['food']
@@ -1819,7 +1802,7 @@ def write_current(in_data):
 	current['PSP'] = in_data['primary_setpoint']
 	current['NT'] = in_data['notify_targets']
 	current['TS'] = int(time.time() * 1000)  # Timestamp
-	cmdsts.set('control:current', json.dumps(current))
+	datastore.set_blob('control:current', json.dumps(current))
 
 
 def read_current(zero_out=False):
@@ -1829,8 +1812,6 @@ def read_current(zero_out=False):
 	:param zero_out: True to zero out current. False otherwise
 	:return: Current probe temps structure
 	"""
-	global cmdsts
-
 	if zero_out:
 		""" Build Probe Structure """
 		settings = read_settings()
@@ -1845,37 +1826,34 @@ def read_current(zero_out=False):
 				current['AUX'][probe['label']] = 0
 			current['NT'][probe['label']] = 0
 
-		cmdsts.set('control:current', json.dumps(current))
+		datastore.set_blob('control:current', json.dumps(current))
 
-	if not cmdsts.exists('control:current'):
+	if not datastore.exists_blob('control:current'):
 		current = {}
 	else:
-		current = json.loads(cmdsts.get('control:current'))
+		current = json.loads(datastore.get_blob('control:current'))
 
 	return current
 
 
 def write_tr(tr_data):
 	"""
-	Write tr values to Valkey DB
+	Write tr values to SQLite DB
 
 	"""
-	global cmdsts
-	cmdsts.set('control:tuning', json.dumps(tr_data))
+	datastore.set_blob('control:tuning', json.dumps(tr_data))
 
 
 def read_tr():
 	"""
-	Read tr from Valkey DB and return structure
+	Read tr from SQLite DB and return structure
 
 	:return: Current probe Tr values structure
 	"""
-	global cmdsts
-
-	if not cmdsts.exists('control:tuning'):
+	if not datastore.exists_blob('control:tuning'):
 		tr_data = {}
 	else:
-		tr_data = json.loads(cmdsts.get('control:tuning'))
+		tr_data = json.loads(datastore.get_blob('control:tuning'))
 
 	return tr_data
 
@@ -2335,21 +2313,17 @@ def write_generic_json(dictionary, filename):
 
 def write_status(status):
 	"""
-	Write Status to Valkey DB
+	Write Status to SQLite DB
 
 	:param status: Status Dictionary
 	"""
-	global cmdsts
-
-	cmdsts.set('control:status', json.dumps(status))
+	datastore.set_blob('control:status', json.dumps(status))
 
 
 def read_status(init=False):
 	"""
-	Read Status dictionary from Valkey DB
+	Read Status dictionary from SQLite DB
 	"""
-	global cmdsts
-
 	if init:
 		settings = read_settings()
 		pellet_db = read_pellet_db()
@@ -2380,7 +2354,7 @@ def read_status(init=False):
 		# Match InMemoryStore semantics: absent status reads back as {} (falsy),
 		# not a crash. In production the controller seeds status via init=True
 		# before any init=False reader runs; this guards the pre-seed/fresh-DB case.
-		raw = cmdsts.get('control:status')
+		raw = datastore.get_blob('control:status')
 		status = json.loads(raw) if raw is not None else {}
 
 	return status
@@ -3229,13 +3203,11 @@ def read_generic_key(key):
 
 def write_generic_key(key, value):
 	"""
-	Write generic data to Valkey DB
+	Write generic data to SQLite DB
 	:param key: key name
 	:parma value: value to write
 	"""
-	global cmdsts
-
-	cmdsts.set(key, json.dumps(value))
+	datastore.set_blob(key, json.dumps(value))
 
 
 def get_os_info(filepath='os_info.json', loggername='events'):
