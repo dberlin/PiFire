@@ -716,6 +716,10 @@ metrics_items = [
 	('pellet_brand_type', ''),  # Pellet Brand and Wood Type
 ]
 
+# The columnar `metrics` table's columns, in order -- built generically from
+# metrics_items so the SQL column list can't drift out of sync with it.
+METRIC_COLUMNS = [k for k, _ in metrics_items]
+
 
 def default_metrics():
 	metrics = {}
@@ -977,6 +981,12 @@ def write_warning(warning):
 	SqliteQueue('list_warnings', raw=True).push(warning)
 
 
+def _metrics_row_to_dict(row):
+	metrics = dict(zip(METRIC_COLUMNS, row))
+	metrics['smokeplus'] = bool(metrics['smokeplus'])
+	return metrics
+
+
 def read_metrics(all=False):
 	"""
 	Read Metrics from SQLite DB
@@ -984,14 +994,15 @@ def read_metrics(all=False):
 	:param all: True to read entire list. False for top of list.
 	"""
 	conn = datastore.connection()
+	cols_sql = ', '.join(METRIC_COLUMNS)
 	if all:
 		# Read entire list of Metrics, in insertion order
-		rows = conn.execute('SELECT data FROM metrics ORDER BY id').fetchall()
-		return [json.loads(row[0]) for row in rows]
+		rows = conn.execute(f'SELECT {cols_sql} FROM metrics ORDER BY seq').fetchall()
+		return [_metrics_row_to_dict(row) for row in rows]
 
 	# Read current Metrics Record (i.e. last one written)
-	row = conn.execute('SELECT data FROM metrics ORDER BY id DESC LIMIT 1').fetchone()
-	return json.loads(row[0]) if row else default_metrics()
+	row = conn.execute(f'SELECT {cols_sql} FROM metrics ORDER BY seq DESC LIMIT 1').fetchone()
+	return _metrics_row_to_dict(row) if row else default_metrics()
 
 
 def write_metrics(metrics=None, flush=False, new_metric=False):
@@ -1009,19 +1020,25 @@ def write_metrics(metrics=None, flush=False, new_metric=False):
 		datastore.execute_write('DELETE FROM metrics')
 		return
 
+	cols_sql = ', '.join(METRIC_COLUMNS)
+	placeholders = ', '.join(['?'] * len(METRIC_COLUMNS))
+
 	if new_metric:
 		metrics['starttime'] = time.time() * 1000
 		metrics['id'] = generate_uuid()
-		datastore.execute_write('INSERT INTO metrics(data) VALUES(?)', (json.dumps(metrics),))
+		values = [metrics.get(k) for k in METRIC_COLUMNS]
+		datastore.execute_write(f'INSERT INTO metrics({cols_sql}) VALUES({placeholders})', values)
 		return
 
 	# Replace the last record (or insert if the table is empty)
+	values = [metrics.get(k) for k in METRIC_COLUMNS]
 	with datastore.transaction() as conn:
-		row = conn.execute('SELECT id FROM metrics ORDER BY id DESC LIMIT 1').fetchone()
+		row = conn.execute('SELECT seq FROM metrics ORDER BY seq DESC LIMIT 1').fetchone()
 		if row is None:
-			conn.execute('INSERT INTO metrics(data) VALUES(?)', (json.dumps(metrics),))
+			conn.execute(f'INSERT INTO metrics({cols_sql}) VALUES({placeholders})', values)
 		else:
-			conn.execute('UPDATE metrics SET data=? WHERE id=?', (json.dumps(metrics), row[0]))
+			set_sql = ', '.join([f'{k}=?' for k in METRIC_COLUMNS])
+			conn.execute(f'UPDATE metrics SET {set_sql} WHERE seq=?', values + [row[0]])
 
 
 def read_settings_file(filename='settings.json', init=False, retry_count=0):

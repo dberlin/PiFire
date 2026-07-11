@@ -13,7 +13,40 @@ _ORIGINAL_DB_PATH = DB_PATH
 
 _local = threading.local()
 
-SCHEMA = """
+# Columnar metrics schema (schema v2). Columns mirror common.metrics_items in
+# order; `seq` is a surrogate PK so it doesn't clash with the metrics 'id'
+# field (a uuid string). Defined separately so the v1->v2 migration below can
+# reuse the exact same DDL when recreating the table.
+_METRICS_DDL = """
+CREATE TABLE IF NOT EXISTS metrics (
+    seq                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  TEXT,
+    starttime           REAL,
+    starttime_c         TEXT,
+    endtime             REAL,
+    endtime_c           TEXT,
+    timeinmode          REAL,
+    mode                TEXT,
+    augerontime         REAL,
+    augerontime_c       TEXT,
+    estusage_m          TEXT,
+    estusage_i          TEXT,
+    fanontime           REAL,
+    fanontime_c         TEXT,
+    smokeplus           INTEGER,
+    primary_setpoint    REAL,
+    smart_start_profile INTEGER,
+    startup_temp        REAL,
+    p_mode              INTEGER,
+    auger_cycle_time    REAL,
+    pellet_level_start  REAL,
+    pellet_level_end    REAL,
+    pellet_brand_type   TEXT
+);
+"""
+
+SCHEMA = (
+	"""
 CREATE TABLE IF NOT EXISTS kv (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL CHECK(json_valid(value))
@@ -29,10 +62,9 @@ CREATE TABLE IF NOT EXISTS history (
     ext_data       TEXT CHECK(ext_data IS NULL OR json_valid(ext_data))
 );
 CREATE INDEX IF NOT EXISTS ix_history_ts ON history(ts);
-CREATE TABLE IF NOT EXISTS metrics (
-    id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    data TEXT NOT NULL CHECK(json_valid(data))
-);
+"""
+	+ _METRICS_DDL
+	+ """
 CREATE TABLE IF NOT EXISTS logs (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     name    TEXT NOT NULL,
@@ -41,6 +73,7 @@ CREATE TABLE IF NOT EXISTS logs (
 );
 CREATE INDEX IF NOT EXISTS ix_logs_name_id ON logs(name, id);
 """
+)
 
 # one table per queue; JSON queues carry a json_valid CHECK, raw lists do not
 _JSON_QUEUE_TABLES = ['queue_control_write', 'queue_systemq', 'queue_systemo', 'queue_displayq', 'queue_autotune']
@@ -62,8 +95,15 @@ def _queue_ddl():
 
 def _ensure_schema(conn):
 	conn.executescript(SCHEMA + _queue_ddl())
-	if conn.execute('PRAGMA user_version').fetchone()[0] == 0:
-		conn.execute('PRAGMA user_version=1')
+	version = conn.execute('PRAGMA user_version').fetchone()[0]
+	if version == 1:
+		# Pre-fast-follow DB: metrics is still the old (id, data) JSON blob
+		# table -- CREATE TABLE IF NOT EXISTS above left it untouched. Metrics
+		# are per-cook/transient, so dropping in-progress metrics on this
+		# one-time upgrade is acceptable.
+		conn.executescript('DROP TABLE IF EXISTS metrics;' + _METRICS_DDL)
+	if version < 2:
+		conn.execute('PRAGMA user_version=2')
 
 
 def connection():

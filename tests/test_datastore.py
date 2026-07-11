@@ -164,6 +164,55 @@ def test_retry_uncontended_case_unchanged():
 	assert datastore._retry(lambda: 42) == 42
 
 
+def test_metrics_v1_blob_db_migrates_to_columnar(tmp_path):
+	"""Regression: an existing pre-fast-follow DB (old blob metrics(id, data)
+	table, user_version=1) must be upgraded in place to the columnar schema
+	on next connect, with schema version bumped to 2. In-progress metric loss
+	is expected/acceptable on this one-time upgrade."""
+	db_path = str(tmp_path / 'v1.db')
+	conn = sqlite3.connect(db_path)
+	try:
+		conn.execute(
+			'CREATE TABLE metrics (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL CHECK(json_valid(data)))'
+		)
+		conn.execute('INSERT INTO metrics(data) VALUES(?)', (json.dumps({'mode': 'Hold'}),))
+		conn.execute('PRAGMA user_version=1')
+		conn.commit()
+	finally:
+		conn.close()
+
+	datastore._reset_for_tests(db_path)
+	try:
+		conn = datastore.connection()
+		assert conn.execute('PRAGMA user_version').fetchone()[0] == 2
+		cols = {r[1] for r in conn.execute('PRAGMA table_info(metrics)')}
+		assert 'seq' in cols
+		assert 'mode' in cols
+		assert 'data' not in cols
+		# Table is empty post-migration (in-progress metric loss is expected).
+		assert conn.execute('SELECT COUNT(*) FROM metrics').fetchone()[0] == 0
+	finally:
+		datastore._reset_for_tests(None)
+
+
+def test_metrics_v2_migration_idempotent(tmp_path):
+	"""A DB already at schema version 2 must not be touched again on
+	reconnect (idempotent migration)."""
+	db_path = str(tmp_path / 'v2.db')
+	datastore._reset_for_tests(db_path)
+	try:
+		conn = datastore.connection()
+		assert conn.execute('PRAGMA user_version').fetchone()[0] == 2
+		datastore.execute_write("INSERT INTO metrics(id, mode) VALUES ('abc', 'Hold')")
+		datastore._reset_for_tests(db_path)  # drop cached connection, keep file
+		conn = datastore.connection()  # reconnect -> _ensure_schema runs again
+		assert conn.execute('PRAGMA user_version').fetchone()[0] == 2
+		# Row must survive: idempotent migration must not re-drop the table.
+		assert conn.execute('SELECT mode FROM metrics WHERE id=?', ('abc',)).fetchone()[0] == 'Hold'
+	finally:
+		datastore._reset_for_tests(None)
+
+
 def test_no_valkey_references_in_source():
 	hits = subprocess.run(
 		[
