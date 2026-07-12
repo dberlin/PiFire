@@ -122,3 +122,4 @@ pifire_from_other_machine_samples.npz
 pifire.db
 pifire.db-wal
 pifire.db-shm
+.gitattributes
