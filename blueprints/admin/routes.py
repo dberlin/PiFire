@@ -158,7 +158,7 @@ def admin_page(action=None):
 				os.system('rm logs/*.log')
 				success.append('Log files deleted.')
 			except:
-				errors.append("There was an error restoring pellet database.  Restore file wasn't specified or found")
+				errors.append('There was an error deleting the log files.')
 
 		if 'download_settings' in response:
 			# settings.json is not kept in sync -- SQLite is the source of
