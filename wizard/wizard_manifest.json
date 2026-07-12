@@ -1927,11 +1927,10 @@
           },
           "fan_controller_address": {
             "friendly_name": "Fan Controller I2C Address",
-            "description": "I2C address of the fan controller when a PWM fan mode is selected (EMC2101: 0x4C/0x4D, EMC2301: 0x2F). Ignored in Relay mode.",
+            "description": "I2C address of the fan controller when a PWM fan mode is selected (EMC2101: fixed at 0x4C; EMC2301: 0x2F). Ignored in Relay mode.",
             "options": {
-              "0x4c": "0x4C",
-              "0x4d": "0x4D",
-              "0x2f": "0x2F"
+              "0x4c": "0x4C (EMC2101)",
+              "0x2f": "0x2F (EMC2301)"
             },
             "settings": ["platform", "fan_controller", "address"]
           },
