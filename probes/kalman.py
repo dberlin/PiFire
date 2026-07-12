@@ -36,6 +36,7 @@ class TempKalman:
 		self.P = [[self.R, 0.0], [0.0, self.R]]
 		self.last_time = None
 		self.none_streak = 0
+		self.gated = False  # True if the last reading was rejected by the gate (debug)
 
 	def update(self, reading, now=None):
 		if reading is None:
@@ -45,6 +46,7 @@ class TempKalman:
 			return None
 
 		self.none_streak = 0
+		self.gated = False
 		if now is None:
 			now = time.monotonic()
 
@@ -85,6 +87,7 @@ class TempKalman:
 		y = reading - self.x
 		s = p00 + self.R
 		if (y * y) / s > self.gate2:
+			self.gated = True
 			self.P = [[p00, p01], [p10, p11]]
 			return round(self.x, 1)
 

@@ -347,7 +347,16 @@ class ProbeInterface:
 			)
 
 			""" Filter the Temperature Reading (Kalman); None passes through """
-			output_value = self.port_filters[port].update(port_values[port])
+			kalman = self.port_filters[port]
+			output_value = kalman.update(port_values[port])
+
+			""" Debug: raw probe reading vs. filtered output and Kalman state """
+			if self.logger.isEnabledFor(logging.DEBUG):
+				self.logger.debug(
+					f'Kalman[{self.port_map[port]}] raw={port_values[port]} output={output_value} '
+					f'est={round(kalman.x, 2) if kalman.x is not None else None} '
+					f'rate={round(kalman.v, 3)}/s gated={kalman.gated} none_streak={kalman.none_streak}'
+				)
 
 			""" Get average temperature from the queue and store it in the output data structure"""
 			if port == self.primary_port:
