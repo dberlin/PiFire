@@ -74,6 +74,25 @@ def _convert_value(value):
 	return value
 
 
+def select_grillplat_module(settings):
+	"""Map platform.system_type to the grillplat module and set dc_fan.
+
+	dc_fan gates all PWM behavior in the control loop, so it is set per platform:
+	always True for x86_numato, and for ft232h_relay only when a PWM fan
+	controller (EMC2101/EMC2301) is selected.
+	"""
+	system_type = settings['platform']['system_type']
+	settings['modules']['grillplat'] = 'prototype'
+	if system_type == 'raspberry_pi_all':
+		settings['modules']['grillplat'] = 'raspberry_pi_all'
+	elif system_type == 'x86_numato':
+		settings['modules']['grillplat'] = 'x86_numato'
+		settings['platform']['dc_fan'] = True
+	elif system_type == 'ft232h_relay':
+		settings['modules']['grillplat'] = 'ft232h_relay'
+		settings['platform']['dc_fan'] = settings['platform']['fan_controller']['chip'] in ('emc2101', 'emc2301')
+
+
 def wizardInstallInfoExisting(settings, wizardData):
 	wizardInstallInfo = {
 		'modules': {
@@ -181,12 +200,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 	time.sleep(2)
 
 	""" Set the grillplatform module per the system_type """
-	settings['modules']['grillplat'] = 'prototype'
-	if settings['platform']['system_type'] == 'raspberry_pi_all':
-		settings['modules']['grillplat'] = 'raspberry_pi_all'
-	elif settings['platform']['system_type'] == 'x86_numato':
-		settings['modules']['grillplat'] = 'x86_numato'
-		settings['platform']['dc_fan'] = True
+	select_grillplat_module(settings)
 
 	# Commit Settings to JSON
 	write_settings(settings)

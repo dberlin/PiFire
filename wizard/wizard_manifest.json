@@ -1886,6 +1886,104 @@
             "settings": ["platform", "outputs", "fan"]
           }
         }
+      },
+      "ft232h_relay": {
+        "friendly_name": "FT232H IO-Triggered Relay",
+        "filename": "ft232h_relay",
+        "description": "Host-agnostic build. PiFire outputs (power/igniter/auger/fan) drive an IO-triggered relay board via FT232H GPIO pins over USB. The fan is either a plain relay (on/off) or variable-speed via an EMC2101/EMC2301 fan controller on the FT232H's I2C bus. Requires USB access to the FT232H (libusb; on Linux add a udev rule so it is reachable without root, and ensure the ftdi_sio kernel driver does not claim the device).",
+        "default": false,
+        "image": "custom.png",
+        "reboot_required": false,
+        "py_dependencies": [
+          "pyftdi",
+          "adafruit-circuitpython-emc2101"
+        ],
+        "apt_dependencies": [],
+        "command_list": [],
+        "settings_dependencies": {
+          "current": {
+            "friendly_name": "Platform Selected",
+            "description": "Selects the current platform.",
+            "options": { "ft232h_relay": "FT232H IO-Triggered Relay" },
+            "settings": ["platform", "current"],
+            "hidden": true
+          },
+          "system_type": {
+            "friendly_name": "System Type",
+            "description": "System core for this platform. Set automatically for the FT232H relay build.",
+            "options": { "ft232h_relay": "FT232H IO-Triggered Relay" },
+            "settings": ["platform", "system_type"],
+            "hidden": true
+          },
+          "fan_mode": {
+            "friendly_name": "Fan Mode",
+            "description": "How the fan is driven: 'Relay (on/off)' treats the fan as a plain relay; EMC2101/EMC2301 add variable fan speed via a controller on the FT232H I2C bus.",
+            "options": {
+              "none": "Relay (on/off)",
+              "emc2101": "EMC2101 PWM fan controller",
+              "emc2301": "EMC2301 PWM fan controller"
+            },
+            "settings": ["platform", "fan_controller", "chip"]
+          },
+          "fan_controller_address": {
+            "friendly_name": "Fan Controller I2C Address",
+            "description": "I2C address of the fan controller when a PWM fan mode is selected (EMC2101: 0x4C/0x4D, EMC2301: 0x2F). Ignored in Relay mode.",
+            "options": {
+              "0x4c": "0x4C",
+              "0x4d": "0x4D",
+              "0x2f": "0x2F"
+            },
+            "settings": ["platform", "fan_controller", "address"]
+          },
+          "ft232h_url": {
+            "friendly_name": "FT232H Device",
+            "description": "Which FT232H to use. '1' selects the first FT232H found; a pyftdi URL (e.g. ftdi://ftdi:232h:SERIAL/1) selects a specific device by serial.",
+            "options": {
+              "1": "First FT232H (default)"
+            },
+            "settings": ["platform", "ft232h", "url"]
+          },
+          "output_power": {
+            "friendly_name": "Power Output Pin",
+            "description": "FT232H GPIO pin driving the power relay.",
+            "options": {
+              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
+              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
+              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
+            },
+            "settings": ["platform", "outputs", "power"]
+          },
+          "output_igniter": {
+            "friendly_name": "Igniter Output Pin",
+            "description": "FT232H GPIO pin driving the igniter relay.",
+            "options": {
+              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
+              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
+              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
+            },
+            "settings": ["platform", "outputs", "igniter"]
+          },
+          "output_auger": {
+            "friendly_name": "Auger Output Pin",
+            "description": "FT232H GPIO pin driving the auger relay.",
+            "options": {
+              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
+              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
+              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
+            },
+            "settings": ["platform", "outputs", "auger"]
+          },
+          "output_fan": {
+            "friendly_name": "Fan Output Pin",
+            "description": "FT232H GPIO pin driving the fan relay (gates fan power in both modes).",
+            "options": {
+              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
+              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
+              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
+            },
+            "settings": ["platform", "outputs", "fan"]
+          }
+        }
       }
     },
     "probes": {
