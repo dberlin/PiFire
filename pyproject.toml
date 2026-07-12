@@ -17,6 +17,7 @@ dependencies = [
     "influxdb-client>=1.50.0",
     "netifaces>=0.11.0",
     "paho-mqtt>=2.1.0",
+    "pyftdi>=0.55.0",
     "pyserial>=3.5",
     "pillow>=12.2.0",
     "psutil>=7.2.2",

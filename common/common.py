@@ -188,6 +188,9 @@ def default_settings():
 			'i2c_bus_num': '1',  # extended only: /dev/i2c-N number or adapter-name match (e.g. 'CP2112')
 			'address': '0x4c',  # fan controller I2C address (EMC2101 0x4C / EMC2301 0x2F)
 		},
+		'ft232h': {  # ft232h_relay platform: FT232H USB GPIO expander selection
+			'url': '1'  # '1' = first FT232H; or a pyftdi URL to pick a specific device
+		},
 		'current': 'custom',
 		'dc_fan': False,  # True if system has a DC Fan (Does not indicate PWM)
 		'triggerlevel': 'LOW',  # Active LOW / Active HIGH for the Relay Outputs
