@@ -82,7 +82,7 @@ class ReadProbes(ProbeInterface):
 	def read_all_ports(self, output_data):
 		"""Read temperature from device"""
 		tempC = round(self.device.temperature, 1)
-		tempF = int(tempC * (9 / 5) + 32)  # Celsius to Fahrenheit
+		tempF = round(tempC * (9 / 5) + 32, 1)  # Celsius to Fahrenheit
 		port = self.device_info['ports'][0]
 
 		""" Read resistance from device """

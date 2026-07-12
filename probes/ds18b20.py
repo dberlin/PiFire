@@ -139,7 +139,7 @@ class ReadProbes(ProbeInterface):
 		tempC = self.device.temperature
 		if tempC is not None:
 			tempC = round(tempC, 1)
-			tempF = int(tempC * (9 / 5) + 32)  # Celsius to Fahrenheit
+			tempF = round(tempC * (9 / 5) + 32, 1)  # Celsius to Fahrenheit
 		else:
 			tempC = None
 			tempF = None

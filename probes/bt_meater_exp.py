@@ -138,7 +138,7 @@ class Meater:
 		tip = self.bytesToInt(array[0], array[1])
 		ra = self.bytesToInt(array[2], array[3])
 		oa = self.bytesToInt(array[4], array[5])
-		return int(tip + (max(0, (((ra - min(48, oa)) * 16) * 589) / 1487)))
+		return tip + (max(0, (((ra - min(48, oa)) * 16) * 589) / 1487))
 
 	def getAmbient(self):
 		"""
@@ -338,7 +338,7 @@ class Meater_Pro:
 		int
 			The corrected internal temperature reading.
 		"""
-		return (int)(internal_temp + ((ambient_temp - internal_temp) * 1.2))
+		return internal_temp + ((ambient_temp - internal_temp) * 1.2)
 
 	def convert_to_temperatures(self, data):
 		"""
@@ -665,7 +665,7 @@ class ReadProbes(ProbeInterface):
 				""" Read Ports from Device """
 				if probe_values_F[index] is not None:
 					port_values[port] = (
-						int(probe_values_F[index]) if self.units == 'F' else self._to_celsius(probe_values_F[index])
+						probe_values_F[index] if self.units == 'F' else self._to_celsius(probe_values_F[index])
 					)
 					output_value = port_values[port]
 				else:

@@ -438,7 +438,7 @@ class ProbeInterface:
 
 	def _to_fahrenheit(self, celsius):
 		if celsius is not None:
-			return int(celsius * 9 / 5 + 32)
+			return round(celsius * 9 / 5 + 32, 1)
 		else:
 			return None
 

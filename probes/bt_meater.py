@@ -101,7 +101,7 @@ class BaseMeater:
 		tip = self.bytesToInt(array[0], array[1])
 		ra = self.bytesToInt(array[2], array[3])
 		oa = self.bytesToInt(array[4], array[5])
-		return int(tip + (max(0, (((ra - min(48, oa)) * 16) * 589) / 1487)))
+		return tip + (max(0, (((ra - min(48, oa)) * 16) * 589) / 1487))
 
 	def readCharacteristic(self, c):
 		try:
@@ -224,7 +224,7 @@ class MeaterPro(BaseMeater):
 		return struct.unpack_from('<h', data, offset)[0]
 
 	def ambient_correction(self, ambient_temp, internal_temp):
-		return int(internal_temp + ((ambient_temp - internal_temp) * 1.2))
+		return internal_temp + ((ambient_temp - internal_temp) * 1.2)
 
 	def convert_to_temperatures(self, data):
 		self.internal_temps = [
