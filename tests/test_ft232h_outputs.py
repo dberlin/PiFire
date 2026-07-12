@@ -106,3 +106,11 @@ def test_cleanup_deasserts_and_closes_pins():
 		for pin in ('C0', 'C1', 'C2', 'C3'):
 			assert harness.dio.pins[pin].value is True
 			assert harness.dio.pins[pin].deinit_called is True
+
+
+def test_import_does_not_enable_ft232h_backend():
+	import subprocess
+	import sys
+
+	code = "import os, grillplat.ft232h_relay; assert 'BLINKA_FT232H' not in os.environ"
+	subprocess.run([sys.executable, '-c', code], check=True, cwd='.')

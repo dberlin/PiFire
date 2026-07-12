@@ -36,7 +36,7 @@ class SystemCommandsMixin:
 		}
 
 	def check_throttled(self, arglist):
-		# Not applicable on x86 hardware.
+		# Not applicable on generic-host hardware.
 		return {
 			'result': 'OK',
 			'message': 'No under-voltage or throttling detected.',

@@ -114,14 +114,22 @@ class GrillPlatform(SystemCommandsMixin):
 		# Open the FT232H and create one output pin per PiFire output.
 		board, digitalio = _load_ft232h(self.url)
 		self.relays = {}
-		for name, pin_name in self.pin_map.items():
-			try:
-				pin = getattr(board, pin_name)
-			except AttributeError:
-				raise ValueError(f'Unknown FT232H pin {pin_name!r} for output {name!r}')
-			dio = digitalio.DigitalInOut(pin)
-			dio.direction = digitalio.Direction.OUTPUT
-			self.relays[name] = _Relay(dio, active_high)
+		try:
+			for name, pin_name in self.pin_map.items():
+				try:
+					pin = getattr(board, pin_name)
+				except AttributeError:
+					raise ValueError(f'Unknown FT232H pin {pin_name!r} for output {name!r}')
+				dio = digitalio.DigitalInOut(pin)
+				dio.direction = digitalio.Direction.OUTPUT
+				self.relays[name] = _Relay(dio, active_high)
+		except Exception:
+			for relay in self.relays.values():
+				try:
+					relay.close()
+				except Exception:
+					pass
+			raise
 
 		# Open the fan controller if PWM fan mode is selected (Task 2).
 		self.emc = None
