@@ -128,8 +128,17 @@ class GrillPlatform:
 			self._init_fan_controller(board)
 
 	def _init_fan_controller(self, board):
-		# Implemented in Task 2.
-		pass
+		# EMC fan controller on the FT232H's own I2C bus (D0=SCL, D1/D2=SDA).
+		i2c = busio.I2C(board.SCL, board.SDA)
+		if self.chip == 'emc2301':
+			self.emc = EMC2301(i2c, address=self.emc_address)
+		else:
+			self.emc = EMC2101_LUT(i2c)
+			# Drive the fan from PiFire's control logic, not the chip's LUT curve.
+			self.emc.lut_enabled = False
+		self.emc.manual_fan_speed = 0
+		# Apply the PWM frequency now so the chip is correct immediately.
+		self.set_pwm_frequency(self.frequency)
 
 	# MARK: Output control
 	def _set_output(self, name, state):
