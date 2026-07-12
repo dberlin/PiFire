@@ -375,6 +375,11 @@ class ProbeInterface:
 		if not self.applies_kalman:
 			return output_data
 
+		# Remember the last DEBUG line emitted per port so a steady probe doesn't
+		# flood the log every tick -- only log when the line actually changes.
+		if not hasattr(self, '_last_kalman_log'):
+			self._last_kalman_log = {}
+
 		for port, label in self.port_map.items():
 			if port == self.primary_port:
 				group = 'primary'
@@ -393,11 +398,14 @@ class ProbeInterface:
 			output_data[group][label] = output_value
 
 			if self.logger.isEnabledFor(logging.DEBUG):
-				self.logger.debug(
+				msg = (
 					f'Kalman[{label}] raw={raw} output={output_value} '
 					f'est={round(kalman.x, 2) if kalman.x is not None else None} '
 					f'rate={round(kalman.v, 3)}/s gated={kalman.gated} none_streak={kalman.none_streak}'
 				)
+				if msg != self._last_kalman_log.get(port):
+					self.logger.debug(msg)
+					self._last_kalman_log[port] = msg
 
 		return output_data
 
