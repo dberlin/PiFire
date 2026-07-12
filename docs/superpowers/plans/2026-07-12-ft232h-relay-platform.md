@@ -19,7 +19,7 @@
 - Wizard output-pin dropdown options: `C0`–`C7` and `D4`–`D7` only (D0–D3 reserved).
 - The control loop gates all PWM on `settings['platform']['dc_fan']`; the wizard sets it `True` for EMC modes, `False` for `none`.
 - Run `uvx ruff format <changed files>` before every commit (repo standing rule).
-- Reference implementation to port fan/PWM and system-info code from: `grillplat/x86_numato.py`.
+- Fan/PWM logic is ported from `grillplat/x86_numato.py`. Generic-host system-info commands are **not** duplicated: they live in a shared `grillplat/system_commands.py` `SystemCommandsMixin`, inherited by both `x86_numato` and `ft232h_relay`.
 
 ---
 
@@ -36,7 +36,7 @@ Creates the platform module driving the four relays via FT232H GPIO, with the fa
 - Produces:
   - `grillplat.ft232h_relay._load_ft232h(url='1') -> (board, digitalio)` — module-level, patchable.
   - `grillplat.ft232h_relay._Relay(dio, active_high)` with `.on()`, `.off()`, `.is_active` (bool), `.close()`.
-  - `grillplat.ft232h_relay.GrillPlatform(config)` implementing `auger_on/off`, `igniter_on/off`, `power_on/off`, `fan_on(percent=100)`, `fan_off`, `fan_toggle`, `set_duty_cycle(percent, override_ramping=True)`, `set_pwm_frequency(frequency=25000)`, `pwm_fan_ramp(on_time=5, min_duty_cycle=20, max_duty_cycle=100)`, `get_input_status()`, `get_output_status()`, `cleanup()`. Instance attrs used by tests: `.relays` (dict name→`_Relay`), `.pin_map` (dict name→pin string), `._output_state`, `.pwm_fan` (bool), `.emc` (None in relay mode), `.chip`.
+  - `grillplat.ft232h_relay.GrillPlatform(config)` implementing `auger_on/off`, `igniter_on/off`, `power_on/off`, `fan_on(percent=100)`, `fan_off`, `fan_toggle`, `set_duty_cycle(percent, override_ramping=True)`, `set_pwm_frequency(frequency=25000)`, `pwm_fan_ramp(on_time=5, min_duty_cycle=20, max_duty_cycle=100)`, `get_input_status()`, `get_output_status()`, `cleanup()`. Instance attrs used by tests: `.relays` (dict name→`_Relay`), `.pin_map` (dict name→pin string), `._output_state`, `.pwm_fan` (bool), `.emc` (None in relay mode), `.chip`. (Task 3 makes `GrillPlatform` inherit `SystemCommandsMixin` for the system-info commands; Task 1 defines it as a plain `class GrillPlatform:`.)
   - `tests.ft232h_helpers.make_ft232h_platform(config)` — context manager yielding `(platform, harness)`; `harness` has `.board`, `.dio`, `.emc2101_cls`, `.emc2301_cls`, `.busio`.
 
 - [ ] **Step 1: Write the shared test helper**
@@ -265,7 +265,7 @@ Create `grillplat/ft232h_relay.py`:
 import os
 import threading
 
-from common import is_float, create_logger, get_os_info, get_wifi_quality
+from common import create_logger
 
 import busio
 from adafruit_emc2101.emc2101_lut import EMC2101_LUT
@@ -675,17 +675,20 @@ git commit -m "feat(ft232h): EMC2101/EMC2301 PWM fan mode"
 
 ---
 
-### Task 3: System / platform info commands
+### Task 3: Shared generic-host system/platform info mixin
 
-Ports the generic-host system-info commands from `x86_numato` so the admin panel's platform queries work.
+Extracts the generic-host system-info commands into a shared `SystemCommandsMixin` inherited by both `x86_numato` and the new `ft232h_relay`, replacing `x86_numato`'s inline copies. This is a behavior-preserving refactor: `tests/test_x86_system.py` calls these methods on the instance, so they keep resolving through inheritance and that file stays green **unmodified**.
 
 **Files:**
-- Modify: `grillplat/ft232h_relay.py` (append methods to `GrillPlatform`)
+- Create: `grillplat/system_commands.py`
+- Modify: `grillplat/x86_numato.py` (inherit the mixin; delete the 9 inline methods; drop the now-unused `is_float` / `get_os_info` / `get_wifi_quality` imports)
+- Modify: `grillplat/ft232h_relay.py` (inherit the mixin)
 - Test: `tests/test_ft232h_system.py`
+- Must stay green unmodified: `tests/test_x86_system.py`
 
 **Interfaces:**
-- Consumes: Task 1's `GrillPlatform`.
-- Produces: `supported_commands`, `check_throttled`, `check_cpu_temp`, `check_wifi_quality`, `check_alive`, `scan_bluetooth`, `os_info`, `network_info`, `hardware_info` — each returns a dict `{'result', 'message', 'data'}`.
+- Consumes: Task 1's `GrillPlatform`; Task 2's completed module.
+- Produces: `grillplat.system_commands.SystemCommandsMixin` providing `supported_commands(arglist)`, `check_throttled(arglist)`, `check_cpu_temp(arglist)`, `check_wifi_quality(arglist)`, `check_alive(arglist)`, `scan_bluetooth(arglist)`, `os_info(arglist)`, `network_info(arglist)`, `hardware_info(arglist)` — each returns `{'result', 'message', 'data'}` and relies on `self.logger`. Both `x86_numato.GrillPlatform` and `ft232h_relay.GrillPlatform` inherit it.
 
 - [ ] **Step 1: Write the failing system-commands test**
 
@@ -735,21 +738,84 @@ def test_check_cpu_temp_returns_float():
 Run: `python -m pytest tests/test_ft232h_system.py -q`
 Expected: FAIL — `AttributeError: 'GrillPlatform' object has no attribute 'supported_commands'`.
 
-- [ ] **Step 3: Append the system-info methods**
+- [ ] **Step 3: Create the shared mixin**
 
-Copy the system-info command methods verbatim from `grillplat/x86_numato.py` (the block under `# MARK: System / Platform Commands`, i.e. `supported_commands`, `check_throttled`, `check_cpu_temp`, `check_wifi_quality`, `check_alive`, `scan_bluetooth`, `os_info`, `network_info`, `hardware_info`) and append them as methods of `GrillPlatform` in `grillplat/ft232h_relay.py`. These are the generic-host variants (psutil-based CPU temp, no `vcgencmd`), which suit any FT232H host. `is_float`, `get_os_info`, and `get_wifi_quality` are already imported at the top of the module (Task 1).
+Create `grillplat/system_commands.py` by **moving** the nine methods currently under `# MARK: System / Platform Commands` in `grillplat/x86_numato.py` (`supported_commands`, `check_throttled`, `check_cpu_temp`, `check_wifi_quality`, `check_alive`, `scan_bluetooth`, `os_info`, `network_info`, `hardware_info`) verbatim into a mixin class. These are the generic-host variants (psutil-based CPU temp, no `vcgencmd`), which suit any non-Raspberry-Pi host. Add the imports the moved methods need at module top:
 
-- [ ] **Step 4: Run tests to verify they pass**
+```python
+#!/usr/bin/env python3
 
-Run: `python -m pytest tests/test_ft232h_system.py -q`
-Expected: PASS (4 passed).
+# *****************************************
+# PiFire Generic-Host System / Platform Commands
+# *****************************************
+#
+# Description: System/platform info commands (supported_commands, CPU temp via
+#   psutil, wifi quality, bluetooth scan, os/network/hardware info) shared by
+#   non-Raspberry-Pi platforms (x86_numato, ft232h_relay).  Raspberry-Pi
+#   platforms keep their own vcgencmd-based variants.
+#
+#   Consuming classes must provide self.logger.
+# *****************************************
 
-- [ ] **Step 5: Format and commit**
+from common import is_float, get_os_info, get_wifi_quality
+
+
+class SystemCommandsMixin:
+	# <the nine methods, pasted verbatim from x86_numato.py, tabs preserved>
+```
+
+Paste the nine methods exactly as they appear in `x86_numato.py` (do not rewrite them). `check_cpu_temp`, `scan_bluetooth`, `network_info`, and `hardware_info` keep their existing method-local `import psutil` / `import asyncio` / `from bleak import BleakScanner` / `import netifaces` lines.
+
+- [ ] **Step 4: Make `x86_numato` inherit the mixin and delete its copies**
+
+In `grillplat/x86_numato.py`:
+1. Add the import near the other `grillplat.*` imports:
+
+```python
+from grillplat.system_commands import SystemCommandsMixin
+```
+
+2. Change the class declaration:
+
+```python
+class GrillPlatform(SystemCommandsMixin):
+```
+
+3. Delete the nine methods that were moved (the whole `# MARK: System / Platform Commands` block down to but **not** including `get_output_status`, which stays on the class).
+4. Fix the top-of-file import — the moved methods were the only users of `is_float`, `get_os_info`, and `get_wifi_quality`, so narrow the line to what `x86_numato` still uses:
+
+```python
+from common import create_logger
+```
+
+(Verify with `grep -nE 'is_float|get_os_info|get_wifi_quality' grillplat/x86_numato.py` — expected: no matches after the deletion.)
+
+- [ ] **Step 5: Make `ft232h_relay` inherit the mixin**
+
+In `grillplat/ft232h_relay.py`:
+1. Add the import near the other `grillplat.*` import:
+
+```python
+from grillplat.system_commands import SystemCommandsMixin
+```
+
+2. Change the class declaration:
+
+```python
+class GrillPlatform(SystemCommandsMixin):
+```
+
+- [ ] **Step 6: Run both suites to verify green**
+
+Run: `python -m pytest tests/test_ft232h_system.py tests/test_x86_system.py tests/test_x86_outputs.py tests/test_ft232h_outputs.py tests/test_ft232h_fan.py -q`
+Expected: PASS (all). `test_x86_system.py` passes unmodified, proving the refactor preserved behavior.
+
+- [ ] **Step 7: Format and commit**
 
 ```bash
-uvx ruff format grillplat/ft232h_relay.py tests/test_ft232h_system.py
-git add grillplat/ft232h_relay.py tests/test_ft232h_system.py
-git commit -m "feat(ft232h): port system/platform info commands"
+uvx ruff format grillplat/system_commands.py grillplat/x86_numato.py grillplat/ft232h_relay.py tests/test_ft232h_system.py
+git add grillplat/system_commands.py grillplat/x86_numato.py grillplat/ft232h_relay.py tests/test_ft232h_system.py
+git commit -m "refactor(grillplat): shared generic-host system-info mixin"
 ```
 
 ---
@@ -1097,6 +1163,7 @@ git commit -m "feat(ft232h): wizard manifest entry + dc_fan coupling"
 - Selectable fan: relay-only → Task 1; EMC2101/EMC2301 PWM on FT232H I2C → Task 2.
 - `get_output_status` shape per mode → Tasks 1 & 2.
 - `get_input_status()` False (outputs only) → Task 1.
+- System-info commands via shared `SystemCommandsMixin` (no duplication) → Task 3.
 - Config: `outputs` pin names, `ft232h.url`, `fan_controller.chip` incl. `none` → Tasks 1 & 4.
 - Settings defaults `ft232h` block → Task 4.
 - Wizard manifest entry (friendly name, pin dropdowns C0–C7/D4–D7, py_dependencies) → Task 5.
@@ -1105,6 +1172,6 @@ git commit -m "feat(ft232h): wizard manifest entry + dc_fan coupling"
 - Tests mirroring x86 suite → Tasks 1–5.
 - Host-agnostic naming `ft232h_relay` → Global Constraints + Task 5.
 
-**Placeholder scan:** No `TBD`/`TODO`/"add error handling"/"similar to". The Task 1 `_init_fan_controller` stub is an intentional, named seam filled by Task 2 (its Task-1 tests assert `plat.emc is None`, its Task-2 tests assert the filled behavior). The Task 3 port references the exact source block in `x86_numato.py` rather than restating ~130 lines of identical code.
+**Placeholder scan:** No `TBD`/`TODO`/"add error handling"/"similar to". The Task 1 `_init_fan_controller` stub is an intentional, named seam filled by Task 2 (its Task-1 tests assert `plat.emc is None`, its Task-2 tests assert the filled behavior). Task 3 avoids duplication entirely by extracting the shared `SystemCommandsMixin` (moving, not copying, `x86_numato`'s methods) — verified behavior-preserving by `test_x86_system.py` staying green unmodified.
 
 **Type consistency:** `_load_ft232h(url)` signature, `_Relay(dio, active_high)` with `.on/.off/.is_active/.close`, `pin_map`/`relays`/`_output_state`/`pwm_fan`/`emc`/`chip` attribute names, `select_grillplat_module(settings)`, and the harness attribute names (`board/dio/emc2101_cls/emc2301_cls/busio`) are used identically across all tasks and tests. Fan-mode option key `none`/`emc2101`/`emc2301` matches `fan_controller.chip` reads in the module and the wizard helper.
