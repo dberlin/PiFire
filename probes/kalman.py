@@ -3,9 +3,9 @@
 """
 Constant-velocity Kalman filter for smoothing probe temperature readings.
 
-Replaces the standard-deviation-gated moving average (TempQueue). Estimates
-both temperature and its rate of change, so it tracks ramps with little lag
-while smoothing noise.
+Estimates both temperature and its rate of change, so it tracks ramps with
+little lag while smoothing noise. Applied centrally to every probe module's
+output in ProbesMain.read_probes() via ProbeInterface.apply_filters().
 """
 
 import time

@@ -37,6 +37,8 @@ from statistics import mean
 
 
 class ReadProbes(ProbeInterface):
+	applies_kalman = False  # Aggregates already-filtered probes; don't double-filter.
+
 	def __init__(self, probe_info, device_info, units):
 		super().__init__(probe_info, device_info, units)
 

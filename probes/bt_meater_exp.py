@@ -674,7 +674,7 @@ class ReadProbes(ProbeInterface):
 				""" Output Tr """
 				self.output_data['tr'][self.port_map[port]] = 0  # resistance NA
 
-				""" Get average temperature from the queue and store it in the output data structure"""
+				""" Store the raw temperature; Kalman filtering is applied centrally in ProbesMain.read_probes() via apply_filters() """
 				if port == self.primary_port:
 					self.output_data['primary'][self.port_map[port]] = output_value
 				elif port in self.food_ports:

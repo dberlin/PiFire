@@ -34,6 +34,8 @@ from probes.base import ProbeInterface
 
 
 class ReadProbes(ProbeInterface):
+	applies_kalman = False  # No real sensor; nothing to filter.
+
 	def __init__(self, probe_info, device_info, units):
 		super().__init__(probe_info, device_info, units)
 
@@ -44,7 +46,7 @@ class ReadProbes(ProbeInterface):
 		for port in self.port_map:
 			self.output_data['tr'][self.port_map[port]] = 0
 
-			""" Get average temperature from the queue and store it in the output data structure"""
+			""" Store the constant 0 placeholder; this device has no real sensor to filter """
 			if port == self.primary_port:
 				self.output_data['primary'][self.port_map[port]] = 0
 			elif port in self.food_ports:

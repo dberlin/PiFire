@@ -88,7 +88,7 @@ class ReadProbes(ProbeInterface):
 		""" Read resistance from device """
 		self.output_data['tr'][self.port_map[port]] = self.device.resistance
 
-		""" Get average temperature from the queue and store it in the output data structure"""
+		""" Store the raw temperature; Kalman filtering is applied centrally in ProbesMain.read_probes() via apply_filters() """
 		if port == self.primary_port:
 			self.output_data['primary'][self.port_map[port]] = tempF if self.units == 'F' else tempC
 		elif port in self.food_ports:

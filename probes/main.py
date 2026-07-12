@@ -71,6 +71,10 @@ class ProbesMain:
 		output_data = {'primary': {}, 'food': {}, 'aux': {}, 'tr': {}}
 		for device in self.probe_device_list:
 			device_data = device.read_all_ports(output_data)
+			# Apply the Kalman filter uniformly, regardless of which read_all_ports
+			# variant the device module implements. Virtual/derived probes read the
+			# already-filtered values above and opt out via applies_kalman = False.
+			device.apply_filters(device_data)
 			for group in device_data:
 				for probe in device_data[group]:
 					output_data[group][probe] = device_data[group][probe]

@@ -172,6 +172,12 @@ def resolve_spi_bus(config, default_cs):
 
 
 class ProbeInterface:
+	# Whether ProbesMain.read_probes() applies each port's Kalman filter to this
+	# device's output. Real sensor modules leave this True; virtual/derived probes
+	# (which aggregate other, already-filtered probes) set it False to avoid
+	# double-filtering and adding control-loop lag.
+	applies_kalman = True
+
 	def __init__(self, probe_info, device_info, units):
 		self.units = units
 		self.device_info = device_info
@@ -346,30 +352,54 @@ class ProbeInterface:
 				port_values[port], self.probe_profiles[port], port=port
 			)
 
-			""" Filter the Temperature Reading (Kalman); None passes through """
-			kalman = self.port_filters[port]
-			output_value = kalman.update(port_values[port])
-
-			""" Debug: raw probe reading vs. filtered output and Kalman state """
-			if self.logger.isEnabledFor(logging.DEBUG):
-				self.logger.debug(
-					f'Kalman[{self.port_map[port]}] raw={port_values[port]} output={output_value} '
-					f'est={round(kalman.x, 2) if kalman.x is not None else None} '
-					f'rate={round(kalman.v, 3)}/s gated={kalman.gated} none_streak={kalman.none_streak}'
-				)
-
-			""" Get average temperature from the queue and store it in the output data structure"""
+			""" Store the raw temperature; Kalman filtering is applied centrally in
+			ProbesMain.read_probes() via apply_filters() so every probe module gets it. """
 			if port == self.primary_port:
-				self.output_data['primary'][self.port_map[port]] = output_value
+				self.output_data['primary'][self.port_map[port]] = port_values[port]
 			elif port in self.food_ports:
-				self.output_data['food'][self.port_map[port]] = output_value
+				self.output_data['food'][self.port_map[port]] = port_values[port]
 			elif port in self.aux_ports:
-				self.output_data['aux'][self.port_map[port]] = output_value
+				self.output_data['aux'][self.port_map[port]] = port_values[port]
 
 			if self.time_delay:
 				time.sleep(self.time_delay)  # Time delay, if needed for single-shot mode on some ADC's
 
 		return self.output_data
+
+	def apply_filters(self, output_data):
+		"""Apply each port's Kalman filter to this device's raw temperature output,
+		in place, and (at DEBUG) log the raw reading vs. filtered output and filter
+		state. Called by ProbesMain.read_probes() after read_all_ports() so filtering
+		is uniform across every probe module (each module's read_all_ports stores raw
+		temperatures). Skipped for devices with applies_kalman = False."""
+		if not self.applies_kalman:
+			return output_data
+
+		for port, label in self.port_map.items():
+			if port == self.primary_port:
+				group = 'primary'
+			elif port in self.food_ports:
+				group = 'food'
+			elif port in self.aux_ports:
+				group = 'aux'
+			else:
+				continue
+			if label not in output_data[group]:
+				continue
+
+			raw = output_data[group][label]
+			kalman = self.port_filters[port]
+			output_value = kalman.update(raw)  # None passes through
+			output_data[group][label] = output_value
+
+			if self.logger.isEnabledFor(logging.DEBUG):
+				self.logger.debug(
+					f'Kalman[{label}] raw={raw} output={output_value} '
+					f'est={round(kalman.x, 2) if kalman.x is not None else None} '
+					f'rate={round(kalman.v, 3)}/s gated={kalman.gated} none_streak={kalman.none_streak}'
+				)
+
+		return output_data
 
 	def update_units(self, units):
 		self.units = 'C' if units == 'C' else 'F'

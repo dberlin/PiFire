@@ -470,16 +470,16 @@ class ReadProbes(ProbeInterface):
 		if len(probe_values_C) >= len(self.port_map):
 			for index, port in enumerate(self.port_map):
 				# Read Ports from Device
-				port_values[port] = (
+				output_value = (
 					probe_values_C[index] if self.units == 'C' else self._to_fahrenheit(probe_values_C[index])
 				)
-				# output_value = port_values[port] if port_values[port] != None else 0 # If the read value is None, pass that to the output
-				output_value = port_values[port]
+				port_values[port] = output_value
 
 				# Output Tr
 				self.output_data['tr'][self.port_map[port]] = 0  # resistance NA
 
-				# Get average temperature from the queue and store it in the output data structure
+				# Store the raw temperature; Kalman filtering is applied centrally in
+				# ProbesMain.read_probes() via apply_filters().
 				if port == self.primary_port:
 					self.output_data['primary'][self.port_map[port]] = output_value
 				elif port in self.food_ports:
