@@ -25,6 +25,7 @@ import busio
 from adafruit_emc2101.emc2101_lut import EMC2101_LUT
 
 from grillplat.emc2301 import EMC2301
+from grillplat.system_commands import SystemCommandsMixin
 
 
 # Default FT232H pin name per PiFire output.  The C-bank keeps the I2C pins
@@ -75,7 +76,7 @@ class _Relay:
 		self._dio.deinit()
 
 
-class GrillPlatform:
+class GrillPlatform(SystemCommandsMixin):
 	def __init__(self, config):
 		self.logger = create_logger('control')
 		self.config = config
