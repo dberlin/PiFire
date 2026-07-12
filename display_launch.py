@@ -37,7 +37,7 @@ def build_launch_argv(settings, env):
 
 	runtime_dir = env.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}'
 	env_updates = {'QT_QPA_PLATFORM': 'wayland', 'XDG_RUNTIME_DIR': runtime_dir}
-	return ['cage', '-s', '--', *child], env_updates
+	return ['cage', '-d', '-s', '--', *child], env_updates
 
 
 def _ensure_runtime_dir(path):
