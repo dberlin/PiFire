@@ -1814,7 +1814,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.9.0" },
     { name = "thermoworks-cloud", specifier = ">=0.1.13" },
     { name = "uuid", specifier = ">=1.30" },
-    { name = "valkey", git = "https://github.com/valkey-io/valkey-py" },
+    { name = "valkey", specifier = ">=6.0.0" },
     { name = "zeroconf", specifier = ">=0.149.17" },
 ]
 
@@ -2657,8 +2657,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/ce/63/f42f5aa951ebf2c8d
 
 [[package]]
 name = "valkey"
-version = "6.2.0rc2"
-source = { git = "https://github.com/valkey-io/valkey-py#f8f0aeaae69e8e354cbd925b6e8c755f7fa4cfbf" }
+version = "6.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/ee/7fd930fc712275084722ddd464a0ea296abdb997d2da396320507968daeb/valkey-6.1.1.tar.gz", hash = "sha256:5880792990c6c2b5eb604a5ed5f98f300880b6dd92d123819b66ed54bb259731", size = 4601372, upload-time = "2025-08-11T06:41:10.63Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/a2/252afa4da08c714460f49e943070f86a02931f99f886182765194002fe33/valkey-6.1.1-py3-none-any.whl", hash = "sha256:e2691541c6e1503b53c714ad9a35551ac9b7c0bbac93865f063dbc859a46de92", size = 259474, upload-time = "2025-08-11T06:41:08.769Z" },
+]
 
 [[package]]
 name = "wcwidth"
