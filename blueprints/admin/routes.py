@@ -376,6 +376,7 @@ def _zip_files_logs(dir_name):
 
 
 def _get_os_info():
+	os_info = None
 	try:
 		os_info = read_generic_json('os_info.json')
 		if not os_info:
@@ -384,30 +385,29 @@ def _get_os_info():
 	except Exception as e:
 		current_app.logger.error(f'Error reading OS info: {e}')
 
-	finally:
-		if not os_info:
-			os_info = {
-				'PRETTY_NAME': 'Unknown.',
-				'NAME': 'Unknown.',
-				'VERSION_ID': 'Unknown.',
-				'VERSION': 'Unknown.',
-				'VERSION_CODENAME': 'Unknown.',
-				'ARCHITECTURE': 'Unknown.',
-				'BITS': 'Unknown.',
-			}
+	if not os_info:
+		os_info = {
+			'PRETTY_NAME': 'Unknown.',
+			'NAME': 'Unknown.',
+			'VERSION_ID': 'Unknown.',
+			'VERSION': 'Unknown.',
+			'VERSION_CODENAME': 'Unknown.',
+			'ARCHITECTURE': 'Unknown.',
+			'BITS': 'Unknown.',
+		}
+	else:
+		# Ensure the os_info has all expected keys
+		os_info.setdefault('PRETTY_NAME', 'Unknown.')
+		os_info.setdefault('NAME', 'Unknown.')
+		os_info.setdefault('VERSION_ID', 'Unknown.')
+		os_info.setdefault('VERSION', 'Unknown.')
+		os_info.setdefault('VERSION_CODENAME', 'Unknown.')
+		os_info.setdefault('ARCHITECTURE', 'Unknown.')
+		if os_info['ARCHITECTURE'] in ['armv7l', 'armv6l', 'armv5l', 'arm', 'i386', 'i486', 'i586', 'i686']:
+			os_info['BITS'] = '32-Bit'
+		elif os_info['ARCHITECTURE'] in ['aarch64', 'x86_64']:
+			os_info['BITS'] = '64-Bit'
 		else:
-			# Ensure the os_info has all expected keys
-			os_info.setdefault('PRETTY_NAME', 'Unknown.')
-			os_info.setdefault('NAME', 'Unknown.')
-			os_info.setdefault('VERSION_ID', 'Unknown.')
-			os_info.setdefault('VERSION', 'Unknown.')
-			os_info.setdefault('VERSION_CODENAME', 'Unknown.')
-			os_info.setdefault('ARCHITECTURE', 'Unknown.')
-			if os_info['ARCHITECTURE'] in ['armv7l', 'armv6l', 'armv5l', 'arm', 'i386', 'i486', 'i586', 'i686']:
-				os_info['BITS'] = '32-Bit'
-			elif os_info['ARCHITECTURE'] in ['aarch64', 'x86_64']:
-				os_info['BITS'] = '64-Bit'
-			else:
-				os_info['BITS'] = 'Unknown'
+			os_info['BITS'] = 'Unknown'
 
-		return os_info
+	return os_info
