@@ -111,7 +111,14 @@ def probeconfig_page():
 					if device['device'] == device_name:
 						# wizardInstallInfo['probe_map']['probe_devices'][index]
 						moduleData = wizardData['modules']['probes'][device['module']]
-						defaultConfig = device['config']
+						defaultConfig = dict(device['config'])
+						""" Backfill any config options the saved device is missing (e.g. options
+						added to the manifest after this device was configured, such as tc_type)
+						with their manifest default, so the modal shows the intended default
+						instead of falling back to the first dropdown entry. """
+						for config_setting in moduleData['device_specific']['config']:
+							if config_setting['label'] != 'probes_list':
+								defaultConfig.setdefault(config_setting['label'], config_setting['default'])
 						break
 
 				""" Get a list of port-labels that can be used by the virtual port """
