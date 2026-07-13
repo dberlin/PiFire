@@ -41,35 +41,6 @@ from datetime import datetime, timezone
 
 from probes.base import ProbeInterface
 
-# Temporary discovery instrumentation. Logs at ERROR level (webapp.log is at
-# ERROR in production unless debug_mode is on) with a "TW-DEBUG" prefix so it is
-# always visible and easy to grep/remove later.
-_debug_logger = logging.getLogger('webapp')
-
-
-def _tw_debug(where):
-	"""Snapshot the runtime at `where`: current thread, whether gevent has
-	monkey-patched threading/socket/ssl (the crux of the wizard hang), and
-	whether an asyncio loop is already running on this thread."""
-	parts = [f'thread={threading.current_thread().name}/{threading.get_ident()}']
-	try:
-		from gevent import monkey
-
-		parts.append(
-			'patched('
-			f'threading={monkey.is_module_patched("threading")},'
-			f'socket={monkey.is_module_patched("socket")},'
-			f'ssl={monkey.is_module_patched("ssl")})'
-		)
-	except Exception as exc:  # gevent not importable / not the active server
-		parts.append(f'gevent=n/a({exc})')
-	try:
-		asyncio.get_running_loop()
-		parts.append('running_loop=YES')
-	except RuntimeError:
-		parts.append('running_loop=no')
-	_debug_logger.error('TW-DEBUG: %s | %s', where, ' '.join(parts))
-
 
 async def poll_once(client, device_serial, num_probes):
 	"""Fetch channels 1..num_probes for one device. Pure — no thread, no
@@ -87,17 +58,13 @@ async def discover_devices(client):
 	"""Enumerate this account's ThermoWorks devices and each one's channel
 	count. Pure — takes an already-built client, so this is the direct
 	unit-test target; discover() below wires in real auth/network."""
-	_tw_debug('discover_devices: before get_user')
 	user = await client.get_user()
-	_tw_debug(f'discover_devices: got user, before get_devices(account_id={getattr(user, "account_id", "?")})')
 	devices = await client.get_devices(user.account_id)
-	_tw_debug(f'discover_devices: got {len(devices)} device(s)')
 	results = []
 	for device in devices:
 		num_channels = 0
 		for channel in range(1, 10):
 			try:
-				_tw_debug(f'discover_devices: probing {device.serial} channel {channel}')
 				await client.get_device_channel(device.serial, str(channel))
 				num_channels += 1
 			except ResourceNotFoundError:
@@ -105,18 +72,14 @@ async def discover_devices(client):
 		results.append(
 			{'serial': device.serial, 'label': device.label, 'type': device.type, 'num_channels': num_channels}
 		)
-	_tw_debug(f'discover_devices: done, {len(results)} result(s)')
 	return results
 
 
 async def discover(email, password):
 	"""Convenience wrapper used by the wizard's discovery route: builds a
 	fresh session/auth/client and delegates to discover_devices()."""
-	_tw_debug('discover: before ClientSession')
 	async with ClientSession() as session:
-		_tw_debug('discover: session open, before build_auth (login)')
 		auth = await AuthFactory(session).build_auth(email, password)
-		_tw_debug('discover: auth built, before ThermoworksCloud client')
 		client = ThermoworksCloud(auth)
 		return await discover_devices(client)
 

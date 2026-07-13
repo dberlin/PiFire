@@ -1,7 +1,7 @@
 import os
 import asyncio
 from flask import render_template, request, jsonify, redirect, render_template_string
-from probes.thermoworks_cloud import discover, _tw_debug
+from probes.thermoworks_cloud import discover
 from thermoworks_cloud import AuthenticationError
 from common.common import (
 	read_settings,
@@ -152,7 +152,6 @@ def wizard_page(action=None):
 			tw_data = []
 			error = None
 
-			_tw_debug(f'route thermoworks_discover: entered for email={email!r}')
 			try:
 				tw_data = asyncio.run(discover(email, password))
 				if tw_data == []:
@@ -160,7 +159,6 @@ def wizard_page(action=None):
 			except AuthenticationError as e:
 				error = f'Could not log in to ThermoWorks Cloud: {e}'
 			except Exception as e:
-				_tw_debug(f'route thermoworks_discover: discovery raised {type(e).__name__}: {e}')
 				error = f'Something bad happened: {e}'
 
 			render_string = "{% from 'probeconfig/_macro_probes_config.html' import render_thermoworks_scan_table %}{{ render_thermoworks_scan_table(serialID, numProbesID, tw_data, error) }}"
