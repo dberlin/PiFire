@@ -11,10 +11,7 @@ def platform():
 		mock.patch.object(mod, 'NumatoUSBRelay'),
 		mock.patch.object(mod, 'EMC2101_LUT'),
 		mock.patch.object(mod, 'EMC2301'),
-		mock.patch.object(mod, 'ExtendedI2C'),
-		mock.patch.object(mod, 'busio'),
-		mock.patch.object(mod, 'board'),
-		mock.patch.object(mod, 'find_i2c_bus', return_value=7),
+		mock.patch.object(mod, 'open_i2c_bus'),
 	):
 		config = {'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}}
 		yield mod.GrillPlatform(config)
@@ -78,10 +75,7 @@ def test_set_pwm_frequency_on_emc2301_passes_hz():
 		mock.patch.object(mod, 'NumatoUSBRelay'),
 		mock.patch.object(mod, 'EMC2101_LUT'),
 		mock.patch.object(mod, 'EMC2301'),
-		mock.patch.object(mod, 'ExtendedI2C'),
-		mock.patch.object(mod, 'busio'),
-		mock.patch.object(mod, 'board'),
-		mock.patch.object(mod, 'find_i2c_bus', return_value=7),
+		mock.patch.object(mod, 'open_i2c_bus'),
 	):
 		platform = mod.GrillPlatform({'fan_controller': {'chip': 'emc2301'}})
 	# EMC2301 takes a frequency in Hz directly.

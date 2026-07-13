@@ -18,10 +18,10 @@ def test_open_sensor_constructs_vl53l4cd_at_resolved_address_and_starts_ranging(
 	import distance._tof_base as tof_mod
 	import distance.vl53l4cd as vl_mod
 
-	with mock.patch.object(tof_mod, 'busio'), mock.patch.object(tof_mod, 'board'):
+	with mock.patch.object(tof_mod, 'open_i2c_bus', return_value=mock.sentinel.bus):
 		hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod)
 		try:
-			VL53L4CD.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x29)
+			VL53L4CD.assert_called_once_with(mock.sentinel.bus, address=0x29)
 			VL53L4CD.return_value.start_ranging.assert_called_once()
 		finally:
 			_stop(hopper)
@@ -31,10 +31,10 @@ def test_open_sensor_uses_configured_address():
 	import distance._tof_base as tof_mod
 	import distance.vl53l4cd as vl_mod
 
-	with mock.patch.object(tof_mod, 'busio'), mock.patch.object(tof_mod, 'board'):
+	with mock.patch.object(tof_mod, 'open_i2c_bus', return_value=mock.sentinel.bus):
 		hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod, dev_pins={'distance': {'address': '0x2a'}})
 		try:
-			VL53L4CD.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x2A)
+			VL53L4CD.assert_called_once_with(mock.sentinel.bus, address=0x2A)
 		finally:
 			_stop(hopper)
 
@@ -43,7 +43,7 @@ def test_read_distance_mm_converts_cm_to_mm_and_clears_interrupt():
 	import distance._tof_base as tof_mod
 	import distance.vl53l4cd as vl_mod
 
-	with mock.patch.object(tof_mod, 'busio'), mock.patch.object(tof_mod, 'board'):
+	with mock.patch.object(tof_mod, 'open_i2c_bus', return_value=mock.sentinel.bus):
 		hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod, distance_cm=12.5)
 		try:
 			assert hopper._read_distance_mm() == 125.0
@@ -56,7 +56,7 @@ def test_close_sensor_stops_ranging():
 	import distance._tof_base as tof_mod
 	import distance.vl53l4cd as vl_mod
 
-	with mock.patch.object(tof_mod, 'busio'), mock.patch.object(tof_mod, 'board'):
+	with mock.patch.object(tof_mod, 'open_i2c_bus', return_value=mock.sentinel.bus):
 		hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod)
 		try:
 			hopper._close_sensor()

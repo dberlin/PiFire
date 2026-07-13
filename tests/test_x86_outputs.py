@@ -12,16 +12,13 @@ def platform():
 		mock.patch.object(mod, 'NumatoUSBRelay') as relay_cls,
 		mock.patch.object(mod, 'EMC2101_LUT') as emc_cls,
 		mock.patch.object(mod, 'EMC2301'),
-		mock.patch.object(mod, 'ExtendedI2C') as i2c_cls,
-		mock.patch.object(mod, 'busio'),
-		mock.patch.object(mod, 'board'),
-		mock.patch.object(mod, 'find_i2c_bus', return_value=7),
+		mock.patch.object(mod, 'open_i2c_bus') as open_bus,
 	):
 		config = {'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}, 'frequency': 100}
 		plat = mod.GrillPlatform(config)
 		plat._relay_cls = relay_cls
 		plat._emc_cls = emc_cls
-		plat._i2c_cls = i2c_cls
+		plat._open_bus = open_bus
 		yield plat
 
 
@@ -31,7 +28,7 @@ def test_init_opens_relay_and_emc(platform):
 	# Bus-kind selection itself is covered in test_x86_bus_discovery.
 	platform._relay_cls.assert_called_once()
 	assert platform._relay_cls.call_args.args[0] == '/dev/ttyACM0'
-	platform._i2c_cls.assert_not_called()
+	platform._open_bus.assert_called_once_with('basic', 'CP2112')
 	platform._emc_cls.assert_called_once()
 
 

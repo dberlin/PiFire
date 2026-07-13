@@ -12,10 +12,7 @@ def _build(chip):
 		mock.patch.object(mod, 'NumatoUSBRelay'),
 		mock.patch.object(mod, 'EMC2101_LUT') as emc2101_lut,
 		mock.patch.object(mod, 'EMC2301') as emc2301,
-		mock.patch.object(mod, 'ExtendedI2C'),
-		mock.patch.object(mod, 'busio'),
-		mock.patch.object(mod, 'board'),
-		mock.patch.object(mod, 'find_i2c_bus', return_value=7),
+		mock.patch.object(mod, 'open_i2c_bus'),
 	):
 		config = {} if chip is None else {'fan_controller': {'chip': chip}}
 		platform = mod.GrillPlatform(config)
