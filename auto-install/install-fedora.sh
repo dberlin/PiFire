@@ -120,7 +120,7 @@ $SUDO dnf -y install \
     python3 python3-devel python3-pip python3-scipy \
     gcc gcc-c++ make gcc-gfortran openblas-devel lapack-devel \
     openjpeg glib2-devel \
-    nginx git supervisor cage seatd \
+    nginx git supervisor cage seatd wlr-randr \
     bluez bluez-libs-devel \
     cabextract curl dejavu-sans-fonts fontconfig 2>&1 | tee -a "$LOG"
 if [ ${PIPESTATUS[0]} -ne 0 ]; then

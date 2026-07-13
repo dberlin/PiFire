@@ -133,7 +133,7 @@ $SUDO apt install -y \
     python3-dev python3-pip python3-venv python3-scipy \
     gfortran libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev \
     nginx git supervisor valkey-server \
-    bluetooth bluez cage seatd \
+    bluetooth bluez cage seatd wlr-randr \
     openssl curl 2>&1 | tee -a "$LOG"
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     log " !! Failed to install dependencies. Installation cannot continue."
