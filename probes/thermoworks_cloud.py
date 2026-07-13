@@ -84,6 +84,33 @@ async def discover(email, password):
 		return await discover_devices(client)
 
 
+def discover_blocking(email, password):
+	"""Synchronous discover() safe to call from a web request handler.
+
+	PiFire's web UI runs under gevent (Flask-SocketIO), whose greenlets share a
+	single OS thread. Calling asyncio.run() directly from a request greenlet
+	collides with the server's cooperative loop -- it hangs the first call and
+	raises "asyncio.run() cannot be called from a running event loop" on the
+	next. Running the coroutine on its own OS thread with a fresh event loop
+	(the same isolation ThermoworksCloudDevice uses for polling) keeps asyncio
+	fully separate from the server loop. Exceptions raised inside are re-raised
+	on the caller's thread so callers can still catch AuthenticationError etc."""
+	result = {}
+
+	def runner():
+		try:
+			result['value'] = asyncio.run(discover(email, password))
+		except Exception as exc:  # re-raised below on the caller's thread
+			result['error'] = exc
+
+	thread = threading.Thread(target=runner)
+	thread.start()
+	thread.join()
+	if 'error' in result:
+		raise result['error']
+	return result['value']
+
+
 _STALE_MULTIPLIER = 3  # a cached channel reading is considered stale (-> None)
 # after this many missed poll intervals
 

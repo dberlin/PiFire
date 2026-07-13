@@ -1,7 +1,6 @@
 import os
-import asyncio
 from flask import render_template, request, jsonify, redirect, render_template_string
-from probes.thermoworks_cloud import discover
+from probes.thermoworks_cloud import discover_blocking
 from thermoworks_cloud import AuthenticationError
 from common.common import (
 	read_settings,
@@ -110,7 +109,7 @@ def wizard_page(action=None):
 			error = None
 
 			try:
-				tw_data = asyncio.run(discover(email, password))
+				tw_data = discover_blocking(email, password)
 				if tw_data == []:
 					error = 'No ThermoWorks Cloud devices found for this account.'
 			except AuthenticationError as e:
