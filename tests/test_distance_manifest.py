@@ -41,7 +41,7 @@ def test_all_platforms_have_distance_i2c_fields():
 
 		assert 'device_distance_i2c_bus_kind' in deps, name
 		assert deps['device_distance_i2c_bus_kind']['settings'] == ['platform', 'devices', 'distance', 'i2c_bus_kind']
-		assert set(deps['device_distance_i2c_bus_kind']['options']) == {'basic', 'extended'}
+		assert set(deps['device_distance_i2c_bus_kind']['options']) == {'basic', 'extended', 'ft232h', 'mcp2221a'}
 
 		assert 'device_distance_i2c_bus_num' in deps, name
 		assert deps['device_distance_i2c_bus_num']['settings'] == ['platform', 'devices', 'distance', 'i2c_bus_num']
@@ -49,3 +49,26 @@ def test_all_platforms_have_distance_i2c_fields():
 		assert 'device_distance_address' in deps, name
 		assert deps['device_distance_address']['settings'] == ['platform', 'devices', 'distance', 'address']
 		assert '0x29' in deps['device_distance_address']['options']
+
+
+def test_distance_bus_kind_includes_usb_hid():
+	import json
+	import os
+
+	manifest = json.load(open(os.path.join(os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json')))
+	found = []
+
+	def walk(node):
+		if isinstance(node, dict):
+			opts = node.get('options')
+			if isinstance(opts, dict) and 'basic' in opts and 'extended' in opts:
+				found.append(set(opts))
+			for value in node.values():
+				walk(value)
+		elif isinstance(node, list):
+			for value in node:
+				walk(value)
+
+	walk(manifest['modules'])
+	assert found, 'no bus-kind selectors found'
+	assert all({'ft232h', 'mcp2221a'} <= opts for opts in found)

@@ -119,3 +119,13 @@ def test_kttdevice_opens_bus_via_factory(monkeypatch):
 	assert dev.i2c is fake_bus
 	assert opened['args'] == ('ft232h', '1')
 	probe.MCP9600.assert_called_once()
+
+
+def test_mcp9600_manifest_bus_kind_includes_usb_hid():
+	import json
+	import os
+
+	manifest = json.load(open(os.path.join(os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json')))
+	cfg = manifest['modules']['probes']['mcp9600_adafruit']['device_specific']['config']
+	bus_kind = next(item for item in cfg if item['label'] == 'i2c_bus_kind')
+	assert bus_kind['list_values'] == ['basic', 'extended', 'ft232h', 'mcp2221a']
