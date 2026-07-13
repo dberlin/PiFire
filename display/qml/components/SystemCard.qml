@@ -10,6 +10,7 @@ import ".."
 // implicit (content-driven); width is not bound.
 Rectangle {
 	id: card
+	property bool compact: false
 	color: Theme.card
 	radius: Theme.cardRadius
 	border.color: Theme.cardBorder
@@ -20,7 +21,7 @@ Rectangle {
 		anchors.left: parent.left
 		anchors.right: parent.right
 		anchors.top: parent.top
-		anchors.margins: 16
+		anchors.margins: card.compact ? 12 : 16
 		spacing: 10
 
 		Text {
@@ -34,8 +35,8 @@ Rectangle {
 		// Fan row
 		Rectangle {
 			width: parent.width
-			height: 66
-			radius: 13
+			height: card.compact ? 48 : 66
+			radius: card.compact ? 10 : 13
 			color: Theme.inset
 			border.color: backend.fanOn ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.35) : Theme.cardBorder
 
@@ -48,8 +49,8 @@ Rectangle {
 				spacing: 14
 
 				Item {
-					width: 64
-					height: 46
+					width: card.compact ? 48 : 64
+					height: card.compact ? 34 : 46
 					anchors.verticalCenter: parent.verticalCenter
 					FanIcon {
 						objectName: "sysFanIcon"
@@ -59,11 +60,11 @@ Rectangle {
 				}
 				Column {
 					anchors.verticalCenter: parent.verticalCenter
-					Text { text: "FAN"; font.family: Theme.sans; font.pixelSize: 17; color: Theme.rowLabel }
+					Text { text: "FAN"; font.family: Theme.sans; font.pixelSize: card.compact ? 14 : 17; color: Theme.rowLabel }
 					Text {
 						text: backend.fanOn ? "RUNNING" : "IDLE"
 						font.family: Theme.sans
-						font.pixelSize: 13
+						font.pixelSize: card.compact ? 11 : 13
 						font.letterSpacing: 2
 						color: backend.fanOn ? Theme.accentColor : Theme.label
 					}
@@ -83,8 +84,8 @@ Rectangle {
 		// Auger row
 		Rectangle {
 			width: parent.width
-			height: 66
-			radius: 13
+			height: card.compact ? 48 : 66
+			radius: card.compact ? 10 : 13
 			color: Theme.inset
 			border.color: backend.augerOn ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.35) : Theme.cardBorder
 
@@ -97,8 +98,8 @@ Rectangle {
 				spacing: 14
 
 				Item {
-					width: 64
-					height: 46
+					width: card.compact ? 48 : 64
+					height: card.compact ? 34 : 46
 					anchors.verticalCenter: parent.verticalCenter
 					AugerIcon {
 						objectName: "sysAugerIcon"
@@ -108,11 +109,11 @@ Rectangle {
 				}
 				Column {
 					anchors.verticalCenter: parent.verticalCenter
-					Text { text: "AUGER"; font.family: Theme.sans; font.pixelSize: 17; color: Theme.rowLabel }
+					Text { text: "AUGER"; font.family: Theme.sans; font.pixelSize: card.compact ? 14 : 17; color: Theme.rowLabel }
 					Text {
 						text: backend.augerOn ? "FEEDING" : "IDLE"
 						font.family: Theme.sans
-						font.pixelSize: 13
+						font.pixelSize: card.compact ? 11 : 13
 						font.letterSpacing: 2
 						color: backend.augerOn ? Theme.accentColor : Theme.label
 					}
@@ -132,8 +133,8 @@ Rectangle {
 		// Igniter row
 		Rectangle {
 			width: parent.width
-			height: 66
-			radius: 13
+			height: card.compact ? 48 : 66
+			radius: card.compact ? 10 : 13
 			color: Theme.inset
 			border.color: backend.igniterOn ? Qt.rgba(Theme.igniterColor.r, Theme.igniterColor.g, Theme.igniterColor.b, 0.4) : Theme.cardBorder
 
@@ -146,8 +147,8 @@ Rectangle {
 				spacing: 14
 
 				Item {
-					width: 64
-					height: 40
+					width: card.compact ? 48 : 64
+					height: card.compact ? 30 : 40
 					anchors.verticalCenter: parent.verticalCenter
 					IgniterIcon {
 						objectName: "sysIgniterIcon"
@@ -157,11 +158,11 @@ Rectangle {
 				}
 				Column {
 					anchors.verticalCenter: parent.verticalCenter
-					Text { text: "IGNITER"; font.family: Theme.sans; font.pixelSize: 17; color: Theme.rowLabel }
+					Text { text: "IGNITER"; font.family: Theme.sans; font.pixelSize: card.compact ? 14 : 17; color: Theme.rowLabel }
 					Text {
 						text: backend.igniterOn ? "HOT" : "OFF"
 						font.family: Theme.sans
-						font.pixelSize: 13
+						font.pixelSize: card.compact ? 11 : 13
 						font.letterSpacing: 2
 						color: backend.igniterOn ? Theme.igniterColor : Theme.label
 					}

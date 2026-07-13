@@ -13,6 +13,7 @@ import ".."
 // rather than by rotating a 12-o'clock-anchored item (that lands ~90° off).
 Item {
 	id: g
+	property bool compact: false
 	property real value: 0
 	property real setpoint: 0
 	property real target: 0
@@ -121,7 +122,7 @@ Item {
 			anchors.horizontalCenter: parent.horizontalCenter
 			text: (g.probeName || g.label).toUpperCase()
 			font.family: Theme.sans
-			font.pixelSize: 14
+			font.pixelSize: g.compact ? 12 : 14
 			font.letterSpacing: 4
 			color: Theme.label
 		}
@@ -131,14 +132,14 @@ Item {
 			Text {
 				text: Math.round(g.value)
 				font.family: Theme.condensed
-				font.pixelSize: 84
+				font.pixelSize: g.compact ? 66 : 84
 				font.bold: true
 				color: Theme.textColor
 			}
 			Text {
 				text: "°" + g.units
 				font.family: Theme.condensed
-				font.pixelSize: 30
+				font.pixelSize: g.compact ? 24 : 30
 				color: Theme.dim
 				anchors.bottom: parent.bottom
 				anchors.bottomMargin: 10
@@ -149,16 +150,16 @@ Item {
 			visible: g.setpoint > 0
 			text: "SET " + Math.round(g.setpoint) + "°"
 			font.family: Theme.sans
-			font.pixelSize: 20
+			font.pixelSize: g.compact ? 16 : 20
 			font.letterSpacing: 1
 			color: Theme.setpoint
 		}
 		Rectangle {
 			anchors.horizontalCenter: parent.horizontalCenter
 			visible: g.modeLabel.length > 0
-			height: 34
+			height: g.compact ? 28 : 34
 			width: pillText.width + 40
-			radius: 17
+			radius: g.compact ? 14 : 17
 			color: Qt.rgba(g.arcColor.r, g.arcColor.g, g.arcColor.b, 0.14)
 			border.color: Qt.rgba(g.arcColor.r, g.arcColor.g, g.arcColor.b, 0.55)
 			border.width: 1.5
@@ -167,7 +168,7 @@ Item {
 				anchors.centerIn: parent
 				text: g.modeLabel.toUpperCase()
 				font.family: Theme.sans
-				font.pixelSize: 17
+				font.pixelSize: g.compact ? 14 : 17
 				font.bold: true
 				font.letterSpacing: 3
 				color: g.arcColor
