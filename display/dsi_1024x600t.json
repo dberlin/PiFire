@@ -201,7 +201,7 @@
         ],
         "animation_enabled": false,
         "size": [
-          310,
+          490,
           40
         ],
         "glow": false,
@@ -218,12 +218,12 @@
         "name": "lid_alert",
         "type": "alert",
         "position": [
-          586,
+          266,
           424
         ],
         "animation_enabled": false,
         "size": [
-          170,
+          490,
           40
         ],
         "glow": false,

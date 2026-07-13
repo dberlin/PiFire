@@ -236,14 +236,14 @@ def _dashboard_1024x600():
 		)
 	)
 	dash.append(
-		_flex_obj('cook_time', 'duty_pill', [266, 424], [310, 40], data={'label': '', 'value': '', 'highlight': False})
+		_flex_obj('cook_time', 'duty_pill', [266, 424], [490, 40], data={'label': '', 'value': '', 'highlight': False})
 	)
 	dash.append(
 		_flex_obj(
 			'lid_alert',
 			'alert',
-			[586, 424],
-			[170, 40],
+			[266, 424],
+			[490, 40],
 			label='Lid Open Detected',
 			active=False,
 			fg_color=[255, 90, 77, 255],
