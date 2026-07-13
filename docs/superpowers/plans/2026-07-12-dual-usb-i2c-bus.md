@@ -1,8 +1,8 @@
-# Dual USB I2C Bus Support (FT232H + MCP2221A) Implementation Plan
+# Dual USB I2C Bus Support (FT232H + MCP2221) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let PiFire drive an FT232H I2C bus and an MCP2221A I2C bus simultaneously in one process, with any I2C device (probe, distance sensor, EMC fan controller) assignable to either, selected in the wizard via new `ft232h`/`mcp2221a` bus kinds.
+**Goal:** Let PiFire drive an FT232H I2C bus and an MCP2221 I2C bus simultaneously in one process, with any I2C device (probe, distance sensor, EMC fan controller) assignable to either, selected in the wizard via new `ft232h`/`mcp2221` bus kinds.
 
 **Architecture:** A new shared factory `common/i2c_bus.py` opens every I2C bus. It adds two USB-HID bus kinds that instantiate their Blinka backend I2C class directly (bypassing the process-global `board` singleton), wraps them so Adafruit drivers can lock them, caches one handle per physical bus, validates the one unworkable combination (`basic` + a USB-HID kind), and guards against board-forcing `BLINKA_*` env vars at startup. All existing call sites migrate to it; `ft232h_relay` routes its FT232H access through the factory so relays + EMC + probes share one MPSSE controller.
 
@@ -13,9 +13,9 @@
 - **Indentation: TABS** (match every existing file). ruff-format (v0.15.20) runs on commit; changed `.py` files must pass it.
 - **Test command:** `python3 -m pytest <path> -v` from the repo root (`tests/conftest.py` sets import roots).
 - **Blinka backends are never opened on CI/dev.** Every test fakes them at the module boundary via `unittest.mock` (patterns already in `tests/ft232h_helpers.py` and `tests/test_tof_base.py`).
-- **`ft232h`/`mcp2221a` apply only to `busio`-based devices:** `mcp9600_adafruit`, `ads1115_adafruit`, `ads1015_adafruit`, the distance sensors, and the EMC fan controller. The smbus2 `ads1115` and the `prototype` probe keep `basic`/`extended` only.
-- **The only unworkable combination is `basic` + (`ft232h` or `mcp2221a`)** in one process. Everything else (including `basic` + `extended`, and `ft232h` + `mcp2221a` + `extended`) is allowed.
-- **Selector reuses the existing `i2c_bus_num` config field:** for `ft232h` a pyftdi URL (`ftdi://…`), for `mcp2221a` a device serial; blank = first of that kind. For `ft232h`, blank and `'1'` are the same adapter.
+- **`ft232h`/`mcp2221` apply only to `busio`-based devices:** `mcp9600_adafruit`, `ads1115_adafruit`, `ads1015_adafruit`, the distance sensors, and the EMC fan controller. The smbus2 `ads1115` and the `prototype` probe keep `basic`/`extended` only.
+- **The only unworkable combination is `basic` + (`ft232h` or `mcp2221`)** in one process. Everything else (including `basic` + `extended`, and `ft232h` + `mcp2221` + `extended`) is allowed.
+- **Selector reuses the existing `i2c_bus_num` config field:** for `ft232h` a pyftdi URL (`ftdi://…`), for `mcp2221` a device serial; blank = first of that kind. For `ft232h`, blank and `'1'` are the same adapter.
 - Spec: `docs/superpowers/specs/2026-07-12-dual-usb-i2c-bus-design.md`.
 
 ---
@@ -30,7 +30,7 @@
 - **Modify** `grillplat/x86_numato.py` — open the EMC bus via `open_i2c_bus`; drop its local `find_i2c_bus`/`resolve_i2c_bus`.
 - **Modify** `grillplat/ft232h_relay.py` — open the FT232H bus via the factory first, reuse it for relay GPIO and the EMC; **Modify** `tests/ft232h_helpers.py`.
 - **Modify** `controller/runtime/devices.py` — call `assert_clean_blinka_env()` at the top of `build_devices`.
-- **Modify** `wizard/wizard_manifest.json` — add `ft232h`/`mcp2221a` to the eligible bus-kind selectors and update the `i2c_bus_num` help; **Modify** manifest tests.
+- **Modify** `wizard/wizard_manifest.json` — add `ft232h`/`mcp2221` to the eligible bus-kind selectors and update the `i2c_bus_num` help; **Modify** manifest tests.
 - **Modify** `blueprints/probeconfig/routes.py` — validate the assembled bus kinds on device add/edit; **Create** `tests/test_i2c_bus_wizard_validation.py`.
 
 ---
@@ -71,11 +71,11 @@ def test_resolve_i2c_bus_numeric_returns_int():
 
 def test_validate_bus_kinds_allows_workable_combos():
 	# None of these raise.
-	validate_bus_kinds({'ft232h', 'mcp2221a'})
+	validate_bus_kinds({'ft232h', 'mcp2221'})
 	validate_bus_kinds({'ft232h', 'extended'})
-	validate_bus_kinds({'mcp2221a', 'extended'})
+	validate_bus_kinds({'mcp2221', 'extended'})
 	validate_bus_kinds({'basic', 'extended'})
-	validate_bus_kinds({'ft232h', 'mcp2221a', 'extended'})
+	validate_bus_kinds({'ft232h', 'mcp2221', 'extended'})
 	validate_bus_kinds({'', None, 'basic'})  # blanks ignored
 
 
@@ -83,7 +83,7 @@ def test_validate_bus_kinds_rejects_basic_plus_usb():
 	with pytest.raises(I2CBusConfigError):
 		validate_bus_kinds({'basic', 'ft232h'})
 	with pytest.raises(I2CBusConfigError):
-		validate_bus_kinds({'basic', 'mcp2221a'})
+		validate_bus_kinds({'basic', 'mcp2221'})
 
 
 def test_assert_clean_blinka_env_rejects_board_forcing_vars():
@@ -122,9 +122,9 @@ Description:
     basic      -- Blinka's board singleton: busio.I2C(board.SCL, board.SDA)
     extended   -- a kernel i2c-dev bus (/dev/i2c-N or an adapter-name match)
     ft232h     -- an FT232H USB adapter, via its Blinka MPSSE backend
-    mcp2221a   -- an MCP2221A USB adapter, via its Blinka backend
+    mcp2221   -- an MCP2221 USB adapter, via its Blinka backend
 
-  ft232h/mcp2221a bypass the process-global `board` singleton so two USB
+  ft232h/mcp2221 bypass the process-global `board` singleton so two USB
   adapters can run at once; they cannot be combined with `basic` (which owns
   `board`). See docs/superpowers/specs/2026-07-12-dual-usb-i2c-bus-design.md.
 """
@@ -134,7 +134,7 @@ import os
 import threading
 
 # USB-HID bus kinds that bypass Blinka's `board` singleton.
-USB_HID_KINDS = frozenset({'ft232h', 'mcp2221a'})
+USB_HID_KINDS = frozenset({'ft232h', 'mcp2221'})
 
 # Board/chip-forcing Blinka env vars. If any is set, `import board` is pinned to
 # that backend process-wide, which silently breaks `basic` and any later
@@ -214,7 +214,7 @@ def validate_bus_kinds(kinds):
 	kinds = {str(k).lower() for k in kinds if k}
 	if 'basic' in kinds and (kinds & USB_HID_KINDS):
 		raise I2CBusConfigError(
-			"'basic' I2C can't share a process with a USB-HID bus (ft232h/mcp2221a): "
+			"'basic' I2C can't share a process with a USB-HID bus (ft232h/mcp2221): "
 			"Blinka's board backend is process-global. Use 'extended' for the onboard "
 			'bus (a Pi onboard I2C is reachable as extended bus 1).'
 		)
@@ -233,7 +233,7 @@ def assert_clean_blinka_env(environ=None):
 	if offenders:
 		raise I2CBusConfigError(
 			f'Board-forcing Blinka environment variable(s) set: {", ".join(offenders)}. '
-			'Remove them and select the ft232h/mcp2221a bus kinds in the wizard instead; '
+			'Remove them and select the ft232h/mcp2221 bus kinds in the wizard instead; '
 			'forcing the Blinka board via the environment breaks `basic` and any import board.'
 		)
 ```
@@ -442,7 +442,7 @@ def _construct_ft232h(selector):
 	return _LockedI2C(backend)
 
 
-def _construct_mcp2221a(selector):
+def _construct_mcp2221(selector):
 	from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
 	from adafruit_blinka.microcontroller.mcp2221.i2c import I2C as _MCP2221_I2C
 
@@ -456,7 +456,7 @@ def _construct_mcp2221a(selector):
 				path = info['path']
 				break
 		if path is None:
-			raise I2CBusConfigError(f'No MCP2221A found with serial {selector!r}.')
+			raise I2CBusConfigError(f'No MCP2221 found with serial {selector!r}.')
 		handle = _mcp_mod.mcp2221._hid
 		try:
 			handle.close()
@@ -478,8 +478,8 @@ def _construct_bus(kind, selector):
 		return ExtendedI2C(resolve_i2c_bus(selector))
 	if kind == 'ft232h':
 		return _construct_ft232h(selector)
-	if kind == 'mcp2221a':
-		return _construct_mcp2221a(selector)
+	if kind == 'mcp2221':
+		return _construct_mcp2221(selector)
 	raise I2CBusConfigError(f'Unknown i2c bus kind {kind!r}.')
 
 
@@ -488,7 +488,7 @@ def open_i2c_bus(bus_kind='basic', bus_selector=None):
 
 	bus_selector is the stored i2c_bus_num value: a /dev/i2c-N number or adapter
 	match for `extended`, a pyftdi URL for `ft232h`, an MCP2221 serial for
-	`mcp2221a`; ignored for `basic`. Buses are cached per (kind, selector) for
+	`mcp2221`; ignored for `basic`. Buses are cached per (kind, selector) for
 	the process lifetime so every device on one physical bus shares one handle
 	and lock. Raises I2CBusConfigError for an unworkable combination."""
 	kind = (bus_kind or 'basic').strip().lower()
@@ -517,7 +517,7 @@ git add common/i2c_bus.py tests/test_i2c_bus.py
 git commit -F - <<'EOF'
 feat(i2c): open_i2c_bus factory with _LockedI2C wrapper, caching, guards
 
-open_i2c_bus dispatches basic/extended/ft232h/mcp2221a, wraps USB-HID backends
+open_i2c_bus dispatches basic/extended/ft232h/mcp2221, wraps USB-HID backends
 so Adafruit drivers can lock them, caches one handle per physical bus (ft232h
 blank/'1' canonicalized), sets BLINKA_FT232H only transiently, and validates
 the running combination on each open.
@@ -683,7 +683,7 @@ git commit -F - <<'EOF'
 refactor(probes): open busio probe buses via the shared factory
 
 mcp9600_adafruit, ads1115_adafruit, ads1015_adafruit now call open_i2c_bus,
-which adds ft232h/mcp2221a support and shared bus caching.
+which adds ft232h/mcp2221 support and shared bus caching.
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
@@ -821,9 +821,9 @@ def _make(config):
 		return platform, open_bus, emc2101, emc2301
 
 
-def test_emc_bus_opened_via_factory_mcp2221a():
-	platform, open_bus, emc2101, emc2301 = _make(_base_config(chip='emc2101', i2c_bus_kind='mcp2221a', i2c_bus_num='SERIAL9'))
-	open_bus.assert_called_once_with('mcp2221a', 'SERIAL9')
+def test_emc_bus_opened_via_factory_mcp2221():
+	platform, open_bus, emc2101, emc2301 = _make(_base_config(chip='emc2101', i2c_bus_kind='mcp2221', i2c_bus_num='SERIAL9'))
+	open_bus.assert_called_once_with('mcp2221', 'SERIAL9')
 	emc2101.assert_called_once_with(mock.sentinel.bus)
 	emc2301.assert_not_called()
 ```
@@ -881,7 +881,7 @@ git add grillplat/x86_numato.py tests/test_x86_numato_fan.py
 git commit -F - <<'EOF'
 refactor(grillplat): open x86_numato EMC bus via the shared factory
 
-Drop the duplicated resolve_i2c_bus/find_i2c_bus and add ft232h/mcp2221a
+Drop the duplicated resolve_i2c_bus/find_i2c_bus and add ft232h/mcp2221
 support for the EMC fan controller through common.i2c_bus.
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
@@ -1060,7 +1060,7 @@ As the very first statement inside `build_devices(...)` (before it reads `settin
 ```python
 	# Refuse to start if a board-forcing BLINKA_* env var is set: it would pin
 	# Blinka's `board` backend process-wide and silently break `basic` and any
-	# import board. Devices must select ft232h/mcp2221a bus kinds instead.
+	# import board. Devices must select ft232h/mcp2221 bus kinds instead.
 	assert_clean_blinka_env()
 ```
 
@@ -1086,14 +1086,14 @@ EOF
 
 ---
 
-### Task 9: Add `ft232h`/`mcp2221a` to the wizard manifest selectors
+### Task 9: Add `ft232h`/`mcp2221` to the wizard manifest selectors
 
 **Files:**
 - Modify: `wizard/wizard_manifest.json`
 - Test: `tests/test_x86_manifest.py`, `tests/test_distance_manifest.py`, `tests/test_mcp9600_probe.py`
 
 **Interfaces:**
-- Produces: the `i2c_bus_kind` selectors for `mcp9600_adafruit`, `ads1115_adafruit`, `ads1015_adafruit` probe configs, the distance `device_distance_i2c_bus_kind` settings-dependency, and the platform `fan_controller` `i2c_bus_kind` settings-dependency all offer `ft232h` and `mcp2221a`.
+- Produces: the `i2c_bus_kind` selectors for `mcp9600_adafruit`, `ads1115_adafruit`, `ads1015_adafruit` probe configs, the distance `device_distance_i2c_bus_kind` settings-dependency, and the platform `fan_controller` `i2c_bus_kind` settings-dependency all offer `ft232h` and `mcp2221`.
 
 - [ ] **Step 1: Write the failing manifest tests**
 
@@ -1109,7 +1109,7 @@ def test_x86_fan_bus_kind_includes_usb_hid():
 	numato = manifest['modules']['grillplatform']['x86_numato']
 	deps = numato['settings_dependencies']
 	options = set(deps['i2c_bus_kind']['options'])
-	assert {'basic', 'extended', 'ft232h', 'mcp2221a'} <= options
+	assert {'basic', 'extended', 'ft232h', 'mcp2221'} <= options
 ```
 
 Append to `tests/test_distance_manifest.py` a check that at least one `device_distance_i2c_bus_kind` selector includes the USB kinds:
@@ -1135,7 +1135,7 @@ def test_distance_bus_kind_includes_usb_hid():
 
 	walk(manifest['modules'])
 	assert found, 'no bus-kind selectors found'
-	assert all({'ft232h', 'mcp2221a'} <= opts for opts in found)
+	assert all({'ft232h', 'mcp2221'} <= opts for opts in found)
 ```
 
 Append to `tests/test_mcp9600_probe.py`:
@@ -1148,7 +1148,7 @@ def test_mcp9600_manifest_bus_kind_includes_usb_hid():
 	manifest = json.load(open(os.path.join(os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json')))
 	cfg = manifest['modules']['probes']['mcp9600_adafruit']['device_specific']['config']
 	bus_kind = next(item for item in cfg if item['label'] == 'i2c_bus_kind')
-	assert bus_kind['list_values'] == ['basic', 'extended', 'ft232h', 'mcp2221a']
+	assert bus_kind['list_values'] == ['basic', 'extended', 'ft232h', 'mcp2221']
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -1161,8 +1161,8 @@ Expected: FAIL — options currently only `basic`/`extended`.
 In `wizard/wizard_manifest.json`, for the **probe** configs `mcp9600_adafruit`, `ads1115_adafruit`, and `ads1015_adafruit` only (NOT `ads1115` or `prototype`), update each `i2c_bus_kind` entry:
 
 ```json
-"list_values": ["basic", "extended", "ft232h", "mcp2221a"],
-"list_labels": ["Basic (native I2C)", "Extended (USB / other bus)", "FT232H (USB)", "MCP2221A (USB)"],
+"list_values": ["basic", "extended", "ft232h", "mcp2221"],
+"list_labels": ["Basic (native I2C)", "Extended (USB / other bus)", "FT232H (USB)", "MCP2221 (USB)"],
 ```
 
 For every `device_distance_i2c_bus_kind` settings-dependency (each platform board that has one) and the platform `fan_controller` `i2c_bus_kind` settings-dependency, update the `options` object to:
@@ -1172,14 +1172,14 @@ For every `device_distance_i2c_bus_kind` settings-dependency (each platform boar
   "basic": "Basic (integrated I2C bus)",
   "extended": "Extended (numbered / bridge bus)",
   "ft232h": "FT232H (USB)",
-  "mcp2221a": "MCP2221A (USB)"
+  "mcp2221": "MCP2221 (USB)"
 }
 ```
 
 Update every `i2c_bus_num` description (probe config `description`, and the distance/fan `device_*_i2c_bus_num` entries) to note the selector doubles as the USB device selector, e.g.:
 
 ```
-"For extended: a /dev/i2c-N number or adapter-name match. For ft232h: a pyftdi URL (blank = first). For mcp2221a: a device serial (blank = first)."
+"For extended: a /dev/i2c-N number or adapter-name match. For ft232h: a pyftdi URL (blank = first). For mcp2221: a device serial (blank = first)."
 ```
 
 Use a JSON-aware edit — after editing, verify validity:
@@ -1197,7 +1197,7 @@ Expected: PASS.
 ```bash
 git add wizard/wizard_manifest.json tests/test_x86_manifest.py tests/test_distance_manifest.py tests/test_mcp9600_probe.py
 git commit -F - <<'EOF'
-feat(wizard): offer ft232h/mcp2221a bus kinds for busio I2C devices
+feat(wizard): offer ft232h/mcp2221 bus kinds for busio I2C devices
 
 Add the two USB-HID bus kinds to the i2c_bus_kind selectors for the busio
 probes, the distance sensor, and the platform fan controller, and document the
@@ -1244,8 +1244,8 @@ def _probe_map(*kinds):
 
 
 def test_configured_bus_kinds_collects_all_surfaces():
-	kinds = configured_bus_kinds(_settings(distance_kind='ft232h', fan_kind='mcp2221a'), _probe_map('ft232h', 'extended'))
-	assert kinds == {'ft232h', 'mcp2221a', 'extended'}
+	kinds = configured_bus_kinds(_settings(distance_kind='ft232h', fan_kind='mcp2221'), _probe_map('ft232h', 'extended'))
+	assert kinds == {'ft232h', 'mcp2221', 'extended'}
 
 
 def test_configured_bus_kinds_conflict_raises_when_validated():
@@ -1329,7 +1329,7 @@ def test_add_conflicting_probe_is_rejected():
 	with pytest.raises(I2CBusConfigError):
 		validate_bus_kinds(kinds)
 	# a workable combination validates cleanly
-	validate_bus_kinds(configured_bus_kinds(_settings(fan_kind='mcp2221a'), _probe_map('ft232h')))
+	validate_bus_kinds(configured_bus_kinds(_settings(fan_kind='mcp2221'), _probe_map('ft232h')))
 ```
 
 - [ ] **Step 7: Run tests, format, commit**
@@ -1380,7 +1380,7 @@ Expected: `imports OK` (no Blinka hardware opened — all backend imports are la
 - Shared factory `common/i2c_bus.py` — Tasks 1, 2. ✅
 - `_LockedI2C` wrapper — Task 2. ✅
 - Cache per (kind, selector) incl. ft232h blank/'1' canonicalization — Task 2. ✅
-- `basic`/`extended`/`ft232h`/`mcp2221a` construction incl. transient env — Task 2. ✅
+- `basic`/`extended`/`ft232h`/`mcp2221` construction incl. transient env — Task 2. ✅
 - `validate_bus_kinds` + runtime backstop — Tasks 1, 2. ✅
 - `assert_clean_blinka_env` + wiring — Tasks 1, 8. ✅
 - De-duplicate `resolve_i2c_bus` (probes.base re-export; x86_numato drops copy) — Tasks 3, 6. ✅

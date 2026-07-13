@@ -1,4 +1,4 @@
-# Dual USB I2C Bus Support (FT232H + MCP2221A) — Design
+# Dual USB I2C Bus Support (FT232H + MCP2221) — Design
 
 **Date:** 2026-07-12
 **Status:** Approved design, pending implementation plan
@@ -9,11 +9,11 @@ Let PiFire drive two independent USB-based I2C buses in the same process at the
 same time — for example, on an x86 + Numato build:
 
 1. An **FT232H** I2C bus carrying the temperature probes and the distance sensor.
-2. An **MCP2221A** I2C bus carrying the EMC2101/EMC2301 fan controller.
+2. An **MCP2221** I2C bus carrying the EMC2101/EMC2301 fan controller.
 
 The assignment must be arbitrary: any I2C device (probe, distance sensor, fan
 controller) can be placed on either bus. The wizard gains two new bus kinds,
-`ft232h` and `mcp2221a`, alongside the existing `basic` and `extended`.
+`ft232h` and `mcp2221`, alongside the existing `basic` and `extended`.
 
 ## Background
 
@@ -46,7 +46,7 @@ Each Blinka backend exposes its own low-level I2C class that bypasses `board`:
   by USB VID/PID `0x04D8/0x00DD` at import. Importing that module opens hardware
   immediately.
 
-Neither backend touches `board`, so an FT232H bus and an MCP2221A bus coexist,
+Neither backend touches `board`, so an FT232H bus and an MCP2221 bus coexist,
 and neither collides with `basic` or `extended`.
 
 Both backend classes expose `scan`, `writeto`, `readfrom_into`, and
@@ -59,12 +59,12 @@ the key enabler.
 
 | Combination in one process | Works? |
 | --- | --- |
-| `ft232h` + `mcp2221a` | ✅ |
+| `ft232h` + `mcp2221` | ✅ |
 | `ft232h` + `extended` | ✅ |
-| `mcp2221a` + `extended` | ✅ |
-| `ft232h` + `mcp2221a` + `extended` | ✅ |
+| `mcp2221` + `extended` | ✅ |
+| `ft232h` + `mcp2221` + `extended` | ✅ |
 | `basic` + `extended` | ✅ |
-| `basic` + `ft232h` or `mcp2221a` | ❌ |
+| `basic` + `ft232h` or `mcp2221` | ❌ |
 
 The only unworkable case: `basic` cannot share a process with a USB-HID kind
 (the `board` singleton). If a third onboard-style bus is needed alongside the
@@ -73,7 +73,7 @@ extended bus `1`).
 
 ### Scope of the USB kinds
 
-`ft232h`/`mcp2221a` only make sense for devices that open a `busio`-compatible
+`ft232h`/`mcp2221` only make sense for devices that open a `busio`-compatible
 bus object:
 
 - **Eligible:** `mcp9600_adafruit`, `ads1115_adafruit`, `ads1015_adafruit`
@@ -99,7 +99,7 @@ def open_i2c_bus(bus_kind='basic', bus_selector=None):
     bus_selector is the stored i2c_bus_num value:
       - extended : a /dev/i2c-N number or adapter-name match (resolve_i2c_bus)
       - ft232h   : a pyftdi URL (ftdi://...); blank -> first FT232H
-      - mcp2221a : an MCP2221 serial; blank -> first MCP2221A
+      - mcp2221 : an MCP2221 serial; blank -> first MCP2221
       - basic    : ignored
 
     Buses are cached per (kind, selector) for the life of the process so every
@@ -124,7 +124,7 @@ Bus construction per kind:
   side effect that lets FT232H GPIO reuse this same controller. Because the
   factory opens the controller before any relay pin is created, `Pin.__init__`
   never hits its lazy fallback, so no `BLINKA_FT232H` is needed at GPIO time.
-- `mcp2221a` → construct `mcp2221.i2c.I2C()` (blank selector = first device);
+- `mcp2221` → construct `mcp2221.i2c.I2C()` (blank selector = first device);
   a non-blank serial opens the matching HID device, wrap in `_LockedI2C`.
 
 Backend imports are lazy (inside each branch) so importing `common.i2c_bus`
@@ -135,7 +135,7 @@ hosts importable).
 
 In `common/i2c_bus.py`. Adds `try_lock`/`unlock` (a `threading.RLock`) and
 delegates `scan`, `writeto`, `readfrom_into`, `writeto_then_readfrom`, and
-`deinit` to the backend. Only `ft232h`/`mcp2221a` buses are wrapped; `basic`
+`deinit` to the backend. Only `ft232h`/`mcp2221` buses are wrapped; `basic`
 and `extended` already provide locking.
 
 ### Bus cache and process model
@@ -196,7 +196,7 @@ relay's `ft232h.url` and those devices' `ft232h` selector must resolve to the
 same adapter (blank/`'1'` = first FT232H on both). Different selectors mean
 different adapters — and opening two controllers on one physical FT232H fails.
 
-Moving the EMC in `ft232h_relay` onto a *different* bus (e.g. an MCP2221A while
+Moving the EMC in `ft232h_relay` onto a *different* bus (e.g. an MCP2221 while
 relays stay on the FT232H) is a straightforward later extension (give its
 `fan_controller` an `i2c_bus_kind`); this design keeps the `ft232h_relay` EMC on
 the FT232H bus.
@@ -206,7 +206,7 @@ the FT232H bus.
 A pure function in `common/i2c_bus.py`:
 
 ```python
-USB_HID_KINDS = {'ft232h', 'mcp2221a'}
+USB_HID_KINDS = {'ft232h', 'mcp2221'}
 
 def validate_bus_kinds(kinds):
     """Raise I2CBusConfigError if the set of bus kinds cannot coexist."""
@@ -214,7 +214,7 @@ def validate_bus_kinds(kinds):
     if 'basic' in kinds and (kinds & USB_HID_KINDS):
         raise I2CBusConfigError(
             "'basic' I2C can't share a process with a USB-HID bus "
-            "(ft232h/mcp2221a): Blinka's board backend is process-global. "
+            "(ft232h/mcp2221): Blinka's board backend is process-global. "
             "Use 'extended' for the onboard bus (a Pi's onboard I2C is "
             "reachable as extended bus 1)."
         )
@@ -246,11 +246,11 @@ well-meaning operator could set e.g. `BLINKA_FT232H=1` or `BLINKA_MCP2221=1` in
 the shell/systemd unit to force `basic` onto a USB adapter as a workaround —
 which appears to work until some unrelated `import board` elsewhere resolves to
 that adapter and breaks, subtly and far from the cause. The whole point of the
-`ft232h`/`mcp2221a` kinds is to make that unnecessary, so the design forbids it.
+`ft232h`/`mcp2221` kinds is to make that unnecessary, so the design forbids it.
 
 `assert_clean_blinka_env()` in `common/i2c_bus.py` inspects `os.environ` for any
 **board/chip-forcing** Blinka variable and raises `I2CBusConfigError` if one is
-present, with a message pointing the user at the `ft232h`/`mcp2221a` bus kinds
+present, with a message pointing the user at the `ft232h`/`mcp2221` bus kinds
 instead. It is called once at control-process startup, **before** any bus is
 opened. Because the factory only ever sets `BLINKA_FT232H` transiently (restored
 immediately), the invariant "no board-forcing `BLINKA_*` var in `os.environ`"
@@ -285,7 +285,7 @@ imports from `common.i2c_bus`.
 
 `wizard/wizard_manifest.json`:
 
-- Add `ft232h` and `mcp2221a` to the `i2c_bus_kind` selectors for the eligible
+- Add `ft232h` and `mcp2221` to the `i2c_bus_kind` selectors for the eligible
   surfaces only:
   - Probe `device_specific.config` `list_values`/`list_labels` for
     `mcp9600_adafruit`, `ads1115_adafruit`, `ads1015_adafruit` (leave `ads1115`
@@ -293,9 +293,9 @@ imports from `common.i2c_bus`.
   - The distance `device_distance_i2c_bus_kind` settings-dependency options
     (all platform boards that expose it).
   - The platform fan-controller `i2c_bus_kind` settings-dependency options.
-- Labels: `ft232h` → "FT232H (USB)", `mcp2221a` → "MCP2221A (USB)".
+- Labels: `ft232h` → "FT232H (USB)", `mcp2221` → "MCP2221 (USB)".
 - Reuse the existing `i2c_bus_num` field on each surface as the optional
-  selector (FTDI URL for `ft232h`, MCP2221 serial for `mcp2221a`; blank = first
+  selector (FTDI URL for `ft232h`, MCP2221 serial for `mcp2221`; blank = first
   of that kind). Update its help text to say so.
 
 No config key renames — existing `basic`/`extended` configs are untouched and
@@ -308,7 +308,7 @@ inject fakes at the backend-import boundary (the pattern the `ft232h_relay`
 tests already use for `_load_ft232h`):
 
 - Factory selects the correct backend per kind; passes the selector through
-  (sets `BLINKA_FT232H` for `ft232h`; matches serial for `mcp2221a`).
+  (sets `BLINKA_FT232H` for `ft232h`; matches serial for `mcp2221`).
 - Buses are cached per `(kind, selector)` — a second request for the same bus
   returns the same object.
 - `_LockedI2C.try_lock`/`unlock` behave (exclusive, reentrant, safe double
@@ -328,7 +328,7 @@ tests already use for `_load_ft232h`):
   (`BLINKA_FT232H`, `BLINKA_MCP2221`, `BLINKA_FORCEBOARD`, a `BLINKA_FTX232H_0`
   prefix case, …) and passes when only the allowed tuning vars
   (`BLINKA_MCP2221_HID_DELAY`) or nothing are set.
-- Manifest test: the eligible selectors include `ft232h` and `mcp2221a`; the
+- Manifest test: the eligible selectors include `ft232h` and `mcp2221`; the
   ineligible ones (`ads1115`, `prototype`) do not.
 
 ## Backward compatibility

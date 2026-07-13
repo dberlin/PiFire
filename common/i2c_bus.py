@@ -12,9 +12,9 @@ Description:
     basic      -- Blinka's board singleton: busio.I2C(board.SCL, board.SDA)
     extended   -- a kernel i2c-dev bus (/dev/i2c-N or an adapter-name match)
     ft232h     -- an FT232H USB adapter, via its Blinka MPSSE backend
-    mcp2221a   -- an MCP2221A USB adapter, via its Blinka backend
+    mcp2221    -- an MCP2221 USB adapter, via its Blinka backend
 
-  ft232h/mcp2221a bypass the process-global `board` singleton so two USB
+  ft232h/mcp2221 bypass the process-global `board` singleton so two USB
   adapters can run at once; they cannot be combined with `basic` (which owns
   `board`). See docs/superpowers/specs/2026-07-12-dual-usb-i2c-bus-design.md.
 """
@@ -24,7 +24,7 @@ import os
 import threading
 
 # USB-HID bus kinds that bypass Blinka's `board` singleton.
-USB_HID_KINDS = frozenset({'ft232h', 'mcp2221a'})
+USB_HID_KINDS = frozenset({'ft232h', 'mcp2221'})
 
 # Board/chip-forcing Blinka env vars. If any is set, `import board` is pinned to
 # that backend process-wide, which silently breaks `basic` and any later
@@ -106,7 +106,7 @@ def validate_bus_kinds(kinds):
 	kinds = {str(k).lower() for k in kinds if k}
 	if 'basic' in kinds and (kinds & USB_HID_KINDS):
 		raise I2CBusConfigError(
-			"'basic' I2C can't share a process with a USB-HID bus (ft232h/mcp2221a): "
+			"'basic' I2C can't share a process with a USB-HID bus (ft232h/mcp2221): "
 			"Blinka's board backend is process-global. Use 'extended' for the onboard "
 			'bus (a Pi onboard I2C is reachable as extended bus 1).'
 		)
@@ -143,7 +143,7 @@ def assert_clean_blinka_env(environ=None):
 	if offenders:
 		raise I2CBusConfigError(
 			f'Board-forcing Blinka environment variable(s) set: {", ".join(offenders)}. '
-			'Remove them and select the ft232h/mcp2221a bus kinds in the wizard instead; '
+			'Remove them and select the ft232h/mcp2221 bus kinds in the wizard instead; '
 			'forcing the Blinka board via the environment breaks `basic` and any import board.'
 		)
 
@@ -225,7 +225,7 @@ def _construct_ft232h(selector):
 	return _LockedI2C(backend)
 
 
-def _construct_mcp2221a(selector):
+def _construct_mcp2221(selector):
 	from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
 	from adafruit_blinka.microcontroller.mcp2221.i2c import I2C as _MCP2221_I2C
 
@@ -239,7 +239,7 @@ def _construct_mcp2221a(selector):
 				path = info['path']
 				break
 		if path is None:
-			raise I2CBusConfigError(f'No MCP2221A found with serial {selector!r}.')
+			raise I2CBusConfigError(f'No MCP2221 found with serial {selector!r}.')
 		handle = _mcp_mod.mcp2221._hid
 		try:
 			handle.close()
@@ -261,8 +261,8 @@ def _construct_bus(kind, selector):
 		return ExtendedI2C(resolve_i2c_bus(selector))
 	if kind == 'ft232h':
 		return _construct_ft232h(selector)
-	if kind == 'mcp2221a':
-		return _construct_mcp2221a(selector)
+	if kind == 'mcp2221':
+		return _construct_mcp2221(selector)
 	raise I2CBusConfigError(f'Unknown i2c bus kind {kind!r}.')
 
 
@@ -271,7 +271,7 @@ def open_i2c_bus(bus_kind='basic', bus_selector=None):
 
 	bus_selector is the stored i2c_bus_num value: a /dev/i2c-N number or adapter
 	match for `extended`, a pyftdi URL for `ft232h`, an MCP2221 serial for
-	`mcp2221a`; ignored for `basic`. Buses are cached per (kind, selector) for
+	`mcp2221`; ignored for `basic`. Buses are cached per (kind, selector) for
 	the process lifetime so every device on one physical bus shares one handle
 	and lock. Raises I2CBusConfigError for an unworkable combination."""
 	kind = (bus_kind or 'basic').strip().lower()

@@ -25,7 +25,7 @@ def test_x86_platform_settings_dependencies():
 	assert deps['i2c_bus_num']['settings'] == ['platform', 'fan_controller', 'i2c_bus_num']
 	assert deps['fan_controller_address']['settings'] == ['platform', 'fan_controller', 'address']
 	assert '0x2f' in deps['fan_controller_address']['options']
-	assert set(deps['i2c_bus_kind']['options']) == {'basic', 'extended', 'ft232h', 'mcp2221a'}
+	assert set(deps['i2c_bus_kind']['options']) == {'basic', 'extended', 'ft232h', 'mcp2221'}
 
 
 def test_x86_fan_bus_kind_includes_usb_hid():
@@ -37,4 +37,4 @@ def test_x86_fan_bus_kind_includes_usb_hid():
 	numato = manifest['modules']['grillplatform']['x86_numato']
 	deps = numato['settings_dependencies']
 	options = set(deps['i2c_bus_kind']['options'])
-	assert {'basic', 'extended', 'ft232h', 'mcp2221a'} <= options
+	assert {'basic', 'extended', 'ft232h', 'mcp2221'} <= options

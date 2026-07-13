@@ -14,11 +14,11 @@ def test_resolve_i2c_bus_numeric_returns_int():
 
 def test_validate_bus_kinds_allows_workable_combos():
 	# None of these raise.
-	validate_bus_kinds({'ft232h', 'mcp2221a'})
+	validate_bus_kinds({'ft232h', 'mcp2221'})
 	validate_bus_kinds({'ft232h', 'extended'})
-	validate_bus_kinds({'mcp2221a', 'extended'})
+	validate_bus_kinds({'mcp2221', 'extended'})
 	validate_bus_kinds({'basic', 'extended'})
-	validate_bus_kinds({'ft232h', 'mcp2221a', 'extended'})
+	validate_bus_kinds({'ft232h', 'mcp2221', 'extended'})
 	validate_bus_kinds({'', None, 'basic'})  # blanks ignored
 
 
@@ -26,7 +26,7 @@ def test_validate_bus_kinds_rejects_basic_plus_usb():
 	with pytest.raises(I2CBusConfigError):
 		validate_bus_kinds({'basic', 'ft232h'})
 	with pytest.raises(I2CBusConfigError):
-		validate_bus_kinds({'basic', 'mcp2221a'})
+		validate_bus_kinds({'basic', 'mcp2221'})
 
 
 def test_assert_clean_blinka_env_rejects_board_forcing_vars():
@@ -156,33 +156,33 @@ def _fake_mcp2221_modules(enumerate_result):
 	return modules, handle, i2c_ctor_calls
 
 
-def test_open_mcp2221a_no_selector_constructs_backend():
+def test_open_mcp2221_no_selector_constructs_backend():
 	modules, handle, ctor = _fake_mcp2221_modules(enumerate_result=[])
 	with mock.patch.dict('sys.modules', modules):
-		bus = i2c_bus.open_i2c_bus('mcp2221a', '')
+		bus = i2c_bus.open_i2c_bus('mcp2221', '')
 	assert isinstance(bus, i2c_bus._LockedI2C)
 	assert ctor == [True]
 	handle.open_path.assert_not_called()  # no selector -> first device, no reopen
 
 
-def test_open_mcp2221a_selector_opens_matching_serial():
+def test_open_mcp2221_selector_opens_matching_serial():
 	enumerate_result = [
 		{'serial_number': 'AAAA', 'path': b'/dev/hidraw0'},
 		{'serial_number': 'BBBB', 'path': b'/dev/hidraw1'},
 	]
 	modules, handle, ctor = _fake_mcp2221_modules(enumerate_result)
 	with mock.patch.dict('sys.modules', modules):
-		bus = i2c_bus.open_i2c_bus('mcp2221a', 'BBBB')
+		bus = i2c_bus.open_i2c_bus('mcp2221', 'BBBB')
 	assert isinstance(bus, i2c_bus._LockedI2C)
 	handle.close.assert_called_once()
 	handle.open_path.assert_called_once_with(b'/dev/hidraw1')
 
 
-def test_open_mcp2221a_selector_not_found_raises():
+def test_open_mcp2221_selector_not_found_raises():
 	modules, handle, ctor = _fake_mcp2221_modules(enumerate_result=[{'serial_number': 'AAAA', 'path': b'/dev/hidraw0'}])
 	with mock.patch.dict('sys.modules', modules):
 		with pytest.raises(i2c_bus.I2CBusConfigError):
-			i2c_bus.open_i2c_bus('mcp2221a', 'ZZZZ')
+			i2c_bus.open_i2c_bus('mcp2221', 'ZZZZ')
 
 
 def test_probes_base_reexports_bus_helpers():

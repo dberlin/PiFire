@@ -23,10 +23,10 @@ def _make(config):
 		return platform, open_bus, emc2101, emc2301
 
 
-def test_emc_bus_opened_via_factory_mcp2221a():
+def test_emc_bus_opened_via_factory_mcp2221():
 	platform, open_bus, emc2101, emc2301 = _make(
-		_base_config(chip='emc2101', i2c_bus_kind='mcp2221a', i2c_bus_num='SERIAL9')
+		_base_config(chip='emc2101', i2c_bus_kind='mcp2221', i2c_bus_num='SERIAL9')
 	)
-	open_bus.assert_called_once_with('mcp2221a', 'SERIAL9')
+	open_bus.assert_called_once_with('mcp2221', 'SERIAL9')
 	emc2101.assert_called_once_with(mock.sentinel.bus)
 	emc2301.assert_not_called()

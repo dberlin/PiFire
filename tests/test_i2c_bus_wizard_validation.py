@@ -18,9 +18,9 @@ def _probe_map(*kinds):
 
 def test_configured_bus_kinds_collects_all_surfaces():
 	kinds = configured_bus_kinds(
-		_settings(distance_kind='ft232h', fan_kind='mcp2221a'), _probe_map('ft232h', 'extended')
+		_settings(distance_kind='ft232h', fan_kind='mcp2221'), _probe_map('ft232h', 'extended')
 	)
-	assert kinds == {'ft232h', 'mcp2221a', 'extended'}
+	assert kinds == {'ft232h', 'mcp2221', 'extended'}
 
 
 def test_configured_bus_kinds_conflict_raises_when_validated():
@@ -35,4 +35,4 @@ def test_add_conflicting_probe_is_rejected():
 	with pytest.raises(I2CBusConfigError):
 		validate_bus_kinds(kinds)
 	# a workable combination validates cleanly
-	validate_bus_kinds(configured_bus_kinds(_settings(fan_kind='mcp2221a'), _probe_map('ft232h')))
+	validate_bus_kinds(configured_bus_kinds(_settings(fan_kind='mcp2221'), _probe_map('ft232h')))

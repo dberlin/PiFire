@@ -41,7 +41,7 @@ def test_all_platforms_have_distance_i2c_fields():
 
 		assert 'device_distance_i2c_bus_kind' in deps, name
 		assert deps['device_distance_i2c_bus_kind']['settings'] == ['platform', 'devices', 'distance', 'i2c_bus_kind']
-		assert set(deps['device_distance_i2c_bus_kind']['options']) == {'basic', 'extended', 'ft232h', 'mcp2221a'}
+		assert set(deps['device_distance_i2c_bus_kind']['options']) == {'basic', 'extended', 'ft232h', 'mcp2221'}
 
 		assert 'device_distance_i2c_bus_num' in deps, name
 		assert deps['device_distance_i2c_bus_num']['settings'] == ['platform', 'devices', 'distance', 'i2c_bus_num']
@@ -71,4 +71,4 @@ def test_distance_bus_kind_includes_usb_hid():
 
 	walk(manifest['modules'])
 	assert found, 'no bus-kind selectors found'
-	assert all({'ft232h', 'mcp2221a'} <= opts for opts in found)
+	assert all({'ft232h', 'mcp2221'} <= opts for opts in found)
