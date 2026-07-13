@@ -123,6 +123,13 @@ class ProbeInterface:
 	# double-filtering and adding control-loop lag.
 	applies_kalman = True
 
+	# Some hardware devices intermittently fail their first initialization and
+	# need a reinit, so _init_device() is retried up to this many times before
+	# the failure is allowed to propagate. Delay (seconds) lets the hardware
+	# settle between attempts.
+	device_init_retries = 5
+	device_init_retry_delay = 0.5
+
 	def __init__(self, probe_info, device_info, units):
 		self.logger = logging.getLogger('control')
 		self.units = units
@@ -139,11 +146,36 @@ class ProbeInterface:
 		self.food_ports = []
 		self.aux_ports = []
 		self._discover_port_types(probe_info)
-		self._init_device()
+		self._init_device_with_retries()
 
 	def _init_device(self):
 		self.time_delay = 0
 		self.device = FakeDevice(self.port_map, self.primary_port, self.units)
+
+	def _init_device_with_retries(self):
+		"""Initialize the hardware device, retrying on failure.
+
+		Some devices intermittently fail their first init and need a reinit,
+		so attempt _init_device() up to device_init_retries times before giving
+		up and re-raising the last exception.
+		"""
+		device_name = self.device_info.get('device', 'unknown')
+		last_exception = None
+		for attempt in range(1, self.device_init_retries + 1):
+			try:
+				self._init_device()
+				if attempt > 1:
+					self.logger.info(f'Device "{device_name}" initialized on attempt {attempt}.')
+				return
+			except Exception as exception:
+				last_exception = exception
+				self.logger.warning(
+					f'Device "{device_name}" init attempt {attempt} of {self.device_init_retries} failed: {exception}'
+				)
+				if attempt < self.device_init_retries:
+					time.sleep(self.device_init_retry_delay)
+		self.logger.error(f'Device "{device_name}" failed to initialize after {self.device_init_retries} attempts.')
+		raise last_exception
 
 	def _discover_port_types(self, probe_info):
 		"""Find attached ports and identify their types"""
@@ -356,7 +388,7 @@ class ProbeInterface:
 
 	def update_units(self, units):
 		self.units = 'C' if units == 'C' else 'F'
-		self._init_device()
+		self._init_device_with_retries()
 
 	def set_profiles(self, probe_info):
 		"""Set the probe profile for each of the probes."""
