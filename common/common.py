@@ -214,7 +214,7 @@ def default_settings():
 
 	settings['controller']['config'] = _default_controller_config()
 
-	settings['display'] = {'selected': 'none'}
+	settings['display'] = {'selected': 'none', 'sleep_timeout': 300}
 	settings['display']['config'] = _default_display_config()
 
 	settings['keep_warm'] = {'temp': 165, 's_plus': False}
@@ -368,6 +368,16 @@ def _default_display_config():
 			config[display][option['option_name']] = option['default']
 
 	return config
+
+
+def display_sleep_timeout(settings):
+	"""Idle seconds before the display sleeps; 0 = never. Defaults to 300 on
+	missing/invalid values. Negative values clamp to 0."""
+	try:
+		value = int(settings['display']['sleep_timeout'])
+	except KeyError, TypeError, ValueError:
+		return 300
+	return value if value > 0 else 0
 
 
 def get_display_info(settings):
