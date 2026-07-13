@@ -1,0 +1,2353 @@
+{
+  "metadata": {
+    "name": "dsi_1024x600t",
+    "screen_width": 1024,
+    "screen_height": 600,
+    "framerate": 20,
+    "dash_background": "./static/img/display/background_ember_1024x600.png",
+    "splash_image": "./static/img/display/splash_800x480.png",
+    "splash_delay": 500,
+    "max_food_probes": 5,
+    "default_profile": "profile_1"
+  },
+  "profile_1": {
+    "home": [],
+    "dash": [
+      {
+        "name": "header_bar",
+        "type": "header_bar",
+        "position": [
+          0,
+          0
+        ],
+        "animation_enabled": false,
+        "size": [
+          1024,
+          50
+        ],
+        "glow": false,
+        "data": {
+          "ip": "",
+          "clock": "",
+          "cooking": false
+        },
+        "button_list": [
+          "menu_main"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "probe_card_0",
+        "type": "probe_card",
+        "position": [
+          14,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          238,
+          96
+        ],
+        "glow": false,
+        "data": {
+          "name": "",
+          "temp": 0,
+          "target": 0
+        },
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "units": "F"
+      },
+      {
+        "name": "probe_card_1",
+        "type": "probe_card",
+        "position": [
+          14,
+          166
+        ],
+        "animation_enabled": false,
+        "size": [
+          238,
+          96
+        ],
+        "glow": false,
+        "data": {
+          "name": "",
+          "temp": 0,
+          "target": 0
+        },
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "units": "F"
+      },
+      {
+        "name": "probe_card_2",
+        "type": "probe_card",
+        "position": [
+          14,
+          270
+        ],
+        "animation_enabled": false,
+        "size": [
+          238,
+          96
+        ],
+        "glow": false,
+        "data": {
+          "name": "",
+          "temp": 0,
+          "target": 0
+        },
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "units": "F"
+      },
+      {
+        "name": "probe_card_3",
+        "type": "probe_card",
+        "position": [
+          14,
+          374
+        ],
+        "animation_enabled": false,
+        "size": [
+          238,
+          96
+        ],
+        "glow": false,
+        "data": {
+          "name": "",
+          "temp": 0,
+          "target": 0
+        },
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "units": "F"
+      },
+      {
+        "name": "probe_card_4",
+        "type": "probe_card",
+        "position": [
+          14,
+          478
+        ],
+        "animation_enabled": false,
+        "size": [
+          238,
+          96
+        ],
+        "glow": false,
+        "data": {
+          "name": "",
+          "temp": 0,
+          "target": 0
+        },
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "units": "F"
+      },
+      {
+        "name": "primary_gauge",
+        "type": "gauge_ember",
+        "position": [
+          266,
+          62
+        ],
+        "animation_enabled": true,
+        "size": [
+          490,
+          352
+        ],
+        "glow": true,
+        "data": {
+          "mode_label": ""
+        },
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": [],
+        "temps": [
+          0,
+          0,
+          0
+        ],
+        "max_temp": 600,
+        "units": "F",
+        "label": "Grill"
+      },
+      {
+        "name": "cook_time",
+        "type": "duty_pill",
+        "position": [
+          266,
+          424
+        ],
+        "animation_enabled": false,
+        "size": [
+          310,
+          40
+        ],
+        "glow": false,
+        "data": {
+          "label": "",
+          "value": "",
+          "highlight": false
+        },
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "lid_alert",
+        "type": "alert",
+        "position": [
+          586,
+          424
+        ],
+        "animation_enabled": false,
+        "size": [
+          170,
+          40
+        ],
+        "glow": false,
+        "data": {
+          "text": [
+            "Lid Open",
+            "Detected"
+          ]
+        },
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": [],
+        "label": "Lid Open Detected",
+        "active": false,
+        "fg_color": [
+          255,
+          90,
+          77,
+          255
+        ],
+        "bg_color": [
+          26,
+          22,
+          17,
+          220
+        ]
+      },
+      {
+        "name": "button_row",
+        "type": "button_row",
+        "position": [
+          266,
+          474
+        ],
+        "animation_enabled": false,
+        "size": [
+          490,
+          100
+        ],
+        "glow": false,
+        "data": {},
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": [],
+        "button_type": [],
+        "button_active": ""
+      },
+      {
+        "name": "system_card",
+        "type": "system_card",
+        "position": [
+          770,
+          62
+        ],
+        "animation_enabled": true,
+        "size": [
+          240,
+          190
+        ],
+        "glow": false,
+        "data": {
+          "fan": false,
+          "auger": false,
+          "igniter": false
+        },
+        "button_list": [
+          "cmd_fan_toggle",
+          "cmd_auger_toggle",
+          "cmd_igniter_toggle"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "duty_pill_left",
+        "type": "duty_pill",
+        "position": [
+          770,
+          262
+        ],
+        "animation_enabled": false,
+        "size": [
+          115,
+          40
+        ],
+        "glow": false,
+        "data": {
+          "label": "",
+          "value": "",
+          "highlight": false
+        },
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "duty_pill_right",
+        "type": "duty_pill",
+        "position": [
+          895,
+          262
+        ],
+        "animation_enabled": false,
+        "size": [
+          115,
+          40
+        ],
+        "glow": false,
+        "data": {
+          "label": "",
+          "value": "",
+          "highlight": false
+        },
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "hopper_vertical",
+        "type": "hopper_vertical",
+        "position": [
+          770,
+          312
+        ],
+        "animation_enabled": false,
+        "size": [
+          240,
+          262
+        ],
+        "glow": false,
+        "data": {
+          "level": 0,
+          "enabled": true
+        },
+        "button_list": [
+          "cmd_hopper_level"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      }
+    ],
+    "menus": {
+      "main": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu",
+        "title_text": "Main Menu",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "menu_prime",
+          "menu_startup",
+          "cmd_monitor",
+          "menu_system",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Prime",
+          "Startup",
+          "Monitor",
+          "System",
+          "Close"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "main_active_normal": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu",
+        "title_text": "Main Menu",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_lid_open",
+          "input_hold",
+          "cmd_shutdown",
+          "cmd_stop",
+          "cmd_smoke",
+          "cmd_splus",
+          "menu_pmode",
+          "menu_system",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Lid Open",
+          "Hold",
+          "Shutdown",
+          "Stop",
+          "Smoke",
+          "Smoke+",
+          "PMode",
+          "System",
+          "Close"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "main_active_monitor": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu",
+        "title_text": "Main Menu",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_stop",
+          "menu_system",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Stop",
+          "System",
+          "Close"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "main_active_recipe": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu",
+        "title_text": "Main Menu",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_next_step",
+          "cmd_shutdown",
+          "cmd_stop",
+          "cmd_splus",
+          "menu_system",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Next Step",
+          "Shutdown",
+          "Stop",
+          "Smoke+",
+          "System",
+          "Close"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "system": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu",
+        "title_text": "Main Menu",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "menu_qrcode",
+          "menu_main_reboot",
+          "menu_main_power_off",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Show QR Code",
+          "Reboot System",
+          "Power Off System",
+          "Close Menu"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "qrcode": {
+        "type": "qrcode",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "qr_code",
+        "ip_address": "0.0.0.0",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "main_reboot": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu_reboot",
+        "title_text": "Reboot the System?",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_reboot",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Yes",
+          "No"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "main_power_off": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu_power_off",
+        "title_text": "Power Off the System?",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_poweroff",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Yes",
+          "No"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "prime": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "menu_prime_start",
+        "title_text": "Startup after priming?",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "menu_prime_startup",
+          "menu_prime_only"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Yes",
+          "No"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "prime_startup": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "menu_prime",
+        "title_text": "Select Amount to Prime:",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_primestartup",
+          "cmd_primestartup",
+          "cmd_primestartup"
+        ],
+        "button_text": [
+          "Close Menu",
+          "10 grams",
+          "25 grams",
+          "50 grams"
+        ],
+        "button_value": [
+          0,
+          10,
+          25,
+          50
+        ],
+        "touch_areas": []
+      },
+      "prime_only": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "menu_prime",
+        "title_text": "Select Amount to Prime:",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_primeonly",
+          "cmd_primeonly",
+          "cmd_primeonly"
+        ],
+        "button_text": [
+          "Close Menu",
+          "10 grams",
+          "25 grams",
+          "50 grams"
+        ],
+        "button_value": [
+          0,
+          10,
+          25,
+          50
+        ],
+        "touch_areas": []
+      },
+      "startup": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "menu_startup",
+        "title_text": "Do you want to start up?",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_startup",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Yes",
+          "No"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "pmode": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "menu_startup",
+        "title_text": "Select a PMode:",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode"
+        ],
+        "button_text": [
+          "Close Menu",
+          "PMode 0",
+          "PMode 1",
+          "PMode 2",
+          "PMode 3",
+          "PMode 4",
+          "PMode 5",
+          "PMode 6",
+          "PMode 7",
+          "PMode 8",
+          "PMode 9"
+        ],
+        "button_value": [
+          0,
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "touch_areas": []
+      },
+      "message": {
+        "type": "menu",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": false,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "message",
+        "title_text": "Message",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {
+          "text": ""
+        },
+        "button_list": [
+          "menu_close",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "OK"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      }
+    },
+    "input": {
+      "hold": {
+        "type": "input_number",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": true,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "input_hold",
+        "title_text": "Enter Hold Temperature:",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "command": "cmd_hold",
+        "data": {
+          "input": "",
+          "value": 200,
+          "origin": ""
+        },
+        "step": 5,
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "notify": {
+        "type": "input_number",
+        "position": [
+          137,
+          50
+        ],
+        "animation_enabled": true,
+        "size": [
+          750,
+          500
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "input_notify",
+        "title_text": "Enter Notify Temperature:",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "command": "cmd_notify",
+        "data": {
+          "input": "",
+          "value": 165,
+          "origin": ""
+        },
+        "step": 5,
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": []
+      }
+    }
+  },
+  "profile_2": {
+    "home": [],
+    "dash": [
+      {
+        "name": "primary_gauge",
+        "type": "gauge",
+        "position": [
+          81,
+          74
+        ],
+        "animation_enabled": true,
+        "size": [
+          438,
+          438
+        ],
+        "fg_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "bg_color": [
+          25,
+          25,
+          25,
+          255
+        ],
+        "sp_color": [
+          0,
+          200,
+          255,
+          255
+        ],
+        "np_color": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "glow": true,
+        "font": "trebuc.ttf",
+        "temps": [
+          0,
+          0,
+          0
+        ],
+        "label": "Primary",
+        "units": "F",
+        "max_temp": 600,
+        "data": {},
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "control_panel",
+        "type": "control_panel",
+        "position": [
+          50,
+          887
+        ],
+        "animation_enabled": false,
+        "glow": false,
+        "size": [
+          500,
+          125
+        ],
+        "label": "control_panel",
+        "data": {},
+        "button_list": [
+          "menu_prime",
+          "menu_startup",
+          "cmd_monitor",
+          "cmd_stop"
+        ],
+        "button_type": [
+          "Prime",
+          "Startup",
+          "Monitor",
+          "Stop"
+        ],
+        "button_active": "Stop",
+        "touch_areas": []
+      },
+      {
+        "name": "food_probe_gauge_0",
+        "type": "gauge_compact",
+        "position": [
+          0,
+          487
+        ],
+        "animation_enabled": false,
+        "size": [
+          275,
+          138
+        ],
+        "fg_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "bg_color": [
+          25,
+          25,
+          25,
+          255
+        ],
+        "sp_color": [
+          0,
+          200,
+          255,
+          255
+        ],
+        "np_color": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "temps": [
+          0,
+          0,
+          0
+        ],
+        "label": "Food Probe",
+        "units": "F",
+        "max_temp": 300,
+        "data": {},
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "food_probe_gauge_1",
+        "type": "gauge_compact",
+        "position": [
+          325,
+          487
+        ],
+        "animation_enabled": false,
+        "size": [
+          275,
+          138
+        ],
+        "fg_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "bg_color": [
+          25,
+          25,
+          25,
+          255
+        ],
+        "sp_color": [
+          0,
+          200,
+          255,
+          255
+        ],
+        "np_color": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "temps": [
+          0,
+          0,
+          0
+        ],
+        "label": "Food Probe",
+        "units": "F",
+        "max_temp": 300,
+        "data": {},
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "food_probe_gauge_2",
+        "type": "gauge_compact",
+        "position": [
+          0,
+          624
+        ],
+        "animation_enabled": false,
+        "size": [
+          275,
+          138
+        ],
+        "fg_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "bg_color": [
+          25,
+          25,
+          25,
+          255
+        ],
+        "sp_color": [
+          0,
+          200,
+          255,
+          255
+        ],
+        "np_color": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "temps": [
+          0,
+          0,
+          0
+        ],
+        "label": "Food Probe",
+        "units": "F",
+        "max_temp": 300,
+        "data": {},
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "food_probe_gauge_3",
+        "type": "gauge_compact",
+        "position": [
+          325,
+          624
+        ],
+        "animation_enabled": false,
+        "size": [
+          275,
+          138
+        ],
+        "fg_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "bg_color": [
+          25,
+          25,
+          25,
+          255
+        ],
+        "sp_color": [
+          0,
+          200,
+          255,
+          255
+        ],
+        "np_color": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "temps": [
+          0,
+          0,
+          0
+        ],
+        "label": "Food Probe",
+        "units": "F",
+        "max_temp": 300,
+        "data": {},
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "food_probe_gauge_4",
+        "type": "gauge_compact",
+        "position": [
+          0,
+          762
+        ],
+        "animation_enabled": false,
+        "size": [
+          275,
+          138
+        ],
+        "fg_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "bg_color": [
+          25,
+          25,
+          25,
+          255
+        ],
+        "sp_color": [
+          0,
+          200,
+          255,
+          255
+        ],
+        "np_color": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "temps": [
+          0,
+          0,
+          0
+        ],
+        "label": "Food Probe",
+        "units": "F",
+        "max_temp": 300,
+        "data": {},
+        "button_list": [
+          "input_notify"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "mode_bar",
+        "type": "mode_bar",
+        "position": [
+          81,
+          12
+        ],
+        "animation_enabled": false,
+        "size": [
+          438,
+          75
+        ],
+        "fg_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "bg_color": [
+          0,
+          0,
+          0,
+          100
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "mode_bar",
+        "text": "Stop",
+        "data": {},
+        "touch_areas": []
+      },
+      {
+        "name": "fan_status",
+        "type": "status_icon",
+        "position": [
+          0,
+          12
+        ],
+        "animation_enabled": false,
+        "size": [
+          62,
+          62
+        ],
+        "glow": true,
+        "icon": "Fan",
+        "label": "fan_status",
+        "active": false,
+        "inactive_color": [
+          128,
+          128,
+          128,
+          128
+        ],
+        "active_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "rotation": 0,
+        "button_list": [
+          "cmd_fan_toggle"
+        ],
+        "button_value": [],
+        "data": {},
+        "touch_areas": []
+      },
+      {
+        "name": "auger_status",
+        "type": "status_icon",
+        "position": [
+          0,
+          87
+        ],
+        "animation_enabled": false,
+        "size": [
+          62,
+          62
+        ],
+        "glow": true,
+        "icon": "Auger",
+        "label": "auger_status",
+        "active": false,
+        "inactive_color": [
+          128,
+          128,
+          128,
+          128
+        ],
+        "active_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "rotation": 0,
+        "button_list": [
+          "cmd_auger_toggle"
+        ],
+        "button_value": [],
+        "data": {},
+        "touch_areas": []
+      },
+      {
+        "name": "igniter_status",
+        "type": "status_icon",
+        "position": [
+          0,
+          162
+        ],
+        "animation_enabled": false,
+        "size": [
+          62,
+          62
+        ],
+        "glow": true,
+        "icon": "Igniter",
+        "label": "igniter_status",
+        "active": false,
+        "inactive_color": [
+          128,
+          128,
+          128,
+          128
+        ],
+        "active_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "rotation": 0,
+        "button_list": [
+          "cmd_igniter_toggle"
+        ],
+        "button_value": [],
+        "data": {},
+        "touch_areas": []
+      },
+      {
+        "name": "lid_open_button",
+        "type": "button",
+        "position": [
+          0,
+          312
+        ],
+        "animation_enabled": false,
+        "size": [
+          62,
+          62
+        ],
+        "glow": false,
+        "label": "Lid Open Toggle",
+        "active": false,
+        "active_color": [
+          0,
+          200,
+          0,
+          255
+        ],
+        "inactive_color": [
+          255,
+          255,
+          255,
+          200
+        ],
+        "font": "trebuc.ttf",
+        "data": {
+          "text": [
+            "Lid Open",
+            "Pause"
+          ],
+          "active_icon": "\uf52b",
+          "inactive_icon": "\uf52a",
+          "image": ""
+        },
+        "button_list": [
+          "cmd_lid_open"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "smoke_plus",
+        "type": "splus_control",
+        "position": [
+          0,
+          237
+        ],
+        "animation_enabled": false,
+        "size": [
+          62,
+          62
+        ],
+        "glow": false,
+        "label": "P-Mode",
+        "active": false,
+        "active_color": [
+          200,
+          0,
+          200,
+          225
+        ],
+        "inactive_color": [
+          255,
+          255,
+          255,
+          100
+        ],
+        "data": {},
+        "button_list": [
+          "cmd_splus"
+        ],
+        "touch_areas": [],
+        "button_value": [
+          "on"
+        ]
+      },
+      {
+        "name": "menu_icon",
+        "type": "menu_icon",
+        "position": [
+          538,
+          18
+        ],
+        "animation_enabled": false,
+        "size": [
+          62,
+          62
+        ],
+        "glow": false,
+        "icon": "Hamburger",
+        "label": "menu_icon",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "button_list": [
+          "menu_main"
+        ],
+        "button_value": [],
+        "data": {},
+        "touch_areas": []
+      },
+      {
+        "name": "timer",
+        "type": "timer",
+        "position": [
+          325,
+          762
+        ],
+        "animation_enabled": false,
+        "size": [
+          275,
+          138
+        ],
+        "glow": false,
+        "label": "Timer",
+        "fg_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "bg_color": [
+          0,
+          0,
+          0,
+          100
+        ],
+        "button_list": [],
+        "button_value": [],
+        "data": {
+          "seconds": 0
+        },
+        "touch_areas": []
+      },
+      {
+        "name": "p_mode",
+        "type": "p_mode_control",
+        "position": [
+          450,
+          412
+        ],
+        "animation_enabled": false,
+        "size": [
+          150,
+          81
+        ],
+        "glow": false,
+        "label": "P-Mode",
+        "active": false,
+        "fg_color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "bg_color": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "data": {
+          "pmode": 0
+        },
+        "button_list": [
+          "menu_pmode"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      {
+        "name": "hopper",
+        "type": "hopper_status",
+        "position": [
+          0,
+          412
+        ],
+        "animation_enabled": false,
+        "size": [
+          150,
+          81
+        ],
+        "glow": false,
+        "label": "Hopper Level",
+        "active": false,
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "color_levels": [
+          [
+            225,
+            50,
+            50,
+            255
+          ],
+          [
+            225,
+            150,
+            50,
+            255
+          ],
+          [
+            225,
+            225,
+            50,
+            255
+          ],
+          [
+            50,
+            225,
+            50,
+            255
+          ],
+          [
+            255,
+            255,
+            255,
+            255
+          ]
+        ],
+        "data": {
+          "level": 100
+        },
+        "button_list": [
+          "cmd_hopper_level"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      }
+    ],
+    "menus": {
+      "main": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu",
+        "title_text": "Main Menu",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "menu_prime",
+          "menu_startup",
+          "cmd_monitor",
+          "menu_system",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Prime",
+          "Startup",
+          "Monitor",
+          "System",
+          "Close"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "main_active_normal": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu",
+        "title_text": "Main Menu",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_lid_open",
+          "input_hold",
+          "cmd_shutdown",
+          "cmd_stop",
+          "cmd_smoke",
+          "cmd_splus",
+          "menu_pmode",
+          "menu_system",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Lid Open",
+          "Hold",
+          "Shutdown",
+          "Stop",
+          "Smoke",
+          "Smoke+",
+          "PMode",
+          "System",
+          "Close"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "main_active_monitor": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu",
+        "title_text": "Main Menu",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_stop",
+          "menu_system",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Stop",
+          "System",
+          "Close"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "main_active_recipe": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu",
+        "title_text": "Main Menu",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_next_step",
+          "cmd_shutdown",
+          "cmd_stop",
+          "cmd_splus",
+          "menu_system",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Next Step",
+          "Shutdown",
+          "Stop",
+          "Smoke+",
+          "System",
+          "Close"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "system": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu",
+        "title_text": "Main Menu",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "menu_qrcode",
+          "menu_main_reboot",
+          "menu_main_power_off",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Show QR Code",
+          "Reboot System",
+          "Power Off System",
+          "Close Menu"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "qrcode": {
+        "type": "qrcode",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "qr_code",
+        "ip_address": "0.0.0.0",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "main_reboot": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu_reboot",
+        "title_text": "Reboot the System?",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_reboot",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Yes",
+          "No"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "main_power_off": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "main_menu_power_off",
+        "title_text": "Power Off the System?",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_poweroff",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Yes",
+          "No"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "prime": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "menu_prime_start",
+        "title_text": "Startup after priming?",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "menu_prime_startup",
+          "menu_prime_only"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Yes",
+          "No"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "prime_startup": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "menu_prime",
+        "title_text": "Select Amount to Prime:",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_primestartup",
+          "cmd_primestartup",
+          "cmd_primestartup"
+        ],
+        "button_text": [
+          "Close Menu",
+          "10 grams",
+          "25 grams",
+          "50 grams"
+        ],
+        "button_value": [
+          0,
+          10,
+          25,
+          50
+        ],
+        "touch_areas": []
+      },
+      "prime_only": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "menu_prime",
+        "title_text": "Select Amount to Prime:",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_primeonly",
+          "cmd_primeonly",
+          "cmd_primeonly"
+        ],
+        "button_text": [
+          "Close Menu",
+          "10 grams",
+          "25 grams",
+          "50 grams"
+        ],
+        "button_value": [
+          0,
+          10,
+          25,
+          50
+        ],
+        "touch_areas": []
+      },
+      "startup": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "menu_startup",
+        "title_text": "Do you want to start up?",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_startup",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "Yes",
+          "No"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "pmode": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "menu_startup",
+        "title_text": "Select a PMode:",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {},
+        "button_list": [
+          "menu_close",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode",
+          "cmd_pmode"
+        ],
+        "button_text": [
+          "Close Menu",
+          "PMode 0",
+          "PMode 1",
+          "PMode 2",
+          "PMode 3",
+          "PMode 4",
+          "PMode 5",
+          "PMode 6",
+          "PMode 7",
+          "PMode 8",
+          "PMode 9"
+        ],
+        "button_value": [
+          0,
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "touch_areas": []
+      },
+      "message": {
+        "type": "menu",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": false,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "message",
+        "title_text": "Message",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "data": {
+          "text": ""
+        },
+        "button_list": [
+          "menu_close",
+          "menu_close"
+        ],
+        "button_text": [
+          "Close Menu",
+          "OK"
+        ],
+        "button_value": [],
+        "touch_areas": []
+      }
+    },
+    "input": {
+      "hold": {
+        "type": "input_number",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": true,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "input_hold",
+        "title_text": "Enter Hold Temperature:",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "command": "cmd_hold",
+        "data": {
+          "input": "",
+          "value": 200,
+          "origin": ""
+        },
+        "step": 5,
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": []
+      },
+      "notify": {
+        "type": "input_number",
+        "position": [
+          25,
+          62
+        ],
+        "animation_enabled": true,
+        "size": [
+          550,
+          400
+        ],
+        "glow": false,
+        "font": "trebuc.ttf",
+        "label": "input_notify",
+        "title_text": "Enter Notify Temperature:",
+        "color": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "command": "cmd_notify",
+        "data": {
+          "input": "",
+          "value": 165,
+          "origin": ""
+        },
+        "step": 5,
+        "button_list": [],
+        "button_value": [],
+        "touch_areas": []
+      }
+    }
+  }
+}

@@ -18,7 +18,7 @@ SOURCE_W, SOURCE_H = 800, 480
 # here also requires a display/dsi_<W>x<H>t.py re-export module, a
 # wizard_manifest.json entry, and a paired byte-identical regression assertion
 # in tests/test_dsi_layout_generator.py.
-RESOLUTIONS = [(1024, 768), (1280, 720)]
+RESOLUTIONS = [(1024, 768), (1280, 720), (1024, 600)]
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SOURCE_PATH = os.path.join(BASE, 'display', 'dsi_800x480t.json')
@@ -188,6 +188,104 @@ def _dashboard_1280x720():
 	return dash
 
 
+def _dashboard_1024x600():
+	"""Bespoke ember-style profile_1.dash for the 1024x600 DSI display.
+
+	Same three-column ember design as _dashboard_1280x720(), reflowed for the
+	shorter/wider 1024x600 canvas (14px margins; content bottoms at y=574).
+	Widgets resize their rendered image to these boxes (see
+	display/flexobject.py), so no widget code changes are needed.
+	"""
+	dash = [
+		_flex_obj(
+			'header_bar',
+			'header_bar',
+			[0, 0],
+			[1024, 50],
+			data={'ip': '', 'clock': '', 'cooking': False},
+			button_list=['menu_main'],
+		)
+	]
+	probe_card_y = [62, 166, 270, 374, 478]
+	for index, y in enumerate(probe_card_y):
+		dash.append(
+			_flex_obj(
+				f'probe_card_{index}',
+				'probe_card',
+				[14, y],
+				[238, 96],
+				units='F',
+				data={'name': '', 'temp': 0, 'target': 0},
+				button_list=['input_notify'],
+			)
+		)
+	dash.append(
+		_flex_obj(
+			'primary_gauge',
+			'gauge_ember',
+			[266, 62],
+			[490, 352],
+			animation_enabled=True,
+			glow=True,
+			temps=[0, 0, 0],
+			max_temp=600,
+			units='F',
+			label='Grill',
+			data={'mode_label': ''},
+			button_list=['input_notify'],
+		)
+	)
+	dash.append(
+		_flex_obj('cook_time', 'duty_pill', [266, 424], [310, 40], data={'label': '', 'value': '', 'highlight': False})
+	)
+	dash.append(
+		_flex_obj(
+			'lid_alert',
+			'alert',
+			[586, 424],
+			[170, 40],
+			label='Lid Open Detected',
+			active=False,
+			fg_color=[255, 90, 77, 255],
+			bg_color=[26, 22, 17, 220],
+			data={'text': ['Lid Open', 'Detected']},
+		)
+	)
+	dash.append(_flex_obj('button_row', 'button_row', [266, 474], [490, 100], button_type=[], button_active=''))
+	dash.append(
+		_flex_obj(
+			'system_card',
+			'system_card',
+			[770, 62],
+			[240, 190],
+			animation_enabled=True,
+			data={'fan': False, 'auger': False, 'igniter': False},
+			button_list=['cmd_fan_toggle', 'cmd_auger_toggle', 'cmd_igniter_toggle'],
+		)
+	)
+	dash.append(
+		_flex_obj(
+			'duty_pill_left', 'duty_pill', [770, 262], [115, 40], data={'label': '', 'value': '', 'highlight': False}
+		)
+	)
+	dash.append(
+		_flex_obj(
+			'duty_pill_right', 'duty_pill', [895, 262], [115, 40], data={'label': '', 'value': '', 'highlight': False}
+		)
+	)
+	dash.append(
+		_flex_obj(
+			'hopper_vertical',
+			'hopper_vertical',
+			[770, 312],
+			[240, 262],
+			data={'level': 0, 'enabled': True},
+			button_list=['cmd_hopper_level'],
+		)
+	)
+	return dash
+
+
 def build(width, height):
 	with open(SOURCE_PATH) as f:
 		src = json.load(f)
@@ -209,12 +307,17 @@ def build(width, height):
 			for obj in prof.get(section, {}).values():
 				_scale_obj(obj, scale, xoff, yoff)
 
-	if (width, height) == (1280, 720):
-		# Bespoke ember dashboard (Task 25) - decoupled from the 800x480 scaler.
-		# Only profile_1.dash and the dash background change; profile_2 and
+	bespoke = {
+		(1280, 720): (_dashboard_1280x720, './static/img/display/background_ember_1280x720.png'),
+		(1024, 600): (_dashboard_1024x600, './static/img/display/background_ember_1024x600.png'),
+	}
+	if (width, height) in bespoke:
+		# Bespoke ember dashboard - decoupled from the 800x480 scaler. Only
+		# profile_1.dash and the dash background change; profile_2 and
 		# profile_1's home/menus/input stay the scaled 800x480-derived values.
-		data['profile_1']['dash'] = _dashboard_1280x720()
-		data['metadata']['dash_background'] = './static/img/display/background_ember_1280x720.png'
+		make_dash, background = bespoke[(width, height)]
+		data['profile_1']['dash'] = make_dash()
+		data['metadata']['dash_background'] = background
 
 	return data
 
