@@ -19,6 +19,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 
 from common import read_current, read_status, read_generic_json
 from display.qtbackend import PiFireBackend
+from display.screen_power import ScreenPowerController
 
 QML_DIR = Path(__file__).parent / 'qml'
 
@@ -96,6 +97,18 @@ def _make_backlight():
 	return DummyBacklight()
 
 
+def bind_backend_power(backend, controller):
+	"""Drive the screen-power controller from the backend's asleep signal.
+	Applies once immediately and returns the apply callable."""
+
+	def _apply():
+		controller.set_output_power(not backend.asleep)
+
+	backend.asleepChanged.connect(_apply)
+	_apply()
+	return _apply
+
+
 def run_app(config, units):
 	config = dict(config)
 	config.setdefault('units', units)
@@ -121,6 +134,9 @@ def run_app(config, units):
 
 	backend.asleepChanged.connect(_apply_backlight)
 	_apply_backlight()
+
+	screen_power = ScreenPowerController('wayland')
+	bind_backend_power(backend, screen_power)
 
 	meta = read_generic_json(config['display_data_filename']).get('metadata', {})
 	framerate = meta.get('framerate', 20)
