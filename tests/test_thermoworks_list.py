@@ -3,8 +3,8 @@ import types
 from tools.thermoworks_list import channel_label, format_temp, resolve_credentials
 
 
-def _channel(value, units, label=None):
-	return types.SimpleNamespace(value=value, units=units, label=label)
+def _channel(value, units, label=None, type=None):
+	return types.SimpleNamespace(value=value, units=units, label=label, type=type)
 
 
 def test_format_temp_as_reported_uses_cloud_units():
@@ -23,9 +23,12 @@ def test_format_temp_normalizes_units():
 	assert format_temp(_channel(212.0, 'F'), 'C') == '100.0 \N{DEGREE SIGN}C'
 
 
-def test_channel_label_falls_back_to_number():
+def test_channel_label_prefers_label_then_type_then_number():
 	assert channel_label(_channel(1, 'F', label='Brisket'), 3) == 'Brisket'
-	assert channel_label(_channel(1, 'F', label=''), 3) == 'Channel 3'
+	# No label -> fall back to the channel type (what RFX populates per sensor).
+	assert channel_label(_channel(1, 'F', label='', type='internal'), 3) == 'internal'
+	# Neither label nor type -> the channel number.
+	assert channel_label(_channel(1, 'F', label='', type=None), 3) == 'Channel 3'
 	assert channel_label(None, 5) == 'Channel 5'
 
 

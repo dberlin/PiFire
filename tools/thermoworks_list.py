@@ -57,9 +57,16 @@ def resolve_credentials(email, password):
 
 
 def channel_label(channel, number):
-	"""A human label for a channel: its cloud label, else 'Channel N'."""
-	label = getattr(channel, 'label', None) if channel is not None else None
-	return label or f'Channel {number}'
+	"""A human label for a channel: its cloud label, else the channel type
+	(RFX probes sense at several points and name them via `type`), else
+	'Channel N'. RFX wireless "probes" are a single physical thermometer whose
+	multiple internal sensors each appear here as a channel."""
+	if channel is not None:
+		for attr in ('label', 'type'):
+			value = getattr(channel, attr, None)
+			if value:
+				return str(value)
+	return f'Channel {number}'
 
 
 def format_temp(channel, units):
@@ -116,6 +123,8 @@ def build_json(readings):
 				{
 					'number': number,
 					'label': channel_label(channel, number),
+					'type': getattr(channel, 'type', None),
+					'status': getattr(channel, 'status', None),
 					'value': getattr(channel, 'value', None),
 					'units': getattr(channel, 'units', None),
 					'celsius': _channel_to_celsius(channel) if channel is not None else None,
