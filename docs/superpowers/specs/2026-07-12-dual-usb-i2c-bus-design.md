@@ -115,6 +115,9 @@ Bus construction per kind:
 - `extended` → `ExtendedI2C(resolve_i2c_bus(bus_selector))` (as-is).
 - `ft232h` → set `os.environ['BLINKA_FT232H']` to the selector (a `ftdi:` URL)
   or `'1'`, construct `ftdi_mpsse.mpsse.i2c.I2C()`, wrap in `_LockedI2C`.
+  Constructing this I2C also sets the process-global `Pin.mpsse_gpio` (see
+  "FT232H single-controller sharing" below) — an intentional side effect that
+  lets FT232H GPIO reuse this same controller.
 - `mcp2221a` → construct `mcp2221.i2c.I2C()` (blank selector = first device);
   a non-blank serial opens the matching HID device, wrap in `_LockedI2C`.
 
@@ -136,6 +139,50 @@ control process owns both the grill platform and the probe complex, so one cache
 covers both; the two USB adapters are distinct devices, so there is no
 cross-conflict. Sharing one handle per physical bus is mandatory for FT232H (a
 single MPSSE engine) and correct for the rest.
+
+### FT232H single-controller sharing (relays + I2C)
+
+An FT232H has one MPSSE engine, so there can be only one `pyftdi` controller per
+FT232H per process. Blinka shares it through a process-global class attribute
+`Pin.mpsse_gpio` (`ftdi_mpsse/mpsse/pin.py`): constructing the MPSSE `I2C` sets
+`Pin.mpsse_gpio = controller.get_gpio()`, and `digitalio` GPIO pins reuse
+whatever `Pin.mpsse_gpio` holds — or, if it is still `None`, lazily create their
+own controller. Whoever creates a controller first wins; a second controller on
+the same device conflicts. `ft232h/pin.py` imports the same `Pin` class the
+factory's MPSSE `I2C` touches, so the attribute is genuinely shared.
+
+`grillplat/ft232h_relay.py` uses the FT232H for **both** the relays (GPIO) and
+the EMC fan controller (I2C). Today it sets `BLINKA_FT232H` itself, creates the
+relay GPIO pins first (controller #1), then builds the EMC bus via `busio.I2C`
+(controller #2); a new `ft232h` probe bus would add a third. All must collapse
+to one.
+
+**Unification:** the factory is the single owner of each FT232H controller
+(cached by selector). `ft232h_relay` is refactored to:
+
+1. resolve its FT232H selector (`ft232h.url`, default `'1'`),
+2. call `open_i2c_bus('ft232h', url)` **first** to construct the one MPSSE `I2C`
+   (which sets `Pin.mpsse_gpio`) and cache it,
+3. `import board, digitalio` and create the relay GPIO pins, which now reuse the
+   factory's controller via `Pin.mpsse_gpio`,
+4. use that same factory bus for the EMC controller.
+
+`ft232h_relay` no longer sets `BLINKA_FT232H` directly — the factory owns the
+env/URL for the `ft232h` kind. Because the controller is cached by selector, any
+probe or distance sensor later placed on the same FT232H (same selector) reuses
+the one controller, with no conflict. Since the control process builds the
+platform before the probe complex, the platform establishes the shared
+controller first.
+
+**Caveat:** to share one FT232H between the relays and other I2C devices, the
+relay's `ft232h.url` and those devices' `ft232h` selector must resolve to the
+same adapter (blank/`'1'` = first FT232H on both). Different selectors mean
+different adapters — and opening two controllers on one physical FT232H fails.
+
+Moving the EMC in `ft232h_relay` onto a *different* bus (e.g. an MCP2221A while
+relays stay on the FT232H) is a straightforward later extension (give its
+`fan_controller` an `i2c_bus_kind`); this design keeps the `ft232h_relay` EMC on
+the FT232H bus.
 
 ### Validation
 
@@ -183,8 +230,11 @@ Replace each inline `if basic/extended` block with a single
   (`ads1115.py` smbus keeps its own basic/extended handling — not a `busio`
   device.)
 - Distance: `distance/_tof_base.py` (`_open_i2c_bus`).
-- Platform: `grillplat/x86_numato.py` and `grillplat/ft232h_relay.py` (EMC
-  controller construction).
+- Platform: `grillplat/x86_numato.py` (EMC controller construction) and
+  `grillplat/ft232h_relay.py` (single-controller unification — open the FT232H
+  bus via the factory first, then create relay GPIO pins that reuse it, and use
+  the same bus for the EMC; drop its own `BLINKA_FT232H` handling per "FT232H
+  single-controller sharing").
 
 `grillplat/x86_numato.py` drops its local `resolve_i2c_bus`/`find_i2c_bus` and
 imports from `common.i2c_bus`.
@@ -225,6 +275,10 @@ tests already use for `_load_ft232h`):
   workable combination in the table.
 - Wizard save rejects an unworkable combination with an alert and does not
   persist it.
+- `ft232h_relay` opens its FT232H bus through the factory before creating relay
+  GPIO pins, so relays + EMC (+ any FT232H probe) share one controller: assert
+  the factory is called first and that no second controller is constructed
+  (fakes count controller instantiations).
 - Manifest test: the eligible selectors include `ft232h` and `mcp2221a`; the
   ineligible ones (`ads1115`, `prototype`) do not.
 
@@ -242,3 +296,7 @@ tests already use for `_load_ft232h`):
   selector (URL/serial); the common case is one of each.
 - Non-`busio` devices using USB-HID buses (smbus2 ADS1115, prototype).
 - Combining `basic` with a USB-HID kind (validated against, not supported).
+- Moving the `ft232h_relay` EMC fan controller off the FT232H onto another bus
+  (a later extension; the relays are inherently on the FT232H's GPIO).
+- Sharing one FT232H across two different selectors (a physical FT232H hosts a
+  single controller).
