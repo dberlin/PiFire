@@ -15,11 +15,7 @@ import threading
 import logging
 import time
 
-import board
-import busio
-from adafruit_extended_bus import ExtendedI2C
-
-from probes.base import resolve_i2c_bus
+from common.i2c_bus import open_i2c_bus
 
 
 class ToFHopperLevel:
@@ -61,9 +57,7 @@ class ToFHopperLevel:
 		self.sensor_thread.start()
 
 	def _open_i2c_bus(self):
-		if self.i2c_bus_kind == 'extended':
-			return ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
-		return busio.I2C(board.SCL, board.SDA)
+		return open_i2c_bus(self.i2c_bus_kind, self.i2c_bus_num)
 
 	def __start_sensor(self):
 		i2c = self._open_i2c_bus()

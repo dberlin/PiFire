@@ -31,12 +31,7 @@ class FakeSensorMixin:
 def tof_mod():
 	import distance._tof_base as mod
 
-	with (
-		mock.patch.object(mod, 'busio'),
-		mock.patch.object(mod, 'board'),
-		mock.patch.object(mod, 'ExtendedI2C'),
-		mock.patch.object(mod, 'resolve_i2c_bus', return_value=7),
-	):
+	with mock.patch.object(mod, 'open_i2c_bus', return_value=mock.sentinel.bus):
 		yield mod
 
 
@@ -45,6 +40,15 @@ def _make_hopper(tof_mod, dev_pins=None, reading_mm=100, empty=22, full=4, read_
 		pass
 
 	return TestHopperLevel(dev_pins or {}, empty=empty, full=full, reading_mm=reading_mm, read_delay=read_delay)
+
+
+def test_open_i2c_bus_delegates_to_factory(tof_mod):
+	hopper = _make_hopper(tof_mod, dev_pins={'distance': {'i2c_bus_kind': 'ft232h', 'i2c_bus_num': '1'}})
+	try:
+		assert hopper.opened_with[0] is mock.sentinel.bus
+		tof_mod.open_i2c_bus.assert_called_with('ft232h', '1')
+	finally:
+		_stop(hopper)
 
 
 def _stop(hopper):
@@ -98,25 +102,6 @@ def test_slow_read_cycle_reinitializes_sensor(tof_mod):
 	try:
 		hopper.get_level(override=True)
 		assert hopper.open_calls == 2
-	finally:
-		_stop(hopper)
-
-
-def test_basic_bus_uses_board_scl_sda(tof_mod):
-	hopper = _make_hopper(tof_mod, dev_pins={})
-	try:
-		tof_mod.busio.I2C.assert_called_with(tof_mod.board.SCL, tof_mod.board.SDA)
-		assert hopper.opened_with[0] is tof_mod.busio.I2C.return_value
-	finally:
-		_stop(hopper)
-
-
-def test_extended_bus_resolves_and_uses_extended_i2c(tof_mod):
-	hopper = _make_hopper(tof_mod, dev_pins={'distance': {'i2c_bus_kind': 'extended', 'i2c_bus_num': '3'}})
-	try:
-		tof_mod.resolve_i2c_bus.assert_called_with('3')
-		tof_mod.ExtendedI2C.assert_called_with(7)
-		assert hopper.opened_with[0] is tof_mod.ExtendedI2C.return_value
 	finally:
 		_stop(hopper)
 
