@@ -28,6 +28,7 @@ from common import (
 	WriteKind,
 	is_real_hardware,
 	read_generic_json,
+	display_sleep_timeout,
 	read_settings,
 	write_settings,
 	read_status,
@@ -78,7 +79,7 @@ class DisplayBase:
 
 		self.display_active = None
 		self.display_timeout = None
-		self.TIMEOUT = 10
+		self.TIMEOUT = display_sleep_timeout(read_settings())
 		self.command = 'splash'
 		self.command_data = None
 
