@@ -33,6 +33,7 @@ FlexObject_TypeMap = {
 	'gauge_ember': 'GaugeEmber',
 	'system_card': 'SystemCard',
 	'duty_pill': 'DutyPill',
+	'cook_time_bar': 'CookTimeBar',
 	'hopper_vertical': 'HopperVertical',
 	'header_bar': 'HeaderBar',
 	'button_row': 'ButtonRow',
@@ -2255,6 +2256,75 @@ class DutyPill(FlexObject):
 		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
 		pill = pill.resize(output_size)
 		canvas.paste(pill, (0, 0), pill)
+
+		return canvas
+
+
+class CookTimeBar(FlexObject):
+	"""Horizontal cook-time bar: a rounded-rectangle card with a small label
+	pinned left and the time value pinned right - the pygame counterpart of the
+	Qt CookTimeBar. Renders on a canvas that preserves the output box's aspect
+	ratio, so a wide/short bar downscales uniformly instead of distorting the way
+	a fixed square-ish canvas (e.g. DutyPill) does when squished into a wide box.
+
+	Presentational only - base_flex feeds data={'label','value','highlight'} to
+	the 'cook_time' object by name (see base_flex._cook_time_data). When the lid
+	opens in Hold mode base_flex feeds label='Lid Pause' + a mm:ss countdown; the
+	bar recolors red to serve as the lid-open alert (the ember dashboards have no
+	separate lid_alert overlay - one full-width bar handles both states)."""
+
+	def __init__(self, objectType, objectData, background):
+		super().__init__(objectType, objectData, background)
+
+	def _draw_object(self):
+		output_size = self.objectData['size']
+		# Work at 2x the output (aspect-preserving) for a crisp, undistorted downscale.
+		width = max(1, output_size[0] * 2)
+		height = max(1, output_size[1] * 2)
+
+		accent = self.objectData.get('accent', resolve_accent('Ember'))
+		data = self.objectData.get('data', {})
+		label = str(data.get('label') or 'COOK TIME').upper()
+		value = str(data.get('value', ''))
+		# base_flex._timer_seconds_and_label() uses the 'Lid Pause' label while the
+		# lid is open - render the bar as a red alert in that state.
+		lid_alert = 'LID' in label
+
+		if lid_alert:
+			card_fill = (48, 22, 18, 255)  # dark red-tinted
+			border_color = (255, 90, 77, 255)  # #ff5a4d
+			label_color = (255, 138, 128, 255)
+			value_color = (255, 90, 77, 255)
+			border_w = 4
+		else:
+			card_fill = (26, 22, 17, 255)  # #1a1611
+			border_color = (255, 255, 255, 15)  # rgba(255,255,255,0.06)
+			label_color = (125, 114, 100, 255)  # #7d7264
+			value_color = accent['accent'] if value else (138, 127, 112, 255)
+			border_w = 2
+
+		bar = Image.new('RGBA', (width, height))
+		draw = ImageDraw.Draw(bar)
+		radius = round(height * 0.32)
+		draw.rounded_rectangle(
+			(0, 0, width - 1, height - 1), radius=radius, fill=card_fill, outline=border_color, width=border_w
+		)
+
+		pad = round(height * 0.55)
+		label_canvas = self._draw_text(label, './static/font/Barlow-SemiBold.ttf', round(height * 0.28), label_color)
+		value_canvas = self._draw_text(
+			value, './static/font/BarlowSemiCondensed-Bold.ttf', round(height * 0.50), value_color
+		)
+
+		bar.paste(label_canvas, (pad, (height - label_canvas.size[1]) // 2), label_canvas)
+		bar.paste(
+			value_canvas, (width - pad - value_canvas.size[0], (height - value_canvas.size[1]) // 2), value_canvas
+		)
+
+		# Resize to the configured output size (uniform - aspect was preserved above).
+		canvas = Image.new('RGBA', (output_size[0], output_size[1]))
+		bar = bar.resize(output_size)
+		canvas.paste(bar, (0, 0), bar)
 
 		return canvas
 

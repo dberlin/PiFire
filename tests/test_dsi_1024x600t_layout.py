@@ -3,11 +3,11 @@ import os
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.join(BASE, 'display', 'dsi_800x480t.json')
-OUT = os.path.join(BASE, 'display', 'dsi_1280x720t.json')
+OUT = os.path.join(BASE, 'display', 'dsi_1024x600t.json')
 
-SCALE = 1.5
-OFFSETS = {'profile_1': (40, 0), 'profile_2': (0, 40)}
-SCREEN = {'profile_1': (1280, 720), 'profile_2': (720, 1280)}
+SCALE = 1.25
+OFFSETS = {'profile_1': (12, 0), 'profile_2': (0, 12)}
+SCREEN = {'profile_1': (1024, 600), 'profile_2': (600, 1024)}
 
 EMBER_DASH_OBJECT_NAMES = [
 	'header_bar',
@@ -42,17 +42,13 @@ def _iter_objects(profile):
 
 def test_metadata():
 	d = _load(OUT)
-	assert d['metadata']['name'] == 'dsi_1280x720t'
-	assert d['metadata']['screen_width'] == 1280
-	assert d['metadata']['screen_height'] == 720
-
-
-def test_splash_image_unchanged():
-	assert _load(OUT)['metadata']['splash_image'] == './static/img/display/splash_800x480.png'
+	assert d['metadata']['name'] == 'dsi_1024x600t'
+	assert d['metadata']['screen_width'] == 1024
+	assert d['metadata']['screen_height'] == 600
 
 
 def test_dash_background_is_bespoke_ember_background():
-	assert _load(OUT)['metadata']['dash_background'].endswith('background_ember_1280x720.png')
+	assert _load(OUT)['metadata']['dash_background'].endswith('background_ember_1024x600.png')
 
 
 def test_all_elements_on_screen():
@@ -68,13 +64,9 @@ def test_all_elements_on_screen():
 
 
 def test_profile_1_dash_is_bespoke_ember_layout():
-	"""Task 25: profile_1.dash is a bespoke layout built from the new ember
-	flexobject types (Tasks 17-23), not a scaled copy of the 800x480 source."""
 	d = _load(OUT)
 	dash = d['profile_1']['dash']
-	names = [obj['name'] for obj in dash]
-	assert names == EMBER_DASH_OBJECT_NAMES
-
+	assert [obj['name'] for obj in dash] == EMBER_DASH_OBJECT_NAMES
 	by_name = {obj['name']: obj for obj in dash}
 	assert by_name['header_bar']['type'] == 'header_bar'
 	assert by_name['primary_gauge']['type'] == 'gauge_ember'
@@ -100,37 +92,8 @@ def test_profile_1_dash_objects_have_common_flexobject_keys():
 
 
 def test_profile_2_dash_is_untouched_scaled_layout():
-	"""profile_2 (portrait) is not part of Task 25 - it stays the scaled
-	800x480-derived layout used by every other resolution."""
 	d = _load(OUT)
 	names = [obj['name'] for obj in d['profile_2']['dash']]
 	assert 'primary_gauge' in names
 	assert d['profile_2']['dash'][0]['type'] == 'gauge'
 	assert 'header_bar' not in names
-
-
-def _assert_scaled(so, oo, xoff, yoff):
-	if 'position' in so:
-		x, y = so['position']
-		assert oo['position'] == [round(x * SCALE + xoff), round(y * SCALE + yoff)]
-	if 'size' in so:
-		w, h = so['size']
-		assert oo['size'] == [round(w * SCALE), round(h * SCALE)]
-
-
-def test_transform_matches_source_for_still_scaled_sections():
-	"""Task 25 only replaces profile_1.dash and metadata.dash_background.
-	profile_1's home/menus/input and everything in profile_2 (home/dash/
-	menus/input) remain uniformly scaled from the 800x480 source, exactly
-	like every other resolution this generator produces."""
-	src = _load(SRC)
-	out = _load(OUT)
-	for profile, (xoff, yoff) in OFFSETS.items():
-		sp, op = src[profile], out[profile]
-		sections = ('home',) if profile == 'profile_1' else ('home', 'dash')
-		for section in sections:
-			for so, oo in zip(sp.get(section, []), op.get(section, [])):
-				_assert_scaled(so, oo, xoff, yoff)
-		for section in ('menus', 'input'):
-			for key in sp.get(section, {}):
-				_assert_scaled(sp[section][key], op[section][key], xoff, yoff)

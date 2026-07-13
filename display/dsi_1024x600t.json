@@ -1,10 +1,10 @@
 {
   "metadata": {
-    "name": "dsi_1280x720t",
-    "screen_width": 1280,
-    "screen_height": 720,
+    "name": "dsi_1024x600t",
+    "screen_width": 1024,
+    "screen_height": 600,
     "framerate": 20,
-    "dash_background": "./static/img/display/background_ember_1280x720.png",
+    "dash_background": "./static/img/display/background_ember_1024x600.png",
     "splash_image": "./static/img/display/splash_800x480.png",
     "splash_delay": 500,
     "max_food_probes": 5,
@@ -22,8 +22,8 @@
         ],
         "animation_enabled": false,
         "size": [
-          1280,
-          58
+          1024,
+          50
         ],
         "glow": false,
         "data": {
@@ -41,13 +41,13 @@
         "name": "probe_card_0",
         "type": "probe_card",
         "position": [
-          18,
-          74
+          14,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          298,
-          116
+          238,
+          96
         ],
         "glow": false,
         "data": {
@@ -66,13 +66,13 @@
         "name": "probe_card_1",
         "type": "probe_card",
         "position": [
-          18,
-          202
+          14,
+          166
         ],
         "animation_enabled": false,
         "size": [
-          298,
-          116
+          238,
+          96
         ],
         "glow": false,
         "data": {
@@ -91,13 +91,13 @@
         "name": "probe_card_2",
         "type": "probe_card",
         "position": [
-          18,
-          330
+          14,
+          270
         ],
         "animation_enabled": false,
         "size": [
-          298,
-          116
+          238,
+          96
         ],
         "glow": false,
         "data": {
@@ -116,13 +116,13 @@
         "name": "probe_card_3",
         "type": "probe_card",
         "position": [
-          18,
-          458
+          14,
+          374
         ],
         "animation_enabled": false,
         "size": [
-          298,
-          116
+          238,
+          96
         ],
         "glow": false,
         "data": {
@@ -141,13 +141,13 @@
         "name": "probe_card_4",
         "type": "probe_card",
         "position": [
-          18,
-          586
+          14,
+          478
         ],
         "animation_enabled": false,
         "size": [
-          298,
-          116
+          238,
+          96
         ],
         "glow": false,
         "data": {
@@ -166,13 +166,13 @@
         "name": "primary_gauge",
         "type": "gauge_ember",
         "position": [
-          332,
-          74
+          266,
+          62
         ],
         "animation_enabled": true,
         "size": [
-          614,
-          452
+          490,
+          352
         ],
         "glow": true,
         "data": {
@@ -196,13 +196,13 @@
         "name": "cook_time",
         "type": "cook_time_bar",
         "position": [
-          332,
-          538
+          266,
+          424
         ],
         "animation_enabled": false,
         "size": [
-          614,
-          52
+          490,
+          40
         ],
         "glow": false,
         "data": {
@@ -218,12 +218,12 @@
         "name": "button_row",
         "type": "button_row",
         "position": [
-          332,
-          602
+          266,
+          474
         ],
         "animation_enabled": false,
         "size": [
-          614,
+          490,
           100
         ],
         "glow": false,
@@ -238,13 +238,13 @@
         "name": "system_card",
         "type": "system_card",
         "position": [
-          962,
-          74
+          770,
+          62
         ],
         "animation_enabled": true,
         "size": [
-          300,
-          230
+          240,
+          190
         ],
         "glow": false,
         "data": {
@@ -264,13 +264,13 @@
         "name": "duty_pill_left",
         "type": "duty_pill",
         "position": [
-          962,
-          318
+          770,
+          262
         ],
         "animation_enabled": false,
         "size": [
-          143,
-          64
+          115,
+          40
         ],
         "glow": false,
         "data": {
@@ -286,13 +286,13 @@
         "name": "duty_pill_right",
         "type": "duty_pill",
         "position": [
-          1119,
-          318
+          895,
+          262
         ],
         "animation_enabled": false,
         "size": [
-          143,
-          64
+          115,
+          40
         ],
         "glow": false,
         "data": {
@@ -308,13 +308,13 @@
         "name": "hopper_vertical",
         "type": "hopper_vertical",
         "position": [
-          962,
-          396
+          770,
+          312
         ],
         "animation_enabled": false,
         "size": [
-          300,
-          306
+          240,
+          262
         ],
         "glow": false,
         "data": {
@@ -332,13 +332,13 @@
       "main": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -373,13 +373,13 @@
       "main_active_normal": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -422,13 +422,13 @@
       "main_active_monitor": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -459,13 +459,13 @@
       "main_active_recipe": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -502,13 +502,13 @@
       "system": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -541,13 +541,13 @@
       "qrcode": {
         "type": "qrcode",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -569,13 +569,13 @@
       "main_reboot": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -604,13 +604,13 @@
       "main_power_off": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -639,13 +639,13 @@
       "prime": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -674,13 +674,13 @@
       "prime_startup": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -716,13 +716,13 @@
       "prime_only": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -758,13 +758,13 @@
       "startup": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -793,13 +793,13 @@
       "pmode": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -856,13 +856,13 @@
       "message": {
         "type": "menu",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": false,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -893,13 +893,13 @@
       "hold": {
         "type": "input_number",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": true,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -925,13 +925,13 @@
       "notify": {
         "type": "input_number",
         "position": [
-          190,
-          60
+          137,
+          50
         ],
         "animation_enabled": true,
         "size": [
-          900,
-          600
+          750,
+          500
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -963,13 +963,13 @@
         "name": "primary_gauge",
         "type": "gauge",
         "position": [
-          98,
-          115
+          81,
+          74
         ],
         "animation_enabled": true,
         "size": [
-          525,
-          525
+          438,
+          438
         ],
         "fg_color": [
           255,
@@ -1016,14 +1016,14 @@
         "name": "control_panel",
         "type": "control_panel",
         "position": [
-          60,
-          1090
+          50,
+          887
         ],
         "animation_enabled": false,
         "glow": false,
         "size": [
-          600,
-          150
+          500,
+          125
         ],
         "label": "control_panel",
         "data": {},
@@ -1047,12 +1047,12 @@
         "type": "gauge_compact",
         "position": [
           0,
-          610
+          487
         ],
         "animation_enabled": false,
         "size": [
-          330,
-          165
+          275,
+          138
         ],
         "fg_color": [
           255,
@@ -1099,13 +1099,13 @@
         "name": "food_probe_gauge_1",
         "type": "gauge_compact",
         "position": [
-          390,
-          610
+          325,
+          487
         ],
         "animation_enabled": false,
         "size": [
-          330,
-          165
+          275,
+          138
         ],
         "fg_color": [
           255,
@@ -1153,12 +1153,12 @@
         "type": "gauge_compact",
         "position": [
           0,
-          775
+          624
         ],
         "animation_enabled": false,
         "size": [
-          330,
-          165
+          275,
+          138
         ],
         "fg_color": [
           255,
@@ -1205,13 +1205,13 @@
         "name": "food_probe_gauge_3",
         "type": "gauge_compact",
         "position": [
-          390,
-          775
+          325,
+          624
         ],
         "animation_enabled": false,
         "size": [
-          330,
-          165
+          275,
+          138
         ],
         "fg_color": [
           255,
@@ -1259,12 +1259,12 @@
         "type": "gauge_compact",
         "position": [
           0,
-          940
+          762
         ],
         "animation_enabled": false,
         "size": [
-          330,
-          165
+          275,
+          138
         ],
         "fg_color": [
           255,
@@ -1311,13 +1311,13 @@
         "name": "mode_bar",
         "type": "mode_bar",
         "position": [
-          98,
-          40
+          81,
+          12
         ],
         "animation_enabled": false,
         "size": [
-          525,
-          90
+          438,
+          75
         ],
         "fg_color": [
           255,
@@ -1343,12 +1343,12 @@
         "type": "status_icon",
         "position": [
           0,
-          40
+          12
         ],
         "animation_enabled": false,
         "size": [
-          75,
-          75
+          62,
+          62
         ],
         "glow": true,
         "icon": "Fan",
@@ -1379,12 +1379,12 @@
         "type": "status_icon",
         "position": [
           0,
-          130
+          87
         ],
         "animation_enabled": false,
         "size": [
-          75,
-          75
+          62,
+          62
         ],
         "glow": true,
         "icon": "Auger",
@@ -1415,12 +1415,12 @@
         "type": "status_icon",
         "position": [
           0,
-          220
+          162
         ],
         "animation_enabled": false,
         "size": [
-          75,
-          75
+          62,
+          62
         ],
         "glow": true,
         "icon": "Igniter",
@@ -1451,12 +1451,12 @@
         "type": "button",
         "position": [
           0,
-          400
+          312
         ],
         "animation_enabled": false,
         "size": [
-          75,
-          75
+          62,
+          62
         ],
         "glow": false,
         "label": "Lid Open Toggle",
@@ -1494,12 +1494,12 @@
         "type": "splus_control",
         "position": [
           0,
-          310
+          237
         ],
         "animation_enabled": false,
         "size": [
-          75,
-          75
+          62,
+          62
         ],
         "glow": false,
         "label": "P-Mode",
@@ -1529,13 +1529,13 @@
         "name": "menu_icon",
         "type": "menu_icon",
         "position": [
-          645,
-          48
+          538,
+          18
         ],
         "animation_enabled": false,
         "size": [
-          75,
-          75
+          62,
+          62
         ],
         "glow": false,
         "icon": "Hamburger",
@@ -1557,13 +1557,13 @@
         "name": "timer",
         "type": "timer",
         "position": [
-          390,
-          940
+          325,
+          762
         ],
         "animation_enabled": false,
         "size": [
-          330,
-          165
+          275,
+          138
         ],
         "glow": false,
         "label": "Timer",
@@ -1590,13 +1590,13 @@
         "name": "p_mode",
         "type": "p_mode_control",
         "position": [
-          540,
-          520
+          450,
+          412
         ],
         "animation_enabled": false,
         "size": [
-          180,
-          98
+          150,
+          81
         ],
         "glow": false,
         "label": "P-Mode",
@@ -1627,12 +1627,12 @@
         "type": "hopper_status",
         "position": [
           0,
-          520
+          412
         ],
         "animation_enabled": false,
         "size": [
-          180,
-          98
+          150,
+          81
         ],
         "glow": false,
         "label": "Hopper Level",
@@ -1689,13 +1689,13 @@
       "main": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -1730,13 +1730,13 @@
       "main_active_normal": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -1779,13 +1779,13 @@
       "main_active_monitor": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -1816,13 +1816,13 @@
       "main_active_recipe": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -1859,13 +1859,13 @@
       "system": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -1898,13 +1898,13 @@
       "qrcode": {
         "type": "qrcode",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -1926,13 +1926,13 @@
       "main_reboot": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -1961,13 +1961,13 @@
       "main_power_off": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -1996,13 +1996,13 @@
       "prime": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -2031,13 +2031,13 @@
       "prime_startup": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -2073,13 +2073,13 @@
       "prime_only": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -2115,13 +2115,13 @@
       "startup": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -2150,13 +2150,13 @@
       "pmode": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -2213,13 +2213,13 @@
       "message": {
         "type": "menu",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": false,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -2250,13 +2250,13 @@
       "hold": {
         "type": "input_number",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": true,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",
@@ -2282,13 +2282,13 @@
       "notify": {
         "type": "input_number",
         "position": [
-          30,
-          100
+          25,
+          62
         ],
         "animation_enabled": true,
         "size": [
-          660,
-          480
+          550,
+          400
         ],
         "glow": false,
         "font": "trebuc.ttf",

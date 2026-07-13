@@ -4,11 +4,12 @@ import ".." as QmlGlobal
 
 Rectangle {
 	id: root
-	radius: 14
+	radius: root.compact ? 12 : 14
 	implicitWidth: 120
 	implicitHeight: 64
 
 	// Properties
+	property bool compact: false
 	property string label: ""
 	property string value: ""
 	property bool highlighted: false
@@ -35,7 +36,7 @@ Rectangle {
 			anchors.horizontalCenter: parent.horizontalCenter
 			text: root.value
 			font.family: QmlGlobal.Theme.condensed
-			font.pixelSize: 24
+			font.pixelSize: root.compact ? 18 : 24
 			font.bold: true
 			color: root.highlighted ? QmlGlobal.Theme.okColor : QmlGlobal.Theme.accentColor
 		}

@@ -8,7 +8,8 @@ import ".."
 // and backend.mode for the live dot, and drives its own clock via a Timer.
 Item {
 	id: header
-	height: 58
+	property bool compact: false
+	height: header.compact ? 50 : 58
 
 	readonly property bool cooking: ["Startup", "Reignite", "Smoke", "Hold", "Recipe"].indexOf(backend.mode) >= 0
 	property string clock: ""
@@ -48,13 +49,13 @@ Item {
 		Text {
 			text: "Pi<font color='" + Theme.accentColor + "'>Fire</font>"
 			textFormat: Text.RichText
-			font.family: Theme.sans; font.pixelSize: 20; font.bold: true; color: Theme.textColor
+			font.family: Theme.sans; font.pixelSize: header.compact ? 16 : 20; font.bold: true; color: Theme.textColor
 			Layout.leftMargin: 12
 		}
 
 		Text {
 			text: "CONTROLLER"
-			font.family: Theme.sans; font.pixelSize: 12; font.letterSpacing: 2
+			font.family: Theme.sans; font.pixelSize: header.compact ? 11 : 12; font.letterSpacing: 2
 			color: Theme.label
 			Layout.leftMargin: 10
 		}
@@ -63,18 +64,18 @@ Item {
 
 		Text {
 			text: backend.ipAddress
-			font.family: Theme.sans; font.pixelSize: 13; color: Theme.dim
+			font.family: Theme.sans; font.pixelSize: header.compact ? 11 : 13; color: Theme.dim
 		}
 
 		Text {
 			text: header.clock
-			font.family: Theme.condensed; font.pixelSize: 22; color: Theme.dim
+			font.family: Theme.condensed; font.pixelSize: header.compact ? 18 : 22; color: Theme.dim
 			Layout.leftMargin: 18
 		}
 
 		Rectangle {
 			Layout.leftMargin: 18
-			width: 44; height: 44; radius: 12
+			width: header.compact ? 38 : 44; height: header.compact ? 38 : 44; radius: header.compact ? 10 : 12
 			color: Theme.inset
 			border.color: Qt.rgba(1, 1, 1, 0.08)
 			Column {
@@ -82,7 +83,7 @@ Item {
 				spacing: 4
 				Repeater {
 					model: 3
-					Rectangle { width: 20; height: 2; radius: 2; color: Theme.probeLabel }
+					Rectangle { width: header.compact ? 16 : 20; height: 2; radius: 2; color: Theme.probeLabel }
 				}
 			}
 			TapHandler { onTapped: header.menuRequested() }

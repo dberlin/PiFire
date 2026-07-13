@@ -1,0 +1,14 @@
+{
+	"metadata": {
+		"name": "qtquick_dsi_1024x600t",
+		"screen_width": 1024,
+		"screen_height": 600,
+		"framerate": 20,
+		"splash_image": "./static/img/display/splash_800x480.png",
+		"splash_delay": 500,
+		"max_food_probes": 5,
+		"default_profile": "profile_1"
+	},
+	"profile_1": {"home": [], "dash": [], "menus": {}, "input": {}},
+	"profile_2": {"home": [], "dash": [], "menus": {}, "input": {}}
+}

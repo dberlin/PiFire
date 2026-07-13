@@ -7,6 +7,7 @@ import ".."
 // preview-verified left-column probe card in tools/qt_dashboard_preview.qml.
 Rectangle {
 	id: card
+	property bool compact: false
 	property string name: ""
 	property real temp: 0
 	property real target: 0
@@ -40,7 +41,7 @@ Rectangle {
 				anchors.verticalCenter: parent.verticalCenter
 				text: card.name.toUpperCase()
 				font.family: Theme.sans
-				font.pixelSize: 15
+				font.pixelSize: card.compact ? 13 : 15
 				font.letterSpacing: 1.5
 				color: Theme.probeLabel
 			}
@@ -49,7 +50,7 @@ Rectangle {
 				anchors.verticalCenter: parent.verticalCenter
 				text: card.target > 0 ? "→ " + card.target + "°" : "AMBIENT"
 				font.family: Theme.sans
-				font.pixelSize: 15
+				font.pixelSize: card.compact ? 13 : 15
 				color: card.target > 0 ? (card.done ? Theme.okColor : Theme.cookingColor) : Theme.label
 			}
 		}
@@ -59,14 +60,14 @@ Rectangle {
 			Text {
 				text: Math.round(card.temp)
 				font.family: Theme.condensed
-				font.pixelSize: 66
+				font.pixelSize: card.compact ? 52 : 66
 				font.bold: true
 				color: Theme.textColor
 			}
 			Text {
 				text: "°" + card.units
 				font.family: Theme.condensed
-				font.pixelSize: 26
+				font.pixelSize: card.compact ? 20 : 26
 				color: Theme.dim
 				anchors.bottom: parent.bottom
 				anchors.bottomMargin: 8

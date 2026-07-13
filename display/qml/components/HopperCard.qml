@@ -8,6 +8,7 @@ import ".."
 // preview-verified hopperCard in tools/qt_dashboard_preview.qml.
 Rectangle {
 	id: card
+	property bool compact: false
 
 	signal checkRequested()
 
@@ -25,7 +26,7 @@ Rectangle {
 
 	Column {
 		anchors.fill: parent
-		anchors.margins: 16
+		anchors.margins: card.compact ? 12 : 16
 		spacing: 12
 
 		// header: "HOPPER" label (left) + n% (right) via anchors — no width feedback
@@ -47,7 +48,7 @@ Rectangle {
 				anchors.verticalCenter: parent.verticalCenter
 				text: Math.round(card.level) + "%"
 				font.family: Theme.condensed
-				font.pixelSize: 34
+				font.pixelSize: card.compact ? 26 : 34
 				font.bold: true
 				color: card.hopCol
 			}
@@ -56,7 +57,7 @@ Rectangle {
 		Rectangle {
 			id: track
 			width: parent.width
-			height: parent.height - 78
+			height: parent.height - (card.compact ? 60 : 78)
 			radius: 14
 			color: Qt.rgba(1, 1, 1, 0.045)
 			border.color: Qt.rgba(1, 1, 1, 0.04)
@@ -73,7 +74,7 @@ Rectangle {
 		Text {
 			text: card.level < 15 ? "REFILL PELLETS" : card.level < 35 ? "RUNNING LOW" : "LEVEL OK"
 			font.family: Theme.sans
-			font.pixelSize: 12
+			font.pixelSize: card.compact ? 11 : 12
 			font.letterSpacing: 2
 			color: card.hopCol
 		}
