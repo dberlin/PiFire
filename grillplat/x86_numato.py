@@ -23,77 +23,15 @@
 ==============================
 """
 
-import glob
 import logging
-import os
 import threading
 
-import board
-import busio
-from adafruit_extended_bus import ExtendedI2C
 from adafruit_emc2101.emc2101_lut import EMC2101_LUT
 
+from common.i2c_bus import open_i2c_bus
 from grillplat.numato_usbrelay import NumatoUSBRelay
 from grillplat.emc2301 import EMC2301
 from grillplat.system_commands import SystemCommandsMixin
-
-
-"""
-	==============================
-	  Module Helpers
-	==============================
-"""
-
-
-def find_i2c_bus(match='CP2112', devices_path='/sys/bus/i2c/devices'):
-	"""
-	Find the integer i2c bus number whose adapter name contains `match`.
-
-	Scans `<devices_path>/i2c-*/name`.  Raises RuntimeError if zero or more
-	than one adapter matches, so the caller can fail clearly.
-	"""
-	match_lower = match.lower()
-	found = []
-	for bus_dir in glob.glob(os.path.join(devices_path, 'i2c-*')):
-		name_file = os.path.join(bus_dir, 'name')
-		try:
-			with open(name_file) as handle:
-				name = handle.read().strip()
-		except OSError:
-			continue
-		if match_lower in name.lower():
-			# Bus number is the trailing integer of the i2c-N directory name.
-			try:
-				bus_num = int(os.path.basename(bus_dir).split('-')[-1])
-			except ValueError:
-				continue
-			found.append(bus_num)
-
-	if len(found) == 1:
-		return found[0]
-	if not found:
-		raise RuntimeError(f'No i2c adapter found matching {match!r} under {devices_path}')
-	raise RuntimeError(f'Multiple i2c adapters match {match!r}: {sorted(found)}')
-
-
-def resolve_i2c_bus(bus):
-	"""
-	Resolve an extended-i2c-bus spec to a bus number. Accepts an int or numeric
-	string (e.g. 3 / '3' -> /dev/i2c-3, used directly) or an adapter-name match
-	string (e.g. 'CP2112' -> discovered via find_i2c_bus, robust against the
-	dynamic bus numbers USB-to-I2C bridges get).
-
-	Mirrors probes.base.resolve_i2c_bus so probes and the platform driver share
-	the same basic/extended bus conventions.
-	"""
-	spec = str(bus).strip()
-	# A plain number is a /dev/i2c-N bus index; anything else is an adapter-name
-	# match. Check explicitly (rather than try/int/except) so a name like 'CP2112'
-	# does not raise a ValueError -- only find_i2c_bus's clear "not found" error
-	# can surface.
-	if spec.isdigit():
-		return int(spec)
-	return find_i2c_bus(spec)
 
 
 """
@@ -158,10 +96,7 @@ class GrillPlatform(SystemCommandsMixin):
 		self.relay = NumatoUSBRelay(self.device, baudrate=self.baudrate)
 
 		# Open the fan controller on the configured I2C bus.
-		if self.i2c_bus_kind == 'extended':
-			i2c = ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
-		else:
-			i2c = busio.I2C(board.SCL, board.SDA)
+		i2c = open_i2c_bus(self.i2c_bus_kind, self.i2c_bus_num)
 
 		if self.chip == 'emc2301':
 			self.emc = EMC2301(i2c, address=self.emc_address)
