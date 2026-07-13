@@ -82,15 +82,16 @@ class PiFireBackend(QObject):
 	navEvent = Signal(str)
 	accentThemeChanged = Signal()
 
-	def __init__(self, fetch_fn, command_fn, probe_info, accent_fn=None, parent=None):
+	def __init__(self, fetch_fn, command_fn, probe_info, accent_fn=None, timeout_fn=None, parent=None):
 		super().__init__(parent)
 		self._fetch_fn = fetch_fn
 		self._command_fn = command_fn
 		self._probe_info = probe_info or {}
 		self._now = time.time
 		self._accent_fn = accent_fn
+		self._timeout_fn = timeout_fn
 		self._accent_theme = 'Ember'
-		self._last_accent_check = 0.0
+		self._last_settings_check = 0.0
 		primary = self._probe_info.get('primary', {})
 		self._primary_name = primary.get('name', 'Primary')
 		self._primary_label = primary.get('label', self._primary_name)
@@ -121,7 +122,7 @@ class PiFireBackend(QObject):
 		self._food_count = len(self._probe_info.get('food', []))
 		self._cook_elapsed_text = '00:00'
 		# Idle / sleep state
-		self.TIMEOUT = 10
+		self.TIMEOUT = self._timeout_fn() if self._timeout_fn is not None else 300
 		self._last_interaction = self._now()
 		self._asleep = False
 
@@ -167,9 +168,12 @@ class PiFireBackend(QObject):
 		self._set('_mode_text', mode_text, self.modeTextChanged)
 		self._set('_p_mode_active', mode in ('Startup', 'Reignite', 'Smoke'), self.statusChanged)
 		self._update_idle(mode, now)
-		if self._accent_fn is not None and (now - self._last_accent_check) >= 1.0:
-			self._last_accent_check = now
-			self._set('_accent_theme', self._accent_fn() or 'Ember', self.accentThemeChanged)
+		if (now - self._last_settings_check) >= 1.0:
+			self._last_settings_check = now
+			if self._accent_fn is not None:
+				self._set('_accent_theme', self._accent_fn() or 'Ember', self.accentThemeChanged)
+			if self._timeout_fn is not None:
+				self.TIMEOUT = self._timeout_fn()
 
 	def _update_timer_text(self, status, now):
 		mode = status.get('mode', 'Stop')
@@ -205,10 +209,11 @@ class PiFireBackend(QObject):
 
 	def _update_idle(self, mode, now):
 		# The screen never sleeps during an active cook; in Stop it sleeps after
-		# TIMEOUT seconds of no interaction. Leaving Stop auto-wakes.
+		# TIMEOUT seconds of no interaction (TIMEOUT <= 0 disables sleeping).
+		# Leaving Stop auto-wakes.
 		if mode != 'Stop':
 			self._set('_asleep', False, self.asleepChanged)
-		elif now - self._last_interaction > self.TIMEOUT:
+		elif self.TIMEOUT > 0 and now - self._last_interaction > self.TIMEOUT:
 			self._set('_asleep', True, self.asleepChanged)
 
 	@Slot()

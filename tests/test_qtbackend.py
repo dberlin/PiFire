@@ -178,6 +178,7 @@ def test_sleep_wake_state_machine():
 		lambda c, d: None,
 		{'primary': {'name': 'Grill'}, 'food': [], 'aux': []},
 	)
+	b.TIMEOUT = 10
 	b._now = lambda: clock['t']
 	b._last_interaction = clock['t']
 	# In Stop, before timeout: awake.
@@ -260,3 +261,44 @@ def test_cook_elapsed_text_counts_up_else_zero():
 	)
 	b.poll()
 	assert b.cookElapsedText == '00:00'
+
+
+def test_timeout_seeded_from_timeout_fn():
+	b = PiFireBackend(
+		lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}}),
+		lambda c, d: None,
+		{'primary': {'name': 'Grill'}, 'food': [], 'aux': []},
+		timeout_fn=lambda: 42,
+	)
+	assert b.TIMEOUT == 42
+
+
+def test_zero_timeout_never_sleeps():
+	clock = {'t': 1000.0}
+	b = PiFireBackend(
+		lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}}),
+		lambda c, d: None,
+		{'primary': {'name': 'Grill'}, 'food': [], 'aux': []},
+		timeout_fn=lambda: 0,
+	)
+	b._now = lambda: clock['t']
+	b._last_interaction = clock['t']
+	clock['t'] = 999999.0
+	b.poll()
+	assert b.asleep is False
+
+
+def test_timeout_live_reread():
+	clock = {'t': 1000.0}
+	state = {'timeout': 30}
+	b = PiFireBackend(
+		lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}}),
+		lambda c, d: None,
+		{'primary': {'name': 'Grill'}, 'food': [], 'aux': []},
+		timeout_fn=lambda: state['timeout'],
+	)
+	b._now = lambda: clock['t']
+	state['timeout'] = 5
+	clock['t'] = 1002.0  # >1s since last settings check -> re-read
+	b.poll()
+	assert b.TIMEOUT == 5

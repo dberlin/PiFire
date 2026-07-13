@@ -46,6 +46,7 @@ def build_backend(config):
 	"""Construct the backend wired to the framework's data + command layer."""
 	from display.qtquick_flex import Display
 	from common import read_settings_store
+	from common.common import display_sleep_timeout
 
 	def _accent_fn():
 		try:
@@ -55,8 +56,16 @@ def build_backend(config):
 		except Exception:
 			return 'Ember'
 
+	def _timeout_fn():
+		try:
+			return display_sleep_timeout(read_settings_store())
+		except Exception:
+			return 300
+
 	dispatcher = Display.for_dispatch(config, config.get('units', 'F'))
-	backend = PiFireBackend(_fetch, dispatcher._dispatch_command, config.get('probe_info', {}), accent_fn=_accent_fn)
+	backend = PiFireBackend(
+		_fetch, dispatcher._dispatch_command, config.get('probe_info', {}), accent_fn=_accent_fn, timeout_fn=_timeout_fn
+	)
 	backend._accent_theme = config.get('accent_theme', 'Ember')
 	backend._ip_address = config.get('ip_address', '') or backend.ipAddress
 	return backend
