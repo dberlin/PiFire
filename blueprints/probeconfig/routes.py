@@ -1,5 +1,6 @@
 from flask import request, render_template_string
 from common.common import read_settings, read_wizard, load_wizard_install_info, store_wizard_install_info
+from common.i2c_bus import I2CBusConfigError, configured_bus_kinds, validate_bus_kinds
 
 from . import probeconfig_bp
 
@@ -102,8 +103,16 @@ def probeconfig_page():
 								config_item = key.replace('probes_devspec_', '')
 								new_device['config'][config_item] = config_value
 
-					wizardInstallInfo['probe_map']['probe_devices'].append(new_device)
-					store_wizard_install_info(wizardInstallInfo)
+					candidate = {'probe_devices': wizardInstallInfo['probe_map']['probe_devices'] + [new_device]}
+					try:
+						validate_bus_kinds(configured_bus_kinds(settings, candidate))
+					except I2CBusConfigError as exc:
+						alerts.append({'message': str(exc), 'type': 'error'})
+						errors += 1
+
+					if errors == 0:
+						wizardInstallInfo['probe_map']['probe_devices'].append(new_device)
+						store_wizard_install_info(wizardInstallInfo)
 			if r['action'] == 'edit_config':
 				""" Populate Configuration Settings into Modal """
 				device_name = r['name']
@@ -166,8 +175,18 @@ def probeconfig_page():
 							new_device['ports'] = probe['ports']
 							new_device['module'] = probe['module']
 							new_device['module_filename'] = probe.get('module_filename', probe['module'])
-							wizardInstallInfo['probe_map']['probe_devices'][index] = new_device
-							store_wizard_install_info(wizardInstallInfo)
+							candidate_devices = list(wizardInstallInfo['probe_map']['probe_devices'])
+							candidate_devices[index] = new_device
+							candidate = {'probe_devices': candidate_devices}
+							try:
+								validate_bus_kinds(configured_bus_kinds(settings, candidate))
+							except I2CBusConfigError as exc:
+								alerts.append({'message': str(exc), 'type': 'error'})
+								errors += 1
+
+							if errors == 0:
+								wizardInstallInfo['probe_map']['probe_devices'][index] = new_device
+								store_wizard_install_info(wizardInstallInfo)
 							break
 			render_string = "{% from 'probeconfig/_macro_probes_config.html' import render_probe_devices, render_probe_ports %}{{ render_probe_devices(probe_map, modules, alerts) }}"
 			return render_template_string(

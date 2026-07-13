@@ -112,6 +112,24 @@ def validate_bus_kinds(kinds):
 		)
 
 
+def configured_bus_kinds(settings, probe_map):
+	"""Collect every I2C bus kind across probe devices, the distance sensor, and
+	the platform fan controller. Used to validate a whole wizard config."""
+	kinds = set()
+	for device in (probe_map or {}).get('probe_devices', []):
+		kind = (device.get('config') or {}).get('i2c_bus_kind')
+		if kind:
+			kinds.add(kind)
+	platform = (settings or {}).get('platform', {})
+	distance = (platform.get('devices', {}) or {}).get('distance', {}) or {}
+	if distance.get('i2c_bus_kind'):
+		kinds.add(distance['i2c_bus_kind'])
+	fan = platform.get('fan_controller', {}) or {}
+	if fan.get('i2c_bus_kind'):
+		kinds.add(fan['i2c_bus_kind'])
+	return kinds
+
+
 def assert_clean_blinka_env(environ=None):
 	"""Raise I2CBusConfigError if any board/chip-forcing BLINKA_* var is set.
 	Called once at control-process startup so nobody can force `basic`/`import
