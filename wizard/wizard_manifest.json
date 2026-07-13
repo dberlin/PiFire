@@ -504,9 +504,10 @@
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
             "options": {
               "CP2112": "CP2112 (bridge name match)",
+              "MCP2221": "MCP2221 (bridge name match)",
               "0": "i2c-0",
               "1": "i2c-1",
               "2": "i2c-2",
@@ -844,9 +845,10 @@
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
             "options": {
               "CP2112": "CP2112 (bridge name match)",
+              "MCP2221": "MCP2221 (bridge name match)",
               "0": "i2c-0",
               "1": "i2c-1",
               "2": "i2c-2",
@@ -1130,9 +1132,10 @@
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
             "options": {
               "CP2112": "CP2112 (bridge name match)",
+              "MCP2221": "MCP2221 (bridge name match)",
               "0": "i2c-0",
               "1": "i2c-1",
               "2": "i2c-2",
@@ -1380,9 +1383,10 @@
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
             "options": {
               "CP2112": "CP2112 (bridge name match)",
+              "MCP2221": "MCP2221 (bridge name match)",
               "0": "i2c-0",
               "1": "i2c-1",
               "2": "i2c-2",
@@ -1628,9 +1632,10 @@
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
             "options": {
               "CP2112": "CP2112 (bridge name match)",
+              "MCP2221": "MCP2221 (bridge name match)",
               "0": "i2c-0",
               "1": "i2c-1",
               "2": "i2c-2",
@@ -1774,9 +1779,10 @@
           },
           "i2c_bus_num": {
             "friendly_name": "Fan Controller Extended Bus",
-            "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+            "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
             "options": {
               "CP2112": "CP2112 (bridge name match)",
+              "MCP2221": "MCP2221 (bridge name match)",
               "0": "i2c-0",
               "1": "i2c-1",
               "2": "i2c-2",
@@ -1819,9 +1825,10 @@
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
             "options": {
               "CP2112": "CP2112 (bridge name match)",
+              "MCP2221": "MCP2221 (bridge name match)",
               "0": "i2c-0",
               "1": "i2c-1",
               "2": "i2c-2",
@@ -1969,9 +1976,10 @@
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
             "options": {
               "CP2112": "CP2112 (bridge name match)",
+              "MCP2221": "MCP2221 (bridge name match)",
               "0": "i2c-0",
               "1": "i2c-1",
               "2": "i2c-2",
@@ -2094,10 +2102,10 @@
             {
               "label": "i2c_bus_num",
               "friendly_name": "Extended I2C Bus",
-              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
               "type": "list",
-              "list_values": ["CP2112", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
-              "list_labels": ["CP2112 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5", "/dev/i2c-6", "/dev/i2c-7", "/dev/i2c-8", "/dev/i2c-9", "/dev/i2c-10", "/dev/i2c-11", "/dev/i2c-12", "/dev/i2c-13", "/dev/i2c-14", "/dev/i2c-15"],
+              "list_values": ["CP2112", "MCP2221", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
+              "list_labels": ["CP2112 USB bridge (auto)", "MCP2221 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5", "/dev/i2c-6", "/dev/i2c-7", "/dev/i2c-8", "/dev/i2c-9", "/dev/i2c-10", "/dev/i2c-11", "/dev/i2c-12", "/dev/i2c-13", "/dev/i2c-14", "/dev/i2c-15"],
               "default": "CP2112",
               "hidden": false
             },
@@ -2217,10 +2225,10 @@
             {
               "label": "i2c_bus_num",
               "friendly_name": "Extended I2C Bus",
-              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
               "type": "list",
-              "list_values": ["CP2112", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
-              "list_labels": ["CP2112 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5", "/dev/i2c-6", "/dev/i2c-7", "/dev/i2c-8", "/dev/i2c-9", "/dev/i2c-10", "/dev/i2c-11", "/dev/i2c-12", "/dev/i2c-13", "/dev/i2c-14", "/dev/i2c-15"],
+              "list_values": ["CP2112", "MCP2221", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
+              "list_labels": ["CP2112 USB bridge (auto)", "MCP2221 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5", "/dev/i2c-6", "/dev/i2c-7", "/dev/i2c-8", "/dev/i2c-9", "/dev/i2c-10", "/dev/i2c-11", "/dev/i2c-12", "/dev/i2c-13", "/dev/i2c-14", "/dev/i2c-15"],
               "default": "CP2112",
               "hidden": false
             },
@@ -2723,10 +2731,10 @@
             {
               "label": "i2c_bus_num",
               "friendly_name": "Extended I2C Bus",
-              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
+              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221A. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221A: a device serial (blank = first). Ignored when Basic.",
               "type": "list",
-              "list_values": ["CP2112", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
-              "list_labels": ["CP2112 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5", "/dev/i2c-6", "/dev/i2c-7", "/dev/i2c-8", "/dev/i2c-9", "/dev/i2c-10", "/dev/i2c-11", "/dev/i2c-12", "/dev/i2c-13", "/dev/i2c-14", "/dev/i2c-15"],
+              "list_values": ["CP2112", "MCP2221", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
+              "list_labels": ["CP2112 USB bridge (auto)", "MCP2221 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5", "/dev/i2c-6", "/dev/i2c-7", "/dev/i2c-8", "/dev/i2c-9", "/dev/i2c-10", "/dev/i2c-11", "/dev/i2c-12", "/dev/i2c-13", "/dev/i2c-14", "/dev/i2c-15"],
               "default": "CP2112",
               "hidden": false
             },
@@ -3071,10 +3079,10 @@
             {
               "label": "i2c_bus_num",
               "friendly_name": "Extended I2C Bus",
-              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
+              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
               "type": "list",
-              "list_values": ["CP2112", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
-              "list_labels": ["CP2112 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5", "/dev/i2c-6", "/dev/i2c-7", "/dev/i2c-8", "/dev/i2c-9", "/dev/i2c-10", "/dev/i2c-11", "/dev/i2c-12", "/dev/i2c-13", "/dev/i2c-14", "/dev/i2c-15"],
+              "list_values": ["CP2112", "MCP2221", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
+              "list_labels": ["CP2112 USB bridge (auto)", "MCP2221 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5", "/dev/i2c-6", "/dev/i2c-7", "/dev/i2c-8", "/dev/i2c-9", "/dev/i2c-10", "/dev/i2c-11", "/dev/i2c-12", "/dev/i2c-13", "/dev/i2c-14", "/dev/i2c-15"],
               "default": "CP2112",
               "hidden": false
             },
@@ -3194,10 +3202,10 @@
             {
               "label": "i2c_bus_num",
               "friendly_name": "Extended I2C Bus",
-              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' auto-discovers the CP2112 USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
+              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); a number selects /dev/i2c-N explicitly. Ignored when Basic.",
               "type": "list",
-              "list_values": ["CP2112", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
-              "list_labels": ["CP2112 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5", "/dev/i2c-6", "/dev/i2c-7", "/dev/i2c-8", "/dev/i2c-9", "/dev/i2c-10", "/dev/i2c-11", "/dev/i2c-12", "/dev/i2c-13", "/dev/i2c-14", "/dev/i2c-15"],
+              "list_values": ["CP2112", "MCP2221", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
+              "list_labels": ["CP2112 USB bridge (auto)", "MCP2221 USB bridge (auto)", "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4", "/dev/i2c-5", "/dev/i2c-6", "/dev/i2c-7", "/dev/i2c-8", "/dev/i2c-9", "/dev/i2c-10", "/dev/i2c-11", "/dev/i2c-12", "/dev/i2c-13", "/dev/i2c-14", "/dev/i2c-15"],
               "default": "CP2112",
               "hidden": false
             },
