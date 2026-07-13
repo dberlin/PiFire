@@ -124,6 +124,7 @@ class ProbeInterface:
 	applies_kalman = True
 
 	def __init__(self, probe_info, device_info, units):
+		self.logger = logging.getLogger('control')
 		self.units = units
 		self.device_info = device_info
 		if self.device_info['config'].get('transient', 'False') == 'True':
@@ -139,7 +140,6 @@ class ProbeInterface:
 		self.aux_ports = []
 		self._discover_port_types(probe_info)
 		self._init_device()
-		self.logger = logging.getLogger('control')
 
 	def _init_device(self):
 		self.time_delay = 0
