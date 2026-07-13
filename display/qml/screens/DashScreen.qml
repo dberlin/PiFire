@@ -19,6 +19,7 @@ Item {
 	signal requestInput(string name, string origin)
 
 	property bool hold: backend.mode === "Hold"
+	readonly property bool compact: width <= 1100
 
 	ColumnLayout {
 		anchors.fill: parent
@@ -26,24 +27,25 @@ Item {
 
 		HeaderBar {
 			Layout.fillWidth: true
+			compact: dash.compact
 			onMenuRequested: dash.requestMenu("")
 		}
 
 		RowLayout {
 			Layout.fillWidth: true
 			Layout.fillHeight: true
-			Layout.leftMargin: 18
-			Layout.rightMargin: 18
-			Layout.topMargin: 16
-			Layout.bottomMargin: 18
-			spacing: 16
+			Layout.leftMargin: dash.compact ? 14 : 18
+			Layout.rightMargin: dash.compact ? 14 : 18
+			Layout.topMargin: dash.compact ? 12 : 16
+			Layout.bottomMargin: dash.compact ? 14 : 18
+			spacing: dash.compact ? 14 : 16
 
 			// ----- Left: food probes. Collapses (and the center column flexes
 			// into the freed space) when there are no food probes. -----
 			ColumnLayout {
-				Layout.preferredWidth: 298
-				Layout.minimumWidth: 298
-				Layout.maximumWidth: 298
+				Layout.preferredWidth: dash.compact ? 238 : 298
+				Layout.minimumWidth: dash.compact ? 238 : 298
+				Layout.maximumWidth: dash.compact ? 238 : 298
 				Layout.fillHeight: true
 				spacing: 12
 				visible: backend.foodProbeCount > 0
@@ -62,6 +64,7 @@ Item {
 					ProbeCard {
 						Layout.fillWidth: true
 						Layout.fillHeight: true
+						compact: dash.compact
 						name: model.name
 						temp: model.temp
 						target: model.target
@@ -76,14 +79,14 @@ Item {
 			// lid alert row, control-panel buttons. Absorbs horizontal slack. -----
 			ColumnLayout {
 				Layout.fillWidth: true
-				Layout.minimumWidth: 380
+				Layout.minimumWidth: dash.compact ? 300 : 380
 				Layout.fillHeight: true
 				spacing: 14
 
 				Rectangle {
 					Layout.fillWidth: true
 					Layout.fillHeight: true
-					Layout.minimumHeight: 420
+					Layout.minimumHeight: dash.compact ? 300 : 420
 					color: Theme.card
 					radius: Theme.cardRadius
 					border.color: Theme.cardBorder
@@ -91,8 +94,9 @@ Item {
 
 					Gauge {
 						anchors.centerIn: parent
-						width: 392
-						height: 392
+						width: dash.compact ? 300 : 392
+						height: dash.compact ? 300 : 392
+						compact: dash.compact
 						value: backend.primaryTemp
 						setpoint: backend.primarySetpoint
 						target: backend.primaryNotifyTarget
@@ -106,13 +110,14 @@ Item {
 
 				RowLayout {
 					Layout.fillWidth: true
-					Layout.preferredHeight: 52
-					Layout.maximumHeight: 52
+					Layout.preferredHeight: dash.compact ? 42 : 52
+					Layout.maximumHeight: dash.compact ? 42 : 52
 					spacing: 14
 
 					CookTimeBar {
 						Layout.fillWidth: true
 						Layout.fillHeight: true
+						compact: dash.compact
 					}
 
 					Alert {
@@ -123,8 +128,9 @@ Item {
 
 				ControlPanel {
 					Layout.fillWidth: true
-					Layout.preferredHeight: 82
-					Layout.maximumHeight: 82
+					Layout.preferredHeight: dash.compact ? 74 : 82
+					Layout.maximumHeight: dash.compact ? 74 : 82
+					compact: dash.compact
 					mode: backend.mode
 					recipe: backend.recipe
 					recipePaused: backend.recipePaused
@@ -135,25 +141,27 @@ Item {
 
 			// ----- Right: system status, duty/mode pills, hopper. -----
 			ColumnLayout {
-				Layout.preferredWidth: 300
-				Layout.minimumWidth: 300
-				Layout.maximumWidth: 300
+				Layout.preferredWidth: dash.compact ? 240 : 300
+				Layout.minimumWidth: dash.compact ? 240 : 300
+				Layout.maximumWidth: dash.compact ? 240 : 300
 				Layout.fillHeight: true
 				spacing: 14
 
 				SystemCard {
 					Layout.fillWidth: true
+					compact: dash.compact
 				}
 
 				RowLayout {
 					Layout.fillWidth: true
-					Layout.preferredHeight: 64
-					Layout.maximumHeight: 64
+					Layout.preferredHeight: dash.compact ? 40 : 64
+					Layout.maximumHeight: dash.compact ? 40 : 64
 					spacing: 14
 
 					DutyPill {
 						Layout.fillWidth: true
 						Layout.fillHeight: true
+						compact: dash.compact
 						label: dash.hold ? "AUGER DUTY" : "P-MODE"
 						value: dash.hold ? backend.augerDuty + "%" : "P-" + backend.pMode
 						highlighted: false
@@ -161,6 +169,7 @@ Item {
 					DutyPill {
 						Layout.fillWidth: true
 						Layout.fillHeight: true
+						compact: dash.compact
 						label: dash.hold ? "FAN DUTY" : "SMOKE+"
 						value: dash.hold ? backend.fanDuty + "%" : (backend.smokePlus ? "ON" : "OFF")
 						highlighted: dash.hold ? backend.fanOn : backend.smokePlus
@@ -170,7 +179,8 @@ Item {
 				HopperCard {
 					Layout.fillWidth: true
 					Layout.fillHeight: true
-					Layout.minimumHeight: 180
+					Layout.minimumHeight: dash.compact ? 140 : 180
+					compact: dash.compact
 					onCheckRequested: backend.hopperCheck()
 				}
 			}
