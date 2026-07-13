@@ -103,9 +103,13 @@ def probeconfig_page():
 								config_item = key.replace('probes_devspec_', '')
 								new_device['config'][config_item] = config_value
 
+					# Validate the in-progress probe devices among themselves only. Do NOT mix in
+					# read_settings()'s fan/distance bus kinds here: mid-wizard those hold the old
+					# saved config, not the user's in-progress selections, and would wrongly block
+					# a valid probe bus. Cross-subsystem conflicts are caught at runtime by open_i2c_bus.
 					candidate = {'probe_devices': wizardInstallInfo['probe_map']['probe_devices'] + [new_device]}
 					try:
-						validate_bus_kinds(configured_bus_kinds(settings, candidate))
+						validate_bus_kinds(configured_bus_kinds(None, candidate))
 					except I2CBusConfigError as exc:
 						alerts.append({'message': str(exc), 'type': 'error'})
 						errors += 1
@@ -177,9 +181,11 @@ def probeconfig_page():
 							new_device['module_filename'] = probe.get('module_filename', probe['module'])
 							candidate_devices = list(wizardInstallInfo['probe_map']['probe_devices'])
 							candidate_devices[index] = new_device
+							# Probe devices only (see add_device): validate in-progress probes, not the
+							# stale saved platform bus in read_settings().
 							candidate = {'probe_devices': candidate_devices}
 							try:
-								validate_bus_kinds(configured_bus_kinds(settings, candidate))
+								validate_bus_kinds(configured_bus_kinds(None, candidate))
 							except I2CBusConfigError as exc:
 								alerts.append({'message': str(exc), 'type': 'error'})
 								errors += 1

@@ -28,10 +28,12 @@ from common.common import (  # noqa: E402
 	default_control,
 	default_pellets,
 	default_settings,
+	load_wizard_install_info,
 	read_connected_users,
 	read_current,
 	read_history,
 	read_settings,
+	store_wizard_install_info,
 	read_status,
 	remove_connected_user,
 	write_connected_user,
@@ -132,6 +134,42 @@ def test_api_settings_post_writes_through_to_sqlite():
 	assert resp.status_code == 201
 	assert resp.get_json()['result'] == 'success'
 	assert read_settings()['globals']['grill_name'] == 'T18 Written Via Blueprint'
+
+
+@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+def test_probeconfig_add_usb_hid_probe_not_blocked_by_stale_platform_bus():
+	"""Regression: adding an ft232h probe in the wizard must not be rejected
+	because the *previously saved* platform fan bus is 'basic'. Mid-wizard,
+	read_settings() holds the old running config, not the user's in-progress
+	selections; the probe step must validate the in-progress probe devices
+	only. Cross-subsystem conflicts are enforced at runtime by open_i2c_bus."""
+	flask_app.config.update(TESTING=True)
+	client = flask_app.test_client()
+
+	# Saved (stale) config: fan controller on the onboard 'basic' bus.
+	settings = read_settings()
+	settings.setdefault('platform', {}).setdefault('fan_controller', {})['i2c_bus_kind'] = 'basic'
+	write_settings_store(settings)
+
+	# In-progress wizard state: no probe devices configured yet.
+	store_wizard_install_info({'probe_map': {'probe_devices': [], 'probe_info': []}})
+
+	resp = client.post(
+		'/probeconfig/',
+		data={
+			'section': 'devices',
+			'action': 'add_device',
+			'name': 'FT232HProbe',
+			'module': 'mcp9600_adafruit',
+			'probes_devspec_i2c_bus_kind': 'ft232h',
+		},
+	)
+	assert resp.status_code == 200
+
+	devices = load_wizard_install_info()['probe_map']['probe_devices']
+	added = [device for device in devices if device['device'] == 'FT232HProbe']
+	assert added, 'ft232h probe was rejected even though it is a valid selection'
+	assert added[0]['config']['i2c_bus_kind'] == 'ft232h'
 
 
 # --- Goal 3 (always exercised): the common.common free-function path -------
