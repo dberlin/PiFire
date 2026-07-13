@@ -36,8 +36,12 @@ def settings_page(action=None):
 
 	if request.method == 'POST' and action == 'display':
 		response = request.form
-		if is_not_blank(response, 'sleep_timeout'):
-			settings['display']['sleep_timeout'] = max(0, int(response['sleep_timeout']))
+		raw = response.get('sleep_timeout', '').strip()
+		if raw:
+			try:
+				settings['display']['sleep_timeout'] = max(0, int(raw))
+			except ValueError:
+				pass
 		write_settings(settings)
 
 	if request.method == 'POST' and action == 'probe_select':

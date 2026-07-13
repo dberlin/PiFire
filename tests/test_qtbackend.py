@@ -288,6 +288,27 @@ def test_zero_timeout_never_sleeps():
 	assert b.asleep is False
 
 
+def test_zero_timeout_wakes_already_asleep_screen():
+	clock = {'t': 1000.0}
+	state = {'timeout': 30}
+	b = PiFireBackend(
+		lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}}),
+		lambda c, d: None,
+		{'primary': {'name': 'Grill'}, 'food': [], 'aux': []},
+		timeout_fn=lambda: state['timeout'],
+	)
+	b._now = lambda: clock['t']
+	b._last_interaction = clock['t']
+	clock['t'] = 1031.0  # >30s since last interaction -> asleep
+	b.poll()
+	assert b.asleep is True
+
+	state['timeout'] = 0
+	clock['t'] = 1032.5  # >1s since last settings check -> re-read TIMEOUT
+	b.poll()
+	assert b.asleep is False
+
+
 def test_timeout_live_reread():
 	clock = {'t': 1000.0}
 	state = {'timeout': 30}

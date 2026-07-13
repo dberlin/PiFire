@@ -219,3 +219,27 @@ def test_settings_display_post_clamps_negative():
 	client = flask_app.test_client()
 	client.post('/settings/display', data={'sleep_timeout': '-9'})
 	assert read_settings()['display']['sleep_timeout'] == 0
+
+
+def test_settings_display_post_blank_does_not_500_or_change_value():
+	from app import app as flask_app
+
+	client = flask_app.test_client()
+	client.post('/settings/display', data={'sleep_timeout': '77'})
+	assert read_settings()['display']['sleep_timeout'] == 77
+
+	resp = client.post('/settings/display', data={'sleep_timeout': ''})
+	assert resp.status_code != 500
+	assert read_settings()['display']['sleep_timeout'] == 77
+
+
+def test_settings_display_post_non_numeric_does_not_500_or_change_value():
+	from app import app as flask_app
+
+	client = flask_app.test_client()
+	client.post('/settings/display', data={'sleep_timeout': '77'})
+	assert read_settings()['display']['sleep_timeout'] == 77
+
+	resp = client.post('/settings/display', data={'sleep_timeout': 'abc'})
+	assert resp.status_code != 500
+	assert read_settings()['display']['sleep_timeout'] == 77

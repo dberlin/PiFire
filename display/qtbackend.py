@@ -167,13 +167,13 @@ class PiFireBackend(QObject):
 		mode_text = f'Recipe: {mode}' if recipe and mode != 'Shutdown' else mode
 		self._set('_mode_text', mode_text, self.modeTextChanged)
 		self._set('_p_mode_active', mode in ('Startup', 'Reignite', 'Smoke'), self.statusChanged)
-		self._update_idle(mode, now)
 		if (now - self._last_settings_check) >= 1.0:
 			self._last_settings_check = now
 			if self._accent_fn is not None:
 				self._set('_accent_theme', self._accent_fn() or 'Ember', self.accentThemeChanged)
 			if self._timeout_fn is not None:
 				self.TIMEOUT = self._timeout_fn()
+		self._update_idle(mode, now)
 
 	def _update_timer_text(self, status, now):
 		mode = status.get('mode', 'Stop')
@@ -209,11 +209,13 @@ class PiFireBackend(QObject):
 
 	def _update_idle(self, mode, now):
 		# The screen never sleeps during an active cook; in Stop it sleeps after
-		# TIMEOUT seconds of no interaction (TIMEOUT <= 0 disables sleeping).
-		# Leaving Stop auto-wakes.
+		# TIMEOUT seconds of no interaction. TIMEOUT <= 0 disables sleeping and
+		# wakes an already-asleep screen. Leaving Stop auto-wakes.
 		if mode != 'Stop':
 			self._set('_asleep', False, self.asleepChanged)
-		elif self.TIMEOUT > 0 and now - self._last_interaction > self.TIMEOUT:
+		elif self.TIMEOUT <= 0:
+			self._set('_asleep', False, self.asleepChanged)
+		elif now - self._last_interaction > self.TIMEOUT:
 			self._set('_asleep', True, self.asleepChanged)
 
 	@Slot()
