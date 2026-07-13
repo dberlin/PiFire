@@ -142,14 +142,25 @@ single MPSSE engine) and correct for the rest.
 
 ### FT232H single-controller sharing (relays + I2C)
 
-An FT232H has one MPSSE engine, so there can be only one `pyftdi` controller per
-FT232H per process. Blinka shares it through a process-global class attribute
-`Pin.mpsse_gpio` (`ftdi_mpsse/mpsse/pin.py`): constructing the MPSSE `I2C` sets
+An FT232H exposes a **single USB interface**, and only one `pyftdi` controller
+can own it at a time. I2C uses that interface in **MPSSE mode**; GPIO can use a
+non-MPSSE bitbang controller, but bitbang and MPSSE are mutually exclusive modes
+of the same interface, so once I2C is active the *only* way to drive the spare
+pins (AD3–7, AC0–7; the I2C pins AD0–AD2 are dedicated to I2C) is
+`I2cController.get_gpio()` — GPIO carried over the MPSSE controller. Blinka in
+fact always builds an `I2cController` and calls `get_gpio()` for FT232H GPIO,
+even relay-only. Hence: on one FT232H, relays (GPIO) and I2C must share one
+controller.
+
+Blinka shares it through a process-global class attribute `Pin.mpsse_gpio`
+(`ftdi_mpsse/mpsse/pin.py`): constructing the MPSSE `I2C` sets
 `Pin.mpsse_gpio = controller.get_gpio()`, and `digitalio` GPIO pins reuse
 whatever `Pin.mpsse_gpio` holds — or, if it is still `None`, lazily create their
 own controller. Whoever creates a controller first wins; a second controller on
 the same device conflicts. `ft232h/pin.py` imports the same `Pin` class the
-factory's MPSSE `I2C` touches, so the attribute is genuinely shared.
+factory's MPSSE `I2C` touches, so the attribute is genuinely shared. (Relays on
+a *separate* FT232H from any I2C device would not need to share — but that is not
+the `ft232h_relay` topology.)
 
 `grillplat/ft232h_relay.py` uses the FT232H for **both** the relays (GPIO) and
 the EMC fan controller (I2C). Today it sets `BLINKA_FT232H` itself, creates the
