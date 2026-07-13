@@ -179,8 +179,9 @@
 		<tbody>
             <!-- Device Specifc Configuration Items-->
             {% for setting in moduleData['device_specific']['config'] %}
-			<!-- hide row if setting['hidden'] is true -->
-            <tr{% if setting['hidden'] %} style="display:none;" {% endif %}>
+			<!-- hide row if setting['hidden'] is true, but keep the device_serial row
+			     visible: it hosts the ThermoWorks "Test Connection" discovery button -->
+            <tr{% if setting['hidden'] and setting['label'] != 'device_serial' %} style="display:none;" {% endif %}>
 				<td>
                     {{ setting['friendly_name'] }}
                 </td>
