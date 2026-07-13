@@ -128,3 +128,142 @@ def assert_clean_blinka_env(environ=None):
 			'Remove them and select the ft232h/mcp2221a bus kinds in the wizard instead; '
 			'forcing the Blinka board via the environment breaks `basic` and any import board.'
 		)
+
+
+class _LockedI2C:
+	"""Wrap a Blinka backend I2C (ft232h/mcp2221) so Adafruit drivers can use it.
+
+	The backend classes expose scan/writeto/readfrom_into/writeto_then_readfrom
+	but not try_lock/unlock, which adafruit_bus_device.I2CDevice requires. Add a
+	reentrant lock and delegate I/O to the backend."""
+
+	def __init__(self, backend):
+		self._backend = backend
+		self._lock = threading.RLock()
+
+	def try_lock(self):
+		return self._lock.acquire(blocking=False)
+
+	def unlock(self):
+		try:
+			self._lock.release()
+		except RuntimeError:
+			pass
+
+	def scan(self):
+		return self._backend.scan()
+
+	def writeto(self, address, buffer, **kwargs):
+		return self._backend.writeto(address, buffer, **kwargs)
+
+	def readfrom_into(self, address, buffer, **kwargs):
+		return self._backend.readfrom_into(address, buffer, **kwargs)
+
+	def writeto_then_readfrom(self, address, out_buffer, in_buffer, **kwargs):
+		return self._backend.writeto_then_readfrom(address, out_buffer, in_buffer, **kwargs)
+
+	def deinit(self):
+		deinit = getattr(self._backend, 'deinit', None)
+		if deinit is not None:
+			deinit()
+
+
+_bus_cache = {}  # (kind, selector) -> bus object
+_opened_kinds = set()  # kinds actually opened this process
+_cache_lock = threading.RLock()
+
+
+def reset_bus_state():
+	"""Clear the bus cache and opened-kind registry. Tests only."""
+	with _cache_lock:
+		_bus_cache.clear()
+		_opened_kinds.clear()
+
+
+def _canonical_selector(kind, selector):
+	sel = '' if selector in (None, '') else str(selector)
+	# For ft232h, blank and '1' both mean "first FT232H" -> one cache entry.
+	if kind == 'ft232h' and sel in ('', '1'):
+		sel = ''
+	return sel
+
+
+def _construct_ft232h(selector):
+	from adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c import I2C as _FT232H_I2C
+
+	# The backend reads BLINKA_FT232H only during __init__ (get_ft232h_url()).
+	# Set it transiently and restore the prior value so the factory never leaves
+	# a board-forcing var in the environment (keeps assert_clean_blinka_env true
+	# process-wide). If a caller pre-set it (ft232h_relay), restore keeps it set.
+	prev = os.environ.get('BLINKA_FT232H', _UNSET)
+	os.environ['BLINKA_FT232H'] = str(selector) if selector else '1'
+	try:
+		backend = _FT232H_I2C()
+	finally:
+		if prev is _UNSET:
+			os.environ.pop('BLINKA_FT232H', None)
+		else:
+			os.environ['BLINKA_FT232H'] = prev
+	return _LockedI2C(backend)
+
+
+def _construct_mcp2221a(selector):
+	from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
+	from adafruit_blinka.microcontroller.mcp2221.i2c import I2C as _MCP2221_I2C
+
+	if selector:
+		# Point the Blinka MCP2221 singleton at the adapter with this serial.
+		import hid
+
+		path = None
+		for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID):
+			if info.get('serial_number') == str(selector):
+				path = info['path']
+				break
+		if path is None:
+			raise I2CBusConfigError(f'No MCP2221A found with serial {selector!r}.')
+		handle = _mcp_mod.mcp2221._hid
+		try:
+			handle.close()
+		except Exception:
+			pass
+		handle.open_path(path)
+	return _LockedI2C(_MCP2221_I2C())
+
+
+def _construct_bus(kind, selector):
+	if kind == 'basic':
+		import board
+		import busio
+
+		return busio.I2C(board.SCL, board.SDA)
+	if kind == 'extended':
+		from adafruit_extended_bus import ExtendedI2C
+
+		return ExtendedI2C(resolve_i2c_bus(selector))
+	if kind == 'ft232h':
+		return _construct_ft232h(selector)
+	if kind == 'mcp2221a':
+		return _construct_mcp2221a(selector)
+	raise I2CBusConfigError(f'Unknown i2c bus kind {kind!r}.')
+
+
+def open_i2c_bus(bus_kind='basic', bus_selector=None):
+	"""Return a busio.I2C-compatible bus for `bus_kind`, opening it if needed.
+
+	bus_selector is the stored i2c_bus_num value: a /dev/i2c-N number or adapter
+	match for `extended`, a pyftdi URL for `ft232h`, an MCP2221 serial for
+	`mcp2221a`; ignored for `basic`. Buses are cached per (kind, selector) for
+	the process lifetime so every device on one physical bus shares one handle
+	and lock. Raises I2CBusConfigError for an unworkable combination."""
+	kind = (bus_kind or 'basic').strip().lower()
+	selector = _canonical_selector(kind, bus_selector)
+	with _cache_lock:
+		validate_bus_kinds(_opened_kinds | {kind})
+		key = (kind, selector)
+		bus = _bus_cache.get(key)
+		if bus is None:
+			bus = _construct_bus(kind, selector)
+			_bus_cache[key] = bus
+		_opened_kinds.add(kind)
+		return bus
