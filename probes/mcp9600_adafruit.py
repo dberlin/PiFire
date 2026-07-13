@@ -34,13 +34,9 @@ Description:
 *****************************************
 """
 import logging
-import time
-import board
-import busio
-from adafruit_extended_bus import ExtendedI2C
-from adafruit_bus_device.i2c_device import I2CDevice
 from adafruit_mcp9600 import MCP9600
-from probes.base import ProbeInterface, resolve_i2c_bus
+from probes.base import ProbeInterface
+from common.i2c_bus import open_i2c_bus
 
 
 """
@@ -57,11 +53,7 @@ class KTTDevice:
 		self.logger = logging.getLogger('control')
 		self.status = {}
 
-		if i2c_bus_kind == 'basic':
-			# Create the I2C bus
-			self.i2c = busio.I2C(board.SCL, board.SDA)
-		elif i2c_bus_kind == 'extended':
-			self.i2c = ExtendedI2C(resolve_i2c_bus(i2c_bus_num))
+		self.i2c = open_i2c_bus(i2c_bus_kind, i2c_bus_num)
 
 		self.sensor = MCP9600(self.i2c, address=i2c_bus_addr, tctype=tc_type)
 
