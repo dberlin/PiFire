@@ -113,11 +113,17 @@ Bus construction per kind:
 - `basic` → `import board, busio; busio.I2C(board.SCL, board.SDA)` (returned
   as-is; already lockable).
 - `extended` → `ExtendedI2C(resolve_i2c_bus(bus_selector))` (as-is).
-- `ft232h` → set `os.environ['BLINKA_FT232H']` to the selector (a `ftdi:` URL)
-  or `'1'`, construct `ftdi_mpsse.mpsse.i2c.I2C()`, wrap in `_LockedI2C`.
-  Constructing this I2C also sets the process-global `Pin.mpsse_gpio` (see
-  "FT232H single-controller sharing" below) — an intentional side effect that
-  lets FT232H GPIO reuse this same controller.
+- `ft232h` → **transiently** set `os.environ['BLINKA_FT232H']` to the selector
+  (a `ftdi:` URL) or `'1'`, construct `ftdi_mpsse.mpsse.i2c.I2C()`, then restore
+  the prior value (delete it if it was unset). The backend reads the var only
+  during construction (`get_ft232h_url()` in `__init__`), so restoring
+  immediately afterward is safe — and it means the factory never leaves a
+  board-forcing var in the environment (see "Startup Blinka-environment guard").
+  Wrap in `_LockedI2C`. Constructing this I2C also sets the process-global
+  `Pin.mpsse_gpio` (see "FT232H single-controller sharing") — an intentional
+  side effect that lets FT232H GPIO reuse this same controller. Because the
+  factory opens the controller before any relay pin is created, `Pin.__init__`
+  never hits its lazy fallback, so no `BLINKA_FT232H` is needed at GPIO time.
 - `mcp2221a` → construct `mcp2221.i2c.I2C()` (blank selector = first device);
   a non-blank serial opens the matching HID device, wrap in `_LockedI2C`.
 
@@ -232,6 +238,31 @@ Enforced at two layers:
 
 One rule, one message, both places.
 
+### Startup Blinka-environment guard
+
+The `basic` kind relies on Blinka's `board`/`busio.I2C(board.SCL, board.SDA)`,
+which picks a backend from `BLINKA_*` env vars at first `import board`. A
+well-meaning operator could set e.g. `BLINKA_FT232H=1` or `BLINKA_MCP2221=1` in
+the shell/systemd unit to force `basic` onto a USB adapter as a workaround —
+which appears to work until some unrelated `import board` elsewhere resolves to
+that adapter and breaks, subtly and far from the cause. The whole point of the
+`ft232h`/`mcp2221a` kinds is to make that unnecessary, so the design forbids it.
+
+`assert_clean_blinka_env()` in `common/i2c_bus.py` inspects `os.environ` for any
+**board/chip-forcing** Blinka variable and raises `I2CBusConfigError` if one is
+present, with a message pointing the user at the `ft232h`/`mcp2221a` bus kinds
+instead. It is called once at control-process startup, **before** any bus is
+opened. Because the factory only ever sets `BLINKA_FT232H` transiently (restored
+immediately), the invariant "no board-forcing `BLINKA_*` var in `os.environ`"
+holds for the entire process, so `import board` can never be silently hijacked.
+
+Forbidden (exact match): `BLINKA_FT232H`, `BLINKA_FT2232H`, `BLINKA_FT4232H`,
+`BLINKA_MCP2221`, `BLINKA_U2IF`, `BLINKA_GREATFET`, `BLINKA_NOVA`,
+`BLINKA_SPIDRIVER`, `BLINKA_FORCECHIP`, `BLINKA_FORCEBOARD`. Forbidden (prefix):
+`BLINKA_FTX232H_`. Explicitly allowed (tuning, not board-forcing):
+`BLINKA_MCP2221_HID_DELAY`, `BLINKA_MCP2221_RESET_DELAY` — so the `BLINKA_MCP2221`
+check must be exact, not a prefix.
+
 ## Call-site migration
 
 Replace each inline `if basic/extended` block with a single
@@ -290,6 +321,13 @@ tests already use for `_load_ft232h`):
   GPIO pins, so relays + EMC (+ any FT232H probe) share one controller: assert
   the factory is called first and that no second controller is constructed
   (fakes count controller instantiations).
+- The `ft232h` factory path leaves `os.environ` unchanged after construction:
+  set a sentinel value (or leave it unset) beforehand and assert it is restored,
+  proving the transient set/restore.
+- `assert_clean_blinka_env()` raises for each forbidden var
+  (`BLINKA_FT232H`, `BLINKA_MCP2221`, `BLINKA_FORCEBOARD`, a `BLINKA_FTX232H_0`
+  prefix case, …) and passes when only the allowed tuning vars
+  (`BLINKA_MCP2221_HID_DELAY`) or nothing are set.
 - Manifest test: the eligible selectors include `ft232h` and `mcp2221a`; the
   ineligible ones (`ads1115`, `prototype`) do not.
 
