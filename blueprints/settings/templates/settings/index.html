@@ -1069,6 +1069,26 @@
                             <button type="button" class="btn btn-outline-danger" onclick="selectDashboard(document.getElementById('dashboardSelect').value);">Save</button>
                         </div>
                     </div><!-- End of Card -->
+                    <br>
+                    <div class="card shadow">
+                        <form name="displaypower" action="/settings/display" method="POST">
+                            <div class="card-header bg-primary text-white">
+                                <h5><i class="fas fa-tools"></i>&nbsp; Screen Power Save</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group row">
+                                    <label for="sleep_timeout" class="col-sm-8 col-form-label">Screen sleep timeout (seconds, 0 = never)</label>
+                                    <div class="col-sm-4">
+                                        <input id="sleep_timeout" type="number" inputmode="numeric" min="0" step="1" class="form-control" placeholder="{{ settings['display']['sleep_timeout'] }}" value="{{ settings['display']['sleep_timeout'] }}" name="sleep_timeout" style="min-width: 6ch;">
+                                    </div>
+                                </div>
+                                <i class="small">When the grill is stopped and the screen is untouched for this long, the display powers off. It never sleeps during a cook; touch the screen to wake it.</i>
+                            </div>
+                            <div class="card-footer bg-light">
+                                <button type="submit" class="btn btn-outline-danger">Save</button>
+                            </div>
+                        </form>
+                    </div><!-- End of Card -->
                     <br><br><br>
                 </div><!-- End of Tab -->
                 <!-- ============================ History Settings ========================== -->

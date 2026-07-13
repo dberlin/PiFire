@@ -34,6 +34,12 @@ def settings_page(action=None):
 		render_string = "{% from 'settings/_macro_settings.html' import render_dash_settings %}{{ render_dash_settings(selected, settings) }}"
 		return render_template_string(render_string, selected=selected, settings=settings)
 
+	if request.method == 'POST' and action == 'display':
+		response = request.form
+		if is_not_blank(response, 'sleep_timeout'):
+			settings['display']['sleep_timeout'] = max(0, int(response['sleep_timeout']))
+		write_settings(settings)
+
 	if request.method == 'POST' and action == 'probe_select':
 		response = request.form
 

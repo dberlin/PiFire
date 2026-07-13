@@ -203,3 +203,19 @@ def test_no_pifire_valkey_module_imported():
 	# reaches for a Valkey client.
 	assert 'common.valkey_queue' not in sys.modules
 	assert 'common.valkey_handler' not in sys.modules
+
+
+def test_settings_display_post_sets_sleep_timeout():
+	from app import app as flask_app
+
+	client = flask_app.test_client()
+	client.post('/settings/display', data={'sleep_timeout': '123'})
+	assert read_settings()['display']['sleep_timeout'] == 123
+
+
+def test_settings_display_post_clamps_negative():
+	from app import app as flask_app
+
+	client = flask_app.test_client()
+	client.post('/settings/display', data={'sleep_timeout': '-9'})
+	assert read_settings()['display']['sleep_timeout'] == 0
