@@ -141,3 +141,28 @@ def prepare_wizard_data(form_data):
 				wizardInstallInfo['modules'][module]['config'][config.replace(module_ + 'config_', '')] = value
 
 	return wizardInstallInfo
+
+
+def wizard_bus_kinds(wizardInstallInfo, wizardData):
+	"""Collect every configured I2C bus kind from an assembled wizardInstallInfo,
+	using the user's in-progress selections: each probe device's config
+	i2c_bus_kind, plus any grillplatform/distance settings-dependency whose
+	manifest `settings` path ends in 'i2c_bus_kind' (the fan controller and the
+	distance sensor). Used to validate the whole config at wizard finish."""
+	kinds = set()
+	for device in wizardInstallInfo.get('probe_map', {}).get('probe_devices', []):
+		kind = (device.get('config') or {}).get('i2c_bus_kind')
+		if kind:
+			kinds.add(kind)
+	for module in ('grillplatform', 'distance'):
+		module_info = wizardInstallInfo.get('modules', {}).get(module, {}) or {}
+		selected = (module_info.get('profile_selected') or [None])[0]
+		module_settings = module_info.get('settings', {}) or {}
+		module_manifest = (wizardData.get('modules', {}).get(module, {}) or {}).get(selected, {}) or {}
+		for dep_name, dep in (module_manifest.get('settings_dependencies', {}) or {}).items():
+			path = dep.get('settings') or []
+			if path and path[-1] == 'i2c_bus_kind':
+				value = module_settings.get(dep_name)
+				if value:
+					kinds.add(value)
+	return kinds

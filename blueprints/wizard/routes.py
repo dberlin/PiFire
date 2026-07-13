@@ -13,9 +13,38 @@ from common.common import (
 	is_real_hardware,
 )
 from common.app import get_supported_cmds, process_command, get_system_command_output
+from common.i2c_bus import I2CBusConfigError, validate_bus_kinds
 
 from . import wizard_bp
 from .wizard import *
+
+
+# Full-page error shown when the finish step's assembled config has an
+# unworkable I2C bus combination; mirrors wizard-finish.html's block overrides
+# so it renders with just page_theme/grill_name and does not start an install.
+_WIZARD_BUS_CONFLICT_PAGE = """{% extends 'base.html' %}
+{% block title %}Wizard Configuration Error{% endblock %}
+{% block timer_bar %}{% endblock %}
+{% block content %}
+<div class="container">
+	<div class="card shadow">
+		<div class="card-body text-center">
+			<br>
+			<h2 class="text-danger"><i class="fas fa-exclamation-triangle"></i>&nbsp;I2C Bus Configuration Error</h2>
+			<br>
+			<p>{{ message }}</p>
+			<p>Your configuration was <strong>not</strong> saved and no install was started. Please go back and
+			change the conflicting I2C bus selection.</p>
+			<br>
+			<a class="btn btn-outline-primary" href="/wizard">&larr; Back to the Configuration Wizard</a>
+			<br><br>
+		</div>
+	</div>
+</div>
+{% endblock %}
+{% block controlpanel %}{% endblock %}
+{% block controlpanel_scripts %}{% endblock %}
+{% block scripts %}{% endblock %}"""
 
 
 @wizard_bp.route('/<action>', methods=['POST', 'GET'])
@@ -45,6 +74,20 @@ def wizard_page(action=None):
 		if action == 'finish':
 			if control['mode'] == 'Stop':
 				wizardInstallInfo = prepare_wizard_data(r)
+				# Whole-config check on the user's in-progress selections (probes +
+				# distance + fan controller). Unlike the per-probe step, this sees the
+				# platform bus the user just chose, so it catches a real basic+USB-HID
+				# conflict before the install starts -- without the stale-settings
+				# false positives that plagued the per-device check.
+				try:
+					validate_bus_kinds(wizard_bus_kinds(wizardInstallInfo, wizardData))
+				except I2CBusConfigError as exc:
+					return render_template_string(
+						_WIZARD_BUS_CONFLICT_PAGE,
+						message=str(exc),
+						page_theme=settings['globals'].get('page_theme', 'light'),
+						grill_name=settings['globals'].get('grill_name', ''),
+					)
 				store_wizard_install_info(wizardInstallInfo)
 				set_wizard_install_status(0, 'Starting Install...', '')
 				os.system(f'{python_exec} wizard.py &')  # Kickoff Installation

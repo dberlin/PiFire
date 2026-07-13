@@ -172,6 +172,51 @@ def test_probeconfig_add_usb_hid_probe_not_blocked_by_stale_platform_bus():
 	assert added[0]['config']['i2c_bus_kind'] == 'ft232h'
 
 
+@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+def test_wizard_finish_blocks_unworkable_bus_combo():
+	"""Finish-step whole-config check: a probe on the ft232h bus while the fan
+	controller is left on the onboard 'basic' bus is the one unworkable combo.
+	The finish step must reject it (and NOT start an install) using the user's
+	in-progress selections. Only the conflict path is exercised -- the success
+	path launches the installer via os.system."""
+	flask_app.config.update(TESTING=True)
+	client = flask_app.test_client()
+
+	# The finish branch only runs when the grill is stopped.
+	control = default_control()
+	control['mode'] = 'Stop'
+	write_control(control, WriteKind.OVERWRITE, origin='test')
+
+	# In-progress wizard: one probe assigned to the ft232h bus.
+	store_wizard_install_info(
+		{
+			'probe_map': {
+				'probe_devices': [{'device': 'P1', 'module': 'mcp9600_adafruit', 'config': {'i2c_bus_kind': 'ft232h'}}],
+				'probe_info': [],
+			}
+		}
+	)
+
+	resp = client.post(
+		'/wizard/finish',
+		data={
+			'grillplatformSelect': 'x86_numato',
+			'displaySelect': 'none',
+			'distanceSelect': 'none',
+			'probes_units': 'F',
+			# Fan controller left on the onboard 'basic' bus -> conflicts with the
+			# ft232h probe. This is the platform selection the per-device step
+			# could not see.
+			'grillplatform_i2c_bus_kind': 'basic',
+		},
+	)
+
+	assert resp.status_code == 200
+	body = resp.get_data(as_text=True)
+	assert 'I2C Bus Configuration Error' in body
+	assert 'Starting Install' not in body  # the install page was not rendered
+
+
 # --- Goal 3 (always exercised): the common.common free-function path -------
 # This is the essential T6 assertion -- it does not depend on the app
 # booting, and proves the blueprint-facing read/write functions work
