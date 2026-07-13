@@ -183,3 +183,11 @@ def test_open_mcp2221a_selector_not_found_raises():
 	with mock.patch.dict('sys.modules', modules):
 		with pytest.raises(i2c_bus.I2CBusConfigError):
 			i2c_bus.open_i2c_bus('mcp2221a', 'ZZZZ')
+
+
+def test_probes_base_reexports_bus_helpers():
+	import common.i2c_bus as cib
+	import probes.base as base
+
+	assert base.resolve_i2c_bus is cib.resolve_i2c_bus
+	assert base.find_i2c_bus is cib.find_i2c_bus
