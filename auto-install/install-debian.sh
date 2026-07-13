@@ -253,9 +253,6 @@ uv venv --system-site-packages 2>&1 | tee -a "$LOG"
 # shellcheck disable=SC1091
 source .venv/bin/activate
 
-log " + Installing eventlet"
-uv pip install eventlet 2>&1 | tee -a "$LOG" || { log " !! eventlet install failed. Exiting."; exit 1; }
-
 log " + Installing influxdb_client[ciso]==1.48.0"
 uv pip install "influxdb_client[ciso]==1.48.0" 2>&1 | tee -a "$LOG" || { log " !! influxdb_client install failed. Exiting."; exit 1; }
 

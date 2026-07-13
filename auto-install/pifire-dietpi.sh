@@ -201,12 +201,6 @@ if [ "$OS_BITS" = "64" ]; then
     # Installing module dependencies
     echo " - Installing module dependencies... " | tee -a ~/logs/pifire_install.log
 
-    # Install latest eventlet
-    if ! uv pip install eventlet 2>&1 | tee -a ~/logs/pifire_install.log; then
-        echo " !! Failed to install eventlet. Installation cannot continue." | tee -a ~/logs/pifire_install.log
-        exit 1
-    fi
-
     if ! uv pip install "influxdb_client[ciso]==1.48.0" 2>&1 | tee -a ~/logs/pifire_install.log; then
         echo " !! Failed to install influxdb_client. Installation cannot continue." | tee -a ~/logs/pifire_install.log
         exit 1
@@ -240,12 +234,10 @@ else
     cd /usr/local/bin/pifire
     source bin/activate
     if ! /bin/python -c "import sys; assert sys.version_info[:2] >= (3,11)" > /dev/null 2>&1; then
-        echo " + System is running a python version lower than 3.11, installing eventlet==0.30.2." | tee -a ~/logs/pifire_install.log;
-        python -m pip install "greenlet==3.1.1" "eventlet==0.30.2" 2>&1 | tee -a ~/logs/pifire_install.log
+        echo " + System is running a python version lower than 3.11." | tee -a ~/logs/pifire_install.log;
         python -m pip install "influxdb_client==1.48.0" 2>&1 | tee -a ~/logs/pifire_install.log
     else
         echo " + System is running a python version 3.11 or higher." | tee -a ~/logs/pifire_install.log
-        python -m pip install eventlet 2>&1 | tee -a ~/logs/pifire_install.log
         python -m pip install "influxdb_client[ciso]==1.48.0" 2>&1 | tee -a ~/logs/pifire_install.log
     fi
     # Installing module dependencies from requirements.txt

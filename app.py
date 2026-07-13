@@ -45,7 +45,13 @@ from config import ProductionConfig  # ProductionConfig or DevelopmentConfig
 from common.server_status import set_server_status
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins='*')
+# async_mode='threading' pins Flask-SocketIO to the threaded (gthread) server
+# model. gunicorn runs the webapp with `-k gthread`, which does NOT monkey-patch
+# the stdlib; that is what lets in-process asyncio (e.g. ThermoWorks Cloud
+# discovery) work. Since gevent is still importable, engineio would otherwise
+# auto-select 'gevent' mode and reintroduce the monkey-patch hang, so pin it.
+# WebSockets are still served natively via simple-websocket.
+socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
 QRcode(app)
 Mobility(app)
 
@@ -121,10 +127,8 @@ def index():
  Register Mobile Blueprint
 ==============================================================================
 """
-# Initialize Flask-SocketIO
-socketio = SocketIO(app, cors_allowed_origins='*')
-
 # Register mobile blueprint and provide it with socketio instance
+# (socketio is created once, above, right after the Flask app.)
 from blueprints.mobile import mobile_bp, socket_io
 
 mobile_bp.socketio = socketio
