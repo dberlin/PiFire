@@ -12,11 +12,14 @@ def _relay_config(**overrides):
 	return config
 
 
-def test_relay_only_init_opens_no_i2c_or_emc():
+def test_relay_only_init_opens_shared_bus_but_no_emc():
 	with make_ft232h_platform(_relay_config()) as (plat, harness):
 		assert plat.pwm_fan is False
 		assert plat.emc is None
-		harness.busio.I2C.assert_not_called()
+		# The FT232H bus is always opened via the factory (it establishes the
+		# single MPSSE controller the relay GPIO pins reuse below), even in
+		# relay-only mode where no EMC fan controller is created.
+		harness.open_bus.assert_called_once_with('ft232h', '1')
 		harness.emc2101_cls.assert_not_called()
 		harness.emc2301_cls.assert_not_called()
 		# Four output pins created and de-asserted (active-low -> value True).

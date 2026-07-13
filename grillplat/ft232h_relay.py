@@ -20,9 +20,9 @@ import logging
 import os
 import threading
 
-import busio
 from adafruit_emc2101.emc2101_lut import EMC2101_LUT
 
+from common.i2c_bus import open_i2c_bus
 from grillplat.emc2301 import EMC2301
 from grillplat.system_commands import SystemCommandsMixin
 
@@ -110,7 +110,14 @@ class GrillPlatform(SystemCommandsMixin):
 		self._ramp_thread = None
 		self._ramp_stop = threading.Event()
 
-		# Open the FT232H and create one output pin per PiFire output.
+		# Open the FT232H I2C bus through the shared factory FIRST. This creates
+		# the single MPSSE controller (and sets Blinka's Pin.mpsse_gpio), so the
+		# relay GPIO pins below and any ft232h probe reuse one controller instead
+		# of fighting over the FT232H's single MPSSE engine.
+		self._ft232h_bus = open_i2c_bus('ft232h', self.url)
+
+		# Now import the ft232h board/digitalio and create one pin per output;
+		# these reuse the controller established above via Pin.mpsse_gpio.
 		board, digitalio = _load_ft232h(self.url)
 		self.relays = {}
 		try:
@@ -136,8 +143,8 @@ class GrillPlatform(SystemCommandsMixin):
 			self._init_fan_controller(board)
 
 	def _init_fan_controller(self, board):
-		# EMC fan controller on the FT232H's own I2C bus (D0=SCL, D1/D2=SDA).
-		i2c = busio.I2C(board.SCL, board.SDA)
+		# EMC fan controller on the shared FT232H bus opened in __init__.
+		i2c = self._ft232h_bus
 		if self.chip == 'emc2301':
 			self.emc = EMC2301(i2c, address=self.emc_address)
 		else:

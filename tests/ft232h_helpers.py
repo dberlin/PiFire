@@ -57,12 +57,12 @@ def make_ft232h_platform(config):
 	fake_dio = FakeDigitalIO()
 	with (
 		mock.patch.object(mod, '_load_ft232h', return_value=(fake_board, fake_dio)),
+		mock.patch.object(mod, 'open_i2c_bus', return_value=mock.sentinel.ft232h_bus) as open_bus,
 		mock.patch.object(mod, 'EMC2101_LUT') as emc2101_cls,
 		mock.patch.object(mod, 'EMC2301') as emc2301_cls,
-		mock.patch.object(mod, 'busio') as busio_mod,
 	):
 		platform = mod.GrillPlatform(config)
 		harness = types.SimpleNamespace(
-			board=fake_board, dio=fake_dio, emc2101_cls=emc2101_cls, emc2301_cls=emc2301_cls, busio=busio_mod
+			board=fake_board, dio=fake_dio, open_bus=open_bus, emc2101_cls=emc2101_cls, emc2301_cls=emc2301_cls
 		)
 		yield platform, harness
