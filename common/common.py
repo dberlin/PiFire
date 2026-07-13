@@ -375,7 +375,7 @@ def display_sleep_timeout(settings):
 	missing/invalid values. Negative values clamp to 0."""
 	try:
 		value = int(settings['display']['sleep_timeout'])
-	except KeyError, TypeError, ValueError:
+	except (KeyError, TypeError, ValueError):
 		return 300
 	return value if value > 0 else 0
 
