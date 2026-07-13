@@ -1,6 +1,6 @@
 import os
 from flask import render_template, request, jsonify, redirect, render_template_string
-from probes.thermoworks_cloud import discover_blocking
+from probes.thermoworks_cloud import discover_blocking, _tw_debug
 from thermoworks_cloud import AuthenticationError
 from common.common import (
 	read_settings,
@@ -151,6 +151,7 @@ def wizard_page(action=None):
 			tw_data = []
 			error = None
 
+			_tw_debug(f'route thermoworks_discover: entered for email={email!r}')
 			try:
 				tw_data = discover_blocking(email, password)
 				if tw_data == []:
