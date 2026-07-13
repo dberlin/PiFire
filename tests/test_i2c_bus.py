@@ -1,3 +1,4 @@
+import logging
 import os
 from unittest import mock
 
@@ -191,3 +192,27 @@ def test_probes_base_reexports_bus_helpers():
 
 	assert base.resolve_i2c_bus is cib.resolve_i2c_bus
 	assert base.find_i2c_bus is cib.find_i2c_bus
+
+
+def test_find_i2c_bus_debug_logs_match_and_result(tmp_path, caplog):
+	bus = tmp_path / 'i2c-5'
+	bus.mkdir()
+	(bus / 'name').write_text('CP2112 SMBus Bridge\n')
+
+	with caplog.at_level(logging.DEBUG, logger='control'):
+		assert i2c_bus.find_i2c_bus('CP2112', devices_path=str(tmp_path)) == 5
+
+	messages = [record.getMessage() for record in caplog.records]
+	assert any('CP2112' in m for m in messages)
+	assert any('i2c-5' in m for m in messages)
+
+
+def test_open_i2c_bus_debug_logs_kind_and_selector(caplog):
+	fake_mod = types_module_with(I2C=type('FakeBackendI2C', (), {'__init__': lambda self: None}))
+	with mock.patch.dict('sys.modules', {'adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c': fake_mod}):
+		with caplog.at_level(logging.DEBUG, logger='control'):
+			i2c_bus.open_i2c_bus('ft232h', 'ftdi://ftdi:232h:FT9/1')
+
+	text = caplog.text
+	assert 'ft232h' in text  # the kind being opened
+	assert 'ftdi://ftdi:232h:FT9/1' in text  # the exact selector/URL

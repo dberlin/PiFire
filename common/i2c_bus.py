@@ -20,8 +20,14 @@ Description:
 """
 
 import glob
+import logging
 import os
 import threading
+
+# Bus opens are logged here at DEBUG so it is obvious which physical bus/adapter
+# is being resolved and opened when the control process runs in debug mode. The
+# 'control' logger is the one control.py raises to DEBUG when debug_mode is set.
+logger = logging.getLogger('control')
 
 # USB-HID bus kinds that bypass Blinka's `board` singleton.
 USB_HID_KINDS = frozenset({'ft232h', 'mcp2221'})
@@ -75,10 +81,12 @@ def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
 		adapters.append((bus_num, name))
 
 	found = [num for num, name in adapters if match_lower in name.lower()]
-	if len(found) == 1:
-		return found[0]
-	# Include what IS present so a misconfigured match string is easy to fix.
+	# Include what IS present so debug logs and error messages both show it.
 	available = ', '.join(f'i2c-{n} ({name!r})' for n, name in sorted(adapters)) or '(none)'
+	logger.debug('find_i2c_bus: matching %r among adapters: %s', match, available)
+	if len(found) == 1:
+		logger.debug('find_i2c_bus: %r matched i2c-%d', match, found[0])
+		return found[0]
 	if not found:
 		raise RuntimeError(
 			f'No i2c adapter found matching {match!r} under {devices_path}. Available adapters: {available}'
@@ -95,7 +103,9 @@ def resolve_i2c_bus(bus):
 	"""
 	spec = str(bus).strip()
 	if spec.isdigit():
+		logger.debug('resolve_i2c_bus: %r is a numeric bus -> /dev/i2c-%s', bus, spec)
 		return int(spec)
+	logger.debug('resolve_i2c_bus: %r is an adapter-name match, discovering the bus number', bus)
 	return find_i2c_bus(spec)
 
 
@@ -213,8 +223,10 @@ def _construct_ft232h(selector):
 	# Set it transiently and restore the prior value so the factory never leaves
 	# a board-forcing var in the environment (keeps assert_clean_blinka_env true
 	# process-wide). If a caller pre-set it (ft232h_relay), restore keeps it set.
+	url = str(selector) if selector else '1'
+	logger.debug('open_i2c_bus[ft232h]: opening FT232H via BLINKA_FT232H=%r', url)
 	prev = os.environ.get('BLINKA_FT232H', _UNSET)
-	os.environ['BLINKA_FT232H'] = str(selector) if selector else '1'
+	os.environ['BLINKA_FT232H'] = url
 	try:
 		backend = _FT232H_I2C()
 	finally:
@@ -231,6 +243,7 @@ def _construct_mcp2221(selector):
 
 	if selector:
 		# Point the Blinka MCP2221 singleton at the adapter with this serial.
+		logger.debug('open_i2c_bus[mcp2221]: selecting MCP2221 with serial=%r', selector)
 		import hid
 
 		path = None
@@ -240,12 +253,19 @@ def _construct_mcp2221(selector):
 				break
 		if path is None:
 			raise I2CBusConfigError(f'No MCP2221 found with serial {selector!r}.')
+		logger.debug('open_i2c_bus[mcp2221]: serial %r -> hid path %r', selector, path)
 		handle = _mcp_mod.mcp2221._hid
 		try:
 			handle.close()
 		except Exception:
 			pass
 		handle.open_path(path)
+	else:
+		logger.debug(
+			'open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)',
+			_mcp_mod.MCP2221.VID,
+			_mcp_mod.MCP2221.PID,
+		)
 	return _LockedI2C(_MCP2221_I2C())
 
 
@@ -254,11 +274,14 @@ def _construct_bus(kind, selector):
 		import board
 		import busio
 
+		logger.debug('open_i2c_bus[basic]: opening Blinka board.SCL/SDA')
 		return busio.I2C(board.SCL, board.SDA)
 	if kind == 'extended':
 		from adafruit_extended_bus import ExtendedI2C
 
-		return ExtendedI2C(resolve_i2c_bus(selector))
+		bus_num = resolve_i2c_bus(selector)
+		logger.debug('open_i2c_bus[extended]: opening /dev/i2c-%s (from selector=%r)', bus_num, selector)
+		return ExtendedI2C(bus_num)
 	if kind == 'ft232h':
 		return _construct_ft232h(selector)
 	if kind == 'mcp2221':
@@ -281,7 +304,10 @@ def open_i2c_bus(bus_kind='basic', bus_selector=None):
 		key = (kind, selector)
 		bus = _bus_cache.get(key)
 		if bus is None:
+			logger.debug('open_i2c_bus: opening new bus kind=%r selector=%r', kind, selector)
 			bus = _construct_bus(kind, selector)
 			_bus_cache[key] = bus
+		else:
+			logger.debug('open_i2c_bus: reusing cached bus kind=%r selector=%r', kind, selector)
 		_opened_kinds.add(kind)
 		return bus
