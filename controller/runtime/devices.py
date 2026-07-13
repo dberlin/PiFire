@@ -18,6 +18,7 @@ from common import (
 	get_probe_info,
 	WriteKind,
 )
+from common.i2c_bus import assert_clean_blinka_env
 
 from controller.runtime.context import Devices
 
@@ -120,6 +121,11 @@ def build_devices(settings, *, errors, event_log, control_log):
 	:param control_log: Control logger
 	:return: (Devices, errors)
 	"""
+	# Refuse to start if a board-forcing BLINKA_* env var is set: it would pin
+	# Blinka's `board` backend process-wide and silently break `basic` and any
+	# import board. Devices must select ft232h/mcp2221a bus kinds instead.
+	assert_clean_blinka_env()
+
 	platform_config = settings['platform']
 	platform_config['frequency'] = settings['pwm']['frequency']
 	units = settings['globals']['units']
