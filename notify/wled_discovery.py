@@ -263,61 +263,18 @@ class WLEDDiscovery:
 
 def discover_wled_devices(timeout: int = 10) -> List[Dict]:
 	"""
-	Convenience function to discover WLED devices
-	Returns a list of device dictionaries suitable for JSON serialization
+	Convenience function to discover WLED devices.
+	Returns a list of device dictionaries suitable for JSON serialization.
 
-	This function handles web server environments by using a subprocess approach
-	when needed to avoid threading conflicts with eventlet/gunicorn.
+	Runs zeroconf/mDNS discovery in-process. This is safe under the webapp's
+	gthread worker (real OS threads, no eventlet/gevent monkey-patching); the
+	old subprocess fallback existed only to dodge that patching and is no longer
+	needed.
 	"""
 	try:
-		# Try direct discovery first
 		with WLEDDiscovery(timeout) as discovery:
 			devices = discovery.discover_all()
-			result = [device.to_dict() for device in devices]
-
-			# If we got devices, return them
-			if result:
-				return result
-
-		# If no devices found with direct method, try subprocess approach
-		# This helps in web server environments where threading might be restricted
-		import subprocess
-		import json
-		import sys
-
-		script_code = f"""
-import sys
-sys.path.insert(0, ".")
-from notify.wled_discovery import WLEDDiscovery
-import json
-
-try:
-    with WLEDDiscovery({timeout}) as discovery:
-        devices = discovery.discover_mdns_devices()
-        result = [device.to_dict() for device in devices]
-        print(json.dumps(result))
-except Exception as e:
-    print(json.dumps([]))
-"""
-
-		# Run discovery in a separate process to avoid threading conflicts
-		process = subprocess.Popen(
-			[sys.executable, '-c', script_code],
-			stdout=subprocess.PIPE,
-			stderr=subprocess.PIPE,
-			cwd='/usr/local/bin/pifire',
-		)
-
-		stdout, stderr = process.communicate(timeout=timeout + 10)
-
-		if process.returncode == 0 and stdout:
-			try:
-				return json.loads(stdout.decode())
-			except json.JSONDecodeError:
-				pass
-
-		return []
-
+			return [device.to_dict() for device in devices]
 	except Exception as e:
 		print(f'WLED discovery error: {e}')
 		return []

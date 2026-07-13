@@ -91,7 +91,6 @@ test_wled_final.py
 debug_wled_discovery.py
 test_wled_api.py
 test_wled_ui.html
-wled_discover_standalone.py
 
 # Other test/debug files
 debug_server_status.html

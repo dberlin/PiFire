@@ -95,59 +95,21 @@ def api_page(action=None, arg0=None, arg1=None, arg2=None, arg3=None):
 			pellets = f'{pelletdb["archive"][pelletid]["brand"]} {pelletdb["archive"][pelletid]["wood"]}'
 			return jsonify({'hopper_level': pelletlevel, 'hopper_pellets': pellets})
 		elif action == 'wled_discover':
-			""" Discover WLED devices on the network """
+			""" Discover WLED devices on the network (mDNS/zeroconf, in-process) """
 			try:
-				import subprocess
-				import json
-				import sys
-				import os
+				# Imported lazily so zeroconf is only loaded when discovery runs.
+				# Runs in-process now that the webapp uses the gthread worker (no
+				# eventlet/gevent monkey-patching), so no subprocess is needed.
+				from notify.wled_discovery import discover_wled_devices
 
 				# Get timeout from query parameter, default to 10 seconds
 				timeout = request.args.get('timeout', 10, type=int)
 				timeout = max(5, min(30, timeout))  # Clamp between 5-30 seconds
 
-				# Use standalone script to avoid threading conflicts with eventlet/gunicorn
-				script_path = '/usr/local/bin/pifire/wled_discover_standalone.py'
-				python_path = '/usr/local/bin/pifire/bin/python3'
-
-				# Run discovery in a separate process
-				process = subprocess.Popen(
-					[python_path, script_path, str(timeout)],
-					stdout=subprocess.PIPE,
-					stderr=subprocess.PIPE,
-					cwd='/usr/local/bin/pifire',
-				)
-
-				stdout, stderr = process.communicate(timeout=timeout + 15)
-
-				if process.returncode == 0 and stdout:
-					try:
-						result = json.loads(stdout.decode())
-						if result.get('success', False):
-							return jsonify(
-								{
-									'result': 'success',
-									'message': f'Found {result["count"]} WLED devices',
-									'devices': result['devices'],
-								}
-							), 200
-						else:
-							return jsonify(
-								{
-									'result': 'error',
-									'message': f'Discovery failed: {result.get("error", "Unknown error")}',
-									'devices': [],
-								}
-							), 500
-					except json.JSONDecodeError as e:
-						return jsonify(
-							{'result': 'error', 'message': f'Failed to parse discovery result: {e}', 'devices': []}
-						), 500
-				else:
-					error_msg = stderr.decode() if stderr else 'Discovery process failed'
-					return jsonify(
-						{'result': 'error', 'message': f'Discovery process error: {error_msg}', 'devices': []}
-					), 500
+				devices = discover_wled_devices(timeout)
+				return jsonify(
+					{'result': 'success', 'message': f'Found {len(devices)} WLED devices', 'devices': devices}
+				), 200
 
 			except Exception as e:
 				return jsonify({'result': 'error', 'message': f'WLED discovery failed: {str(e)}', 'devices': []}), 500
