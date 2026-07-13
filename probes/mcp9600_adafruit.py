@@ -80,8 +80,11 @@ class ReadProbes(ProbeInterface):
 			self.device = KTTDevice(
 				i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num, tc_type=tc_type
 			)
-		except:
-			self.logger.error('Something went wrong when trying to initialize the MCP9600 device.')
+		except Exception:
+			self.logger.error(
+				'Something went wrong when trying to initialize the MCP9600 device '
+				f'(i2c bus kind={i2c_bus_kind!r}, address=0x{i2c_bus_addr:02X}, bus={i2c_bus_num!r}).'
+			)
 			raise
 
 	def read_all_ports(self, output_data):
