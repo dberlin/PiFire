@@ -194,7 +194,11 @@ def _dashboard_1024x600():
 	Same three-column ember design as _dashboard_1280x720(), reflowed for the
 	shorter/wider 1024x600 canvas (14px margins; content bottoms at y=574).
 	Widgets resize their rendered image to these boxes (see
-	display/flexobject.py), so no widget code changes are needed.
+	display/flexobject.py). One exception: 'cook_time' uses the horizontal
+	'cook_time_bar' widget (label left, value right) instead of the vertical
+	'duty_pill' - spanning the full gauge width as a stadium-shaped pill
+	distorts the stacked pill text, so this bar renders on an aspect-matched
+	canvas. lid_alert overlays the same box and only paints when active.
 	"""
 	dash = [
 		_flex_obj(
@@ -236,7 +240,9 @@ def _dashboard_1024x600():
 		)
 	)
 	dash.append(
-		_flex_obj('cook_time', 'duty_pill', [266, 424], [490, 40], data={'label': '', 'value': '', 'highlight': False})
+		_flex_obj(
+			'cook_time', 'cook_time_bar', [266, 424], [490, 40], data={'label': '', 'value': '', 'highlight': False}
+		)
 	)
 	dash.append(
 		_flex_obj(

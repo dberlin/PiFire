@@ -194,7 +194,7 @@
       },
       {
         "name": "cook_time",
-        "type": "duty_pill",
+        "type": "cook_time_bar",
         "position": [
           266,
           424
