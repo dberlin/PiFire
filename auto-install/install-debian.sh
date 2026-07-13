@@ -128,11 +128,11 @@ log "*************************************************************************"
 log "**  Installing dependencies...                                        **"
 log "*************************************************************************"
 # Build toolchain + scientific libs (scipy/scikit-learn), web stack, supervisor,
-# valkey (redis-compatible), bluetooth, and image libs. No Raspberry Pi packages.
+# bluetooth, and image libs. No Raspberry Pi packages.
 $SUDO apt install -y \
     python3-dev python3-pip python3-venv python3-scipy \
     gfortran libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev \
-    nginx git supervisor valkey-server \
+    nginx git supervisor \
     bluetooth bluez cage seatd wlr-randr \
     openssl curl 2>&1 | tee -a "$LOG"
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
@@ -170,10 +170,6 @@ fi
 log " + Enabling Bluetooth"
 command -v rfkill >/dev/null 2>&1 && $SUDO rfkill unblock bluetooth 2>&1 | tee -a "$LOG"
 $SUDO systemctl enable --now bluetooth 2>&1 | tee -a "$LOG" || log " ! bluetooth service not enabled (continuing)."
-
-# Valkey (redis-compatible) service.
-log " + Enabling valkey"
-$SUDO systemctl enable --now valkey-server 2>&1 | tee -a "$LOG" || log " ! valkey service not enabled (continuing)."
 
 # --- Clone PiFire ----------------------------------------------------------
 log "*************************************************************************"
