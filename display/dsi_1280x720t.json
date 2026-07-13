@@ -194,14 +194,14 @@
       },
       {
         "name": "cook_time",
-        "type": "duty_pill",
+        "type": "cook_time_bar",
         "position": [
           332,
           538
         ],
         "animation_enabled": false,
         "size": [
-          400,
+          614,
           52
         ],
         "glow": false,
@@ -213,43 +213,6 @@
         "button_list": [],
         "button_value": [],
         "touch_areas": []
-      },
-      {
-        "name": "lid_alert",
-        "type": "alert",
-        "position": [
-          736,
-          538
-        ],
-        "animation_enabled": false,
-        "size": [
-          210,
-          52
-        ],
-        "glow": false,
-        "data": {
-          "text": [
-            "Lid Open",
-            "Detected"
-          ]
-        },
-        "button_list": [],
-        "button_value": [],
-        "touch_areas": [],
-        "label": "Lid Open Detected",
-        "active": false,
-        "fg_color": [
-          255,
-          90,
-          77,
-          255
-        ],
-        "bg_color": [
-          26,
-          22,
-          17,
-          220
-        ]
       },
       {
         "name": "button_row",

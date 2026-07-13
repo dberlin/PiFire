@@ -215,43 +215,6 @@
         "touch_areas": []
       },
       {
-        "name": "lid_alert",
-        "type": "alert",
-        "position": [
-          266,
-          424
-        ],
-        "animation_enabled": false,
-        "size": [
-          490,
-          40
-        ],
-        "glow": false,
-        "data": {
-          "text": [
-            "Lid Open",
-            "Detected"
-          ]
-        },
-        "button_list": [],
-        "button_value": [],
-        "touch_areas": [],
-        "label": "Lid Open Detected",
-        "active": false,
-        "fg_color": [
-          255,
-          90,
-          77,
-          255
-        ],
-        "bg_color": [
-          26,
-          22,
-          17,
-          220
-        ]
-      },
-      {
         "name": "button_row",
         "type": "button_row",
         "position": [

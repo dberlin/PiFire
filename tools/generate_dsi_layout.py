@@ -85,15 +85,17 @@ def _dashboard_1280x720():
 	contracts" for the per-type data shapes):
 	  - header_bar spans the full width at the top.
 	  - Left column: 5 stacked probe_card_N food-probe cards.
-	  - Center column: the big gauge_ember primary gauge, a cook_time pill,
-	    a lid_alert, and the mode-dependent button_row.
+	  - Center column: the big gauge_ember primary gauge, the full-width
+	    cook_time bar (which doubles as the lid-open alert), and the
+	    mode-dependent button_row.
 	  - Right column: system_card (fan/auger/igniter), two duty_pill status
 	    pills, and the hopper_vertical pellet-level card.
 
-	'cook_time' uses type 'duty_pill': base_flex._cook_time_data() feeds it
-	{'label': ..., 'value': ...} (see display/base_flex.py), which is exactly
-	the DutyPill data contract (data={label,value,highlight}, with
-	'highlight' defaulting to False when absent). The existing 'timer' type
+	'cook_time' uses the horizontal 'cook_time_bar' widget (label left, value
+	right, spanning the full gauge width); base_flex._cook_time_data() feeds it
+	{'label': ..., 'value': ...} (see display/base_flex.py). When the lid opens
+	base_flex feeds a 'Lid Pause' countdown and the bar recolors red, so the
+	ember dashboards need no separate lid_alert overlay. The existing 'timer' type
 	(TimerStatus) does not fit - it reads data['seconds'] and only shows a
 	live countdown ("Ns"), so it can't render the pre-formatted mm:ss/H:MM:SS
 	elapsed-cook-time string cook_time also needs to display.
@@ -138,19 +140,8 @@ def _dashboard_1280x720():
 		)
 	)
 	dash.append(
-		_flex_obj('cook_time', 'duty_pill', [332, 538], [400, 52], data={'label': '', 'value': '', 'highlight': False})
-	)
-	dash.append(
 		_flex_obj(
-			'lid_alert',
-			'alert',
-			[736, 538],
-			[210, 52],
-			label='Lid Open Detected',
-			active=False,
-			fg_color=[255, 90, 77, 255],
-			bg_color=[26, 22, 17, 220],
-			data={'text': ['Lid Open', 'Detected']},
+			'cook_time', 'cook_time_bar', [332, 538], [614, 52], data={'label': '', 'value': '', 'highlight': False}
 		)
 	)
 	dash.append(_flex_obj('button_row', 'button_row', [332, 602], [614, 100], button_type=[], button_active=''))
@@ -198,7 +189,8 @@ def _dashboard_1024x600():
 	'cook_time_bar' widget (label left, value right) instead of the vertical
 	'duty_pill' - spanning the full gauge width as a stadium-shaped pill
 	distorts the stacked pill text, so this bar renders on an aspect-matched
-	canvas. lid_alert overlays the same box and only paints when active.
+	canvas. When the lid opens the bar recolors red (base_flex feeds a 'Lid
+	Pause' countdown); there is no separate lid_alert overlay.
 	"""
 	dash = [
 		_flex_obj(
@@ -242,19 +234,6 @@ def _dashboard_1024x600():
 	dash.append(
 		_flex_obj(
 			'cook_time', 'cook_time_bar', [266, 424], [490, 40], data={'label': '', 'value': '', 'highlight': False}
-		)
-	)
-	dash.append(
-		_flex_obj(
-			'lid_alert',
-			'alert',
-			[266, 424],
-			[490, 40],
-			label='Lid Open Detected',
-			active=False,
-			fg_color=[255, 90, 77, 255],
-			bg_color=[26, 22, 17, 220],
-			data={'text': ['Lid Open', 'Detected']},
 		)
 	)
 	dash.append(_flex_obj('button_row', 'button_row', [266, 474], [490, 100], button_type=[], button_active=''))

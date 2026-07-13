@@ -18,7 +18,6 @@ EMBER_DASH_OBJECT_NAMES = [
 	'probe_card_4',
 	'primary_gauge',
 	'cook_time',
-	'lid_alert',
 	'button_row',
 	'system_card',
 	'duty_pill_left',
@@ -76,7 +75,7 @@ def test_profile_1_dash_is_bespoke_ember_layout():
 	assert by_name['duty_pill_right']['type'] == 'duty_pill'
 	assert by_name['hopper_vertical']['type'] == 'hopper_vertical'
 	assert by_name['button_row']['type'] == 'button_row'
-	assert by_name['lid_alert']['type'] == 'alert'
+	assert by_name['cook_time']['type'] == 'cook_time_bar'
 	for index in range(5):
 		assert by_name[f'probe_card_{index}']['type'] == 'probe_card'
 

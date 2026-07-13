@@ -2268,7 +2268,10 @@ class CookTimeBar(FlexObject):
 	a fixed square-ish canvas (e.g. DutyPill) does when squished into a wide box.
 
 	Presentational only - base_flex feeds data={'label','value','highlight'} to
-	the 'cook_time' object by name (see base_flex._cook_time_data)."""
+	the 'cook_time' object by name (see base_flex._cook_time_data). When the lid
+	opens in Hold mode base_flex feeds label='Lid Pause' + a mm:ss countdown; the
+	bar recolors red to serve as the lid-open alert (the ember dashboards have no
+	separate lid_alert overlay - one full-width bar handles both states)."""
 
 	def __init__(self, objectType, objectData, background):
 		super().__init__(objectType, objectData, background)
@@ -2283,17 +2286,28 @@ class CookTimeBar(FlexObject):
 		data = self.objectData.get('data', {})
 		label = str(data.get('label') or 'COOK TIME').upper()
 		value = str(data.get('value', ''))
+		# base_flex._timer_seconds_and_label() uses the 'Lid Pause' label while the
+		# lid is open - render the bar as a red alert in that state.
+		lid_alert = 'LID' in label
 
-		card_fill = (26, 22, 17, 255)  # #1a1611
-		border_color = (255, 255, 255, 15)  # rgba(255,255,255,0.06)
-		label_color = (125, 114, 100, 255)  # #7d7264
-		value_color = accent['accent'] if value else (138, 127, 112, 255)
+		if lid_alert:
+			card_fill = (48, 22, 18, 255)  # dark red-tinted
+			border_color = (255, 90, 77, 255)  # #ff5a4d
+			label_color = (255, 138, 128, 255)
+			value_color = (255, 90, 77, 255)
+			border_w = 4
+		else:
+			card_fill = (26, 22, 17, 255)  # #1a1611
+			border_color = (255, 255, 255, 15)  # rgba(255,255,255,0.06)
+			label_color = (125, 114, 100, 255)  # #7d7264
+			value_color = accent['accent'] if value else (138, 127, 112, 255)
+			border_w = 2
 
 		bar = Image.new('RGBA', (width, height))
 		draw = ImageDraw.Draw(bar)
 		radius = round(height * 0.32)
 		draw.rounded_rectangle(
-			(0, 0, width - 1, height - 1), radius=radius, fill=card_fill, outline=border_color, width=2
+			(0, 0, width - 1, height - 1), radius=radius, fill=card_fill, outline=border_color, width=border_w
 		)
 
 		pad = round(height * 0.55)
