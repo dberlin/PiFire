@@ -344,13 +344,13 @@ def test_discover_extended_i2c_buses_empty_when_missing_path():
 
 
 def test_discover_mcp2221_devices_lists_serials():
-	modules, handle, ctor = _fake_mcp2221_modules(
-		enumerate_result=[
+	hid_mod = types_module_with(
+		enumerate=lambda vid, pid: [
 			{'serial_number': 'AAAA', 'path': b'/dev/hidraw0'},
 			{'serial_number': 'BBBB', 'path': b'/dev/hidraw1'},
 		]
 	)
-	with mock.patch.dict('sys.modules', modules):
+	with mock.patch.dict('sys.modules', {'hid': hid_mod}):
 		devices = i2c_bus.discover_mcp2221_devices()
 	assert devices == [{'serial': 'AAAA', 'path': b'/dev/hidraw0'}, {'serial': 'BBBB', 'path': b'/dev/hidraw1'}]
 

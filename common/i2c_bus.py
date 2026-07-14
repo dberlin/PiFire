@@ -165,20 +165,24 @@ def discover_extended_i2c_buses(devices_path='/sys/bus/i2c/devices'):
 	return _enumerate_i2c_adapters(devices_path)
 
 
+# MCP2221(A) chip's fixed USB VID/PID -- the same constants EasyMCP2221 and
+# Blinka's MCP2221 backend both use internally.
+_MCP2221_VID = 0x04D8
+_MCP2221_PID = 0x00DD
+
+
 def discover_mcp2221_devices():
 	"""Best-effort list of connected MCP2221 USB devices ({'serial', 'path'}),
-	for the wizard's Discover button. Returns [] if the `hid` module or the
-	Blinka MCP2221 backend aren't importable, or no devices are present --
-	never raises."""
+	for the wizard's Discover button. Returns [] if the `hid` module isn't
+	importable, or no devices are present -- never raises."""
 	try:
 		import hid
-		from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
 	except ImportError:
 		return []
 	try:
 		return [
 			{'serial': info.get('serial_number'), 'path': info.get('path')}
-			for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID)
+			for info in hid.enumerate(_MCP2221_VID, _MCP2221_PID)
 			if info.get('serial_number')
 		]
 	except Exception:
