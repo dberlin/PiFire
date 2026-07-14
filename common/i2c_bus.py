@@ -59,6 +59,30 @@ class I2CBusConfigError(ValueError):
 	"""Raised for an I2C bus configuration that cannot work on this host."""
 
 
+def _read_usb_serial(bus_dir, max_hops=15):
+	"""Return the USB iSerial of `bus_dir`'s (an i2c-N sysfs directory) USB
+	ancestor, or None if it has none within `max_hops` parent directories (a
+	non-USB adapter, e.g. a Pi's onboard I2C). Requires the ancestor to have
+	both a 'serial' and an 'idVendor' file -- the USB *device* level in sysfs,
+	as opposed to an interface level or an unrelated subsystem node that might
+	also expose a 'serial' file (e.g. power_supply)."""
+	current = os.path.realpath(bus_dir)
+	for _ in range(max_hops):
+		parent = os.path.dirname(current)
+		if parent == current:
+			return None
+		current = parent
+		serial_path = os.path.join(current, 'serial')
+		vendor_path = os.path.join(current, 'idVendor')
+		if os.path.isfile(serial_path) and os.path.isfile(vendor_path):
+			try:
+				with open(serial_path) as handle:
+					return handle.read().strip()
+			except OSError:
+				return None
+	return None
+
+
 def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
 	"""
 	Return the integer i2c bus number whose adapter name contains `match`

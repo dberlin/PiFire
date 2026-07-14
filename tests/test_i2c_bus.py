@@ -216,3 +216,38 @@ def test_open_i2c_bus_debug_logs_kind_and_selector(caplog):
 	text = caplog.text
 	assert 'ft232h' in text  # the kind being opened
 	assert 'ftdi://ftdi:232h:FT9/1' in text  # the exact selector/URL
+
+
+def test_read_usb_serial_resolves_via_sysfs_walk(tmp_path):
+	usb_device = tmp_path / 'devices' / 'usb1' / '1-1'
+	usb_device.mkdir(parents=True)
+	(usb_device / 'serial').write_text('AB12\n')
+	(usb_device / 'idVendor').write_text('04d8\n')
+	iface = usb_device / '1-1:1.0'
+	iface.mkdir()
+	bus_dir = iface / 'i2c-7'
+	bus_dir.mkdir()
+	(bus_dir / 'name').write_text('MCP2221 usb-i2c bridge\n')
+
+	assert i2c_bus._read_usb_serial(str(bus_dir)) == 'AB12'
+
+
+def test_read_usb_serial_returns_none_without_usb_ancestor(tmp_path):
+	bus_dir = tmp_path / 'i2c-1'
+	bus_dir.mkdir()
+	(bus_dir / 'name').write_text('bcm2835 I2C adapter\n')
+
+	assert i2c_bus._read_usb_serial(str(bus_dir)) is None
+
+
+def test_read_usb_serial_ignores_serial_file_without_idvendor(tmp_path):
+	# A directory with a 'serial' file but no 'idVendor' isn't a USB device
+	# level (e.g. a power_supply sysfs node) -- must not be mistaken for one.
+	not_usb = tmp_path / 'not_a_usb_device'
+	not_usb.mkdir()
+	(not_usb / 'serial').write_text('DECOY\n')
+	bus_dir = not_usb / 'i2c-2'
+	bus_dir.mkdir()
+	(bus_dir / 'name').write_text('some adapter\n')
+
+	assert i2c_bus._read_usb_serial(str(bus_dir)) is None
