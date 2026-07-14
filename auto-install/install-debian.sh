@@ -131,7 +131,8 @@ log "*************************************************************************"
 # bluetooth, and image libs. No Raspberry Pi packages.
 $SUDO apt install -y \
     python3-dev python3-pip python3-venv python3-scipy \
-    gfortran libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev \
+    gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev \
+    libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev \
     nginx git supervisor \
     bluetooth bluez cage seatd wlr-randr \
     openssl curl 2>&1 | tee -a "$LOG"
