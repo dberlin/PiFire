@@ -1,4 +1,4 @@
-pillow==11.1.0  # This version is compatible with Python 3.9+
+pillow==12.2.0  # Matches pyproject.toml's pillow>=12.2.0; older versions predate Python 3.14 wheels and force a source build
 flask==3.1.0
 flask_mobility==2.0.1
 flask_qrcode==3.2.0

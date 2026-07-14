@@ -119,7 +119,8 @@ log "*************************************************************************"
 $SUDO dnf -y install \
     python3 python3-devel python3-pip python3-scipy \
     gcc gcc-c++ make gcc-gfortran openblas-devel lapack-devel \
-    openjpeg glib2-devel \
+    openjpeg-devel glib2-devel \
+    libjpeg-turbo-devel zlib-ng-compat-devel freetype-devel lcms2-devel libtiff-devel libwebp-devel \
     nginx git supervisor cage seatd wlr-randr \
     bluez bluez-libs-devel \
     cabextract curl dejavu-sans-fonts fontconfig 2>&1 | tee -a "$LOG"
@@ -142,7 +143,7 @@ fi
 
 # Unblock Bluetooth (if blocked) and enable the bluetooth service.
 log " + Enabling Bluetooth"
-command -v rfkill >/dev/null 2>&1 && $SUDO rfkill unblock bluetooth 2>&1 | tee -a "$LOG"
+command -v rfkill >/dev/null 2>&1 && [ -e /dev/rfkill ] && $SUDO rfkill unblock bluetooth 2>&1 | tee -a "$LOG"
 $SUDO systemctl enable --now bluetooth 2>&1 | tee -a "$LOG" || log " ! bluetooth service not enabled (continuing)."
 
 # --- Clone PiFire ----------------------------------------------------------
