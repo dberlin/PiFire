@@ -280,7 +280,8 @@ def assert_clean_blinka_env(environ=None):
 
 
 class _LockedI2C:
-	"""Wrap a Blinka backend I2C (ft232h/mcp2221) so Adafruit drivers can use it.
+	"""Wrap an I2C backend (Blinka's ft232h backend, or an EasyMCP2221
+	backend for mcp2221) so Adafruit drivers can use it.
 
 	The backend classes expose scan/writeto/readfrom_into/writeto_then_readfrom
 	but not try_lock/unlock, which adafruit_bus_device.I2CDevice requires. Add a
@@ -315,6 +316,68 @@ class _LockedI2C:
 		deinit = getattr(self._backend, 'deinit', None)
 		if deinit is not None:
 			deinit()
+
+
+class _EasyMCP2221Backend:
+	"""Adapt an EasyMCP2221.Device to the scan/writeto/readfrom_into/
+	writeto_then_readfrom surface _LockedI2C expects (the same surface the
+	Blinka ft232h backend provides).
+
+	Translates EasyMCP2221's NotAckError/TimeoutError/LowSCLError/LowSDAError
+	into OSError, which is what adafruit_bus_device.I2CDevice's device-probe
+	logic (and PiFire's own probe code) already knows how to treat as "no
+	device at this address" / "bus fault"."""
+
+	def __init__(self, device):
+		from EasyMCP2221.exceptions import LowSCLError, LowSDAError, NotAckError, TimeoutError
+
+		self._device = device
+		self._errors = (NotAckError, TimeoutError, LowSCLError, LowSDAError)
+
+	def scan(self):
+		found = []
+		for address in range(0x08, 0x78):
+			try:
+				self._device.I2C_read(address, 1)
+			except self._errors:
+				continue
+			found.append(address)
+		return found
+
+	def writeto(self, address, buffer, *, start=0, end=None, **kwargs):
+		end = len(buffer) if end is None else end
+		data = bytes(buffer[start:end])
+		try:
+			if data:
+				self._device.I2C_write(address, data)
+			else:
+				# EasyMCP2221.I2C_write rejects empty data; a zero-length
+				# writeto is only ever used as a device-presence probe
+				# (adafruit_bus_device.I2CDevice.__probe_for_device), so a
+				# 1-byte read serves the same purpose.
+				self._device.I2C_read(address, 1)
+		except self._errors as exc:
+			raise OSError(str(exc)) from exc
+
+	def readfrom_into(self, address, buffer, *, start=0, end=None, **kwargs):
+		end = len(buffer) if end is None else end
+		try:
+			data = self._device.I2C_read(address, end - start)
+		except self._errors as exc:
+			raise OSError(str(exc)) from exc
+		buffer[start:end] = data
+
+	def writeto_then_readfrom(
+		self, address, out_buffer, in_buffer, *, out_start=0, out_end=None, in_start=0, in_end=None, **kwargs
+	):
+		out_end = len(out_buffer) if out_end is None else out_end
+		in_end = len(in_buffer) if in_end is None else in_end
+		try:
+			self._device.I2C_write(address, bytes(out_buffer[out_start:out_end]), kind='nonstop')
+			data = self._device.I2C_read(address, in_end - in_start, kind='restart')
+		except self._errors as exc:
+			raise OSError(str(exc)) from exc
+		in_buffer[in_start:in_end] = data
 
 
 _bus_cache = {}  # (kind, selector) -> bus object

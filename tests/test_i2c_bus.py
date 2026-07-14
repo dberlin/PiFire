@@ -3,6 +3,7 @@ import os
 from unittest import mock
 
 import pytest
+from EasyMCP2221.exceptions import LowSCLError, LowSDAError, NotAckError, TimeoutError
 
 import common.i2c_bus as i2c_bus
 from common.i2c_bus import I2CBusConfigError, assert_clean_blinka_env, resolve_i2c_bus, validate_bus_kinds
@@ -59,6 +60,76 @@ def test_locked_i2c_lock_and_delegate():
 	backend.writeto.assert_called_once_with(0x10, b'\x01')
 	wrapped.scan()
 	backend.scan.assert_called_once()
+
+
+class _FakeI2CDevice:
+	"""Stand-in for an EasyMCP2221.Device -- records every I2C_write/I2C_read
+	call, returns a canned read result, and can be told to raise a canned
+	exception (simulating NotAckError etc.) instead."""
+
+	def __init__(self, read_result=b'', raise_exc=None):
+		self.read_result = read_result
+		self.raise_exc = raise_exc
+		self.calls = []
+
+	def I2C_write(self, addr, data, kind='regular', timeout_ms=20):
+		self.calls.append(('write', addr, bytes(data), kind))
+		if self.raise_exc:
+			raise self.raise_exc
+
+	def I2C_read(self, addr, size=1, kind='regular', timeout_ms=20):
+		self.calls.append(('read', addr, size, kind))
+		if self.raise_exc:
+			raise self.raise_exc
+		return self.read_result
+
+
+def test_easymcp2221_backend_writeto_nonempty_calls_i2c_write():
+	device = _FakeI2CDevice()
+	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend.writeto(0x40, b'\x01\x02')
+	assert device.calls == [('write', 0x40, b'\x01\x02', 'regular')]
+
+
+def test_easymcp2221_backend_writeto_empty_does_presence_read():
+	device = _FakeI2CDevice()
+	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend.writeto(0x40, b'')
+	assert device.calls == [('read', 0x40, 1, 'regular')]
+
+
+def test_easymcp2221_backend_readfrom_into_fills_buffer():
+	device = _FakeI2CDevice(read_result=b'\x0a\x0b\x0c')
+	backend = i2c_bus._EasyMCP2221Backend(device)
+	buf = bytearray(3)
+	backend.readfrom_into(0x40, buf)
+	assert bytes(buf) == b'\x0a\x0b\x0c'
+	assert device.calls == [('read', 0x40, 3, 'regular')]
+
+
+def test_easymcp2221_backend_writeto_then_readfrom_uses_nonstop_restart():
+	device = _FakeI2CDevice(read_result=b'\xaa\xbb')
+	backend = i2c_bus._EasyMCP2221Backend(device)
+	out = bytearray(2)
+	backend.writeto_then_readfrom(0x40, b'\x00', out)
+	assert bytes(out) == b'\xaa\xbb'
+	assert device.calls == [('write', 0x40, b'\x00', 'nonstop'), ('read', 0x40, 2, 'restart')]
+
+
+def test_easymcp2221_backend_scan_collects_acking_addresses():
+	device = _FakeI2CDevice()
+	backend = i2c_bus._EasyMCP2221Backend(device)
+	assert backend.scan() == list(range(0x08, 0x78))
+
+
+@pytest.mark.parametrize('exc_cls', [NotAckError, TimeoutError, LowSCLError, LowSDAError])
+def test_easymcp2221_backend_translates_i2c_errors_to_oserror(exc_cls):
+	device = _FakeI2CDevice(raise_exc=exc_cls('boom'))
+	backend = i2c_bus._EasyMCP2221Backend(device)
+	with pytest.raises(OSError):
+		backend.writeto(0x40, b'\x01')
+	with pytest.raises(OSError):
+		backend.readfrom_into(0x40, bytearray(1))
 
 
 def test_open_ft232h_sets_env_transiently_and_restores(monkeypatch):
