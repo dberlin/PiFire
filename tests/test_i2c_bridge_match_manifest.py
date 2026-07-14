@@ -34,19 +34,20 @@ def test_every_bridge_selector_offers_mcp2221():
 	assert found, 'no CP2112 bridge selectors found'
 
 
-def test_busio_probe_bus_num_lists_offer_mcp2221():
-	"""The busio probe i2c_bus_num list_values (which drive the Extended bus)
-	include the MCP2221 bridge-name match with a matching label."""
+def test_busio_probe_bus_num_is_free_text_and_documents_bridges():
+	"""The busio probe i2c_bus_num field (which drives the Extended bus) is
+	free text with a Discover button, and its description documents both
+	bridge-name matches and the serial: selector."""
 	manifest = _manifest()
 	checked = 0
 	for name in ('mcp9600_adafruit', 'ads1115_adafruit', 'ads1015_adafruit'):
 		cfg = manifest['modules']['probes'][name]['device_specific']['config']
 		field = next(c for c in cfg if c['label'] == 'i2c_bus_num')
-		assert 'MCP2221' in field['list_values']
-		# list_labels stays aligned with list_values (same length, MCP2221 labelled)
-		assert len(field['list_labels']) == len(field['list_values'])
-		idx = field['list_values'].index('MCP2221')
-		assert 'MCP2221' in field['list_labels'][idx]
+		assert field['type'] == 'i2c_bus_num'
+		assert 'list_values' not in field
+		assert 'CP2112' in field['description']
+		assert 'MCP2221' in field['description']
+		assert 'serial:' in field['description']
 		checked += 1
 	assert checked == 3
 
