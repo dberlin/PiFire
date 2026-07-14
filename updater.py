@@ -580,7 +580,7 @@ if __name__ == '__main__':
 
 	if args.update:
 		num_args += 1
-		settings = read_generic_json('settings.json')
+		settings = read_settings()
 		current_version = settings['versions']['server']
 		current_build = settings['versions'].get('build', 0)
 
@@ -600,7 +600,7 @@ if __name__ == '__main__':
 
 	elif args.branch:
 		num_args += 1
-		settings = read_generic_json('settings.json')
+		settings = read_settings()
 		current_version = settings['versions']['server']
 		current_build = settings['versions'].get('build', 0)
 
@@ -626,7 +626,7 @@ if __name__ == '__main__':
 
 	elif args.installdependencies:
 		num_args += 1
-		settings = read_generic_json('settings.json')
+		settings = read_settings()
 		current_version = settings['versions']['server']
 		current_build = settings['versions'].get('build', 0)
 
@@ -664,8 +664,8 @@ if __name__ == '__main__':
 		settings['globals']['uv'] = True
 		settings['globals']['venv'] = True
 		settings['globals']['python_exec'] = '.venv/bin/python'
-		write_generic_json(settings, 'settings.json')
-		print('Updated settings.json to set uv flag and set venv flag')
+		write_settings(settings)
+		print('Updated settings to set uv flag and set venv flag')
 
 	if args.legacyvenv:
 		num_args += 1
@@ -673,8 +673,8 @@ if __name__ == '__main__':
 		settings['globals']['uv'] = False
 		settings['globals']['venv'] = True
 		settings['globals']['python_exec'] = 'bin/python'
-		write_generic_json(settings, 'settings.json')
-		print('Updated settings.json to set venv flag and clear uv flag')
+		write_settings(settings)
+		print('Updated settings to set venv flag and clear uv flag')
 
 	""" If no valid arguments are passed, print help message """
 	if num_args == 0:
