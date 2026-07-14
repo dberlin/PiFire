@@ -321,3 +321,59 @@ def test_resolve_i2c_bus_serial_prefix_dispatches(monkeypatch):
 	monkeypatch.setattr(i2c_bus, 'find_i2c_bus_by_serial', lambda serial: 42 if serial == 'AB12' else None)
 	assert resolve_i2c_bus('serial:AB12') == 42
 	assert resolve_i2c_bus('SERIAL:AB12') == 42  # prefix keyword is case-insensitive
+
+
+def test_discover_extended_i2c_buses_wraps_enumeration(tmp_path):
+	usb_device = tmp_path / 'devices' / 'usb1' / '1-1'
+	usb_device.mkdir(parents=True)
+	(usb_device / 'serial').write_text('AB12')
+	(usb_device / 'idVendor').write_text('04d8')
+	iface = usb_device / '1-1:1.0'
+	iface.mkdir()
+	bus_dir = iface / 'i2c-7'
+	bus_dir.mkdir()
+	(bus_dir / 'name').write_text('MCP2221 usb-i2c bridge')
+
+	assert i2c_bus.discover_extended_i2c_buses(devices_path=str(iface)) == [
+		{'bus_num': 7, 'name': 'MCP2221 usb-i2c bridge', 'serial': 'AB12'}
+	]
+
+
+def test_discover_extended_i2c_buses_empty_when_missing_path():
+	assert i2c_bus.discover_extended_i2c_buses(devices_path='/no/such/path') == []
+
+
+def test_discover_mcp2221_devices_lists_serials():
+	modules, handle, ctor = _fake_mcp2221_modules(
+		enumerate_result=[
+			{'serial_number': 'AAAA', 'path': b'/dev/hidraw0'},
+			{'serial_number': 'BBBB', 'path': b'/dev/hidraw1'},
+		]
+	)
+	with mock.patch.dict('sys.modules', modules):
+		devices = i2c_bus.discover_mcp2221_devices()
+	assert devices == [{'serial': 'AAAA', 'path': b'/dev/hidraw0'}, {'serial': 'BBBB', 'path': b'/dev/hidraw1'}]
+
+
+def test_discover_mcp2221_devices_empty_without_hid_module():
+	with mock.patch.dict('sys.modules', {'hid': None}):
+		assert i2c_bus.discover_mcp2221_devices() == []
+
+
+def test_discover_ft232h_devices_lists_urls():
+	descriptor = types_module_with(sn='FT9', description='Single RS232-HS')
+
+	class FakeFtdi:
+		@staticmethod
+		def list_devices(url):
+			return [(descriptor, 1)]
+
+	fake_mod = types_module_with(Ftdi=FakeFtdi)
+	with mock.patch.dict('sys.modules', {'pyftdi.ftdi': fake_mod}):
+		devices = i2c_bus.discover_ft232h_devices()
+	assert devices == [{'url': 'ftdi://ftdi:232h:FT9/1', 'serial': 'FT9', 'description': 'Single RS232-HS'}]
+
+
+def test_discover_ft232h_devices_empty_without_pyftdi():
+	with mock.patch.dict('sys.modules', {'pyftdi.ftdi': None}):
+		assert i2c_bus.discover_ft232h_devices() == []

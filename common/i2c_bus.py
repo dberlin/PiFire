@@ -158,6 +158,53 @@ def find_i2c_bus_by_serial(serial, devices_path='/sys/bus/i2c/devices'):
 	)
 
 
+def discover_extended_i2c_buses(devices_path='/sys/bus/i2c/devices'):
+	"""Best-effort list of every extended-kind (kernel i2c-dev) adapter
+	present, for the wizard's Discover button. Returns [] if devices_path
+	doesn't exist or has no adapters; never raises."""
+	return _enumerate_i2c_adapters(devices_path)
+
+
+def discover_mcp2221_devices():
+	"""Best-effort list of connected MCP2221 USB devices ({'serial', 'path'}),
+	for the wizard's Discover button. Returns [] if the `hid` module or the
+	Blinka MCP2221 backend aren't importable, or no devices are present --
+	never raises."""
+	try:
+		import hid
+		from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
+	except ImportError:
+		return []
+	try:
+		return [
+			{'serial': info.get('serial_number'), 'path': info.get('path')}
+			for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID)
+			if info.get('serial_number')
+		]
+	except Exception:
+		logger.debug('discover_mcp2221_devices: hid.enumerate failed', exc_info=True)
+		return []
+
+
+def discover_ft232h_devices():
+	"""Best-effort list of connected FT232H USB devices ({'url', 'serial',
+	'description'}), for the wizard's Discover button. Returns [] if pyftdi
+	isn't importable or no devices are present -- never raises."""
+	try:
+		from pyftdi.ftdi import Ftdi
+	except ImportError:
+		return []
+	try:
+		devices = []
+		for descriptor, _interface_count in Ftdi.list_devices('ftdi://ftdi:232h/'):
+			url = f'ftdi://ftdi:232h:{descriptor.sn}/1' if descriptor.sn else 'ftdi://ftdi:232h/1'
+			devices.append({'url': url, 'serial': descriptor.sn, 'description': descriptor.description})
+		return devices
+	except Exception:
+		logger.debug('discover_ft232h_devices: Ftdi.list_devices failed', exc_info=True)
+		return []
+
+
 def resolve_i2c_bus(bus):
 	"""
 	Resolve an extended-i2c-bus spec to a bus number. Accepts an int or numeric
