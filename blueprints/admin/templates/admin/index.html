@@ -692,7 +692,7 @@
 				<br>
 				{% endif %}
 				<!-- CPU Card -->
-				{% if 'cpu_temp' in control['system'].keys() %}
+				{% if control['system'].get('cpu_temp') is not none %}
 				<div class="card shadow">
 					<div class="card-header bg-secondary text-white">
 						<h5>
