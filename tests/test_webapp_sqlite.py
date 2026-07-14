@@ -123,6 +123,53 @@ def test_api_current_route_reads_sqlite_via_blueprint():
 
 
 @pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+def test_admin_page_renders_with_none_cpu_temp():
+	"""Regression: the admin CPU card was gated only on
+	`'cpu_temp' in control['system'].keys()`, but routes.py stores that key
+	with value None whenever the temperature reading is unavailable
+	(unsupported platform or a timed-out system command). The template then
+	evaluated `cpu_temp < 50`, raising
+	`TypeError: '<' not supported between instances of 'NoneType' and 'int'`
+	-> HTTP 500 on GET /admin/.
+
+	In this harness there is no control process, so every system command
+	times out: get_supported_cmds() returns an ERROR dict and the route's
+	cpu_temp block is skipped, letting whatever we seed into
+	control['system'] reach the template verbatim. Seeding cpu_temp=None
+	reproduces exactly the production crash path."""
+	flask_app.config.update(TESTING=True)
+	client = flask_app.test_client()
+
+	control = default_control()
+	control['system']['cpu_temp'] = None
+	write_control(control, WriteKind.OVERWRITE, origin='test')
+
+	resp = client.get('/admin/')
+
+	# Pre-fix this raised TypeError inside the template -> 500.
+	assert resp.status_code == 200
+	# The CPU card must be suppressed rather than rendered with a None value.
+	assert 'CPU Temperature' not in resp.get_data(as_text=True)
+
+
+@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+def test_admin_page_renders_cpu_card_with_real_cpu_temp():
+	"""Complement to the None case: when cpu_temp is a real number the card
+	renders normally (guards the fix against over-suppressing the card)."""
+	flask_app.config.update(TESTING=True)
+	client = flask_app.test_client()
+
+	control = default_control()
+	control['system']['cpu_temp'] = 42.0
+	write_control(control, WriteKind.OVERWRITE, origin='test')
+
+	resp = client.get('/admin/')
+
+	assert resp.status_code == 200
+	assert 'CPU Temperature' in resp.get_data(as_text=True)
+
+
+@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_api_settings_post_writes_through_to_sqlite():
 	"""Round-trip a write through the blueprint (write_settings) and confirm
 	it lands in SQLite by reading it back through common.common directly."""
