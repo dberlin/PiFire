@@ -266,3 +266,58 @@ def test_enumerate_i2c_adapters_includes_serial(tmp_path):
 
 	adapters = i2c_bus._enumerate_i2c_adapters(devices_path=str(devices_dir))
 	assert adapters == [{'bus_num': 7, 'name': 'MCP2221 usb-i2c bridge', 'serial': 'AB12'}]
+
+
+def _make_usb_i2c_adapter(root, usb_name, serial, bus_num, adapter_name, devices_dir):
+	usb_dev = root / usb_name
+	usb_dev.mkdir(parents=True)
+	(usb_dev / 'serial').write_text(serial)
+	(usb_dev / 'idVendor').write_text('04d8')
+	iface = usb_dev / f'{usb_name}:1.0'
+	iface.mkdir()
+	bus_dir = iface / f'i2c-{bus_num}'
+	bus_dir.mkdir()
+	(bus_dir / 'name').write_text(adapter_name)
+	(devices_dir / f'i2c-{bus_num}').symlink_to(bus_dir)
+
+
+def test_find_i2c_bus_by_serial_matches(tmp_path):
+	devices_dir = tmp_path / 'devices_path'
+	devices_dir.mkdir()
+	_make_usb_i2c_adapter(tmp_path, 'usb1', 'AB12', 7, 'MCP2221 usb-i2c bridge', devices_dir)
+
+	assert i2c_bus.find_i2c_bus_by_serial('AB12', devices_path=str(devices_dir)) == 7
+
+
+def test_find_i2c_bus_by_serial_no_match_raises(tmp_path):
+	devices_dir = tmp_path / 'devices_path'
+	devices_dir.mkdir()
+	_make_usb_i2c_adapter(tmp_path, 'usb1', 'AB12', 7, 'MCP2221 usb-i2c bridge', devices_dir)
+
+	with pytest.raises(RuntimeError, match='No i2c adapter found with serial'):
+		i2c_bus.find_i2c_bus_by_serial('DEADBEEF', devices_path=str(devices_dir))
+
+
+def test_find_i2c_bus_by_serial_ambiguous_raises(tmp_path):
+	devices_dir = tmp_path / 'devices_path'
+	devices_dir.mkdir()
+	_make_usb_i2c_adapter(tmp_path, 'usb1', 'AB12', 1, 'MCP2221 usb-i2c bridge', devices_dir)
+	_make_usb_i2c_adapter(tmp_path, 'usb2', 'AB12', 2, 'MCP2221 usb-i2c bridge', devices_dir)
+
+	with pytest.raises(RuntimeError, match='Multiple i2c adapters have serial'):
+		i2c_bus.find_i2c_bus_by_serial('AB12', devices_path=str(devices_dir))
+
+
+def test_find_i2c_bus_by_serial_is_exact_not_substring(tmp_path):
+	devices_dir = tmp_path / 'devices_path'
+	devices_dir.mkdir()
+	_make_usb_i2c_adapter(tmp_path, 'usb1', 'AB1234', 7, 'MCP2221 usb-i2c bridge', devices_dir)
+
+	with pytest.raises(RuntimeError, match='No i2c adapter found with serial'):
+		i2c_bus.find_i2c_bus_by_serial('AB12', devices_path=str(devices_dir))
+
+
+def test_resolve_i2c_bus_serial_prefix_dispatches(monkeypatch):
+	monkeypatch.setattr(i2c_bus, 'find_i2c_bus_by_serial', lambda serial: 42 if serial == 'AB12' else None)
+	assert resolve_i2c_bus('serial:AB12') == 42
+	assert resolve_i2c_bus('SERIAL:AB12') == 42  # prefix keyword is case-insensitive

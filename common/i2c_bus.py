@@ -129,14 +129,49 @@ def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
 	raise RuntimeError(f'Multiple i2c adapters match {match!r}: {sorted(found)}. Available adapters: {available}')
 
 
+def find_i2c_bus_by_serial(serial, devices_path='/sys/bus/i2c/devices'):
+	"""
+	Return the integer i2c bus number whose adapter's USB iSerial exactly
+	equals `serial` (case-sensitive, no substring matching -- a serial is
+	meant to be unambiguous). Raises RuntimeError if zero or more than one
+	adapter matches, listing every available adapter (with its serial, if
+	any) so the error is actionable without a second lookup.
+	"""
+	target = str(serial)
+	adapters = _enumerate_i2c_adapters(devices_path)
+
+	found = [a['bus_num'] for a in adapters if a['serial'] == target]
+	available = (
+		', '.join(f'i2c-{a["bus_num"]} (serial={a["serial"]!r})' for a in sorted(adapters, key=lambda a: a['bus_num']))
+		or '(none)'
+	)
+	logger.debug('find_i2c_bus_by_serial: matching %r among adapters: %s', serial, available)
+	if len(found) == 1:
+		logger.debug('find_i2c_bus_by_serial: %r matched i2c-%d', serial, found[0])
+		return found[0]
+	if not found:
+		raise RuntimeError(
+			f'No i2c adapter found with serial {serial!r} under {devices_path}. Available adapters: {available}'
+		)
+	raise RuntimeError(
+		f'Multiple i2c adapters have serial {serial!r}: {sorted(found)}. Available adapters: {available}'
+	)
+
+
 def resolve_i2c_bus(bus):
 	"""
 	Resolve an extended-i2c-bus spec to a bus number. Accepts an int or numeric
-	string (e.g. 3 / '3' -> /dev/i2c-3, used directly) or an adapter-name match
-	string (e.g. 'CP2112' -> discovered via find_i2c_bus, robust against the
-	dynamic bus numbers USB-to-I2C bridges get).
+	string (e.g. 3 / '3' -> /dev/i2c-3, used directly), a 'serial:<ISERIAL>'
+	USB-serial match (e.g. 'serial:0012AB34' -> discovered via
+	find_i2c_bus_by_serial, the only way to distinguish two identical USB-to-I2C
+	bridges), or an adapter-name match string (e.g. 'CP2112' -> discovered via
+	find_i2c_bus, robust against the dynamic bus numbers USB-to-I2C bridges get).
 	"""
 	spec = str(bus).strip()
+	if spec.lower().startswith('serial:'):
+		serial = spec.split(':', 1)[1].strip()
+		logger.debug('resolve_i2c_bus: %r is a USB-serial match, discovering the bus number', bus)
+		return find_i2c_bus_by_serial(serial)
 	if spec.isdigit():
 		logger.debug('resolve_i2c_bus: %r is a numeric bus -> /dev/i2c-%s', bus, spec)
 		return int(spec)
