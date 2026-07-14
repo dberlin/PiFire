@@ -132,6 +132,70 @@ def test_easymcp2221_backend_translates_i2c_errors_to_oserror(exc_cls):
 		backend.readfrom_into(0x40, bytearray(1))
 
 
+class _FailingHalfI2CDevice:
+	"""Stand-in for an EasyMCP2221.Device whose I2C_write and/or I2C_read can
+	each independently be told to raise, so writeto_then_readfrom's two
+	distinct call sites (the write half and the read half) can be tested
+	separately."""
+
+	def __init__(self, read_result=b'', raise_on_write=None, raise_on_read=None):
+		self.read_result = read_result
+		self.raise_on_write = raise_on_write
+		self.raise_on_read = raise_on_read
+		self.calls = []
+
+	def I2C_write(self, addr, data, kind='regular', timeout_ms=20):
+		self.calls.append(('write', addr, bytes(data), kind))
+		if self.raise_on_write:
+			raise self.raise_on_write
+
+	def I2C_read(self, addr, size=1, kind='regular', timeout_ms=20):
+		self.calls.append(('read', addr, size, kind))
+		if self.raise_on_read:
+			raise self.raise_on_read
+		return self.read_result
+
+
+@pytest.mark.parametrize('exc_cls', [NotAckError, TimeoutError, LowSCLError, LowSDAError])
+def test_easymcp2221_backend_writeto_then_readfrom_translates_write_half_error(exc_cls):
+	device = _FailingHalfI2CDevice(raise_on_write=exc_cls('boom'))
+	backend = i2c_bus._EasyMCP2221Backend(device)
+	with pytest.raises(OSError):
+		backend.writeto_then_readfrom(0x40, b'\x00', bytearray(2))
+
+
+@pytest.mark.parametrize('exc_cls', [NotAckError, TimeoutError, LowSCLError, LowSDAError])
+def test_easymcp2221_backend_writeto_then_readfrom_translates_read_half_error(exc_cls):
+	device = _FailingHalfI2CDevice(read_result=b'\xaa\xbb', raise_on_read=exc_cls('boom'))
+	backend = i2c_bus._EasyMCP2221Backend(device)
+	with pytest.raises(OSError):
+		backend.writeto_then_readfrom(0x40, b'\x00', bytearray(2))
+	# The write half must have actually happened before the read half raised.
+	assert device.calls == [('write', 0x40, b'\x00', 'nonstop'), ('read', 0x40, 2, 'restart')]
+
+
+class _PerAddressI2CDevice:
+	"""Stand-in for an EasyMCP2221.Device that only ACKs (returns normally)
+	for a fixed set of addresses, raising NotAckError for every other
+	address -- so scan()'s per-address inclusion/exclusion can be tested."""
+
+	def __init__(self, acking_addresses):
+		self.acking_addresses = set(acking_addresses)
+		self.calls = []
+
+	def I2C_read(self, addr, size=1, kind='regular', timeout_ms=20):
+		self.calls.append(('read', addr, size, kind))
+		if addr not in self.acking_addresses:
+			raise NotAckError('no device')
+		return b'\x00'
+
+
+def test_easymcp2221_backend_scan_excludes_addresses_that_raise():
+	device = _PerAddressI2CDevice(acking_addresses={0x10, 0x50})
+	backend = i2c_bus._EasyMCP2221Backend(device)
+	assert backend.scan() == [0x10, 0x50]
+
+
 def test_open_ft232h_sets_env_transiently_and_restores(monkeypatch):
 	monkeypatch.delenv('BLINKA_FT232H', raising=False)
 	created = []
