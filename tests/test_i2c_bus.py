@@ -247,78 +247,74 @@ def types_module_with(**attrs):
 	return mod
 
 
-def _fake_mcp2221_modules(enumerate_result):
-	"""Build fake adafruit_blinka mcp2221 backend modules + a fake hid module.
+def _fake_easymcp2221_module(not_found_serials=frozenset()):
+	"""Build a fake EasyMCP2221 module exposing a Device class that records
+	every (usbserial, scan_serial) construction as its own independent
+	instance -- never a shared singleton, which is the whole point of this
+	swap -- and raises RuntimeError like the real library when usbserial is
+	in not_found_serials.
 
-	Returns (modules_dict_for_sys_modules, handle_mock, i2c_ctor_calls)."""
+	Returns (modules_dict_for_sys_modules, the fake Device class)."""
 	import types
 
-	handle = mock.Mock()  # stands in for mcp2221._hid (the open HID handle)
+	class _FakeDevice:
+		instances = []
 
-	singleton = types.SimpleNamespace(_hid=handle)
+		def __init__(self, usbserial=None, scan_serial=False):
+			if usbserial in not_found_serials:
+				raise RuntimeError(f'No device found with serial number {usbserial}.')
+			self.usbserial = usbserial
+			self.scan_serial = scan_serial
+			_FakeDevice.instances.append(self)
 
-	class _MCP2221:
-		VID = 0x04D8
-		PID = 0x00DD
-
-	mcp2221_mod = types.ModuleType('adafruit_blinka.microcontroller.mcp2221.mcp2221')
-	mcp2221_mod.mcp2221 = singleton
-	mcp2221_mod.MCP2221 = _MCP2221
-
-	pkg = types.ModuleType('adafruit_blinka.microcontroller.mcp2221')
-	pkg.mcp2221 = singleton  # so `from ...mcp2221 import mcp2221 as _mcp_mod` yields the module below
-	# NOTE: `from adafruit_blinka.microcontroller.mcp2221 import mcp2221` resolves the
-	# submodule `mcp2221` -> must be the module object, not the singleton:
-	pkg.mcp2221 = mcp2221_mod
-
-	i2c_ctor_calls = []
-
-	class _I2C:
-		def __init__(self):
-			i2c_ctor_calls.append(True)
-
-	i2c_mod = types.ModuleType('adafruit_blinka.microcontroller.mcp2221.i2c')
-	i2c_mod.I2C = _I2C
-
-	hid_mod = types.ModuleType('hid')
-	hid_mod.enumerate = lambda vid, pid: enumerate_result
-
-	modules = {
-		'adafruit_blinka.microcontroller.mcp2221': pkg,
-		'adafruit_blinka.microcontroller.mcp2221.mcp2221': mcp2221_mod,
-		'adafruit_blinka.microcontroller.mcp2221.i2c': i2c_mod,
-		'hid': hid_mod,
-	}
-	return modules, handle, i2c_ctor_calls
+	mod = types.ModuleType('EasyMCP2221')
+	mod.Device = _FakeDevice
+	return {'EasyMCP2221': mod}, _FakeDevice
 
 
 def test_open_mcp2221_no_selector_constructs_backend():
-	modules, handle, ctor = _fake_mcp2221_modules(enumerate_result=[])
+	modules, FakeDevice = _fake_easymcp2221_module()
 	with mock.patch.dict('sys.modules', modules):
 		bus = i2c_bus.open_i2c_bus('mcp2221', '')
 	assert isinstance(bus, i2c_bus._LockedI2C)
-	assert ctor == [True]
-	handle.open_path.assert_not_called()  # no selector -> first device, no reopen
+	assert len(FakeDevice.instances) == 1
+	assert FakeDevice.instances[0].usbserial is None
+	assert FakeDevice.instances[0].scan_serial is False
 
 
 def test_open_mcp2221_selector_opens_matching_serial():
-	enumerate_result = [
-		{'serial_number': 'AAAA', 'path': b'/dev/hidraw0'},
-		{'serial_number': 'BBBB', 'path': b'/dev/hidraw1'},
-	]
-	modules, handle, ctor = _fake_mcp2221_modules(enumerate_result)
+	modules, FakeDevice = _fake_easymcp2221_module()
 	with mock.patch.dict('sys.modules', modules):
 		bus = i2c_bus.open_i2c_bus('mcp2221', 'BBBB')
 	assert isinstance(bus, i2c_bus._LockedI2C)
-	handle.close.assert_called_once()
-	handle.open_path.assert_called_once_with(b'/dev/hidraw1')
+	assert len(FakeDevice.instances) == 1
+	assert FakeDevice.instances[0].usbserial == 'BBBB'
+	assert FakeDevice.instances[0].scan_serial is True
 
 
 def test_open_mcp2221_selector_not_found_raises():
-	modules, handle, ctor = _fake_mcp2221_modules(enumerate_result=[{'serial_number': 'AAAA', 'path': b'/dev/hidraw0'}])
+	modules, FakeDevice = _fake_easymcp2221_module(not_found_serials={'ZZZZ'})
 	with mock.patch.dict('sys.modules', modules):
 		with pytest.raises(i2c_bus.I2CBusConfigError):
 			i2c_bus.open_i2c_bus('mcp2221', 'ZZZZ')
+
+
+def test_open_mcp2221_two_selectors_stay_independently_live():
+	"""Regression test for the bug this whole change fixes: Blinka's MCP2221
+	backend was a single process-wide singleton, so opening a second serial
+	silently re-pointed the first bus's HID handle at the second device.
+	EasyMCP2221.Device is per-adapter, so two different selectors must
+	produce two distinct, independently-live Device instances."""
+	modules, FakeDevice = _fake_easymcp2221_module()
+	with mock.patch.dict('sys.modules', modules):
+		bus_a = i2c_bus.open_i2c_bus('mcp2221', 'AAAA')
+		bus_b = i2c_bus.open_i2c_bus('mcp2221', 'BBBB')
+	assert bus_a is not bus_b
+	assert len(FakeDevice.instances) == 2
+	dev_a, dev_b = FakeDevice.instances
+	assert dev_a is not dev_b
+	assert dev_a.usbserial == 'AAAA'
+	assert dev_b.usbserial == 'BBBB'
 
 
 def test_probes_base_reexports_bus_helpers():

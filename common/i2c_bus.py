@@ -12,11 +12,20 @@ Description:
     basic      -- Blinka's board singleton: busio.I2C(board.SCL, board.SDA)
     extended   -- a kernel i2c-dev bus (/dev/i2c-N or an adapter-name match)
     ft232h     -- an FT232H USB adapter, via its Blinka MPSSE backend
-    mcp2221    -- an MCP2221 USB adapter, via its Blinka backend
+    mcp2221    -- an MCP2221 USB adapter, via the EasyMCP2221 library
 
   ft232h/mcp2221 bypass the process-global `board` singleton so two USB
   adapters can run at once; they cannot be combined with `basic` (which owns
   `board`). See docs/superpowers/specs/2026-07-12-dual-usb-i2c-bus-design.md.
+
+  mcp2221 uses EasyMCP2221 rather than Blinka's MCP2221 backend because
+  Blinka's is a process-wide singleton (`mcp2221 = MCP2221()` opened once at
+  import time): selecting a second serial re-points that *same* singleton's
+  HID handle, silently stealing it out from under any bus already cached for
+  the first serial. EasyMCP2221.Device() is a per-adapter object (deduped by
+  USB path, not shared across different adapters), so multiple MCP2221s can
+  be open and in use at once -- see
+  docs/superpowers/specs/2026-07-14-mcp2221-easymcp2221-backend-design.md.
 """
 
 import glob
@@ -422,35 +431,20 @@ def _construct_ft232h(selector):
 
 
 def _construct_mcp2221(selector):
-	from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
-	from adafruit_blinka.microcontroller.mcp2221.i2c import I2C as _MCP2221_I2C
+	from EasyMCP2221 import Device as _MCP2221Device
 
-	if selector:
-		# Point the Blinka MCP2221 singleton at the adapter with this serial.
-		logger.debug('open_i2c_bus[mcp2221]: selecting MCP2221 with serial=%r', selector)
-		import hid
-
-		path = None
-		for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID):
-			if info.get('serial_number') == str(selector):
-				path = info['path']
-				break
-		if path is None:
-			raise I2CBusConfigError(f'No MCP2221 found with serial {selector!r}.')
-		logger.debug('open_i2c_bus[mcp2221]: serial %r -> hid path %r', selector, path)
-		handle = _mcp_mod.mcp2221._hid
-		try:
-			handle.close()
-		except Exception:
-			pass
-		handle.open_path(path)
-	else:
-		logger.debug(
-			'open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)',
-			_mcp_mod.MCP2221.VID,
-			_mcp_mod.MCP2221.PID,
-		)
-	return _LockedI2C(_MCP2221_I2C())
+	try:
+		if selector:
+			logger.debug('open_i2c_bus[mcp2221]: opening MCP2221 with serial=%r', selector)
+			device = _MCP2221Device(usbserial=str(selector), scan_serial=True)
+		else:
+			logger.debug(
+				'open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)', _MCP2221_VID, _MCP2221_PID
+			)
+			device = _MCP2221Device()
+	except RuntimeError as exc:
+		raise I2CBusConfigError(str(exc)) from exc
+	return _LockedI2C(_EasyMCP2221Backend(device))
 
 
 def _construct_bus(kind, selector):
