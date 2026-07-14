@@ -774,6 +774,18 @@ full = [
 ]
 
 [[package]]
+name = "easymcp2221"
+version = "1.8.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "hidapi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7b/22/57bf74b2cd1d10f60f457f673ed47a29f38fc3cd237b5f3e717896e3ca2d/easymcp2221-1.8.4.tar.gz", hash = "sha256:361488c548322eeb0a887984826313cd2b2c3ff004acfea4ba1c41f753677ce9", size = 30754, upload-time = "2025-09-19T16:02:54.118Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7a/05/8017e2c4a004cccff910409073be786e21f0dc1e8b0f37a9de750039df79/easymcp2221-1.8.4-py3-none-any.whl", hash = "sha256:9e0a274f1f30defd0ad9a30695fd2f4191c398378ee3f645735c4d015aecf2bb", size = 33737, upload-time = "2025-09-19T16:02:52.956Z" },
+]
+
+[[package]]
 name = "executing"
 version = "2.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1689,6 +1701,7 @@ dependencies = [
     { name = "bleak" },
     { name = "bluepy" },
     { name = "do-mpc", extra = ["full"] },
+    { name = "easymcp2221" },
     { name = "flask" },
     { name = "flask-mobility" },
     { name = "flask-qrcode" },
@@ -1732,6 +1745,7 @@ requires-dist = [
     { name = "bleak", specifier = ">=3.0.2" },
     { name = "bluepy", specifier = ">=1.3.0" },
     { name = "do-mpc", extras = ["full"], specifier = ">=5.1.1" },
+    { name = "easymcp2221", specifier = ">=1.8.4" },
     { name = "flask", specifier = ">=3.1.3" },
     { name = "flask-mobility", specifier = ">=2.0.1" },
     { name = "flask-qrcode", specifier = ">=3.2.0" },

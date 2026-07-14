@@ -38,6 +38,7 @@ dependencies = [
     "gpiozero>=2.0.1",
     "pygame-ce>=2.5.7",
     "pyside6>=6.11.1",
+    "easymcp2221>=1.8.4",
 ]
 
 [dependency-groups]
