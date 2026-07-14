@@ -165,8 +165,6 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 
 	for module in WizardInstallInfo['modules']:
 		for setting in WizardInstallInfo['modules'][module]['settings']:
-			selected = WizardInstallInfo['modules'][module]['profile_selected'][0]
-			settingsLocation = WizardData['modules'][module][selected]['settings_dependencies'][setting]['settings']
 			selected_setting = WizardInstallInfo['modules'][module]['settings'][setting]
 
 			# Convert Strings to the correct type
@@ -180,6 +178,13 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 				elif (units == 'F') and (settings['globals']['units'] == 'C'):
 					settings = convert_settings_units('F', settings)
 			else:
+				# 'selected'/'settingsLocation' only apply to settings that map to a
+				# manifest settings_dependencies path. The probes module's only setting
+				# is 'units' (handled above) and its profile_selected list is empty when
+				# no probe devices are configured -- computing these before the units
+				# check would raise IndexError and silently kill the detached installer.
+				selected = WizardInstallInfo['modules'][module]['profile_selected'][0]
+				settingsLocation = WizardData['modules'][module][selected]['settings_dependencies'][setting]['settings']
 				settings = set_nested_key_value(settings, settingsLocation, selected_setting)
 			output = f'   + Set {setting} in settings.json'
 			set_wizard_install_status(percent, status, output)
