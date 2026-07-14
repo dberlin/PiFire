@@ -317,6 +317,83 @@ def test_open_mcp2221_two_selectors_stay_independently_live():
 	assert dev_b.usbserial == 'BBBB'
 
 
+def _fake_easymcp2221_module_with_catalog(first_device_serial='FIRST'):
+	"""Build a fake EasyMCP2221 module whose Device mimics the real
+	library's object-identity dedup (EasyMCP2221.Device.__new__ returns the
+	SAME Python object for the SAME physical adapter, per its own class
+	docstring, regardless of which selector spelling found it): a blank
+	selector always resolves to `first_device_serial`; any other usbserial
+	is treated as a distinct physical device. This is the exact aliasing
+	shape (blank selector vs. that same device's own explicit serial) the
+	selector-aliasing fix targets -- the plain `_fake_easymcp2221_module`
+	fake above has no catalog behavior at all, so it cannot express this.
+
+	Returns (modules_dict_for_sys_modules, the fake Device class)."""
+	import types
+
+	class _FakeDevice:
+		catalog = {}  # identity (usbserial, or first_device_serial for blank) -> instance
+
+		def __new__(cls, usbserial=None, scan_serial=False):
+			identity = first_device_serial if usbserial is None else usbserial
+			existing = cls.catalog.get(identity)
+			if existing is not None:
+				return existing
+			self = super().__new__(cls)
+			cls.catalog[identity] = self
+			return self
+
+		def __init__(self, usbserial=None, scan_serial=False):
+			# Mirrors the real library: __init__ runs every time, even on a
+			# cataloged/reused object (Python always calls __init__ on
+			# whatever __new__ returns).
+			self.usbserial = first_device_serial if usbserial is None else usbserial
+			self.scan_serial = scan_serial
+
+	mod = types.ModuleType('EasyMCP2221')
+	mod.Device = _FakeDevice
+	return {'EasyMCP2221': mod}, _FakeDevice
+
+
+def test_open_mcp2221_blank_and_explicit_serial_alias_share_one_bus():
+	"""Regression test for the selector-aliasing bug: a blank selector and
+	the explicit serial of that same first device resolve to the SAME
+	EasyMCP2221.Device object (per EasyMCP2221's own object-identity dedup).
+	The returned bus must be shared too -- one lock, not two independently
+	locked wrappers around one physical adapter."""
+	modules, FakeDevice = _fake_easymcp2221_module_with_catalog(first_device_serial='FIRST')
+	with mock.patch.dict('sys.modules', modules):
+		bus_blank = i2c_bus.open_i2c_bus('mcp2221', '')
+		bus_serial = i2c_bus.open_i2c_bus('mcp2221', 'FIRST')
+	assert bus_blank is bus_serial
+	assert len(FakeDevice.catalog) == 1
+
+
+def test_open_mcp2221_explicit_serial_and_blank_alias_share_one_bus_reverse_order():
+	"""Same aliasing scenario as above, opened in the opposite order --
+	proves the dedup doesn't depend on which selector spelling was seen
+	first."""
+	modules, FakeDevice = _fake_easymcp2221_module_with_catalog(first_device_serial='FIRST')
+	with mock.patch.dict('sys.modules', modules):
+		bus_serial = i2c_bus.open_i2c_bus('mcp2221', 'FIRST')
+		bus_blank = i2c_bus.open_i2c_bus('mcp2221', '')
+	assert bus_blank is bus_serial
+	assert len(FakeDevice.catalog) == 1
+
+
+def test_open_mcp2221_non_aliasing_selectors_stay_independent():
+	"""A blank selector and an explicit serial that do NOT match the first
+	device must still produce two independent buses -- confirms the dedup
+	only merges genuine aliases of the same physical device, not every
+	mcp2221 bus indiscriminately."""
+	modules, FakeDevice = _fake_easymcp2221_module_with_catalog(first_device_serial='FIRST')
+	with mock.patch.dict('sys.modules', modules):
+		bus_blank = i2c_bus.open_i2c_bus('mcp2221', '')
+		bus_other = i2c_bus.open_i2c_bus('mcp2221', 'SECOND')
+	assert bus_blank is not bus_other
+	assert len(FakeDevice.catalog) == 2
+
+
 def test_probes_base_reexports_bus_helpers():
 	import common.i2c_bus as cib
 	import probes.base as base

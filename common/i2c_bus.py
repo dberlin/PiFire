@@ -396,12 +396,27 @@ _bus_cache = {}  # (kind, selector) -> bus object
 _opened_kinds = set()  # kinds actually opened this process
 _cache_lock = threading.RLock()
 
+# EasyMCP2221.Device -> _LockedI2C, guarded by _cache_lock. mcp2221 selectors
+# (blank vs. an explicit serial) can alias the same physical adapter --
+# EasyMCP2221.Device.__new__ already dedupes that case by returning the same
+# Device object (see its class docstring), so this registry piggybacks on
+# that identity to make sure an aliasing selector reuses the existing bus
+# (and its lock) instead of wrapping the same device a second time under an
+# independent lock. Keyed by the Device object itself (default identity
+# hashing; EasyMCP2221.Device defines no __eq__/__hash__), not by
+# device.usbserial -- an MCP2221 that has never had a custom serial
+# programmed reports a shared, non-unique factory-default serial, so keying
+# on that value would risk merging two genuinely different physical
+# adapters.
+_mcp2221_bus_by_device = {}
+
 
 def reset_bus_state():
 	"""Clear the bus cache and opened-kind registry. Tests only."""
 	with _cache_lock:
 		_bus_cache.clear()
 		_opened_kinds.clear()
+		_mcp2221_bus_by_device.clear()
 
 
 def _canonical_selector(kind, selector):
@@ -433,21 +448,37 @@ def _construct_ft232h(selector):
 	return _LockedI2C(backend)
 
 
-def _construct_mcp2221(selector):
+def _open_mcp2221_device(selector):
 	from EasyMCP2221 import Device as _MCP2221Device
 
 	try:
 		if selector:
 			logger.debug('open_i2c_bus[mcp2221]: opening MCP2221 with serial=%r', selector)
-			device = _MCP2221Device(usbserial=str(selector), scan_serial=True)
-		else:
-			logger.debug(
-				'open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)', _MCP2221_VID, _MCP2221_PID
-			)
-			device = _MCP2221Device()
+			return _MCP2221Device(usbserial=str(selector), scan_serial=True)
+		logger.debug(
+			'open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)', _MCP2221_VID, _MCP2221_PID
+		)
+		return _MCP2221Device()
 	except RuntimeError as exc:
 		raise I2CBusConfigError(str(exc)) from exc
-	return _LockedI2C(_EasyMCP2221Backend(device))
+
+
+def _construct_mcp2221(selector):
+	# A blank selector and an explicit serial can both resolve to the same
+	# physical adapter -- EasyMCP2221.Device.__new__ already returns the
+	# same Device object for that case, so re-check the registry after
+	# opening rather than trusting the (kind, selector) cache key alone;
+	# open_i2c_bus's cache only dedupes identical selector strings.
+	device = _open_mcp2221_device(selector)
+	bus = _mcp2221_bus_by_device.get(device)
+	if bus is None:
+		bus = _LockedI2C(_EasyMCP2221Backend(device))
+		_mcp2221_bus_by_device[device] = bus
+	else:
+		logger.debug(
+			'open_i2c_bus[mcp2221]: selector=%r aliases an already-open MCP2221; reusing its shared bus/lock', selector
+		)
+	return bus
 
 
 def _construct_bus(kind, selector):
