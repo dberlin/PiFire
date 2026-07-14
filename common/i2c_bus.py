@@ -83,15 +83,12 @@ def _read_usb_serial(bus_dir, max_hops=15):
 	return None
 
 
-def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
-	"""
-	Return the integer i2c bus number whose adapter name contains `match`
-	(case-insensitive), e.g. 'CP2112' for a USB-to-I2C bridge. Scans
-	`<devices_path>/i2c-*/name`. Raises RuntimeError if zero or more than one
-	adapter matches, so the caller fails clearly rather than guessing.
-	"""
-	match_lower = str(match).lower()
-	adapters = []  # (bus_num, name) for every i2c adapter present
+def _enumerate_i2c_adapters(devices_path='/sys/bus/i2c/devices'):
+	"""Return [{'bus_num': int, 'name': str, 'serial': str | None}, ...] for
+	every i2c-dev adapter under devices_path. 'serial' is the USB iSerial of
+	the adapter's USB ancestor (via _read_usb_serial), or None if it has none
+	(e.g. an onboard/non-USB adapter)."""
+	adapters = []
 	for bus_dir in glob.glob(os.path.join(devices_path, 'i2c-*')):
 		try:
 			with open(os.path.join(bus_dir, 'name')) as handle:
@@ -102,11 +99,25 @@ def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
 			bus_num = int(os.path.basename(bus_dir).split('-')[-1])
 		except ValueError:
 			continue
-		adapters.append((bus_num, name))
+		adapters.append({'bus_num': bus_num, 'name': name, 'serial': _read_usb_serial(bus_dir)})
+	return adapters
 
-	found = [num for num, name in adapters if match_lower in name.lower()]
-	# Include what IS present so debug logs and error messages both show it.
-	available = ', '.join(f'i2c-{n} ({name!r})' for n, name in sorted(adapters)) or '(none)'
+
+def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
+	"""
+	Return the integer i2c bus number whose adapter name contains `match`
+	(case-insensitive), e.g. 'CP2112' for a USB-to-I2C bridge. Scans
+	`<devices_path>/i2c-*/name`. Raises RuntimeError if zero or more than one
+	adapter matches, so the caller fails clearly rather than guessing.
+	"""
+	match_lower = str(match).lower()
+	adapters = _enumerate_i2c_adapters(devices_path)
+
+	found = [a['bus_num'] for a in adapters if match_lower in a['name'].lower()]
+	available = (
+		', '.join(f'i2c-{a["bus_num"]} ({a["name"]!r})' for a in sorted(adapters, key=lambda a: a['bus_num']))
+		or '(none)'
+	)
 	logger.debug('find_i2c_bus: matching %r among adapters: %s', match, available)
 	if len(found) == 1:
 		logger.debug('find_i2c_bus: %r matched i2c-%d', match, found[0])

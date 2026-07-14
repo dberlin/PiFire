@@ -251,3 +251,18 @@ def test_read_usb_serial_ignores_serial_file_without_idvendor(tmp_path):
 	(bus_dir / 'name').write_text('some adapter\n')
 
 	assert i2c_bus._read_usb_serial(str(bus_dir)) is None
+
+
+def test_enumerate_i2c_adapters_includes_serial(tmp_path):
+	usb_device = tmp_path / 'devices' / 'usb1' / '1-1'
+	usb_device.mkdir(parents=True)
+	(usb_device / 'serial').write_text('AB12')
+	(usb_device / 'idVendor').write_text('04d8')
+	devices_dir = usb_device / '1-1:1.0'
+	devices_dir.mkdir()
+	bus_dir = devices_dir / 'i2c-7'
+	bus_dir.mkdir()
+	(bus_dir / 'name').write_text('MCP2221 usb-i2c bridge')
+
+	adapters = i2c_bus._enumerate_i2c_adapters(devices_path=str(devices_dir))
+	assert adapters == [{'bus_num': 7, 'name': 'MCP2221 usb-i2c bridge', 'serial': 'AB12'}]
