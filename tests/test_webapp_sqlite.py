@@ -229,14 +229,40 @@ def test_i2c_bus_scan_extended_lists_discovered_adapters(monkeypatch):
 	monkeypatch.setattr(
 		wizard_routes,
 		'discover_extended_i2c_buses',
-		lambda: [{'bus_num': 7, 'name': 'MCP2221 usb-i2c bridge', 'serial': 'AB12'}],
+		lambda: [
+			{'bus_num': 7, 'name': 'MCP2221 usb-i2c bridge', 'serial': 'AB12'},
+			{'bus_num': 1, 'name': 'onboard adapter', 'serial': None},
+		],
 	)
 
 	resp = client.post('/wizard/i2c_bus_scan', data={'itemID': 'distance_devspec_i2c_bus_num', 'kind': 'extended'})
 	assert resp.status_code == 200
 	body = resp.get_data(as_text=True)
 	assert 'i2c-7' in body
+	assert 'i2c-1' in body
 	assert 'serial:AB12' in body
+	assert 'By Bus Number' in body
+	assert 'By Serial' in body
+
+
+@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+def test_i2c_bus_scan_extended_omits_by_serial_group_when_no_serials(monkeypatch):
+	flask_app.config.update(TESTING=True)
+	client = flask_app.test_client()
+
+	import blueprints.wizard.routes as wizard_routes
+
+	monkeypatch.setattr(
+		wizard_routes,
+		'discover_extended_i2c_buses',
+		lambda: [{'bus_num': 1, 'name': 'onboard adapter', 'serial': None}],
+	)
+
+	resp = client.post('/wizard/i2c_bus_scan', data={'itemID': 'distance_devspec_i2c_bus_num', 'kind': 'extended'})
+	assert resp.status_code == 200
+	body = resp.get_data(as_text=True)
+	assert 'By Bus Number' in body
+	assert 'By Serial' not in body
 
 
 @pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')

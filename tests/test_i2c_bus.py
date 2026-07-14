@@ -474,6 +474,21 @@ def test_discover_extended_i2c_buses_empty_when_missing_path():
 	assert i2c_bus.discover_extended_i2c_buses(devices_path='/no/such/path') == []
 
 
+def test_enumerate_i2c_adapters_sorts_by_bus_num(tmp_path, monkeypatch):
+	devices_dir = tmp_path / 'devices_path'
+	devices_dir.mkdir()
+	_make_usb_i2c_adapter(tmp_path, 'usb1', 'AB12', 9, 'adapter nine', devices_dir)
+	_make_usb_i2c_adapter(tmp_path, 'usb2', 'CD34', 3, 'adapter three', devices_dir)
+
+	# glob.glob order isn't guaranteed to match bus_num order; force the
+	# out-of-order case explicitly rather than relying on filesystem quirks.
+	real_glob = i2c_bus.glob.glob
+	monkeypatch.setattr(i2c_bus.glob, 'glob', lambda pattern: sorted(real_glob(pattern), reverse=True))
+
+	adapters = i2c_bus._enumerate_i2c_adapters(devices_path=str(devices_dir))
+	assert [a['bus_num'] for a in adapters] == [3, 9]
+
+
 def test_discover_mcp2221_devices_lists_serials():
 	hid_mod = types_module_with(
 		enumerate=lambda vid, pid: [
@@ -484,6 +499,18 @@ def test_discover_mcp2221_devices_lists_serials():
 	with mock.patch.dict('sys.modules', {'hid': hid_mod}):
 		devices = i2c_bus.discover_mcp2221_devices()
 	assert devices == [{'serial': 'AAAA', 'path': b'/dev/hidraw0'}, {'serial': 'BBBB', 'path': b'/dev/hidraw1'}]
+
+
+def test_discover_mcp2221_devices_sorts_by_serial():
+	hid_mod = types_module_with(
+		enumerate=lambda vid, pid: [
+			{'serial_number': 'BBBB', 'path': b'/dev/hidraw1'},
+			{'serial_number': 'AAAA', 'path': b'/dev/hidraw0'},
+		]
+	)
+	with mock.patch.dict('sys.modules', {'hid': hid_mod}):
+		devices = i2c_bus.discover_mcp2221_devices()
+	assert [d['serial'] for d in devices] == ['AAAA', 'BBBB']
 
 
 def test_discover_mcp2221_devices_empty_without_hid_module():
@@ -503,6 +530,22 @@ def test_discover_ft232h_devices_lists_urls():
 	with mock.patch.dict('sys.modules', {'pyftdi.ftdi': fake_mod}):
 		devices = i2c_bus.discover_ft232h_devices()
 	assert devices == [{'url': 'ftdi://ftdi:232h:FT9/1', 'serial': 'FT9', 'description': 'Single RS232-HS'}]
+
+
+def test_discover_ft232h_devices_sorts_by_serial_and_handles_missing_serial():
+	descriptor_b = types_module_with(sn='FTB', description='Second')
+	descriptor_a = types_module_with(sn='FTA', description='First')
+	descriptor_none = types_module_with(sn=None, description='No Serial')
+
+	class FakeFtdi:
+		@staticmethod
+		def list_devices(url):
+			return [(descriptor_b, 1), (descriptor_none, 1), (descriptor_a, 1)]
+
+	fake_mod = types_module_with(Ftdi=FakeFtdi)
+	with mock.patch.dict('sys.modules', {'pyftdi.ftdi': fake_mod}):
+		devices = i2c_bus.discover_ft232h_devices()
+	assert [d['serial'] for d in devices] == [None, 'FTA', 'FTB']
 
 
 def test_discover_ft232h_devices_empty_without_pyftdi():

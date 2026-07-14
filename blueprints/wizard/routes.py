@@ -175,40 +175,51 @@ def wizard_page(action=None):
 		if action == 'i2c_bus_scan':
 			itemID = r['itemID']
 			kind = r.get('kind', '')
-			candidates = []
+			groups = []
 			error = None
 
 			try:
 				if kind == 'extended':
-					for adapter in discover_extended_i2c_buses():
-						candidates.append(
-							{'value': str(adapter['bus_num']), 'label': f'i2c-{adapter["bus_num"]} ({adapter["name"]})'}
-						)
-						if adapter['serial']:
-							candidates.append(
-								{
-									'value': f'serial:{adapter["serial"]}',
-									'label': f'{adapter["name"]} — serial {adapter["serial"]}',
-								}
-							)
+					adapters = discover_extended_i2c_buses()
+					by_bus = [
+						{'value': str(a['bus_num']), 'label': f'i2c-{a["bus_num"]} ({a["name"]})'} for a in adapters
+					]
+					by_serial = sorted(
+						(
+							{'value': f'serial:{a["serial"]}', 'label': f'{a["name"]} — serial {a["serial"]}'}
+							for a in adapters
+							if a['serial']
+						),
+						key=lambda c: c['value'].lower(),
+					)
+					if by_bus:
+						groups.append({'title': 'By Bus Number', 'items': by_bus})
+					if by_serial:
+						groups.append({'title': 'By Serial', 'items': by_serial})
 				elif kind == 'mcp2221':
-					for device in discover_mcp2221_devices():
-						candidates.append({'value': device['serial'], 'label': f'MCP2221 serial {device["serial"]}'})
+					items = [
+						{'value': d['serial'], 'label': f'MCP2221 serial {d["serial"]}'}
+						for d in discover_mcp2221_devices()
+					]
+					if items:
+						groups.append({'title': 'MCP2221 Devices', 'items': items})
 				elif kind == 'ft232h':
-					for device in discover_ft232h_devices():
-						candidates.append(
-							{'value': device['url'], 'label': f'{device["description"] or "FT232H"} ({device["url"]})'}
-						)
+					items = [
+						{'value': d['url'], 'label': f'{d["description"] or "FT232H"} ({d["url"]})'}
+						for d in discover_ft232h_devices()
+					]
+					if items:
+						groups.append({'title': 'FT232H Devices', 'items': items})
 				else:
 					error = f'Unknown I2C bus kind {kind!r}. Select Extended, FT232H, or MCP2221 first.'
 
-				if not candidates and error is None:
+				if not groups and error is None:
 					error = f'No {kind} I2C buses discovered.'
 			except Exception as e:
 				error = f'Something bad happened: {e}'
 
-			render_string = "{% from 'probeconfig/_macro_probes_config.html' import render_i2c_scan_table %}{{ render_i2c_scan_table(itemID, candidates, error) }}"
-			return render_template_string(render_string, itemID=itemID, candidates=candidates, error=error)
+			render_string = "{% from 'probeconfig/_macro_probes_config.html' import render_i2c_scan_table %}{{ render_i2c_scan_table(itemID, groups, error) }}"
+			return render_template_string(render_string, itemID=itemID, groups=groups, error=error)
 
 	""" Create Temporary Probe Device/Port Structure for Setup, Use Existing unless First Time Setup """
 	if settings['globals']['first_time_setup']:

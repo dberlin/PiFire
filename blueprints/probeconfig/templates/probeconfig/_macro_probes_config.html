@@ -699,7 +699,7 @@
     {% endif %}
 {% endmacro %}
 
-{% macro render_i2c_scan_table(itemID, candidates, error) %}
+{% macro render_i2c_scan_table(itemID, groups, error) %}
     {% if error %}
         <div class="alert alert-danger" role="alert">
             {{ error }}
@@ -713,13 +713,18 @@
                 </tr>
             </thead>
             <tbody>
-                {% for candidate in candidates %}
+                {% for group in groups %}
+                <tr>
+                    <th colspan="2" class="table-light">{{ group['title'] }}</th>
+                </tr>
+                {% for candidate in group['items'] %}
                 <tr>
                     <td class="align-middle">{{ candidate['label'] }}</td>
                     <td class="align-middle">
                         <button type="button" class="btn btn-primary btn-sm" onclick="selectI2CBus('{{ candidate['value'] }}', '{{ itemID }}')">Select</button>
                     </td>
                 </tr>
+                {% endfor %}
                 {% endfor %}
             </tbody>
         </table>

@@ -109,7 +109,7 @@ def _enumerate_i2c_adapters(devices_path='/sys/bus/i2c/devices'):
 		except ValueError:
 			continue
 		adapters.append({'bus_num': bus_num, 'name': name, 'serial': _read_usb_serial(bus_dir)})
-	return adapters
+	return sorted(adapters, key=lambda a: a['bus_num'])
 
 
 def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
@@ -189,11 +189,14 @@ def discover_mcp2221_devices():
 	except ImportError:
 		return []
 	try:
-		return [
-			{'serial': info.get('serial_number'), 'path': info.get('path')}
-			for info in hid.enumerate(_MCP2221_VID, _MCP2221_PID)
-			if info.get('serial_number')
-		]
+		return sorted(
+			(
+				{'serial': info.get('serial_number'), 'path': info.get('path')}
+				for info in hid.enumerate(_MCP2221_VID, _MCP2221_PID)
+				if info.get('serial_number')
+			),
+			key=lambda d: d['serial'].lower(),
+		)
 	except Exception:
 		logger.debug('discover_mcp2221_devices: hid.enumerate failed', exc_info=True)
 		return []
@@ -212,7 +215,7 @@ def discover_ft232h_devices():
 		for descriptor, _interface_count in Ftdi.list_devices('ftdi://ftdi:232h/'):
 			url = f'ftdi://ftdi:232h:{descriptor.sn}/1' if descriptor.sn else 'ftdi://ftdi:232h/1'
 			devices.append({'url': url, 'serial': descriptor.sn, 'description': descriptor.description})
-		return devices
+		return sorted(devices, key=lambda d: (d['serial'] or '').lower())
 	except Exception:
 		logger.debug('discover_ft232h_devices: Ftdi.list_devices failed', exc_info=True)
 		return []
