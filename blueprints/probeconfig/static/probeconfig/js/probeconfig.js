@@ -67,6 +67,33 @@ function selectThermoworksDevice(serial, numChannels, serialID, numProbesID) {
 }
 
 //
+// I2C Bus Discovery Functions
+//
+function scanI2CBus(itemID, kindItemID) {
+	const modal = '#i2c_' + itemID + '_Modal';
+	const modalContent = '#i2c_' + itemID + '_Select';
+	const kind = $('#' + kindItemID).val();
+	$(modal).modal('show');
+	// Show scanning text while scanning
+	$(modalContent).html('<br> \
+                <h4>Scanning...</h4> \
+                <br> \
+                <div class="fa-3x"> \
+                    <i class="fa-solid fa-magnifying-glass fa-bounce"></i> \
+                </div> \
+                <br></br>');
+	// Load the I2C bus scan results
+	$(modalContent).load("/wizard/i2c_bus_scan", {"itemID" : itemID, "kind" : kind});
+}
+
+function selectI2CBus(value, itemID) {
+	const modal = '#i2c_' + itemID + '_Modal';
+	$('#' + itemID).val(value);
+	// Hide the modal
+	$(modal).modal('hide');
+}
+
+//
 // Device Functions
 //
 

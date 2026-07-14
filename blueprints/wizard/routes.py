@@ -14,7 +14,13 @@ from common.common import (
 	is_real_hardware,
 )
 from common.app import get_supported_cmds, process_command, get_system_command_output
-from common.i2c_bus import I2CBusConfigError, validate_bus_kinds
+from common.i2c_bus import (
+	I2CBusConfigError,
+	discover_extended_i2c_buses,
+	discover_ft232h_devices,
+	discover_mcp2221_devices,
+	validate_bus_kinds,
+)
 
 from . import wizard_bp
 from .wizard import *
@@ -165,6 +171,44 @@ def wizard_page(action=None):
 			return render_template_string(
 				render_string, serialID=serialID, numProbesID=numProbesID, tw_data=tw_data, error=error
 			)
+
+		if action == 'i2c_bus_scan':
+			itemID = r['itemID']
+			kind = r.get('kind', '')
+			candidates = []
+			error = None
+
+			try:
+				if kind == 'extended':
+					for adapter in discover_extended_i2c_buses():
+						candidates.append(
+							{'value': str(adapter['bus_num']), 'label': f'i2c-{adapter["bus_num"]} ({adapter["name"]})'}
+						)
+						if adapter['serial']:
+							candidates.append(
+								{
+									'value': f'serial:{adapter["serial"]}',
+									'label': f'{adapter["name"]} — serial {adapter["serial"]}',
+								}
+							)
+				elif kind == 'mcp2221':
+					for device in discover_mcp2221_devices():
+						candidates.append({'value': device['serial'], 'label': f'MCP2221 serial {device["serial"]}'})
+				elif kind == 'ft232h':
+					for device in discover_ft232h_devices():
+						candidates.append(
+							{'value': device['url'], 'label': f'{device["description"] or "FT232H"} ({device["url"]})'}
+						)
+				else:
+					error = f'Unknown I2C bus kind {kind!r}. Select Extended, FT232H, or MCP2221 first.'
+
+				if not candidates and error is None:
+					error = f'No {kind} I2C buses discovered.'
+			except Exception as e:
+				error = f'Something bad happened: {e}'
+
+			render_string = "{% from 'probeconfig/_macro_probes_config.html' import render_i2c_scan_table %}{{ render_i2c_scan_table(itemID, candidates, error) }}"
+			return render_template_string(render_string, itemID=itemID, candidates=candidates, error=error)
 
 	""" Create Temporary Probe Device/Port Structure for Setup, Use Existing unless First Time Setup """
 	if settings['globals']['first_time_setup']:

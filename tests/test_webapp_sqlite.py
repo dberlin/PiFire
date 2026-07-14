@@ -220,6 +220,40 @@ def test_probeconfig_add_usb_hid_probe_not_blocked_by_stale_platform_bus():
 
 
 @pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+def test_i2c_bus_scan_extended_lists_discovered_adapters(monkeypatch):
+	flask_app.config.update(TESTING=True)
+	client = flask_app.test_client()
+
+	import blueprints.wizard.routes as wizard_routes
+
+	monkeypatch.setattr(
+		wizard_routes,
+		'discover_extended_i2c_buses',
+		lambda: [{'bus_num': 7, 'name': 'MCP2221 usb-i2c bridge', 'serial': 'AB12'}],
+	)
+
+	resp = client.post('/wizard/i2c_bus_scan', data={'itemID': 'distance_devspec_i2c_bus_num', 'kind': 'extended'})
+	assert resp.status_code == 200
+	body = resp.get_data(as_text=True)
+	assert 'i2c-7' in body
+	assert 'serial:AB12' in body
+
+
+@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+def test_i2c_bus_scan_no_devices_shows_error(monkeypatch):
+	flask_app.config.update(TESTING=True)
+	client = flask_app.test_client()
+
+	import blueprints.wizard.routes as wizard_routes
+
+	monkeypatch.setattr(wizard_routes, 'discover_mcp2221_devices', lambda: [])
+
+	resp = client.post('/wizard/i2c_bus_scan', data={'itemID': 'distance_devspec_i2c_bus_num', 'kind': 'mcp2221'})
+	assert resp.status_code == 200
+	assert 'No mcp2221 I2C buses discovered.' in resp.get_data(as_text=True)
+
+
+@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_wizard_finish_blocks_unworkable_bus_combo():
 	"""Finish-step whole-config check: a probe on the ft232h bus while the fan
 	controller is left on the onboard 'basic' bus is the one unworkable combo.

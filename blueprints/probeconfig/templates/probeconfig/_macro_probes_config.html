@@ -649,3 +649,30 @@
         </table>
     {% endif %}
 {% endmacro %}
+
+{% macro render_i2c_scan_table(itemID, candidates, error) %}
+    {% if error %}
+        <div class="alert alert-danger" role="alert">
+            {{ error }}
+        </div>
+    {% else %}
+        <table class="table">
+            <thead class="thead-light">
+                <tr>
+                <th scope="col">Discovered Bus</th>
+                <th scope="col"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for candidate in candidates %}
+                <tr>
+                    <td class="align-middle">{{ candidate['label'] }}</td>
+                    <td class="align-middle">
+                        <button type="button" class="btn btn-primary btn-sm" onclick="selectI2CBus('{{ candidate['value'] }}', '{{ itemID }}')">Select</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+{% endmacro %}
