@@ -9,21 +9,22 @@ def _manifest():
 	return json.load(open(path))
 
 
-def test_every_bridge_selector_offers_mcp2221():
-	"""Every i2c_bus_num settings-dependency that offers the CP2112 bridge-name
-	match must also offer MCP2221, so the MCP2221 kernel i2c bridge is selectable
-	on the Extended bus."""
+def test_every_i2c_bus_num_field_documents_both_bridges_and_serial_match():
+	"""Every i2c_bus_num field (settings-dependency or device_specific) is
+	free text (type: i2c_bus_num) and documents CP2112, MCP2221, and the
+	serial: selector in its description, so no field silently regresses to a
+	fixed dropdown that can't express a USB serial."""
 	manifest = _manifest()
 	found = 0
 
 	def walk(node):
 		nonlocal found
 		if isinstance(node, dict):
-			opts = node.get('options')
-			if isinstance(opts, dict) and 'CP2112' in opts:
+			if node.get('type') == 'i2c_bus_num':
 				found += 1
-				assert 'MCP2221' in opts, f'CP2112 bridge selector missing MCP2221 option: {list(opts)}'
-				assert opts['MCP2221']  # non-empty label
+				assert 'CP2112' in node['description']
+				assert 'MCP2221' in node['description']
+				assert 'serial:' in node['description']
 			for value in node.values():
 				walk(value)
 		elif isinstance(node, list):
@@ -31,7 +32,7 @@ def test_every_bridge_selector_offers_mcp2221():
 				walk(value)
 
 	walk(manifest['modules'])
-	assert found, 'no CP2112 bridge selectors found'
+	assert found == 13, f'expected 13 i2c_bus_num fields (5 probe + 7 distance + 1 fan controller), found {found}'
 
 
 def test_busio_probe_bus_num_is_free_text_and_documents_bridges():
