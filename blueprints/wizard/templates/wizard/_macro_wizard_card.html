@@ -1,4 +1,6 @@
-{% macro render_wizard_card(moduleData, moduleSection, moduleSettings) %} 
+{% from 'probeconfig/_macro_probes_config.html' import render_input_i2c_bus_num %}
+
+{% macro render_wizard_card(moduleData, moduleSection, moduleSettings) %}
 <!-- Form for Selected Module -->
 <div class="card">
 	<div class="media">
@@ -31,11 +33,15 @@
 				<tr {% if moduleData['settings_dependencies'][setting]['hidden'] %} hidden {% endif %}>
 					<td>{{ moduleData['settings_dependencies'][setting]['friendly_name'] }}</td>
 					<td>
+						{% if moduleData['settings_dependencies'][setting].get('type') == 'i2c_bus_num' %}
+						{{ render_input_i2c_bus_num(moduleSection ~ '_' ~ setting, '', moduleSettings['settings'][setting], moduleSection ~ '_' ~ (setting | replace('_num', '_kind'))) }}
+						{% else %}
 						<select class="form-control" id="{{ moduleSection }}_{{ setting }}" name="{{ moduleSection }}_{{ setting }}">
 						{% for option in moduleData['settings_dependencies'][setting]['options'] %}
 							<option value="{{ option }}"{% if moduleSettings['settings'][setting]|string == option %} selected{% endif %}>{{ moduleData['settings_dependencies'][setting]['options'][option] }}</option>
 						{% endfor %}
 						</select>
+						{% endif %}
 					</td>
 					<td>{{ moduleData['settings_dependencies'][setting]['description'] }}</td>
 					</tr>

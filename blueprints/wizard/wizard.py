@@ -56,9 +56,12 @@ def wizardInstallInfoDefaults(wizardData, settings):
 				)  # TODO: Change wizard.py to reference the module filename instead, or in grill_platform use platform>system_type
 				for setting in wizardData['modules'][component][module]['settings_dependencies']:
 					""" Populate all settings with default value """
-					wizardInstallInfo['modules'][component]['settings'][setting] = list(
-						wizardData['modules'][component][module]['settings_dependencies'][setting]['options'].keys()
-					)[0]
+					dep = wizardData['modules'][component][module]['settings_dependencies'][setting]
+					if 'options' in dep:
+						default_value = list(dep['options'].keys())[0]
+					else:
+						default_value = dep.get('default', '')
+					wizardInstallInfo['modules'][component]['settings'][setting] = default_value
 				if module == 'display':
 					wizardInstallInfo['modules'][component]['config'] = settings['display']['config'][module]
 

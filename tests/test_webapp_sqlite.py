@@ -254,6 +254,21 @@ def test_i2c_bus_scan_no_devices_shows_error(monkeypatch):
 
 
 @pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+def test_wizard_modulecard_renders_i2c_bus_num_as_free_text():
+	# device_distance_i2c_bus_num / i2c_bus_num (fan controller) live under
+	# grillplatform module settings_dependencies (e.g. x86_numato), not under
+	# the distance sensor modules themselves.
+	flask_app.config.update(TESTING=True)
+	client = flask_app.test_client()
+
+	resp = client.post('/wizard/modulecard', data={'module': 'x86_numato', 'section': 'grillplatform'})
+	assert resp.status_code == 200
+	body = resp.get_data(as_text=True)
+	assert 'type="text"' in body
+	assert 'Discover' in body
+
+
+@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_wizard_finish_blocks_unworkable_bus_combo():
 	"""Finish-step whole-config check: a probe on the ft232h bus while the fan
 	controller is left on the onboard 'basic' bus is the one unworkable combo.
