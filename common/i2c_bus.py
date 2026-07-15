@@ -174,32 +174,11 @@ def discover_extended_i2c_buses(devices_path='/sys/bus/i2c/devices'):
 	return _enumerate_i2c_adapters(devices_path)
 
 
-# MCP2221(A) chip's fixed USB VID/PID -- the same constants EasyMCP2221 and
-# Blinka's MCP2221 backend both use internally.
-_MCP2221_VID = 0x04D8
-_MCP2221_PID = 0x00DD
+def discover_mcp2221_devices(*args, **kwargs):
+	"""Re-export: delegates to common.mcp2221.discover_mcp2221_devices()."""
+	from common import mcp2221
 
-
-def discover_mcp2221_devices():
-	"""Best-effort list of connected MCP2221 USB devices ({'serial', 'path'}),
-	for the wizard's Discover button. Returns [] if the `hid` module isn't
-	importable, or no devices are present -- never raises."""
-	try:
-		import hid
-	except ImportError:
-		return []
-	try:
-		return sorted(
-			(
-				{'serial': info.get('serial_number'), 'path': info.get('path')}
-				for info in hid.enumerate(_MCP2221_VID, _MCP2221_PID)
-				if info.get('serial_number')
-			),
-			key=lambda d: d['serial'].lower(),
-		)
-	except Exception:
-		logger.debug('discover_mcp2221_devices: hid.enumerate failed', exc_info=True)
-		return []
+	return mcp2221.discover_mcp2221_devices(*args, **kwargs)
 
 
 def discover_ft232h_devices():
@@ -330,93 +309,19 @@ class _LockedI2C:
 			deinit()
 
 
-class _EasyMCP2221Backend:
-	"""Adapt an EasyMCP2221.Device to the scan/writeto/readfrom_into/
-	writeto_then_readfrom surface _LockedI2C expects (the same surface the
-	Blinka ft232h backend provides).
-
-	Translates EasyMCP2221's NotAckError/TimeoutError/LowSCLError/LowSDAError
-	into OSError, which is what adafruit_bus_device.I2CDevice's device-probe
-	logic (and PiFire's own probe code) already knows how to treat as "no
-	device at this address" / "bus fault"."""
-
-	def __init__(self, device):
-		from EasyMCP2221.exceptions import LowSCLError, LowSDAError, NotAckError, TimeoutError
-
-		self._device = device
-		self._errors = (NotAckError, TimeoutError, LowSCLError, LowSDAError)
-
-	def scan(self):
-		found = []
-		for address in range(0x08, 0x78):
-			try:
-				self._device.I2C_read(address, 1)
-			except self._errors:
-				continue
-			found.append(address)
-		return found
-
-	def writeto(self, address, buffer, *, start=0, end=None, **kwargs):
-		end = len(buffer) if end is None else end
-		data = bytes(buffer[start:end])
-		try:
-			if data:
-				self._device.I2C_write(address, data)
-			else:
-				# EasyMCP2221.I2C_write rejects empty data; a zero-length
-				# writeto is only ever used as a device-presence probe
-				# (adafruit_bus_device.I2CDevice.__probe_for_device), so a
-				# 1-byte read serves the same purpose.
-				self._device.I2C_read(address, 1)
-		except self._errors as exc:
-			raise OSError(str(exc)) from exc
-
-	def readfrom_into(self, address, buffer, *, start=0, end=None, **kwargs):
-		end = len(buffer) if end is None else end
-		try:
-			data = self._device.I2C_read(address, end - start)
-		except self._errors as exc:
-			raise OSError(str(exc)) from exc
-		buffer[start:end] = data
-
-	def writeto_then_readfrom(
-		self, address, out_buffer, in_buffer, *, out_start=0, out_end=None, in_start=0, in_end=None, **kwargs
-	):
-		out_end = len(out_buffer) if out_end is None else out_end
-		in_end = len(in_buffer) if in_end is None else in_end
-		try:
-			self._device.I2C_write(address, bytes(out_buffer[out_start:out_end]), kind='nonstop')
-			data = self._device.I2C_read(address, in_end - in_start, kind='restart')
-		except self._errors as exc:
-			raise OSError(str(exc)) from exc
-		in_buffer[in_start:in_end] = data
-
-
 _bus_cache = {}  # (kind, selector) -> bus object
 _opened_kinds = set()  # kinds actually opened this process
 _cache_lock = threading.RLock()
 
-# EasyMCP2221.Device -> _LockedI2C, guarded by _cache_lock. mcp2221 selectors
-# (blank vs. an explicit serial) can alias the same physical adapter --
-# EasyMCP2221.Device.__new__ already dedupes that case by returning the same
-# Device object (see its class docstring), so this registry piggybacks on
-# that identity to make sure an aliasing selector reuses the existing bus
-# (and its lock) instead of wrapping the same device a second time under an
-# independent lock. Keyed by the Device object itself (default identity
-# hashing; EasyMCP2221.Device defines no __eq__/__hash__), not by
-# device.usbserial -- an MCP2221 that has never had a custom serial
-# programmed reports a shared, non-unique factory-default serial, so keying
-# on that value would risk merging two genuinely different physical
-# adapters.
-_mcp2221_bus_by_device = {}
-
 
 def reset_bus_state():
 	"""Clear the bus cache and opened-kind registry. Tests only."""
+	from common import mcp2221
+
 	with _cache_lock:
 		_bus_cache.clear()
 		_opened_kinds.clear()
-		_mcp2221_bus_by_device.clear()
+		mcp2221.reset_state()
 
 
 def _canonical_selector(kind, selector):
@@ -448,39 +353,6 @@ def _construct_ft232h(selector):
 	return _LockedI2C(backend)
 
 
-def _open_mcp2221_device(selector):
-	from EasyMCP2221 import Device as _MCP2221Device
-
-	try:
-		if selector:
-			logger.debug('open_i2c_bus[mcp2221]: opening MCP2221 with serial=%r', selector)
-			return _MCP2221Device(usbserial=str(selector), scan_serial=True)
-		logger.debug(
-			'open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)', _MCP2221_VID, _MCP2221_PID
-		)
-		return _MCP2221Device()
-	except RuntimeError as exc:
-		raise I2CBusConfigError(str(exc)) from exc
-
-
-def _construct_mcp2221(selector):
-	# A blank selector and an explicit serial can both resolve to the same
-	# physical adapter -- EasyMCP2221.Device.__new__ already returns the
-	# same Device object for that case, so re-check the registry after
-	# opening rather than trusting the (kind, selector) cache key alone;
-	# open_i2c_bus's cache only dedupes identical selector strings.
-	device = _open_mcp2221_device(selector)
-	bus = _mcp2221_bus_by_device.get(device)
-	if bus is None:
-		bus = _LockedI2C(_EasyMCP2221Backend(device))
-		_mcp2221_bus_by_device[device] = bus
-	else:
-		logger.debug(
-			'open_i2c_bus[mcp2221]: selector=%r aliases an already-open MCP2221; reusing its shared bus/lock', selector
-		)
-	return bus
-
-
 def _construct_bus(kind, selector):
 	if kind == 'basic':
 		import board
@@ -497,7 +369,9 @@ def _construct_bus(kind, selector):
 	if kind == 'ft232h':
 		return _construct_ft232h(selector)
 	if kind == 'mcp2221':
-		return _construct_mcp2221(selector)
+		from common import mcp2221
+
+		return mcp2221.construct_i2c_bus(selector)
 	raise I2CBusConfigError(f'Unknown i2c bus kind {kind!r}.')
 
 

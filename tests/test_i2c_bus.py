@@ -6,6 +6,7 @@ import pytest
 from EasyMCP2221.exceptions import LowSCLError, LowSDAError, NotAckError, TimeoutError
 
 import common.i2c_bus as i2c_bus
+from common import mcp2221
 from common.i2c_bus import I2CBusConfigError, assert_clean_blinka_env, resolve_i2c_bus, validate_bus_kinds
 
 
@@ -86,21 +87,21 @@ class _FakeI2CDevice:
 
 def test_easymcp2221_backend_writeto_nonempty_calls_i2c_write():
 	device = _FakeI2CDevice()
-	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend = mcp2221._EasyMCP2221Backend(device)
 	backend.writeto(0x40, b'\x01\x02')
 	assert device.calls == [('write', 0x40, b'\x01\x02', 'regular')]
 
 
 def test_easymcp2221_backend_writeto_empty_does_presence_read():
 	device = _FakeI2CDevice()
-	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend = mcp2221._EasyMCP2221Backend(device)
 	backend.writeto(0x40, b'')
 	assert device.calls == [('read', 0x40, 1, 'regular')]
 
 
 def test_easymcp2221_backend_readfrom_into_fills_buffer():
 	device = _FakeI2CDevice(read_result=b'\x0a\x0b\x0c')
-	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend = mcp2221._EasyMCP2221Backend(device)
 	buf = bytearray(3)
 	backend.readfrom_into(0x40, buf)
 	assert bytes(buf) == b'\x0a\x0b\x0c'
@@ -109,7 +110,7 @@ def test_easymcp2221_backend_readfrom_into_fills_buffer():
 
 def test_easymcp2221_backend_writeto_then_readfrom_uses_nonstop_restart():
 	device = _FakeI2CDevice(read_result=b'\xaa\xbb')
-	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend = mcp2221._EasyMCP2221Backend(device)
 	out = bytearray(2)
 	backend.writeto_then_readfrom(0x40, b'\x00', out)
 	assert bytes(out) == b'\xaa\xbb'
@@ -118,14 +119,14 @@ def test_easymcp2221_backend_writeto_then_readfrom_uses_nonstop_restart():
 
 def test_easymcp2221_backend_scan_collects_acking_addresses():
 	device = _FakeI2CDevice()
-	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend = mcp2221._EasyMCP2221Backend(device)
 	assert backend.scan() == list(range(0x08, 0x78))
 
 
 @pytest.mark.parametrize('exc_cls', [NotAckError, TimeoutError, LowSCLError, LowSDAError])
 def test_easymcp2221_backend_translates_i2c_errors_to_oserror(exc_cls):
 	device = _FakeI2CDevice(raise_exc=exc_cls('boom'))
-	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend = mcp2221._EasyMCP2221Backend(device)
 	with pytest.raises(OSError):
 		backend.writeto(0x40, b'\x01')
 	with pytest.raises(OSError):
@@ -159,7 +160,7 @@ class _FailingHalfI2CDevice:
 @pytest.mark.parametrize('exc_cls', [NotAckError, TimeoutError, LowSCLError, LowSDAError])
 def test_easymcp2221_backend_writeto_then_readfrom_translates_write_half_error(exc_cls):
 	device = _FailingHalfI2CDevice(raise_on_write=exc_cls('boom'))
-	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend = mcp2221._EasyMCP2221Backend(device)
 	with pytest.raises(OSError):
 		backend.writeto_then_readfrom(0x40, b'\x00', bytearray(2))
 
@@ -167,7 +168,7 @@ def test_easymcp2221_backend_writeto_then_readfrom_translates_write_half_error(e
 @pytest.mark.parametrize('exc_cls', [NotAckError, TimeoutError, LowSCLError, LowSDAError])
 def test_easymcp2221_backend_writeto_then_readfrom_translates_read_half_error(exc_cls):
 	device = _FailingHalfI2CDevice(read_result=b'\xaa\xbb', raise_on_read=exc_cls('boom'))
-	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend = mcp2221._EasyMCP2221Backend(device)
 	with pytest.raises(OSError):
 		backend.writeto_then_readfrom(0x40, b'\x00', bytearray(2))
 	# The write half must have actually happened before the read half raised.
@@ -192,7 +193,7 @@ class _PerAddressI2CDevice:
 
 def test_easymcp2221_backend_scan_excludes_addresses_that_raise():
 	device = _PerAddressI2CDevice(acking_addresses={0x10, 0x50})
-	backend = i2c_bus._EasyMCP2221Backend(device)
+	backend = mcp2221._EasyMCP2221Backend(device)
 	assert backend.scan() == [0x10, 0x50]
 
 
