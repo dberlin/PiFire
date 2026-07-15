@@ -153,13 +153,20 @@ class Ft232hGpio:
 		try:
 			return self.PIN_BITS[str(pin_name)]
 		except KeyError:
-			raise ValueError(f'Unknown or reserved FT232H GPIO pin {pin_name!r} (use C0-C7 or D4-D7)')
+			raise ValueError(f'Unknown or reserved FT232H GPIO pin {pin_name!r} (use C0-C7 or D4-D7)') from None
 
 	def setup_output(self, pin_name):
 		bit = self._bit(pin_name)
 		with self._lock:
 			self._direction |= bit
-			self._port.set_direction(bit, bit)  # 1 = output
+			# Pass the full accumulated direction mask, not just this pin's bit:
+			# pyftdi's I2cController._set_gpio_direction OVERWRITES its internal
+			# gpio_mask with whatever `pins` we pass here (it does not accumulate
+			# across calls, unlike gpio_dir). If we passed only `bit`, pyftdi's
+			# write_gpio() read-modify-write would only ever clear the most
+			# recently configured pin, leaving earlier output pins stuck once
+			# driven high.
+			self._port.set_direction(self._direction, self._direction)  # 1 = output
 
 	def set(self, pin_name, high):
 		bit = self._bit(pin_name)

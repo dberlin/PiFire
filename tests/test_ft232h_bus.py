@@ -103,15 +103,21 @@ def test_runtime_rejects_basic_after_ft232h():
 
 class FakeGpioPort:
 	def __init__(self):
-		self.direction = 0
+		self.direction = 0  # accumulates, for tests that check the full output-pin set
+		self._gpio_mask = 0  # pyftdi semantics: OVERWRITTEN (not accumulated) each call
 		self.value = 0
 
 	def set_direction(self, pins, direction):
 		# pyftdi semantics: 1 bits in `pins` are (re)configured to `direction`.
 		self.direction = (self.direction & ~pins) | (direction & pins)
+		# pyftdi.i2c.I2cController._set_gpio_direction: self._gpio_mask = gpio_mask & pins
+		# -- it OVERWRITES the mask with only the pins passed in *this* call.
+		self._gpio_mask = pins
 
 	def write(self, value):
-		self.value = value
+		# pyftdi.i2c.I2cController.write_gpio: masked read-modify-write, only
+		# clearing bits within the current _gpio_mask before applying `value`.
+		self.value = (self.value & ~self._gpio_mask) | value
 
 	def read(self, with_output=False):
 		return self.value
@@ -179,3 +185,23 @@ def test_open_gpio_is_cached_per_controller():
 		a = ft232h.open_gpio('')
 		b = ft232h.open_gpio('1')
 	assert a is b
+
+
+def test_configured_pins_can_all_be_cleared_after_setup():
+	# Regression test for a bug where setup_output(pin) passed only that pin's
+	# bit to pyftdi's set_direction(), which OVERWRITES (not accumulates)
+	# pyftdi's internal gpio_mask. That left write_gpio()'s read-modify-write
+	# able to clear only the most-recently-configured pin -- earlier output
+	# pins got stuck ON once driven high. Configuring several output pins one
+	# at a time must still allow every one of them to be cleared afterward.
+	controller, port = _controller_with_gpio()
+	with mock.patch.object(ft232h, '_new_controller', return_value=controller):
+		gpio = ft232h.open_gpio('')
+	for name in ('C0', 'C1', 'C2', 'C3'):
+		gpio.setup_output(name)
+	for name in ('C0', 'C1', 'C2', 'C3'):
+		gpio.set(name, True)
+	gpio.set('C0', False)
+	assert port.value & ft232h.Ft232hGpio.PIN_BITS['C0'] == 0
+	for name in ('C1', 'C2', 'C3'):
+		assert port.value & ft232h.Ft232hGpio.PIN_BITS[name] != 0
