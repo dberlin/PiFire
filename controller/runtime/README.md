@@ -36,7 +36,7 @@ for module globals. The context bundles:
 - **`store`** (`store.py`) — all datastore access behind a `Store` ABC.
   `SqliteStore` is the only production code that touches `common.common`'s
   global SQLite-backed accessor functions; `InMemoryStore` is the hermetic
-  test double. A parity suite (`tests/test_sqlite_store_parity.py`) and an
+  test double. A parity suite (`tests/unit/test_sqlite_store_parity.py`) and an
   end-to-end suite (`tests/e2e/`) pin the two to identical semantics against
   the real SQLite datastore.
 - **`clock`** (`clock.py`) — `RealClock` in production, `ManualClock` in tests,

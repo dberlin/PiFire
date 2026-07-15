@@ -17,7 +17,7 @@ SOURCE_W, SOURCE_H = 800, 480
 # profile_1 canvas; profile_2 is the same canvas rotated. Adding a resolution
 # here also requires a display/dsi_<W>x<H>t.py re-export module, a
 # wizard_manifest.json entry, and a paired byte-identical regression assertion
-# in tests/test_dsi_layout_generator.py.
+# in tests/ui/test_dsi_layout_generator.py.
 RESOLUTIONS = [(1024, 768), (1280, 720), (1024, 600)]
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))

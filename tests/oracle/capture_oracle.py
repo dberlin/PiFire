@@ -3,7 +3,7 @@
 Run ONCE against the unmodified codebase with a live valkey-server:
     python -m tests.oracle.capture_oracle
 Commit the resulting tests/oracle/fixtures/*.json. The SQLite rewrite is
-asserted byte-for-byte against these (see tests/test_datastore.py::test_oracle_*).
+asserted byte-for-byte against these (see tests/unit/test_datastore.py::test_oracle_*).
 """
 
 import json
