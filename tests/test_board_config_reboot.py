@@ -134,3 +134,33 @@ def test_enable_i2c_changed_is_or_of_config_and_modules_changes(monkeypatch):
 	monkeypatch.setattr(board_config, 'append_file', lambda *a, **k: ('modules ok', False))
 	_, changed = board_config.enable_i2c()
 	assert changed is False
+
+
+class _NullLogger:
+	def info(self, *_a, **_k):
+		pass
+
+
+def test_print_results_reports_reboot_required_true_when_any_flag_true(capsys):
+	reboot_required = board_config._print_results_and_reboot_flag(
+		['thing: SUCCESS'], [False, True, False], _NullLogger()
+	)
+
+	assert reboot_required is True
+	assert 'REBOOT_REQUIRED=true' in capsys.readouterr().out
+
+
+def test_print_results_reports_reboot_required_false_when_no_flags_true(capsys):
+	reboot_required = board_config._print_results_and_reboot_flag(['thing: SUCCESS'], [False, False], _NullLogger())
+
+	assert reboot_required is False
+	assert 'REBOOT_REQUIRED=false' in capsys.readouterr().out
+
+
+def test_print_results_reports_reboot_required_false_with_no_flags(capsys):
+	reboot_required = board_config._print_results_and_reboot_flag([], [], _NullLogger())
+	captured = capsys.readouterr().out
+
+	assert reboot_required is False
+	assert 'REBOOT_REQUIRED=false' in captured
+	assert 'No Arguments Found' in captured

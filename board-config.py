@@ -529,6 +529,25 @@ def get_os_info(filepath='os_info.json', loggername='events'):
 		return os_info
 
 
+def _print_results_and_reboot_flag(results, reboot_flags, logger):
+	"""Print the human-readable results block, then a final REBOOT_REQUIRED=<bool>
+	sentinel line that wizard.py's command-execution loop parses to decide whether a
+	reboot is actually needed. Returns the aggregated bool."""
+	if len(results) == 0:
+		print('No Arguments Found. Use --help to see available arguments')
+	else:
+		print('Results:')
+		for item in results:
+			print(f' - {item}')
+			logger.info(f'{item}')
+
+	reboot_required = any(reboot_flags)
+	sentinel = f'REBOOT_REQUIRED={str(reboot_required).lower()}'
+	print(sentinel)
+	logger.info(sentinel)
+	return reboot_required
+
+
 """
 ==============================================================================
  Main
@@ -565,27 +584,42 @@ if __name__ == '__main__':
 	args = parser.parse_args()
 
 	results = []
+	reboot_flags = []
 
 	if args.pwm:
-		results.append(set_pwm_gpio())
+		msg, changed = set_pwm_gpio()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.onewire:
-		results.append(set_onewire_gpio())
+		msg, changed = set_onewire_gpio()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.backlight:
-		results.append(set_backlight())
+		msg, changed = set_backlight()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.spi:
-		results.append(enable_spi())
+		msg, changed = enable_spi()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.i2c:
-		results.append(enable_i2c())
+		msg, changed = enable_i2c()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.i2cspeed:
-		results.append(set_i2c_speed(baud=args.i2cspeed))
+		msg, changed = set_i2c_speed(baud=args.i2cspeed)
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.gpioshutdown:
-		results.append(enable_gpio_shutdown())
+		msg, changed = enable_gpio_shutdown()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.osversion:
 		os_info = get_os_info(loggername='board_config')
@@ -595,10 +629,4 @@ if __name__ == '__main__':
 			event = f'   {key} : {value}'
 			results.append(event)
 
-	if len(results) == 0:
-		print('No Arguments Found. Use --help to see available arguments')
-	else:
-		print('Results:')
-		for item in results:
-			print(f' - {item}')
-			logger.info(f'{item}')
+	_print_results_and_reboot_flag(results, reboot_flags, logger)
