@@ -7,9 +7,7 @@
         "description": "Choose this configuration if you have a custom configuration and need to modify all available platform settings.",
         "default": false,
         "image": "custom.png",
-        "py_dependencies": [
-          "rpi-hardware-pwm==0.2.2"
-        ],
+        "py_dependencies": ["rpi-hardware-pwm==0.2.2"],
         "apt_dependencies": [],
         "command_list": [
           [
@@ -27,13 +25,8 @@
           "current": {
             "friendly_name": "Platform Selected",
             "description": "Selects the current platform.",
-            "options": {
-              "custom": "Custom Build"
-            },
-            "settings": [
-              "platform",
-              "current"
-            ],
+            "options": { "custom": "Custom Build" },
+            "settings": ["platform", "current"],
             "hidden": true
           },
           "system_type": {
@@ -43,10 +36,7 @@
               "raspberry_pi_all": "Raspberry Pi (ALL)",
               "prototype": "Prototype / Test Only"
             },
-            "settings": [
-              "platform",
-              "system_type"
-            ]
+            "settings": ["platform", "system_type"]
           },
           "standalone": {
             "friendly_name": "Standalone",
@@ -55,34 +45,19 @@
               "True": "PiFire Only",
               "False": "OEM Controller Present"
             },
-            "settings": [
-              "platform",
-              "standalone"
-            ]
+            "settings": ["platform", "standalone"]
           },
           "triggerlevel": {
             "friendly_name": "Relay Type",
             "description": "Select the trigger level for the relays on the platform.  ",
-            "options": {
-              "LOW": "Active Low",
-              "HIGH": "Active High"
-            },
-            "settings": [
-              "platform",
-              "triggerlevel"
-            ]
+            "options": { "LOW": "Active Low", "HIGH": "Active High" },
+            "settings": ["platform", "triggerlevel"]
           },
           "dc_fan": {
             "friendly_name": "Fan Type",
             "description": "Select if your platform supports a DC(PWM) fan or uses a regular AC Fan. ",
-            "options": {
-              "True": "DC Fan (PWM)",
-              "False": "AC Fan"
-            },
-            "settings": [
-              "platform",
-              "dc_fan"
-            ]
+            "options": { "True": "DC Fan (PWM)", "False": "AC Fan" },
+            "settings": ["platform", "dc_fan"]
           },
           "output_auger": {
             "friendly_name": "Auger Relay GPIO Pin",
@@ -115,11 +90,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "auger"
-            ]
+            "settings": ["platform", "outputs", "auger"]
           },
           "output_dc_fan": {
             "friendly_name": "DC Fan GPIO Pin",
@@ -152,11 +123,7 @@
               "25": "GPIO25",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "dc_fan"
-            ]
+            "settings": ["platform", "outputs", "dc_fan"]
           },
           "output_fan": {
             "friendly_name": "AC Fan Relay GPIO Pin",
@@ -189,11 +156,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "fan"
-            ]
+            "settings": ["platform", "outputs", "fan"]
           },
           "output_igniter": {
             "friendly_name": "Igniter Relay GPIO Pin",
@@ -226,11 +189,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "igniter"
-            ]
+            "settings": ["platform", "outputs", "igniter"]
           },
           "output_power": {
             "friendly_name": "Power Gate Relay GPIO Pin",
@@ -263,11 +222,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "power"
-            ]
+            "settings": ["platform", "outputs", "power"]
           },
           "output_pwm": {
             "friendly_name": "DC Fan PWM GPIO Pin",
@@ -300,11 +255,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "pwm"
-            ]
+            "settings": ["platform", "outputs", "pwm"]
           },
           "input_selector": {
             "friendly_name": "Controller Select GPIO Pin",
@@ -338,11 +289,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "inputs",
-              "selector"
-            ]
+            "settings": ["platform", "inputs", "selector"]
           },
           "input_shutdown": {
             "friendly_name": "System Shutdown GPIO Pin",
@@ -376,11 +323,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "inputs",
-              "shutdown"
-            ]
+            "settings": ["platform", "inputs", "shutdown"]
           },
           "device_display_dc": {
             "friendly_name": "SPI Display DC Pin",
@@ -413,12 +356,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "dc"
-            ]
+            "settings": ["platform", "devices", "display", "dc"]
           },
           "device_display_led": {
             "friendly_name": "SPI Display LED Backlight Pin",
@@ -451,12 +389,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "led"
-            ]
+            "settings": ["platform", "devices", "display", "led"]
           },
           "device_display_rst": {
             "friendly_name": "SPI Display Reset Pin",
@@ -489,12 +422,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "rst"
-            ]
+            "settings": ["platform", "devices", "display", "rst"]
           },
           "device_distance_echo": {
             "friendly_name": "Distance Sensor ECHO GPIO",
@@ -527,12 +455,7 @@
               "25": "GPIO25",
               "26": "GPIO26"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "echo"
-            ]
+            "settings": ["platform", "devices", "distance", "echo"]
           },
           "device_distance_trig": {
             "friendly_name": "Distance Sensor Trigger GPIO",
@@ -565,12 +488,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "trig"
-            ]
+            "settings": ["platform", "devices", "distance", "trig"]
           },
           "device_distance_i2c_bus_kind": {
             "friendly_name": "Distance Sensor I2C Bus Type",
@@ -581,24 +499,14 @@
               "ft232h": "FT232H (USB)",
               "mcp2221": "MCP2221 (USB)"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_kind"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
             "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
             "type": "i2c_bus_num",
             "default": "CP2112",
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_num"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
@@ -612,12 +520,7 @@
               "0x2e": "0x2E",
               "0x2f": "0x2F"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "address"
-            ]
+            "settings": ["platform", "devices", "distance", "address"]
           },
           "device_input_down_dt": {
             "friendly_name": "Down Button / Encoder DT",
@@ -650,12 +553,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "down_dt"
-            ]
+            "settings": ["platform", "devices", "input", "down_dt"]
           },
           "device_input_enter_sw": {
             "friendly_name": "Enter Button / Encoder SW",
@@ -688,12 +586,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "enter_sw"
-            ]
+            "settings": ["platform", "devices", "input", "enter_sw"]
           },
           "device_input_up_clk": {
             "friendly_name": "Up Button / Encoder CLK",
@@ -726,12 +619,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "up_clk"
-            ]
+            "settings": ["platform", "devices", "input", "up_clk"]
           },
           "system_1wire": {
             "friendly_name": "1Wire GPIO Pin",
@@ -751,23 +639,13 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "system",
-              "1WIRE"
-            ]
+            "settings": ["platform", "system", "1WIRE"]
           },
           "real_hw": {
             "friendly_name": "Real Hardware",
             "description": "Select Yes if running on real hardware (Default).  Select No if running in a test environment.",
-            "options": {
-              "True": "Yes",
-              "False": "No (Test Only)"
-            },
-            "settings": [
-              "platform",
-              "real_hw"
-            ]
+            "options": { "True": "Yes", "False": "No (Test Only)" },
+            "settings": ["platform", "real_hw"]
           }
         }
       },
@@ -777,31 +655,17 @@
         "description": "Default settings/configuration for the PiFire PCB v2.00a designed by Ben Parmeter.",
         "default": false,
         "image": "pcb_2.00a.png",
-        "py_dependencies": [
-          "rpi-hardware-pwm==0.2.2"
-        ],
+        "py_dependencies": ["rpi-hardware-pwm==0.2.2"],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-ow",
-            "-s",
-            "-i"
-          ]
+          ["sudo", "python", "board-config.py", "-ow", "-s", "-i"]
         ],
         "settings_dependencies": {
           "current": {
             "friendly_name": "Platform Selected",
             "description": "Selects the current platform.",
-            "options": {
-              "pcb_2.00a": "PiFire PCB v2.00a"
-            },
-            "settings": [
-              "platform",
-              "current"
-            ],
+            "options": { "pcb_2.00a": "PiFire PCB v2.00a" },
+            "settings": ["platform", "current"],
             "hidden": true
           },
           "system_type": {
@@ -811,10 +675,7 @@
               "raspberry_pi_all": "Raspberry Pi (ALL)",
               "prototype": "Prototype / Test Only"
             },
-            "settings": [
-              "platform",
-              "system_type"
-            ]
+            "settings": ["platform", "system_type"]
           },
           "standalone": {
             "friendly_name": "Standalone",
@@ -823,179 +684,96 @@
               "True": "PiFire Only",
               "False": "OEM Controller Present"
             },
-            "settings": [
-              "platform",
-              "standalone"
-            ]
+            "settings": ["platform", "standalone"]
           },
           "triggerlevel": {
             "friendly_name": "Relay Type",
             "description": "Select the trigger level for the relays on the platform.  ",
-            "options": {
-              "LOW": "Active Low",
-              "HIGH": "Active High"
-            },
-            "settings": [
-              "platform",
-              "triggerlevel"
-            ]
+            "options": { "LOW": "Active Low", "HIGH": "Active High" },
+            "settings": ["platform", "triggerlevel"]
           },
           "dc_fan": {
             "friendly_name": "Fan Type",
             "description": "Select if your platform supports a DC(PWM) fan or uses a regular AC Fan. ",
-            "options": {
-              "False": "AC Fan"
-            },
-            "settings": [
-              "platform",
-              "dc_fan"
-            ],
+            "options": { "False": "AC Fan" },
+            "settings": ["platform", "dc_fan"],
             "hidden": true
           },
           "output_auger": {
             "friendly_name": "Auger Relay GPIO Pin",
             "description": "Select the GPIO used for the Auger relay.",
-            "options": {
-              "14": "GPIO14"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "auger"
-            ],
+            "options": { "14": "GPIO14" },
+            "settings": ["platform", "outputs", "auger"],
             "hidden": true
           },
           "output_dc_fan": {
             "friendly_name": "DC Fan GPIO Pin",
             "description": "Select the GPIO used for the DC Fan.",
-            "options": {
-              "None": "None"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "dc_fan"
-            ],
+            "options": { "None": "None" },
+            "settings": ["platform", "outputs", "dc_fan"],
             "hidden": true
           },
           "output_fan": {
             "friendly_name": "AC Fan Relay GPIO Pin",
             "description": "Select the GPIO used for enabling/disabling fan.",
-            "options": {
-              "15": "GPIO15"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "fan"
-            ],
+            "options": { "15": "GPIO15" },
+            "settings": ["platform", "outputs", "fan"],
             "hidden": true
           },
           "output_igniter": {
             "friendly_name": "Igniter Relay GPIO Pin",
             "description": "Select the GPIO used for the Igniter relay.",
-            "options": {
-              "18": "GPIO18"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "igniter"
-            ],
+            "options": { "18": "GPIO18" },
+            "settings": ["platform", "outputs", "igniter"],
             "hidden": true
           },
           "output_power": {
             "friendly_name": "Power Gate Relay GPIO Pin",
             "description": "Select the GPIO used for the AC Power Gate.",
-            "options": {
-              "4": "GPIO4"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "power"
-            ],
+            "options": { "4": "GPIO4" },
+            "settings": ["platform", "outputs", "power"],
             "hidden": true
           },
           "output_pwm": {
             "friendly_name": "DC Fan PWM GPIO Pin",
             "description": "Select the GPIO used for the DC Fan PWM.  Note that this should be a PWM capable GPIO.",
-            "options": {
-              "None": "None"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "pwm"
-            ],
+            "options": { "None": "None" },
+            "settings": ["platform", "outputs", "pwm"],
             "hidden": true
           },
           "input_selector": {
             "friendly_name": "Controller Select GPIO Pin",
             "description": "If the OEM controller is present alongside the PiFire controller, this GPIO will be used to select the active controller. Note that this will not be utilized unless 'Standalone' is set to False.  This should be set to 'None' if not utilized.",
-            "options": {
-              "17": "GPIO17"
-            },
-            "settings": [
-              "platform",
-              "inputs",
-              "selector"
-            ],
+            "options": { "17": "GPIO17" },
+            "settings": ["platform", "inputs", "selector"],
             "hidden": true
           },
           "input_shutdown": {
             "friendly_name": "System Shutdown GPIO Pin",
             "description": "GPIO Pin configured to shutdown the system.  Used for the wake/shutdown button on some designs.  Set this to 'None' if not utilized.",
-            "options": {
-              "None": "None"
-            },
-            "settings": [
-              "platform",
-              "inputs",
-              "shutdown"
-            ],
+            "options": { "None": "None" },
+            "settings": ["platform", "inputs", "shutdown"],
             "hidden": true
           },
           "device_display_dc": {
             "friendly_name": "SPI Display DC Pin",
             "description": "GPIO Pin for the SPI Display DC Pin.",
-            "options": {
-              "24": "GPIO24"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "dc"
-            ],
+            "options": { "24": "GPIO24" },
+            "settings": ["platform", "devices", "display", "dc"],
             "hidden": true
           },
           "device_display_led": {
             "friendly_name": "SPI Display LED Backlight Pin",
             "description": "GPIO Pin for the SPI Display LED Backlight.",
-            "options": {
-              "5": "GPIO5"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "led"
-            ],
+            "options": { "5": "GPIO5" },
+            "settings": ["platform", "devices", "display", "led"],
             "hidden": true
           },
           "device_display_rst": {
             "friendly_name": "SPI Display Reset Pin",
             "description": "GPIO Pin for the SPI Display Reset.",
-            "options": {
-              "25": "GPIO25"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "rst"
-            ],
+            "options": { "25": "GPIO25" },
+            "settings": ["platform", "devices", "display", "rst"],
             "hidden": true
           },
           "device_distance_echo": {
@@ -1014,12 +792,7 @@
               "23": "GPIO23",
               "26": "GPIO26"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "echo"
-            ]
+            "settings": ["platform", "devices", "distance", "echo"]
           },
           "device_distance_trig": {
             "friendly_name": "Distance Sensor Trigger GPIO",
@@ -1037,12 +810,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "trig"
-            ]
+            "settings": ["platform", "devices", "distance", "trig"]
           },
           "device_distance_i2c_bus_kind": {
             "friendly_name": "Distance Sensor I2C Bus Type",
@@ -1053,24 +821,14 @@
               "ft232h": "FT232H (USB)",
               "mcp2221": "MCP2221 (USB)"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_kind"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
             "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
             "type": "i2c_bus_num",
             "default": "CP2112",
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_num"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
@@ -1084,12 +842,7 @@
               "0x2e": "0x2E",
               "0x2f": "0x2F"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "address"
-            ]
+            "settings": ["platform", "devices", "distance", "address"]
           },
           "device_input_down_dt": {
             "friendly_name": "Down Button / Encoder DT",
@@ -1107,12 +860,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "down_dt"
-            ]
+            "settings": ["platform", "devices", "input", "down_dt"]
           },
           "device_input_enter_sw": {
             "friendly_name": "Enter Button / Encoder SW",
@@ -1130,12 +878,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "enter_sw"
-            ]
+            "settings": ["platform", "devices", "input", "enter_sw"]
           },
           "device_input_up_clk": {
             "friendly_name": "Up Button / Encoder CLK",
@@ -1153,12 +896,7 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "up_clk"
-            ]
+            "settings": ["platform", "devices", "input", "up_clk"]
           },
           "system_1wire": {
             "friendly_name": "1Wire GPIO Pin",
@@ -1177,51 +915,27 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "system",
-              "1WIRE"
-            ]
+            "settings": ["platform", "system", "1WIRE"]
           },
           "system_spi0_ce0": {
             "friendly_name": "SPI0 CE0 GPIO Pin",
             "description": "GPIO Pin for SPI0 bus/interface CE/CS0.",
-            "options": {
-              "8": "GPIO8"
-            },
-            "settings": [
-              "platform",
-              "system",
-              "SPI0",
-              "CE0"
-            ],
+            "options": { "8": "GPIO8" },
+            "settings": ["platform", "system", "SPI0", "CE0"],
             "hidden": true
           },
           "system_spi0_ce1": {
             "friendly_name": "SPI0 CE1 GPIO Pin",
             "description": "GPIO Pin for SPI0 bus/interface CE/CS1.",
-            "options": {
-              "7": "GPIO7"
-            },
-            "settings": [
-              "platform",
-              "system",
-              "SPI0",
-              "CE1"
-            ],
+            "options": { "7": "GPIO7" },
+            "settings": ["platform", "system", "SPI0", "CE1"],
             "hidden": true
           },
           "real_hw": {
             "friendly_name": "Real Hardware",
             "description": "Select Yes if running on real hardware (Default).  Select No if running in a test environment.",
-            "options": {
-              "True": "Yes",
-              "False": "No (Test Only)"
-            },
-            "settings": [
-              "platform",
-              "real_hw"
-            ]
+            "options": { "True": "Yes", "False": "No (Test Only)" },
+            "settings": ["platform", "real_hw"]
           }
         }
       },
@@ -1231,31 +945,17 @@
         "description": "Default settings/configuration for the PiFire PCB v3.01a designed by James Weber.",
         "default": false,
         "image": "pcb_3.01a.png",
-        "py_dependencies": [
-          "rpi-hardware-pwm==0.2.2"
-        ],
+        "py_dependencies": ["rpi-hardware-pwm==0.2.2"],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-ow",
-            "-s",
-            "-i"
-          ]
+          ["sudo", "python", "board-config.py", "-ow", "-s", "-i"]
         ],
         "settings_dependencies": {
           "current": {
             "friendly_name": "Platform Selected",
             "description": "Selects the current platform.",
-            "options": {
-              "pcb_3.01a": "PiFire PCB v3.01a"
-            },
-            "settings": [
-              "platform",
-              "current"
-            ],
+            "options": { "pcb_3.01a": "PiFire PCB v3.01a" },
+            "settings": ["platform", "current"],
             "hidden": true
           },
           "system_type": {
@@ -1265,10 +965,7 @@
               "raspberry_pi_all": "Raspberry Pi (ALL)",
               "prototype": "Prototype / Test Only"
             },
-            "settings": [
-              "platform",
-              "system_type"
-            ]
+            "settings": ["platform", "system_type"]
           },
           "standalone": {
             "friendly_name": "Standalone",
@@ -1277,207 +974,110 @@
               "True": "PiFire Only",
               "False": "OEM Controller Present"
             },
-            "settings": [
-              "platform",
-              "standalone"
-            ]
+            "settings": ["platform", "standalone"]
           },
           "triggerlevel": {
             "friendly_name": "Relay Type",
             "description": "Select the trigger level for the relays on the platform.  ",
-            "options": {
-              "LOW": "Active Low",
-              "HIGH": "Active High"
-            },
-            "settings": [
-              "platform",
-              "triggerlevel"
-            ]
+            "options": { "LOW": "Active Low", "HIGH": "Active High" },
+            "settings": ["platform", "triggerlevel"]
           },
           "dc_fan": {
             "friendly_name": "Fan Type",
             "description": "Select if your platform supports a DC(PWM) fan or uses a regular AC Fan. ",
-            "options": {
-              "False": "AC Fan"
-            },
-            "settings": [
-              "platform",
-              "dc_fan"
-            ],
+            "options": { "False": "AC Fan" },
+            "settings": ["platform", "dc_fan"],
             "hidden": true
           },
           "output_auger": {
             "friendly_name": "Auger Relay GPIO Pin",
             "description": "Select the GPIO used for the Auger relay.",
-            "options": {
-              "14": "GPIO14"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "auger"
-            ],
+            "options": { "14": "GPIO14" },
+            "settings": ["platform", "outputs", "auger"],
             "hidden": true
           },
           "output_dc_fan": {
             "friendly_name": "DC Fan GPIO Pin",
             "description": "Select the GPIO used for the DC Fan.",
-            "options": {
-              "None": "None"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "dc_fan"
-            ],
+            "options": { "None": "None" },
+            "settings": ["platform", "outputs", "dc_fan"],
             "hidden": true
           },
           "output_fan": {
             "friendly_name": "AC Fan Relay GPIO Pin",
             "description": "Select the GPIO used for enabling/disabling fan.",
-            "options": {
-              "15": "GPIO15"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "fan"
-            ],
+            "options": { "15": "GPIO15" },
+            "settings": ["platform", "outputs", "fan"],
             "hidden": true
           },
           "output_igniter": {
             "friendly_name": "Igniter Relay GPIO Pin",
             "description": "Select the GPIO used for the Igniter relay.",
-            "options": {
-              "18": "GPIO18"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "igniter"
-            ],
+            "options": { "18": "GPIO18" },
+            "settings": ["platform", "outputs", "igniter"],
             "hidden": true
           },
           "output_power": {
             "friendly_name": "Power Gate Relay GPIO Pin",
             "description": "Select the GPIO used for the AC Power Gate.",
-            "options": {
-              "4": "GPIO4"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "power"
-            ],
+            "options": { "4": "GPIO4" },
+            "settings": ["platform", "outputs", "power"],
             "hidden": true
           },
           "output_pwm": {
             "friendly_name": "DC Fan PWM GPIO Pin",
             "description": "Select the GPIO used for the DC Fan PWM.  Note that this should be a PWM capable GPIO.",
-            "options": {
-              "None": "None"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "pwm"
-            ],
+            "options": { "None": "None" },
+            "settings": ["platform", "outputs", "pwm"],
             "hidden": true
           },
           "input_selector": {
             "friendly_name": "Controller Select GPIO Pin",
             "description": "If the OEM controller is present alongside the PiFire controller, this GPIO will be used to select the active controller. Note that this will not be utilized unless 'Standalone' is set to False.  This should be set to 'None' if not utilized.",
-            "options": {
-              "17": "GPIO17"
-            },
-            "settings": [
-              "platform",
-              "inputs",
-              "selector"
-            ],
+            "options": { "17": "GPIO17" },
+            "settings": ["platform", "inputs", "selector"],
             "hidden": true
           },
           "input_shutdown": {
             "friendly_name": "System Shutdown GPIO Pin",
             "description": "GPIO Pin configured to shutdown the system.  Used for the wake/shutdown button on some designs.  Set this to 'None' if not utilized.",
-            "options": {
-              "None": "None"
-            },
-            "settings": [
-              "platform",
-              "inputs",
-              "shutdown"
-            ],
+            "options": { "None": "None" },
+            "settings": ["platform", "inputs", "shutdown"],
             "hidden": true
           },
           "device_display_dc": {
             "friendly_name": "SPI Display DC Pin",
             "description": "GPIO Pin for the SPI Display DC Pin.",
-            "options": {
-              "24": "GPIO24"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "dc"
-            ],
+            "options": { "24": "GPIO24" },
+            "settings": ["platform", "devices", "display", "dc"],
             "hidden": true
           },
           "device_display_led": {
             "friendly_name": "SPI Display LED Backlight Pin",
             "description": "GPIO Pin for the SPI Display LED Backlight.",
-            "options": {
-              "5": "GPIO5"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "led"
-            ],
+            "options": { "5": "GPIO5" },
+            "settings": ["platform", "devices", "display", "led"],
             "hidden": true
           },
           "device_display_rst": {
             "friendly_name": "SPI Display Reset Pin",
             "description": "GPIO Pin for the SPI Display Reset.",
-            "options": {
-              "25": "GPIO25"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "rst"
-            ],
+            "options": { "25": "GPIO25" },
+            "settings": ["platform", "devices", "display", "rst"],
             "hidden": true
           },
           "device_distance_echo": {
             "friendly_name": "Distance Sensor ECHO GPIO",
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor ECHO",
-            "options": {
-              "27": "GPIO27"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "echo"
-            ],
+            "options": { "27": "GPIO27" },
+            "settings": ["platform", "devices", "distance", "echo"],
             "hidden": true
           },
           "device_distance_trig": {
             "friendly_name": "Distance Sensor Trigger GPIO",
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor Trigger",
-            "options": {
-              "23": "GPIO23"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "trig"
-            ],
+            "options": { "23": "GPIO23" },
+            "settings": ["platform", "devices", "distance", "trig"],
             "hidden": true
           },
           "device_distance_i2c_bus_kind": {
@@ -1489,24 +1089,14 @@
               "ft232h": "FT232H (USB)",
               "mcp2221": "MCP2221 (USB)"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_kind"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
             "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
             "type": "i2c_bus_num",
             "default": "CP2112",
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_num"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
@@ -1520,53 +1110,27 @@
               "0x2e": "0x2E",
               "0x2f": "0x2F"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "address"
-            ]
+            "settings": ["platform", "devices", "distance", "address"]
           },
           "device_input_down_dt": {
             "friendly_name": "Down Button / Encoder DT",
             "description": "GPIO Pin for Down Button / Encoder DT",
-            "options": {
-              "20": "GPIO20"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "down_dt"
-            ],
+            "options": { "20": "GPIO20" },
+            "settings": ["platform", "devices", "input", "down_dt"],
             "hidden": true
           },
           "device_input_enter_sw": {
             "friendly_name": "Enter Button / Encoder SW",
             "description": "GPIO Pin for Enter Button / Encoder SW",
-            "options": {
-              "21": "GPIO21"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "enter_sw"
-            ],
+            "options": { "21": "GPIO21" },
+            "settings": ["platform", "devices", "input", "enter_sw"],
             "hidden": true
           },
           "device_input_up_clk": {
             "friendly_name": "Up Button / Encoder CLK",
             "description": "GPIO Pin for Up Button / Encoder CLK",
-            "options": {
-              "16": "GPIO16"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "up_clk"
-            ],
+            "options": { "16": "GPIO16" },
+            "settings": ["platform", "devices", "input", "up_clk"],
             "hidden": true
           },
           "system_1wire": {
@@ -1582,51 +1146,27 @@
               "26": "GPIO26",
               "27": "GPIO27"
             },
-            "settings": [
-              "platform",
-              "system",
-              "1WIRE"
-            ]
+            "settings": ["platform", "system", "1WIRE"]
           },
           "system_spi0_ce0": {
             "friendly_name": "SPI0 CE0 GPIO Pin",
             "description": "GPIO Pin for SPI0 bus/interface CE/CS0.",
-            "options": {
-              "8": "GPIO8"
-            },
-            "settings": [
-              "platform",
-              "system",
-              "SPI0",
-              "CE0"
-            ],
+            "options": { "8": "GPIO8" },
+            "settings": ["platform", "system", "SPI0", "CE0"],
             "hidden": true
           },
           "system_spi0_ce1": {
             "friendly_name": "SPI0 CE1 GPIO Pin",
             "description": "GPIO Pin for SPI0 bus/interface CE/CS1.",
-            "options": {
-              "7": "GPIO7"
-            },
-            "settings": [
-              "platform",
-              "system",
-              "SPI0",
-              "CE1"
-            ],
+            "options": { "7": "GPIO7" },
+            "settings": ["platform", "system", "SPI0", "CE1"],
             "hidden": true
           },
           "real_hw": {
             "friendly_name": "Real Hardware",
             "description": "Select Yes if running on real hardware (Default).  Select No if running in a test environment.",
-            "options": {
-              "True": "Yes",
-              "False": "No (Test Only)"
-            },
-            "settings": [
-              "platform",
-              "real_hw"
-            ]
+            "options": { "True": "Yes", "False": "No (Test Only)" },
+            "settings": ["platform", "real_hw"]
           }
         }
       },
@@ -1636,31 +1176,17 @@
         "description": "Default settings/configuration for the PiFire PCB PWM designed by James Weber.",
         "default": false,
         "image": "pcb_pwm.png",
-        "py_dependencies": [
-          "rpi-hardware-pwm==0.2.2"
-        ],
+        "py_dependencies": ["rpi-hardware-pwm==0.2.2"],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-pwm",
-            "-s",
-            "-i"
-          ]
+          ["sudo", "python", "board-config.py", "-pwm", "-s", "-i"]
         ],
         "settings_dependencies": {
           "current": {
             "friendly_name": "Platform Selected",
             "description": "Selects the current platform.",
-            "options": {
-              "pcb_pwm": "PiFire PCB PWM"
-            },
-            "settings": [
-              "platform",
-              "current"
-            ],
+            "options": { "pcb_pwm": "PiFire PCB PWM" },
+            "settings": ["platform", "current"],
             "hidden": true
           },
           "system_type": {
@@ -1670,10 +1196,7 @@
               "raspberry_pi_all": "Raspberry Pi (ALL)",
               "prototype": "Prototype / Test Only"
             },
-            "settings": [
-              "platform",
-              "system_type"
-            ]
+            "settings": ["platform", "system_type"]
           },
           "standalone": {
             "friendly_name": "Standalone",
@@ -1682,207 +1205,111 @@
               "True": "PiFire Only",
               "False": "OEM Controller Present"
             },
-            "settings": [
-              "platform",
-              "standalone"
-            ]
+            "settings": ["platform", "standalone"]
           },
           "triggerlevel": {
             "friendly_name": "Relay Type",
             "description": "Select the trigger level for the relays on the platform.  ",
-            "options": {
-              "HIGH": "Active High"
-            },
-            "settings": [
-              "platform",
-              "triggerlevel"
-            ],
+            "options": { "HIGH": "Active High" },
+            "settings": ["platform", "triggerlevel"],
             "hidden": true
           },
           "dc_fan": {
             "friendly_name": "Fan Type",
             "description": "Select if your platform supports a DC(PWM) fan or uses a regular AC Fan. ",
-            "options": {
-              "True": "DC Fan"
-            },
-            "settings": [
-              "platform",
-              "dc_fan"
-            ],
+            "options": { "True": "DC Fan" },
+            "settings": ["platform", "dc_fan"],
             "hidden": true
           },
           "output_auger": {
             "friendly_name": "Auger Relay GPIO Pin",
             "description": "Select the GPIO used for the Auger relay.",
-            "options": {
-              "14": "GPIO14"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "auger"
-            ],
+            "options": { "14": "GPIO14" },
+            "settings": ["platform", "outputs", "auger"],
             "hidden": true
           },
           "output_dc_fan": {
             "friendly_name": "DC Fan GPIO Pin",
             "description": "Select the GPIO used for the DC Fan.",
-            "options": {
-              "26": "GPIO26"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "dc_fan"
-            ],
+            "options": { "26": "GPIO26" },
+            "settings": ["platform", "outputs", "dc_fan"],
             "hidden": true
           },
           "output_fan": {
             "friendly_name": "AC Fan Relay GPIO Pin",
             "description": "Select the GPIO used for enabling/disabling fan.",
-            "options": {
-              "15": "GPIO15"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "fan"
-            ],
+            "options": { "15": "GPIO15" },
+            "settings": ["platform", "outputs", "fan"],
             "hidden": true
           },
           "output_igniter": {
             "friendly_name": "Igniter Relay GPIO Pin",
             "description": "Select the GPIO used for the Igniter relay.",
-            "options": {
-              "18": "GPIO18"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "igniter"
-            ],
+            "options": { "18": "GPIO18" },
+            "settings": ["platform", "outputs", "igniter"],
             "hidden": true
           },
           "output_power": {
             "friendly_name": "Power Gate Relay GPIO Pin",
             "description": "Select the GPIO used for the AC Power Gate.",
-            "options": {
-              "4": "GPIO4"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "power"
-            ],
+            "options": { "4": "GPIO4" },
+            "settings": ["platform", "outputs", "power"],
             "hidden": true
           },
           "output_pwm": {
             "friendly_name": "DC Fan PWM GPIO Pin",
             "description": "Select the GPIO used for the DC Fan PWM.  Note that this should be a PWM capable GPIO.",
-            "options": {
-              "13": "GPIO13"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "pwm"
-            ],
+            "options": { "13": "GPIO13" },
+            "settings": ["platform", "outputs", "pwm"],
             "hidden": true
           },
           "input_selector": {
             "friendly_name": "Controller Select GPIO Pin",
             "description": "If the OEM controller is present alongside the PiFire controller, this GPIO will be used to select the active controller. Note that this will not be utilized unless 'Standalone' is set to False.  This should be set to 'None' if not utilized.",
-            "options": {
-              "17": "GPIO17"
-            },
-            "settings": [
-              "platform",
-              "inputs",
-              "selector"
-            ],
+            "options": { "17": "GPIO17" },
+            "settings": ["platform", "inputs", "selector"],
             "hidden": true
           },
           "input_shutdown": {
             "friendly_name": "System Shutdown GPIO Pin",
             "description": "GPIO Pin configured to shutdown the system.  Used for the wake/shutdown button on some designs.  Set this to 'None' if not utilized.",
-            "options": {
-              "None": "None"
-            },
-            "settings": [
-              "platform",
-              "inputs",
-              "shutdown"
-            ],
+            "options": { "None": "None" },
+            "settings": ["platform", "inputs", "shutdown"],
             "hidden": true
           },
           "device_display_dc": {
             "friendly_name": "SPI Display DC Pin",
             "description": "GPIO Pin for the SPI Display DC Pin.",
-            "options": {
-              "24": "GPIO24"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "dc"
-            ],
+            "options": { "24": "GPIO24" },
+            "settings": ["platform", "devices", "display", "dc"],
             "hidden": true
           },
           "device_display_led": {
             "friendly_name": "SPI Display LED Backlight Pin",
             "description": "GPIO Pin for the SPI Display LED Backlight.",
-            "options": {
-              "5": "GPIO5"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "led"
-            ],
+            "options": { "5": "GPIO5" },
+            "settings": ["platform", "devices", "display", "led"],
             "hidden": true
           },
           "device_display_rst": {
             "friendly_name": "SPI Display Reset Pin",
             "description": "GPIO Pin for the SPI Display Reset.",
-            "options": {
-              "25": "GPIO25"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "rst"
-            ],
+            "options": { "25": "GPIO25" },
+            "settings": ["platform", "devices", "display", "rst"],
             "hidden": true
           },
           "device_distance_echo": {
             "friendly_name": "Distance Sensor ECHO GPIO",
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor ECHO",
-            "options": {
-              "27": "GPIO27"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "echo"
-            ],
+            "options": { "27": "GPIO27" },
+            "settings": ["platform", "devices", "distance", "echo"],
             "hidden": true
           },
           "device_distance_trig": {
             "friendly_name": "Distance Sensor Trigger GPIO",
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor Trigger",
-            "options": {
-              "23": "GPIO23"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "trig"
-            ],
+            "options": { "23": "GPIO23" },
+            "settings": ["platform", "devices", "distance", "trig"],
             "hidden": true
           },
           "device_distance_i2c_bus_kind": {
@@ -1894,24 +1321,14 @@
               "ft232h": "FT232H (USB)",
               "mcp2221": "MCP2221 (USB)"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_kind"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
             "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
             "type": "i2c_bus_num",
             "default": "CP2112",
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_num"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
@@ -1925,107 +1342,55 @@
               "0x2e": "0x2E",
               "0x2f": "0x2F"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "address"
-            ]
+            "settings": ["platform", "devices", "distance", "address"]
           },
           "device_input_down_dt": {
             "friendly_name": "Down Button / Encoder DT",
             "description": "GPIO Pin for Down Button / Encoder DT",
-            "options": {
-              "20": "GPIO20"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "down_dt"
-            ],
+            "options": { "20": "GPIO20" },
+            "settings": ["platform", "devices", "input", "down_dt"],
             "hidden": true
           },
           "device_input_enter_sw": {
             "friendly_name": "Enter Button / Encoder SW",
             "description": "GPIO Pin for Enter Button / Encoder SW",
-            "options": {
-              "21": "GPIO21"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "enter_sw"
-            ],
+            "options": { "21": "GPIO21" },
+            "settings": ["platform", "devices", "input", "enter_sw"],
             "hidden": true
           },
           "device_input_up_clk": {
             "friendly_name": "Up Button / Encoder CLK",
             "description": "GPIO Pin for Up Button / Encoder CLK",
-            "options": {
-              "16": "GPIO16"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "up_clk"
-            ],
+            "options": { "16": "GPIO16" },
+            "settings": ["platform", "devices", "input", "up_clk"],
             "hidden": true
           },
           "system_1wire": {
             "friendly_name": "1Wire GPIO Pin",
             "description": "GPIO Pin for 1Wire bus/interface.  Used for DS18B20 sensors.",
-            "options": {
-              "None": "None"
-            },
-            "settings": [
-              "platform",
-              "system",
-              "1WIRE"
-            ],
+            "options": { "None": "None" },
+            "settings": ["platform", "system", "1WIRE"],
             "hidden": true
           },
           "system_spi0_ce0": {
             "friendly_name": "SPI0 CE0 GPIO Pin",
             "description": "GPIO Pin for SPI0 bus/interface CE/CS0.",
-            "options": {
-              "8": "GPIO8"
-            },
-            "settings": [
-              "platform",
-              "system",
-              "SPI0",
-              "CE0"
-            ],
+            "options": { "8": "GPIO8" },
+            "settings": ["platform", "system", "SPI0", "CE0"],
             "hidden": true
           },
           "system_spi0_ce1": {
             "friendly_name": "SPI0 CE1 GPIO Pin",
             "description": "GPIO Pin for SPI0 bus/interface CE/CS1.",
-            "options": {
-              "7": "GPIO7"
-            },
-            "settings": [
-              "platform",
-              "system",
-              "SPI0",
-              "CE1"
-            ],
+            "options": { "7": "GPIO7" },
+            "settings": ["platform", "system", "SPI0", "CE1"],
             "hidden": true
           },
           "real_hw": {
             "friendly_name": "Real Hardware",
             "description": "Select Yes if running on real hardware (Default).  Select No if running in a test environment.",
-            "options": {
-              "True": "Yes",
-              "False": "No (Test Only)"
-            },
-            "settings": [
-              "platform",
-              "real_hw"
-            ]
+            "options": { "True": "Yes", "False": "No (Test Only)" },
+            "settings": ["platform", "real_hw"]
           }
         }
       },
@@ -2035,9 +1400,7 @@
         "description": "Default settings/configuration for the PiFire PCB v4.x.x modular PCB.  This PCB aims to provide modular options to the user for probe inputs and relay outputs.",
         "default": true,
         "image": "pcb_4.x.x.png",
-        "py_dependencies": [
-          "rpi-hardware-pwm==0.2.2"
-        ],
+        "py_dependencies": ["rpi-hardware-pwm==0.2.2"],
         "apt_dependencies": [],
         "command_list": [
           [
@@ -2056,13 +1419,8 @@
           "current": {
             "friendly_name": "Platform Selected",
             "description": "Selects the current platform.",
-            "options": {
-              "pcb_4.x.x": "PiFire PCB v4.x.x"
-            },
-            "settings": [
-              "platform",
-              "current"
-            ],
+            "options": { "pcb_4.x.x": "PiFire PCB v4.x.x" },
+            "settings": ["platform", "current"],
             "hidden": true
           },
           "system_type": {
@@ -2072,219 +1430,116 @@
               "raspberry_pi_all": "Raspberry Pi (ALL)",
               "prototype": "Prototype / Test Only"
             },
-            "settings": [
-              "platform",
-              "system_type"
-            ]
+            "settings": ["platform", "system_type"]
           },
           "standalone": {
             "friendly_name": "Standalone",
             "description": "Select if your are using PiFire alongside the OEM Controller. ",
-            "options": {
-              "True": "PiFire Only"
-            },
-            "settings": [
-              "platform",
-              "standalone"
-            ],
+            "options": { "True": "PiFire Only" },
+            "settings": ["platform", "standalone"],
             "hidden": true
           },
           "triggerlevel": {
             "friendly_name": "Relay Type",
             "description": "Select the trigger level for the relays attached to the platform.",
-            "options": {
-              "LOW": "Active Low",
-              "HIGH": "Active High"
-            },
-            "settings": [
-              "platform",
-              "triggerlevel"
-            ]
+            "options": { "LOW": "Active Low", "HIGH": "Active High" },
+            "settings": ["platform", "triggerlevel"]
           },
           "dc_fan": {
             "friendly_name": "Fan Type",
             "description": "Select if your platform supports a DC(PWM) fan or uses a regular AC Fan.",
-            "options": {
-              "True": "DC Fan (PWM)",
-              "False": "AC Fan"
-            },
-            "settings": [
-              "platform",
-              "dc_fan"
-            ]
+            "options": { "True": "DC Fan (PWM)", "False": "AC Fan" },
+            "settings": ["platform", "dc_fan"]
           },
           "output_auger": {
             "friendly_name": "Auger Relay GPIO Pin",
             "description": "Select the GPIO used for the Auger relay.",
-            "options": {
-              "23": "GPIO23"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "auger"
-            ],
+            "options": { "23": "GPIO23" },
+            "settings": ["platform", "outputs", "auger"],
             "hidden": true
           },
           "output_dc_fan": {
             "friendly_name": "DC Fan GPIO Pin",
             "description": "Select the GPIO used for the DC Fan.",
-            "options": {
-              "26": "GPIO26"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "dc_fan"
-            ],
+            "options": { "26": "GPIO26" },
+            "settings": ["platform", "outputs", "dc_fan"],
             "hidden": true
           },
           "output_fan": {
             "friendly_name": "AC Fan Relay GPIO Pin",
             "description": "Select the GPIO used for enabling/disabling fan.",
-            "options": {
-              "26": "GPIO26"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "fan"
-            ],
+            "options": { "26": "GPIO26" },
+            "settings": ["platform", "outputs", "fan"],
             "hidden": true
           },
           "output_igniter": {
             "friendly_name": "Igniter Relay GPIO Pin",
             "description": "Select the GPIO used for the Igniter relay.",
-            "options": {
-              "18": "GPIO18"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "igniter"
-            ],
+            "options": { "18": "GPIO18" },
+            "settings": ["platform", "outputs", "igniter"],
             "hidden": true
           },
           "output_power": {
             "friendly_name": "Power Gate Relay GPIO Pin",
             "description": "Select the GPIO used for the AC Power Gate.",
-            "options": {
-              "22": "GPIO22"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "power"
-            ],
+            "options": { "22": "GPIO22" },
+            "settings": ["platform", "outputs", "power"],
             "hidden": true
           },
           "output_pwm": {
             "friendly_name": "DC Fan PWM GPIO Pin",
             "description": "Select the GPIO used for the DC Fan PWM.  Note that this should be a PWM capable GPIO.",
-            "options": {
-              "13": "GPIO13"
-            },
-            "settings": [
-              "platform",
-              "outputs",
-              "pwm"
-            ],
+            "options": { "13": "GPIO13" },
+            "settings": ["platform", "outputs", "pwm"],
             "hidden": true
           },
           "input_selector": {
             "friendly_name": "Controller Select GPIO Pin",
             "description": "If the OEM controller is present alongside the PiFire controller, this GPIO will be used to select the active controller. Note that this will not be utilized unless 'Standalone' is set to False.  This should be set to 'None' if not utilized.",
-            "options": {
-              "None": "None"
-            },
-            "settings": [
-              "platform",
-              "inputs",
-              "selector"
-            ],
+            "options": { "None": "None" },
+            "settings": ["platform", "inputs", "selector"],
             "hidden": true
           },
           "input_shutdown": {
             "friendly_name": "System Shutdown GPIO Pin",
             "description": "GPIO Pin configured to shutdown the system.  Used for the wake/shutdown button on some designs.  Set this to 'None' if not utilized.",
-            "options": {
-              "17": "GPIO17"
-            },
-            "settings": [
-              "platform",
-              "inputs",
-              "shutdown"
-            ],
+            "options": { "17": "GPIO17" },
+            "settings": ["platform", "inputs", "shutdown"],
             "hidden": true
           },
           "device_display_dc": {
             "friendly_name": "SPI Display DC Pin",
             "description": "GPIO Pin for the SPI Display DC Pin.",
-            "options": {
-              "24": "GPIO24"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "dc"
-            ],
+            "options": { "24": "GPIO24" },
+            "settings": ["platform", "devices", "display", "dc"],
             "hidden": true
           },
           "device_display_led": {
             "friendly_name": "SPI Display LED Backlight Pin",
             "description": "GPIO Pin for the SPI Display LED Backlight.",
-            "options": {
-              "5": "GPIO5"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "led"
-            ],
+            "options": { "5": "GPIO5" },
+            "settings": ["platform", "devices", "display", "led"],
             "hidden": true
           },
           "device_display_rst": {
             "friendly_name": "SPI Display Reset Pin",
             "description": "GPIO Pin for the SPI Display Reset.",
-            "options": {
-              "25": "GPIO25"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "display",
-              "rst"
-            ],
+            "options": { "25": "GPIO25" },
+            "settings": ["platform", "devices", "display", "rst"],
             "hidden": true
           },
           "device_distance_echo": {
             "friendly_name": "Distance Sensor ECHO GPIO",
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor ECHO",
-            "options": {
-              "27": "GPIO27"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "echo"
-            ],
+            "options": { "27": "GPIO27" },
+            "settings": ["platform", "devices", "distance", "echo"],
             "hidden": true
           },
           "device_distance_trig": {
             "friendly_name": "Distance Sensor Trigger GPIO",
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor Trigger",
-            "options": {
-              "23": "GPIO23"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "trig"
-            ],
+            "options": { "23": "GPIO23" },
+            "settings": ["platform", "devices", "distance", "trig"],
             "hidden": true
           },
           "device_distance_i2c_bus_kind": {
@@ -2296,24 +1551,14 @@
               "ft232h": "FT232H (USB)",
               "mcp2221": "MCP2221 (USB)"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_kind"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
             "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
             "type": "i2c_bus_num",
             "default": "CP2112",
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_num"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
@@ -2327,107 +1572,55 @@
               "0x2e": "0x2E",
               "0x2f": "0x2F"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "address"
-            ]
+            "settings": ["platform", "devices", "distance", "address"]
           },
           "device_input_down_dt": {
             "friendly_name": "Down Button / Encoder DT",
             "description": "GPIO Pin for Down Button / Encoder DT",
-            "options": {
-              "16": "GPIO16"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "down_dt"
-            ],
+            "options": { "16": "GPIO16" },
+            "settings": ["platform", "devices", "input", "down_dt"],
             "hidden": true
           },
           "device_input_enter_sw": {
             "friendly_name": "Enter Button / Encoder SW",
             "description": "GPIO Pin for Enter Button / Encoder SW",
-            "options": {
-              "15": "GPIO15"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "enter_sw"
-            ],
+            "options": { "15": "GPIO15" },
+            "settings": ["platform", "devices", "input", "enter_sw"],
             "hidden": true
           },
           "device_input_up_clk": {
             "friendly_name": "Up Button / Encoder CLK",
             "description": "GPIO Pin for Up Button / Encoder CLK",
-            "options": {
-              "14": "GPIO14"
-            },
-            "settings": [
-              "platform",
-              "devices",
-              "input",
-              "up_clk"
-            ],
+            "options": { "14": "GPIO14" },
+            "settings": ["platform", "devices", "input", "up_clk"],
             "hidden": true
           },
           "system_1wire": {
             "friendly_name": "1Wire GPIO Pin",
             "description": "GPIO Pin for 1Wire bus/interface.  Used for DS18B20 sensors.",
-            "options": {
-              "4": "GPIO4"
-            },
-            "settings": [
-              "platform",
-              "system",
-              "1WIRE"
-            ],
+            "options": { "4": "GPIO4" },
+            "settings": ["platform", "system", "1WIRE"],
             "hidden": true
           },
           "system_spi0_ce0": {
             "friendly_name": "SPI0 CE0 GPIO Pin",
             "description": "GPIO Pin for SPI0 bus/interface CE/CS0. (SPI Display Port)",
-            "options": {
-              "8": "GPIO8"
-            },
-            "settings": [
-              "platform",
-              "system",
-              "SPI0",
-              "CE0"
-            ],
+            "options": { "8": "GPIO8" },
+            "settings": ["platform", "system", "SPI0", "CE0"],
             "hidden": true
           },
           "system_spi0_ce1": {
             "friendly_name": "SPI0 CE1 GPIO Pin",
             "description": "GPIO Pin for SPI0 bus/interface CE/CS1. (SPI Aux Port)",
-            "options": {
-              "7": "GPIO7"
-            },
-            "settings": [
-              "platform",
-              "system",
-              "SPI0",
-              "CE1"
-            ],
+            "options": { "7": "GPIO7" },
+            "settings": ["platform", "system", "SPI0", "CE1"],
             "hidden": true
           },
           "real_hw": {
             "friendly_name": "Real Hardware",
             "description": "Select Yes if running on real hardware (Default).  Select No if running in a test environment.",
-            "options": {
-              "True": "Yes",
-              "False": "No (Test Only)"
-            },
-            "settings": [
-              "platform",
-              "real_hw"
-            ]
+            "options": { "True": "Yes", "False": "No (Test Only)" },
+            "settings": ["platform", "real_hw"]
           }
         }
       },
@@ -2437,9 +1630,7 @@
         "description": "Generic x86 build. Outputs are driven by a Numato USB relay board and fan PWM is generated by a selectable EMC2101 or EMC2301 fan controller on the board's integrated I2C bus (or an extended bus such as a CP2112 USB-to-I2C bridge).",
         "default": false,
         "image": "custom.png",
-        "py_dependencies": [
-          "adafruit-circuitpython-emc2101"
-        ],
+        "py_dependencies": ["adafruit-circuitpython-emc2101"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -2449,10 +1640,7 @@
             "options": {
               "x86_numato": "Generic x86 (Numato + EMC fan)"
             },
-            "settings": [
-              "platform",
-              "current"
-            ],
+            "settings": ["platform", "current"],
             "hidden": true
           },
           "system_type": {
@@ -2461,10 +1649,7 @@
             "options": {
               "x86_numato": "Generic x86 (Numato + EMC fan)"
             },
-            "settings": [
-              "platform",
-              "system_type"
-            ],
+            "settings": ["platform", "system_type"],
             "hidden": true
           },
           "fan_controller_chip": {
@@ -2474,11 +1659,7 @@
               "emc2101": "EMC2101",
               "emc2301": "EMC2301"
             },
-            "settings": [
-              "platform",
-              "fan_controller",
-              "chip"
-            ]
+            "settings": ["platform", "fan_controller", "chip"]
           },
           "numato_device": {
             "friendly_name": "Numato Serial Device",
@@ -2487,11 +1668,7 @@
               "/dev/ttyACM0": "/dev/ttyACM0",
               "/dev/ttyACM1": "/dev/ttyACM1"
             },
-            "settings": [
-              "platform",
-              "numato",
-              "device"
-            ]
+            "settings": ["platform", "numato", "device"]
           },
           "i2c_bus_kind": {
             "friendly_name": "Fan Controller I2C Bus Type",
@@ -2502,22 +1679,14 @@
               "ft232h": "FT232H (USB)",
               "mcp2221": "MCP2221 (USB)"
             },
-            "settings": [
-              "platform",
-              "fan_controller",
-              "i2c_bus_kind"
-            ]
+            "settings": ["platform", "fan_controller", "i2c_bus_kind"]
           },
           "i2c_bus_num": {
             "friendly_name": "Fan Controller Extended Bus",
             "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
             "type": "i2c_bus_num",
             "default": "CP2112",
-            "settings": [
-              "platform",
-              "fan_controller",
-              "i2c_bus_num"
-            ]
+            "settings": ["platform", "fan_controller", "i2c_bus_num"]
           },
           "fan_controller_address": {
             "friendly_name": "Fan Controller I2C Address",
@@ -2527,11 +1696,7 @@
               "0x4d": "0x4D",
               "0x2f": "0x2F"
             },
-            "settings": [
-              "platform",
-              "fan_controller",
-              "address"
-            ]
+            "settings": ["platform", "fan_controller", "address"]
           },
           "device_distance_i2c_bus_kind": {
             "friendly_name": "Distance Sensor I2C Bus Type",
@@ -2542,24 +1707,14 @@
               "ft232h": "FT232H (USB)",
               "mcp2221": "MCP2221 (USB)"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_kind"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
             "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
             "type": "i2c_bus_num",
             "default": "CP2112",
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_num"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
@@ -2573,12 +1728,7 @@
               "0x2e": "0x2E",
               "0x2f": "0x2F"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "address"
-            ]
+            "settings": ["platform", "devices", "distance", "address"]
           },
           "output_power": {
             "friendly_name": "Power Relay Index",
@@ -2589,11 +1739,7 @@
               "2": "Relay 2",
               "3": "Relay 3"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "power"
-            ]
+            "settings": ["platform", "outputs", "power"]
           },
           "output_igniter": {
             "friendly_name": "Igniter Relay Index",
@@ -2604,11 +1750,7 @@
               "2": "Relay 2",
               "3": "Relay 3"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "igniter"
-            ]
+            "settings": ["platform", "outputs", "igniter"]
           },
           "output_auger": {
             "friendly_name": "Auger Relay Index",
@@ -2619,11 +1761,7 @@
               "2": "Relay 2",
               "3": "Relay 3"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "auger"
-            ]
+            "settings": ["platform", "outputs", "auger"]
           },
           "output_fan": {
             "friendly_name": "Fan Relay Index",
@@ -2634,11 +1772,7 @@
               "2": "Relay 2",
               "3": "Relay 3"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "fan"
-            ]
+            "settings": ["platform", "outputs", "fan"]
           }
         }
       },
@@ -2658,25 +1792,15 @@
           "current": {
             "friendly_name": "Platform Selected",
             "description": "Selects the current platform.",
-            "options": {
-              "ft232h_relay": "FT232H IO-Triggered Relay"
-            },
-            "settings": [
-              "platform",
-              "current"
-            ],
+            "options": { "ft232h_relay": "FT232H IO-Triggered Relay" },
+            "settings": ["platform", "current"],
             "hidden": true
           },
           "system_type": {
             "friendly_name": "System Type",
             "description": "System core for this platform. Set automatically for the FT232H relay build.",
-            "options": {
-              "ft232h_relay": "FT232H IO-Triggered Relay"
-            },
-            "settings": [
-              "platform",
-              "system_type"
-            ],
+            "options": { "ft232h_relay": "FT232H IO-Triggered Relay" },
+            "settings": ["platform", "system_type"],
             "hidden": true
           },
           "fan_mode": {
@@ -2687,11 +1811,7 @@
               "emc2101": "EMC2101 PWM fan controller",
               "emc2301": "EMC2301 PWM fan controller"
             },
-            "settings": [
-              "platform",
-              "fan_controller",
-              "chip"
-            ]
+            "settings": ["platform", "fan_controller", "chip"]
           },
           "fan_controller_address": {
             "friendly_name": "Fan Controller I2C Address",
@@ -2700,11 +1820,7 @@
               "0x4c": "0x4C (EMC2101)",
               "0x2f": "0x2F (EMC2301)"
             },
-            "settings": [
-              "platform",
-              "fan_controller",
-              "address"
-            ]
+            "settings": ["platform", "fan_controller", "address"]
           },
           "ft232h_url": {
             "friendly_name": "FT232H Device",
@@ -2712,11 +1828,7 @@
             "options": {
               "1": "First FT232H (default)"
             },
-            "settings": [
-              "platform",
-              "ft232h",
-              "url"
-            ]
+            "settings": ["platform", "ft232h", "url"]
           },
           "device_distance_i2c_bus_kind": {
             "friendly_name": "Distance Sensor I2C Bus Type",
@@ -2727,24 +1839,14 @@
               "ft232h": "FT232H (USB)",
               "mcp2221": "MCP2221 (USB)"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_kind"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
           },
           "device_distance_i2c_bus_num": {
             "friendly_name": "Distance Sensor Extended I2C Bus",
             "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
             "type": "i2c_bus_num",
             "default": "CP2112",
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "i2c_bus_num"
-            ]
+            "settings": ["platform", "devices", "distance", "i2c_bus_num"]
           },
           "device_distance_address": {
             "friendly_name": "Distance Sensor I2C Address",
@@ -2758,104 +1860,47 @@
               "0x2e": "0x2E",
               "0x2f": "0x2F"
             },
-            "settings": [
-              "platform",
-              "devices",
-              "distance",
-              "address"
-            ]
+            "settings": ["platform", "devices", "distance", "address"]
           },
           "output_power": {
             "friendly_name": "Power Output Pin",
             "description": "FT232H GPIO pin driving the power relay.",
             "options": {
-              "C0": "C0",
-              "C1": "C1",
-              "C2": "C2",
-              "C3": "C3",
-              "C4": "C4",
-              "C5": "C5",
-              "C6": "C6",
-              "C7": "C7",
-              "D4": "D4",
-              "D5": "D5",
-              "D6": "D6",
-              "D7": "D7"
+              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
+              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
+              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "power"
-            ]
+            "settings": ["platform", "outputs", "power"]
           },
           "output_igniter": {
             "friendly_name": "Igniter Output Pin",
             "description": "FT232H GPIO pin driving the igniter relay.",
             "options": {
-              "C0": "C0",
-              "C1": "C1",
-              "C2": "C2",
-              "C3": "C3",
-              "C4": "C4",
-              "C5": "C5",
-              "C6": "C6",
-              "C7": "C7",
-              "D4": "D4",
-              "D5": "D5",
-              "D6": "D6",
-              "D7": "D7"
+              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
+              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
+              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "igniter"
-            ]
+            "settings": ["platform", "outputs", "igniter"]
           },
           "output_auger": {
             "friendly_name": "Auger Output Pin",
             "description": "FT232H GPIO pin driving the auger relay.",
             "options": {
-              "C0": "C0",
-              "C1": "C1",
-              "C2": "C2",
-              "C3": "C3",
-              "C4": "C4",
-              "C5": "C5",
-              "C6": "C6",
-              "C7": "C7",
-              "D4": "D4",
-              "D5": "D5",
-              "D6": "D6",
-              "D7": "D7"
+              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
+              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
+              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "auger"
-            ]
+            "settings": ["platform", "outputs", "auger"]
           },
           "output_fan": {
             "friendly_name": "Fan Output Pin",
             "description": "FT232H GPIO pin driving the fan relay (gates fan power in both modes).",
             "options": {
-              "C0": "C0",
-              "C1": "C1",
-              "C2": "C2",
-              "C3": "C3",
-              "C4": "C4",
-              "C5": "C5",
-              "C6": "C6",
-              "C7": "C7",
-              "D4": "D4",
-              "D5": "D5",
-              "D6": "D6",
-              "D7": "D7"
+              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
+              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
+              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
             },
-            "settings": [
-              "platform",
-              "outputs",
-              "fan"
-            ]
+            "settings": ["platform", "outputs", "fan"]
           }
         }
       }
@@ -2867,33 +1912,19 @@
         "description": "This is the default module supporting ALL of the ADS1115 16-Bit ADC's and is based on Adafruit's Circuit Python implementation/module.  This version is still actively updated and may support a wider range of hardware.  There has been rumors of sellers shipping ADS1015 12-Bit ADC's instead of the ADS1115 16-Bit ADC's.  If you got one of these, you can try the ADS1015 Adafruit library instead.",
         "default": true,
         "image": "ads1115.png",
-        "py_dependencies": [
-          "adafruit-circuitpython-ads1x15==2.4.3",
-          "adafruit-extended-bus==1.0.2"
-        ],
+        "py_dependencies": ["adafruit-circuitpython-ads1x15==2.4.3", "adafruit-extended-bus==1.0.2"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "ADC0",
-            "ADC1",
-            "ADC2",
-            "ADC3"
-          ],
+          "ports": ["ADC0", "ADC1", "ADC2", "ADC3"],
           "type": "adc",
           "config": [
             {
@@ -2901,18 +1932,8 @@
               "friendly_name": "I2C Bus Address",
               "description": "Select the I2C bus address to use for this device.  Default is 0x48.  If you have more than one ADS1115, you can assign unique device bus address for up to four devices.",
               "type": "list",
-              "list_values": [
-                "0x48",
-                "0x49",
-                "0x4A",
-                "0x4B"
-              ],
-              "list_labels": [
-                "0x48",
-                "0x49",
-                "0x4A",
-                "0x4B"
-              ],
+              "list_values": ["0x48", "0x49", "0x4A", "0x4B"],
+              "list_labels": ["0x48", "0x49", "0x4A", "0x4B"],
               "default": "0x48",
               "hidden": false
             },
@@ -2921,18 +1942,8 @@
               "friendly_name": "I2C Bus Type",
               "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
               "type": "list",
-              "list_values": [
-                "basic",
-                "extended",
-                "ft232h",
-                "mcp2221"
-              ],
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)",
-                "FT232H (USB)",
-                "MCP2221 (USB)"
-              ],
+              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
+              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)", "FT232H (USB)", "MCP2221 (USB)"],
               "default": "basic",
               "hidden": false
             },
@@ -3004,10 +2015,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -3024,33 +2032,19 @@
         "description": "This module supports the ADS1015 12-Bit ADC based on Adafruit's Circuit Python implementation/module.  This version can also be used with the ADS1115, as it is backward compatible.  Some fidelity may be lost due to the fact that the ADC has less bits to measure with, however in testing it seems to be reasonably good.  Use this if you are having issues with the default ADS1115 module.",
         "default": false,
         "image": "ads1115.png",
-        "py_dependencies": [
-          "adafruit-circuitpython-ads1x15==2.4.3",
-          "adafruit-extended-bus==1.0.2"
-        ],
+        "py_dependencies": ["adafruit-circuitpython-ads1x15==2.4.3", "adafruit-extended-bus==1.0.2"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "ADC0",
-            "ADC1",
-            "ADC2",
-            "ADC3"
-          ],
+          "ports": ["ADC0", "ADC1", "ADC2", "ADC3"],
           "type": "adc",
           "config": [
             {
@@ -3058,18 +2052,8 @@
               "friendly_name": "I2C Bus Address",
               "description": "Select the I2C bus address to use for this device.  Default is 0x48.  If you have more than one ADS1115, you can assign unique device bus address for up to four devices.",
               "type": "list",
-              "list_values": [
-                "0x48",
-                "0x49",
-                "0x4A",
-                "0x4B"
-              ],
-              "list_labels": [
-                "0x48",
-                "0x49",
-                "0x4A",
-                "0x4B"
-              ],
+              "list_values": ["0x48", "0x49", "0x4A", "0x4B"],
+              "list_labels": ["0x48", "0x49", "0x4A", "0x4B"],
               "default": "0x48",
               "hidden": false
             },
@@ -3078,18 +2062,8 @@
               "friendly_name": "I2C Bus Type",
               "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
               "type": "list",
-              "list_values": [
-                "basic",
-                "extended",
-                "ft232h",
-                "mcp2221"
-              ],
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)",
-                "FT232H (USB)",
-                "MCP2221 (USB)"
-              ],
+              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
+              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)", "FT232H (USB)", "MCP2221 (USB)"],
               "default": "basic",
               "hidden": false
             },
@@ -3161,10 +2135,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -3188,20 +2159,12 @@
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "RTD0"
-          ],
+          "ports": ["RTD0"],
           "type": "rtd",
           "config": [
             {
@@ -3209,14 +2172,8 @@
               "friendly_name": "SPI Chip Select (CS)",
               "description": "SPI Chip Select (CS/CEx) channel used for device.  This module supports CE0 and CE1 only.",
               "type": "list",
-              "list_values": [
-                "1",
-                "0"
-              ],
-              "list_labels": [
-                "CE1",
-                "CE0"
-              ],
+              "list_values": ["1", "0"],
+              "list_labels": ["CE1", "CE0"],
               "default": "1",
               "hidden": false
             },
@@ -3247,16 +2204,8 @@
               "friendly_name": "RTD Wires",
               "description": "Number of RTD wires used for input.  Default 2",
               "type": "list",
-              "list_values": [
-                "2",
-                "3",
-                "4"
-              ],
-              "list_labels": [
-                "2 Wires",
-                "3 Wires",
-                "4 Wires"
-              ],
+              "list_values": ["2", "3", "4"],
+              "list_labels": ["2 Wires", "3 Wires", "4 Wires"],
               "default": "2",
               "hidden": false
             },
@@ -3265,10 +2214,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -3296,20 +2242,12 @@
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "RTD0"
-          ],
+          "ports": ["RTD0"],
           "type": "rtd",
           "config": [
             {
@@ -3318,68 +2256,16 @@
               "description": "SPI Chip Select pin. For Basic (native SPI) pick a board GPIO (D2-D27). For MCP2210 pick the bridge's GP0-GP8.",
               "type": "list",
               "list_values": [
-                "GPIO2",
-                "GPIO3",
-                "GPIO4",
-                "GPIO5",
-                "GPIO6",
-                "GPIO12",
-                "GPIO13",
-                "GPIO14",
-                "GPIO15",
-                "GPIO16",
-                "GPIO17",
-                "GPIO18",
-                "GPIO19",
-                "GPIO20",
-                "GPIO21",
-                "GPIO22",
-                "GPIO23",
-                "GPIO24",
-                "GPIO25",
-                "GPIO26",
-                "GPIO27",
-                "0",
-                "1",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8"
+                "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO12", "GPIO13",
+                "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO19", "GPIO20",
+                "GPIO21", "GPIO22", "GPIO23", "GPIO24", "GPIO25", "GPIO26", "GPIO27",
+                "0", "1", "2", "3", "4", "5", "6", "7", "8"
               ],
               "list_labels": [
-                "D2",
-                "D3",
-                "D4",
-                "D5",
-                "D6",
-                "D12",
-                "D13",
-                "D14",
-                "D15",
-                "D16",
-                "D17",
-                "D18",
-                "D19",
-                "D20",
-                "D21",
-                "D22",
-                "D23",
-                "D24",
-                "D25",
-                "D26",
-                "D27",
-                "MCP2210 GP0",
-                "MCP2210 GP1",
-                "MCP2210 GP2",
-                "MCP2210 GP3",
-                "MCP2210 GP4",
-                "MCP2210 GP5",
-                "MCP2210 GP6",
-                "MCP2210 GP7",
-                "MCP2210 GP8"
+                "D2", "D3", "D4", "D5", "D6", "D12", "D13", "D14", "D15", "D16", "D17",
+                "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27",
+                "MCP2210 GP0", "MCP2210 GP1", "MCP2210 GP2", "MCP2210 GP3", "MCP2210 GP4",
+                "MCP2210 GP5", "MCP2210 GP6", "MCP2210 GP7", "MCP2210 GP8"
               ],
               "default": "GPIO2",
               "hidden": false
@@ -3435,16 +2321,8 @@
               "friendly_name": "RTD Wires",
               "description": "Number of RTD wires used for input.  Default 2",
               "type": "list",
-              "list_values": [
-                "2",
-                "3",
-                "4"
-              ],
-              "list_labels": [
-                "2 Wires",
-                "3 Wires",
-                "4 Wires"
-              ],
+              "list_values": ["2", "3", "4"],
+              "list_labels": ["2 Wires", "3 Wires", "4 Wires"],
               "default": "2",
               "hidden": false
             },
@@ -3453,10 +2331,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -3506,68 +2381,16 @@
               "description": "SPI Chip Select pin. For Basic (native SPI) pick a board GPIO (D2-D27). For MCP2210 pick the bridge's GP0-GP8.",
               "type": "list",
               "list_values": [
-                "GPIO2",
-                "GPIO3",
-                "GPIO4",
-                "GPIO5",
-                "GPIO6",
-                "GPIO12",
-                "GPIO13",
-                "GPIO14",
-                "GPIO15",
-                "GPIO16",
-                "GPIO17",
-                "GPIO18",
-                "GPIO19",
-                "GPIO20",
-                "GPIO21",
-                "GPIO22",
-                "GPIO23",
-                "GPIO24",
-                "GPIO25",
-                "GPIO26",
-                "GPIO27",
-                "0",
-                "1",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8"
+                "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO12", "GPIO13",
+                "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO19", "GPIO20",
+                "GPIO21", "GPIO22", "GPIO23", "GPIO24", "GPIO25", "GPIO26", "GPIO27",
+                "0", "1", "2", "3", "4", "5", "6", "7", "8"
               ],
               "list_labels": [
-                "D2",
-                "D3",
-                "D4",
-                "D5",
-                "D6",
-                "D12",
-                "D13",
-                "D14",
-                "D15",
-                "D16",
-                "D17",
-                "D18",
-                "D19",
-                "D20",
-                "D21",
-                "D22",
-                "D23",
-                "D24",
-                "D25",
-                "D26",
-                "D27",
-                "MCP2210 GP0",
-                "MCP2210 GP1",
-                "MCP2210 GP2",
-                "MCP2210 GP3",
-                "MCP2210 GP4",
-                "MCP2210 GP5",
-                "MCP2210 GP6",
-                "MCP2210 GP7",
-                "MCP2210 GP8"
+                "D2", "D3", "D4", "D5", "D6", "D12", "D13", "D14", "D15", "D16", "D17",
+                "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27",
+                "MCP2210 GP0", "MCP2210 GP1", "MCP2210 GP2", "MCP2210 GP3", "MCP2210 GP4",
+                "MCP2210 GP5", "MCP2210 GP6", "MCP2210 GP7", "MCP2210 GP8"
               ],
               "default": "GPIO2",
               "hidden": false
@@ -3602,24 +2425,10 @@
               "description": "Thermocouple type. Type K is the most common for cooking.",
               "type": "list",
               "list_values": [
-                "B",
-                "E",
-                "J",
-                "K",
-                "N",
-                "R",
-                "S",
-                "T"
+                "B", "E", "J", "K", "N", "R", "S", "T"
               ],
               "list_labels": [
-                "Type B",
-                "Type E",
-                "Type J",
-                "Type K",
-                "Type N",
-                "Type R",
-                "Type S",
-                "Type T"
+                "Type B", "Type E", "Type J", "Type K", "Type N", "Type R", "Type S", "Type T"
               ],
               "default": "K",
               "hidden": false
@@ -3630,18 +2439,10 @@
               "description": "Number of samples averaged per reading. More samples = smoother but slower.",
               "type": "list",
               "list_values": [
-                "1",
-                "2",
-                "4",
-                "8",
-                "16"
+                "1", "2", "4", "8", "16"
               ],
               "list_labels": [
-                "1",
-                "2",
-                "4",
-                "8",
-                "16"
+                "1", "2", "4", "8", "16"
               ],
               "default": "1",
               "hidden": false
@@ -3652,12 +2453,10 @@
               "description": "Mains noise rejection filter frequency. Use 60 Hz in North America, 50 Hz in most of Europe/Asia.",
               "type": "list",
               "list_values": [
-                "60",
-                "50"
+                "60", "50"
               ],
               "list_labels": [
-                "60 Hz (US)",
-                "50 Hz (EU)"
+                "60 Hz (US)", "50 Hz (EU)"
               ],
               "default": "60",
               "hidden": false
@@ -3687,30 +2486,19 @@
         "description": "This I2C device reads K-Type thermocouples / probes. Moreover the MCP9600 can interface with just about any thermocouple type: K, J, T, N, S, E, B and R type are all supported.  This version uses the Adafruit CircuitPython modules.  Note that this device can be intolerant of higher i2c bus speeds, so you may need to reduce the i2c bus speed manually.",
         "default": false,
         "image": "mcp9600.png",
-        "py_dependencies": [
-          "adafruit-circuitpython-mcp9600==2.0.6",
-          "adafruit-extended-bus==1.0.2"
-        ],
+        "py_dependencies": ["adafruit-circuitpython-mcp9600==2.0.6", "adafruit-extended-bus==1.0.2"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "KTT0"
-          ],
+          "ports": ["KTT0"],
           "type": "thermocouple",
           "config": [
             {
@@ -3774,18 +2562,8 @@
               "friendly_name": "I2C Bus Type",
               "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
               "type": "list",
-              "list_values": [
-                "basic",
-                "extended",
-                "ft232h",
-                "mcp2221"
-              ],
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)",
-                "FT232H (USB)",
-                "MCP2221 (USB)"
-              ],
+              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
+              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)", "FT232H (USB)", "MCP2221 (USB)"],
               "default": "basic",
               "hidden": false
             },
@@ -3802,10 +2580,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -3822,40 +2597,21 @@
         "description": "This device module supports Bluetooth LE iBBQ devices such as the Inkbird IBT-4XS four probe thermometer.  Note that the device can take up to a minute to be discovered and to start streaming data once turned on.  This has only been tested with the Inkbird IBT-4XS, but it may also work with other iBBQ models.  This module is still experimental, so feedback is welcome.",
         "default": false,
         "image": "bt_ibbq.png",
-        "py_dependencies": [
-          "bluepy==1.3.0"
-        ],
-        "apt_dependencies": [
-          "libglib2.0-dev"
-        ],
+        "py_dependencies": ["bluepy==1.3.0"],
+        "apt_dependencies": ["libglib2.0-dev"],
         "command_list": [
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/bluepy.sh"
-          ]
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]
         ],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "BT0",
-            "BT1",
-            "BT2",
-            "BT3"
-          ],
+          "ports": ["BT0", "BT1", "BT2", "BT3"],
           "type": "bluetooth",
           "config": [
             {
@@ -3871,10 +2627,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "True",
-                "False"
-              ],
+              "list_values": ["True", "False"],
               "list_labels": [
                 "Transient (sometimes detached)",
                 "Fixed (always attached)"
@@ -3902,42 +2655,21 @@
         "description": "This device module supports Bluetooth LE iBBQ devices such as the Inkbird IBT-6XS six probe thermometer.  Note that the device can take up to a minute to be discovered and to start streaming data once turned on.  This has only been tested with the Inkbird IBT-6XS, but it may also work with other iBBQ models.  This module is still experimental, so feedback is welcome.",
         "default": false,
         "image": "bt_ibt6xs.png",
-        "py_dependencies": [
-          "bluepy==1.3.0"
-        ],
-        "apt_dependencies": [
-          "libglib2.0-dev"
-        ],
+        "py_dependencies": ["bluepy==1.3.0"],
+        "apt_dependencies": ["libglib2.0-dev"],
         "command_list": [
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/bluepy.sh"
-          ]
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]
         ],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "BT0",
-            "BT1",
-            "BT2",
-            "BT3",
-            "BT4",
-            "BT5"
-          ],
+          "ports": ["BT0", "BT1", "BT2", "BT3", "BT4", "BT5"],
           "type": "bluetooth",
           "config": [
             {
@@ -3953,10 +2685,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "True",
-                "False"
-              ],
+              "list_values": ["True", "False"],
               "list_labels": [
                 "Transient (sometimes detached)",
                 "Fixed (always attached)"
@@ -3984,38 +2713,21 @@
         "description": "This device module supports Bluetooth LE Meater probe thermometer devices (Original Meater and Meater Plus supported).  At this time the Meater Pro (Meater 2 Plus) devices are not supported. ",
         "default": false,
         "image": "bt_meater.png",
-        "py_dependencies": [
-          "bluepy==1.3.0"
-        ],
-        "apt_dependencies": [
-          "libglib2.0-dev"
-        ],
+        "py_dependencies": ["bluepy==1.3.0"],
+        "apt_dependencies": ["libglib2.0-dev"],
         "command_list": [
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/bluepy.sh"
-          ]
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]
         ],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "BT_Tip",
-            "BT_Ambient"
-          ],
+          "ports": ["BT_Tip", "BT_Ambient"],
           "type": "bluetooth",
           "config": [
             {
@@ -4031,10 +2743,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "True",
-                "False"
-              ],
+              "list_values": ["True", "False"],
               "list_labels": [
                 "Transient (sometimes detached)",
                 "Fixed (always attached)"
@@ -4051,32 +2760,19 @@
         "description": "This device module supports Bluetooth LE Meater probe thermometer devices and is experimental. Not that this module relies on the simplepyble module and will not co-exist with other bluetooth modules based on bluepy.  This is not recommended for production use.",
         "default": false,
         "image": "bt_meater.png",
-        "py_dependencies": [
-          "simplepyble==0.7.3",
-          "icecream==2.1.4"
-        ],
-        "apt_dependencies": [
-          "libdbus-1-dev"
-        ],
+        "py_dependencies": ["simplepyble==0.7.3", "icecream==2.1.4"],
+        "apt_dependencies": ["libdbus-1-dev"],
         "command_list": [],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "BT0"
-          ],
+          "ports": ["BT0"],
           "type": "bluetooth",
           "config": [
             {
@@ -4092,10 +2788,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "True",
-                "False"
-              ],
+              "list_values": ["True", "False"],
               "list_labels": [
                 "Transient (sometimes detached)",
                 "Fixed (always attached)"
@@ -4112,36 +2805,19 @@
         "description": "This device module reads temperatures from a ThermoWorks Cloud-connected wireless thermometer (Signals, Smoke, Smoke X4, Node, RFX, BlueDOT, etc.) using your ThermoWorks account. Click Test Connection after entering your email/password to discover your devices.",
         "default": false,
         "image": "default.png",
-        "py_dependencies": [
-          "thermoworks-cloud>=0.1.13"
-        ],
+        "py_dependencies": ["thermoworks-cloud>=0.1.13"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "TWC0",
-            "TWC1",
-            "TWC2",
-            "TWC3",
-            "TWC4",
-            "TWC5",
-            "TWC6",
-            "TWC7"
-          ],
+          "ports": ["TWC0", "TWC1", "TWC2", "TWC3", "TWC4", "TWC5", "TWC6", "TWC7"],
           "type": "network",
           "config": [
             {
@@ -4203,23 +2879,12 @@
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "ADC0",
-            "ADC1",
-            "ADC2",
-            "ADC3"
-          ],
+          "ports": ["ADC0", "ADC1", "ADC2", "ADC3"],
           "type": "adc",
           "config": [
             {
@@ -4227,18 +2892,8 @@
               "friendly_name": "I2C Bus Address",
               "description": "Select the I2C bus address to use for this device.  Default is 0x48.  If you have more than one ADS1115, you can assign unique device bus address for up to four devices.",
               "type": "list",
-              "list_values": [
-                "0x48",
-                "0x49",
-                "0x4A",
-                "0x4B"
-              ],
-              "list_labels": [
-                "0x48",
-                "0x49",
-                "0x4A",
-                "0x4B"
-              ],
+              "list_values": ["0x48", "0x49", "0x4A", "0x4B"],
+              "list_labels": ["0x48", "0x49", "0x4A", "0x4B"],
               "default": "0x48",
               "hidden": false
             },
@@ -4247,14 +2902,8 @@
               "friendly_name": "I2C Bus Type",
               "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
               "type": "list",
-              "list_values": [
-                "basic",
-                "extended"
-              ],
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)"
-              ],
+              "list_values": ["basic", "extended"],
+              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)"],
               "default": "basic",
               "hidden": false
             },
@@ -4326,10 +2975,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -4346,32 +2992,19 @@
         "description": "WARNING: This module is no longer the default due to reports of issues.  If you experience trouble with this module, use the Adafruit modules.  This is an alternative PiFire module supporting the ADS1115 16-Bit ADC and should only be used if you are experiencing difficulty with the Adafruit module.",
         "default": false,
         "image": "ads1115.png",
-        "py_dependencies": [
-          "ADS1115==0.2.1"
-        ],
+        "py_dependencies": ["ADS1115==0.2.1"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "ADC0",
-            "ADC1",
-            "ADC2",
-            "ADC3"
-          ],
+          "ports": ["ADC0", "ADC1", "ADC2", "ADC3"],
           "type": "adc",
           "config": [
             {
@@ -4379,18 +3012,8 @@
               "friendly_name": "I2C Bus Address",
               "description": "Select the I2C bus address to use for this device.  Default is 0x48.  If you have more than one ADS1115, you can assign unique device bus address for up to four devices.",
               "type": "list",
-              "list_values": [
-                "0x48",
-                "0x49",
-                "0x4A",
-                "0x4B"
-              ],
-              "list_labels": [
-                "0x48",
-                "0x49",
-                "0x4A",
-                "0x4B"
-              ],
+              "list_values": ["0x48", "0x49", "0x4A", "0x4B"],
+              "list_labels": ["0x48", "0x49", "0x4A", "0x4B"],
               "default": "0x48",
               "hidden": false
             },
@@ -4399,14 +3022,8 @@
               "friendly_name": "I2C Bus Type",
               "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
               "type": "list",
-              "list_values": [
-                "basic",
-                "extended"
-              ],
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)"
-              ],
+              "list_values": ["basic", "extended"],
+              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)"],
               "default": "basic",
               "hidden": false
             },
@@ -4478,10 +3095,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -4498,35 +3112,19 @@
         "description": "The DS18B20 digital thermometer provides Celsius temperature measurements over a 1-wire communication bus.  This module is currently experimental, but may be useful for calibrating probe profiles for other probes as itself has been factory calibrated.",
         "default": false,
         "image": "ds18b20.png",
-        "py_dependencies": [
-          "w1thermsensor==2.3.0"
-        ],
+        "py_dependencies": ["w1thermsensor==2.3.0"],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "bash",
-            "wizard/ds18b20.sh"
-          ]
-        ],
+        "command_list": [["sudo", "bash", "wizard/ds18b20.sh"]],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "DS0"
-          ],
+          "ports": ["DS0"],
           "type": "1wire",
           "config": [
             {
@@ -4534,10 +3132,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -4561,20 +3156,12 @@
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "VIRT0"
-          ],
+          "ports": ["VIRT0"],
           "type": "virtual",
           "config": [
             {
@@ -4589,10 +3176,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -4616,20 +3200,12 @@
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "VIRT0"
-          ],
+          "ports": ["VIRT0"],
           "type": "virtual",
           "config": [
             {
@@ -4644,10 +3220,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -4671,20 +3244,12 @@
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "VIRT0"
-          ],
+          "ports": ["VIRT0"],
           "type": "virtual",
           "config": [
             {
@@ -4699,10 +3264,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -4726,20 +3288,12 @@
           "units": {
             "friendly_name": "Temp Units",
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
-            "options": {
-              "F": "Fahrenheit",
-              "C": "Celsius"
-            },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "options": { "F": "Fahrenheit", "C": "Celsius" },
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "VIRT0"
-          ],
+          "ports": ["VIRT0"],
           "type": "virtual",
           "config": [
             {
@@ -4754,10 +3308,7 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
+              "list_values": ["False", "True"],
               "list_labels": [
                 "Fixed (always attached)",
                 "Transient (sometimes detached)"
@@ -4784,17 +3335,8 @@
         ],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ],
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/raspi5.sh"
-          ]
+          ["sudo", "python", "board-config.py", "-s"],
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/raspi5.sh"]
         ],
         "settings_dependencies": {},
         "config": [
@@ -4803,12 +3345,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1,
-              2,
-              3
-            ],
+            "list_values": [0, 1, 2, 3],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -4823,14 +3360,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -4850,17 +3381,8 @@
         ],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ],
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/raspi5.sh"
-          ]
+          ["sudo", "python", "board-config.py", "-s"],
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/raspi5.sh"]
         ],
         "settings_dependencies": {},
         "config": [
@@ -4869,12 +3391,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1,
-              2,
-              3
-            ],
+            "list_values": [0, 1, 2, 3],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -4889,14 +3406,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -4909,19 +3420,9 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "ili9341.png",
-        "py_dependencies": [
-          "luma.lcd==2.11.0",
-          "pillow==11.1.0"
-        ],
+        "py_dependencies": ["luma.lcd==2.11.0", "pillow==11.1.0"],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -4929,12 +3430,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1,
-              2,
-              3
-            ],
+            "list_values": [0, 1, 2, 3],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -4949,14 +3445,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -4975,26 +3465,13 @@
           "gpiozero==2.0.1"
         ],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
             "description": "Select how your button hardware is configured. (HIGH - Pullups, LOW - Pulldowns)",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": [
@@ -5003,12 +3480,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1,
-              2,
-              3
-            ],
+            "list_values": [0, 1, 2, 3],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -5023,14 +3495,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5051,30 +3517,15 @@
         ],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ],
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/raspi5.sh"
-          ]
+          ["sudo", "python", "board-config.py", "-s"],
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/raspi5.sh"]
         ],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
             "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": [
@@ -5083,12 +3534,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1,
-              2,
-              3
-            ],
+            "list_values": [0, 1, 2, 3],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -5107,10 +3553,7 @@
               "./display/ili9341f_320x240.json",
               "./display/ili9341f_480x320.json"
             ],
-            "list_labels": [
-              "320x240",
-              "480x320"
-            ],
+            "list_labels": ["320x240", "480x320"],
             "default": "./display/ili9341f_320x240.json",
             "hidden": false
           },
@@ -5120,26 +3563,12 @@
             "option_description": "List of input types supported.  Separate multiple types with a comma.",
             "option_type": "list",
             "list_values": [
-              [
-                "button"
-              ],
-              [
-                "encoder"
-              ],
-              [
-                "touch"
-              ],
-              [
-                "button",
-                "touch"
-              ],
-              [
-                "encoder",
-                "touch"
-              ],
-              [
-                "none"
-              ]
+              ["button"],
+              ["encoder"],
+              ["touch"],
+              ["button", "touch"],
+              ["encoder", "touch"],
+              ["none"]
             ],
             "list_labels": [
               "Button",
@@ -5149,10 +3578,7 @@
               "Touch + Encoder",
               "No Input"
             ],
-            "default": [
-              "button",
-              "touch"
-            ],
+            "default": ["button", "touch"],
             "hidden": false
           },
           {
@@ -5160,14 +3586,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5187,17 +3607,8 @@
         ],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ],
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/raspi5.sh"
-          ]
+          ["sudo", "python", "board-config.py", "-s"],
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/raspi5.sh"]
         ],
         "settings_dependencies": {},
         "config": [
@@ -5206,12 +3617,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1,
-              2,
-              3
-            ],
+            "list_values": [0, 1, 2, 3],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -5226,14 +3632,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5253,17 +3653,8 @@
         ],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ],
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/raspi5.sh"
-          ]
+          ["sudo", "python", "board-config.py", "-s"],
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/raspi5.sh"]
         ],
         "settings_dependencies": {},
         "config": [
@@ -5272,12 +3663,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1,
-              2,
-              3
-            ],
+            "list_values": [0, 1, 2, 3],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -5292,14 +3678,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5312,19 +3692,9 @@
         "notes": "Pinout: MISO = MISO(Pin 21), LED = GPIO05, SCK = SCLK(Pin 23), MOSI = MOSI(Pin 19), DC = GPIO24, RST = GPIO25, CS = CE0(Pin 24)",
         "default": false,
         "image": "ili9488.png",
-        "py_dependencies": [
-          "luma.lcd==2.11.0",
-          "pillow==11.1.0"
-        ],
+        "py_dependencies": ["luma.lcd==2.11.0", "pillow==11.1.0"],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -5332,12 +3702,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1,
-              2,
-              3
-            ],
+            "list_values": [0, 1, 2, 3],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -5352,14 +3717,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5372,32 +3731,15 @@
         "notes": "Pinout:  Display - MISO = MISO(Pin 21), LED = GPIO05, SCK = SCLK(Pin 23), MOSI = MOSI(Pin 19), DC = GPIO24, RST = GPIO25, CS = CE0(Pin 24). Buttons - UP = GPIO16, DOWN = GPIO20, ENTER = GPIO21, GND = GND, VCC = 3.3V",
         "default": true,
         "image": "ili9488b.png",
-        "py_dependencies": [
-          "luma.lcd==2.11.0",
-          "pillow==11.1.0",
-          "gpiozero"
-        ],
+        "py_dependencies": ["luma.lcd==2.11.0", "pillow==11.1.0", "gpiozero"],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
             "description": "Select how your button hardware is configured. (HIGH - Pullups, LOW - Pulldowns)",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": [
@@ -5406,12 +3748,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1,
-              2,
-              3
-            ],
+            "list_values": [0, 1, 2, 3],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -5426,14 +3763,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5446,32 +3777,15 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "st7789b.png",
-        "py_dependencies": [
-          "numpy==1.26.4",
-          "st7789==1.0.1",
-          "pillow==11.1.0"
-        ],
+        "py_dependencies": ["numpy==1.26.4", "st7789==1.0.1", "pillow==11.1.0"],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
             "description": "Select how your button hardware is configured. (HIGH - Pullups, LOW - Pulldowns)",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": [
@@ -5480,14 +3794,8 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              180
-            ],
-            "list_labels": [
-              "0 Degrees",
-              "180 Degrees"
-            ],
+            "list_values": [0, 180],
+            "list_labels": ["0 Degrees", "180 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -5496,14 +3804,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5524,17 +3826,8 @@
         ],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ],
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/raspi5.sh"
-          ]
+          ["sudo", "python", "board-config.py", "-s"],
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/raspi5.sh"]
         ],
         "settings_dependencies": {},
         "config": [
@@ -5543,14 +3836,8 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              180
-            ],
-            "list_labels": [
-              "0 Degrees",
-              "180 Degrees"
-            ],
+            "list_values": [0, 180],
+            "list_labels": ["0 Degrees", "180 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -5559,14 +3846,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5579,20 +3860,9 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "st7789p.png",
-        "py_dependencies": [
-          "numpy==1.26.4",
-          "st7789==1.0.1",
-          "pillow==11.1.0"
-        ],
+        "py_dependencies": ["numpy==1.26.4", "st7789==1.0.1", "pillow==11.1.0"],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -5600,14 +3870,8 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              180
-            ],
-            "list_labels": [
-              "0 Degrees",
-              "180 Degrees"
-            ],
+            "list_values": [0, 180],
+            "list_labels": ["0 Degrees", "180 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -5616,14 +3880,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5641,14 +3899,7 @@
           "git+https://github.com/mander1000/st7789-python"
         ],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -5656,14 +3907,8 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              180
-            ],
-            "list_labels": [
-              "0 Degrees",
-              "180 Degrees"
-            ],
+            "list_values": [0, 180],
+            "list_labels": ["0 Degrees", "180 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -5672,14 +3917,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5699,17 +3938,8 @@
         ],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ],
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/raspi5.sh"
-          ]
+          ["sudo", "python", "board-config.py", "-s"],
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/raspi5.sh"]
         ],
         "settings_dependencies": {},
         "config": [
@@ -5718,14 +3948,8 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              180
-            ],
-            "list_labels": [
-              "0 Degrees",
-              "180 Degrees"
-            ],
+            "list_values": [0, 180],
+            "list_labels": ["0 Degrees", "180 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -5734,14 +3958,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5777,9 +3995,7 @@
         "description": "This is the test module for display using Pygame.  This should be used for development & debug only.",
         "default": false,
         "image": "pygame.png",
-        "py_dependencies": [
-          "pygame-ce>=2.5.7"
-        ],
+        "py_dependencies": ["pygame-ce>=2.5.7"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {},
@@ -5791,10 +4007,7 @@
         "description": "This is the test module for display using Pygame.  This should be used for development & debug only.",
         "default": false,
         "image": "pygame.png",
-        "py_dependencies": [
-          "pygame-ce>=2.5.7",
-          "pillow==11.1.0"
-        ],
+        "py_dependencies": ["pygame-ce>=2.5.7", "pillow==11.1.0"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {},
@@ -5804,12 +4017,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              90,
-              180,
-              270
-            ],
+            "list_values": [0, 90, 180, 270],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -5827,10 +4035,7 @@
         "description": "This is the test module for display using Pygame.  This should be used for development & debug only.",
         "default": false,
         "image": "pygame.png",
-        "py_dependencies": [
-          "pygame-ce>=2.5.7",
-          "pillow==11.1.0"
-        ],
+        "py_dependencies": ["pygame-ce>=2.5.7", "pillow==11.1.0"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {},
@@ -5840,12 +4045,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              90,
-              180,
-              270
-            ],
+            "list_values": [0, 90, 180, 270],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -5863,18 +4063,9 @@
         "description": "These displays are small, only about 1\" diagonal, but very readable due to the high contrast of an OLED display. This display is made of 128x64 individual white OLED pixels, each one is turned on or off by the controller chip.",
         "default": false,
         "image": "ssd1306.png",
-        "py_dependencies": [
-          "luma.oled==3.14.0"
-        ],
+        "py_dependencies": ["luma.oled==3.14.0"],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-i"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-i"]],
         "settings_dependencies": {},
         "config": []
       },
@@ -5884,30 +4075,15 @@
         "description": "These displays are small, only about 1\" diagonal, but very readable due to the high contrast of an OLED display. This display is made of 128x64 individual white OLED pixels, each one is turned on or off by the controller chip.",
         "default": false,
         "image": "ssd1306b.png",
-        "py_dependencies": [
-          "luma.oled==3.14.0"
-        ],
+        "py_dependencies": ["luma.oled==3.14.0"],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-i"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-i"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
             "description": "Select how your button hardware is configured. (HIGH - Pullups, LOW - Pulldowns)",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": []
@@ -5926,17 +4102,8 @@
         ],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ],
-          [
-            "sudo",
-            "bash",
-            "/usr/local/bin/pifire/wizard/raspi5.sh"
-          ]
+          ["sudo", "python", "board-config.py", "-s"],
+          ["sudo", "bash", "/usr/local/bin/pifire/wizard/raspi5.sh"]
         ],
         "settings_dependencies": {},
         "config": [
@@ -5945,12 +4112,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle depending on your mounting position.",
             "option_type": "list",
-            "list_values": [
-              0,
-              1,
-              2,
-              3
-            ],
+            "list_values": [0, 1, 2, 3],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -5965,14 +4127,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -5985,19 +4141,9 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "st7789p.png",
-        "py_dependencies": [
-          "numpy==1.26.4",
-          "st7789==1.0.1"
-        ],
+        "py_dependencies": ["numpy==1.26.4", "st7789==1.0.1"],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-s"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -6005,14 +4151,8 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              180
-            ],
-            "list_labels": [
-              "0 Degrees",
-              "180 Degrees"
-            ],
+            "list_values": [0, 180],
+            "list_labels": ["0 Degrees", "180 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -6021,14 +4161,8 @@
             "option_friendly_name": "SPI Device / Chip Enable",
             "option_description": "Select the SPI device to use for the display (Usually 0).",
             "option_type": "list",
-            "list_values": [
-              0,
-              1
-            ],
-            "list_labels": [
-              "SPI Device 0 (CE0)",
-              "SPI Device 1 (CE1)"
-            ],
+            "list_values": [0, 1],
+            "list_labels": ["SPI Device 0 (CE0)", "SPI Device 1 (CE1)"],
             "default": 0,
             "hidden": false
           }
@@ -6046,31 +4180,14 @@
           "pillow==11.1.0",
           "pygame-ce>=2.5.7"
         ],
-        "apt_dependencies": [
-          "lightdm",
-          "libsdl2-2.0-0",
-          "python3-pygame"
-        ],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-bl"
-          ]
-        ],
+        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
+        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
             "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": [
@@ -6079,12 +4196,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              90,
-              180,
-              270
-            ],
+            "list_values": [0, 90, 180, 270],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -6108,26 +4220,12 @@
             "option_description": "List of input types supported.  Separate multiple types with a comma.",
             "option_type": "list",
             "list_values": [
-              [
-                "button"
-              ],
-              [
-                "encoder"
-              ],
-              [
-                "touch"
-              ],
-              [
-                "button",
-                "touch"
-              ],
-              [
-                "encoder",
-                "touch"
-              ],
-              [
-                "none"
-              ]
+              ["button"],
+              ["encoder"],
+              ["touch"],
+              ["button", "touch"],
+              ["encoder", "touch"],
+              ["none"]
             ],
             "list_labels": [
               "Button",
@@ -6137,10 +4235,7 @@
               "Touch + Encoder",
               "No Input"
             ],
-            "default": [
-              "button",
-              "touch"
-            ],
+            "default": ["button", "touch"],
             "hidden": false
           }
         ]
@@ -6157,31 +4252,14 @@
           "pillow==11.1.0",
           "pygame-ce>=2.5.7"
         ],
-        "apt_dependencies": [
-          "lightdm",
-          "libsdl2-2.0-0",
-          "python3-pygame"
-        ],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-bl"
-          ]
-        ],
+        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
+        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
             "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": [
@@ -6190,12 +4268,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              90,
-              180,
-              270
-            ],
+            "list_values": [0, 90, 180, 270],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -6219,26 +4292,12 @@
             "option_description": "List of input types supported.  Separate multiple types with a comma.",
             "option_type": "list",
             "list_values": [
-              [
-                "button"
-              ],
-              [
-                "encoder"
-              ],
-              [
-                "touch"
-              ],
-              [
-                "button",
-                "touch"
-              ],
-              [
-                "encoder",
-                "touch"
-              ],
-              [
-                "none"
-              ]
+              ["button"],
+              ["encoder"],
+              ["touch"],
+              ["button", "touch"],
+              ["encoder", "touch"],
+              ["none"]
             ],
             "list_labels": [
               "Button",
@@ -6248,10 +4307,7 @@
               "Touch + Encoder",
               "No Input"
             ],
-            "default": [
-              "button",
-              "touch"
-            ],
+            "default": ["button", "touch"],
             "hidden": false
           }
         ]
@@ -6276,26 +4332,13 @@
           "libgl1",
           "libxcb-cursor0"
         ],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-bl"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
             "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": [
@@ -6304,18 +4347,8 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              90,
-              180,
-              270
-            ],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_values": [0, 90, 180, 270],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -6333,26 +4366,12 @@
             "option_description": "List of input types supported.  Separate multiple types with a comma.",
             "option_type": "list",
             "list_values": [
-              [
-                "button"
-              ],
-              [
-                "encoder"
-              ],
-              [
-                "touch"
-              ],
-              [
-                "button",
-                "touch"
-              ],
-              [
-                "encoder",
-                "touch"
-              ],
-              [
-                "none"
-              ]
+              ["button"],
+              ["encoder"],
+              ["touch"],
+              ["button", "touch"],
+              ["encoder", "touch"],
+              ["none"]
             ],
             "list_labels": [
               "Button",
@@ -6362,10 +4381,7 @@
               "Touch + Encoder",
               "No Input"
             ],
-            "default": [
-              "button",
-              "touch"
-            ],
+            "default": ["button", "touch"],
             "hidden": false
           },
           {
@@ -6373,16 +4389,8 @@
             "option_friendly_name": "Accent Theme",
             "option_description": "Dashboard accent color theme.",
             "option_type": "list",
-            "list_values": [
-              "Ember",
-              "Ice",
-              "Crimson"
-            ],
-            "list_labels": [
-              "Ember",
-              "Ice",
-              "Crimson"
-            ],
+            "list_values": ["Ember", "Ice", "Crimson"],
+            "list_labels": ["Ember", "Ice", "Crimson"],
             "default": "Ember",
             "hidden": false
           }
@@ -6532,31 +4540,14 @@
           "pillow==11.1.0",
           "pygame-ce>=2.5.7"
         ],
-        "apt_dependencies": [
-          "lightdm",
-          "libsdl2-2.0-0",
-          "python3-pygame"
-        ],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-bl"
-          ]
-        ],
+        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
+        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
             "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": [
@@ -6565,12 +4556,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              90,
-              180,
-              270
-            ],
+            "list_values": [0, 90, 180, 270],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -6594,26 +4580,12 @@
             "option_description": "List of input types supported.  Separate multiple types with a comma.",
             "option_type": "list",
             "list_values": [
-              [
-                "button"
-              ],
-              [
-                "encoder"
-              ],
-              [
-                "touch"
-              ],
-              [
-                "button",
-                "touch"
-              ],
-              [
-                "encoder",
-                "touch"
-              ],
-              [
-                "none"
-              ]
+              ["button"],
+              ["encoder"],
+              ["touch"],
+              ["button", "touch"],
+              ["encoder", "touch"],
+              ["none"]
             ],
             "list_labels": [
               "Button",
@@ -6623,10 +4595,7 @@
               "Touch + Encoder",
               "No Input"
             ],
-            "default": [
-              "button",
-              "touch"
-            ],
+            "default": ["button", "touch"],
             "hidden": false
           },
           {
@@ -6634,16 +4603,8 @@
             "option_friendly_name": "Accent Theme",
             "option_description": "Dashboard accent color theme.",
             "option_type": "list",
-            "list_values": [
-              "Ember",
-              "Ice",
-              "Crimson"
-            ],
-            "list_labels": [
-              "Ember",
-              "Ice",
-              "Crimson"
-            ],
+            "list_values": ["Ember", "Ice", "Crimson"],
+            "list_labels": ["Ember", "Ice", "Crimson"],
             "default": "Ember",
             "hidden": false
           }
@@ -6661,31 +4622,14 @@
           "pillow==11.1.0",
           "pygame-ce>=2.5.7"
         ],
-        "apt_dependencies": [
-          "lightdm",
-          "libsdl2-2.0-0",
-          "python3-pygame"
-        ],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-bl"
-          ]
-        ],
+        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
+        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
             "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": [
@@ -6694,12 +4638,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              90,
-              180,
-              270
-            ],
+            "list_values": [0, 90, 180, 270],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -6723,26 +4662,12 @@
             "option_description": "List of input types supported.  Separate multiple types with a comma.",
             "option_type": "list",
             "list_values": [
-              [
-                "button"
-              ],
-              [
-                "encoder"
-              ],
-              [
-                "touch"
-              ],
-              [
-                "button",
-                "touch"
-              ],
-              [
-                "encoder",
-                "touch"
-              ],
-              [
-                "none"
-              ]
+              ["button"],
+              ["encoder"],
+              ["touch"],
+              ["button", "touch"],
+              ["encoder", "touch"],
+              ["none"]
             ],
             "list_labels": [
               "Button",
@@ -6752,10 +4677,7 @@
               "Touch + Encoder",
               "No Input"
             ],
-            "default": [
-              "button",
-              "touch"
-            ],
+            "default": ["button", "touch"],
             "hidden": false
           },
           {
@@ -6763,16 +4685,8 @@
             "option_friendly_name": "Accent Theme",
             "option_description": "Dashboard accent color theme.",
             "option_type": "list",
-            "list_values": [
-              "Ember",
-              "Ice",
-              "Crimson"
-            ],
-            "list_labels": [
-              "Ember",
-              "Ice",
-              "Crimson"
-            ],
+            "list_values": ["Ember", "Ice", "Crimson"],
+            "list_labels": ["Ember", "Ice", "Crimson"],
             "default": "Ember",
             "hidden": false
           }
@@ -6785,10 +4699,7 @@
         "notes": "This module is used for development only and should not be used for production.",
         "default": false,
         "image": "protoflex.png",
-        "py_dependencies": [
-          "pillow==11.1.0",
-          "pygame-ce>=2.5.7"
-        ],
+        "py_dependencies": ["pillow==11.1.0", "pygame-ce>=2.5.7"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {},
@@ -6798,12 +4709,7 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              90,
-              180,
-              270
-            ],
+            "list_values": [0, 90, 180, 270],
             "list_labels": [
               "0 Degrees",
               "90 Degrees",
@@ -6822,10 +4728,7 @@
               "./display/protoflex_320x240.json",
               "./display/protoflex_800x480.json"
             ],
-            "list_labels": [
-              "320x240",
-              "800x480"
-            ],
+            "list_labels": ["320x240", "800x480"],
             "default": "./display/protoflex_320x240.json",
             "hidden": false
           },
@@ -6835,23 +4738,11 @@
             "option_description": "List of input types supported.  Separate multiple types with a comma.",
             "option_type": "list",
             "list_values": [
-              [
-                "button"
-              ],
-              [
-                "encoder"
-              ],
-              [
-                "touch"
-              ],
-              [
-                "button",
-                "encoder",
-                "touch"
-              ],
-              [
-                "none"
-              ]
+              ["button"],
+              ["encoder"],
+              ["touch"],
+              ["button", "encoder", "touch"],
+              ["none"]
             ],
             "list_labels": [
               "Button",
@@ -6860,11 +4751,7 @@
               "Button/Encoder/Touch",
               "No Input"
             ],
-            "default": [
-              "button",
-              "encoder",
-              "touch"
-            ],
+            "default": ["button", "encoder", "touch"],
             "hidden": false
           }
         ]
@@ -6877,9 +4764,7 @@
         "description": "This economical sensor provides 2cm to 400cm of non-contact measurement functionality with a ranging accuracy that can reach up to 3mm.",
         "default": false,
         "image": "hcsr04.png",
-        "py_dependencies": [
-          "hcsr04sensor==1.7"
-        ],
+        "py_dependencies": ["hcsr04sensor==1.7"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {}
@@ -6890,9 +4775,7 @@
         "description": "The VL53L0X is a new generation Time-of-Flight (ToF) laser-ranging module and is the hopper sensor of choice for the PiFire project.",
         "default": false,
         "image": "vl53l0x.png",
-        "py_dependencies": [
-          "adafruit-circuitpython-vl53l0x"
-        ],
+        "py_dependencies": ["adafruit-circuitpython-vl53l0x"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {}
@@ -6903,9 +4786,7 @@
         "description": "The VL53L4CD is a newer-generation Time-of-Flight (ToF) laser-ranging module with improved accuracy at short range, a good alternative to the VL53L0X for hopper level sensing.",
         "default": false,
         "image": "vl53l4cd.png",
-        "py_dependencies": [
-          "adafruit-circuitpython-vl53l4cd"
-        ],
+        "py_dependencies": ["adafruit-circuitpython-vl53l4cd"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {}
@@ -6916,9 +4797,7 @@
         "description": "The VL53L1X is a longer-range Time-of-Flight (ToF) laser-ranging module (up to ~4m) via Adafruit's CircuitPython library, a good option for taller hoppers than the VL53L0X/VL53L4CD can reach.",
         "default": false,
         "image": "vl53l1x.png",
-        "py_dependencies": [
-          "adafruit-circuitpython-vl53l1x"
-        ],
+        "py_dependencies": ["adafruit-circuitpython-vl53l1x"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {}
@@ -6974,10 +4853,7 @@
     },
     "enabled": {
       "display_name": "Enabled",
-      "options": {
-        "true": "Yes",
-        "false": "No"
-      },
+      "options": { "true": "Yes", "false": "No" },
       "description": "Probe is enabled and visible in the UI."
     }
   },
@@ -7000,12 +4876,7 @@
             "device": "ADS1115",
             "module": "ads1115_adafruit",
             "module_filename": "ads1115_adafruit",
-            "ports": [
-              "ADC0",
-              "ADC1",
-              "ADC2",
-              "ADC3"
-            ]
+            "ports": ["ADC0", "ADC1", "ADC2", "ADC3"]
           }
         ],
         "probe_info": [
@@ -7019,7 +4890,7 @@
             "profile": {
               "A": 0.04136906456,
               "B": -0.00677987613,
-              "C": 2.760294589e-05,
+              "C": 2.760294589e-5,
               "id": "99b8f02d-233d-11ee-a7a2-e5396c02c5fd",
               "name": "PT-1000-Ideal"
             }
@@ -7034,7 +4905,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
@@ -7049,7 +4920,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
@@ -7075,12 +4946,7 @@
             "device": "ADS1115",
             "module": "ads1115_adafruit",
             "module_filename": "ads1115_adafruit",
-            "ports": [
-              "ADC0",
-              "ADC1",
-              "ADC2",
-              "ADC3"
-            ]
+            "ports": ["ADC0", "ADC1", "ADC2", "ADC3"]
           }
         ],
         "probe_info": [
@@ -7094,7 +4960,7 @@
             "profile": {
               "A": 0.04136906456,
               "B": -0.00677987613,
-              "C": 2.760294589e-05,
+              "C": 2.760294589e-5,
               "id": "99b8f02d-233d-11ee-a7a2-e5396c02c5fd",
               "name": "PT-1000-Ideal"
             }
@@ -7109,7 +4975,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
@@ -7124,7 +4990,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
@@ -7139,7 +5005,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
@@ -7165,12 +5031,7 @@
             "device": "ADS1115",
             "module": "ads1115_adafruit",
             "module_filename": "ads1115_adafruit",
-            "ports": [
-              "ADC0",
-              "ADC1",
-              "ADC2",
-              "ADC3"
-            ]
+            "ports": ["ADC0", "ADC1", "ADC2", "ADC3"]
           }
         ],
         "probe_info": [
@@ -7184,7 +5045,7 @@
             "profile": {
               "A": 0.04136906456,
               "B": -0.00677987613,
-              "C": 2.760294589e-05,
+              "C": 2.760294589e-5,
               "id": "99b8f02d-233d-11ee-a7a2-e5396c02c5fd",
               "name": "PT-1000-Ideal"
             }
@@ -7199,7 +5060,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
@@ -7214,7 +5075,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
@@ -7229,7 +5090,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
@@ -7255,12 +5116,7 @@
             "device": "ADS1115",
             "module": "ads1115_adafruit",
             "module_filename": "ads1115_adafruit",
-            "ports": [
-              "ADC0",
-              "ADC1",
-              "ADC2",
-              "ADC3"
-            ]
+            "ports": ["ADC0", "ADC1", "ADC2", "ADC3"]
           }
         ],
         "probe_info": [
@@ -7274,7 +5130,7 @@
             "profile": {
               "A": 0.04136906456,
               "B": -0.00677987613,
-              "C": 2.760294589e-05,
+              "C": 2.760294589e-5,
               "id": "99b8f02d-233d-11ee-a7a2-e5396c02c5fd",
               "name": "PT-1000-Ideal"
             }
@@ -7289,7 +5145,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
@@ -7304,7 +5160,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
@@ -7319,7 +5175,7 @@
             "profile": {
               "A": 0.00073431401,
               "B": 0.0002157437,
-              "C": 9.515686e-08,
+              "C": 9.515686e-8,
               "id": "TWPS00",
               "name": "Thermoworks-Pro-Series-HeaterMeter"
             }
