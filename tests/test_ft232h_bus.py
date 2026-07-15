@@ -205,3 +205,94 @@ def test_configured_pins_can_all_be_cleared_after_setup():
 	assert port.value & ft232h.Ft232hGpio.PIN_BITS['C0'] == 0
 	for name in ('C1', 'C2', 'C3'):
 		assert port.value & ft232h.Ft232hGpio.PIN_BITS[name] != 0
+
+
+# --- Integration test against the REAL pyftdi GPIO logic -------------------
+#
+# The FakeGpioPort tests above encode OUR understanding of pyftdi's mask
+# semantics in the fake. The original stuck-relay bug slipped through precisely
+# because that model was wrong -- a fake can't catch a mistake baked into the
+# fake itself. The test below instead drives the real pyftdi I2cController /
+# I2cGpioPort classes and stubs ONLY the lowest-level FTDI transport with a
+# dumb pin latch (SET_BITS writes, GET_BITS reads). All GPIO masking is pyftdi's
+# own code, so this catches any mismatch between Ft232hGpio and pyftdi's actual
+# behavior -- the class of bug the fakes cannot.
+
+
+class _FakeFtdi:
+	"""FT232H pin latch at the MPSSE-command level. Stores what SET_BITS_LOW/HIGH
+	drive and returns it on GET_BITS_LOW/HIGH. Encodes NO GPIO masking -- that
+	lives in the real I2cController under test."""
+
+	def __init__(self):
+		self.latch = 0  # 16-bit hardware pin state
+		self._pending = bytearray()
+
+	@property
+	def is_connected(self):
+		return True
+
+	def write_data(self, data):
+		from pyftdi.ftdi import Ftdi
+
+		data = bytes(data)
+		i = 0
+		while i < len(data):
+			cmd = data[i]
+			if cmd == Ftdi.SET_BITS_LOW:
+				value, direction = data[i + 1], data[i + 2]
+				self.latch = (self.latch & 0xFF00) | (value & direction)
+				i += 3
+			elif cmd == Ftdi.SET_BITS_HIGH:
+				value, direction = data[i + 1], data[i + 2]
+				self.latch = (self.latch & 0x00FF) | ((value & direction) << 8)
+				i += 3
+			elif cmd == Ftdi.GET_BITS_LOW:
+				self._pending.append(self.latch & 0xFF)
+				i += 1
+			elif cmd == Ftdi.GET_BITS_HIGH:
+				self._pending.append((self.latch >> 8) & 0xFF)
+				i += 1
+			else:  # SEND_IMMEDIATE and anything else: no state change
+				i += 1
+		return len(data)
+
+	def read_data_bytes(self, size, attempt=1, request_gen=None):
+		out = self._pending[:size]
+		del self._pending[:size]
+		return bytearray(out)
+
+
+def _real_pyftdi_controller():
+	"""A real pyftdi I2cController with only the USB transport faked, wired up
+	for wide-port (FT232H) GPIO without a physical device."""
+	from pyftdi.i2c import I2cController
+
+	controller = I2cController()
+	controller._ftdi = _FakeFtdi()
+	controller._wide_port = True  # FT232H is a 16-bit wide port
+	controller._i2c_mask = I2cController.I2C_MASK  # reserve AD0/AD1/AD2 for I2C
+	return controller
+
+
+def test_real_pyftdi_multi_setup_allows_clearing_each_relay():
+	# Same scenario as test_configured_pins_can_all_be_cleared_after_setup, but
+	# against the REAL pyftdi masking logic (only the FTDI transport is faked).
+	# This is the test that would have caught the original bug: with
+	# setup_output passing a single bit to set_direction(), pyftdi's gpio_mask
+	# ends up holding only the last-configured pin, so write_gpio() cannot clear
+	# the earlier pins -- they stay driven high in the hardware latch.
+	controller = _real_pyftdi_controller()
+	with mock.patch.object(ft232h, '_new_controller', return_value=controller):
+		gpio = ft232h.open_gpio('')
+	for name in ('C0', 'C1', 'C2', 'C3'):
+		gpio.setup_output(name)
+	for name in ('C0', 'C1', 'C2', 'C3'):
+		gpio.set(name, True)
+	latch = controller._ftdi.latch
+	assert latch & ft232h.Ft232hGpio.PIN_BITS['C0']  # all four driven high
+	gpio.set('C0', False)
+	latch = controller._ftdi.latch
+	assert latch & ft232h.Ft232hGpio.PIN_BITS['C0'] == 0  # C0 actually cleared
+	for name in ('C1', 'C2', 'C3'):
+		assert latch & ft232h.Ft232hGpio.PIN_BITS[name] != 0  # others untouched
