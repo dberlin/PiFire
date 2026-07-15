@@ -11,6 +11,20 @@ Network calls are mocked entirely in-browser via Playwright's page.route() -- no
 here ever talks to a real Flask server, launches the real `python wizard.py &`
 subprocess (which the real POST /wizard/finish route does), or hits the real
 /admin/reboot or /admin/restart routes.
+
+The Playwright fixture serves the page from a throwaway, single-purpose Flask app --
+deliberately NOT the real app.py singleton. Other Playwright test files in this suite
+(e.g. test_wizard_nested_modal_scroll.py) already serve requests against that same
+shared module-level Flask object; once any of them has served a request, Flask
+forbids registering new routes on it for the rest of the process. Registering a
+'/test-only/wizard-finish' route on the real app worked when this file ran alone but
+raised `AssertionError: The setup method 'route' can no longer be called` once the
+full test suite ran multiple such files. The throwaway app sidesteps this by never
+touching app.py's shared object at all: it reuses the same manual Jinja render as the
+static tests above (so app.py's settings/datastore machinery isn't needed either),
+just with url_for('static', ...) resolved to a real /static/<filename> path so
+jQuery/Bootstrap actually load, and every other url_for(...) call (blueprint nav
+links this page never uses) stubbed to '#'.
 """
 
 import os
@@ -32,9 +46,15 @@ class _FakeRequest:
 	path = '/wizard/finish'
 
 
-def _render_wizard_finish():
+def _stub_url_for(endpoint, **values):
+	"""Default url_for stand-in: every endpoint resolves to '#'. Fine for the static
+	markup checks below, which never load real assets."""
+	return '#'
+
+
+def _render_wizard_finish(url_for=_stub_url_for):
 	env = jinja2.Environment(loader=jinja2.FileSystemLoader([WIZARD_TEMPLATE_DIR, BASE_TEMPLATE_DIR]))
-	env.globals['url_for'] = lambda *a, **k: '#'
+	env.globals['url_for'] = url_for
 	env.globals['request'] = _FakeRequest()
 	template = env.get_template('wizard/wizard-finish.html')
 	return template.render(page_theme='light', grill_name='Test Grill')
@@ -77,39 +97,34 @@ except Exception as exc:  # pragma: no cover - only exercised if playwright itse
 	_PLAYWRIGHT_UNAVAILABLE_REASON = f'playwright unavailable: {exc}'
 
 
-@pytest.fixture(scope='class')
-def live_server(tmp_path_factory):
-	"""Seeds an isolated temp SQLite DB + settings BEFORE importing `app` (mirrors
-	tests/test_wizard_nested_modal_scroll.py's live_server fixture) -- app.py calls
-	datastore.init() and read_settings() at import time, so without this the
-	import would touch this machine's real datastore/settings instead of
-	test-scoped ones.
+def _static_asset_url_for(endpoint, **values):
+	"""url_for stand-in for the live-server render: 'static' resolves to a real
+	/static/<filename> path (so jQuery/Bootstrap actually load in the browser);
+	every other endpoint (blueprint nav links this page never uses) stubs to '#'."""
+	if endpoint == 'static':
+		return f'/static/{values.get("filename", "")}'
+	return '#'
 
-	Defined at module scope (not as an instance method inside the test class) --
-	pytest deprecates class-scoped fixtures defined as instance methods."""
-	import os
+
+@pytest.fixture(scope='class')
+def live_server():
+	"""Serves the pre-rendered wizard-finish.html on a throwaway, single-purpose
+	Flask app -- see the module docstring for why this deliberately does not reuse
+	the real app.py singleton."""
 	import threading
 
+	from flask import Flask
 	from werkzeug.serving import make_server
 
-	from common import datastore
-	from common.common import default_settings, write_settings_store
+	html = _render_wizard_finish(url_for=_static_asset_url_for)
 
-	tmp_dir = tmp_path_factory.mktemp('wizard_finish_reboot_modal_e2e')
-	db_path = str(tmp_dir / 'test.db')
-	os.environ['PIFIRE_DB_PATH'] = db_path
-	datastore._reset_for_tests(db_path)
-	datastore.init()
-	write_settings_store(default_settings())
+	test_app = Flask(__name__, static_folder=os.path.join(BASE, 'static'), static_url_path='/static')
 
-	from app import app as flask_app
-	from flask import render_template
-
-	@flask_app.route('/test-only/wizard-finish')
+	@test_app.route('/test-only/wizard-finish')
 	def _test_only_wizard_finish():
-		return render_template('wizard/wizard-finish.html', page_theme='light', grill_name='Test Grill')
+		return html
 
-	srv = make_server('127.0.0.1', 0, flask_app)
+	srv = make_server('127.0.0.1', 0, test_app)
 	port = srv.server_address[1]
 	thread = threading.Thread(target=srv.serve_forever, daemon=True)
 	thread.start()
@@ -118,16 +133,12 @@ def live_server(tmp_path_factory):
 	finally:
 		srv.shutdown()
 		thread.join(timeout=5)
-		datastore._reset_for_tests(None)
-		os.environ.pop('PIFIRE_DB_PATH', None)
 
 
 @pytest.mark.skipif(_PLAYWRIGHT_UNAVAILABLE_REASON is not None, reason=_PLAYWRIGHT_UNAVAILABLE_REASON or '')
 class TestRebootModalInteraction:
-	"""Serves the real rendered template over a real (local, static-asset-only) Flask
-	dev server so jQuery/Bootstrap load correctly, but via a test-only route added
-	directly to the running app instance in this fixture -- never through the real
-	POST /wizard/finish route, which kicks off a real `python wizard.py &` process."""
+	"""Drives the rendered page in a real browser via the throwaway Flask app served
+	by the live_server fixture above."""
 
 	def _goto_with_mocked_status(self, page, base_url, percent):
 		def _fulfill_status(route):
