@@ -132,6 +132,45 @@ def wizardInstallInfoExisting(settings, wizardData):
 	return wizardInstallInfo
 
 
+def _run_install_commands(command_list, percent, increment, status, python_exec):
+	"""Run each command in command_list, updating install status as we go.
+
+	Returns (percent, reboot_required), where reboot_required is True if any command
+	printed a REBOOT_REQUIRED=true sentinel on stdout (see board-config.py and
+	wizard/ds18b20.sh). Absence of the sentinel is treated as False, so commands that
+	never need a reboot (raspi5.sh, bluepy.sh) require no changes at all.
+	"""
+	reboot_required = False
+	for command in command_list:
+		if 'sudo' in command and 'python' in command:
+			# replace "python" with python_exec in command list object
+			command = [python_exec if item == 'python' else item for item in command]
+		if is_real_hardware():
+			process = subprocess.Popen(command, stdout=subprocess.PIPE, encoding='utf-8')
+			while True:
+				output = process.stdout.readline()
+				if output:
+					stripped = output.strip()
+					set_wizard_install_status(percent, status, stripped)
+					print(f'command output: {stripped}')
+					logger.info(stripped)
+					if stripped.lower().startswith('reboot_required='):
+						if stripped.split('=', 1)[1].strip().lower() == 'true':
+							reboot_required = True
+				elif process.poll() is not None:
+					break
+		else:
+			# This path is for development/testing
+			time.sleep(2)
+
+		percent += increment
+		output = f' - Completed General Dependency Item'
+		logger.info(output)
+		set_updater_install_status(percent, status, output)
+
+	return percent, reboot_required
+
+
 def run_wizard(settings, WizardData, WizardInstallInfo):
 	settings = read_settings()
 
@@ -220,7 +259,6 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 	py_dependencies = []
 	apt_dependencies = []
 	command_list = []
-	reboot_required = False
 
 	for module in WizardInstallInfo['modules']:
 		for selected in WizardInstallInfo['modules'][module]['profile_selected']:
@@ -232,8 +270,6 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 				apt_dependencies.append(apt_dependency)
 			for command in WizardData['modules'][module][selected]['command_list']:
 				command_list.append(command)
-			if WizardData['modules'][module][selected]['reboot_required']:
-				reboot_required = True
 
 	# Calculate the percent done from remaining items to install
 	items_remaining = len(py_dependencies) + len(apt_dependencies) + len(command_list)
@@ -327,29 +363,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 	output = ' - Installing General Dependencies'
 	set_wizard_install_status(percent, status, output)
 
-	for command in command_list:
-		if 'sudo' in command and 'python' in command:
-			# replace "python" with python_exec in command list object
-			command = [python_exec if item == 'python' else item for item in command]
-		if is_real_hardware():
-			process = subprocess.Popen(command, stdout=subprocess.PIPE, encoding='utf-8')
-			while True:
-				output = process.stdout.readline()
-				if process.poll() is not None:
-					break
-				if output:
-					set_wizard_install_status(percent, status, output.strip())
-					print(f'command output: {output.strip()}')
-					logger.info(output.strip())
-			# return_code = process.poll()
-		else:
-			# This path is for development/testing
-			time.sleep(2)
-
-		percent += increment
-		output = f' - Completed General Dependency Item'
-		logger.info(output)
-		set_updater_install_status(percent, status, output)
+	percent, reboot_required = _run_install_commands(command_list, percent, increment, status, python_exec)
 
 	percent = 100
 	status = 'Finished!'

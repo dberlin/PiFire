@@ -58,3 +58,17 @@ def test_run_wizard_no_probe_devices(ds, no_install):
 	assert 'units' in install_info['modules']['probes']['settings']
 
 	wizard.run_wizard(settings, wizard_data, install_info)
+
+
+def test_run_wizard_dev_mode_resolves_to_restart_not_reboot(ds, no_install):
+	settings = c.default_settings()
+	settings['probe_settings']['probe_map']['probe_devices'] = []
+	c.write_settings_store(settings)
+
+	wizard_data = c.read_wizard()
+	install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
+
+	wizard.run_wizard(settings, wizard_data, install_info)
+
+	percent, status, output = c.get_wizard_install_status()
+	assert percent == 101

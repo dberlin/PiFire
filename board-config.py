@@ -40,58 +40,64 @@ log_level = logging.DEBUG
 
 def set_pwm_gpio():
 	result = 'Setting the PWM pin: '
+	changed = False
 	try:
 		settings = read_settings()
 		pin = settings['platform']['outputs']['pwm']
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result
+		return result, changed
 
 	try:
 		if system_type == 'raspberry_pi_all' or system_type == 'prototype':
 			# "dtoverlay=pwm-2chan,pin=13,func=4"
 			pin = int(pin) if pin != None else None
-			result += rpi_config_write('dtoverlay', 'pwm-2chan', add_config={'func': '4'}, pin=pin, pin_type='pin')
+			msg, changed = rpi_config_write('dtoverlay', 'pwm-2chan', add_config={'func': '4'}, pin=pin, pin_type='pin')
+			result += msg
 		else:
 			result += 'NA - No system defined'
 	except:
 		result += 'FAILED (error making the configuration change) '
 
-	return result
+	return result, changed
 
 
 def set_onewire_gpio():
 	result = 'Setting the 1Wire pin: '
+	changed = False
 	try:
 		settings = read_settings()
 		pin = settings['platform']['system']['1WIRE']
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result
+		return result, changed
 
 	try:
 		if system_type == 'raspberry_pi_all' or system_type == 'prototype':
 			# "dtoverlay=w1-gpio,pin=6"
 			pin = int(pin) if pin != None else None
-			result += rpi_config_write('dtoverlay', 'w1-gpio', pin=pin, pin_type='gpiopin')
+			msg, changed = rpi_config_write('dtoverlay', 'w1-gpio', pin=pin, pin_type='gpiopin')
+			result += msg
 		else:
 			result += 'NA - No system defined'
 	except:
 		result += 'FAILED (error making the configuration change) '
 
-	return result
+	return result, changed
 
 
 def set_backlight():
 	result = 'Enabling Backlight Control for DSI Touch Display: '
+	# A udev rule, not a config.txt/device-tree change -- never requires a reboot.
+	changed = False
 	try:
 		settings = read_settings()
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result
+		return result, changed
 
 	try:
 		if system_type == 'raspberry_pi_all':
@@ -103,101 +109,110 @@ def set_backlight():
 	except:
 		result += 'FAILED (error making the configuration change) '
 
-	return result
+	return result, changed
 
 
 def enable_spi():
 	result = 'Enabling SPI: '
+	changed = False
 	try:
 		settings = read_settings()
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result
+		return result, changed
 
 	try:
 		if system_type == 'raspberry_pi_all' or system_type == 'prototype':
 			# "dtparam=spi=on"
-			result += rpi_config_write('dtparam', 'spi')
+			msg, changed = rpi_config_write('dtparam', 'spi')
+			result += msg
 		else:
 			result += 'NA - No system defined'
 	except:
 		result += 'FAILED (error making the configuration change) '
 
-	return result
+	return result, changed
 
 
 def enable_i2c():
 	result = 'Enabling I2C: '
+	changed = False
 	try:
 		settings = read_settings()
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result
+		return result, changed
 
 	try:
 		if system_type == 'raspberry_pi_all':
 			# dtparam=i2c_arm=on
-			result += rpi_config_write('dtparam', 'i2c_arm')
+			msg, dtparam_changed = rpi_config_write('dtparam', 'i2c_arm')
+			result += msg
 			# To enable userspace access to I2C ensure that /etc/modules contains "i2c-dev"
-			# echo "i2c-dev" | $SUDO tee -a /etc/modules
-			result += append_file('/etc/modules', 'i2c-dev\n')
+			msg, modules_changed = append_file('/etc/modules', 'i2c-dev\n')
+			result += msg
+			changed = dtparam_changed or modules_changed
 		else:
 			result += 'NA - No system defined'
 
 	except:
 		result += 'FAILED (error making the configuration change) '
 
-	return result
+	return result, changed
 
 
 def set_i2c_speed(baud=100000):
 	result = f'Setting I2C speed ({baud} Baud): '
+	changed = False
 	try:
 		settings = read_settings()
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result
+		return result, changed
 
 	try:
 		if system_type == 'raspberry_pi_all' or system_type == 'prototype':
 			# dtparam=i2c_arm_baudrate=100000
-			result += rpi_config_write('dtparam', 'i2c_arm_baudrate', param=baud)
+			msg, changed = rpi_config_write('dtparam', 'i2c_arm_baudrate', param=baud)
+			result += msg
 		else:
 			result += 'NA - No system defined'
 
 	except:
 		result += 'FAILED (error making the configuration change) '
 
-	return result
+	return result, changed
 
 
 def enable_gpio_shutdown():
 	result = 'Enabling the GPIO Shutdown pin: '
+	changed = False
 	try:
 		settings = read_settings()
 		pin = settings['platform']['inputs']['shutdown']
 		system_type = settings['platform']['system_type']
 	except:
 		result += 'FAILED (error getting settings.json data) '
-		return result
+		return result, changed
 
 	try:
 		if system_type == 'raspberry_pi_all' or system_type == 'prototype':
 			# dtoverlay=gpio-shutdown,gpio_pin=17,active_low=1,gpio_pull=up
 			add_config = {'active_low': '1', 'gpio_pull': 'up'}
 			pin = int(pin) if pin != None else None
-			result += rpi_config_write(
+			msg, changed = rpi_config_write(
 				'dtoverlay', 'gpio-shutdown', add_config=add_config, pin=pin, pin_type='gpio_pin'
 			)
+			result += msg
 		else:
 			result += 'NA - No system defined'
 	except:
 		result += 'FAILED (error making the configuration change) '
 
-	return result
+	return result, changed
 
 
 """
@@ -209,6 +224,7 @@ def enable_gpio_shutdown():
 
 def rpi_config_write(config_type, feature, add_config={}, pin=0, param='', pin_type='gpio_pin'):
 	result = 'SUCCESS'
+	changed = False
 	""" Check OS version, so we can get the correct location of config.txt """
 	os_info = get_os_info()
 	version = os_info.get('VERSION_ID', None)
@@ -227,6 +243,8 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param='', pin_t
 		""" Open the configuration file """
 		with open(config_filename, 'r+') as config_txt:
 			config_data = config_txt.readlines()
+
+		original_config_data = list(config_data)
 
 		# Remove old pwm overlay lines if adding new pwm-2chan overlay
 		if config_type == 'dtoverlay' and feature == 'pwm-2chan':
@@ -294,14 +312,20 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param='', pin_t
 
 			config_data.append(build_config_line(config_type, config_dict))
 
-		""" Write all data back to the file """
-		with open(config_filename, 'w') as config_txt:
-			config_txt.writelines(config_data)
+		changed = config_data != original_config_data
+
+		""" Write all data back to the file, only if something actually changed --
+		this is what makes re-running the wizard with identical settings correctly
+		report no reboot needed. """
+		if changed:
+			with open(config_filename, 'w') as config_txt:
+				config_txt.writelines(config_data)
 
 	except:
 		result = 'FAILED '
+		changed = False
 
-	return result
+	return result, changed
 
 
 def parse_config_line(config_line):
@@ -387,14 +411,29 @@ def create_file(filename, lines):
 
 def append_file(filename, lines):
 	result = f'\n - Attempting to append data to {filename}: '
+	if isinstance(lines, str):
+		lines = [lines]
+	changed = False
 	try:
-		with open(filename, 'a+') as file:
-			for line in lines:
-				file.write(line)
-		result += f' SUCCESS (appending file {filename}) '
+		try:
+			with open(filename, 'r') as file:
+				existing_lines = file.read().splitlines()
+		except FileNotFoundError:
+			existing_lines = []
+
+		missing_lines = [line for line in lines if line.rstrip('\n') not in existing_lines]
+
+		if missing_lines:
+			with open(filename, 'a+') as file:
+				for line in missing_lines:
+					file.write(line)
+			changed = True
+			result += f' SUCCESS (appending file {filename}) '
+		else:
+			result += f' SUCCESS (no change, already present in {filename}) '
 	except:
 		result += f' FAILED (appending file {filename}) '
-	return result
+	return result, changed
 
 
 def remove_hashtag(text):
@@ -490,6 +529,25 @@ def get_os_info(filepath='os_info.json', loggername='events'):
 		return os_info
 
 
+def _print_results_and_reboot_flag(results, reboot_flags, logger):
+	"""Print the human-readable results block, then a final REBOOT_REQUIRED=<bool>
+	sentinel line that wizard.py's command-execution loop parses to decide whether a
+	reboot is actually needed. Returns the aggregated bool."""
+	if len(results) == 0:
+		print('No Arguments Found. Use --help to see available arguments')
+	else:
+		print('Results:')
+		for item in results:
+			print(f' - {item}')
+			logger.info(f'{item}')
+
+	reboot_required = any(reboot_flags)
+	sentinel = f'REBOOT_REQUIRED={str(reboot_required).lower()}'
+	print(sentinel)
+	logger.info(sentinel)
+	return reboot_required
+
+
 """
 ==============================================================================
  Main
@@ -526,27 +584,42 @@ if __name__ == '__main__':
 	args = parser.parse_args()
 
 	results = []
+	reboot_flags = []
 
 	if args.pwm:
-		results.append(set_pwm_gpio())
+		msg, changed = set_pwm_gpio()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.onewire:
-		results.append(set_onewire_gpio())
+		msg, changed = set_onewire_gpio()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.backlight:
-		results.append(set_backlight())
+		msg, changed = set_backlight()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.spi:
-		results.append(enable_spi())
+		msg, changed = enable_spi()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.i2c:
-		results.append(enable_i2c())
+		msg, changed = enable_i2c()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.i2cspeed:
-		results.append(set_i2c_speed(baud=args.i2cspeed))
+		msg, changed = set_i2c_speed(baud=args.i2cspeed)
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.gpioshutdown:
-		results.append(enable_gpio_shutdown())
+		msg, changed = enable_gpio_shutdown()
+		results.append(msg)
+		reboot_flags.append(changed)
 
 	if args.osversion:
 		os_info = get_os_info(loggername='board_config')
@@ -556,10 +629,4 @@ if __name__ == '__main__':
 			event = f'   {key} : {value}'
 			results.append(event)
 
-	if len(results) == 0:
-		print('No Arguments Found. Use --help to see available arguments')
-	else:
-		print('Results:')
-		for item in results:
-			print(f' - {item}')
-			logger.info(f'{item}')
+	_print_results_and_reboot_flag(results, reboot_flags, logger)
