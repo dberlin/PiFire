@@ -3,7 +3,7 @@
 Two layers:
 1. A cheap static Jinja render check that the modal markup/JS wiring exists.
 2. A Playwright e2e check (skips cleanly if Chromium isn't installed, matching
-   tests/test_wizard_nested_modal_scroll.py's existing pattern) that drives the real
+   tests/web/test_wizard_nested_modal_scroll.py's existing pattern) that drives the real
    page: percent==142 shows the modal instead of auto-redirecting, and each button
    navigates to the right /admin/* URL; percent==101 still auto-redirects with no modal.
 

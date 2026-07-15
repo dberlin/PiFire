@@ -5,7 +5,7 @@ from common.i2c_bus import find_i2c_bus
 
 
 def _manifest():
-	path = os.path.join(os.path.dirname(__file__), '..', '..', 'wizard', 'wizard_manifest.json')
+	path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'wizard', 'wizard_manifest.json')
 	return json.load(open(path))
 
 

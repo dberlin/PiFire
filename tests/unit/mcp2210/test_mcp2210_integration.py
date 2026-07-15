@@ -1,4 +1,4 @@
-# tests/test_mcp2210_integration.py
+# tests/unit/mcp2210/test_mcp2210_integration.py
 """End-to-end: emulate the SPIDevice transaction pattern Adafruit libs use."""
 
 from tests._fake_hid import FakeHID

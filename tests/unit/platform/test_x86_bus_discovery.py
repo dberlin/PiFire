@@ -8,7 +8,7 @@ def _build_platform(fan_cfg):
 	the I2C-bus resolution logic in __init__ is exercised. Returns the platform
 	plus the mock needed to assert which (kind, selector) was handed to the
 	shared open_i2c_bus factory. Actual bus construction (basic/extended/etc.)
-	is common.i2c_bus's job and is covered in tests/test_i2c_bus.py."""
+	is common.i2c_bus's job and is covered in tests/unit/i2c/test_i2c_bus.py."""
 	import grillplat.x86_numato as mod
 
 	with (

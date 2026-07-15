@@ -3,7 +3,7 @@ import sys
 
 # tools/ isn't a package (no __init__.py); resolve it relative to this file
 # rather than the fragile cwd-relative 'tools' insert this replaced.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'tools'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'tools'))
 import regenerate_mpc_net as rg
 
 

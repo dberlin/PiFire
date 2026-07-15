@@ -17,7 +17,7 @@ import pathlib
 
 import pytest
 
-_MODULE_PATH = pathlib.Path(__file__).resolve().parent.parent.parent / 'board-config.py'
+_MODULE_PATH = pathlib.Path(__file__).resolve().parent.parent.parent.parent / 'board-config.py'
 _SPEC = importlib.util.spec_from_file_location('board_config_under_test', _MODULE_PATH)
 board_config = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(board_config)

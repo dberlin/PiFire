@@ -82,7 +82,7 @@ def test_init_device_defaults(monkeypatch):
 
 
 def test_manifest_mcp9600_entry():
-	repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+	repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 	manifest = json.load(open(os.path.join(repo_root, 'wizard', 'wizard_manifest.json')))
 	probes = manifest['modules']['probes']
 	assert 'mcp9600_adafruit' in probes
@@ -125,7 +125,9 @@ def test_mcp9600_manifest_bus_kind_includes_usb_hid():
 	import json
 	import os
 
-	manifest = json.load(open(os.path.join(os.path.dirname(__file__), '..', '..', 'wizard', 'wizard_manifest.json')))
+	manifest = json.load(
+		open(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'wizard', 'wizard_manifest.json'))
+	)
 	cfg = manifest['modules']['probes']['mcp9600_adafruit']['device_specific']['config']
 	bus_kind = next(item for item in cfg if item['label'] == 'i2c_bus_kind')
 	assert bus_kind['list_values'] == ['basic', 'extended', 'ft232h', 'mcp2221']

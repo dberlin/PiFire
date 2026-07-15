@@ -398,7 +398,7 @@ import os
 
 
 def test_wizard_manifest_has_thermoworks_cloud_entry():
-	manifest_path = os.path.join(os.path.dirname(__file__), '..', '..', 'wizard', 'wizard_manifest.json')
+	manifest_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'wizard', 'wizard_manifest.json')
 	with open(manifest_path) as f:
 		manifest = json.load(f)
 

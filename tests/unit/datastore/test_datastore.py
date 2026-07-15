@@ -422,7 +422,7 @@ def test_no_valkey_references_in_source():
 	# Pure in-process file scan (no `grep` subprocess needed): just a plain-text
 	# search across the source tree, with no external process/state to exercise.
 	patterns = ('import valkey', 'cmdsts', 'ValkeyQueue', 'ValkeyHandler')
-	repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+	repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 	targets = [
 		os.path.join(repo_root, 'common'),
 		os.path.join(repo_root, 'controller'),

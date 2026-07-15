@@ -13,7 +13,7 @@ import subprocess
 
 import pytest
 
-_SCRIPT = pathlib.Path(__file__).resolve().parent.parent.parent / 'wizard' / 'ds18b20.sh'
+_SCRIPT = pathlib.Path(__file__).resolve().parent.parent.parent.parent / 'wizard' / 'ds18b20.sh'
 
 
 @pytest.fixture

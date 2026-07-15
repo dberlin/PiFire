@@ -4,7 +4,7 @@ import pytest
 from controller.mpc_net import NetPolicy, net_path_for
 from controller.mpc import _DEFAULTS
 
-ART = os.path.join(os.path.dirname(__file__), '..', '..', 'controller', 'mpc_policy_net.npz')
+ART = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'controller', 'mpc_policy_net.npz')
 
 pytestmark = pytest.mark.skipif(not os.path.exists(ART), reason='net artifact not exported')
 

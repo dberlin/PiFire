@@ -74,7 +74,7 @@ def test_warm_solve_under_budget():
 	assert avg_ms < 200.0  # >=1 Hz with wide margin (x86 ~8 ms)
 
 
-_SHIPPED = os.path.join(os.path.dirname(__file__), '..', '..', 'controller', 'mpc_policy_net.npz')
+_SHIPPED = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'controller', 'mpc_policy_net.npz')
 
 
 @pytest.mark.skipif(not os.path.exists(_SHIPPED), reason='shipped net artifact absent')

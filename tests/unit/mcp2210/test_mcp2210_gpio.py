@@ -1,4 +1,4 @@
-# tests/test_mcp2210_gpio.py
+# tests/unit/mcp2210/test_mcp2210_gpio.py
 import struct
 import pytest
 from tests._fake_hid import FakeHID

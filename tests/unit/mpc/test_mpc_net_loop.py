@@ -5,7 +5,7 @@ from controller.mpc import Controller, _DEFAULTS
 from controller.grill_sim import GrillSim
 from controller.mpc_net import net_path_for
 
-ART = os.path.join(os.path.dirname(__file__), '..', '..', 'controller', 'mpc_policy_net.npz')
+ART = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'controller', 'mpc_policy_net.npz')
 CYCLE = {'u_min': 0.1, 'u_max': 0.9, 'HoldCycleTime': 25}
 TS = 25.0
 

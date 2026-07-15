@@ -3,7 +3,7 @@ import os
 
 
 def _manifest():
-	path = os.path.join(os.path.dirname(__file__), '..', '..', 'wizard', 'wizard_manifest.json')
+	path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'wizard', 'wizard_manifest.json')
 	with open(path) as handle:
 		return json.load(handle)
 
@@ -55,7 +55,9 @@ def test_distance_bus_kind_includes_usb_hid():
 	import json
 	import os
 
-	manifest = json.load(open(os.path.join(os.path.dirname(__file__), '..', '..', 'wizard', 'wizard_manifest.json')))
+	manifest = json.load(
+		open(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'wizard', 'wizard_manifest.json'))
+	)
 	found = []
 
 	def walk(node):
