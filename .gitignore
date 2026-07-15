@@ -122,3 +122,6 @@ pifire.db
 pifire.db-wal
 pifire.db-shm
 .gitattributes
+
+# Serena MCP server project config (local tool state; never committed)
+.serena/
