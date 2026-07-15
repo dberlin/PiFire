@@ -77,53 +77,57 @@ except Exception as exc:  # pragma: no cover - only exercised if playwright itse
 	_PLAYWRIGHT_UNAVAILABLE_REASON = f'playwright unavailable: {exc}'
 
 
+@pytest.fixture(scope='class')
+def live_server(tmp_path_factory):
+	"""Seeds an isolated temp SQLite DB + settings BEFORE importing `app` (mirrors
+	tests/test_wizard_nested_modal_scroll.py's live_server fixture) -- app.py calls
+	datastore.init() and read_settings() at import time, so without this the
+	import would touch this machine's real datastore/settings instead of
+	test-scoped ones.
+
+	Defined at module scope (not as an instance method inside the test class) --
+	pytest deprecates class-scoped fixtures defined as instance methods."""
+	import os
+	import threading
+
+	from werkzeug.serving import make_server
+
+	from common import datastore
+	from common.common import default_settings, write_settings_store
+
+	tmp_dir = tmp_path_factory.mktemp('wizard_finish_reboot_modal_e2e')
+	db_path = str(tmp_dir / 'test.db')
+	os.environ['PIFIRE_DB_PATH'] = db_path
+	datastore._reset_for_tests(db_path)
+	datastore.init()
+	write_settings_store(default_settings())
+
+	from app import app as flask_app
+	from flask import render_template
+
+	@flask_app.route('/test-only/wizard-finish')
+	def _test_only_wizard_finish():
+		return render_template('wizard/wizard-finish.html', page_theme='light', grill_name='Test Grill')
+
+	srv = make_server('127.0.0.1', 0, flask_app)
+	port = srv.server_address[1]
+	thread = threading.Thread(target=srv.serve_forever, daemon=True)
+	thread.start()
+	try:
+		yield f'http://127.0.0.1:{port}'
+	finally:
+		srv.shutdown()
+		thread.join(timeout=5)
+		datastore._reset_for_tests(None)
+		os.environ.pop('PIFIRE_DB_PATH', None)
+
+
 @pytest.mark.skipif(_PLAYWRIGHT_UNAVAILABLE_REASON is not None, reason=_PLAYWRIGHT_UNAVAILABLE_REASON or '')
 class TestRebootModalInteraction:
 	"""Serves the real rendered template over a real (local, static-asset-only) Flask
 	dev server so jQuery/Bootstrap load correctly, but via a test-only route added
 	directly to the running app instance in this fixture -- never through the real
 	POST /wizard/finish route, which kicks off a real `python wizard.py &` process."""
-
-	@pytest.fixture(scope='class')
-	def live_server(self, tmp_path_factory):
-		"""Seeds an isolated temp SQLite DB + settings BEFORE importing `app` (mirrors
-		tests/test_wizard_nested_modal_scroll.py's live_server fixture) -- app.py calls
-		datastore.init() and read_settings() at import time, so without this the
-		import would touch this machine's real datastore/settings instead of
-		test-scoped ones."""
-		import os
-		import threading
-
-		from werkzeug.serving import make_server
-
-		from common import datastore
-		from common.common import default_settings, write_settings_store
-
-		tmp_dir = tmp_path_factory.mktemp('wizard_finish_reboot_modal_e2e')
-		db_path = str(tmp_dir / 'test.db')
-		os.environ['PIFIRE_DB_PATH'] = db_path
-		datastore._reset_for_tests(db_path)
-		datastore.init()
-		write_settings_store(default_settings())
-
-		from app import app as flask_app
-		from flask import render_template
-
-		@flask_app.route('/test-only/wizard-finish')
-		def _test_only_wizard_finish():
-			return render_template('wizard/wizard-finish.html', page_theme='light', grill_name='Test Grill')
-
-		srv = make_server('127.0.0.1', 0, flask_app)
-		port = srv.server_address[1]
-		thread = threading.Thread(target=srv.serve_forever, daemon=True)
-		thread.start()
-		try:
-			yield f'http://127.0.0.1:{port}'
-		finally:
-			srv.shutdown()
-			thread.join(timeout=5)
-			datastore._reset_for_tests(None)
-			os.environ.pop('PIFIRE_DB_PATH', None)
 
 	def _goto_with_mocked_status(self, page, base_url, percent):
 		def _fulfill_status(route):
