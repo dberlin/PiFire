@@ -99,3 +99,83 @@ def test_runtime_rejects_basic_after_ft232h():
 		i2c_bus.open_i2c_bus('ft232h', '')
 		with pytest.raises(i2c_bus.I2CBusConfigError):
 			i2c_bus.open_i2c_bus('basic')
+
+
+class FakeGpioPort:
+	def __init__(self):
+		self.direction = 0
+		self.value = 0
+
+	def set_direction(self, pins, direction):
+		# pyftdi semantics: 1 bits in `pins` are (re)configured to `direction`.
+		self.direction = (self.direction & ~pins) | (direction & pins)
+
+	def write(self, value):
+		self.value = value
+
+	def read(self, with_output=False):
+		return self.value
+
+
+def _controller_with_gpio():
+	controller = FakeController()
+	port = FakeGpioPort()
+	controller.get_gpio = lambda: port
+	return controller, port
+
+
+def test_setup_output_sets_direction_bits():
+	controller, port = _controller_with_gpio()
+	with mock.patch.object(ft232h, '_new_controller', return_value=controller):
+		gpio = ft232h.open_gpio('')
+	gpio.setup_output('C0')  # bit 8
+	gpio.setup_output('D4')  # bit 4
+	assert port.direction == (1 << 8) | (1 << 4)
+
+
+def test_set_toggles_only_its_own_bit():
+	controller, port = _controller_with_gpio()
+	with mock.patch.object(ft232h, '_new_controller', return_value=controller):
+		gpio = ft232h.open_gpio('')
+	for name in ('C0', 'C1', 'C2', 'C3'):
+		gpio.setup_output(name)
+	gpio.set('C1', True)  # bit 9
+	gpio.set('C3', True)  # bit 11
+	assert port.value == (1 << 9) | (1 << 11)
+	gpio.set('C1', False)
+	assert port.value == (1 << 11)  # C3 untouched
+
+
+def test_unknown_pin_name_raises():
+	controller, port = _controller_with_gpio()
+	with mock.patch.object(ft232h, '_new_controller', return_value=controller):
+		gpio = ft232h.open_gpio('')
+	with pytest.raises(ValueError):
+		gpio.setup_output('Z9')
+
+
+def test_reserved_i2c_pin_raises():
+	controller, port = _controller_with_gpio()
+	with mock.patch.object(ft232h, '_new_controller', return_value=controller):
+		gpio = ft232h.open_gpio('')
+	for reserved in ('D0', 'D1', 'D2', 'D3'):
+		with pytest.raises(ValueError):
+			gpio.setup_output(reserved)
+
+
+def test_gpio_and_i2c_share_one_controller():
+	controller, port = _controller_with_gpio()
+	with mock.patch.object(ft232h, '_new_controller', return_value=controller) as new_controller:
+		bus = i2c_bus.open_i2c_bus('ft232h', '')
+		gpio = ft232h.open_gpio('1')  # '' and '1' alias
+	assert new_controller.call_count == 1
+	assert isinstance(bus, i2c_bus._LockedI2C)
+	assert gpio.set  # smoke
+
+
+def test_open_gpio_is_cached_per_controller():
+	controller, port = _controller_with_gpio()
+	with mock.patch.object(ft232h, '_new_controller', return_value=controller):
+		a = ft232h.open_gpio('')
+		b = ft232h.open_gpio('1')
+	assert a is b

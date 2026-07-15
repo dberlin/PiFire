@@ -127,3 +127,58 @@ def construct_i2c_bus(selector):
 	over its pyftdi I2C port."""
 	controller = _get_controller(selector)
 	return _LockedI2C(_PyFtdiI2CBackend(controller))
+
+
+def _pin_bits():
+	bits = {f'C{n}': 1 << (8 + n) for n in range(8)}
+	bits.update({f'D{n}': 1 << n for n in range(4, 8)})  # D4-D7; D0-D3 are I2C/unexposed
+	return bits
+
+
+class Ft232hGpio:
+	"""Drive the FT232H's free GPIO pins (C0-C7, D4-D7) as relay outputs, over
+	the same pyftdi controller the I2C bus uses. pyftdi's write() sets the whole
+	output word, so a shadow register + lock make a single-relay change an atomic
+	read-modify-write that leaves the other relays untouched."""
+
+	PIN_BITS = _pin_bits()
+
+	def __init__(self, controller):
+		self._port = controller.get_gpio()
+		self._direction = 0
+		self._output = 0
+		self._lock = threading.Lock()
+
+	def _bit(self, pin_name):
+		try:
+			return self.PIN_BITS[str(pin_name)]
+		except KeyError:
+			raise ValueError(f'Unknown or reserved FT232H GPIO pin {pin_name!r} (use C0-C7 or D4-D7)')
+
+	def setup_output(self, pin_name):
+		bit = self._bit(pin_name)
+		with self._lock:
+			self._direction |= bit
+			self._port.set_direction(bit, bit)  # 1 = output
+
+	def set(self, pin_name, high):
+		bit = self._bit(pin_name)
+		with self._lock:
+			if high:
+				self._output |= bit
+			else:
+				self._output &= ~bit
+			self._port.write(self._output)
+
+
+def open_gpio(selector):
+	"""Return the Ft232hGpio for `selector`, sharing the same controller as the
+	I2C bus and cached so all relays on one FT232H share one helper (and lock)."""
+	controller = _get_controller(selector)
+	url = canonical_url(selector)
+	with _lock:
+		gpio = _gpios.get(url)
+		if gpio is None:
+			gpio = Ft232hGpio(controller)
+			_gpios[url] = gpio
+		return gpio
