@@ -50,7 +50,7 @@ internally anyway.
   (`probes/base.py`), and native GPIO on a directly-wired Pi still use it. Only
   the FT232H path stops using `board`.
 - **No wizard/UI change and no config-format change.** Relay pin names stay
-  `C0`–`C7` / `D3`–`D7`; existing saved configs keep working. Names translate to
+  `C0`–`C7` / `D4`–`D7`; existing saved configs keep working. Names translate to
   pyftdi bit positions internally.
 - No functional change to the MCP2221 path — it is only relocated to its own
   module, behavior identical.
@@ -73,6 +73,12 @@ FT232H is a 16-bit "wide port": `AD`_n_ = bit _n_, `AC`_n_ = bit _(8+n)_. The
 relay defaults `C0`–`C3` map to bits 8–11. One controller, one internal lock —
 this is exactly the single-MPSSE coordination that `Pin.mpsse_gpio` was doing in
 Blinka, but explicit and self-contained.
+
+**Usable relay pins:** `C0`–`C7` (bits 8–15) and `D4`–`D7` (bits 4–7). This is
+exactly the set Blinka's `ftdi_ft232h` board exposed, so existing configs are
+unaffected. `D0`/`D1`/`D2` are the I2C pins (reserved); `D3` is electrically free
+in I2C mode but was never exposed by Blinka, so we keep it out of the map to
+match historical behavior.
 
 ## Architecture
 
@@ -115,7 +121,7 @@ dedup registry stays atomic with the open exactly as today.
     "no device"/"bus fault").
 - `construct_i2c_bus(selector) -> _LockedI2C(_PyFtdiI2CBackend(controller))`.
 - `Ft232hGpio(controller)` — relay-facing GPIO helper:
-  - name→bit map: `C0..C7 -> 1<<(8+n)`, `D3..D7 -> 1<<n`.
+  - name→bit map: `C0..C7 -> 1<<(8+n)`, `D4..D7 -> 1<<n`.
   - shadow `direction` and `output` integers + a `threading.Lock` so a
     single-relay change is an atomic read-modify-write of the output word (pyftdi
     `write()` sets the whole word; without a shadow, toggling one relay would
