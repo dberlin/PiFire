@@ -33,6 +33,20 @@ def test_vl53l1x_entry_present():
     assert entry["image"] == "vl53l1x.png"
 
 
+def test_sen0628_entry_present():
+    manifest = _manifest()
+    entry = manifest["modules"]["distance"]["sen0628"]
+    assert entry["filename"] == "sen0628"
+    assert entry["py_dependencies"] == []
+    assert entry["apt_dependencies"] == []
+    assert entry["image"] == "sen0628.png"
+    device_field = entry["settings_dependencies"]["sen0628_device"]
+    assert device_field["type"] == "usb_serial_device"
+    assert device_field["settings"] == ["platform", "devices", "distance", "device"]
+    assert device_field["vid"] is None
+    assert device_field["pid"] is None
+
+
 def test_all_platforms_have_distance_i2c_fields():
     manifest = _manifest()
     platforms = manifest["modules"]["grillplatform"]

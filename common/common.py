@@ -156,6 +156,7 @@ def default_settings():
                 "i2c_bus_kind": "basic",  # VL53L0X/VL53L4CD/VL53L1X: "basic" | "extended"
                 "i2c_bus_num": "CP2112",  # VL53L0X/VL53L4CD/VL53L1X: numbered bus or adapter-name match
                 "address": None,  # VL53L0X/VL53L4CD/VL53L1X: optional I2C address override (hex string or int)
+                "device": "/dev/ttyACM0",  # SEN0628: USB-serial device path
             },
             "input": {
                 "down_dt": 20,  # Button (DOWN) or Encoder (DT)
