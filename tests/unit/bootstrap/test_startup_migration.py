@@ -193,11 +193,11 @@ def test_control_main_calls_datastore_init_before_first_settings_read():
     settings/control read, exactly like app.py's module-level call."""
     with open(os.path.join(_REPO_ROOT, "control.py")) as fh:
         src = fh.read()
-    main_block = src[src.index("if __name__ == '__main__':") :]
+    main_block = src[src.index('if __name__ == "__main__":') :]
     # Search for the actual call (`datastore.init()` as a statement), not just
     # any mention -- e.g. an explanatory comment referencing "datastore.init()"
     # or "read_settings(" would otherwise produce a false pass/fail.
-    init_pos = main_block.index("\tdatastore.init()")
+    init_pos = main_block.index("datastore.init()")
     first_read_pos = main_block.index("settings = read_settings(")
     assert init_pos < first_read_pos, "datastore.init() must run before the first settings read in control.py"
 
