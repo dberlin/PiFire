@@ -65,6 +65,21 @@ def _load_probe(monkeypatch):
 	return probe
 
 
+def _wait_for(predicate, timeout=2.0, interval=0.005):
+	"""Poll `predicate()` until it returns truthy or `timeout` seconds have
+	elapsed, then return its final value. Used instead of a single blind
+	`time.sleep()` to synchronize with a background thread/poll loop: it
+	returns as soon as the condition is met (usually far under `timeout`)
+	rather than hardcoding a fixed wait that may be too short under load or
+	needlessly long otherwise."""
+	deadline = time.monotonic() + timeout
+	while True:
+		value = predicate()
+		if value or time.monotonic() >= deadline:
+			return value
+		time.sleep(interval)
+
+
 def test_poll_once_maps_channels_and_handles_missing(monkeypatch):
 	probe = _load_probe(monkeypatch)
 
@@ -260,8 +275,10 @@ def test_start_spawns_thread_and_populates_cache(monkeypatch):
 	)
 	device.start()
 	try:
-		time.sleep(0.2)
-		assert device.get_channel_celsius(1) == pytest.approx(100.0)
+		# The background thread populates the cache asynchronously; poll for it
+		# instead of blindly sleeping a fixed duration.
+		reading = _wait_for(lambda: device.get_channel_celsius(1))
+		assert reading == pytest.approx(100.0)
 	finally:
 		device.stop()  # stop the background loop so it doesn't linger past the test
 

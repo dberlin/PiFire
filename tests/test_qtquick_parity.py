@@ -10,22 +10,16 @@ the real Menus.js via a small QML harness so there is no Python copy to drift).
 """
 
 import json
-import os
-from pathlib import Path
-
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import pytest
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+from PySide6.QtQml import QQmlComponent
 
 import display.qtquick_flex as qmod
 from display.qtbackend import PiFireBackend
+from tests.conftest import QML_DIR, REPO
 
-REPO = Path(__file__).resolve().parents[1]
-QML_DIR = REPO / 'display' / 'qml'
 PYGAME_JSON = REPO / 'display' / 'dsi_1280x720t.json'
 
 
@@ -101,13 +95,6 @@ def test_every_pygame_command_is_handled(monkeypatch, cmd):
 # --------------------------------------------------------------------------
 # QML JS harness — evaluate the real Menus.js in an offscreen engine.
 # --------------------------------------------------------------------------
-def _engine():
-	QGuiApplication.instance() or QGuiApplication([])
-	engine = QQmlApplicationEngine()
-	engine.addImportPath(str(QML_DIR))
-	return engine
-
-
 def _eval_js(engine, expr):
 	qml = 'import QtQuick\nimport "Menus.js" as Menus\nItem { property string result: JSON.stringify(%s) }' % expr
 	comp = QQmlComponent(engine)
@@ -118,8 +105,8 @@ def _eval_js(engine, expr):
 	return json.loads(obj.property('result'))
 
 
-def test_every_pygame_menu_resolves_in_qt():
-	engine = _engine()
+def test_every_pygame_menu_resolves_in_qt(qml_engine):
+	engine = qml_engine
 	for name in PYGAME_MENUS:
 		if name == 'close':
 			continue  # handled by Actions.js routing, not a screen
@@ -155,8 +142,8 @@ EXPECTED_CONTROL_PANEL = {
 
 
 @pytest.mark.parametrize('key,expected', list(EXPECTED_CONTROL_PANEL.items()))
-def test_control_panel_matches_pygame_per_mode(key, expected):
-	engine = _engine()
+def test_control_panel_matches_pygame_per_mode(qml_engine, key, expected):
+	engine = qml_engine
 	mode, recipe, paused = key
 	items = _eval_js(
 		engine, 'Menus.controlPanelForMode("%s", %s, %s)' % (mode, str(recipe).lower(), str(paused).lower())
@@ -164,8 +151,8 @@ def test_control_panel_matches_pygame_per_mode(key, expected):
 	assert [i['action'] for i in items] == expected
 
 
-def test_recipe_paused_marks_next_active():
-	engine = _engine()
+def test_recipe_paused_marks_next_active(qml_engine):
+	engine = qml_engine
 	items = _eval_js(engine, 'Menus.controlPanelForMode("Hold", true, true)')
 	nxt = next(i for i in items if i['action'] == 'cmd_next_step')
 	assert nxt.get('active') is True

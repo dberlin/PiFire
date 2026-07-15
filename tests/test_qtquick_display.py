@@ -1,7 +1,3 @@
-import os
-
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-
 import pytest
 
 import display.qtquick_flex as mod

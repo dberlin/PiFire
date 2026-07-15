@@ -35,6 +35,8 @@ def _run_script(config_txt_path, fake_sudo_bin):
 	env = dict(os.environ)
 	env['PATH'] = f'{bin_dir}:{env["PATH"]}'
 	env['PIFIRE_CONFIG_TXT'] = str(config_txt_path)
+	# Intentional real-process integration test: runs the actual bash script (with
+	# sudo stubbed and /boot redirected above) to verify real script behavior.
 	return subprocess.run(['bash', str(_SCRIPT)], env=env, capture_output=True, text=True, timeout=10)
 
 

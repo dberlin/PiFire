@@ -153,6 +153,8 @@ def test_boot_path_import_via_app_import(tmp_path):
 
 		env = dict(os.environ)
 		env['PIFIRE_DB_PATH'] = db_path
+		# Intentional real-process integration test: a fresh interpreter is required to
+		# exercise app.py's actual module-level boot wiring (see docstring above).
 		proc = subprocess.run(
 			[sys.executable, '-c', 'import app'], cwd=_REPO_ROOT, env=env, capture_output=True, text=True, timeout=60
 		)

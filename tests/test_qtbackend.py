@@ -1,7 +1,3 @@
-import os
-
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-
 from display.qtbackend import PiFireBackend
 
 PROBE_INFO = {'primary': {'name': 'Grill', 'max_temp': 600}, 'food': [{'name': 'Probe 1', 'max_temp': 300}], 'aux': []}

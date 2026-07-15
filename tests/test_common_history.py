@@ -1,23 +1,4 @@
-import json
-import os
-
-import pytest
-
 from common import common as c
-from common import datastore
-
-
-@pytest.fixture
-def ds(tmp_path):
-	datastore._reset_for_tests(str(tmp_path / 't.db'))
-	datastore.init()
-	yield datastore
-	datastore._reset_for_tests(None)
-
-
-def _oracle(name):
-	return json.load(open(os.path.join(os.path.dirname(__file__), 'oracle', 'fixtures', f'{name}.json')))
-
 
 SAMPLE = {
 	'probe_history': {'primary': {'Grill': 225}, 'food': {'P1': 145}, 'aux': {}},
@@ -26,8 +7,8 @@ SAMPLE = {
 }
 
 
-def test_history_cap_matches_oracle(ds):
-	exp = _oracle('history_cap')
+def test_history_cap_matches_oracle(ds, oracle):
+	exp = oracle('history_cap')
 	for _ in range(5):
 		c.write_history(SAMPLE, maxsizelines=3)
 	items = c.read_history()

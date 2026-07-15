@@ -1,14 +1,7 @@
-import os
-from pathlib import Path
-
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-
 from PySide6.QtCore import QObject, QUrl, Property
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+from PySide6.QtQml import QQmlComponent
 
-REPO = Path(__file__).resolve().parents[1]
-QML_DIR = REPO / 'display' / 'qml'
+from tests.conftest import QML_DIR
 
 
 class _StubBackend(QObject):
@@ -36,10 +29,7 @@ class _StubBackend(QObject):
 	fanOn = Property(bool, lambda self: False, constant=True)
 
 
-def _dash(width):
-	QGuiApplication.instance() or QGuiApplication([])
-	engine = QQmlApplicationEngine()
-	engine.addImportPath(str(QML_DIR))
+def _dash(engine, width):
 	backend = _StubBackend()
 	engine.rootContext().setContextProperty('backend', backend)
 	qml = 'import QtQuick\nimport "screens"\nDashScreen { width: %d; height: %d }' % (
@@ -60,9 +50,9 @@ def _dash(width):
 	return obj
 
 
-def test_compact_true_at_1024():
-	assert _dash(1024).property('compact') is True
+def test_compact_true_at_1024(qml_engine):
+	assert _dash(qml_engine, 1024).property('compact') is True
 
 
-def test_compact_false_at_1280():
-	assert _dash(1280).property('compact') is False
+def test_compact_false_at_1280(qml_engine):
+	assert _dash(qml_engine, 1280).property('compact') is False

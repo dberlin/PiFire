@@ -20,8 +20,6 @@ import tempfile
 
 import pytest
 
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-
 from common import datastore
 from common.common import (
 	WriteKind,

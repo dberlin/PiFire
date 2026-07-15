@@ -1,23 +1,9 @@
-import os
-from pathlib import Path
-
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-
 import pytest
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+from PySide6.QtQml import QQmlComponent
 
-REPO = Path(__file__).resolve().parents[1]
-QML_DIR = REPO / 'display' / 'qml'
-
-
-def _engine():
-	QGuiApplication.instance() or QGuiApplication([])
-	engine = QQmlApplicationEngine()
-	engine.addImportPath(str(QML_DIR))
-	return engine
+from tests.conftest import QML_DIR
 
 
 def _make(engine, component, props):
@@ -35,16 +21,14 @@ COMPONENTS = ['HeaderBar', 'Gauge', 'CookTimeBar', 'ControlPanel', 'DutyPill', '
 
 
 @pytest.mark.parametrize('component', COMPONENTS)
-def test_component_has_compact_property(component):
-	engine = _engine()
-	obj = _make(engine, component, {'compact': 'true'})
+def test_component_has_compact_property(qml_engine, component):
+	obj = _make(qml_engine, component, {'compact': 'true'})
 	meta = obj.metaObject()
 	assert meta.indexOfProperty('compact') >= 0, f'{component} missing compact property'
 	assert obj.property('compact') is True
 
 
-def test_headerbar_compact_is_shorter():
-	engine = _engine()
-	tall = _make(engine, 'HeaderBar', {'compact': 'false'})
-	short = _make(engine, 'HeaderBar', {'compact': 'true'})
+def test_headerbar_compact_is_shorter(qml_engine):
+	tall = _make(qml_engine, 'HeaderBar', {'compact': 'false'})
+	short = _make(qml_engine, 'HeaderBar', {'compact': 'true'})
 	assert short.property('height') < tall.property('height')

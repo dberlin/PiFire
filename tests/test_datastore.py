@@ -2,19 +2,10 @@ import json
 import logging
 import os
 import sqlite3
-import subprocess
 
 import pytest
 
 from common import datastore
-
-
-@pytest.fixture
-def ds(tmp_path):
-	datastore._reset_for_tests(str(tmp_path / 't.db'))
-	datastore.init()
-	yield datastore
-	datastore._reset_for_tests(None)
 
 
 def test_pragmas_applied(ds):
@@ -428,25 +419,30 @@ def test_history_v4_migration_idempotent(tmp_path):
 
 
 def test_no_valkey_references_in_source():
-	hits = subprocess.run(
-		[
-			'grep',
-			'-rIl',
-			'-e',
-			'import valkey',
-			'-e',
-			'cmdsts',
-			'-e',
-			'ValkeyQueue',
-			'-e',
-			'ValkeyHandler',
-			'--include=*.py',
-			'common',
-			'controller',
-			'blueprints',
-			'control.py',
-		],
-		capture_output=True,
-		text=True,
-	).stdout.strip()
-	assert hits == '', f'stale Valkey references in: {hits}'
+	# Pure in-process file scan (no `grep` subprocess needed): just a plain-text
+	# search across the source tree, with no external process/state to exercise.
+	patterns = ('import valkey', 'cmdsts', 'ValkeyQueue', 'ValkeyHandler')
+	repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+	targets = [
+		os.path.join(repo_root, 'common'),
+		os.path.join(repo_root, 'controller'),
+		os.path.join(repo_root, 'blueprints'),
+		os.path.join(repo_root, 'control.py'),
+	]
+
+	py_files = []
+	for target in targets:
+		if os.path.isfile(target):
+			py_files.append(target)
+		else:
+			for dirpath, _dirnames, filenames in os.walk(target):
+				py_files.extend(os.path.join(dirpath, f) for f in filenames if f.endswith('.py'))
+
+	hits = []
+	for path in py_files:
+		with open(path, encoding='utf-8') as fh:
+			content = fh.read()
+		if any(pattern in content for pattern in patterns):
+			hits.append(os.path.relpath(path, repo_root))
+
+	assert hits == [], f'stale Valkey references in: {", ".join(hits)}'

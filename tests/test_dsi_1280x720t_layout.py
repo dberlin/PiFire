@@ -1,13 +1,10 @@
-import json
-import os
+from tests.conftest import DSI_LAYOUT_SRC, dsi_layout_out_path, load_json
 
-BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-SRC = os.path.join(BASE, 'display', 'dsi_800x480t.json')
-OUT = os.path.join(BASE, 'display', 'dsi_1280x720t.json')
+OUT = dsi_layout_out_path('dsi_1280x720t')
+SRC = DSI_LAYOUT_SRC
 
 SCALE = 1.5
 OFFSETS = {'profile_1': (40, 0), 'profile_2': (0, 40)}
-SCREEN = {'profile_1': (1280, 720), 'profile_2': (720, 1280)}
 
 EMBER_DASH_OBJECT_NAMES = [
 	'header_bar',
@@ -26,51 +23,18 @@ EMBER_DASH_OBJECT_NAMES = [
 ]
 
 
-def _load(path):
-	with open(path) as f:
-		return json.load(f)
-
-
-def _iter_objects(profile):
-	for section in ('home', 'dash'):
-		for obj in profile.get(section, []):
-			yield obj
-	for section in ('menus', 'input'):
-		for obj in profile.get(section, {}).values():
-			yield obj
-
-
-def test_metadata():
-	d = _load(OUT)
-	assert d['metadata']['name'] == 'dsi_1280x720t'
-	assert d['metadata']['screen_width'] == 1280
-	assert d['metadata']['screen_height'] == 720
-
-
 def test_splash_image_unchanged():
-	assert _load(OUT)['metadata']['splash_image'] == './static/img/display/splash_800x480.png'
+	assert load_json(OUT)['metadata']['splash_image'] == './static/img/display/splash_800x480.png'
 
 
 def test_dash_background_is_bespoke_ember_background():
-	assert _load(OUT)['metadata']['dash_background'].endswith('background_ember_1280x720.png')
-
-
-def test_all_elements_on_screen():
-	d = _load(OUT)
-	for profile, (W, H) in SCREEN.items():
-		for obj in _iter_objects(d[profile]):
-			if 'position' not in obj or 'size' not in obj:
-				continue
-			x, y = obj['position']
-			w, h = obj['size']
-			assert 0 <= x and x + w <= W, f'{profile}:{obj.get("name")} x out of bounds'
-			assert 0 <= y and y + h <= H, f'{profile}:{obj.get("name")} y out of bounds'
+	assert load_json(OUT)['metadata']['dash_background'].endswith('background_ember_1280x720.png')
 
 
 def test_profile_1_dash_is_bespoke_ember_layout():
 	"""Task 25: profile_1.dash is a bespoke layout built from the new ember
 	flexobject types (Tasks 17-23), not a scaled copy of the 800x480 source."""
-	d = _load(OUT)
+	d = load_json(OUT)
 	dash = d['profile_1']['dash']
 	names = [obj['name'] for obj in dash]
 	assert names == EMBER_DASH_OBJECT_NAMES
@@ -89,7 +53,7 @@ def test_profile_1_dash_is_bespoke_ember_layout():
 
 
 def test_profile_1_dash_objects_have_common_flexobject_keys():
-	d = _load(OUT)
+	d = load_json(OUT)
 	for obj in d['profile_1']['dash']:
 		assert isinstance(obj['animation_enabled'], bool)
 		assert isinstance(obj['glow'], bool)
@@ -102,7 +66,7 @@ def test_profile_1_dash_objects_have_common_flexobject_keys():
 def test_profile_2_dash_is_untouched_scaled_layout():
 	"""profile_2 (portrait) is not part of Task 25 - it stays the scaled
 	800x480-derived layout used by every other resolution."""
-	d = _load(OUT)
+	d = load_json(OUT)
 	names = [obj['name'] for obj in d['profile_2']['dash']]
 	assert 'primary_gauge' in names
 	assert d['profile_2']['dash'][0]['type'] == 'gauge'
@@ -123,8 +87,8 @@ def test_transform_matches_source_for_still_scaled_sections():
 	profile_1's home/menus/input and everything in profile_2 (home/dash/
 	menus/input) remain uniformly scaled from the 800x480 source, exactly
 	like every other resolution this generator produces."""
-	src = _load(SRC)
-	out = _load(OUT)
+	src = load_json(SRC)
+	out = load_json(OUT)
 	for profile, (xoff, yoff) in OFFSETS.items():
 		sp, op = src[profile], out[profile]
 		sections = ('home',) if profile == 'profile_1' else ('home', 'dash')

@@ -15,8 +15,6 @@ import os
 import sys
 import tempfile
 
-import pytest
-
 # --- Seed a fresh SQLite DB BEFORE importing `app` -------------------------
 _TMP_DIR = tempfile.mkdtemp(prefix='pifire_test_webapp_')
 _DB_PATH = os.path.join(_TMP_DIR, 'webapp_test.db')
@@ -67,12 +65,7 @@ write_current(
 	}
 )
 
-_APP_IMPORT_ERROR = None
-try:
-	from app import app as flask_app
-except Exception as exc:  # pragma: no cover - only exercised if boot is impossible here
-	_APP_IMPORT_ERROR = exc
-	flask_app = None
+from app import app as flask_app  # noqa: E402
 
 
 def setup_function(function):
@@ -97,7 +90,6 @@ def teardown_module(module):
 # --- Goal 2: boot the real app and drive it through blueprint routes -------
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_api_settings_route_reads_sqlite_via_blueprint():
 	flask_app.config.update(TESTING=True)
 	client = flask_app.test_client()
@@ -109,7 +101,6 @@ def test_api_settings_route_reads_sqlite_via_blueprint():
 	assert payload['settings']['globals']['grill_name'] == _SEEDED_GRILL_NAME
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_api_current_route_reads_sqlite_via_blueprint():
 	flask_app.config.update(TESTING=True)
 	client = flask_app.test_client()
@@ -122,7 +113,6 @@ def test_api_current_route_reads_sqlite_via_blueprint():
 	assert payload['current']['PSP'] == 225
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_admin_page_renders_with_none_cpu_temp():
 	"""Regression: the admin CPU card was gated only on
 	`'cpu_temp' in control['system'].keys()`, but routes.py stores that key
@@ -152,7 +142,6 @@ def test_admin_page_renders_with_none_cpu_temp():
 	assert 'CPU Temperature' not in resp.get_data(as_text=True)
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_admin_page_renders_cpu_card_with_real_cpu_temp():
 	"""Complement to the None case: when cpu_temp is a real number the card
 	renders normally (guards the fix against over-suppressing the card)."""
@@ -169,7 +158,6 @@ def test_admin_page_renders_cpu_card_with_real_cpu_temp():
 	assert 'CPU Temperature' in resp.get_data(as_text=True)
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_api_settings_post_writes_through_to_sqlite():
 	"""Round-trip a write through the blueprint (write_settings) and confirm
 	it lands in SQLite by reading it back through common.common directly."""
@@ -183,7 +171,6 @@ def test_api_settings_post_writes_through_to_sqlite():
 	assert read_settings()['globals']['grill_name'] == 'T18 Written Via Blueprint'
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_probeconfig_add_usb_hid_probe_not_blocked_by_stale_platform_bus():
 	"""Regression: adding an ft232h probe in the wizard must not be rejected
 	because the *previously saved* platform fan bus is 'basic'. Mid-wizard,
@@ -219,7 +206,6 @@ def test_probeconfig_add_usb_hid_probe_not_blocked_by_stale_platform_bus():
 	assert added[0]['config']['i2c_bus_kind'] == 'ft232h'
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_i2c_bus_scan_extended_lists_discovered_adapters(monkeypatch):
 	flask_app.config.update(TESTING=True)
 	client = flask_app.test_client()
@@ -245,7 +231,6 @@ def test_i2c_bus_scan_extended_lists_discovered_adapters(monkeypatch):
 	assert 'By Serial' in body
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_i2c_bus_scan_extended_omits_by_serial_group_when_no_serials(monkeypatch):
 	flask_app.config.update(TESTING=True)
 	client = flask_app.test_client()
@@ -265,7 +250,6 @@ def test_i2c_bus_scan_extended_omits_by_serial_group_when_no_serials(monkeypatch
 	assert 'By Serial' not in body
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_i2c_bus_scan_no_devices_shows_error(monkeypatch):
 	flask_app.config.update(TESTING=True)
 	client = flask_app.test_client()
@@ -279,7 +263,6 @@ def test_i2c_bus_scan_no_devices_shows_error(monkeypatch):
 	assert 'No mcp2221 I2C buses discovered.' in resp.get_data(as_text=True)
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_wizard_modulecard_renders_i2c_bus_num_as_free_text():
 	# device_distance_i2c_bus_num / i2c_bus_num (fan controller) live under
 	# grillplatform module settings_dependencies (e.g. x86_numato), not under
@@ -294,7 +277,6 @@ def test_wizard_modulecard_renders_i2c_bus_num_as_free_text():
 	assert 'Discover' in body
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
 def test_wizard_finish_blocks_unworkable_bus_combo():
 	"""Finish-step whole-config check: a probe on the ft232h bus while the fan
 	controller is left on the onboard 'basic' bus is the one unworkable combo.

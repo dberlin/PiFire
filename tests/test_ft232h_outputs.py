@@ -107,5 +107,8 @@ def test_import_does_not_enable_ft232h_backend():
 	import subprocess
 	import sys
 
+	# Intentional real-process integration test: a fresh interpreter is required so the
+	# module-level import side effect (or absence of one) can't be masked by an
+	# earlier test in this process having already imported/mocked the module.
 	code = "import os, grillplat.ft232h_relay; assert 'BLINKA_FT232H' not in os.environ"
 	subprocess.run([sys.executable, '-c', code], check=True, cwd='.')

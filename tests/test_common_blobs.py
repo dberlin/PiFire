@@ -1,23 +1,5 @@
-import json
-import os
-
-import pytest
-
 from common import common as c
 from common import datastore
-
-
-@pytest.fixture
-def ds(tmp_path):
-	datastore._reset_for_tests(str(tmp_path / 't.db'))
-	datastore.init()
-	yield datastore
-	datastore._reset_for_tests(None)
-
-
-def _oracle(name):
-	p = os.path.join(os.path.dirname(__file__), 'oracle', 'fixtures', f'{name}.json')
-	return json.load(open(p))
 
 
 def test_control_overwrite_and_read(ds):
@@ -25,8 +7,8 @@ def test_control_overwrite_and_read(ds):
 	assert c.read_control() == {'mode': 'Stop', 'n': {'a': 1}}
 
 
-def test_control_merge_matches_oracle(ds):
-	exp = _oracle('control_merge')
+def test_control_merge_matches_oracle(ds, oracle):
+	exp = oracle('control_merge')
 	c.write_control({'mode': 'Stop', 'nested': {'a': 1, 'b': 2}}, c.WriteKind.OVERWRITE, origin='test')
 	c.write_control({'nested': {'b': 9, 'c': 3}}, c.WriteKind.MERGE, origin='webapp')
 	assert c.read_control() == exp['before_execute']  # MERGE deferred
@@ -133,8 +115,8 @@ def test_autotune_uses_queue(ds):
 	assert c.read_autotune() == []
 
 
-def test_warnings_read_and_clear_matches_oracle(ds):
-	exp = _oracle('warnings')
+def test_warnings_read_and_clear_matches_oracle(ds, oracle):
+	exp = oracle('warnings')
 	c.write_warning('first')
 	c.write_warning('second')
 	assert c.read_warnings() == exp['read1']

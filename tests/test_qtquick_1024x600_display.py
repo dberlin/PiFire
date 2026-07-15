@@ -1,8 +1,6 @@
 import json
 import os
 
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 

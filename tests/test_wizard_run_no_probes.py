@@ -17,15 +17,6 @@ import pytest
 
 import wizard
 from common import common as c
-from common import datastore
-
-
-@pytest.fixture
-def ds(tmp_path):
-	datastore._reset_for_tests(str(tmp_path / 't.db'))
-	datastore.init()
-	yield datastore
-	datastore._reset_for_tests(None)
 
 
 @pytest.fixture

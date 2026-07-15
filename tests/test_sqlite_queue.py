@@ -6,14 +6,6 @@ from common import datastore
 from common.sqlite_queue import SqliteQueue, SqliteMembershipList
 
 
-@pytest.fixture
-def ds(tmp_path):
-	datastore._reset_for_tests(str(tmp_path / 't.db'))
-	datastore.init()
-	yield datastore
-	datastore._reset_for_tests(None)
-
-
 def test_fifo_roundtrip(ds):
 	q = SqliteQueue('queue_systemq')
 	assert q.length() == 0

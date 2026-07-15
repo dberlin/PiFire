@@ -1,14 +1,43 @@
-import time
 from unittest import mock
 
 import pytest
+
+
+class _FakeClock:
+	"""Deterministic stand-in for the `time` module as seen by
+	distance._tof_base. `_sensing_loop` measures a read cycle's duration via
+	time.time() to decide whether the sensor looks stuck and needs
+	re-initializing; a slow fake read advances this clock via `advance()`
+	instead of the real one, so that timing-dependent behavior can be
+	exercised without the test process actually blocking on a real sleep.
+
+	`sleep()` (the loop's once-per-iteration idle pacing wait) is a genuine
+	no-op that deliberately does *not* advance the clock: if it did, the
+	background thread -- no longer throttled by a real sleep -- would spin
+	fast enough to blow past the 60s read-interval threshold many times
+	over during a single test, re-triggering reads/re-inits well beyond
+	what the test intends to exercise."""
+
+	def __init__(self):
+		self._now = 0.0
+
+	def time(self):
+		return self._now
+
+	def sleep(self, seconds):
+		pass
+
+	def advance(self, seconds):
+		"""Test-only: simulate a read that took `seconds` to complete."""
+		self._now += seconds
 
 
 class FakeSensorMixin:
 	"""Mixed in ahead of ToFHopperLevel in test subclasses so the shared
 	thread/percent-calc/bus-resolution logic can be exercised without a real
 	sensor. `reading_mm` is the fixed distance every read returns; `read_delay`
-	simulates a slow sensor to exercise the stuck-sensor re-init path."""
+	simulates a slow sensor to exercise the stuck-sensor re-init path by
+	advancing the fake clock installed by the `tof_mod` fixture."""
 
 	def __init__(self, *args, reading_mm=100, read_delay=0, **kwargs):
 		self.open_calls = 0
@@ -23,7 +52,7 @@ class FakeSensorMixin:
 
 	def _read_distance_mm(self):
 		if self._read_delay:
-			time.sleep(self._read_delay)
+			self._tof_mod.time.advance(self._read_delay)
 		return self._reading_mm
 
 
@@ -31,13 +60,16 @@ class FakeSensorMixin:
 def tof_mod():
 	import distance._tof_base as mod
 
-	with mock.patch.object(mod, 'open_i2c_bus', return_value=mock.sentinel.bus):
+	with (
+		mock.patch.object(mod, 'open_i2c_bus', return_value=mock.sentinel.bus),
+		mock.patch.object(mod, 'time', _FakeClock()),
+	):
 		yield mod
 
 
 def _make_hopper(tof_mod, dev_pins=None, reading_mm=100, empty=22, full=4, read_delay=0):
 	class TestHopperLevel(FakeSensorMixin, tof_mod.ToFHopperLevel):
-		pass
+		_tof_mod = tof_mod
 
 	return TestHopperLevel(dev_pins or {}, empty=empty, full=full, reading_mm=reading_mm, read_delay=read_delay)
 

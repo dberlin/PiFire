@@ -8,23 +8,13 @@ shrink fonts/spacing/buttons so the whole keypad fits at 1024x600, while
 leaving the larger 1280x720 profile's sizing unchanged.
 """
 
-import os
-from pathlib import Path
-
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-
 from PySide6.QtCore import QObject, QUrl
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+from PySide6.QtQml import QQmlComponent
 
-REPO = Path(__file__).resolve().parents[1]
-QML_DIR = REPO / 'display' / 'qml'
+from tests.conftest import QML_DIR
 
 
-def _keypad(width, height):
-	QGuiApplication.instance() or QGuiApplication([])
-	engine = QQmlApplicationEngine()
-	engine.addImportPath(str(QML_DIR))
+def _keypad(engine, width, height):
 	qml = 'import QtQuick\nimport "components"\nKeypad { width: %d; height: %d }' % (width, height)
 	comp = QQmlComponent(engine)
 	comp.setData(qml.encode(), QUrl.fromLocalFile(str(QML_DIR / '_probe.qml')))
@@ -45,25 +35,25 @@ def _column_height(keypad_obj):
 	return column.property('height')
 
 
-def test_compact_true_at_1024x600():
-	assert _keypad(1024, 600).property('compact') is True
+def test_compact_true_at_1024x600(qml_engine):
+	assert _keypad(qml_engine, 1024, 600).property('compact') is True
 
 
-def test_compact_false_at_1280x720():
-	assert _keypad(1280, 720).property('compact') is False
+def test_compact_false_at_1280x720(qml_engine):
+	assert _keypad(qml_engine, 1280, 720).property('compact') is False
 
 
-def test_compact_keypad_fits_1024x600_screen():
+def test_compact_keypad_fits_1024x600_screen(qml_engine):
 	# The real bug: at full size, the keypad's content is taller than the
 	# 600px-tall 1024x600 screen, clipping the Cancel button.
-	assert _column_height(_keypad(1024, 600)) <= 600
+	assert _column_height(_keypad(qml_engine, 1024, 600)) <= 600
 
 
-def test_noncompact_keypad_fits_1280x720_screen():
-	assert _column_height(_keypad(1280, 720)) <= 720
+def test_noncompact_keypad_fits_1280x720_screen(qml_engine):
+	assert _column_height(_keypad(qml_engine, 1280, 720)) <= 720
 
 
-def test_compact_keypad_is_shorter_than_full_size():
-	compact_height = _column_height(_keypad(1024, 600))
-	full_height = _column_height(_keypad(1280, 720))
+def test_compact_keypad_is_shorter_than_full_size(qml_engine):
+	compact_height = _column_height(_keypad(qml_engine, 1024, 600))
+	full_height = _column_height(_keypad(qml_engine, 1280, 720))
 	assert compact_height < full_height
