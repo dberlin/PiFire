@@ -16,25 +16,21 @@ def test_relay_only_init_opens_shared_bus_but_no_emc():
 	with make_ft232h_platform(_relay_config()) as (plat, harness):
 		assert plat.pwm_fan is False
 		assert plat.emc is None
-		# The FT232H bus is always opened via the factory (it establishes the
-		# single MPSSE controller the relay GPIO pins reuse below), even in
-		# relay-only mode where no EMC fan controller is created.
 		harness.open_bus.assert_called_once_with('ft232h', '1')
 		harness.emc2101_cls.assert_not_called()
 		harness.emc2301_cls.assert_not_called()
-		# Four output pins created and de-asserted (active-low -> value True).
 		assert set(plat.relays) == {'power', 'igniter', 'auger', 'fan'}
-		assert plat.relays['power']._dio.value is True
+		# Active-low, de-asserted at init -> True.
+		assert harness.gpio.values['C0'] is True
 
 
 def test_output_methods_toggle_mapped_active_low_pins():
 	with make_ft232h_platform(_relay_config()) as (plat, harness):
 		plat.auger_on()
-		# 'auger' maps to C2; active-low asserted -> value False.
-		assert harness.dio.pins['C2'].value is False
+		assert harness.gpio.values['C2'] is False  # auger -> C2 asserted (active-low)
 		assert plat._output_state['auger'] is True
 		plat.auger_off()
-		assert harness.dio.pins['C2'].value is True
+		assert harness.gpio.values['C2'] is True
 		assert plat._output_state['auger'] is False
 
 
@@ -42,16 +38,15 @@ def test_power_and_igniter_use_mapped_pins():
 	with make_ft232h_platform(_relay_config()) as (plat, harness):
 		plat.power_on()
 		plat.igniter_on()
-		assert harness.dio.pins['C0'].value is False  # power -> C0
-		assert harness.dio.pins['C1'].value is False  # igniter -> C1
+		assert harness.gpio.values['C0'] is False  # power -> C0
+		assert harness.gpio.values['C1'] is False  # igniter -> C1
 
 
 def test_active_high_trigger_level_not_inverted():
 	with make_ft232h_platform(_relay_config(triggerlevel='HIGH')) as (plat, harness):
-		# De-asserted at init -> value False for active-high.
-		assert harness.dio.pins['C0'].value is False
+		assert harness.gpio.values['C0'] is False  # de-asserted at init (active-high)
 		plat.power_on()
-		assert harness.dio.pins['C0'].value is True
+		assert harness.gpio.values['C0'] is True
 
 
 def test_custom_pin_mapping_is_honored():
@@ -60,7 +55,7 @@ def test_custom_pin_mapping_is_honored():
 		harness,
 	):
 		plat.auger_on()
-		assert harness.dio.pins['D6'].value is False
+		assert harness.gpio.values['D6'] is False
 
 
 def test_unknown_pin_name_raises_value_error():
@@ -74,16 +69,15 @@ def test_unknown_pin_name_raises_value_error():
 def test_relay_only_fan_on_off_and_toggle():
 	with make_ft232h_platform(_relay_config()) as (plat, harness):
 		plat.fan_on()
-		assert harness.dio.pins['C3'].value is False  # fan -> C3 asserted
+		assert harness.gpio.values['C3'] is False  # fan -> C3 asserted
 		assert plat._output_state['fan'] is True
 		plat.fan_toggle()
 		assert plat._output_state['fan'] is False
-		assert harness.dio.pins['C3'].value is True
+		assert harness.gpio.values['C3'] is True
 
 
 def test_relay_only_set_duty_cycle_and_frequency_are_noops():
 	with make_ft232h_platform(_relay_config()) as (plat, harness):
-		# Must not raise and must not create an EMC.
 		plat.set_duty_cycle(50)
 		plat.set_pwm_frequency(20000)
 		assert plat.emc is None
@@ -101,14 +95,12 @@ def test_get_input_status_is_false():
 		assert plat.get_input_status() is False
 
 
-def test_cleanup_deasserts_and_closes_pins():
+def test_cleanup_deasserts_pins():
 	with make_ft232h_platform(_relay_config()) as (plat, harness):
 		plat.power_on()
 		plat.cleanup()
-		# All relays de-asserted (active-low -> True) and closed.
 		for pin in ('C0', 'C1', 'C2', 'C3'):
-			assert harness.dio.pins[pin].value is True
-			assert harness.dio.pins[pin].deinit_called is True
+			assert harness.gpio.values[pin] is True  # all de-asserted
 
 
 def test_import_does_not_enable_ft232h_backend():

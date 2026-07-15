@@ -36,7 +36,7 @@ def test_emc2301_init_uses_emc2301_at_default_address():
 def test_fan_on_sets_relay_and_speed():
 	with make_ft232h_platform(_emc_config('emc2101')) as (plat, harness):
 		plat.fan_on(80)
-		assert harness.dio.pins['C3'].value is False  # fan relay asserted (active-low)
+		assert harness.gpio.values['C3'] is False  # fan relay asserted (active-low)
 		assert plat._output_state['fan'] is True
 		assert plat.emc.manual_fan_speed == 80
 		assert plat._fan_speed_percent == 80
@@ -48,7 +48,7 @@ def test_fan_off_zeroes_speed_and_deasserts_relay():
 		plat.fan_off()
 		assert plat.emc.manual_fan_speed == 0
 		assert plat._output_state['fan'] is False
-		assert harness.dio.pins['C3'].value is True
+		assert harness.gpio.values['C3'] is True
 
 
 def test_set_duty_cycle_clamps_to_0_100():

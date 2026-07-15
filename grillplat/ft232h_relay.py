@@ -6,8 +6,8 @@
 #
 # Description: Controls PiFire outputs on any host using an FT232H USB breakout
 #   as a GPIO expander.  Each output (power, igniter, auger, fan) drives one
-#   input of an IO-triggered relay board via an FT232H GPIO pin (Adafruit Blinka
-#   digitalio).  An alternative to a directly-wired relay board.
+#   input of an IO-triggered relay board via an FT232H GPIO pin (pyftdi, not
+#   Adafruit Blinka).  An alternative to a directly-wired relay board.
 #
 #   The fan is selectable via fan_controller.chip:
 #     'none'                 -> the fan is a plain relay (on/off).
@@ -17,11 +17,11 @@
 # *****************************************
 
 import logging
-import os
 import threading
 
 from adafruit_emc2101.emc2101_lut import EMC2101_LUT
 
+from common.ft232h import open_gpio as open_ft232h_gpio
 from common.i2c_bus import open_i2c_bus
 from grillplat.emc2301 import EMC2301
 from grillplat.system_commands import SystemCommandsMixin
@@ -32,39 +32,25 @@ from grillplat.system_commands import SystemCommandsMixin
 _DEFAULT_OUTPUTS = {'power': 'C0', 'igniter': 'C1', 'auger': 'C2', 'fan': 'C3'}
 
 
-def _load_ft232h(url='1'):
-	"""Enable Blinka's FT232H backend and import board + digitalio.
-
-	Isolated so importing this module never opens USB hardware, and so tests can
-	patch it to inject fakes.  `url` is assigned to BLINKA_FT232H before importing
-	board: '1' selects the first FT232H; a pyftdi URL selects a specific device.
-	"""
-	os.environ['BLINKA_FT232H'] = str(url)
-	import board
-	import digitalio
-
-	return board, digitalio
-
-
 class _Relay:
-	"""One relay-board input driven by an FT232H GPIO pin.
-
-	digitalio has no active_high parameter, so trigger polarity is applied
-	explicitly: an active-LOW board asserts the relay by driving the pin low.
+	"""One relay-board input driven by an FT232H GPIO pin (by name, via the
+	shared Ft232hGpio). digitalio had no active_high parameter and neither does
+	this: an active-LOW board asserts the relay by driving the pin low.
 	"""
 
-	def __init__(self, dio, active_high):
-		self._dio = dio
+	def __init__(self, gpio, pin_name, active_high):
+		self._gpio = gpio
+		self._pin_name = pin_name
 		self._active_high = active_high
 		self._state = False
 		self.off()
 
 	def on(self):
-		self._dio.value = self._active_high
+		self._gpio.set(self._pin_name, self._active_high)
 		self._state = True
 
 	def off(self):
-		self._dio.value = not self._active_high
+		self._gpio.set(self._pin_name, not self._active_high)
 		self._state = False
 
 	@property
@@ -72,7 +58,9 @@ class _Relay:
 		return self._state
 
 	def close(self):
-		self._dio.deinit()
+		# The shared pyftdi controller lives for the process lifetime; nothing
+		# per-relay to release.
+		pass
 
 
 class GrillPlatform(SystemCommandsMixin):
@@ -111,24 +99,19 @@ class GrillPlatform(SystemCommandsMixin):
 		self._ramp_stop = threading.Event()
 
 		# Open the FT232H I2C bus through the shared factory FIRST. This creates
-		# the single MPSSE controller (and sets Blinka's Pin.mpsse_gpio), so the
-		# relay GPIO pins below and any ft232h probe reuse one controller instead
-		# of fighting over the FT232H's single MPSSE engine.
+		# (and caches) the single pyftdi I2cController, so the relay GPIO below
+		# and any ft232h I2C probe reuse one controller and one MPSSE engine.
 		self._ft232h_bus = open_i2c_bus('ft232h', self.url)
 
-		# Now import the ft232h board/digitalio and create one pin per output;
-		# these reuse the controller established above via Pin.mpsse_gpio.
-		board, digitalio = _load_ft232h(self.url)
+		# Relay GPIO comes off that same controller via pyftdi's get_gpio() --
+		# no Adafruit Blinka `board`/`digitalio`, so no process-global board
+		# singleton to resolve to the wrong board.
+		gpio = open_ft232h_gpio(self.url)
 		self.relays = {}
 		try:
 			for name, pin_name in self.pin_map.items():
-				try:
-					pin = getattr(board, pin_name)
-				except AttributeError:
-					raise ValueError(f'Unknown FT232H pin {pin_name!r} for output {name!r}')
-				dio = digitalio.DigitalInOut(pin)
-				dio.direction = digitalio.Direction.OUTPUT
-				self.relays[name] = _Relay(dio, active_high)
+				gpio.setup_output(pin_name)
+				self.relays[name] = _Relay(gpio, pin_name, active_high)
 		except Exception:
 			for relay in self.relays.values():
 				try:
@@ -140,9 +123,9 @@ class GrillPlatform(SystemCommandsMixin):
 		# Open the fan controller if PWM fan mode is selected (Task 2).
 		self.emc = None
 		if self.pwm_fan:
-			self._init_fan_controller(board)
+			self._init_fan_controller()
 
-	def _init_fan_controller(self, board):
+	def _init_fan_controller(self):
 		# EMC fan controller on the shared FT232H bus opened in __init__.
 		i2c = self._ft232h_bus
 		if self.chip == 'emc2301':
