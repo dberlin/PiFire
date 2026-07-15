@@ -263,6 +263,80 @@ def test_i2c_bus_scan_no_devices_shows_error(monkeypatch):
     assert "No mcp2221 I2C buses discovered." in resp.get_data(as_text=True)
 
 
+def test_usb_serial_scan_lists_all_devices_when_unfiltered(monkeypatch):
+    flask_app.config.update(TESTING=True)
+    client = flask_app.test_client()
+
+    import blueprints.wizard.routes as wizard_routes
+
+    monkeypatch.setattr(
+        wizard_routes,
+        "discover_usb_serial_devices",
+        lambda vid=None, pid=None: [
+            {
+                "device": "/dev/ttyACM0",
+                "description": "SEN0628",
+                "manufacturer": "DFRobot",
+                "serial_number": "AB12",
+                "vid": 0x2E8A,
+                "pid": 0x000A,
+            }
+        ],
+    )
+
+    resp = client.post("/wizard/usb_serial_scan", data={"itemID": "distance_sen0628_device", "vid": "", "pid": ""})
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "/dev/ttyACM0" in body
+    assert "All Serial Devices" in body
+
+
+def test_usb_serial_scan_filters_by_vid_pid(monkeypatch):
+    flask_app.config.update(TESTING=True)
+    client = flask_app.test_client()
+
+    import blueprints.wizard.routes as wizard_routes
+
+    captured = {}
+
+    def _fake_discover(vid=None, pid=None):
+        captured["vid"] = vid
+        captured["pid"] = pid
+        return [
+            {
+                "device": "/dev/ttyACM0",
+                "description": "SEN0628",
+                "manufacturer": "",
+                "serial_number": "",
+                "vid": vid,
+                "pid": pid,
+            }
+        ]
+
+    monkeypatch.setattr(wizard_routes, "discover_usb_serial_devices", _fake_discover)
+
+    resp = client.post(
+        "/wizard/usb_serial_scan", data={"itemID": "distance_sen0628_device", "vid": "2E8A", "pid": "000A"}
+    )
+    assert resp.status_code == 200
+    assert captured["vid"] == 0x2E8A
+    assert captured["pid"] == 0x000A
+    assert "Matched Devices" in resp.get_data(as_text=True)
+
+
+def test_usb_serial_scan_no_devices_shows_error(monkeypatch):
+    flask_app.config.update(TESTING=True)
+    client = flask_app.test_client()
+
+    import blueprints.wizard.routes as wizard_routes
+
+    monkeypatch.setattr(wizard_routes, "discover_usb_serial_devices", lambda vid=None, pid=None: [])
+
+    resp = client.post("/wizard/usb_serial_scan", data={"itemID": "distance_sen0628_device", "vid": "", "pid": ""})
+    assert resp.status_code == 200
+    assert "No serial devices found." in resp.get_data(as_text=True)
+
+
 def test_wizard_modulecard_renders_i2c_bus_num_as_free_text():
     # device_distance_i2c_bus_num / i2c_bus_num (fan controller) live under
     # grillplatform module settings_dependencies (e.g. x86_numato), not under

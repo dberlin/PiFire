@@ -40,10 +40,12 @@ def discover_ft232h_devices():
 
 def canonical_url(selector):
     """Canonical pyftdi url for an FT232H selector. Blank/'1'/None all mean
-    'the first FT232H' -> one shared controller."""
+    'the first FT232H' -> one shared controller. Must be a real pyftdi URL
+    (scheme 'ftdi'): a bare '1' fails pyftdi's own URL parsing
+    (UsbToolsError: Invalid URL: 1), since urlsplit('1').scheme == ''."""
     sel = "" if selector in (None, "") else str(selector)
     if sel in ("", "1"):
-        return "1"
+        return "ftdi://ftdi:232h/1"
     return sel
 
 

@@ -21,6 +21,7 @@ from common.i2c_bus import (
     discover_mcp2221_devices,
     validate_bus_kinds,
 )
+from common.usb_serial import discover_usb_serial_devices
 
 from . import wizard_bp
 from .wizard import *
@@ -215,6 +216,40 @@ def wizard_page(action=None):
 
                 if not groups and error is None:
                     error = f"No {kind} I2C buses discovered."
+            except Exception as e:
+                error = f"Something bad happened: {e}"
+
+            render_string = "{% from 'probeconfig/_macro_probes_config.html' import render_i2c_scan_table %}{{ render_i2c_scan_table(itemID, groups, error) }}"
+            return render_template_string(render_string, itemID=itemID, groups=groups, error=error)
+
+        if action == "usb_serial_scan":
+            itemID = r["itemID"]
+            vid_raw = r.get("vid", "")
+            pid_raw = r.get("pid", "")
+            groups = []
+            error = None
+
+            try:
+                vid = int(vid_raw, 16) if vid_raw else None
+                pid = int(pid_raw, 16) if pid_raw else None
+                devices = discover_usb_serial_devices(vid=vid, pid=pid)
+                items = [
+                    {
+                        "value": d["device"],
+                        "label": f"{d['device']} — {d['description'] or 'Unknown device'}"
+                        + (f" (serial {d['serial_number']})" if d["serial_number"] else ""),
+                    }
+                    for d in devices
+                ]
+                if items:
+                    title = "Matched Devices" if (vid is not None or pid is not None) else "All Serial Devices"
+                    groups.append({"title": title, "items": items})
+                if not groups:
+                    error = (
+                        "No matching USB serial devices found."
+                        if (vid is not None or pid is not None)
+                        else "No serial devices found."
+                    )
             except Exception as e:
                 error = f"Something bad happened: {e}"
 

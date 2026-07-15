@@ -77,6 +77,30 @@ def test_blank_and_one_selector_share_one_controller():
     assert new_controller.call_count == 1  # one physical controller
 
 
+def test_blank_selector_produces_a_real_pyftdi_url():
+    # Regression test for a production crash: canonical_url() used to return
+    # the bare string "1" for a blank/None/"1" selector, which fails pyftdi's
+    # own URL scheme check (urlsplit("1").scheme == "") and raises
+    # UsbToolsError("Invalid URL: 1") -- see discover_ft232h_devices() in
+    # common/ft232h.py, which already builds "ftdi://ftdi:232h/1" for this
+    # exact case.
+    controller, patch = _patch_controller()
+    with patch as new_controller:
+        i2c_bus.open_i2c_bus("ft232h", "")
+    called_url = new_controller.call_args[0][0]
+    assert called_url.startswith("ftdi://"), called_url
+
+
+def test_canonical_url_blank_none_and_one_all_map_to_first_device_url():
+    assert ft232h.canonical_url("") == "ftdi://ftdi:232h/1"
+    assert ft232h.canonical_url(None) == "ftdi://ftdi:232h/1"
+    assert ft232h.canonical_url("1") == "ftdi://ftdi:232h/1"
+
+
+def test_canonical_url_passes_through_explicit_urls():
+    assert ft232h.canonical_url("ftdi://ftdi:232h:AB1234/1") == "ftdi://ftdi:232h:AB1234/1"
+
+
 def test_i2c_nack_becomes_oserror():
     from pyftdi.i2c import I2cNackError
 

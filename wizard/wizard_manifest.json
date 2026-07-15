@@ -4802,6 +4802,33 @@
         "command_list": [],
         "settings_dependencies": {}
       },
+      "sen0628": {
+        "friendly_name": "DFRobot SEN0628 8x8 Matrix ToF Distance Sensor (USB)",
+        "filename": "sen0628",
+        "description": "An 8x8-point Time-of-Flight depth sensor (20mm-3.5m range) connected via its onboard USB-C port. A good option for taller hoppers.",
+        "default": false,
+        "image": "sen0628.png",
+        "py_dependencies": [],
+        "apt_dependencies": [],
+        "command_list": [],
+        "settings_dependencies": {
+          "sen0628_device": {
+            "friendly_name": "Serial Device (USB)",
+            "description": "Path to the SEN0628's USB-C serial device (e.g. /dev/ttyACM0). Use Discover to scan for connected USB serial devices.",
+            "type": "usb_serial_device",
+            "vid": null,
+            "pid": null,
+            "default": "/dev/ttyACM0",
+            "options": {
+              "/dev/ttyACM0": "/dev/ttyACM0",
+              "/dev/ttyACM1": "/dev/ttyACM1",
+              "/dev/ttyUSB0": "/dev/ttyUSB0",
+              "/dev/ttyUSB1": "/dev/ttyUSB1"
+            },
+            "settings": ["platform", "devices", "distance", "device"]
+          }
+        }
+      },
       "prototype": {
         "friendly_name": "Prototype / Test",
         "filename": "prototype",
