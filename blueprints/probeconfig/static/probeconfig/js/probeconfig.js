@@ -5,7 +5,41 @@ var deviceNameSelected = '';
 var deviceModuleSelected = '';
 var probeNameSelected = '';
 
-// 
+// Bootstrap 4 always strips `modal-open` off <body> when ANY modal closes,
+// even one nested inside another still-open modal (e.g. the Discover/Scan
+// modals below, which live inside the Add/Edit Probe Device modal). Losing
+// that class breaks the outer modal's `overflow-y: auto` and un-hides body
+// scroll, so the page behind the modal scrolls instead of the modal itself.
+// Put `modal-open` back if another modal is still shown.
+$(document).on('hidden.bs.modal', '.modal', function () {
+	if ($('.modal.show').length) {
+		$('body').addClass('modal-open');
+	}
+});
+
+// Bootstrap 4 binds each modal's [data-dismiss="modal"] click handling on
+// that modal's OWN root element (delegated, bubble phase). Since our
+// Discover/Scan modals are literal DOM descendants of the Add/Edit Probe
+// Device modal (not siblings appended to <body>), clicking a nested modal's
+// X/Close button bubbles past its own handler and keeps going up to the
+// outer modal's identical handler, closing BOTH. Intercept in the capture
+// phase -- before either bubble handler runs -- and, for a nested modal
+// only, close just that modal ourselves and stop the event there. Modals
+// with no ancestor modal (the normal case) are untouched.
+document.addEventListener(
+	'click',
+	function (event) {
+		const dismissBtn = event.target.closest('[data-dismiss="modal"]');
+		if (!dismissBtn) return;
+		const modal = dismissBtn.closest('.modal');
+		if (!modal || !modal.parentElement || !modal.parentElement.closest('.modal')) return;
+		event.stopPropagation();
+		$(modal).modal('hide');
+	},
+	true,
+);
+
+//
 // Bluetooth Scanning Functions
 //
 function scanBluetooth(itemID) {

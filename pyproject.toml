@@ -45,4 +45,5 @@ dependencies = [
 dev = [
     "ipython>=9.14.1",
     "pytest>=8.0.0",
+    "pytest-playwright>=0.7.1",
 ]
