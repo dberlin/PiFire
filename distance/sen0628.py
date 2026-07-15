@@ -96,6 +96,9 @@ def _recv_packet(ser, cmd, timeout=2.0):
 class HopperLevel(SerialToFHopperLevel):
     _setmode_retries = 3
     _setmode_recv_timeout = 2.0
+    _read_recv_timeout = (
+        0.5  # a live sensor answers in milliseconds; this timeout only matters when the sensor is silent
+    )
 
     def _open_sensor(self, ser):
         self.ser = ser
@@ -113,7 +116,7 @@ class HopperLevel(SerialToFHopperLevel):
         self.ser.reset_input_buffer()
         self.ser.write(_SYNC_BYTE)
         self.ser.write(_build_packet(CMD_FIXED_POINT, args=[x, y]))
-        data = _recv_packet(self.ser, CMD_FIXED_POINT, timeout=self._setmode_recv_timeout)
+        data = _recv_packet(self.ser, CMD_FIXED_POINT, timeout=self._read_recv_timeout)
         if not data or len(data) < 2:
             return 0
         return (data[1] << 8) | data[0]

@@ -1,5 +1,3 @@
-from unittest import mock
-
 import pytest
 
 import distance.sen0628 as sen_mod
@@ -116,5 +114,5 @@ def test_get_fixed_point_mm_returns_zero_on_no_response():
     ser = _FakeSerial(rx_bytes=b"")
     hopper = sen_mod.HopperLevel.__new__(sen_mod.HopperLevel)
     hopper.ser = ser
-    hopper._setmode_recv_timeout = 0.02
+    hopper._read_recv_timeout = 0.02
     assert hopper._get_fixed_point_mm(3, 3) == 0

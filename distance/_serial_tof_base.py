@@ -59,7 +59,9 @@ class SerialToFHopperLevel:
         return serial.Serial(self.device, self.baudrate, timeout=0.2)
 
     def __start_sensor(self):
+        self._close_sensor()
         ser = self._open_serial_port()
+        self._serial_port = ser
         self._open_sensor(ser)
 
     def _open_sensor(self, ser):
@@ -74,8 +76,15 @@ class SerialToFHopperLevel:
         raise NotImplementedError
 
     def _close_sensor(self):
-        """Close the serial port / release the sensor. Optional; no-op by default."""
-        pass
+        """Close the serial port opened by __start_sensor, if any. Subclasses
+        that need additional teardown should call super()._close_sensor()."""
+        ser = getattr(self, "_serial_port", None)
+        if ser is not None:
+            try:
+                ser.close()
+            except Exception:
+                pass
+            self._serial_port = None
 
     def _sensing_loop(self):
         """This loop should run in a thread so that it does not stall the main control process"""
@@ -118,12 +127,17 @@ class SerialToFHopperLevel:
 
                 # If it took a long time to get sensor data, then the sensor might be having issues
                 if (time.time() - start_time) > 0.5:
-                    self.__start_sensor()  # Attempt re-init of sensor
                     event = (
                         "Warning: The serial ToF sensor took longer than normal to get a reading.  "
                         "Re-initializing the sensor."
                     )
                     self.logger.info(event)
+                    try:
+                        self.__start_sensor()  # Attempt re-init of sensor
+                    except Exception:
+                        self.logger.exception(
+                            "Serial ToF sensor re-init failed; will retry on the next slow read cycle."
+                        )
                 if self.sensor_thread_override:
                     self.event.set()
                     self.sensor_thread_override = False
