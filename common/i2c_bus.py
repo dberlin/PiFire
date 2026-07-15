@@ -11,7 +11,7 @@ Description:
 
     basic      -- Blinka's board singleton: busio.I2C(board.SCL, board.SDA)
     extended   -- a kernel i2c-dev bus (/dev/i2c-N or an adapter-name match)
-    ft232h     -- an FT232H USB adapter, via its Blinka MPSSE backend
+    ft232h     -- an FT232H USB adapter, via pyftdi (see common/ft232h.py)
     mcp2221    -- an MCP2221 USB adapter, via the EasyMCP2221 library
 
   ft232h/mcp2221 bypass the process-global `board` singleton so two USB
@@ -60,8 +60,6 @@ _FORBIDDEN_BLINKA_EXACT = frozenset(
 	}
 )
 _FORBIDDEN_BLINKA_PREFIXES = ('BLINKA_FTX232H_',)
-
-_UNSET = object()
 
 
 class I2CBusConfigError(ValueError):
@@ -181,23 +179,11 @@ def discover_mcp2221_devices(*args, **kwargs):
 	return mcp2221.discover_mcp2221_devices(*args, **kwargs)
 
 
-def discover_ft232h_devices():
-	"""Best-effort list of connected FT232H USB devices ({'url', 'serial',
-	'description'}), for the wizard's Discover button. Returns [] if pyftdi
-	isn't importable or no devices are present -- never raises."""
-	try:
-		from pyftdi.ftdi import Ftdi
-	except ImportError:
-		return []
-	try:
-		devices = []
-		for descriptor, _interface_count in Ftdi.list_devices('ftdi://ftdi:232h/'):
-			url = f'ftdi://ftdi:232h:{descriptor.sn}/1' if descriptor.sn else 'ftdi://ftdi:232h/1'
-			devices.append({'url': url, 'serial': descriptor.sn, 'description': descriptor.description})
-		return sorted(devices, key=lambda d: (d['serial'] or '').lower())
-	except Exception:
-		logger.debug('discover_ft232h_devices: Ftdi.list_devices failed', exc_info=True)
-		return []
+def discover_ft232h_devices(*args, **kwargs):
+	"""Re-export: delegates to common.ft232h.discover_ft232h_devices()."""
+	from common import ft232h
+
+	return ft232h.discover_ft232h_devices(*args, **kwargs)
 
 
 def resolve_i2c_bus(bus):
@@ -271,8 +257,8 @@ def assert_clean_blinka_env(environ=None):
 
 
 class _LockedI2C:
-	"""Wrap an I2C backend (Blinka's ft232h backend, or an EasyMCP2221
-	backend for mcp2221) so Adafruit drivers can use it.
+	"""Wrap an I2C backend (a pyftdi-based backend for ft232h, or an
+	EasyMCP2221 backend for mcp2221) so Adafruit drivers can use it.
 
 	The backend classes expose scan/writeto/readfrom_into/writeto_then_readfrom
 	but not try_lock/unlock, which adafruit_bus_device.I2CDevice requires. Add a
@@ -316,11 +302,12 @@ _cache_lock = threading.RLock()
 
 def reset_bus_state():
 	"""Clear the bus cache and opened-kind registry. Tests only."""
-	from common import mcp2221
+	from common import ft232h, mcp2221
 
 	with _cache_lock:
 		_bus_cache.clear()
 		_opened_kinds.clear()
+		ft232h.reset_state()
 		mcp2221.reset_state()
 
 
@@ -330,27 +317,6 @@ def _canonical_selector(kind, selector):
 	if kind == 'ft232h' and sel in ('', '1'):
 		sel = ''
 	return sel
-
-
-def _construct_ft232h(selector):
-	from adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c import I2C as _FT232H_I2C
-
-	# The backend reads BLINKA_FT232H only during __init__ (get_ft232h_url()).
-	# Set it transiently and restore the prior value so the factory never leaves
-	# a board-forcing var in the environment (keeps assert_clean_blinka_env true
-	# process-wide). If a caller pre-set it (ft232h_relay), restore keeps it set.
-	url = str(selector) if selector else '1'
-	logger.debug('open_i2c_bus[ft232h]: opening FT232H via BLINKA_FT232H=%r', url)
-	prev = os.environ.get('BLINKA_FT232H', _UNSET)
-	os.environ['BLINKA_FT232H'] = url
-	try:
-		backend = _FT232H_I2C()
-	finally:
-		if prev is _UNSET:
-			os.environ.pop('BLINKA_FT232H', None)
-		else:
-			os.environ['BLINKA_FT232H'] = prev
-	return _LockedI2C(backend)
 
 
 def _construct_bus(kind, selector):
@@ -367,7 +333,9 @@ def _construct_bus(kind, selector):
 		logger.debug('open_i2c_bus[extended]: opening /dev/i2c-%s (from selector=%r)', bus_num, selector)
 		return ExtendedI2C(bus_num)
 	if kind == 'ft232h':
-		return _construct_ft232h(selector)
+		from common import ft232h
+
+		return ft232h.construct_i2c_bus(selector)
 	if kind == 'mcp2221':
 		from common import mcp2221
 

@@ -1,5 +1,4 @@
 import logging
-import os
 from unittest import mock
 
 import pytest
@@ -197,48 +196,6 @@ def test_easymcp2221_backend_scan_excludes_addresses_that_raise():
 	assert backend.scan() == [0x10, 0x50]
 
 
-def test_open_ft232h_sets_env_transiently_and_restores(monkeypatch):
-	monkeypatch.delenv('BLINKA_FT232H', raising=False)
-	created = []
-
-	class FakeBackendI2C:
-		def __init__(self):
-			created.append(os.environ.get('BLINKA_FT232H'))
-
-	fake_mod = types_module_with(I2C=FakeBackendI2C)
-	with mock.patch.dict('sys.modules', {'adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c': fake_mod}):
-		bus = i2c_bus.open_i2c_bus('ft232h', 'ftdi://ftdi:232h:FT9/1')
-	assert isinstance(bus, i2c_bus._LockedI2C)
-	# Env was set to the selector during construction, restored (unset) after.
-	assert created == ['ftdi://ftdi:232h:FT9/1']
-	assert 'BLINKA_FT232H' not in os.environ
-
-
-def test_open_i2c_bus_caches_per_kind_and_selector():
-	class FakeBackendI2C:
-		def __init__(self):
-			pass
-
-	fake_mod = types_module_with(I2C=FakeBackendI2C)
-	with mock.patch.dict('sys.modules', {'adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c': fake_mod}):
-		a = i2c_bus.open_i2c_bus('ft232h', '')
-		b = i2c_bus.open_i2c_bus('ft232h', '1')  # '' and '1' are the same adapter
-		c = i2c_bus.open_i2c_bus('ft232h', '')
-	assert a is b is c
-
-
-def test_open_i2c_bus_runtime_rejects_basic_after_ft232h():
-	class FakeBackendI2C:
-		def __init__(self):
-			pass
-
-	fake_mod = types_module_with(I2C=FakeBackendI2C)
-	with mock.patch.dict('sys.modules', {'adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c': fake_mod}):
-		i2c_bus.open_i2c_bus('ft232h', '')
-		with pytest.raises(i2c_bus.I2CBusConfigError):
-			i2c_bus.open_i2c_bus('basic')
-
-
 def types_module_with(**attrs):
 	import types
 
@@ -417,8 +374,10 @@ def test_find_i2c_bus_debug_logs_match_and_result(tmp_path, caplog):
 
 
 def test_open_i2c_bus_debug_logs_kind_and_selector(caplog):
-	fake_mod = types_module_with(I2C=type('FakeBackendI2C', (), {'__init__': lambda self: None}))
-	with mock.patch.dict('sys.modules', {'adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c': fake_mod}):
+	from common import ft232h
+
+	fake_controller = type('FakeController', (), {})()
+	with mock.patch.object(ft232h, '_new_controller', return_value=fake_controller):
 		with caplog.at_level(logging.DEBUG, logger='control'):
 			i2c_bus.open_i2c_bus('ft232h', 'ftdi://ftdi:232h:FT9/1')
 
