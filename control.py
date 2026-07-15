@@ -49,73 +49,73 @@ controlLogger = None
 # program. Guarding this lets the module be imported (e.g. by tests, and by the
 # per-mode handlers that reference control.eventLogger) without initializing
 # hardware, flushing the datastore, or entering the control loop.
-if __name__ == '__main__':
-	# When launched as `python control.py`, this module is named `__main__`. The
-	# per-mode handlers do `import control as _control` to reach the loggers
-	# bound below; without this alias that import would load a SECOND, separate
-	# `control` module whose `__main__` block never ran (loggers unbound ->
-	# AttributeError on the first mode log). Alias `control` to this running
-	# module so those imports see the bound loggers.
-	import sys
+if __name__ == "__main__":
+    # When launched as `python control.py`, this module is named `__main__`. The
+    # per-mode handlers do `import control as _control` to reach the loggers
+    # bound below; without this alias that import would load a SECOND, separate
+    # `control` module whose `__main__` block never ran (loggers unbound ->
+    # AttributeError on the first mode log). Alias `control` to this running
+    # module so those imports see the bound loggers.
+    import sys
 
-	sys.modules['control'] = sys.modules['__main__']
+    sys.modules["control"] = sys.modules["__main__"]
 
-	# First-boot migration: import existing settings.json / pelletdb.json into
-	# SQLite if it hasn't happened yet. Must run before the first
-	# read_settings()/read_control() call below -- this is the ONLY trigger of
-	# that import in production (both control.py and app.py call it; it is
-	# idempotent, so running it from both independently-supervised processes,
-	# in either order, is safe).
-	datastore.init()
+    # First-boot migration: import existing settings.json / pelletdb.json into
+    # SQLite if it hasn't happened yet. Must run before the first
+    # read_settings()/read_control() call below -- this is the ONLY trigger of
+    # that import in production (both control.py and app.py call it; it is
+    # idempotent, so running it from both independently-supervised processes,
+    # in either order, is safe).
+    datastore.init()
 
-	settings = read_settings(init=True)
+    settings = read_settings(init=True)
 
-	# Setup logging
-	log_level = logging.DEBUG if settings['globals']['debug_mode'] else logging.ERROR
-	controlLogger = create_logger(
-		'control',
-		filename='./logs/control.log',
-		messageformat='%(asctime)s [%(levelname)s] %(message)s',
-		level=log_level,
-	)
+    # Setup logging
+    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.ERROR
+    controlLogger = create_logger(
+        "control",
+        filename="./logs/control.log",
+        messageformat="%(asctime)s [%(levelname)s] %(message)s",
+        level=log_level,
+    )
 
-	log_level = logging.DEBUG if settings['globals']['debug_mode'] else logging.INFO
-	eventLogger = create_logger(
-		'events', filename='./logs/events.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level
-	)
+    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
+    eventLogger = create_logger(
+        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
+    )
 
-	event_message = f'PiFire Control Process started. PiFire Version: {settings["versions"]["server"]} Build: {settings["versions"]["build"]}, Debug Mode: {settings["globals"]["debug_mode"]}'
+    event_message = f"PiFire Control Process started. PiFire Version: {settings['versions']['server']} Build: {settings['versions']['build']}, Debug Mode: {settings['globals']['debug_mode']}"
 
-	eventLogger.info(event_message)
-	controlLogger.info(event_message)
+    eventLogger.info(event_message)
+    controlLogger.info(event_message)
 
-	# Flush datastore and create JSON structure
-	control = read_control(flush=True)
-	# Delete datastore entries for history / current
-	read_history(0, flushhistory=True)
-	# Flush metrics DB for tracking certain metrics
-	write_metrics(flush=True)
-	# Create/Flush errors list
-	errors = read_errors(flush=True)
+    # Flush datastore and create JSON structure
+    control = read_control(flush=True)
+    # Delete datastore entries for history / current
+    read_history(0, flushhistory=True)
+    # Flush metrics DB for tracking certain metrics
+    write_metrics(flush=True)
+    # Create/Flush errors list
+    errors = read_errors(flush=True)
 
-	eventLogger.info('Flushing datastore and creating new control structure')
+    eventLogger.info("Flushing datastore and creating new control structure")
 
-	devices, errors = build_devices(settings, errors=errors, event_log=eventLogger, control_log=controlLogger)
+    devices, errors = build_devices(settings, errors=errors, event_log=eventLogger, control_log=controlLogger)
 
-	# Build the injected context used by the controller / mode functions instead of bare globals
-	ctx = ControllerContext(
-		devices=devices,
-		store=SqliteStore(),
-		notifications=LiveNotifier(),
-		clock=RealClock(),
-		event_log=eventLogger,
-		control_log=controlLogger,
-	)
+    # Build the injected context used by the controller / mode functions instead of bare globals
+    ctx = ControllerContext(
+        devices=devices,
+        store=SqliteStore(),
+        notifications=LiveNotifier(),
+        clock=RealClock(),
+        event_log=eventLogger,
+        control_log=controlLogger,
+    )
 
-	# Hand off to the orchestrator: setup() + the control loop.
-	controller = Controller(ctx)
+    # Hand off to the orchestrator: setup() + the control loop.
+    controller = Controller(ctx)
 
-	# Register the exit handler (logs + grill_platform.cleanup())
-	atexit.register(controller.cleanup)
+    # Register the exit handler (logs + grill_platform.cleanup())
+    atexit.register(controller.cleanup)
 
-	controller.run()
+    controller.run()

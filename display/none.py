@@ -15,20 +15,20 @@
 
 
 class Display:
-	def __init__(self, dev_pins, buttonslevel='HIGH', rotation=0, units='F', config={}):
-		self.display_splash()
+    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+        self.display_splash()
 
-	def display_status(self, in_data, status_data):
-		pass
+    def display_status(self, in_data, status_data):
+        pass
 
-	def display_splash(self):
-		pass
+    def display_splash(self):
+        pass
 
-	def clear_display(self):
-		pass
+    def clear_display(self):
+        pass
 
-	def display_text(self, text):
-		pass
+    def display_text(self, text):
+        pass
 
-	def display_network(self):
-		pass
+    def display_network(self):
+        pass

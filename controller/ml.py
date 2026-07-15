@@ -32,39 +32,39 @@ Class Definition
 
 
 class Controller(ControllerBase):
-	def __init__(self, config, units, cycle_data):
-		super().__init__(config, units, cycle_data)
-		try:
-			self.model = load('./controller/ml_model.joblib')
-		except:
-			""" Error loading model """
-			raise
-		self.set_target(0.0)
-		self.last_temp = -99
-		self.last_time = time.time()
-		self.cycle_time = cycle_data['HoldCycleTime']
+    def __init__(self, config, units, cycle_data):
+        super().__init__(config, units, cycle_data)
+        try:
+            self.model = load("./controller/ml_model.joblib")
+        except:
+            """ Error loading model """
+            raise
+        self.set_target(0.0)
+        self.last_temp = -99
+        self.last_time = time.time()
+        self.cycle_time = cycle_data["HoldCycleTime"]
 
-	def update(self, current):
-		if self.units == 'C':
-			current = int(current * (9 / 5) + 32)  # Celsius to Fahrenheit
+    def update(self, current):
+        if self.units == "C":
+            current = int(current * (9 / 5) + 32)  # Celsius to Fahrenheit
 
-		now = time.time()
+        now = time.time()
 
-		cycle_time = now - self.last_time
+        cycle_time = now - self.last_time
 
-		self.last_time = now
+        self.last_time = now
 
-		if self.last_temp == -99:
-			self.last_temp == current
-			cycle_time = self.cycle_time
+        if self.last_temp == -99:
+            self.last_temp == current
+            cycle_time = self.cycle_time
 
-		rate_of_change = (current - self.last_temp) / cycle_time  # Rate of Change
+        rate_of_change = (current - self.last_temp) / cycle_time  # Rate of Change
 
-		cycle_ratio = self.model.predict([[current, self.set_point, rate_of_change]])
+        cycle_ratio = self.model.predict([[current, self.set_point, rate_of_change]])
 
-		return cycle_ratio[0]
+        return cycle_ratio[0]
 
-	def set_target(self, set_point):
-		self.set_point = set_point
-		if self.units == 'C':
-			self.set_point = int(set_point * (9 / 5) + 32)  # Convert to Fahrenheit
+    def set_target(self, set_point):
+        self.set_point = set_point
+        if self.units == "C":
+            self.set_point = int(set_point * (9 / 5) + 32)  # Convert to Fahrenheit

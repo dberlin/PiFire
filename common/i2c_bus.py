@@ -36,263 +36,263 @@ import threading
 # Bus opens are logged here at DEBUG so it is obvious which physical bus/adapter
 # is being resolved and opened when the control process runs in debug mode. The
 # 'control' logger is the one control.py raises to DEBUG when debug_mode is set.
-logger = logging.getLogger('control')
+logger = logging.getLogger("control")
 
 # USB-HID bus kinds that bypass Blinka's `board` singleton.
-USB_HID_KINDS = frozenset({'ft232h', 'mcp2221'})
+USB_HID_KINDS = frozenset({"ft232h", "mcp2221"})
 
 # Board/chip-forcing Blinka env vars. If any is set, `import board` is pinned to
 # that backend process-wide, which silently breaks `basic` and any later
 # `import board`. The MCP2221 entry is EXACT so the _HID_DELAY/_RESET_DELAY
 # tuning vars stay allowed.
 _FORBIDDEN_BLINKA_EXACT = frozenset(
-	{
-		'BLINKA_FT232H',
-		'BLINKA_FT2232H',
-		'BLINKA_FT4232H',
-		'BLINKA_MCP2221',
-		'BLINKA_U2IF',
-		'BLINKA_GREATFET',
-		'BLINKA_NOVA',
-		'BLINKA_SPIDRIVER',
-		'BLINKA_FORCECHIP',
-		'BLINKA_FORCEBOARD',
-	}
+    {
+        "BLINKA_FT232H",
+        "BLINKA_FT2232H",
+        "BLINKA_FT4232H",
+        "BLINKA_MCP2221",
+        "BLINKA_U2IF",
+        "BLINKA_GREATFET",
+        "BLINKA_NOVA",
+        "BLINKA_SPIDRIVER",
+        "BLINKA_FORCECHIP",
+        "BLINKA_FORCEBOARD",
+    }
 )
-_FORBIDDEN_BLINKA_PREFIXES = ('BLINKA_FTX232H_',)
+_FORBIDDEN_BLINKA_PREFIXES = ("BLINKA_FTX232H_",)
 
 
 class I2CBusConfigError(ValueError):
-	"""Raised for an I2C bus configuration that cannot work on this host."""
+    """Raised for an I2C bus configuration that cannot work on this host."""
 
 
 def _read_usb_serial(bus_dir, max_hops=15):
-	"""Return the USB iSerial of `bus_dir`'s (an i2c-N sysfs directory) USB
-	ancestor, or None if it has none within `max_hops` parent directories (a
-	non-USB adapter, e.g. a Pi's onboard I2C). Requires the ancestor to have
-	both a 'serial' and an 'idVendor' file -- the USB *device* level in sysfs,
-	as opposed to an interface level or an unrelated subsystem node that might
-	also expose a 'serial' file (e.g. power_supply)."""
-	current = os.path.realpath(bus_dir)
-	for _ in range(max_hops):
-		parent = os.path.dirname(current)
-		if parent == current:
-			return None
-		current = parent
-		serial_path = os.path.join(current, 'serial')
-		vendor_path = os.path.join(current, 'idVendor')
-		if os.path.isfile(serial_path) and os.path.isfile(vendor_path):
-			try:
-				with open(serial_path) as handle:
-					return handle.read().strip()
-			except OSError:
-				return None
-	return None
+    """Return the USB iSerial of `bus_dir`'s (an i2c-N sysfs directory) USB
+    ancestor, or None if it has none within `max_hops` parent directories (a
+    non-USB adapter, e.g. a Pi's onboard I2C). Requires the ancestor to have
+    both a 'serial' and an 'idVendor' file -- the USB *device* level in sysfs,
+    as opposed to an interface level or an unrelated subsystem node that might
+    also expose a 'serial' file (e.g. power_supply)."""
+    current = os.path.realpath(bus_dir)
+    for _ in range(max_hops):
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+        serial_path = os.path.join(current, "serial")
+        vendor_path = os.path.join(current, "idVendor")
+        if os.path.isfile(serial_path) and os.path.isfile(vendor_path):
+            try:
+                with open(serial_path) as handle:
+                    return handle.read().strip()
+            except OSError:
+                return None
+    return None
 
 
-def _enumerate_i2c_adapters(devices_path='/sys/bus/i2c/devices'):
-	"""Return [{'bus_num': int, 'name': str, 'serial': str | None}, ...] for
-	every i2c-dev adapter under devices_path. 'serial' is the USB iSerial of
-	the adapter's USB ancestor (via _read_usb_serial), or None if it has none
-	(e.g. an onboard/non-USB adapter)."""
-	adapters = []
-	for bus_dir in glob.glob(os.path.join(devices_path, 'i2c-*')):
-		try:
-			with open(os.path.join(bus_dir, 'name')) as handle:
-				name = handle.read().strip()
-		except OSError:
-			continue
-		try:
-			bus_num = int(os.path.basename(bus_dir).split('-')[-1])
-		except ValueError:
-			continue
-		adapters.append({'bus_num': bus_num, 'name': name, 'serial': _read_usb_serial(bus_dir)})
-	return sorted(adapters, key=lambda a: a['bus_num'])
+def _enumerate_i2c_adapters(devices_path="/sys/bus/i2c/devices"):
+    """Return [{'bus_num': int, 'name': str, 'serial': str | None}, ...] for
+    every i2c-dev adapter under devices_path. 'serial' is the USB iSerial of
+    the adapter's USB ancestor (via _read_usb_serial), or None if it has none
+    (e.g. an onboard/non-USB adapter)."""
+    adapters = []
+    for bus_dir in glob.glob(os.path.join(devices_path, "i2c-*")):
+        try:
+            with open(os.path.join(bus_dir, "name")) as handle:
+                name = handle.read().strip()
+        except OSError:
+            continue
+        try:
+            bus_num = int(os.path.basename(bus_dir).split("-")[-1])
+        except ValueError:
+            continue
+        adapters.append({"bus_num": bus_num, "name": name, "serial": _read_usb_serial(bus_dir)})
+    return sorted(adapters, key=lambda a: a["bus_num"])
 
 
-def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
-	"""
-	Return the integer i2c bus number whose adapter name contains `match`
-	(case-insensitive), e.g. 'CP2112' for a USB-to-I2C bridge. Scans
-	`<devices_path>/i2c-*/name`. Raises RuntimeError if zero or more than one
-	adapter matches, so the caller fails clearly rather than guessing.
-	"""
-	match_lower = str(match).lower()
-	adapters = _enumerate_i2c_adapters(devices_path)
+def find_i2c_bus(match, devices_path="/sys/bus/i2c/devices"):
+    """
+    Return the integer i2c bus number whose adapter name contains `match`
+    (case-insensitive), e.g. 'CP2112' for a USB-to-I2C bridge. Scans
+    `<devices_path>/i2c-*/name`. Raises RuntimeError if zero or more than one
+    adapter matches, so the caller fails clearly rather than guessing.
+    """
+    match_lower = str(match).lower()
+    adapters = _enumerate_i2c_adapters(devices_path)
 
-	found = [a['bus_num'] for a in adapters if match_lower in a['name'].lower()]
-	available = (
-		', '.join(f'i2c-{a["bus_num"]} ({a["name"]!r})' for a in sorted(adapters, key=lambda a: a['bus_num']))
-		or '(none)'
-	)
-	logger.debug('find_i2c_bus: matching %r among adapters: %s', match, available)
-	if len(found) == 1:
-		logger.debug('find_i2c_bus: %r matched i2c-%d', match, found[0])
-		return found[0]
-	if not found:
-		raise RuntimeError(
-			f'No i2c adapter found matching {match!r} under {devices_path}. Available adapters: {available}'
-		)
-	raise RuntimeError(f'Multiple i2c adapters match {match!r}: {sorted(found)}. Available adapters: {available}')
-
-
-def find_i2c_bus_by_serial(serial, devices_path='/sys/bus/i2c/devices'):
-	"""
-	Return the integer i2c bus number whose adapter's USB iSerial exactly
-	equals `serial` (case-sensitive, no substring matching -- a serial is
-	meant to be unambiguous). Raises RuntimeError if zero or more than one
-	adapter matches, listing every available adapter (with its serial, if
-	any) so the error is actionable without a second lookup.
-	"""
-	target = str(serial)
-	adapters = _enumerate_i2c_adapters(devices_path)
-
-	found = [a['bus_num'] for a in adapters if a['serial'] == target]
-	available = (
-		', '.join(f'i2c-{a["bus_num"]} (serial={a["serial"]!r})' for a in sorted(adapters, key=lambda a: a['bus_num']))
-		or '(none)'
-	)
-	logger.debug('find_i2c_bus_by_serial: matching %r among adapters: %s', serial, available)
-	if len(found) == 1:
-		logger.debug('find_i2c_bus_by_serial: %r matched i2c-%d', serial, found[0])
-		return found[0]
-	if not found:
-		raise RuntimeError(
-			f'No i2c adapter found with serial {serial!r} under {devices_path}. Available adapters: {available}'
-		)
-	raise RuntimeError(
-		f'Multiple i2c adapters have serial {serial!r}: {sorted(found)}. Available adapters: {available}'
-	)
+    found = [a["bus_num"] for a in adapters if match_lower in a["name"].lower()]
+    available = (
+        ", ".join(f"i2c-{a['bus_num']} ({a['name']!r})" for a in sorted(adapters, key=lambda a: a["bus_num"]))
+        or "(none)"
+    )
+    logger.debug("find_i2c_bus: matching %r among adapters: %s", match, available)
+    if len(found) == 1:
+        logger.debug("find_i2c_bus: %r matched i2c-%d", match, found[0])
+        return found[0]
+    if not found:
+        raise RuntimeError(
+            f"No i2c adapter found matching {match!r} under {devices_path}. Available adapters: {available}"
+        )
+    raise RuntimeError(f"Multiple i2c adapters match {match!r}: {sorted(found)}. Available adapters: {available}")
 
 
-def discover_extended_i2c_buses(devices_path='/sys/bus/i2c/devices'):
-	"""Best-effort list of every extended-kind (kernel i2c-dev) adapter
-	present, for the wizard's Discover button. Returns [] if devices_path
-	doesn't exist or has no adapters; never raises."""
-	return _enumerate_i2c_adapters(devices_path)
+def find_i2c_bus_by_serial(serial, devices_path="/sys/bus/i2c/devices"):
+    """
+    Return the integer i2c bus number whose adapter's USB iSerial exactly
+    equals `serial` (case-sensitive, no substring matching -- a serial is
+    meant to be unambiguous). Raises RuntimeError if zero or more than one
+    adapter matches, listing every available adapter (with its serial, if
+    any) so the error is actionable without a second lookup.
+    """
+    target = str(serial)
+    adapters = _enumerate_i2c_adapters(devices_path)
+
+    found = [a["bus_num"] for a in adapters if a["serial"] == target]
+    available = (
+        ", ".join(f"i2c-{a['bus_num']} (serial={a['serial']!r})" for a in sorted(adapters, key=lambda a: a["bus_num"]))
+        or "(none)"
+    )
+    logger.debug("find_i2c_bus_by_serial: matching %r among adapters: %s", serial, available)
+    if len(found) == 1:
+        logger.debug("find_i2c_bus_by_serial: %r matched i2c-%d", serial, found[0])
+        return found[0]
+    if not found:
+        raise RuntimeError(
+            f"No i2c adapter found with serial {serial!r} under {devices_path}. Available adapters: {available}"
+        )
+    raise RuntimeError(
+        f"Multiple i2c adapters have serial {serial!r}: {sorted(found)}. Available adapters: {available}"
+    )
+
+
+def discover_extended_i2c_buses(devices_path="/sys/bus/i2c/devices"):
+    """Best-effort list of every extended-kind (kernel i2c-dev) adapter
+    present, for the wizard's Discover button. Returns [] if devices_path
+    doesn't exist or has no adapters; never raises."""
+    return _enumerate_i2c_adapters(devices_path)
 
 
 def discover_mcp2221_devices(*args, **kwargs):
-	"""Re-export: delegates to common.mcp2221.discover_mcp2221_devices()."""
-	from common import mcp2221
+    """Re-export: delegates to common.mcp2221.discover_mcp2221_devices()."""
+    from common import mcp2221
 
-	return mcp2221.discover_mcp2221_devices(*args, **kwargs)
+    return mcp2221.discover_mcp2221_devices(*args, **kwargs)
 
 
 def discover_ft232h_devices(*args, **kwargs):
-	"""Re-export: delegates to common.ft232h.discover_ft232h_devices()."""
-	from common import ft232h
+    """Re-export: delegates to common.ft232h.discover_ft232h_devices()."""
+    from common import ft232h
 
-	return ft232h.discover_ft232h_devices(*args, **kwargs)
+    return ft232h.discover_ft232h_devices(*args, **kwargs)
 
 
 def resolve_i2c_bus(bus):
-	"""
-	Resolve an extended-i2c-bus spec to a bus number. Accepts an int or numeric
-	string (e.g. 3 / '3' -> /dev/i2c-3, used directly), a 'serial:<ISERIAL>'
-	USB-serial match (e.g. 'serial:0012AB34' -> discovered via
-	find_i2c_bus_by_serial, the only way to distinguish two identical USB-to-I2C
-	bridges), or an adapter-name match string (e.g. 'CP2112' -> discovered via
-	find_i2c_bus, robust against the dynamic bus numbers USB-to-I2C bridges get).
-	"""
-	spec = str(bus).strip()
-	if spec.lower().startswith('serial:'):
-		serial = spec.split(':', 1)[1].strip()
-		logger.debug('resolve_i2c_bus: %r is a USB-serial match, discovering the bus number', bus)
-		return find_i2c_bus_by_serial(serial)
-	if spec.isdigit():
-		logger.debug('resolve_i2c_bus: %r is a numeric bus -> /dev/i2c-%s', bus, spec)
-		return int(spec)
-	logger.debug('resolve_i2c_bus: %r is an adapter-name match, discovering the bus number', bus)
-	return find_i2c_bus(spec)
+    """
+    Resolve an extended-i2c-bus spec to a bus number. Accepts an int or numeric
+    string (e.g. 3 / '3' -> /dev/i2c-3, used directly), a 'serial:<ISERIAL>'
+    USB-serial match (e.g. 'serial:0012AB34' -> discovered via
+    find_i2c_bus_by_serial, the only way to distinguish two identical USB-to-I2C
+    bridges), or an adapter-name match string (e.g. 'CP2112' -> discovered via
+    find_i2c_bus, robust against the dynamic bus numbers USB-to-I2C bridges get).
+    """
+    spec = str(bus).strip()
+    if spec.lower().startswith("serial:"):
+        serial = spec.split(":", 1)[1].strip()
+        logger.debug("resolve_i2c_bus: %r is a USB-serial match, discovering the bus number", bus)
+        return find_i2c_bus_by_serial(serial)
+    if spec.isdigit():
+        logger.debug("resolve_i2c_bus: %r is a numeric bus -> /dev/i2c-%s", bus, spec)
+        return int(spec)
+    logger.debug("resolve_i2c_bus: %r is an adapter-name match, discovering the bus number", bus)
+    return find_i2c_bus(spec)
 
 
 def validate_bus_kinds(kinds):
-	"""Raise I2CBusConfigError if the set of bus kinds cannot coexist in one
-	process. The only unworkable case is `basic` alongside a USB-HID kind:
-	Blinka's board backend is process-global."""
-	kinds = {str(k).lower() for k in kinds if k}
-	if 'basic' in kinds and (kinds & USB_HID_KINDS):
-		raise I2CBusConfigError(
-			"'basic' I2C can't share a process with a USB-HID bus (ft232h/mcp2221): "
-			"Blinka's board backend is process-global. Use 'extended' for the onboard "
-			'bus (a Pi onboard I2C is reachable as extended bus 1).'
-		)
+    """Raise I2CBusConfigError if the set of bus kinds cannot coexist in one
+    process. The only unworkable case is `basic` alongside a USB-HID kind:
+    Blinka's board backend is process-global."""
+    kinds = {str(k).lower() for k in kinds if k}
+    if "basic" in kinds and (kinds & USB_HID_KINDS):
+        raise I2CBusConfigError(
+            "'basic' I2C can't share a process with a USB-HID bus (ft232h/mcp2221): "
+            "Blinka's board backend is process-global. Use 'extended' for the onboard "
+            "bus (a Pi onboard I2C is reachable as extended bus 1)."
+        )
 
 
 def configured_bus_kinds(settings, probe_map):
-	"""Collect every I2C bus kind across probe devices, the distance sensor, and
-	the platform fan controller. Used to validate a whole wizard config."""
-	kinds = set()
-	for device in (probe_map or {}).get('probe_devices', []):
-		kind = (device.get('config') or {}).get('i2c_bus_kind')
-		if kind:
-			kinds.add(kind)
-	platform = (settings or {}).get('platform', {})
-	distance = (platform.get('devices', {}) or {}).get('distance', {}) or {}
-	if distance.get('i2c_bus_kind'):
-		kinds.add(distance['i2c_bus_kind'])
-	fan = platform.get('fan_controller', {}) or {}
-	if fan.get('i2c_bus_kind'):
-		kinds.add(fan['i2c_bus_kind'])
-	return kinds
+    """Collect every I2C bus kind across probe devices, the distance sensor, and
+    the platform fan controller. Used to validate a whole wizard config."""
+    kinds = set()
+    for device in (probe_map or {}).get("probe_devices", []):
+        kind = (device.get("config") or {}).get("i2c_bus_kind")
+        if kind:
+            kinds.add(kind)
+    platform = (settings or {}).get("platform", {})
+    distance = (platform.get("devices", {}) or {}).get("distance", {}) or {}
+    if distance.get("i2c_bus_kind"):
+        kinds.add(distance["i2c_bus_kind"])
+    fan = platform.get("fan_controller", {}) or {}
+    if fan.get("i2c_bus_kind"):
+        kinds.add(fan["i2c_bus_kind"])
+    return kinds
 
 
 def assert_clean_blinka_env(environ=None):
-	"""Raise I2CBusConfigError if any board/chip-forcing BLINKA_* var is set.
-	Called once at control-process startup so nobody can force `basic`/`import
-	board` onto a USB adapter via the environment."""
-	environ = os.environ if environ is None else environ
-	offenders = sorted(
-		key
-		for key in environ
-		if key in _FORBIDDEN_BLINKA_EXACT or any(key.startswith(p) for p in _FORBIDDEN_BLINKA_PREFIXES)
-	)
-	if offenders:
-		raise I2CBusConfigError(
-			f'Board-forcing Blinka environment variable(s) set: {", ".join(offenders)}. '
-			'Remove them and select the ft232h/mcp2221 bus kinds in the wizard instead; '
-			'forcing the Blinka board via the environment breaks `basic` and any import board.'
-		)
+    """Raise I2CBusConfigError if any board/chip-forcing BLINKA_* var is set.
+    Called once at control-process startup so nobody can force `basic`/`import
+    board` onto a USB adapter via the environment."""
+    environ = os.environ if environ is None else environ
+    offenders = sorted(
+        key
+        for key in environ
+        if key in _FORBIDDEN_BLINKA_EXACT or any(key.startswith(p) for p in _FORBIDDEN_BLINKA_PREFIXES)
+    )
+    if offenders:
+        raise I2CBusConfigError(
+            f"Board-forcing Blinka environment variable(s) set: {', '.join(offenders)}. "
+            "Remove them and select the ft232h/mcp2221 bus kinds in the wizard instead; "
+            "forcing the Blinka board via the environment breaks `basic` and any import board."
+        )
 
 
 class _LockedI2C:
-	"""Wrap an I2C backend (a pyftdi-based backend for ft232h, or an
-	EasyMCP2221 backend for mcp2221) so Adafruit drivers can use it.
+    """Wrap an I2C backend (a pyftdi-based backend for ft232h, or an
+    EasyMCP2221 backend for mcp2221) so Adafruit drivers can use it.
 
-	The backend classes expose scan/writeto/readfrom_into/writeto_then_readfrom
-	but not try_lock/unlock, which adafruit_bus_device.I2CDevice requires. Add a
-	reentrant lock and delegate I/O to the backend."""
+    The backend classes expose scan/writeto/readfrom_into/writeto_then_readfrom
+    but not try_lock/unlock, which adafruit_bus_device.I2CDevice requires. Add a
+    reentrant lock and delegate I/O to the backend."""
 
-	def __init__(self, backend):
-		self._backend = backend
-		self._lock = threading.RLock()
+    def __init__(self, backend):
+        self._backend = backend
+        self._lock = threading.RLock()
 
-	def try_lock(self):
-		return self._lock.acquire(blocking=False)
+    def try_lock(self):
+        return self._lock.acquire(blocking=False)
 
-	def unlock(self):
-		try:
-			self._lock.release()
-		except RuntimeError:
-			pass
+    def unlock(self):
+        try:
+            self._lock.release()
+        except RuntimeError:
+            pass
 
-	def scan(self):
-		return self._backend.scan()
+    def scan(self):
+        return self._backend.scan()
 
-	def writeto(self, address, buffer, **kwargs):
-		return self._backend.writeto(address, buffer, **kwargs)
+    def writeto(self, address, buffer, **kwargs):
+        return self._backend.writeto(address, buffer, **kwargs)
 
-	def readfrom_into(self, address, buffer, **kwargs):
-		return self._backend.readfrom_into(address, buffer, **kwargs)
+    def readfrom_into(self, address, buffer, **kwargs):
+        return self._backend.readfrom_into(address, buffer, **kwargs)
 
-	def writeto_then_readfrom(self, address, out_buffer, in_buffer, **kwargs):
-		return self._backend.writeto_then_readfrom(address, out_buffer, in_buffer, **kwargs)
+    def writeto_then_readfrom(self, address, out_buffer, in_buffer, **kwargs):
+        return self._backend.writeto_then_readfrom(address, out_buffer, in_buffer, **kwargs)
 
-	def deinit(self):
-		deinit = getattr(self._backend, 'deinit', None)
-		if deinit is not None:
-			deinit()
+    def deinit(self):
+        deinit = getattr(self._backend, "deinit", None)
+        if deinit is not None:
+            deinit()
 
 
 _bus_cache = {}  # (kind, selector) -> bus object
@@ -301,67 +301,67 @@ _cache_lock = threading.RLock()
 
 
 def reset_bus_state():
-	"""Clear the bus cache and opened-kind registry. Tests only."""
-	from common import ft232h, mcp2221
+    """Clear the bus cache and opened-kind registry. Tests only."""
+    from common import ft232h, mcp2221
 
-	with _cache_lock:
-		_bus_cache.clear()
-		_opened_kinds.clear()
-		ft232h.reset_state()
-		mcp2221.reset_state()
+    with _cache_lock:
+        _bus_cache.clear()
+        _opened_kinds.clear()
+        ft232h.reset_state()
+        mcp2221.reset_state()
 
 
 def _canonical_selector(kind, selector):
-	sel = '' if selector in (None, '') else str(selector)
-	# For ft232h, blank and '1' both mean "first FT232H" -> one cache entry.
-	if kind == 'ft232h' and sel in ('', '1'):
-		sel = ''
-	return sel
+    sel = "" if selector in (None, "") else str(selector)
+    # For ft232h, blank and '1' both mean "first FT232H" -> one cache entry.
+    if kind == "ft232h" and sel in ("", "1"):
+        sel = ""
+    return sel
 
 
 def _construct_bus(kind, selector):
-	if kind == 'basic':
-		import board
-		import busio
+    if kind == "basic":
+        import board
+        import busio
 
-		logger.debug('open_i2c_bus[basic]: opening Blinka board.SCL/SDA')
-		return busio.I2C(board.SCL, board.SDA)
-	if kind == 'extended':
-		from adafruit_extended_bus import ExtendedI2C
+        logger.debug("open_i2c_bus[basic]: opening Blinka board.SCL/SDA")
+        return busio.I2C(board.SCL, board.SDA)
+    if kind == "extended":
+        from adafruit_extended_bus import ExtendedI2C
 
-		bus_num = resolve_i2c_bus(selector)
-		logger.debug('open_i2c_bus[extended]: opening /dev/i2c-%s (from selector=%r)', bus_num, selector)
-		return ExtendedI2C(bus_num)
-	if kind == 'ft232h':
-		from common import ft232h
+        bus_num = resolve_i2c_bus(selector)
+        logger.debug("open_i2c_bus[extended]: opening /dev/i2c-%s (from selector=%r)", bus_num, selector)
+        return ExtendedI2C(bus_num)
+    if kind == "ft232h":
+        from common import ft232h
 
-		return ft232h.construct_i2c_bus(selector)
-	if kind == 'mcp2221':
-		from common import mcp2221
+        return ft232h.construct_i2c_bus(selector)
+    if kind == "mcp2221":
+        from common import mcp2221
 
-		return mcp2221.construct_i2c_bus(selector)
-	raise I2CBusConfigError(f'Unknown i2c bus kind {kind!r}.')
+        return mcp2221.construct_i2c_bus(selector)
+    raise I2CBusConfigError(f"Unknown i2c bus kind {kind!r}.")
 
 
-def open_i2c_bus(bus_kind='basic', bus_selector=None):
-	"""Return a busio.I2C-compatible bus for `bus_kind`, opening it if needed.
+def open_i2c_bus(bus_kind="basic", bus_selector=None):
+    """Return a busio.I2C-compatible bus for `bus_kind`, opening it if needed.
 
-	bus_selector is the stored i2c_bus_num value: a /dev/i2c-N number or adapter
-	match for `extended`, a pyftdi URL for `ft232h`, an MCP2221 serial for
-	`mcp2221`; ignored for `basic`. Buses are cached per (kind, selector) for
-	the process lifetime so every device on one physical bus shares one handle
-	and lock. Raises I2CBusConfigError for an unworkable combination."""
-	kind = (bus_kind or 'basic').strip().lower()
-	selector = _canonical_selector(kind, bus_selector)
-	with _cache_lock:
-		validate_bus_kinds(_opened_kinds | {kind})
-		key = (kind, selector)
-		bus = _bus_cache.get(key)
-		if bus is None:
-			logger.debug('open_i2c_bus: opening new bus kind=%r selector=%r', kind, selector)
-			bus = _construct_bus(kind, selector)
-			_bus_cache[key] = bus
-		else:
-			logger.debug('open_i2c_bus: reusing cached bus kind=%r selector=%r', kind, selector)
-		_opened_kinds.add(kind)
-		return bus
+    bus_selector is the stored i2c_bus_num value: a /dev/i2c-N number or adapter
+    match for `extended`, a pyftdi URL for `ft232h`, an MCP2221 serial for
+    `mcp2221`; ignored for `basic`. Buses are cached per (kind, selector) for
+    the process lifetime so every device on one physical bus shares one handle
+    and lock. Raises I2CBusConfigError for an unworkable combination."""
+    kind = (bus_kind or "basic").strip().lower()
+    selector = _canonical_selector(kind, bus_selector)
+    with _cache_lock:
+        validate_bus_kinds(_opened_kinds | {kind})
+        key = (kind, selector)
+        bus = _bus_cache.get(key)
+        if bus is None:
+            logger.debug("open_i2c_bus: opening new bus kind=%r selector=%r", kind, selector)
+            bus = _construct_bus(kind, selector)
+            _bus_cache[key] = bus
+        else:
+            logger.debug("open_i2c_bus: reusing cached bus kind=%r selector=%r", kind, selector)
+        _opened_kinds.add(kind)
+        return bus

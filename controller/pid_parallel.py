@@ -45,7 +45,7 @@ from controller.base import ControllerBase
 
 log_level = logging.DEBUG
 eventLogger = create_logger(
-	'events', filename='./logs/events.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level
+    "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
 )
 
 """
@@ -54,102 +54,102 @@ Class Definition
 
 
 class Controller(ControllerBase):
-	def __init__(self, config, units, cycle_data):
-		super().__init__(config, units, cycle_data)
-		self.function_list.append('set_gains')
-		self.function_list.append('get_k')
+    def __init__(self, config, units, cycle_data):
+        super().__init__(config, units, cycle_data)
+        self.function_list.append("set_gains")
+        self.function_list.append("get_k")
 
-		self.clamping = config.get('Clamping', True)
+        self.clamping = config.get("Clamping", True)
 
-		self.p = 0.0
-		self.i = 0.0
-		self.d = 0.0
-		self.u = 0
+        self.p = 0.0
+        self.i = 0.0
+        self.d = 0.0
+        self.u = 0
 
-		self.last_update = time.time()
-		self.error = 0.0
-		self.error_last = 0.0
-		self.set_point = 0
+        self.last_update = time.time()
+        self.error = 0.0
+        self.error_last = 0.0
+        self.set_point = 0
 
-		self.derv = 0.0
-		self.inter = 0.0
-		self._calculate_gains(config.get('Kp', 0.01), config.get('Ki', 0.000055), config.get('Kd', 0.45))
-		self.clamping = config.get('Clamping', True)
-		self.set_target(0.0)
+        self.derv = 0.0
+        self.inter = 0.0
+        self._calculate_gains(config.get("Kp", 0.01), config.get("Ki", 0.000055), config.get("Kd", 0.45))
+        self.clamping = config.get("Clamping", True)
+        self.set_target(0.0)
 
-	def update(self, current):
-		# dt
-		dt = time.time() - self.last_update
+    def update(self, current):
+        # dt
+        dt = time.time() - self.last_update
 
-		# P
-		error = current - self.set_point
-		self.p = self.kp * error
+        # P
+        error = current - self.set_point
+        self.p = self.kp * error
 
-		# I
-		self.inter += error * dt
-		self.i = self.ki * self.inter
+        # I
+        self.inter += error * dt
+        self.i = self.ki * self.inter
 
-		# D
-		self.derv = (error - self.error_last) / dt
-		self.d = self.kd * self.derv
+        # D
+        self.derv = (error - self.error_last) / dt
+        self.d = self.kd * self.derv
 
-		# PID
-		self.u = self.p + self.i + self.d
+        # PID
+        self.u = self.p + self.i + self.d
 
-		# Clamping anti-windup method.
-		# Stops integration when the sum of the block components exceeds the output limits
-		# and the integrator output and block input have the same sign.
-		# Resumes integration when either the sum of the block components exceeds the output limits
-		# and the integrator output and block input have opposite sign or the sum no longer exceeds the output limits.
-		#
-		# Implemented via reversing the addition to self.inter above if we are clamping.
-		if self.clamping:
-			if not ((abs(self.u) >= 1) and (self.i * self.u > 0)):
-				eventLogger.debug('Not clamping integrator.')
-			else:
-				eventLogger.debug('clamping integrator.')
-				self.inter -= error * dt
+        # Clamping anti-windup method.
+        # Stops integration when the sum of the block components exceeds the output limits
+        # and the integrator output and block input have the same sign.
+        # Resumes integration when either the sum of the block components exceeds the output limits
+        # and the integrator output and block input have opposite sign or the sum no longer exceeds the output limits.
+        #
+        # Implemented via reversing the addition to self.inter above if we are clamping.
+        if self.clamping:
+            if not ((abs(self.u) >= 1) and (self.i * self.u > 0)):
+                eventLogger.debug("Not clamping integrator.")
+            else:
+                eventLogger.debug("clamping integrator.")
+                self.inter -= error * dt
 
-		eventLogger.debug(
-			'PID Update... error: '
-			+ str(error)
-			+ ', p: '
-			+ str(self.p)
-			+ ', i: '
-			+ str(self.i)
-			+ ', d: '
-			+ str(self.d)
-			+ ', pid: '
-			+ str(self.u)
-		)
+        eventLogger.debug(
+            "PID Update... error: "
+            + str(error)
+            + ", p: "
+            + str(self.p)
+            + ", i: "
+            + str(self.i)
+            + ", d: "
+            + str(self.d)
+            + ", pid: "
+            + str(self.u)
+        )
 
-		# Update for next cycle
-		self.error_last = error
-		self.last_update = time.time()
+        # Update for next cycle
+        self.error_last = error
+        self.last_update = time.time()
 
-		return self.u
+        return self.u
 
-	def set_target(self, set_point):
-		self.set_point = set_point
-		self.error = 0.0
-		self.inter = 0.0
-		self.derv = 0.0
-		self.last_update = time.time()
+    def set_target(self, set_point):
+        self.set_point = set_point
+        self.error = 0.0
+        self.inter = 0.0
+        self.derv = 0.0
+        self.last_update = time.time()
 
-	def set_gains(self, kp, ki, kd):
-		self._calculate_gains(kp, ki, kd)
+    def set_gains(self, kp, ki, kd):
+        self._calculate_gains(kp, ki, kd)
 
-	def set_config(self, config):
-		self.clamping = config.get('Clamping', True)
-		self._calculate_gains(config.get('Kp', 0.01), config.get('Ki', 0.000055), config.get('Kd', 0.45))
-		self.error = 0.0
-		self.inter = 0.0
-		self.derv = 0.0
+    def set_config(self, config):
+        self.clamping = config.get("Clamping", True)
+        self._calculate_gains(config.get("Kp", 0.01), config.get("Ki", 0.000055), config.get("Kd", 0.45))
+        self.error = 0.0
+        self.inter = 0.0
+        self.derv = 0.0
 
-	def _calculate_gains(self, kp, ki, kd):
-		self.kp = -1 * kp
-		self.ki = -1 * ki
-		self.kd = -1 * kd
+    def _calculate_gains(self, kp, ki, kd):
+        self.kp = -1 * kp
+        self.ki = -1 * ki
+        self.kd = -1 * kd
 
-	def get_k(self):
-		return self.kp, self.ki, self.kd
+    def get_k(self):
+        return self.kp, self.ki, self.kd

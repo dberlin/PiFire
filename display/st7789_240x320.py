@@ -27,48 +27,48 @@ Display class definition
 
 
 class Display(DisplayBase):
-	def __init__(self, dev_pins, buttonslevel='HIGH', rotation=0, units='F', config={}):
-		self.config = config
-		super().__init__(dev_pins, buttonslevel, rotation, units, config)
+    def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
+        self.config = config
+        super().__init__(dev_pins, buttonslevel, rotation, units, config)
 
-	def _init_display_device(self):
-		# Init Device
-		dc_pin = self.dev_pins['display']['dc']
-		bl_pin = self.dev_pins['display']['led']
-		rst_pin = self.dev_pins['display']['rst']
-		spi_device = self.config.get('spi_device', 0)
+    def _init_display_device(self):
+        # Init Device
+        dc_pin = self.dev_pins["display"]["dc"]
+        bl_pin = self.dev_pins["display"]["led"]
+        rst_pin = self.dev_pins["display"]["rst"]
+        spi_device = self.config.get("spi_device", 0)
 
-		self.device = ST7789.ST7789(
-			port=0,
-			cs=spi_device,
-			dc=dc_pin,
-			backlight=bl_pin,
-			rst=rst_pin,
-			rotation=self.rotation,
-			width=320,
-			height=240,
-			spi_speed_hz=60 * 1000 * 1000,
-		)
-		self.WIDTH = self.device.width
-		self.HEIGHT = self.device.height
+        self.device = ST7789.ST7789(
+            port=0,
+            cs=spi_device,
+            dc=dc_pin,
+            backlight=bl_pin,
+            rst=rst_pin,
+            rotation=self.rotation,
+            width=320,
+            height=240,
+            spi_speed_hz=60 * 1000 * 1000,
+        )
+        self.WIDTH = self.device.width
+        self.HEIGHT = self.device.height
 
-		# Setup & Start Display Loop Thread
-		display_thread = threading.Thread(target=self._display_loop)
-		display_thread.start()
+        # Setup & Start Display Loop Thread
+        display_thread = threading.Thread(target=self._display_loop)
+        display_thread.start()
 
-	"""
+    """
 	============== Graphics / Display / Draw Methods ============= 
 	"""
 
-	def _display_clear(self):
-		# Create blank canvas
-		img = Image.new('RGB', (self.WIDTH, self.HEIGHT), color=(0, 0, 0))
-		self.device.display(img)
-		# Kill the backlight to the display
-		self.device.set_backlight(0)
+    def _display_clear(self):
+        # Create blank canvas
+        img = Image.new("RGB", (self.WIDTH, self.HEIGHT), color=(0, 0, 0))
+        self.device.display(img)
+        # Kill the backlight to the display
+        self.device.set_backlight(0)
 
-	def _display_canvas(self, canvas):
-		# Display canvas to screen for ST7789
-		# Turn on Backlight (just in case it was off)
-		self.device.set_backlight(1)
-		self.device.display(canvas.convert(mode='RGB'))
+    def _display_canvas(self, canvas):
+        # Display canvas to screen for ST7789
+        # Turn on Backlight (just in case it was off)
+        self.device.set_backlight(1)
+        self.device.display(canvas.convert(mode="RGB"))

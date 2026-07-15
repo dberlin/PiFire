@@ -24,105 +24,105 @@ import tests.characterization.harness as harness  # noqa: F401  (binds control.e
 
 
 class _RecordingMode(ControlMode):
-	name = 'Recording'
+    name = "Recording"
 
-	def __init__(self, ctx, state):
-		super().__init__(ctx, state)
-		self.calls = []
+    def __init__(self, ctx, state):
+        super().__init__(ctx, state)
+        self.calls = []
 
-	def setup(self):
-		self.calls.append('setup')
+    def setup(self):
+        self.calls.append("setup")
 
-	def setup_safety(self, ptemp):
-		self.calls.append('setup_safety')
-		return 'Active'
+    def setup_safety(self, ptemp):
+        self.calls.append("setup_safety")
+        return "Active"
 
-	def on_tick(self, now, ptemp, current_output_status):
-		self.calls.append('on_tick')
+    def on_tick(self, now, ptemp, current_output_status):
+        self.calls.append("on_tick")
 
-	def check_safety(self, now, ptemp):
-		self.calls.append('check_safety')
+    def check_safety(self, now, ptemp):
+        self.calls.append("check_safety")
 
-	def status_fragment(self):
-		self.calls.append('status_fragment')
-		return {}
+    def status_fragment(self):
+        self.calls.append("status_fragment")
+        return {}
 
-	def should_exit(self, now, ptemp):
-		self.calls.append('should_exit')
-		# Bound the loop to exactly one iteration.
-		return True
+    def should_exit(self, now, ptemp):
+        self.calls.append("should_exit")
+        # Bound the loop to exactly one iteration.
+        return True
 
-	def teardown(self, ptemp):
-		self.calls.append('teardown')
+    def teardown(self, ptemp):
+        self.calls.append("teardown")
 
 
 def _make_ctx():
-	settings = base_settings()
-	control_data = base_control(mode='Recording')
-	pellet_db = base_pellet_db()
-	probes = FakeProbes().script([120])
-	store = InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
-	grill = FakeGrillPlatform(outputs=tuple(settings['platform']['outputs']))
-	notifier = FakeNotifier()
-	ctx = ControllerContext(
-		devices=Devices(grill_platform=grill, probe_complex=probes, dist_device=FakeDistance()),
-		store=store,
-		notifications=notifier,
-		clock=ManualClock(),
-	)
-	return ctx
+    settings = base_settings()
+    control_data = base_control(mode="Recording")
+    pellet_db = base_pellet_db()
+    probes = FakeProbes().script([120])
+    store = InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
+    grill = FakeGrillPlatform(outputs=tuple(settings["platform"]["outputs"]))
+    notifier = FakeNotifier()
+    ctx = ControllerContext(
+        devices=Devices(grill_platform=grill, probe_complex=probes, dist_device=FakeDistance()),
+        store=store,
+        notifications=notifier,
+        clock=ManualClock(),
+    )
+    return ctx
 
 
 def test_control_mode_hook_order_one_bounded_tick():
-	ctx = _make_ctx()
-	# ControlMode.run() reads ctx.clock.now() exactly once pre-loop (for
-	# start_time/display_toggle_time/etc.) before entering `while status ==
-	# 'Active':`. Advance the clock right after that first read so the loop's
-	# first `now = ctx.clock.now()` is > 0.5s past display_toggle_time,
-	# firing the status-publish gate (and status_fragment()) within this
-	# single bounded iteration.
-	real_now = ctx.clock.now
-	calls = {'n': 0}
+    ctx = _make_ctx()
+    # ControlMode.run() reads ctx.clock.now() exactly once pre-loop (for
+    # start_time/display_toggle_time/etc.) before entering `while status ==
+    # 'Active':`. Advance the clock right after that first read so the loop's
+    # first `now = ctx.clock.now()` is > 0.5s past display_toggle_time,
+    # firing the status-publish gate (and status_fragment()) within this
+    # single bounded iteration.
+    real_now = ctx.clock.now
+    calls = {"n": 0}
 
-	def _now():
-		calls['n'] += 1
-		if calls['n'] == 1:
-			return real_now()
-		return real_now() + 0.6
+    def _now():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_now()
+        return real_now() + 0.6
 
-	ctx.clock.now = _now
+    ctx.clock.now = _now
 
-	mode = _RecordingMode(ctx, WorkCycleState())
-	mode.run()
+    mode = _RecordingMode(ctx, WorkCycleState())
+    mode.run()
 
-	# sense -> safety -> act -> publish: check_safety now runs BEFORE the merged
-	# on_tick, and the status-publish gate (status_fragment) runs AFTER it.
-	assert mode.calls == [
-		'setup',
-		'setup_safety',
-		'check_safety',
-		'on_tick',
-		'status_fragment',
-		'should_exit',
-		'teardown',
-	]
+    # sense -> safety -> act -> publish: check_safety now runs BEFORE the merged
+    # on_tick, and the status-publish gate (status_fragment) runs AFTER it.
+    assert mode.calls == [
+        "setup",
+        "setup_safety",
+        "check_safety",
+        "on_tick",
+        "status_fragment",
+        "should_exit",
+        "teardown",
+    ]
 
 
 def test_status_publishes_duty_fields():
-	ctx = _make_ctx()
-	real_now = ctx.clock.now
-	calls = {'n': 0}
+    ctx = _make_ctx()
+    real_now = ctx.clock.now
+    calls = {"n": 0}
 
-	def _now():
-		calls['n'] += 1
-		return real_now() if calls['n'] == 1 else real_now() + 0.6
+    def _now():
+        calls["n"] += 1
+        return real_now() if calls["n"] == 1 else real_now() + 0.6
 
-	ctx.clock.now = _now
-	mode = _RecordingMode(ctx, WorkCycleState())
-	mode.run()
-	status = ctx.store.read_status()
-	assert 'cycle_ratio' in status
-	assert 'fan_duty' in status
-	# Default state: no auger ratio set, DC fan disabled, fan output off.
-	assert status['cycle_ratio'] == 0.0
-	assert status['fan_duty'] == 0
+    ctx.clock.now = _now
+    mode = _RecordingMode(ctx, WorkCycleState())
+    mode.run()
+    status = ctx.store.read_status()
+    assert "cycle_ratio" in status
+    assert "fan_duty" in status
+    # Default state: no auger ratio set, DC fan disabled, fan output off.
+    assert status["cycle_ratio"] == 0.0
+    assert status["fan_duty"] == 0

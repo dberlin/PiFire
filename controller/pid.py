@@ -42,102 +42,102 @@ Class Definition
 
 
 class Controller(ControllerBase):
-	def __init__(self, config, units, cycle_data):
-		super().__init__(config, units, cycle_data)
+    def __init__(self, config, units, cycle_data):
+        super().__init__(config, units, cycle_data)
 
-		self.function_list.append('set_gains')
-		self.function_list.append('get_k')
+        self.function_list.append("set_gains")
+        self.function_list.append("get_k")
 
-		self._calculate_gains(config.get('PB', 60.0), config.get('Ti', 180.0), config.get('Td', 45.0))
+        self._calculate_gains(config.get("PB", 60.0), config.get("Ti", 180.0), config.get("Td", 45.0))
 
-		self.p = 0.0
-		self.i = 0.0
-		self.d = 0.0
-		self.u = 0
+        self.p = 0.0
+        self.i = 0.0
+        self.d = 0.0
+        self.u = 0
 
-		self.last_update = time.time()
-		self.error = 0.0
-		self.set_point = 0
+        self.last_update = time.time()
+        self.error = 0.0
+        self.set_point = 0
 
-		self.center = config.get('center', 0.5)
+        self.center = config.get("center", 0.5)
 
-		self.derv = 0.0
-		self.inter = 0.0
-		if self.ki != 0:
-			self.inter_max = abs(self.center / self.ki)
-		else:
-			self.inter_max = 0
+        self.derv = 0.0
+        self.inter = 0.0
+        if self.ki != 0:
+            self.inter_max = abs(self.center / self.ki)
+        else:
+            self.inter_max = 0
 
-		self.last = 150
+        self.last = 150
 
-		self.set_target(0.0)
+        self.set_target(0.0)
 
-	def _calculate_gains(self, pb, ti, td):
-		if pb == 0:
-			self.kp = 0
-		else:
-			self.kp = -1 / pb
-		if ti == 0:
-			self.ki = 0
-		else:
-			self.ki = self.kp / ti
-		self.kd = self.kp * td
+    def _calculate_gains(self, pb, ti, td):
+        if pb == 0:
+            self.kp = 0
+        else:
+            self.kp = -1 / pb
+        if ti == 0:
+            self.ki = 0
+        else:
+            self.ki = self.kp / ti
+        self.kd = self.kp * td
 
-	def update(self, current):
-		# P
-		error = current - self.set_point
-		self.p = self.kp * error + self.center  # p = 1 for pb / 2 under set_point, p = 0 for pb / 2 over set_point
+    def update(self, current):
+        # P
+        error = current - self.set_point
+        self.p = self.kp * error + self.center  # p = 1 for pb / 2 under set_point, p = 0 for pb / 2 over set_point
 
-		# I
-		dt = time.time() - self.last_update
-		# if self.p > 0 and self.p < 1: # Ensure we are in the pb, otherwise do not calculate i to avoid windup
-		self.inter += error * dt
-		if self.center != 0:
-			self.inter = max(self.inter, -self.inter_max)
-			self.inter = min(self.inter, self.inter_max)
+        # I
+        dt = time.time() - self.last_update
+        # if self.p > 0 and self.p < 1: # Ensure we are in the pb, otherwise do not calculate i to avoid windup
+        self.inter += error * dt
+        if self.center != 0:
+            self.inter = max(self.inter, -self.inter_max)
+            self.inter = min(self.inter, self.inter_max)
 
-		self.i = self.ki * self.inter
+        self.i = self.ki * self.inter
 
-		# D
-		self.derv = (current - self.last) / dt
-		self.d = self.kd * self.derv
+        # D
+        self.derv = (current - self.last) / dt
+        self.d = self.kd * self.derv
 
-		# PID
-		self.u = self.p + self.i + self.d
+        # PID
+        self.u = self.p + self.i + self.d
 
-		# Update for next cycle
-		self.error = error
-		self.last = current
-		self.last_update = time.time()
+        # Update for next cycle
+        self.error = error
+        self.last = current
+        self.last_update = time.time()
 
-		return self.u
+        return self.u
 
-	def set_target(self, set_point):
-		self.set_point = set_point
-		self.error = 0.0
-		self.inter = 0.0
-		self.derv = 0.0
-		self.last_update = time.time()
+    def set_target(self, set_point):
+        self.set_point = set_point
+        self.error = 0.0
+        self.inter = 0.0
+        self.derv = 0.0
+        self.last_update = time.time()
 
-	def set_gains(self, pb, ti, td):
-		self._calculate_gains(pb, ti, td)
-		if self.ki != 0:
-			self.inter_max = abs(self.center / self.ki)
-		else:
-			self.inter_max = 0
+    def set_gains(self, pb, ti, td):
+        self._calculate_gains(pb, ti, td)
+        if self.ki != 0:
+            self.inter_max = abs(self.center / self.ki)
+        else:
+            self.inter_max = 0
 
-	def get_k(self):
-		return self.kp, self.ki, self.kd
+    def get_k(self):
+        return self.kp, self.ki, self.kd
 
-	def set_config(self, config):
-		super().set_config(config)
-		self.error = 0.0
-		self.inter = 0.0
-		self.derv = 0.0
-		self.last_update = time.time()
-		self._calculate_gains(config.get('PB', 60.0), config.get('Ti', 180.0), config.get('Td', 45.0))
-		self.center = config.get('center', 0.5)
-		if self.ki != 0:
-			self.inter_max = abs(self.center / self.ki)
-		else:
-			self.inter_max = 0
+    def set_config(self, config):
+        super().set_config(config)
+        self.error = 0.0
+        self.inter = 0.0
+        self.derv = 0.0
+        self.last_update = time.time()
+        self._calculate_gains(config.get("PB", 60.0), config.get("Ti", 180.0), config.get("Td", 45.0))
+        self.center = config.get("center", 0.5)
+        if self.ki != 0:
+            self.inter_max = abs(self.center / self.ki)
+        else:
+            self.inter_max = 0

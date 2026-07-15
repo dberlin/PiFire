@@ -47,76 +47,76 @@ _MAX_DUTY = 0xFF
 
 
 class EMC2301:
-	def __init__(self, i2c_bus, address=_DEFAULT_ADDRESS, poles=2):
-		if poles not in (1, 2, 3, 4):
-			raise ValueError('poles must be 1-4')
-		self.poles = poles
-		self.i2c_device = I2CDevice(i2c_bus, address)
-		# Disable the SMBus timeout (DIS_TO=1) and keep the watchdog out of
-		# continuous mode (WD_EN=0) so the fan is never force-ramped to full
-		# speed during quiet periods; preserve the other config bits.
-		config = self._read_register(_REG_CONFIG)
-		config |= _CONFIG_DIS_TO
-		config &= ~_CONFIG_WD_EN
-		self._write_register(_REG_CONFIG, config)
-		# Known 26 kHz output: 26 kHz base, divide by 1. Fan stopped.
-		self._write_register(_REG_PWM_BASE_FREQ, _BASE_FREQS[26000])
-		self._write_register(_REG_PWM_DIVIDE, 0x01)
-		self._write_register(_REG_FAN_SETTING, 0x00)
-		# Set the tachometer EDGES field to match the fan's pole count so the
-		# tach measurement is correct; preserve the RANGE and other bits.
-		config1 = self._read_register(_REG_FAN_CONFIG1)
-		config1 = (config1 & ~_EDGES_MASK) | ((poles - 1) << 3)
-		self._write_register(_REG_FAN_CONFIG1, config1)
+    def __init__(self, i2c_bus, address=_DEFAULT_ADDRESS, poles=2):
+        if poles not in (1, 2, 3, 4):
+            raise ValueError("poles must be 1-4")
+        self.poles = poles
+        self.i2c_device = I2CDevice(i2c_bus, address)
+        # Disable the SMBus timeout (DIS_TO=1) and keep the watchdog out of
+        # continuous mode (WD_EN=0) so the fan is never force-ramped to full
+        # speed during quiet periods; preserve the other config bits.
+        config = self._read_register(_REG_CONFIG)
+        config |= _CONFIG_DIS_TO
+        config &= ~_CONFIG_WD_EN
+        self._write_register(_REG_CONFIG, config)
+        # Known 26 kHz output: 26 kHz base, divide by 1. Fan stopped.
+        self._write_register(_REG_PWM_BASE_FREQ, _BASE_FREQS[26000])
+        self._write_register(_REG_PWM_DIVIDE, 0x01)
+        self._write_register(_REG_FAN_SETTING, 0x00)
+        # Set the tachometer EDGES field to match the fan's pole count so the
+        # tach measurement is correct; preserve the RANGE and other bits.
+        config1 = self._read_register(_REG_FAN_CONFIG1)
+        config1 = (config1 & ~_EDGES_MASK) | ((poles - 1) << 3)
+        self._write_register(_REG_FAN_CONFIG1, config1)
 
-	def _read_register(self, register):
-		result = bytearray(1)
-		with self.i2c_device as i2c:
-			i2c.write_then_readinto(bytes([register]), result)
-		return result[0]
+    def _read_register(self, register):
+        result = bytearray(1)
+        with self.i2c_device as i2c:
+            i2c.write_then_readinto(bytes([register]), result)
+        return result[0]
 
-	def _write_register(self, register, value):
-		with self.i2c_device as i2c:
-			i2c.write(bytes([register, value & 0xFF]))
+    def _write_register(self, register, value):
+        with self.i2c_device as i2c:
+            i2c.write(bytes([register, value & 0xFF]))
 
-	@property
-	def manual_fan_speed(self):
-		raw = self._read_register(_REG_FAN_SETTING)
-		return (raw / _MAX_DUTY) * 100.0
+    @property
+    def manual_fan_speed(self):
+        raw = self._read_register(_REG_FAN_SETTING)
+        return (raw / _MAX_DUTY) * 100.0
 
-	@manual_fan_speed.setter
-	def manual_fan_speed(self, percent):
-		if not 0 <= percent <= 100:
-			raise ValueError('manual_fan_speed must be from 0-100')
-		self._write_register(_REG_FAN_SETTING, round((percent / 100.0) * _MAX_DUTY))
+    @manual_fan_speed.setter
+    def manual_fan_speed(self, percent):
+        if not 0 <= percent <= 100:
+            raise ValueError("manual_fan_speed must be from 0-100")
+        self._write_register(_REG_FAN_SETTING, round((percent / 100.0) * _MAX_DUTY))
 
-	@property
-	def pwm_frequency(self):
-		base_value = self._read_register(_REG_PWM_BASE_FREQ) & 0x03
-		divide = self._read_register(_REG_PWM_DIVIDE) or 1
-		base_hz = _BASE_VALUE_TO_HZ.get(base_value, 26000)
-		return base_hz / divide
+    @property
+    def pwm_frequency(self):
+        base_value = self._read_register(_REG_PWM_BASE_FREQ) & 0x03
+        divide = self._read_register(_REG_PWM_DIVIDE) or 1
+        base_hz = _BASE_VALUE_TO_HZ.get(base_value, 26000)
+        return base_hz / divide
 
-	@pwm_frequency.setter
-	def pwm_frequency(self, hz):
-		nearest = min(_BASE_FREQS, key=lambda base: abs(base - hz))
-		self._write_register(_REG_PWM_BASE_FREQ, _BASE_FREQS[nearest])
-		self._write_register(_REG_PWM_DIVIDE, 0x01)
+    @pwm_frequency.setter
+    def pwm_frequency(self, hz):
+        nearest = min(_BASE_FREQS, key=lambda base: abs(base - hz))
+        self._write_register(_REG_PWM_BASE_FREQ, _BASE_FREQS[nearest])
+        self._write_register(_REG_PWM_DIVIDE, 0x01)
 
-	@property
-	def fan_speed(self):
-		"""Measured fan speed in RPM from the tachometer, or 0.0 if the fan is
-		stopped/stalled. The chip's Fan Stall Status bit is authoritative: a fan
-		turning slower than the current RANGE can measure reads as stalled (the
-		tach count saturates near its max), which the chip flags directly. Reads
-		the RANGE multiplier live so the result is correct regardless of how
-		RANGE is configured."""
-		if self._read_register(_REG_FAN_STALL_STATUS) & _STALL_MASK:
-			return 0.0
-		msb = self._read_register(_REG_TACH_HIGH)
-		lsb = self._read_register(_REG_TACH_LOW)
-		count = ((msb << 8) | lsb) >> 3
-		if count == 0:
-			return 0.0
-		multiplier = _RANGE_TO_MULTIPLIER[(self._read_register(_REG_FAN_CONFIG1) >> 5) & 0x03]
-		return round((multiplier * _RPM_CONSTANT) / count, 2)
+    @property
+    def fan_speed(self):
+        """Measured fan speed in RPM from the tachometer, or 0.0 if the fan is
+        stopped/stalled. The chip's Fan Stall Status bit is authoritative: a fan
+        turning slower than the current RANGE can measure reads as stalled (the
+        tach count saturates near its max), which the chip flags directly. Reads
+        the RANGE multiplier live so the result is correct regardless of how
+        RANGE is configured."""
+        if self._read_register(_REG_FAN_STALL_STATUS) & _STALL_MASK:
+            return 0.0
+        msb = self._read_register(_REG_TACH_HIGH)
+        lsb = self._read_register(_REG_TACH_LOW)
+        count = ((msb << 8) | lsb) >> 3
+        if count == 0:
+            return 0.0
+        multiplier = _RANGE_TO_MULTIPLIER[(self._read_register(_REG_FAN_CONFIG1) >> 5) & 0x03]
+        return round((multiplier * _RPM_CONSTANT) / count, 2)

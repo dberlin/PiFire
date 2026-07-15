@@ -37,76 +37,76 @@ from notify.notifications import *
 
 
 class Process_Monitor:
-	def __init__(self, process, command, timeout=5):
-		self.process = process  # name of the process to monitor
-		self.timeout = timeout  # time in seconds to wait before logging an error and running the specified command
-		self.command = command  # subprocess formatted command to run when a timeout occurs
+    def __init__(self, process, command, timeout=5):
+        self.process = process  # name of the process to monitor
+        self.timeout = timeout  # time in seconds to wait before logging an error and running the specified command
+        self.command = command  # subprocess formatted command to run when a timeout occurs
 
-		self.last_heartbeat = time.time()
-		self.active = False
-		self.kill = False
+        self.last_heartbeat = time.time()
+        self.active = False
+        self.kill = False
 
-		self.is_real_hw = is_real_hardware()
+        self.is_real_hw = is_real_hardware()
 
-		# Setup logging
-		log_level = logging.ERROR
-		self.process_logger = create_logger(self.process, filename=f'./logs/{self.process}.log', level=log_level)
-		self.event_logger = create_logger(
-			'events',
-			filename='./logs/events.log',
-			messageformat='%(asctime)s [%(levelname)s] %(message)s',
-			level=log_level,
-		)
+        # Setup logging
+        log_level = logging.ERROR
+        self.process_logger = create_logger(self.process, filename=f"./logs/{self.process}.log", level=log_level)
+        self.event_logger = create_logger(
+            "events",
+            filename="./logs/events.log",
+            messageformat="%(asctime)s [%(levelname)s] %(message)s",
+            level=log_level,
+        )
 
-		# Setup process monitoring thread
-		self.process_thread = threading.Thread(target=self._heartbeat_check)
-		self.process_thread.start()
+        # Setup process monitoring thread
+        self.process_thread = threading.Thread(target=self._heartbeat_check)
+        self.process_thread.start()
 
-	def heartbeat(self):
-		self.last_heartbeat = time.time()
+    def heartbeat(self):
+        self.last_heartbeat = time.time()
 
-	def start_monitor(self):
-		self.active = True
+    def start_monitor(self):
+        self.active = True
 
-	def stop_monitor(self):
-		# Terminate the heartbeat thread. base.run() builds a fresh
-		# Process_Monitor per work cycle, so stopping always means "done with
-		# this one" -- there is no restart-the-same-instance case to preserve.
-		self.active = False
-		self.kill = True
+    def stop_monitor(self):
+        # Terminate the heartbeat thread. base.run() builds a fresh
+        # Process_Monitor per work cycle, so stopping always means "done with
+        # this one" -- there is no restart-the-same-instance case to preserve.
+        self.active = False
+        self.kill = True
 
-	def status(self):
-		if self.kill:
-			return 'killed'
-		if self.active:
-			return 'active'
-		else:
-			return 'inactive'
+    def status(self):
+        if self.kill:
+            return "killed"
+        if self.active:
+            return "active"
+        else:
+            return "inactive"
 
-	def _heartbeat_check(self):
-		while True:
-			while self.active:
-				now = time.time()
-				if now - self.last_heartbeat > self.timeout:
-					# Set control process critical error flag
-					control = read_control()
-					control['updated'] = True
-					control['mode'] = 'Error'
-					control['critical_error'] = True
-					write_control(control, WriteKind.OVERWRITE, origin='process_monitor')
-					# Send notification
-					send_notifications('Control_Process_Stopped')
-					# Log error
-					message = f'The {self.process} process experienced a timeout event (no heartbeat detected in {self.timeout} seconds) and is being reset.'
-					self.event_logger.error(message)
-					self.process_logger.error(message)
-					# Execute command on real hardware only
-					if self.is_real_hw:
-						subprocess.run(self.command)
-					else:
-						print(message)
-					self.active = False  # Pause thread
-				time.sleep(1)
-			if self.kill:
-				break
-			time.sleep(0.25)
+    def _heartbeat_check(self):
+        while True:
+            while self.active:
+                now = time.time()
+                if now - self.last_heartbeat > self.timeout:
+                    # Set control process critical error flag
+                    control = read_control()
+                    control["updated"] = True
+                    control["mode"] = "Error"
+                    control["critical_error"] = True
+                    write_control(control, WriteKind.OVERWRITE, origin="process_monitor")
+                    # Send notification
+                    send_notifications("Control_Process_Stopped")
+                    # Log error
+                    message = f"The {self.process} process experienced a timeout event (no heartbeat detected in {self.timeout} seconds) and is being reset."
+                    self.event_logger.error(message)
+                    self.process_logger.error(message)
+                    # Execute command on real hardware only
+                    if self.is_real_hw:
+                        subprocess.run(self.command)
+                    else:
+                        print(message)
+                    self.active = False  # Pause thread
+                time.sleep(1)
+            if self.kill:
+                break
+            time.sleep(0.25)

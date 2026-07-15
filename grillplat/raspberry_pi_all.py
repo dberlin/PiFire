@@ -48,200 +48,200 @@ from rpi_hardware_pwm import HardwarePWM
 
 
 class GrillPlatform:
-	def __init__(self, config):
-		self.logger = logging.getLogger('control')
-		try:
-			self.out_pins = config.get('outputs', None)  # Pins to control the PiFire outputs
-			self.in_pins = config.get('inputs', None)  # Pins for input
-			self.dc_fan = config.get('dc_fan', False)  # Save state for DC Fan
-			self.frequency = config.get('frequency', 100)  # Save configured fan frequency
-			self.standalone = config.get('standalone', True)  # Save configured state for Standalone
-			self.current = {}
-		except:
-			self.logger.error('Error parsing platform configuration.  Check your settings.json file.')
-			raise
+    def __init__(self, config):
+        self.logger = logging.getLogger("control")
+        try:
+            self.out_pins = config.get("outputs", None)  # Pins to control the PiFire outputs
+            self.in_pins = config.get("inputs", None)  # Pins for input
+            self.dc_fan = config.get("dc_fan", False)  # Save state for DC Fan
+            self.frequency = config.get("frequency", 100)  # Save configured fan frequency
+            self.standalone = config.get("standalone", True)  # Save configured state for Standalone
+            self.current = {}
+        except:
+            self.logger.error("Error parsing platform configuration.  Check your settings.json file.")
+            raise
 
-		if not self.standalone:
-			self.selector = Button(self.in_pins['selector'])
-		else:
-			self.selector = None
+        if not self.standalone:
+            self.selector = Button(self.in_pins["selector"])
+        else:
+            self.selector = None
 
-		active_high = True if config.get('triggerlevel', 'HIGH') == 'HIGH' else False
+        active_high = True if config.get("triggerlevel", "HIGH") == "HIGH" else False
 
-		if self.dc_fan:
-			self.current_fan_speed_percent = 100  # Hardware PWM library does not have a mechanism to retrieve the current duty cycle - initialize a variable to track this
-			self._ramp_thread = None
-			self.fan = OutputDevice(self.out_pins['dc_fan'], active_high=active_high, initial_value=False)
-			if self.out_pins['pwm'] in [13, 19]:
-				self.hardware_pwm_channel = 1  # Raspberry Pi maps GPIO13 & GPIO19 to Hardware PWM channel 1
-			else:
-				self.hardware_pwm_channel = 0  # Raspberry Pi maps GPIO12 & GPIO18 to Hardware PWM channel 0
-			self.pwm = HardwarePWM(pwm_channel=self.hardware_pwm_channel, hz=self.frequency)
-			self.logger.debug(
-				'Hardware PWM setup: Using PWM channel '
-				+ str(self.hardware_pwm_channel)
-				+ ' and PWM frequency '
-				+ str(self.frequency)
-			)
+        if self.dc_fan:
+            self.current_fan_speed_percent = 100  # Hardware PWM library does not have a mechanism to retrieve the current duty cycle - initialize a variable to track this
+            self._ramp_thread = None
+            self.fan = OutputDevice(self.out_pins["dc_fan"], active_high=active_high, initial_value=False)
+            if self.out_pins["pwm"] in [13, 19]:
+                self.hardware_pwm_channel = 1  # Raspberry Pi maps GPIO13 & GPIO19 to Hardware PWM channel 1
+            else:
+                self.hardware_pwm_channel = 0  # Raspberry Pi maps GPIO12 & GPIO18 to Hardware PWM channel 0
+            self.pwm = HardwarePWM(pwm_channel=self.hardware_pwm_channel, hz=self.frequency)
+            self.logger.debug(
+                "Hardware PWM setup: Using PWM channel "
+                + str(self.hardware_pwm_channel)
+                + " and PWM frequency "
+                + str(self.frequency)
+            )
 
-		else:
-			self.fan = OutputDevice(self.out_pins['fan'], active_high=active_high, initial_value=False)
+        else:
+            self.fan = OutputDevice(self.out_pins["fan"], active_high=active_high, initial_value=False)
 
-		self.auger = OutputDevice(self.out_pins['auger'], active_high=active_high, initial_value=False)
-		self.igniter = OutputDevice(self.out_pins['igniter'], active_high=active_high, initial_value=False)
-		self.power = OutputDevice(self.out_pins['power'], active_high=active_high, initial_value=False)
+        self.auger = OutputDevice(self.out_pins["auger"], active_high=active_high, initial_value=False)
+        self.igniter = OutputDevice(self.out_pins["igniter"], active_high=active_high, initial_value=False)
+        self.power = OutputDevice(self.out_pins["power"], active_high=active_high, initial_value=False)
 
-	def auger_on(self):
-		self.logger.debug('auger_on: Turning on auger')
-		self.auger.on()
+    def auger_on(self):
+        self.logger.debug("auger_on: Turning on auger")
+        self.auger.on()
 
-	def auger_off(self):
-		self.logger.debug('auger_off: Turning off auger')
-		self.auger.off()
+    def auger_off(self):
+        self.logger.debug("auger_off: Turning off auger")
+        self.auger.off()
 
-	def fan_on(self, fan_speed_percent=100):
-		self.fan.on()  # Turn on fan output pin to enable fan power
-		if self.dc_fan:
-			self._stop_ramp()
-			self.logger.debug('fan_on: Turning on PWM fan with fan speed percent ' + str(fan_speed_percent))
-			start_duty_cycle = float(100 - fan_speed_percent)  # PWM duty cycle = (100 - fan percent speed)
-			self.pwm.start(
-				start_duty_cycle
-			)  # Hardware PWM needs to have a start() before we can change_duty_cycle() later
-			self.current_fan_speed_percent = fan_speed_percent  # Keep track of our current fan percent speed
+    def fan_on(self, fan_speed_percent=100):
+        self.fan.on()  # Turn on fan output pin to enable fan power
+        if self.dc_fan:
+            self._stop_ramp()
+            self.logger.debug("fan_on: Turning on PWM fan with fan speed percent " + str(fan_speed_percent))
+            start_duty_cycle = float(100 - fan_speed_percent)  # PWM duty cycle = (100 - fan percent speed)
+            self.pwm.start(
+                start_duty_cycle
+            )  # Hardware PWM needs to have a start() before we can change_duty_cycle() later
+            self.current_fan_speed_percent = fan_speed_percent  # Keep track of our current fan percent speed
 
-	def fan_off(self):
-		self.fan.off()
-		if self.dc_fan:
-			self.logger.debug('fan_off: Turning off PWM fan')
-			self.pwm.stop()
-			self.current_fan_speed_percent = 0  # Fan is off, so our current fan speed is now 0
+    def fan_off(self):
+        self.fan.off()
+        if self.dc_fan:
+            self.logger.debug("fan_off: Turning off PWM fan")
+            self.pwm.stop()
+            self.current_fan_speed_percent = 0  # Fan is off, so our current fan speed is now 0
 
-	def fan_toggle(self):
-		self.fan.toggle()
+    def fan_toggle(self):
+        self.fan.toggle()
 
-	def set_duty_cycle(self, fan_speed_percent, override_ramping=True):
-		# This can be called by both control.py and the thread that handles PWM fan ramping (for Smoke Plus).
-		# If control.py is doing the calling, then we want to override the ramping thread, so we need to stop it so the PWM change will stick.
-		# If the ramp thread is doing the calling, then we set override_ramping to False when calling, so we don't end up stopping the thread we are in.
-		if override_ramping:
-			self._stop_ramp()
-		self.logger.debug('set_duty_cycle: Changing fan speed percent to ' + str(fan_speed_percent))
-		pwm_duty_cycle = float(100 - fan_speed_percent)  # Duty cycle is inverted due to PWM board amplifier circuitry
-		self.pwm.change_duty_cycle(pwm_duty_cycle)  # Hardware PWM library simply takes duty cycle in percent
-		self.current_fan_speed_percent = fan_speed_percent  # Keep track of our current fan percent speed
+    def set_duty_cycle(self, fan_speed_percent, override_ramping=True):
+        # This can be called by both control.py and the thread that handles PWM fan ramping (for Smoke Plus).
+        # If control.py is doing the calling, then we want to override the ramping thread, so we need to stop it so the PWM change will stick.
+        # If the ramp thread is doing the calling, then we set override_ramping to False when calling, so we don't end up stopping the thread we are in.
+        if override_ramping:
+            self._stop_ramp()
+        self.logger.debug("set_duty_cycle: Changing fan speed percent to " + str(fan_speed_percent))
+        pwm_duty_cycle = float(100 - fan_speed_percent)  # Duty cycle is inverted due to PWM board amplifier circuitry
+        self.pwm.change_duty_cycle(pwm_duty_cycle)  # Hardware PWM library simply takes duty cycle in percent
+        self.current_fan_speed_percent = fan_speed_percent  # Keep track of our current fan percent speed
 
-	def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
-		self.fan.on()
-		self.logger.debug(
-			'pwm_fan_ramp: Starting fan ramp: on_time: '
-			+ str(on_time)
-			+ ' min_duty_cycle: '
-			+ str(min_duty_cycle)
-			+ ' max_duty_cycle: '
-			+ str(max_duty_cycle)
-		)
-		self._start_ramp(on_time=on_time, min_duty_cycle=min_duty_cycle, max_duty_cycle=max_duty_cycle)
+    def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
+        self.fan.on()
+        self.logger.debug(
+            "pwm_fan_ramp: Starting fan ramp: on_time: "
+            + str(on_time)
+            + " min_duty_cycle: "
+            + str(min_duty_cycle)
+            + " max_duty_cycle: "
+            + str(max_duty_cycle)
+        )
+        self._start_ramp(on_time=on_time, min_duty_cycle=min_duty_cycle, max_duty_cycle=max_duty_cycle)
 
-	def set_pwm_frequency(self, frequency=30):
-		self.logger.debug('set_pwm_frequency: Setting PWM signal frequency to ' + str(frequency))
-		self.pwm.change_frequency(frequency)
+    def set_pwm_frequency(self, frequency=30):
+        self.logger.debug("set_pwm_frequency: Setting PWM signal frequency to " + str(frequency))
+        self.pwm.change_frequency(frequency)
 
-	def igniter_on(self):
-		self.logger.debug('igniter_on: Turning on igniter')
-		self.igniter.on()
+    def igniter_on(self):
+        self.logger.debug("igniter_on: Turning on igniter")
+        self.igniter.on()
 
-	def igniter_off(self):
-		self.logger.debug('igniter_off: Turning off igniter')
-		self.igniter.off()
+    def igniter_off(self):
+        self.logger.debug("igniter_off: Turning off igniter")
+        self.igniter.off()
 
-	def power_on(self):
-		self.logger.debug('power_on: Powering on grill platform')
-		self.power.on()
+    def power_on(self):
+        self.logger.debug("power_on: Powering on grill platform")
+        self.power.on()
 
-	def power_off(self):
-		self.logger.debug('power_off: Powering off grill platform')
-		self.power.off()
+    def power_off(self):
+        self.logger.debug("power_off: Powering off grill platform")
+        self.power.off()
 
-	def get_input_status(self):
-		if self.in_pins['selector'] is not None and self.standalone == False:
-			return self.selector.is_active
-		return False
+    def get_input_status(self):
+        if self.in_pins["selector"] is not None and self.standalone == False:
+            return self.selector.is_active
+        return False
 
-	def get_output_status(self):
-		self.current = {}
-		self.current['auger'] = self.auger.is_active
-		self.current['igniter'] = self.igniter.is_active
-		self.current['power'] = self.power.is_active
-		self.current['fan'] = self.fan.is_active
-		if self.dc_fan:
-			# self.logger.debug('get_output_status: self.current_fan_speed_percent = ' + str(self.current_fan_speed_percent)) # This is a little verbose, even for debug logging
-			self.current['pwm'] = self.current_fan_speed_percent
-			self.current['frequency'] = self.frequency
-		return self.current
+    def get_output_status(self):
+        self.current = {}
+        self.current["auger"] = self.auger.is_active
+        self.current["igniter"] = self.igniter.is_active
+        self.current["power"] = self.power.is_active
+        self.current["fan"] = self.fan.is_active
+        if self.dc_fan:
+            # self.logger.debug('get_output_status: self.current_fan_speed_percent = ' + str(self.current_fan_speed_percent)) # This is a little verbose, even for debug logging
+            self.current["pwm"] = self.current_fan_speed_percent
+            self.current["frequency"] = self.frequency
+        return self.current
 
-	def _start_ramp(self, on_time, min_duty_cycle, max_duty_cycle, background=True):
-		self._stop_ramp()
-		self.logger.debug(
-			'_start_ramp: Setting starting fan percentage for ramp: min_duty_cycle: ' + str(min_duty_cycle)
-		)
-		self.logger.debug(
-			'_start_ramp: Starting fan ramp thread: on_time: '
-			+ str(on_time)
-			+ ' min_duty_cycle: '
-			+ str(min_duty_cycle)
-			+ ' max_duty_cycle: '
-			+ str(max_duty_cycle)
-		)
-		min_fan_percent = min_duty_cycle  # Keeping things sane, the setting passed in is actually percent, not the eventual PWM duty cycle
-		self.fan_on(min_fan_percent)  # Need to turn on PWM with starting percentage
-		self._ramp_thread = GPIOThread(self._ramp_device, (on_time, min_duty_cycle, max_duty_cycle))
-		self._ramp_thread.start()
-		if not background:
-			self._ramp_thread.join()
-			self._ramp_thread = None
+    def _start_ramp(self, on_time, min_duty_cycle, max_duty_cycle, background=True):
+        self._stop_ramp()
+        self.logger.debug(
+            "_start_ramp: Setting starting fan percentage for ramp: min_duty_cycle: " + str(min_duty_cycle)
+        )
+        self.logger.debug(
+            "_start_ramp: Starting fan ramp thread: on_time: "
+            + str(on_time)
+            + " min_duty_cycle: "
+            + str(min_duty_cycle)
+            + " max_duty_cycle: "
+            + str(max_duty_cycle)
+        )
+        min_fan_percent = min_duty_cycle  # Keeping things sane, the setting passed in is actually percent, not the eventual PWM duty cycle
+        self.fan_on(min_fan_percent)  # Need to turn on PWM with starting percentage
+        self._ramp_thread = GPIOThread(self._ramp_device, (on_time, min_duty_cycle, max_duty_cycle))
+        self._ramp_thread.start()
+        if not background:
+            self._ramp_thread.join()
+            self._ramp_thread = None
 
-	def _stop_ramp(self):
-		self.logger.debug('_stop_ramp: Stopping fan ramp')
-		if self._ramp_thread:
-			self._ramp_thread.stop()
-			self._ramp_thread = None
+    def _stop_ramp(self):
+        self.logger.debug("_stop_ramp: Stopping fan ramp")
+        if self._ramp_thread:
+            self._ramp_thread.stop()
+            self._ramp_thread = None
 
-	def _ramp_device(self, on_time, min_duty_cycle, max_duty_cycle, fps=25):
-		duty_cycle = max_duty_cycle / 100
-		self.logger.debug('_ramp_device: Fan ramp thread calculating / executing')
-		sequence = []
-		sequence += [
-			(1 - (i * (duty_cycle / fps) / on_time), 1 / fps)
-			for i in range(int((fps * on_time) * (min_duty_cycle / max_duty_cycle)), int(fps * on_time))
-		]
-		sequence.append((1.0 - duty_cycle, 1 / fps))
+    def _ramp_device(self, on_time, min_duty_cycle, max_duty_cycle, fps=25):
+        duty_cycle = max_duty_cycle / 100
+        self.logger.debug("_ramp_device: Fan ramp thread calculating / executing")
+        sequence = []
+        sequence += [
+            (1 - (i * (duty_cycle / fps) / on_time), 1 / fps)
+            for i in range(int((fps * on_time) * (min_duty_cycle / max_duty_cycle)), int(fps * on_time))
+        ]
+        sequence.append((1.0 - duty_cycle, 1 / fps))
 
-		for value, delay in sequence:
-			new_duty_cycle = (
-				round(value, 4) * 100
-			)  # PWM duty cycle is 0-100 for Hardware PWM, sequence above generates 0.00-1.00, so multiply by 100
-			fan_speed_percent = float(100 - new_duty_cycle)  # Duty cycle is inverted due to PWM amplifier
-			# self.logger.debug('grillplat pifire_pwm _ramp_device: Changing fan speed percent to ' + str(fan_speed_percent)) # Redundant
-			# Call self.set_duty_cycle but set extra override_ramping parameter to False so we don't kill the thread
-			self.set_duty_cycle(
-				fan_speed_percent, False
-			)  # set_duty_cycle takes fan speed percent, not actual PWM duty cycle
-			self.current_fan_speed_percent = fan_speed_percent  # Keep track of our current fan percent speed
-			if self._ramp_thread.stopping.wait(delay):
-				break
+        for value, delay in sequence:
+            new_duty_cycle = (
+                round(value, 4) * 100
+            )  # PWM duty cycle is 0-100 for Hardware PWM, sequence above generates 0.00-1.00, so multiply by 100
+            fan_speed_percent = float(100 - new_duty_cycle)  # Duty cycle is inverted due to PWM amplifier
+            # self.logger.debug('grillplat pifire_pwm _ramp_device: Changing fan speed percent to ' + str(fan_speed_percent)) # Redundant
+            # Call self.set_duty_cycle but set extra override_ramping parameter to False so we don't kill the thread
+            self.set_duty_cycle(
+                fan_speed_percent, False
+            )  # set_duty_cycle takes fan speed percent, not actual PWM duty cycle
+            self.current_fan_speed_percent = fan_speed_percent  # Keep track of our current fan percent speed
+            if self._ramp_thread.stopping.wait(delay):
+                break
 
-	def cleanup(self):
-		self.power.close()
-		self.igniter.close()
-		self.auger.close()
-		self.fan.close()
-		self.pwm.stop()
-		if self.selector is not None:
-			self.selector.close()
+    def cleanup(self):
+        self.power.close()
+        self.igniter.close()
+        self.auger.close()
+        self.fan.close()
+        self.pwm.stop()
+        if self.selector is not None:
+            self.selector.close()
 
-	# MARK: System / Platform Commands
-	"""
+    # MARK: System / Platform Commands
+    """
 	==============================
 	  System / Platform Commands 
 	==============================
@@ -250,185 +250,185 @@ class GrillPlatform:
 	
 	"""
 
-	def supported_commands(self, arglist):
-		supported_commands = [
-			'check_throttled',
-			'check_wifi_quality',
-			'check_cpu_temp',
-			'supported_commands',
-			'check_alive',
-			'scan_bluetooth',
-			'os_info',
-			'network_info',
-			'hardware_info',
-		]
+    def supported_commands(self, arglist):
+        supported_commands = [
+            "check_throttled",
+            "check_wifi_quality",
+            "check_cpu_temp",
+            "supported_commands",
+            "check_alive",
+            "scan_bluetooth",
+            "os_info",
+            "network_info",
+            "hardware_info",
+        ]
 
-		data = {
-			'result': 'OK',
-			'message': 'Supported commands listed in "data".',
-			'data': {'supported_cmds': supported_commands},
-		}
-		return data
+        data = {
+            "result": "OK",
+            "message": 'Supported commands listed in "data".',
+            "data": {"supported_cmds": supported_commands},
+        }
+        return data
 
-	def check_throttled(self, arglist):
-		"""Checks for under-voltage and throttling using vcgencmd.
+    def check_throttled(self, arglist):
+        """Checks for under-voltage and throttling using vcgencmd.
 
-		Returns:
-			(bool, bool): A tuple of (under_voltage, throttled) indicating their status.
-		"""
-		try:
-			output = subprocess.check_output(['sudo', 'vcgencmd', 'get_throttled'])
-			status_str = output.decode('utf-8').strip()[10:]  # Extract the numerical value
-			status_int = int(status_str, 16)  # Convert from hex to decimal
+        Returns:
+                (bool, bool): A tuple of (under_voltage, throttled) indicating their status.
+        """
+        try:
+            output = subprocess.check_output(["sudo", "vcgencmd", "get_throttled"])
+            status_str = output.decode("utf-8").strip()[10:]  # Extract the numerical value
+            status_int = int(status_str, 16)  # Convert from hex to decimal
 
-			under_voltage = bool(status_int & 0x10000)  # Check bit 16 for under-voltage
-			throttled = bool(status_int & 0x5)  # Check bits 0 and 2 for active throttling
-			if under_voltage or throttled:
-				message = 'WARNING: Under-voltage or throttled situation detected'
-			else:
-				message = 'No under-voltage or throttling detected.'
-			result = 'OK'
-		except:
-			under_voltage = False
-			throttled = False
-			message = 'Error obtaining throttled status.'
-			result = 'ERROR'
+            under_voltage = bool(status_int & 0x10000)  # Check bit 16 for under-voltage
+            throttled = bool(status_int & 0x5)  # Check bits 0 and 2 for active throttling
+            if under_voltage or throttled:
+                message = "WARNING: Under-voltage or throttled situation detected"
+            else:
+                message = "No under-voltage or throttling detected."
+            result = "OK"
+        except:
+            under_voltage = False
+            throttled = False
+            message = "Error obtaining throttled status."
+            result = "ERROR"
 
-		data = {
-			'result': result,
-			'message': message,
-			'data': {'cpu_under_voltage': under_voltage, 'cpu_throttled': throttled},
-		}
-		self.logger.debug(f'Check Throttled Called. [data = {data}]')
-		return data
+        data = {
+            "result": result,
+            "message": message,
+            "data": {"cpu_under_voltage": under_voltage, "cpu_throttled": throttled},
+        }
+        self.logger.debug(f"Check Throttled Called. [data = {data}]")
+        return data
 
-	def check_wifi_quality(self, arglist):
-		"""Checks the Wi-Fi signal quality and returns the value (or None if not connected)."""
-		return get_wifi_quality(logger=self.logger)
+    def check_wifi_quality(self, arglist):
+        """Checks the Wi-Fi signal quality and returns the value (or None if not connected)."""
+        return get_wifi_quality(logger=self.logger)
 
-	def check_cpu_temp(self, arglist):
-		try:
-			output = subprocess.check_output(['sudo', 'vcgencmd', 'measure_temp'])
-			temp = output.decode('utf-8').replace('temp=', '').replace("'C", '').replace('\n', '')
-			result = 'OK'
-			message = 'Successfully obtained CPU temperature.'
+    def check_cpu_temp(self, arglist):
+        try:
+            output = subprocess.check_output(["sudo", "vcgencmd", "measure_temp"])
+            temp = output.decode("utf-8").replace("temp=", "").replace("'C", "").replace("\n", "")
+            result = "OK"
+            message = "Successfully obtained CPU temperature."
 
-			if is_float(temp):
-				temp = float(temp)
-			else:
-				temp = 0.0
-				message = 'Error: command output is not a valid float.'
-				result = 'ERROR'
-		except:
-			temp = 0.0
-			message = 'Error obtaining CPU temperature.'
-			result = 'ERROR'
+            if is_float(temp):
+                temp = float(temp)
+            else:
+                temp = 0.0
+                message = "Error: command output is not a valid float."
+                result = "ERROR"
+        except:
+            temp = 0.0
+            message = "Error obtaining CPU temperature."
+            result = "ERROR"
 
-		data = {'result': result, 'message': message, 'data': {'cpu_temp': float(temp)}}
-		self.logger.debug(f'Check CPU Temp Called. [data = {data}]')
-		return data
+        data = {"result": result, "message": message, "data": {"cpu_temp": float(temp)}}
+        self.logger.debug(f"Check CPU Temp Called. [data = {data}]")
+        return data
 
-	def check_alive(self, arglist):
-		"""
-		Simple check to see if the platform is up and running.
-		"""
+    def check_alive(self, arglist):
+        """
+        Simple check to see if the platform is up and running.
+        """
 
-		data = {'result': 'OK', 'message': 'The control script is running.', 'data': {}}
-		return data
+        data = {"result": "OK", "message": "The control script is running.", "data": {}}
+        return data
 
-	def scan_bluetooth(self, arglist):
-		"""
-		Scan for bluetooth device addresses using bleak (modern BlueZ D-Bus API).
-		bleak cooperates with bluetoothd rather than fighting it over raw HCI access,
-		making it compatible with BlueZ 5.56+ unlike the unmaintained bluepy library.
-		"""
-		import asyncio
+    def scan_bluetooth(self, arglist):
+        """
+        Scan for bluetooth device addresses using bleak (modern BlueZ D-Bus API).
+        bleak cooperates with bluetoothd rather than fighting it over raw HCI access,
+        making it compatible with BlueZ 5.56+ unlike the unmaintained bluepy library.
+        """
+        import asyncio
 
-		try:
-			from bleak import BleakScanner
-		except ImportError:
-			return {
-				'result': 'ERROR',
-				'message': 'bleak is not installed. Run: pip install bleak',
-				'data': {'bt_devices': []},
-			}
+        try:
+            from bleak import BleakScanner
+        except ImportError:
+            return {
+                "result": "ERROR",
+                "message": "bleak is not installed. Run: pip install bleak",
+                "data": {"bt_devices": []},
+            }
 
-		bt_devices = []
-		result = 'OK'
-		message = 'Bluetooth scan completed successfully.'
+        bt_devices = []
+        result = "OK"
+        message = "Bluetooth scan completed successfully."
 
-		async def _scan():
-			discovered = await BleakScanner.discover(timeout=5.0)
-			for dev in discovered:
-				name = dev.name or 'Unknown'
-				bt_devices.append({'name': name, 'hw_id': dev.address.lower(), 'info': ''})
-				self.logger.debug(f'scan_bluetooth: Found device {name} ({dev.address})')
+        async def _scan():
+            discovered = await BleakScanner.discover(timeout=5.0)
+            for dev in discovered:
+                name = dev.name or "Unknown"
+                bt_devices.append({"name": name, "hw_id": dev.address.lower(), "info": ""})
+                self.logger.debug(f"scan_bluetooth: Found device {name} ({dev.address})")
 
-		try:
-			asyncio.run(_scan())
-		except Exception as e:
-			result = 'ERROR'
-			message = f'Bluetooth scan error: {e}'
-			self.logger.error(f'scan_bluetooth: Error during scan - {e}')
+        try:
+            asyncio.run(_scan())
+        except Exception as e:
+            result = "ERROR"
+            message = f"Bluetooth scan error: {e}"
+            self.logger.error(f"scan_bluetooth: Error during scan - {e}")
 
-		data = {'result': result, 'message': message, 'data': {'bt_devices': bt_devices}}
-		return data
+        data = {"result": result, "message": message, "data": {"bt_devices": bt_devices}}
+        return data
 
-	def os_info(self, arglist):
-		"""
-		Retrieve OS information such as version and architecture.
-		"""
-		os_info = get_os_info()
+    def os_info(self, arglist):
+        """
+        Retrieve OS information such as version and architecture.
+        """
+        os_info = get_os_info()
 
-		data = {'result': 'OK', 'message': 'OS information retrieved successfully.', 'data': os_info}
-		return data
+        data = {"result": "OK", "message": "OS information retrieved successfully.", "data": os_info}
+        return data
 
-	def network_info(self, arglist):
-		"""
-		Retrieve network information such as IP address and MAC address.
-		"""
-		import netifaces
+    def network_info(self, arglist):
+        """
+        Retrieve network information such as IP address and MAC address.
+        """
+        import netifaces
 
-		ifaces = netifaces.interfaces()
-		net_info = {}
+        ifaces = netifaces.interfaces()
+        net_info = {}
 
-		for iface in ifaces:
-			addrs = netifaces.ifaddresses(iface)
-			ip_addr = addrs.get(netifaces.AF_INET, [{}])[0].get('addr', 'N/A')
-			mac_addr = addrs.get(netifaces.AF_LINK, [{}])[0].get('addr', 'N/A')
-			net_info[iface] = {'ip_address': ip_addr, 'mac_address': mac_addr}
+        for iface in ifaces:
+            addrs = netifaces.ifaddresses(iface)
+            ip_addr = addrs.get(netifaces.AF_INET, [{}])[0].get("addr", "N/A")
+            mac_addr = addrs.get(netifaces.AF_LINK, [{}])[0].get("addr", "N/A")
+            net_info[iface] = {"ip_address": ip_addr, "mac_address": mac_addr}
 
-		data = {'result': 'OK', 'message': 'Network information retrieved successfully.', 'data': net_info}
-		return data
+        data = {"result": "OK", "message": "Network information retrieved successfully.", "data": net_info}
+        return data
 
-	def hardware_info(self, arglist):
-		"""
-		Retrieve hardware information such as CPU model and RAM size.
-		"""
-		import psutil
+    def hardware_info(self, arglist):
+        """
+        Retrieve hardware information such as CPU model and RAM size.
+        """
+        import psutil
 
-		cpu_info = {
-			'hardware': 'Unknown',
-			'model': 'Unknown',
-			'model_name': 'Unknown',
-			'cores': psutil.cpu_count(logical=True),
-			'frequency': psutil.cpu_freq().current if psutil.cpu_freq() else 'Unknown',
-		}
+        cpu_info = {
+            "hardware": "Unknown",
+            "model": "Unknown",
+            "model_name": "Unknown",
+            "cores": psutil.cpu_count(logical=True),
+            "frequency": psutil.cpu_freq().current if psutil.cpu_freq() else "Unknown",
+        }
 
-		with open('/proc/cpuinfo') as f:
-			for line in f:
-				if 'hardware' in line.lower():
-					cpu_info['hardware'] = line.strip().split(':')[1].strip()
-				if 'model name' in line.lower():
-					cpu_info['model_name'] = line.strip().split(':')[1].strip()
-				elif 'model' in line.lower():
-					cpu_info['model'] = line.strip().split(':')[1].strip()
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if "hardware" in line.lower():
+                    cpu_info["hardware"] = line.strip().split(":")[1].strip()
+                if "model name" in line.lower():
+                    cpu_info["model_name"] = line.strip().split(":")[1].strip()
+                elif "model" in line.lower():
+                    cpu_info["model"] = line.strip().split(":")[1].strip()
 
-		mem_info = psutil.virtual_memory()
+        mem_info = psutil.virtual_memory()
 
-		data = {
-			'result': 'OK',
-			'message': 'Hardware information retrieved successfully.',
-			'data': {'cpu_info': cpu_info, 'total_ram': mem_info.total, 'available_ram': mem_info.available},
-		}
-		return data
+        data = {
+            "result": "OK",
+            "message": "Hardware information retrieved successfully.",
+            "data": {"cpu_info": cpu_info, "total_ram": mem_info.total, "available_ram": mem_info.available},
+        }
+        return data

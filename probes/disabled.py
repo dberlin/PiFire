@@ -8,14 +8,14 @@ PiFire Probes Disabled Module
 Description:
   This module is loaded in the case where the probes complex is disabled.
 
-	Ex Device Definition:
+        Ex Device Definition:
 
-	device_info = {
-			'device' : 'your_device_name',	# Unique name for the device
-			'module' : 'disabled',  		# Must be populated for this module to load properly
-			'ports' : ['ADC0', 'RTD0', etc... ], # This should be defined by the user with the number of ports desired
-			'config' : {}
-		}
+        device_info = {
+                        'device' : 'your_device_name',	# Unique name for the device
+                        'module' : 'disabled',  		# Must be populated for this module to load properly
+                        'ports' : ['ADC0', 'RTD0', etc... ], # This should be defined by the user with the number of ports desired
+                        'config' : {}
+                }
 """
 
 """
@@ -34,28 +34,28 @@ from probes.base import ProbeInterface
 
 
 class ReadProbes(ProbeInterface):
-	applies_kalman = False  # No real sensor; nothing to filter.
+    applies_kalman = False  # No real sensor; nothing to filter.
 
-	def __init__(self, probe_info, device_info, units):
-		super().__init__(probe_info, device_info, units)
+    def __init__(self, probe_info, device_info, units):
+        super().__init__(probe_info, device_info, units)
 
-	def _init_device(self):
-		pass
+    def _init_device(self):
+        pass
 
-	def read_all_ports(self, output_data):
-		for port in self.port_map:
-			self.output_data['tr'][self.port_map[port]] = 0
+    def read_all_ports(self, output_data):
+        for port in self.port_map:
+            self.output_data["tr"][self.port_map[port]] = 0
 
-			""" Store the constant 0 placeholder; this device has no real sensor to filter """
-			if port == self.primary_port:
-				self.output_data['primary'][self.port_map[port]] = 0
-			elif port in self.food_ports:
-				self.output_data['food'][self.port_map[port]] = 0
-			elif port in self.aux_ports:
-				self.output_data['aux'][self.port_map[port]] = 0
+            """ Store the constant 0 placeholder; this device has no real sensor to filter """
+            if port == self.primary_port:
+                self.output_data["primary"][self.port_map[port]] = 0
+            elif port in self.food_ports:
+                self.output_data["food"][self.port_map[port]] = 0
+            elif port in self.aux_ports:
+                self.output_data["aux"][self.port_map[port]] = 0
 
-		return self.output_data
+        return self.output_data
 
-	def get_device_info(self):
-		self.device_info['status'] = {'connected': False, 'disabled': True}
-		return self.device_info
+    def get_device_info(self):
+        self.device_info["status"] = {"connected": False, "disabled": True}
+        return self.device_info

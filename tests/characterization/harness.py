@@ -43,8 +43,8 @@ import controller.runtime.controller as controller_mod
 
 
 # --- Pitfall 1: loggers are normally bound in `if __name__ == '__main__':` ---
-control.eventLogger = logging.getLogger('characterization')
-control.controlLogger = logging.getLogger('characterization')
+control.eventLogger = logging.getLogger("characterization")
+control.controlLogger = logging.getLogger("characterization")
 
 
 # --- Pitfall 2: Process_Monitor spawns a heartbeat thread + shells out to
@@ -55,107 +55,107 @@ control.controlLogger = logging.getLogger('characterization')
 
 @dataclass
 class CaptureResult:
-	grill_calls: list = field(default_factory=list)
-	display_commands: list = field(default_factory=list)
-	notifications: list = field(default_factory=list)
-	final_control: dict = field(default_factory=dict)
-	final_status: dict = field(default_factory=dict)
-	final_metrics: dict = field(default_factory=dict)
+    grill_calls: list = field(default_factory=list)
+    display_commands: list = field(default_factory=list)
+    notifications: list = field(default_factory=list)
+    final_control: dict = field(default_factory=dict)
+    final_status: dict = field(default_factory=dict)
+    final_metrics: dict = field(default_factory=dict)
 
 
 class _CappedProbes:
-	"""Wraps a probe fake; after `cap` reads, injects `{'updated': True}` into
-	the store (MERGE) so the work-cycle loop breaks cleanly on its next
-	top-of-iteration read_control(). This is the belt-and-suspenders bound for
-	modes with no natural timer/temp exit (Smoke steady-state, Hold, Monitor,
-	Manual)."""
+    """Wraps a probe fake; after `cap` reads, injects `{'updated': True}` into
+    the store (MERGE) so the work-cycle loop breaks cleanly on its next
+    top-of-iteration read_control(). This is the belt-and-suspenders bound for
+    modes with no natural timer/temp exit (Smoke steady-state, Hold, Monitor,
+    Manual)."""
 
-	def __init__(self, probes, store, cap):
-		self._probes = probes
-		self._store = store
-		self._cap = cap
-		self._n = 0
+    def __init__(self, probes, store, cap):
+        self._probes = probes
+        self._store = store
+        self._cap = cap
+        self._n = 0
 
-	def read_probes(self):
-		self._n += 1
-		if self._n >= self._cap:
-			self._store.write_control({'updated': True}, WriteKind.MERGE, origin='test-cap')
-		return self._probes.read_probes()
+    def read_probes(self):
+        self._n += 1
+        if self._n >= self._cap:
+            self._store.write_control({"updated": True}, WriteKind.MERGE, origin="test-cap")
+        return self._probes.read_probes()
 
-	def __getattr__(self, name):
-		return getattr(self._probes, name)
+    def __getattr__(self, name):
+        return getattr(self._probes, name)
 
 
 def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None, store=None):
-	# `runner` is accepted for signature symmetry with `run_mode` (which does
-	# the actual `control.build_runner` monkeypatching around `_work_cycle`);
-	# `make_ctx` itself never constructs a runner, so this is unused here.
-	#
-	# `store`: when None (the default, used by every InMemoryStore golden
-	# scenario) a fresh InMemoryStore is built and seeded from the args. When
-	# provided (the E2E suite passes a `SqliteStore`), it is used as-is --
-	# the caller is responsible for seeding it, since a real store can't be
-	# seeded through a constructor.
-	store = store if store is not None else InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
-	grill = grill or FakeGrillPlatform(
-		dc_fan=settings['platform'].get('dc_fan', False),
-		standalone=settings['platform'].get('standalone', True),
-		outputs=tuple(settings['platform']['outputs']),
-	)
-	notifier = FakeNotifier()
-	ctx = ControllerContext(
-		devices=Devices(grill_platform=grill, probe_complex=probes, dist_device=FakeDistance()),
-		store=store,
-		notifications=notifier,
-		clock=ManualClock(),
-	)
-	return ctx, grill, notifier
+    # `runner` is accepted for signature symmetry with `run_mode` (which does
+    # the actual `control.build_runner` monkeypatching around `_work_cycle`);
+    # `make_ctx` itself never constructs a runner, so this is unused here.
+    #
+    # `store`: when None (the default, used by every InMemoryStore golden
+    # scenario) a fresh InMemoryStore is built and seeded from the args. When
+    # provided (the E2E suite passes a `SqliteStore`), it is used as-is --
+    # the caller is responsible for seeding it, since a real store can't be
+    # seeded through a constructor.
+    store = store if store is not None else InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
+    grill = grill or FakeGrillPlatform(
+        dc_fan=settings["platform"].get("dc_fan", False),
+        standalone=settings["platform"].get("standalone", True),
+        outputs=tuple(settings["platform"]["outputs"]),
+    )
+    notifier = FakeNotifier()
+    ctx = ControllerContext(
+        devices=Devices(grill_platform=grill, probe_complex=probes, dist_device=FakeDistance()),
+        store=store,
+        notifications=notifier,
+        clock=ManualClock(),
+    )
+    return ctx, grill, notifier
 
 
 def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, probe_cap=None, runner=None, store=None):
-	"""Run one `control._work_cycle` invocation hermetically and capture its
-	observable effects.
+    """Run one `control._work_cycle` invocation hermetically and capture its
+    observable effects.
 
-	`probe_cap`: if set, bounds modes with no natural exit -- see
-	`_CappedProbes` above. Pick a value comfortably larger than the number of
-	iterations needed to exercise the behavior under test (e.g. enough for a
-	couple of auger on/off cycles) but bounded so the test can't hang.
+    `probe_cap`: if set, bounds modes with no natural exit -- see
+    `_CappedProbes` above. Pick a value comfortably larger than the number of
+    iterations needed to exercise the behavior under test (e.g. enough for a
+    couple of auger on/off cycles) but bounded so the test can't hang.
 
-	`runner`: if set, monkeypatches `controller.runtime.runner.build_runner` for
-	the duration of the call so Hold mode uses this object (e.g. a scripted
-	`FakeControllerRunner`) instead of constructing a real PID/MPC core. Lets
-	Hold-mode scenarios pin the runner's `.latest()` output deterministically
-	without depending on real controller math.
+    `runner`: if set, monkeypatches `controller.runtime.runner.build_runner` for
+    the duration of the call so Hold mode uses this object (e.g. a scripted
+    `FakeControllerRunner`) instead of constructing a real PID/MPC core. Lets
+    Hold-mode scenarios pin the runner's `.latest()` output deterministically
+    without depending on real controller math.
 
-	NOTE: HoldMode (controller/runtime/modes/hold.py) calls
-	`controller.runtime.runner.build_runner(...)` directly (a patchable
-	module-level reference). The legacy inline Hold code in `control.py` that
-	used to call `control.build_runner` has been deleted (all modes are
-	migrated to `ControlMode` handlers), so only the runtime reference needs
-	patching now.
-	"""
-	ctx, grill, notifier = make_ctx(settings, control_data, pellet_db, probes, grill, store=store)
+    NOTE: HoldMode (controller/runtime/modes/hold.py) calls
+    `controller.runtime.runner.build_runner(...)` directly (a patchable
+    module-level reference). The legacy inline Hold code in `control.py` that
+    used to call `control.build_runner` has been deleted (all modes are
+    migrated to `ControlMode` handlers), so only the runtime reference needs
+    patching now.
+    """
+    ctx, grill, notifier = make_ctx(settings, control_data, pellet_db, probes, grill, store=store)
 
-	if probe_cap is not None:
-		probes = _CappedProbes(probes, ctx.store, probe_cap)
-		ctx.devices.probe_complex = probes
+    if probe_cap is not None:
+        probes = _CappedProbes(probes, ctx.store, probe_cap)
+        ctx.devices.probe_complex = probes
 
-	# Process_Monitor is neutralized globally by the autouse fixture in
-	# tests/conftest.py, so we only need to (optionally) inject a fake runner.
-	prev_runtime_build_runner = controller.runtime.runner.build_runner
-	if runner is not None:
-		fake_build_runner = lambda *a, **k: (runner, 'Active')
-		controller.runtime.runner.build_runner = fake_build_runner
-	try:
-		controller_mod.run_work_cycle(mode, ctx)
-	finally:
-		controller.runtime.runner.build_runner = prev_runtime_build_runner
+    # Process_Monitor is neutralized globally by the autouse fixture in
+    # tests/conftest.py, so we only need to (optionally) inject a fake runner.
+    prev_runtime_build_runner = controller.runtime.runner.build_runner
+    if runner is not None:
+        fake_build_runner = lambda *a, **k: (runner, "Active")
+        controller.runtime.runner.build_runner = fake_build_runner
+    try:
+        controller_mod.run_work_cycle(mode, ctx)
+    finally:
+        controller.runtime.runner.build_runner = prev_runtime_build_runner
 
-	return CaptureResult(
-		grill_calls=grill.calls,
-		display_commands=ctx.store.display_commands().list(),
-		notifications=notifier.sent,
-		final_control=ctx.store.read_control(),
-		final_status=ctx.store.read_status(),
-		final_metrics=ctx.store.read_metrics(),
-	)
+    return CaptureResult(
+        grill_calls=grill.calls,
+        display_commands=ctx.store.display_commands().list(),
+        notifications=notifier.sent,
+        final_control=ctx.store.read_control(),
+        final_status=ctx.store.read_status(),
+        final_metrics=ctx.store.read_metrics(),
+    )

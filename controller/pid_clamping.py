@@ -45,7 +45,7 @@ from controller.base import ControllerBase
 
 log_level = logging.DEBUG
 eventLogger = create_logger(
-	'events', filename='./logs/events.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level
+    "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
 )
 
 """
@@ -54,109 +54,109 @@ Class Definition
 
 
 class Controller(ControllerBase):
-	def __init__(self, config, units, cycle_data):
-		super().__init__(config, units, cycle_data)
-		self.function_list.append('set_gains')
-		self.function_list.append('get_k')
-		self._calculate_gains(config.get('PB', 100.0), config.get('Ti', 180.0), config.get('Td', 45.0))
+    def __init__(self, config, units, cycle_data):
+        super().__init__(config, units, cycle_data)
+        self.function_list.append("set_gains")
+        self.function_list.append("get_k")
+        self._calculate_gains(config.get("PB", 100.0), config.get("Ti", 180.0), config.get("Td", 45.0))
 
-		self.p = 0.0
-		self.i = 0.0
-		self.d = 0.0
-		self.u = 0
+        self.p = 0.0
+        self.i = 0.0
+        self.d = 0.0
+        self.u = 0
 
-		self.last_update = time.time()
-		self.error = 0.0
-		self.error_last = 0.0
-		self.set_point = 0
+        self.last_update = time.time()
+        self.error = 0.0
+        self.error_last = 0.0
+        self.set_point = 0
 
-		self.derv = 0.0
-		self.inter = 0.0
+        self.derv = 0.0
+        self.inter = 0.0
 
-		self.set_target(0.0)
+        self.set_target(0.0)
 
-	def _calculate_gains(self, pb, ti, td):
-		if pb == 0:
-			self.kp = 0
-		else:
-			self.kp = -1 / pb
-		if ti == 0:
-			self.ki = 0
-		else:
-			self.ki = self.kp / ti
-		self.kd = self.kp * td
-		eventLogger.debug('kp: ' + str(self.kp) + ', ki: ' + str(self.ki) + ', kd: ' + str(self.kd))
+    def _calculate_gains(self, pb, ti, td):
+        if pb == 0:
+            self.kp = 0
+        else:
+            self.kp = -1 / pb
+        if ti == 0:
+            self.ki = 0
+        else:
+            self.ki = self.kp / ti
+        self.kd = self.kp * td
+        eventLogger.debug("kp: " + str(self.kp) + ", ki: " + str(self.ki) + ", kd: " + str(self.kd))
 
-	def update(self, current):
-		# dt
-		dt = time.time() - self.last_update
+    def update(self, current):
+        # dt
+        dt = time.time() - self.last_update
 
-		# P
-		error = current - self.set_point
-		self.p = self.kp * error
+        # P
+        error = current - self.set_point
+        self.p = self.kp * error
 
-		# I
-		self.inter += error * dt
-		self.i = self.ki * self.inter
+        # I
+        self.inter += error * dt
+        self.i = self.ki * self.inter
 
-		# D
-		self.derv = (error - self.error_last) / dt
-		self.d = self.kd * self.derv
+        # D
+        self.derv = (error - self.error_last) / dt
+        self.d = self.kd * self.derv
 
-		# PID
-		self.u = self.p + self.i + self.d
+        # PID
+        self.u = self.p + self.i + self.d
 
-		# Clamping anti-windup method.
-		# Stops integration when the sum of the block components exceeds the output limits
-		# and the integrator output and block input have the same sign.
-		# Resumes integration when either the sum of the block components exceeds the output limits
-		# and the integrator output and block input have opposite sign or the sum no longer exceeds the output limits.
-		#
-		# Implemented via reversing the addition to self.inter above if we are clamping.
-		if not ((abs(self.u) >= 1) and (self.i * self.u > 0)):
-			clamping_log = 'false'
-			eventLogger.debug('Not clamping integrator.')
-		else:
-			clamping_log = 'true'
-			eventLogger.debug('clamping integrator.')
-			self.inter -= error * dt
-		eventLogger.debug(
-			'PID Update... error: '
-			+ str(error)
-			+ ', p: '
-			+ str(self.p)
-			+ ', i: '
-			+ str(self.i)
-			+ ', d: '
-			+ str(self.d)
-			+ ', pid: '
-			+ str(self.u)
-			+ ' , clamping: '
-			+ str(clamping_log)
-		)
+        # Clamping anti-windup method.
+        # Stops integration when the sum of the block components exceeds the output limits
+        # and the integrator output and block input have the same sign.
+        # Resumes integration when either the sum of the block components exceeds the output limits
+        # and the integrator output and block input have opposite sign or the sum no longer exceeds the output limits.
+        #
+        # Implemented via reversing the addition to self.inter above if we are clamping.
+        if not ((abs(self.u) >= 1) and (self.i * self.u > 0)):
+            clamping_log = "false"
+            eventLogger.debug("Not clamping integrator.")
+        else:
+            clamping_log = "true"
+            eventLogger.debug("clamping integrator.")
+            self.inter -= error * dt
+        eventLogger.debug(
+            "PID Update... error: "
+            + str(error)
+            + ", p: "
+            + str(self.p)
+            + ", i: "
+            + str(self.i)
+            + ", d: "
+            + str(self.d)
+            + ", pid: "
+            + str(self.u)
+            + " , clamping: "
+            + str(clamping_log)
+        )
 
-		# Update for next cycle
-		self.error_last = error
-		self.last_update = time.time()
+        # Update for next cycle
+        self.error_last = error
+        self.last_update = time.time()
 
-		return self.u
+        return self.u
 
-	def set_target(self, set_point):
-		self.set_point = set_point
-		self.error = 0.0
-		self.inter = 0.0
-		self.derv = 0.0
-		self.last_update = time.time()
+    def set_target(self, set_point):
+        self.set_point = set_point
+        self.error = 0.0
+        self.inter = 0.0
+        self.derv = 0.0
+        self.last_update = time.time()
 
-	def set_gains(self, pb, ti, td):
-		self._calculate_gains(pb, ti, td)
+    def set_gains(self, pb, ti, td):
+        self._calculate_gains(pb, ti, td)
 
-	def set_config(self, config):
-		super().set_config(config)
-		self._calculate_gains(config.get('PB', 100.0), config.get('Ti', 180.0), config.get('Td', 45.0))
-		self.error = 0.0
-		self.inter = 0.0
-		self.derv = 0.0
+    def set_config(self, config):
+        super().set_config(config)
+        self._calculate_gains(config.get("PB", 100.0), config.get("Ti", 180.0), config.get("Td", 45.0))
+        self.error = 0.0
+        self.inter = 0.0
+        self.derv = 0.0
 
-	def get_k(self):
-		return self.kp, self.ki, self.kd
+    def get_k(self):
+        return self.kp, self.ki, self.kd

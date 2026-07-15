@@ -6,16 +6,16 @@ from dataclasses import dataclass
 
 @dataclass
 class Devices:
-	grill_platform: object
-	probe_complex: object
-	dist_device: object
+    grill_platform: object
+    probe_complex: object
+    dist_device: object
 
 
 @dataclass
 class ControllerContext:
-	devices: object  # Devices
-	store: object  # Store
-	notifications: object  # Notifier
-	clock: object  # Clock
-	event_log: object = None
-	control_log: object = None
+    devices: object  # Devices
+    store: object  # Store
+    notifications: object  # Notifier
+    clock: object  # Clock
+    event_log: object = None
+    control_log: object = None

@@ -1,14 +1,2 @@
 # Line length is relaxed: ~99% of existing lines fit within 120 columns.
 line-length = 120
-# Tab width used when computing line length (the codebase indents with tabs).
-indent-width = 4
-
-[format]
-# The codebase indents with tabs and uses single quotes for strings.
-indent-style = "tab"
-quote-style = "single"
-line-ending = "lf"
-# Match the existing style: don't reflow on trailing commas or format
-# docstring code blocks.
-skip-magic-trailing-comma = true
-docstring-code-format = false

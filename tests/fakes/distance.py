@@ -1,9 +1,9 @@
 class FakeDistance:
-	def __init__(self, level=100):
-		self._level = level
+    def __init__(self, level=100):
+        self._level = level
 
-	def get_level(self, override=False):
-		return self._level
+    def get_level(self, override=False):
+        return self._level
 
-	def update_distances(self, empty, full):
-		pass
+    def update_distances(self, empty, full):
+        pass

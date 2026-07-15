@@ -40,60 +40,60 @@ Class Definition
 
 
 class Controller(ControllerBase):
-	def __init__(self, config, units, cycle_data):
-		super().__init__(config, units, cycle_data)
-		# Consumer of the shared 'control' logger, configured by the control
-		# process entry point (control.py). Do not re-configure it here.
-		self.controlLogger = logging.getLogger('control')
+    def __init__(self, config, units, cycle_data):
+        super().__init__(config, units, cycle_data)
+        # Consumer of the shared 'control' logger, configured by the control
+        # process entry point (control.py). Do not re-configure it here.
+        self.controlLogger = logging.getLogger("control")
 
-		pickle_path = pathlib.Path('./controller/fuzzy.pickle')
-		if not pathlib.Path.exists(pickle_path):
-			import subprocess
+        pickle_path = pathlib.Path("./controller/fuzzy.pickle")
+        if not pathlib.Path.exists(pickle_path):
+            import subprocess
 
-			command = ['python', 'update_fuzzy.py']
-			update_fuzzy = subprocess.run(command)
+            command = ["python", "update_fuzzy.py"]
+            update_fuzzy = subprocess.run(command)
 
-		try:
-			with open('./controller/fuzzy.pickle', 'rb') as pickle_file:
-				self.fuzzy_controller = pickle.load(pickle_file)
-			# print('Fuzzy Pickle Successfully Opened.')
-		except:
-			self.controlLogger.exception('An exception occurred when attempting to open the fuzzy.pickle file.')
-		self.set_target(0.0)
-		self.last_temp = -99
-		self.last_time = time.time()
-		self.cycle_time = cycle_data['HoldCycleTime']
+        try:
+            with open("./controller/fuzzy.pickle", "rb") as pickle_file:
+                self.fuzzy_controller = pickle.load(pickle_file)
+            # print('Fuzzy Pickle Successfully Opened.')
+        except:
+            self.controlLogger.exception("An exception occurred when attempting to open the fuzzy.pickle file.")
+        self.set_target(0.0)
+        self.last_temp = -99
+        self.last_time = time.time()
+        self.cycle_time = cycle_data["HoldCycleTime"]
 
-	def update(self, current):
-		if self.units == 'C':
-			current = int(current * (9 / 5) + 32)  # Celsius to Fahrenheit
+    def update(self, current):
+        if self.units == "C":
+            current = int(current * (9 / 5) + 32)  # Celsius to Fahrenheit
 
-		now = time.time()
+        now = time.time()
 
-		cycle_time = now - self.last_time
+        cycle_time = now - self.last_time
 
-		self.last_time = now
+        self.last_time = now
 
-		if self.last_temp == -99:
-			self.last_temp == current
-			cycle_time = self.cycle_time
+        if self.last_temp == -99:
+            self.last_temp == current
+            cycle_time = self.cycle_time
 
-		# Pass inputs to the ControlSystem using Antecedent labels with Pythonic API
-		self.fuzzy_controller.input['delta'] = self.set_point - current  # Delta = Set Point - Current Temperature
-		self.fuzzy_controller.input['current'] = current  # Current temperature
-		self.fuzzy_controller.input['rate_of_change'] = (current - self.last_temp) / cycle_time  # Rate of Change
+        # Pass inputs to the ControlSystem using Antecedent labels with Pythonic API
+        self.fuzzy_controller.input["delta"] = self.set_point - current  # Delta = Set Point - Current Temperature
+        self.fuzzy_controller.input["current"] = current  # Current temperature
+        self.fuzzy_controller.input["rate_of_change"] = (current - self.last_temp) / cycle_time  # Rate of Change
 
-		# Crunch the numbers
-		self.fuzzy_controller.compute()
+        # Crunch the numbers
+        self.fuzzy_controller.compute()
 
-		# Set last temp to current temp
-		self.last_temp = current
+        # Set last temp to current temp
+        self.last_temp = current
 
-		# Return the Cycle Ratio Computed
-		return self.fuzzy_controller.output['cycleratio']
+        # Return the Cycle Ratio Computed
+        return self.fuzzy_controller.output["cycleratio"]
 
-	def set_target(self, set_point):
-		self.set_point = set_point
-		if self.units == 'C':
-			self.set_point = int(set_point * (9 / 5) + 32)  # Convert to Fahrenheit
-		# self.last_update = time.time()
+    def set_target(self, set_point):
+        self.set_point = set_point
+        if self.units == "C":
+            self.set_point = int(set_point * (9 / 5) + 32)  # Convert to Fahrenheit
+        # self.last_update = time.time()

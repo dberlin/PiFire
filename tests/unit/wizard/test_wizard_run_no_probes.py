@@ -21,45 +21,45 @@ from common import common as c
 
 @pytest.fixture
 def no_install(monkeypatch):
-	"""Neutralize the real dependency-install side effects so run_wizard only
-	exercises the settings-writing logic under test."""
-	monkeypatch.setattr(wizard, 'logger', logging.getLogger('wizard_test'), raising=False)
-	monkeypatch.setattr(wizard, 'is_real_hardware', lambda *a, **k: False)
-	monkeypatch.setattr(wizard.time, 'sleep', lambda *a, **k: None)
+    """Neutralize the real dependency-install side effects so run_wizard only
+    exercises the settings-writing logic under test."""
+    monkeypatch.setattr(wizard, "logger", logging.getLogger("wizard_test"), raising=False)
+    monkeypatch.setattr(wizard, "is_real_hardware", lambda *a, **k: False)
+    monkeypatch.setattr(wizard.time, "sleep", lambda *a, **k: None)
 
-	class _Result:
-		returncode = 0
-		stdout = ''
-		stderr = ''
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
 
-	monkeypatch.setattr(wizard.subprocess, 'run', lambda *a, **k: _Result())
+    monkeypatch.setattr(wizard.subprocess, "run", lambda *a, **k: _Result())
 
 
 def test_run_wizard_no_probe_devices(ds, no_install):
-	settings = c.default_settings()
-	settings['probe_settings']['probe_map']['probe_devices'] = []
-	c.write_settings_store(settings)
+    settings = c.default_settings()
+    settings["probe_settings"]["probe_map"]["probe_devices"] = []
+    c.write_settings_store(settings)
 
-	wizard_data = c.read_wizard()
-	install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
+    wizard_data = c.read_wizard()
+    install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
 
-	# No probe devices -> probes profile_selected is empty, but it still carries
-	# a units setting. This must not raise.
-	assert install_info['modules']['probes']['profile_selected'] == []
-	assert 'units' in install_info['modules']['probes']['settings']
+    # No probe devices -> probes profile_selected is empty, but it still carries
+    # a units setting. This must not raise.
+    assert install_info["modules"]["probes"]["profile_selected"] == []
+    assert "units" in install_info["modules"]["probes"]["settings"]
 
-	wizard.run_wizard(settings, wizard_data, install_info)
+    wizard.run_wizard(settings, wizard_data, install_info)
 
 
 def test_run_wizard_dev_mode_resolves_to_restart_not_reboot(ds, no_install):
-	settings = c.default_settings()
-	settings['probe_settings']['probe_map']['probe_devices'] = []
-	c.write_settings_store(settings)
+    settings = c.default_settings()
+    settings["probe_settings"]["probe_map"]["probe_devices"] = []
+    c.write_settings_store(settings)
 
-	wizard_data = c.read_wizard()
-	install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
+    wizard_data = c.read_wizard()
+    install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
 
-	wizard.run_wizard(settings, wizard_data, install_info)
+    wizard.run_wizard(settings, wizard_data, install_info)
 
-	percent, status, output = c.get_wizard_install_status()
-	assert percent == 101
+    percent, status, output = c.get_wizard_install_status()
+    assert percent == 101

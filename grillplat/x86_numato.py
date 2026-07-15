@@ -41,235 +41,235 @@ from grillplat.system_commands import SystemCommandsMixin
 """
 
 # Default Numato relay index for each PiFire output.
-_DEFAULT_OUTPUTS = {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}
+_DEFAULT_OUTPUTS = {"power": 0, "igniter": 1, "auger": 2, "fan": 3}
 
 
 class GrillPlatform(SystemCommandsMixin):
-	def __init__(self, config):
-		self.logger = logging.getLogger('control')
-		self.config = config
+    def __init__(self, config):
+        self.logger = logging.getLogger("control")
+        self.config = config
 
-		outputs = config.get('outputs', {}) or {}
-		self.relay_map = {name: int(outputs.get(name, default)) for name, default in _DEFAULT_OUTPUTS.items()}
+        outputs = config.get("outputs", {}) or {}
+        self.relay_map = {name: int(outputs.get(name, default)) for name, default in _DEFAULT_OUTPUTS.items()}
 
-		numato_cfg = config.get('numato', {}) or {}
-		self.device = numato_cfg.get('device', '/dev/ttyACM0')
-		self.baudrate = int(numato_cfg.get('baudrate', 921600))
+        numato_cfg = config.get("numato", {}) or {}
+        self.device = numato_cfg.get("device", "/dev/ttyACM0")
+        self.baudrate = int(numato_cfg.get("baudrate", 921600))
 
-		fan_cfg = config.get('fan_controller', {}) or {}
-		self.chip = str(fan_cfg.get('chip', 'emc2101')).lower()
+        fan_cfg = config.get("fan_controller", {}) or {}
+        self.chip = str(fan_cfg.get("chip", "emc2101")).lower()
 
-		# I2C bus selection, matching the probe drivers' basic/extended scheme:
-		#   'basic'    -> the board's integrated I2C bus (board.SCL/SDA)
-		#   'extended' -> a numbered /dev/i2c-N bus, or a USB-to-I2C bridge
-		#                 (e.g. a CP2112) discovered by adapter-name match.
-		if 'i2c_bus_kind' in fan_cfg:
-			self.i2c_bus_kind = fan_cfg['i2c_bus_kind']
-		elif 'i2c_bus_match' in fan_cfg:
-			# Legacy config (pre basic/extended): the controller lived on a
-			# CP2112 bridge, so honor it as an extended bus.
-			self.i2c_bus_kind = 'extended'
-		else:
-			self.i2c_bus_kind = 'basic'
-		self.i2c_bus_num = fan_cfg.get('i2c_bus_num', fan_cfg.get('i2c_bus_match', 'CP2112'))
+        # I2C bus selection, matching the probe drivers' basic/extended scheme:
+        #   'basic'    -> the board's integrated I2C bus (board.SCL/SDA)
+        #   'extended' -> a numbered /dev/i2c-N bus, or a USB-to-I2C bridge
+        #                 (e.g. a CP2112) discovered by adapter-name match.
+        if "i2c_bus_kind" in fan_cfg:
+            self.i2c_bus_kind = fan_cfg["i2c_bus_kind"]
+        elif "i2c_bus_match" in fan_cfg:
+            # Legacy config (pre basic/extended): the controller lived on a
+            # CP2112 bridge, so honor it as an extended bus.
+            self.i2c_bus_kind = "extended"
+        else:
+            self.i2c_bus_kind = "basic"
+        self.i2c_bus_num = fan_cfg.get("i2c_bus_num", fan_cfg.get("i2c_bus_match", "CP2112"))
 
-		# Address defaults per chip when unset.
-		address = fan_cfg.get('address')
-		if address is None:
-			address = 0x2F if self.chip == 'emc2301' else 0x4C
-		elif isinstance(address, str):
-			address = int(address, 16)
-		self.emc_address = address
+        # Address defaults per chip when unset.
+        address = fan_cfg.get("address")
+        if address is None:
+            address = 0x2F if self.chip == "emc2301" else 0x4C
+        elif isinstance(address, str):
+            address = int(address, 16)
+        self.emc_address = address
 
-		self.frequency = config.get('frequency', 25000)
-		self.standalone = config.get('standalone', True)
+        self.frequency = config.get("frequency", 25000)
+        self.standalone = config.get("standalone", True)
 
-		# Cached commanded output state (avoids a serial round-trip per poll).
-		self._output_state = {'auger': False, 'fan': False, 'igniter': False, 'power': False}
-		self._fan_speed_percent = 0
+        # Cached commanded output state (avoids a serial round-trip per poll).
+        self._output_state = {"auger": False, "fan": False, "igniter": False, "power": False}
+        self._fan_speed_percent = 0
 
-		# Fan ramp control.
-		self._ramp_thread = None
-		self._ramp_stop = threading.Event()
+        # Fan ramp control.
+        self._ramp_thread = None
+        self._ramp_stop = threading.Event()
 
-		# Open the relay board.
-		self.relay = NumatoUSBRelay(self.device, baudrate=self.baudrate)
+        # Open the relay board.
+        self.relay = NumatoUSBRelay(self.device, baudrate=self.baudrate)
 
-		# Open the fan controller on the configured I2C bus.
-		i2c = open_i2c_bus(self.i2c_bus_kind, self.i2c_bus_num)
+        # Open the fan controller on the configured I2C bus.
+        i2c = open_i2c_bus(self.i2c_bus_kind, self.i2c_bus_num)
 
-		if self.chip == 'emc2301':
-			self.emc = EMC2301(i2c, address=self.emc_address)
-		else:
-			self.emc = EMC2101_LUT(i2c)
-			# Drive the fan directly from PiFire's control logic, not the
-			# chip's internal lookup-table fan curve.
-			self.emc.lut_enabled = False
+        if self.chip == "emc2301":
+            self.emc = EMC2301(i2c, address=self.emc_address)
+        else:
+            self.emc = EMC2101_LUT(i2c)
+            # Drive the fan directly from PiFire's control logic, not the
+            # chip's internal lookup-table fan curve.
+            self.emc.lut_enabled = False
 
-		# Start in a known state: all relays off, fan stopped.
-		self.relay.reset()
-		self.emc.manual_fan_speed = 0
-		# Apply the fan PWM frequency now so the chip is correct immediately,
-		# independent of whether control.py later calls set_pwm_frequency.
-		self.set_pwm_frequency(self.frequency)
+        # Start in a known state: all relays off, fan stopped.
+        self.relay.reset()
+        self.emc.manual_fan_speed = 0
+        # Apply the fan PWM frequency now so the chip is correct immediately,
+        # independent of whether control.py later calls set_pwm_frequency.
+        self.set_pwm_frequency(self.frequency)
 
-	# MARK: Output control
-	def _set_output(self, name, state):
-		# Call relay_on/relay_off directly (not relay_set) so the action is
-		# explicit and observable when the relay driver is mocked in tests.
-		index = self.relay_map[name]
-		if state:
-			self.relay.relay_on(index)
-		else:
-			self.relay.relay_off(index)
-		self._output_state[name] = state
+    # MARK: Output control
+    def _set_output(self, name, state):
+        # Call relay_on/relay_off directly (not relay_set) so the action is
+        # explicit and observable when the relay driver is mocked in tests.
+        index = self.relay_map[name]
+        if state:
+            self.relay.relay_on(index)
+        else:
+            self.relay.relay_off(index)
+        self._output_state[name] = state
 
-	def auger_on(self):
-		self.logger.debug('auger_on: Turning on auger')
-		self._set_output('auger', True)
+    def auger_on(self):
+        self.logger.debug("auger_on: Turning on auger")
+        self._set_output("auger", True)
 
-	def auger_off(self):
-		self.logger.debug('auger_off: Turning off auger')
-		self._set_output('auger', False)
+    def auger_off(self):
+        self.logger.debug("auger_off: Turning off auger")
+        self._set_output("auger", False)
 
-	def igniter_on(self):
-		self.logger.debug('igniter_on: Turning on igniter')
-		self._set_output('igniter', True)
+    def igniter_on(self):
+        self.logger.debug("igniter_on: Turning on igniter")
+        self._set_output("igniter", True)
 
-	def igniter_off(self):
-		self.logger.debug('igniter_off: Turning off igniter')
-		self._set_output('igniter', False)
+    def igniter_off(self):
+        self.logger.debug("igniter_off: Turning off igniter")
+        self._set_output("igniter", False)
 
-	def power_on(self):
-		self.logger.debug('power_on: Powering on grill platform')
-		self._set_output('power', True)
+    def power_on(self):
+        self.logger.debug("power_on: Powering on grill platform")
+        self._set_output("power", True)
 
-	def power_off(self):
-		self.logger.debug('power_off: Powering off grill platform')
-		self._set_output('power', False)
+    def power_off(self):
+        self.logger.debug("power_off: Powering off grill platform")
+        self._set_output("power", False)
 
-	def get_input_status(self):
-		# No selector/shutdown inputs on this platform.
-		return False
+    def get_input_status(self):
+        # No selector/shutdown inputs on this platform.
+        return False
 
-	# MARK: Fan / PWM control
-	def fan_on(self, fan_speed_percent=100):
-		self.logger.debug('fan_on: Enabling fan power and setting speed to ' + str(fan_speed_percent))
-		self.relay.relay_on(self.relay_map['fan'])
-		self._output_state['fan'] = True
-		self._stop_ramp()
-		self.set_duty_cycle(fan_speed_percent)
+    # MARK: Fan / PWM control
+    def fan_on(self, fan_speed_percent=100):
+        self.logger.debug("fan_on: Enabling fan power and setting speed to " + str(fan_speed_percent))
+        self.relay.relay_on(self.relay_map["fan"])
+        self._output_state["fan"] = True
+        self._stop_ramp()
+        self.set_duty_cycle(fan_speed_percent)
 
-	def fan_off(self):
-		self.logger.debug('fan_off: Stopping fan and removing power')
-		self._stop_ramp()
-		self.emc.manual_fan_speed = 0
-		self._fan_speed_percent = 0
-		self.relay.relay_off(self.relay_map['fan'])
-		self._output_state['fan'] = False
+    def fan_off(self):
+        self.logger.debug("fan_off: Stopping fan and removing power")
+        self._stop_ramp()
+        self.emc.manual_fan_speed = 0
+        self._fan_speed_percent = 0
+        self.relay.relay_off(self.relay_map["fan"])
+        self._output_state["fan"] = False
 
-	def fan_toggle(self):
-		if self._output_state['fan']:
-			self.fan_off()
-		else:
-			self.fan_on()
+    def fan_toggle(self):
+        if self._output_state["fan"]:
+            self.fan_off()
+        else:
+            self.fan_on()
 
-	def set_duty_cycle(self, fan_speed_percent, override_ramping=True):
-		# Called by control.py (override_ramping=True) and by the ramp thread
-		# (override_ramping=False so it does not stop the thread it runs in).
-		if override_ramping:
-			self._stop_ramp()
-		# Clamp to the EMC2101's valid 0-100 range.  manual_fan_speed raises
-		# ValueError outside that range; an out-of-range settings value would
-		# otherwise kill the ramp thread silently mid-ramp.
-		fan_speed_percent = max(0, min(100, fan_speed_percent))
-		# EMC2101 duty maps directly to fan speed percent (no inversion).
-		self.emc.manual_fan_speed = fan_speed_percent
-		self._fan_speed_percent = fan_speed_percent
+    def set_duty_cycle(self, fan_speed_percent, override_ramping=True):
+        # Called by control.py (override_ramping=True) and by the ramp thread
+        # (override_ramping=False so it does not stop the thread it runs in).
+        if override_ramping:
+            self._stop_ramp()
+        # Clamp to the EMC2101's valid 0-100 range.  manual_fan_speed raises
+        # ValueError outside that range; an out-of-range settings value would
+        # otherwise kill the ramp thread silently mid-ramp.
+        fan_speed_percent = max(0, min(100, fan_speed_percent))
+        # EMC2101 duty maps directly to fan speed percent (no inversion).
+        self.emc.manual_fan_speed = fan_speed_percent
+        self._fan_speed_percent = fan_speed_percent
 
-	def set_pwm_frequency(self, frequency=25000):
-		self.logger.debug('set_pwm_frequency: Setting PWM frequency to ' + str(frequency))
-		# Report the requested value so control.py's "re-apply if changed"
-		# comparison settles even though each chip rounds to its own grid.
-		self.frequency = frequency
-		try:
-			if self.chip == 'emc2301':
-				# The EMC2301 driver takes a frequency in Hz.
-				self.emc.pwm_frequency = frequency
-			else:
-				# EMC2101: f = 360 kHz / (2 * PWM_F); PWM_F also sets duty
-				# resolution (2 * PWM_F steps). Use the 360 kHz preset clock.
-				pwm_f = max(1, min(31, round(360000 / (2 * frequency))))
-				self.emc.set_pwm_clock(use_preset=False, use_slow=False)
-				self.emc.pwm_frequency_divisor = 1
-				self.emc.pwm_frequency = pwm_f
-		except (ValueError, OSError, AttributeError) as exc:
-			self.logger.warning('set_pwm_frequency: controller rejected frequency: ' + str(exc))
+    def set_pwm_frequency(self, frequency=25000):
+        self.logger.debug("set_pwm_frequency: Setting PWM frequency to " + str(frequency))
+        # Report the requested value so control.py's "re-apply if changed"
+        # comparison settles even though each chip rounds to its own grid.
+        self.frequency = frequency
+        try:
+            if self.chip == "emc2301":
+                # The EMC2301 driver takes a frequency in Hz.
+                self.emc.pwm_frequency = frequency
+            else:
+                # EMC2101: f = 360 kHz / (2 * PWM_F); PWM_F also sets duty
+                # resolution (2 * PWM_F steps). Use the 360 kHz preset clock.
+                pwm_f = max(1, min(31, round(360000 / (2 * frequency))))
+                self.emc.set_pwm_clock(use_preset=False, use_slow=False)
+                self.emc.pwm_frequency_divisor = 1
+                self.emc.pwm_frequency = pwm_f
+        except (ValueError, OSError, AttributeError) as exc:
+            self.logger.warning("set_pwm_frequency: controller rejected frequency: " + str(exc))
 
-	def _stop_ramp(self):
-		# Stop any in-progress fan ramp. The fan methods above call it; the
-		# ramp-start methods (added in a later task) reuse it. Safe to call when
-		# no ramp is running (self._ramp_thread is None).
-		if self._ramp_thread is not None:
-			self._ramp_stop.set()
-			if self._ramp_thread is not threading.current_thread():
-				self._ramp_thread.join(timeout=5)
-			self._ramp_thread = None
+    def _stop_ramp(self):
+        # Stop any in-progress fan ramp. The fan methods above call it; the
+        # ramp-start methods (added in a later task) reuse it. Safe to call when
+        # no ramp is running (self._ramp_thread is None).
+        if self._ramp_thread is not None:
+            self._ramp_stop.set()
+            if self._ramp_thread is not threading.current_thread():
+                self._ramp_thread.join(timeout=5)
+            self._ramp_thread = None
 
-	# MARK: Fan ramp (Smoke Plus)
-	def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
-		self.logger.debug(
-			'pwm_fan_ramp: Starting fan ramp on_time='
-			+ str(on_time)
-			+ ' min='
-			+ str(min_duty_cycle)
-			+ ' max='
-			+ str(max_duty_cycle)
-		)
-		self.relay.relay_on(self.relay_map['fan'])
-		self._output_state['fan'] = True
-		self._start_ramp(on_time, min_duty_cycle, max_duty_cycle)
+    # MARK: Fan ramp (Smoke Plus)
+    def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
+        self.logger.debug(
+            "pwm_fan_ramp: Starting fan ramp on_time="
+            + str(on_time)
+            + " min="
+            + str(min_duty_cycle)
+            + " max="
+            + str(max_duty_cycle)
+        )
+        self.relay.relay_on(self.relay_map["fan"])
+        self._output_state["fan"] = True
+        self._start_ramp(on_time, min_duty_cycle, max_duty_cycle)
 
-	def _start_ramp(self, on_time, min_duty_cycle, max_duty_cycle):
-		self._stop_ramp()
-		self._ramp_stop = threading.Event()
-		self._ramp_thread = threading.Thread(
-			target=self._ramp_device, args=(on_time, min_duty_cycle, max_duty_cycle), daemon=True
-		)
-		self._ramp_thread.start()
+    def _start_ramp(self, on_time, min_duty_cycle, max_duty_cycle):
+        self._stop_ramp()
+        self._ramp_stop = threading.Event()
+        self._ramp_thread = threading.Thread(
+            target=self._ramp_device, args=(on_time, min_duty_cycle, max_duty_cycle), daemon=True
+        )
+        self._ramp_thread.start()
 
-	def _ramp_device(self, on_time, min_duty_cycle, max_duty_cycle, fps=25):
-		# Linearly ramp the fan speed from min to max over on_time seconds.
-		# No inversion: values are fan-speed percent applied directly.
-		steps = max(int(fps * on_time), 1)
-		for i in range(steps):
-			fraction = i / steps
-			percent = min_duty_cycle + (max_duty_cycle - min_duty_cycle) * fraction
-			self.set_duty_cycle(round(percent, 2), override_ramping=False)
-			if self._ramp_stop.wait(1.0 / fps):
-				break
-		self.set_duty_cycle(max_duty_cycle, override_ramping=False)
+    def _ramp_device(self, on_time, min_duty_cycle, max_duty_cycle, fps=25):
+        # Linearly ramp the fan speed from min to max over on_time seconds.
+        # No inversion: values are fan-speed percent applied directly.
+        steps = max(int(fps * on_time), 1)
+        for i in range(steps):
+            fraction = i / steps
+            percent = min_duty_cycle + (max_duty_cycle - min_duty_cycle) * fraction
+            self.set_duty_cycle(round(percent, 2), override_ramping=False)
+            if self._ramp_stop.wait(1.0 / fps):
+                break
+        self.set_duty_cycle(max_duty_cycle, override_ramping=False)
 
-	# MARK: Lifecycle
-	def cleanup(self):
-		self.logger.debug('cleanup: Shutting down outputs')
-		self._stop_ramp()
-		try:
-			self.emc.manual_fan_speed = 0
-		except Exception:
-			pass
-		try:
-			self.relay.reset()
-		finally:
-			self.relay.close()
+    # MARK: Lifecycle
+    def cleanup(self):
+        self.logger.debug("cleanup: Shutting down outputs")
+        self._stop_ramp()
+        try:
+            self.emc.manual_fan_speed = 0
+        except Exception:
+            pass
+        try:
+            self.relay.reset()
+        finally:
+            self.relay.close()
 
-	def get_output_status(self):
-		self.current = {
-			'auger': self._output_state['auger'],
-			'igniter': self._output_state['igniter'],
-			'power': self._output_state['power'],
-			'fan': self._output_state['fan'],
-			'pwm': self._fan_speed_percent,
-			'frequency': self.frequency,
-		}
-		return self.current
+    def get_output_status(self):
+        self.current = {
+            "auger": self._output_state["auger"],
+            "igniter": self._output_state["igniter"],
+            "power": self._output_state["power"],
+            "fan": self._output_state["fan"],
+            "pwm": self._fan_speed_percent,
+            "frequency": self.frequency,
+        }
+        return self.current

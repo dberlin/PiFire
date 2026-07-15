@@ -52,7 +52,7 @@ app = Flask(__name__)
 # already defaults to 'threading'; the explicit pin is a safety belt so a stray
 # eventlet/gevent install can't silently switch modes and reintroduce the
 # monkey-patch hang. WebSockets are still served natively via simple-websocket.
-socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 QRcode(app)
 Mobility(app)
 
@@ -82,23 +82,23 @@ from blueprints.wizard import wizard_bp
 from blueprints.update import update_bp
 
 """ Register Flask Blueprints """
-app.register_blueprint(admin_bp, url_prefix='/admin')
-app.register_blueprint(api_bp, url_prefix='/api')
-app.register_blueprint(events_bp, url_prefix='/events')
-app.register_blueprint(logs_bp, url_prefix='/logs')
-app.register_blueprint(manifest_bp, url_prefix='/manifest')
-app.register_blueprint(manual_bp, url_prefix='/manual')
-app.register_blueprint(history_bp, url_prefix='/history')
-app.register_blueprint(metrics_bp, url_prefix='/metrics')
-app.register_blueprint(dash_bp, url_prefix='/dash')
-app.register_blueprint(pellets_bp, url_prefix='/pellets')
-app.register_blueprint(cookfile_bp, url_prefix='/cookfile')
-app.register_blueprint(tuner_bp, url_prefix='/tuner')
-app.register_blueprint(probeconfig_bp, url_prefix='/probeconfig')
-app.register_blueprint(recipes_bp, url_prefix='/recipes')
-app.register_blueprint(settings_bp, url_prefix='/settings')
-app.register_blueprint(wizard_bp, url_prefix='/wizard')
-app.register_blueprint(update_bp, url_prefix='/update')
+app.register_blueprint(admin_bp, url_prefix="/admin")
+app.register_blueprint(api_bp, url_prefix="/api")
+app.register_blueprint(events_bp, url_prefix="/events")
+app.register_blueprint(logs_bp, url_prefix="/logs")
+app.register_blueprint(manifest_bp, url_prefix="/manifest")
+app.register_blueprint(manual_bp, url_prefix="/manual")
+app.register_blueprint(history_bp, url_prefix="/history")
+app.register_blueprint(metrics_bp, url_prefix="/metrics")
+app.register_blueprint(dash_bp, url_prefix="/dash")
+app.register_blueprint(pellets_bp, url_prefix="/pellets")
+app.register_blueprint(cookfile_bp, url_prefix="/cookfile")
+app.register_blueprint(tuner_bp, url_prefix="/tuner")
+app.register_blueprint(probeconfig_bp, url_prefix="/probeconfig")
+app.register_blueprint(recipes_bp, url_prefix="/recipes")
+app.register_blueprint(settings_bp, url_prefix="/settings")
+app.register_blueprint(wizard_bp, url_prefix="/wizard")
+app.register_blueprint(update_bp, url_prefix="/update")
 
 """
 ==============================================================================
@@ -109,18 +109,18 @@ app.register_blueprint(update_bp, url_prefix='/update')
 
 @app.errorhandler(InternalServerError)
 def handle_500(e):
-	"""Handle 500 Server Error"""
-	return render_template('server_error.html'), 500
+    """Handle 500 Server Error"""
+    return render_template("server_error.html"), 500
 
 
-@app.route('/')
+@app.route("/")
 def index():
-	settings = read_settings()
+    settings = read_settings()
 
-	if settings['globals']['first_time_setup']:
-		return redirect('/wizard/welcome')
-	else:
-		return redirect('/dash')
+    if settings["globals"]["first_time_setup"]:
+        return redirect("/wizard/welcome")
+    else:
+        return redirect("/dash")
 
 
 """
@@ -133,7 +133,7 @@ def index():
 from blueprints.mobile import mobile_bp, socket_io
 
 mobile_bp.socketio = socketio
-app.register_blueprint(mobile_bp, url_prefix='/mobile')
+app.register_blueprint(mobile_bp, url_prefix="/mobile")
 
 """
 ==============================================================================
@@ -144,26 +144,26 @@ app.register_blueprint(mobile_bp, url_prefix='/mobile')
 # Setup logging
 settings = read_settings()
 
-log_level = logging.DEBUG if settings['globals']['debug_mode'] else logging.ERROR
+log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.ERROR
 webappLogger = create_logger(
-	'webapp', filename='./logs/webapp.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level
+    "webapp", filename="./logs/webapp.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
 )
 
-log_level = logging.DEBUG if settings['globals']['debug_mode'] else logging.INFO
+log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
 eventLogger = create_logger(
-	'events', filename='./logs/events.log', messageformat='%(asctime)s [%(levelname)s] %(message)s', level=log_level
+    "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
 )
 
-event_message = f'PiFire Web UI started. PiFire Version: {settings["versions"]["server"]} Build: {settings["versions"]["build"]}, Debug Mode: {settings["globals"]["debug_mode"]}'
+event_message = f"PiFire Web UI started. PiFire Version: {settings['versions']['server']} Build: {settings['versions']['build']}, Debug Mode: {settings['globals']['debug_mode']}"
 webappLogger.info(event_message)
 eventLogger.info(event_message)
 
 # Initialize server status to 'available' when app starts
 with app.app_context():
-	set_server_status('available')
+    set_server_status("available")
 
-if __name__ == '__main__':
-	if is_real_hardware():
-		socketio.run(app, host='0.0.0.0')
-	else:
-		socketio.run(app, host='0.0.0.0', debug=True)
+if __name__ == "__main__":
+    if is_real_hardware():
+        socketio.run(app, host="0.0.0.0")
+    else:
+        socketio.run(app, host="0.0.0.0", debug=True)

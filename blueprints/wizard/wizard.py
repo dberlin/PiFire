@@ -2,170 +2,170 @@ from common.common import read_settings, read_wizard, load_wizard_install_info
 
 
 def parse_bt_device_info(bt_devices):
-	settings = read_settings()
-	# Check if this hardware id is already in use
-	for index, peripheral in enumerate(bt_devices):
-		for device in settings['probe_settings']['probe_map']['probe_devices']:
-			# print(f'[DEBUG] Comparing {device["name"]} ({device["config"].get('hardware_id', None)}) to {name} ({hw_id})')
-			if device['config'].get('hardware_id', None) == peripheral['hw_id']:
-				bt_devices[index]['info'] += f'This hardware ID is already in use by {device["device"]}'
-				return bt_devices
-	return bt_devices
+    settings = read_settings()
+    # Check if this hardware id is already in use
+    for index, peripheral in enumerate(bt_devices):
+        for device in settings["probe_settings"]["probe_map"]["probe_devices"]:
+            # print(f'[DEBUG] Comparing {device["name"]} ({device["config"].get('hardware_id', None)}) to {name} ({hw_id})')
+            if device["config"].get("hardware_id", None) == peripheral["hw_id"]:
+                bt_devices[index]["info"] += f"This hardware ID is already in use by {device['device']}"
+                return bt_devices
+    return bt_devices
 
 
 def get_settings_dependencies_values(settings, moduleData):
-	moduleSettings = {}
-	for setting, data in moduleData['settings_dependencies'].items():
-		setting_location = data['settings']
-		setting_value = settings
-		try:
-			for setting_name in setting_location:
-				setting_value = setting_value[setting_name]
-		except KeyError, TypeError:
-			# The setting isn't present yet -- normal during initial setup (e.g. a
-			# platform whose settings haven't been written before this wizard run,
-			# or a module that introduces new settings keys). Fall back to None so
-			# the card still renders and the user can pick a value.
-			setting_value = None
-		moduleSettings[setting] = setting_value
-	return moduleSettings
+    moduleSettings = {}
+    for setting, data in moduleData["settings_dependencies"].items():
+        setting_location = data["settings"]
+        setting_value = settings
+        try:
+            for setting_name in setting_location:
+                setting_value = setting_value[setting_name]
+        except KeyError, TypeError:
+            # The setting isn't present yet -- normal during initial setup (e.g. a
+            # platform whose settings haven't been written before this wizard run,
+            # or a module that introduces new settings keys). Fall back to None so
+            # the card still renders and the user can pick a value.
+            setting_value = None
+        moduleSettings[setting] = setting_value
+    return moduleSettings
 
 
 def wizardInstallInfoDefaults(wizardData, settings):
 
-	wizardInstallInfo = {
-		'modules': {
-			'grillplatform': {
-				'profile_selected': [],  # Reference the profile in wizardData > wizard_manifest.json
-				'settings': {},
-				'config': {},
-			},
-			'display': {'profile_selected': [], 'settings': {}, 'config': {}},
-			'distance': {'profile_selected': [], 'settings': {}, 'config': {}},
-			'probes': {'profile_selected': [], 'settings': {'units': 'F'}, 'config': {}},
-		},
-		'probe_map': {},
-	}
-	""" Populate Modules Info with Defaults from Wizard Data including Settings """
-	for component in ['grillplatform', 'display', 'distance']:
-		for module in wizardData['modules'][component]:
-			if wizardData['modules'][component][module]['default']:
-				""" Populate Module Filename"""
-				wizardInstallInfo['modules'][component]['profile_selected'].append(
-					module
-				)  # TODO: Change wizard.py to reference the module filename instead, or in grill_platform use platform>system_type
-				for setting in wizardData['modules'][component][module]['settings_dependencies']:
-					""" Populate all settings with default value """
-					dep = wizardData['modules'][component][module]['settings_dependencies'][setting]
-					if 'options' in dep:
-						default_value = list(dep['options'].keys())[0]
-					else:
-						default_value = dep.get('default', '')
-					wizardInstallInfo['modules'][component]['settings'][setting] = default_value
-				if module == 'display':
-					wizardInstallInfo['modules'][component]['config'] = settings['display']['config'][module]
+    wizardInstallInfo = {
+        "modules": {
+            "grillplatform": {
+                "profile_selected": [],  # Reference the profile in wizardData > wizard_manifest.json
+                "settings": {},
+                "config": {},
+            },
+            "display": {"profile_selected": [], "settings": {}, "config": {}},
+            "distance": {"profile_selected": [], "settings": {}, "config": {}},
+            "probes": {"profile_selected": [], "settings": {"units": "F"}, "config": {}},
+        },
+        "probe_map": {},
+    }
+    """ Populate Modules Info with Defaults from Wizard Data including Settings """
+    for component in ["grillplatform", "display", "distance"]:
+        for module in wizardData["modules"][component]:
+            if wizardData["modules"][component][module]["default"]:
+                """ Populate Module Filename"""
+                wizardInstallInfo["modules"][component]["profile_selected"].append(
+                    module
+                )  # TODO: Change wizard.py to reference the module filename instead, or in grill_platform use platform>system_type
+                for setting in wizardData["modules"][component][module]["settings_dependencies"]:
+                    """ Populate all settings with default value """
+                    dep = wizardData["modules"][component][module]["settings_dependencies"][setting]
+                    if "options" in dep:
+                        default_value = list(dep["options"].keys())[0]
+                    else:
+                        default_value = dep.get("default", "")
+                    wizardInstallInfo["modules"][component]["settings"][setting] = default_value
+                if module == "display":
+                    wizardInstallInfo["modules"][component]["config"] = settings["display"]["config"][module]
 
-	""" Populate the default probe device / probe map from the default PCB Board """
-	wizardInstallInfo['probe_map'] = wizardData['boards'][
-		wizardInstallInfo['modules']['grillplatform']['profile_selected'][0]
-	]['probe_map']
+    """ Populate the default probe device / probe map from the default PCB Board """
+    wizardInstallInfo["probe_map"] = wizardData["boards"][
+        wizardInstallInfo["modules"]["grillplatform"]["profile_selected"][0]
+    ]["probe_map"]
 
-	""" Populate Probes Module List with all configured probe devices """
-	for device in wizardInstallInfo['probe_map']['probe_devices']:
-		wizardInstallInfo['modules']['probes']['profile_selected'].append(device['module'])
+    """ Populate Probes Module List with all configured probe devices """
+    for device in wizardInstallInfo["probe_map"]["probe_devices"]:
+        wizardInstallInfo["modules"]["probes"]["profile_selected"].append(device["module"])
 
-	return wizardInstallInfo
+    return wizardInstallInfo
 
 
 def wizardInstallInfoExisting(wizardData, settings):
-	wizardInstallInfo = {
-		'modules': {
-			'grillplatform': {'profile_selected': [settings['platform']['current']], 'settings': {}, 'config': {}},
-			'display': {'profile_selected': [settings['modules']['display']], 'settings': {}, 'config': {}},
-			'distance': {'profile_selected': [settings['modules']['dist']], 'settings': {}, 'config': {}},
-			'probes': {'profile_selected': [], 'settings': {'units': settings['globals']['units']}, 'config': {}},
-		},
-		'probe_map': settings['probe_settings']['probe_map'],
-	}
-	""" Populate Probes Module List with all configured probe devices """
-	for device in wizardInstallInfo['probe_map']['probe_devices']:
-		wizardInstallInfo['modules']['probes']['profile_selected'].append(device['module'])
+    wizardInstallInfo = {
+        "modules": {
+            "grillplatform": {"profile_selected": [settings["platform"]["current"]], "settings": {}, "config": {}},
+            "display": {"profile_selected": [settings["modules"]["display"]], "settings": {}, "config": {}},
+            "distance": {"profile_selected": [settings["modules"]["dist"]], "settings": {}, "config": {}},
+            "probes": {"profile_selected": [], "settings": {"units": settings["globals"]["units"]}, "config": {}},
+        },
+        "probe_map": settings["probe_settings"]["probe_map"],
+    }
+    """ Populate Probes Module List with all configured probe devices """
+    for device in wizardInstallInfo["probe_map"]["probe_devices"]:
+        wizardInstallInfo["modules"]["probes"]["profile_selected"].append(device["module"])
 
-	""" Populate Modules Info with current Settings """
-	for module in ['grillplatform', 'display', 'distance']:
-		selected = wizardInstallInfo['modules'][module]['profile_selected'][0]
-		""" Error condition if the item in settings doesn't match the wizard manifest """
-		if selected not in wizardData['modules'][module].keys():
-			if module == 'grillplatform':
-				selected = 'custom'
-				settings['platform']['current'] = selected
-			else:
-				selected = 'none'
-			wizardInstallInfo['modules'][module]['profile_selected'] = selected
+    """ Populate Modules Info with current Settings """
+    for module in ["grillplatform", "display", "distance"]:
+        selected = wizardInstallInfo["modules"][module]["profile_selected"][0]
+        """ Error condition if the item in settings doesn't match the wizard manifest """
+        if selected not in wizardData["modules"][module].keys():
+            if module == "grillplatform":
+                selected = "custom"
+                settings["platform"]["current"] = selected
+            else:
+                selected = "none"
+            wizardInstallInfo["modules"][module]["profile_selected"] = selected
 
-		for setting in wizardData['modules'][module][selected]['settings_dependencies']:
-			settingsLocation = wizardData['modules'][module][selected]['settings_dependencies'][setting]['settings']
-			settingsValue = settings.copy()
-			for index in range(0, len(settingsLocation)):
-				settingsValue = settingsValue[settingsLocation[index]]
-			wizardInstallInfo['modules'][module]['settings'][setting] = str(settingsValue)
-		if module == 'display':
-			wizardInstallInfo['modules'][module]['config'] = settings['display']['config'][
-				settings['modules']['display']
-			]
-	return wizardInstallInfo
+        for setting in wizardData["modules"][module][selected]["settings_dependencies"]:
+            settingsLocation = wizardData["modules"][module][selected]["settings_dependencies"][setting]["settings"]
+            settingsValue = settings.copy()
+            for index in range(0, len(settingsLocation)):
+                settingsValue = settingsValue[settingsLocation[index]]
+            wizardInstallInfo["modules"][module]["settings"][setting] = str(settingsValue)
+        if module == "display":
+            wizardInstallInfo["modules"][module]["config"] = settings["display"]["config"][
+                settings["modules"]["display"]
+            ]
+    return wizardInstallInfo
 
 
 def prepare_wizard_data(form_data):
-	wizardData = read_wizard()
+    wizardData = read_wizard()
 
-	wizardInstallInfo = load_wizard_install_info()
+    wizardInstallInfo = load_wizard_install_info()
 
-	wizardInstallInfo['modules'] = {
-		'grillplatform': {'profile_selected': [form_data['grillplatformSelect']], 'settings': {}, 'config': {}},
-		'display': {'profile_selected': [form_data['displaySelect']], 'settings': {}, 'config': {}},
-		'distance': {'profile_selected': [form_data['distanceSelect']], 'settings': {}, 'config': {}},
-		'probes': {'profile_selected': [], 'settings': {'units': form_data['probes_units']}, 'config': {}},
-	}
+    wizardInstallInfo["modules"] = {
+        "grillplatform": {"profile_selected": [form_data["grillplatformSelect"]], "settings": {}, "config": {}},
+        "display": {"profile_selected": [form_data["displaySelect"]], "settings": {}, "config": {}},
+        "distance": {"profile_selected": [form_data["distanceSelect"]], "settings": {}, "config": {}},
+        "probes": {"profile_selected": [], "settings": {"units": form_data["probes_units"]}, "config": {}},
+    }
 
-	for device in wizardInstallInfo['probe_map']['probe_devices']:
-		wizardInstallInfo['modules']['probes']['profile_selected'].append(device['module'])
+    for device in wizardInstallInfo["probe_map"]["probe_devices"]:
+        wizardInstallInfo["modules"]["probes"]["profile_selected"].append(device["module"])
 
-	for module in ['grillplatform', 'display', 'distance']:
-		module_ = module + '_'
-		moduleSelect = module + 'Select'
-		selected = form_data[moduleSelect]
-		for setting in wizardData['modules'][module][selected]['settings_dependencies']:
-			settingName = module_ + setting
-			if settingName in form_data:
-				wizardInstallInfo['modules'][module]['settings'][setting] = form_data[settingName]
-		for config, value in form_data.items():
-			if config.startswith(module_ + 'config_'):
-				wizardInstallInfo['modules'][module]['config'][config.replace(module_ + 'config_', '')] = value
+    for module in ["grillplatform", "display", "distance"]:
+        module_ = module + "_"
+        moduleSelect = module + "Select"
+        selected = form_data[moduleSelect]
+        for setting in wizardData["modules"][module][selected]["settings_dependencies"]:
+            settingName = module_ + setting
+            if settingName in form_data:
+                wizardInstallInfo["modules"][module]["settings"][setting] = form_data[settingName]
+        for config, value in form_data.items():
+            if config.startswith(module_ + "config_"):
+                wizardInstallInfo["modules"][module]["config"][config.replace(module_ + "config_", "")] = value
 
-	return wizardInstallInfo
+    return wizardInstallInfo
 
 
 def wizard_bus_kinds(wizardInstallInfo, wizardData):
-	"""Collect every configured I2C bus kind from an assembled wizardInstallInfo,
-	using the user's in-progress selections: each probe device's config
-	i2c_bus_kind, plus any grillplatform/distance settings-dependency whose
-	manifest `settings` path ends in 'i2c_bus_kind' (the fan controller and the
-	distance sensor). Used to validate the whole config at wizard finish."""
-	kinds = set()
-	for device in wizardInstallInfo.get('probe_map', {}).get('probe_devices', []):
-		kind = (device.get('config') or {}).get('i2c_bus_kind')
-		if kind:
-			kinds.add(kind)
-	for module in ('grillplatform', 'distance'):
-		module_info = wizardInstallInfo.get('modules', {}).get(module, {}) or {}
-		selected = (module_info.get('profile_selected') or [None])[0]
-		module_settings = module_info.get('settings', {}) or {}
-		module_manifest = (wizardData.get('modules', {}).get(module, {}) or {}).get(selected, {}) or {}
-		for dep_name, dep in (module_manifest.get('settings_dependencies', {}) or {}).items():
-			path = dep.get('settings') or []
-			if path and path[-1] == 'i2c_bus_kind':
-				value = module_settings.get(dep_name)
-				if value:
-					kinds.add(value)
-	return kinds
+    """Collect every configured I2C bus kind from an assembled wizardInstallInfo,
+    using the user's in-progress selections: each probe device's config
+    i2c_bus_kind, plus any grillplatform/distance settings-dependency whose
+    manifest `settings` path ends in 'i2c_bus_kind' (the fan controller and the
+    distance sensor). Used to validate the whole config at wizard finish."""
+    kinds = set()
+    for device in wizardInstallInfo.get("probe_map", {}).get("probe_devices", []):
+        kind = (device.get("config") or {}).get("i2c_bus_kind")
+        if kind:
+            kinds.add(kind)
+    for module in ("grillplatform", "distance"):
+        module_info = wizardInstallInfo.get("modules", {}).get(module, {}) or {}
+        selected = (module_info.get("profile_selected") or [None])[0]
+        module_settings = module_info.get("settings", {}) or {}
+        module_manifest = (wizardData.get("modules", {}).get(module, {}) or {}).get(selected, {}) or {}
+        for dep_name, dep in (module_manifest.get("settings_dependencies", {}) or {}).items():
+            path = dep.get("settings") or []
+            if path and path[-1] == "i2c_bus_kind":
+                value = module_settings.get(dep_name)
+                if value:
+                    kinds.add(value)
+    return kinds

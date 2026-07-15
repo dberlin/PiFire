@@ -15,10 +15,10 @@ from distance._tof_base import ToFHopperLevel
 
 
 class HopperLevel(ToFHopperLevel):
-	default_address = 0x29
+    default_address = 0x29
 
-	def _open_sensor(self, i2c, address):
-		self.tof = VL53L0X(i2c, address=address)
+    def _open_sensor(self, i2c, address):
+        self.tof = VL53L0X(i2c, address=address)
 
-	def _read_distance_mm(self):
-		return self.tof.range
+    def _read_distance_mm(self):
+        return self.tof.range
