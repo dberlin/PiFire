@@ -128,6 +128,25 @@ function selectI2CBus(value, itemID) {
 }
 
 //
+// USB Serial Device Discovery Functions
+//
+function scanUsbSerial(itemID, vid, pid) {
+	const modal = '#i2c_' + itemID + '_Modal';
+	const modalContent = '#i2c_' + itemID + '_Select';
+	$(modal).modal('show');
+	// Show scanning text while scanning
+	$(modalContent).html('<br> \
+                <h4>Scanning...</h4> \
+                <br> \
+                <div class="fa-3x"> \
+                    <i class="fa-solid fa-magnifying-glass fa-bounce"></i> \
+                </div> \
+                <br></br>');
+	// Load the USB serial scan results
+	$(modalContent).load("/wizard/usb_serial_scan", {"itemID" : itemID, "vid" : vid, "pid" : pid});
+}
+
+//
 // Device Functions
 //
 

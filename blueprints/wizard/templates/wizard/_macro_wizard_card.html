@@ -1,4 +1,4 @@
-{% from 'probeconfig/_macro_probes_config.html' import render_input_i2c_bus_num %}
+{% from 'probeconfig/_macro_probes_config.html' import render_input_i2c_bus_num, render_input_usb_serial_device %}
 
 {% macro render_wizard_card(moduleData, moduleSection, moduleSettings) %}
 <!-- Form for Selected Module -->
@@ -35,6 +35,8 @@
 					<td>
 						{% if moduleData['settings_dependencies'][setting].get('type') == 'i2c_bus_num' %}
 						{{ render_input_i2c_bus_num(moduleSection ~ '_' ~ setting, '', moduleSettings['settings'][setting], moduleSection ~ '_' ~ (setting | replace('_num', '_kind'))) }}
+						{% elif moduleData['settings_dependencies'][setting].get('type') == 'usb_serial_device' %}
+						{{ render_input_usb_serial_device(moduleSection ~ '_' ~ setting, '', moduleSettings['settings'][setting], moduleData['settings_dependencies'][setting].get('vid'), moduleData['settings_dependencies'][setting].get('pid')) }}
 						{% else %}
 						<select class="form-control" id="{{ moduleSection }}_{{ setting }}" name="{{ moduleSection }}_{{ setting }}">
 						{% for option in moduleData['settings_dependencies'][setting]['options'] %}

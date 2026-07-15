@@ -584,6 +584,51 @@
 
 {% endmacro %}
 
+{% macro render_input_usb_serial_device(dom_id, css_class, default, vid, pid) %}
+
+<div class="input-group mb-3">
+    <input type="text" class="form-control {{ css_class }}"
+    value="{{ default }}" aria-label="usb_serial_device"
+    id="{{ dom_id }}"
+    name="{{ dom_id }}"/>
+    <div class="input-group-append">
+        <button type="button" class="btn btn-success" id="i2c_{{ dom_id }}_Scan" onclick="scanUsbSerial('{{ dom_id }}', '{{ vid or '' }}', '{{ pid or '' }}')">Discover</button>
+    </div>
+</div>
+
+<!-- Discover USB Serial Device Modal -->
+<div class="modal fade power-modal" id="i2c_{{ dom_id }}_Modal" data-backdrop="false" tabindex="-1" aria-labelledby="i2c_{{ dom_id }}_Label" aria-hidden="true" >
+    <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+        <div class="modal-header">
+        <h5 class="modal-title" id="i2c_{{ dom_id }}_Label">Discovered USB Serial Devices</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+        </button>
+        </div>
+        <div class="modal-body text-center">
+
+            <div id="i2c_{{ dom_id }}_Select">
+                <br>
+                <h4>Scanning...</h4>
+                <br>
+                <div class="fa-3x">
+                    <i class="fa-solid fa-magnifying-glass fa-bounce"></i>
+                </div>
+                <br>
+            </div>
+
+        </div>
+        <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" value="" onclick="scanUsbSerial('{{ dom_id }}', '{{ vid or '' }}', '{{ pid or '' }}')">Refresh</button>
+        </div>
+    </div>
+    </div>
+</div>
+
+{% endmacro %}
+
 {% macro render_input_thermoworks_discover(section, mode, label, default) %}
 
 <div class="input-group mb-3">
