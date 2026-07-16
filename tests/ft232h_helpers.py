@@ -4,7 +4,7 @@ from unittest import mock
 
 
 class FakeGpio:
-    """Stand-in for common.ft232h.Ft232hGpio. Records per-pin direction/value
+    """Stand-in for grillplat.ft232h.Ft232hGpio. Records per-pin direction/value
     so tests can assert what each relay pin was driven to."""
 
     def __init__(self):
@@ -13,7 +13,7 @@ class FakeGpio:
 
     def setup_output(self, pin_name):
         # Mirror the real validation so bad-pin tests still exercise it.
-        from common.ft232h import Ft232hGpio
+        from grillplat.ft232h import Ft232hGpio
 
         if str(pin_name) not in Ft232hGpio.PIN_BITS:
             raise ValueError(f"Unknown or reserved FT232H GPIO pin {pin_name!r}")

@@ -21,9 +21,9 @@ import threading
 
 from adafruit_emc2101.emc2101_lut import EMC2101_LUT
 
-from common.ft232h import open_gpio as open_ft232h_gpio
 from common.i2c_bus import open_i2c_bus
 from grillplat.emc2301 import EMC2301
+from grillplat.ft232h import open_gpio as open_ft232h_gpio
 from grillplat.system_commands import SystemCommandsMixin
 
 

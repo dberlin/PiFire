@@ -11,7 +11,7 @@ Description:
 
     basic      -- Blinka's board singleton: busio.I2C(board.SCL, board.SDA)
     extended   -- a kernel i2c-dev bus (/dev/i2c-N or an adapter-name match)
-    ft232h     -- an FT232H USB adapter, via pyftdi (see common/ft232h.py)
+    ft232h     -- an FT232H USB adapter, via pyftdi (see grillplat/ft232h.py)
     mcp2221    -- an MCP2221 USB adapter, via the EasyMCP2221 library
 
   ft232h/mcp2221 bypass the process-global `board` singleton so two USB
@@ -173,15 +173,15 @@ def discover_extended_i2c_buses(devices_path="/sys/bus/i2c/devices"):
 
 
 def discover_mcp2221_devices(*args, **kwargs):
-    """Re-export: delegates to common.mcp2221.discover_mcp2221_devices()."""
-    from common import mcp2221
+    """Re-export: delegates to grillplat.mcp2221.discover_mcp2221_devices()."""
+    from grillplat import mcp2221
 
     return mcp2221.discover_mcp2221_devices(*args, **kwargs)
 
 
 def discover_ft232h_devices(*args, **kwargs):
-    """Re-export: delegates to common.ft232h.discover_ft232h_devices()."""
-    from common import ft232h
+    """Re-export: delegates to grillplat.ft232h.discover_ft232h_devices()."""
+    from grillplat import ft232h
 
     return ft232h.discover_ft232h_devices(*args, **kwargs)
 
@@ -302,7 +302,7 @@ _cache_lock = threading.RLock()
 
 def reset_bus_state():
     """Clear the bus cache and opened-kind registry. Tests only."""
-    from common import ft232h, mcp2221
+    from grillplat import ft232h, mcp2221
 
     with _cache_lock:
         _bus_cache.clear()
@@ -333,11 +333,11 @@ def _construct_bus(kind, selector):
         logger.debug("open_i2c_bus[extended]: opening /dev/i2c-%s (from selector=%r)", bus_num, selector)
         return ExtendedI2C(bus_num)
     if kind == "ft232h":
-        from common import ft232h
+        from grillplat import ft232h
 
         return ft232h.construct_i2c_bus(selector)
     if kind == "mcp2221":
-        from common import mcp2221
+        from grillplat import mcp2221
 
         return mcp2221.construct_i2c_bus(selector)
     raise I2CBusConfigError(f"Unknown i2c bus kind {kind!r}.")

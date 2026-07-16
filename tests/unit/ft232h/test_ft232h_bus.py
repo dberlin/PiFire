@@ -2,7 +2,8 @@ from unittest import mock
 
 import pytest
 
-from common import ft232h, i2c_bus
+from common import i2c_bus
+from grillplat import ft232h
 
 
 class FakePort:

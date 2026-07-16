@@ -5,8 +5,8 @@ import pytest
 from EasyMCP2221.exceptions import LowSCLError, LowSDAError, NotAckError, TimeoutError
 
 import common.i2c_bus as i2c_bus
-from common import mcp2221
 from common.i2c_bus import I2CBusConfigError, assert_clean_blinka_env, resolve_i2c_bus, validate_bus_kinds
+from grillplat import mcp2221
 
 
 def test_resolve_i2c_bus_numeric_returns_int():
@@ -374,7 +374,7 @@ def test_find_i2c_bus_debug_logs_match_and_result(tmp_path, caplog):
 
 
 def test_open_i2c_bus_debug_logs_kind_and_selector(caplog):
-    from common import ft232h
+    from grillplat import ft232h
 
     fake_controller = type("FakeController", (), {})()
     with mock.patch.object(ft232h, "_new_controller", return_value=fake_controller):
