@@ -89,7 +89,7 @@ def create_logger(
 	"""
     if not logger.hasHandlers():
         logger.setLevel(level)
-        formatter = logging.Formatter(fmt=messageformat, datefmt="%Y-%m-%d %H:%M:%S")
+        formatter = logging.Formatter(fmt=messageformat, datefmt="%Y-%m-%d %H:%M:%S %z")
         # datefmt='%Y-%m-%d %H:%M:%S'
         # Add a rate limit filter for the voltage error logging
         config = {"match": ["An error occurred reading the voltage from one of the ports."]}

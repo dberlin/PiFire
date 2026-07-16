@@ -493,7 +493,7 @@ def create_logger(
 	"""
     if not logger.hasHandlers():
         logger.setLevel(level)
-        formatter = logging.Formatter(fmt=messageformat, datefmt="%Y-%m-%d %H:%M:%S")
+        formatter = logging.Formatter(fmt=messageformat, datefmt="%Y-%m-%d %H:%M:%S %z")
         # datefmt='%Y-%m-%d %H:%M:%S'
         handler = logging.FileHandler(filename)
         handler.setFormatter(formatter)
