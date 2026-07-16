@@ -197,6 +197,12 @@ def test_main_populates_cache_on_success(monkeypatch):
     assert device.status["last_error"] is None
     assert device.get_channel_celsius(1) == pytest.approx((165.0 - 32) * 5 / 9)
 
+    # Regression: status must survive the write_generic_key() -> json.dumps()
+    # round trip (last_poll_time used to be a raw datetime, which json.dumps
+    # rejects).
+    assert isinstance(device.status["last_poll_time"], str)
+    json.dumps(device.status)
+
 
 def test_main_sets_disconnected_status_on_auth_failure(monkeypatch):
     probe = _load_probe(monkeypatch)

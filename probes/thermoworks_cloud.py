@@ -166,7 +166,7 @@ class ThermoworksCloudDevice:
                             for channel, data in channels.items():
                                 if data is not None:
                                     self._cache[channel] = (_channel_to_celsius(data), now)
-                        self.status["last_poll_time"] = now
+                        self.status["last_poll_time"] = now.isoformat()
                         await asyncio.sleep(self.poll_interval)
             except Exception as exc:  # AuthenticationError, ClientError, network errors, etc.
                 self.status["connected"] = False
