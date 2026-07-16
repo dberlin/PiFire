@@ -345,7 +345,7 @@ log "*************************************************************************"
 cd /usr/local/bin/pifire/auto-install/supervisor
 echo "user=$USER" | tee -a control.conf > /dev/null
 echo "user=$USER" | tee -a webapp.conf > /dev/null
-$SUDO cp control.conf webapp.conf /etc/supervisor/conf.d/
+$SUDO cp control.conf webapp.conf display.conf /etc/supervisor/conf.d/
 
 if [[ "$SVISOR" == "ENABLE_SVISOR" ]]; then
     log " + Enabling the Supervisor WebUI on :9001"

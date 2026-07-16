@@ -375,10 +375,14 @@ log "*************************************************************************"
 # definitions (the .venv/uv variant -- correct for this x86_64 install) and add
 # the run-as user.
 $SUDO mkdir -p /etc/supervisord.d
-for prog in control webapp; do
+for prog in control webapp display; do
     tmp="/tmp/pifire-$prog.ini"
     cp "/usr/local/bin/pifire/auto-install/supervisor/$prog.conf" "$tmp"
-    echo "user=$USER" >> "$tmp"
+    # display runs as root (like the Raspberry Pi installers) since root was
+    # added to the video/input/render/seat groups above for cage/seatd access.
+    if [ "$prog" != "display" ]; then
+        echo "user=$USER" >> "$tmp"
+    fi
     $SUDO cp "$tmp" "/etc/supervisord.d/$prog.ini"
     rm -f "$tmp"
 done
