@@ -243,7 +243,7 @@ log "*************************************************************************"
 log "**  Setting up the Python venv (UV) and installing modules...         **"
 log "*************************************************************************"
 log " + Installing UV"
-if ! /bin/curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" /bin/sh 2>&1 | tee -a "$LOG"; then
+if ! /bin/curl -LsSf https://astral.sh/uv/install.sh | $SUDO env UV_INSTALL_DIR="/usr/local/bin" /bin/sh 2>&1 | tee -a "$LOG"; then
     log " !! Failed to install UV. Exiting."
     exit 1
 fi
