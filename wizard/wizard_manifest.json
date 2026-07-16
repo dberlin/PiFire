@@ -1862,6 +1862,15 @@
             },
             "settings": ["platform", "devices", "distance", "address"]
           },
+          "triggerlevel": {
+            "friendly_name": "Relay Type",
+            "description": "Select the trigger level for the relays attached to the platform.",
+            "options": {
+              "LOW": "Active Low",
+              "HIGH": "Active High"
+            },
+            "settings": ["platform", "triggerlevel"]
+          },
           "output_power": {
             "friendly_name": "Power Output Pin",
             "description": "FT232H GPIO pin driving the power relay.",

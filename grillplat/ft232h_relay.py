@@ -88,7 +88,7 @@ class GrillPlatform(SystemCommandsMixin):
         self.frequency = config.get("frequency", 25000)
         self.standalone = config.get("standalone", True)
 
-        active_high = config.get("triggerlevel", "LOW") == "HIGH"
+        active_high = config.get("triggerlevel", "HIGH") == "HIGH"
 
         # Cached commanded output state (avoids reading hardware per poll).
         self._output_state = {"auger": False, "fan": False, "igniter": False, "power": False}

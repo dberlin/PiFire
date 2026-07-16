@@ -191,7 +191,7 @@ def default_settings():
         },
         "current": "custom",
         "dc_fan": False,  # True if system has a DC Fan (Does not indicate PWM)
-        "triggerlevel": "LOW",  # Active LOW / Active HIGH for the Relay Outputs
+        "triggerlevel": "HIGH",  # Active LOW / Active HIGH for the Relay Outputs
         "buttonslevel": "HIGH",  # Active LOW / Active HIGH for the button inputs
         "standalone": True,  # Standalone (without OEM controller present)
         "real_hw": True,  # Set to True if running on real hardware (i.e. Raspberry Pi), False if running in a test environment

@@ -24,6 +24,10 @@ def test_manifest_registers_ft232h_relay():
     fan_mode = entry["settings_dependencies"]["fan_mode"]
     assert fan_mode["settings"] == ["platform", "fan_controller", "chip"]
     assert set(fan_mode["options"]) == {"none", "emc2101", "emc2301"}
+    # Relay trigger level is configurable, matching the other platforms.
+    triggerlevel = entry["settings_dependencies"]["triggerlevel"]
+    assert triggerlevel["settings"] == ["platform", "triggerlevel"]
+    assert set(triggerlevel["options"]) == {"LOW", "HIGH"}
 
 
 def test_ft232h_relay_selection_relay_mode_leaves_dc_fan_false():

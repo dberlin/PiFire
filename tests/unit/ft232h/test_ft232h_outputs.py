@@ -49,6 +49,15 @@ def test_active_high_trigger_level_not_inverted():
         assert harness.gpio.values["C0"] is True
 
 
+def test_missing_triggerlevel_defaults_to_active_high():
+    config = _relay_config()
+    del config["triggerlevel"]
+    with make_ft232h_platform(config) as (plat, harness):
+        assert harness.gpio.values["C0"] is False  # de-asserted at init (active-high default)
+        plat.power_on()
+        assert harness.gpio.values["C0"] is True
+
+
 def test_custom_pin_mapping_is_honored():
     with make_ft232h_platform(_relay_config(outputs={"power": "D4", "igniter": "D5", "auger": "D6", "fan": "D7"})) as (
         plat,
