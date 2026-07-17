@@ -1105,6 +1105,45 @@ def write_metrics(metrics=None, flush=False, new_metric=False):
             conn.execute(f"UPDATE metrics SET {set_sql} WHERE seq=?", values + [row[0]])
 
 
+def _load_json_file(filename, default, retry_count=0, max_retries=None):
+    """
+    Load and parse a JSON file, encapsulating the open/read/parse-with-retry
+    shape shared by several read_*_file functions in this module: open the
+    file, parse it as JSON, return `default` if the file can't be
+    opened/read, and retry (recursively) if the contents fail to parse as
+    JSON -- which happens when a reader collides with a concurrent writer
+    that hasn't finished yet.
+
+    :param filename: path of the JSON file to read
+    :param default: value returned if the file is missing/unreadable, or if
+            JSON parsing still fails once the retry budget is exhausted
+    :param retry_count: internal recursion counter; callers should leave this
+            at its default of 0
+    :param max_retries: maximum number of recursive retries to attempt when
+            the file fails to parse as JSON. None (default) retries without
+            bound, matching the historical read_wizard/read_updater_manifest
+            behavior. Pass 0 to disable retries entirely, matching
+            read_generic_json's historical behavior.
+    :return: parsed JSON data, or `default`
+    """
+    try:
+        json_data_file = os.fdopen(os.open(filename, os.O_RDONLY))
+        json_data_string = json_data_file.read()
+        data = json.loads(json_data_string)
+        json_data_file.close()
+        return data
+    except IOError, OSError:
+        write_log(f"ERROR: Could not read from {filename}.")
+        return default
+    except ValueError:
+        # A ValueError Exception occurs when multiple accesses collide, this code attempts a retry.
+        write_log(f"ERROR: Value Error Exception - JSONDecodeError reading {filename}")
+        json_data_file.close()
+        if max_retries is None or retry_count < max_retries:
+            return _load_json_file(filename, default, retry_count=retry_count + 1, max_retries=max_retries)
+        return default
+
+
 def read_settings_file(filename="settings.json", init=False, retry_count=0):
     """
     Read Settings from file
@@ -2062,25 +2101,7 @@ def read_wizard(filename="wizard/wizard_manifest.json"):
     :param filename: Filename to use (default wizard/wizard_manifest.json)
     :return: Wizard Data
     """
-    try:
-        json_data_file = os.fdopen(os.open(filename, os.O_RDONLY))
-        json_data_string = json_data_file.read()
-        wizard = json.loads(json_data_string)
-        json_data_file.close()
-    except IOError, OSError:
-        event = "ERROR: Could not read from wizard manifest."
-        write_log(event)
-        wizard = {"modules": {}}
-        return wizard
-    except ValueError:
-        # A ValueError Exception occurs when multiple accesses collide, this code attempts a retry.
-        event = "ERROR: Value Error Exception - JSONDecodeError reading wizard_manifest.json"
-        write_log(event)
-        json_data_file.close()
-        # Retry Reading Settings
-        wizard = read_wizard(filename=filename)
-
-    return wizard
+    return _load_json_file(filename, {"modules": {}})
 
 
 def _read_json_key_or_none(key):
@@ -2149,25 +2170,7 @@ def read_updater_manifest(filename="updater/updater_manifest.json"):
     :param filename: updater_manifest.json filename
     :return: Dependencies
     """
-    try:
-        json_data_file = os.fdopen(os.open(filename, os.O_RDONLY))
-        json_data_string = json_data_file.read()
-        dependencies = json.loads(json_data_string)
-        json_data_file.close()
-    except IOError, OSError:
-        event = "ERROR: Could not read from updater manifest."
-        write_log(event)
-        dependencies = {"dependencies": {}}
-        return dependencies
-    except ValueError:
-        # A ValueError Exception occurs when multiple accesses collide, this code attempts a retry.
-        event = "ERROR: Value Error Exception - JSONDecodeError reading updater_manifest.json"
-        write_log(event)
-        json_data_file.close()
-        # Retry Reading Settings
-        dependencies = read_updater_manifest(filename=filename)
-
-    return dependencies
+    return _load_json_file(filename, {"dependencies": {}})
 
 
 def get_updater_install_status():
@@ -2305,17 +2308,9 @@ def get_system_command_output(requested="supported_commands", timeout=1):
 
 
 def read_generic_json(filename):
-    try:
-        json_file = os.fdopen(os.open(filename, os.O_RDONLY))
-        json_data = json_file.read()
-        dictionary = json.loads(json_data)
-        json_file.close()
-    except:
-        dictionary = {}
-        event = f"An error occurred loading {filename}"
-        write_log(event)
-
-    return dictionary
+    # Historical behavior: no retry on a JSON parse error -- give up
+    # immediately and return the empty-dict default.
+    return _load_json_file(filename, {}, max_retries=0)
 
 
 def write_generic_json(dictionary, filename):
