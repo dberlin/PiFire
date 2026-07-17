@@ -433,7 +433,7 @@ def default_control():
     # builder reaching into the datastore). Importing at module scope would be a
     # circular import; importing here keeps the cycle out of import time.
     # Behavior is unchanged. See Task 8 report.
-    from common.common import read_settings
+    from common.datastore_accessors import read_settings
 
     settings = read_settings()
 
