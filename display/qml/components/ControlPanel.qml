@@ -21,7 +21,7 @@ RowLayout {
 			Layout.fillWidth: true
 			Layout.fillHeight: true
 			radius: panel.compact ? 12 : 16
-			color: mouse.pressed ? Qt.darker(Theme.card, 1.3) : Theme.card
+			color: Theme.card
 			border.width: 2
 			border.color: (modelData.action === "cmd_stop" || modelData.action === "cmd_shutdown")
 				? Theme.dangerColor
@@ -36,6 +36,13 @@ RowLayout {
 				font.pixelSize: panel.compact ? 20 : 25
 				font.bold: true
 				color: Theme.textColor
+			}
+
+			PressOverlay {
+				pressed: mouse.pressed
+				tint: (modelData.action === "cmd_stop" || modelData.action === "cmd_shutdown")
+					? Theme.dangerColor
+					: (modelData.active ? Theme.okColor : Theme.accentColor)
 			}
 
 			MouseArea {

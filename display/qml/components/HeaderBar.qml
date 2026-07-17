@@ -86,7 +86,8 @@ Item {
 					Rectangle { width: header.compact ? 16 : 20; height: 2; radius: 2; color: Theme.probeLabel }
 				}
 			}
-			TapHandler { onTapped: header.menuRequested() }
+			TapHandler { id: menuTap; onTapped: header.menuRequested() }
+			PressOverlay { pressed: menuTap.pressed }
 		}
 	}
 }

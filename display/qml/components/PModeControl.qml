@@ -11,6 +11,7 @@ Rectangle {
 	color: Theme.surface
 	opacity: active ? 1.0 : 0.4
 	Behavior on opacity { NumberAnimation { duration: Theme.animMs } }
+	PressOverlay { pressed: ctrlMouse.pressed }
 	Text {
 		anchors.centerIn: parent
 		text: "P-" + ctrl.pMode
@@ -18,6 +19,7 @@ Rectangle {
 		font.pixelSize: 30
 	}
 	MouseArea {
+		id: ctrlMouse
 		anchors.fill: parent
 		onClicked: ctrl.clicked()
 	}

@@ -8,6 +8,7 @@ Rectangle {
 	height: 60
 	radius: Theme.radius
 	color: Theme.surface
+	PressOverlay { pressed: barMouse.pressed }
 	Text {
 		anchors.centerIn: parent
 		text: bar.mode
@@ -16,6 +17,7 @@ Rectangle {
 		font.bold: true
 	}
 	MouseArea {
+		id: barMouse
 		anchors.fill: parent
 		onClicked: bar.clicked()
 	}

@@ -17,8 +17,9 @@ Button {
 	}
 	background: Rectangle {
 		radius: Theme.radius
-		color: b.down ? Qt.darker(b.accent, 1.4) : Theme.surface
+		color: Theme.surface
 		border.color: b.accent
 		border.width: b.activeFocus ? 4 : 2
+		PressOverlay { pressed: b.down; tint: b.accent }
 	}
 }

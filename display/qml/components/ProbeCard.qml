@@ -21,7 +21,8 @@ Rectangle {
 	radius: Theme.cardRadius
 	border.color: Theme.cardBorder
 
-	TapHandler { onTapped: card.tapped() }
+	TapHandler { id: tap; onTapped: card.tapped() }
+	PressOverlay { pressed: tap.pressed }
 
 	Column {
 		anchors.verticalCenter: parent.verticalCenter

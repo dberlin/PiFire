@@ -40,7 +40,8 @@ Rectangle {
 			color: Theme.inset
 			border.color: backend.fanOn ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.35) : Theme.cardBorder
 
-			TapHandler { onTapped: backend.toggleFan() }
+			TapHandler { id: fanTap; onTapped: backend.toggleFan() }
+			PressOverlay { pressed: fanTap.pressed }
 
 			Row {
 				anchors.fill: parent
@@ -89,7 +90,8 @@ Rectangle {
 			color: Theme.inset
 			border.color: backend.augerOn ? Qt.rgba(Theme.accentColor.r, Theme.accentColor.g, Theme.accentColor.b, 0.35) : Theme.cardBorder
 
-			TapHandler { onTapped: backend.toggleAuger() }
+			TapHandler { id: augerTap; onTapped: backend.toggleAuger() }
+			PressOverlay { pressed: augerTap.pressed }
 
 			Row {
 				anchors.fill: parent
@@ -138,7 +140,8 @@ Rectangle {
 			color: Theme.inset
 			border.color: backend.igniterOn ? Qt.rgba(Theme.igniterColor.r, Theme.igniterColor.g, Theme.igniterColor.b, 0.4) : Theme.cardBorder
 
-			TapHandler { onTapped: backend.toggleIgniter() }
+			TapHandler { id: igniterTap; onTapped: backend.toggleIgniter() }
+			PressOverlay { pressed: igniterTap.pressed; tint: Theme.igniterColor }
 
 			Row {
 				anchors.fill: parent

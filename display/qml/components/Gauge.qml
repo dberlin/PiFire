@@ -25,7 +25,7 @@ Item {
 	property string modeLabel: ""
 	signal tapped()
 
-	TapHandler { onTapped: g.tapped() }
+	TapHandler { id: tap; onTapped: g.tapped() }
 
 	readonly property real _frac: Math.max(0, Math.min(1, value / Math.max(maxValue, 1)))
 	readonly property real _spFrac: Math.max(0, Math.min(1, setpoint / Math.max(maxValue, 1)))
@@ -52,6 +52,19 @@ Item {
 			NumberAnimation { to: 1.06; duration: 1600; easing.type: Easing.InOutQuad }
 			NumberAnimation { to: 1.0; duration: 1600; easing.type: Easing.InOutQuad }
 		}
+	}
+
+	// Touch feedback: warm the dial face with the accent colour on press. A
+	// circular disc (not the rectangular PressOverlay) matches the gauge shape.
+	Rectangle {
+		anchors.centerIn: parent
+		width: g._radius * 2
+		height: width
+		radius: width / 2
+		color: g.arcColor
+		opacity: tap.pressed ? 0.18 : 0
+		visible: opacity > 0
+		Behavior on opacity { NumberAnimation { duration: 90 } }
 	}
 
 	Shape {

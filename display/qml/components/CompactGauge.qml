@@ -13,7 +13,8 @@ Rectangle {
 	radius: Theme.radius
 	color: Theme.surface
 
-	TapHandler { onTapped: cg.tapped() }
+	TapHandler { id: tap; onTapped: cg.tapped() }
+	PressOverlay { pressed: tap.pressed }
 	Column {
 		anchors.centerIn: parent
 		spacing: 2

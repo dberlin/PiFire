@@ -22,7 +22,8 @@ Rectangle {
 	radius: Theme.cardRadius
 	border.color: Theme.cardBorder
 
-	TapHandler { onTapped: card.checkRequested() }
+	TapHandler { id: tap; onTapped: card.checkRequested() }
+	PressOverlay { pressed: tap.pressed }
 
 	Column {
 		anchors.fill: parent

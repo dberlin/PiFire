@@ -9,6 +9,7 @@ Rectangle {
 	radius: Theme.radius
 	color: active ? Theme.ok : Theme.surface
 	Behavior on color { ColorAnimation { duration: Theme.animMs } }
+	PressOverlay { pressed: ctrlMouse.pressed }
 	Text {
 		anchors.centerIn: parent
 		text: "Smoke+"
@@ -16,6 +17,7 @@ Rectangle {
 		font.pixelSize: 26
 	}
 	MouseArea {
+		id: ctrlMouse
 		anchors.fill: parent
 		onClicked: ctrl.clicked()
 	}
