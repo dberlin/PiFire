@@ -14,9 +14,11 @@
 - **Serena for all code edits** (`replace_symbol_body`, `insert_*_symbol`, `replace_content`); never hand-edit code files blind.
 - **Public names stay stable.** Every currently-importable name in `common.common` remains importable from *somewhere*; `common/app.py` re-exports keep the blueprint-facing surface identical.
 - **No new dependencies.**
-- **Full suite green before each commit:** `python3 -m pytest -q`.
+- **Full suite green before each commit:** `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest -q`. Bare `python3 -m pytest` resolves an interpreter without PySide6 and reports false failures — never use it.
+- **`uvx ruff format <changed files>` before every commit** (standing repo rule).
 - **Frequent commits** — one per task.
-- `except (IOError, OSError):` — parenthesized tuple form everywhere (no Python-2 comma syntax).
+- **Leave `except IOError, OSError:` alone.** This repo is `requires-python = ">=3.14"`; PEP 758 makes the unparenthesized except-tuple valid, and `ruff format` canonicalizes *to* it. The original plan's "fix Python-2 except syntax" item was a misreading and has been struck (see Task 3).
+- **Branch base:** `refactor/common-split` is branched from `massive-reworks-and-new-ui` (f07f9b8), not `main` — `main` is 523 commits behind and does not contain the code this plan describes. The PR targets `massive-reworks-and-new-ui`.
 
 ---
 
@@ -55,7 +57,7 @@ def test_key_present_but_empty_returns_false():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest tests/unit/common/test_is_not_blank.py -v`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_is_not_blank.py -v`
 Expected: `test_key_present_but_empty_returns_false` FAILS (returns True); the other two PASS.
 
 - [ ] **Step 3: Apply the fix with Serena**
@@ -69,12 +71,12 @@ def is_not_blank(response, setting):
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python3 -m pytest tests/unit/common/test_is_not_blank.py -v`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_is_not_blank.py -v`
 Expected: 3 PASS.
 
 - [ ] **Step 5: Run the web suite to confirm no settings route regressed**
 
-Run: `python3 -m pytest tests/web -q`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web -q`
 Expected: PASS (all settings-route branches still store populated values; empty inputs now skip instead of crashing).
 
 - [ ] **Step 6: Commit**
@@ -129,7 +131,7 @@ def test_write_json_blob_roundtrip(monkeypatch):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest tests/unit/common/test_json_blob_helpers.py -v`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_json_blob_helpers.py -v`
 Expected: FAIL (`_read_json_blob` / `_write_json_blob` not defined).
 
 - [ ] **Step 3: Add the helpers with Serena**
@@ -167,7 +169,7 @@ Apply the same pattern to `read_settings_store`, `read_pellets_store`, `read_cur
 
 - [ ] **Step 5: Run the blob + datastore suites**
 
-Run: `python3 -m pytest tests/unit/common/test_common_blobs.py tests/unit/datastore -q`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_common_blobs.py tests/unit/datastore -q`
 Expected: PASS (existing behavior preserved).
 
 - [ ] **Step 6: Commit**
@@ -181,9 +183,11 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: Generic file-read-with-retry + fix Python-2 except syntax
+### Task 3: Generic file-read-with-retry
 
-Five readers (`read_settings_file`, `read_pellet_db_file`, `read_wizard`, `read_updater_manifest`, `read_generic_json`) reimplement `os.fdopen(os.open(...))` → `json.loads` → `except (IOError, OSError)` (default) → `except ValueError` (recursive retry). Route them through one helper and fix the 6 `except IOError, OSError:` occurrences.
+Five readers (`read_settings_file`, `read_pellet_db_file`, `read_wizard`, `read_updater_manifest`, `read_generic_json`) reimplement `os.fdopen(os.open(...))` → `json.loads` → `except IOError, OSError` (default) → `except ValueError` (recursive retry). Route them through one helper.
+
+> **Struck from this task:** the original "fix Python-2 except syntax" item. `except IOError, OSError:` is valid PEP 758 syntax on this repo's Python 3.14 (verified: `common/common.py` parses clean under 3.14.6), and `ruff format` rewrites the parenthesized form back to it. Do not touch those 6 lines. Steps 1–4 and 6 below stand; Step 5 is struck.
 
 **Files:**
 - Modify: `common/common.py`
@@ -212,28 +216,25 @@ def test_valid_file_parses(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest tests/unit/common/test_load_json_file.py -v`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_load_json_file.py -v`
 Expected: FAIL (`_load_json_file` not defined).
 
 - [ ] **Step 3: Add `_load_json_file` and migrate the five readers with Serena**
 
-Read each of the five existing readers' bodies first (`find_symbol` with `include_body=True`) to preserve their per-reader default/upgrade overlay, then have each delegate the raw load to `_load_json_file`, keeping its own post-load logic. Replace all `except IOError, OSError:` with `except (IOError, OSError):` in the same pass.
+Read each of the five existing readers' bodies first (`find_symbol` with `include_body=True`) to preserve their per-reader default/upgrade overlay, then have each delegate the raw load to `_load_json_file`, keeping its own post-load logic. Leave the `except IOError, OSError:` lines exactly as they are.
 
 - [ ] **Step 4: Run the relevant suites**
 
-Run: `python3 -m pytest tests/unit/common tests/unit/wizard tests/unit/bootstrap -q`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common tests/unit/wizard tests/unit/bootstrap -q`
 Expected: PASS.
 
-- [ ] **Step 5: Confirm no Python-2 except syntax remains**
-
-Run: `grep -rn "except IOError, OSError" common/ || echo CLEAN`
-Expected: `CLEAN`.
+- [ ] ~~**Step 5: Confirm no Python-2 except syntax remains**~~ — STRUCK (see task note).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add common/common.py tests/unit/common/test_load_json_file.py
-git commit -m "refactor(common): single _load_json_file helper; fix py2 except syntax
+git commit -m "refactor(common): single _load_json_file helper
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -278,7 +279,7 @@ def test_wizard_and_updater_use_separate_namespaces(monkeypatch):
 
 - [ ] **Step 2: Run test to verify it passes on current code (behavior baseline)**
 
-Run: `python3 -m pytest tests/unit/common/test_install_status.py -v`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_install_status.py -v`
 Expected: PASS (this is a characterization baseline — the refactor must keep it green).
 
 - [ ] **Step 3: Introduce the private helpers and rewrite the four wrappers with Serena**
@@ -296,7 +297,7 @@ def set_wizard_install_status(percent, status, output):
 
 - [ ] **Step 4: Run tests to verify they still pass**
 
-Run: `python3 -m pytest tests/unit/common/test_install_status.py -v`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_install_status.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -361,7 +362,7 @@ If the repo's characterization harness uses a captured-file oracle rather than a
 
 - [ ] **Step 3: Run to capture the baseline**
 
-Run: `python3 -m pytest tests/characterization/test_process_command_golden.py -q`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/characterization/test_process_command_golden.py -q`
 Expected: PASS (baseline captured). Commit the captured golden artifact.
 
 - [ ] **Step 4: Commit**
@@ -399,7 +400,7 @@ The `set`/`manual` branch repeats a ~15-line read-status → toggle → set-outp
 
 - [ ] **Step 4: Run the golden test**
 
-Run: `python3 -m pytest tests/characterization/test_process_command_golden.py -q`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/characterization/test_process_command_golden.py -q`
 Expected: PASS (byte-identical).
 
 - [ ] **Step 5: Commit**
@@ -425,11 +426,11 @@ Replace the nested `if action==… / elif arglist[0]==…` ladders with `{(actio
 
 - [ ] **Step 1: Extract one branch to a handler, keep dispatch inline, run golden**
 
-Pick the smallest GET branch; `insert_before_symbol` the handler; replace its inline block with a call. Run `python3 -m pytest tests/characterization/test_process_command_golden.py -q` → PASS. This proves the extraction shape before repeating.
+Pick the smallest GET branch; `insert_before_symbol` the handler; replace its inline block with a call. Run `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/characterization/test_process_command_golden.py -q` → PASS. This proves the extraction shape before repeating.
 
 - [ ] **Step 2: Extract the remaining branches the same way, running the golden test after each**
 
-One handler per `(action, subcommand)`. After each extraction: `python3 -m pytest tests/characterization/test_process_command_golden.py -q` → PASS.
+One handler per `(action, subcommand)`. After each extraction: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/characterization/test_process_command_golden.py -q` → PASS.
 
 - [ ] **Step 3: Replace the if/elif ladder with the dispatch dict**
 
@@ -448,7 +449,7 @@ Preserve the exact current fallback/error path (read it first and reproduce it i
 
 - [ ] **Step 4: Run the full characterization + web suites**
 
-Run: `python3 -m pytest tests/characterization tests/web -q`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/characterization tests/web -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -484,12 +485,12 @@ Use `create_text_file`/`insert_*` to place the builders in `common/defaults.py` 
 
 - [ ] **Step 2: Run the full suite**
 
-Run: `python3 -m pytest -q`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest -q`
 Expected: PASS (nothing should notice — names still resolve via `common.common`).
 
 - [ ] **Step 3: Repeat Step 1–2 for `system.py`, `datastore_accessors.py`, `settings_migration.py`, `api_commands.py`**
 
-Move one module's worth of symbols, wire the temporary re-import in `common/common.py`, run `python3 -m pytest -q` → PASS, then proceed to the next. Commit after each module moves cleanly.
+Move one module's worth of symbols, wire the temporary re-import in `common/common.py`, run `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest -q` → PASS, then proceed to the next. Commit after each module moves cleanly.
 
 - [ ] **Step 4: Commit (per module)**
 
@@ -544,7 +545,7 @@ def test_public_names_resolve_from_new_homes():
 
 - [ ] **Step 3: Run it — expect PASS (Task 8 already created the modules)**
 
-Run: `python3 -m pytest tests/unit/common/test_import_smoke.py -v`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_import_smoke.py -v`
 Expected: PASS.
 
 - [ ] **Step 4: Rewrite each import site with Serena `replace_content`**
@@ -557,7 +558,7 @@ Remove the `from common.<module> import *` lines added in Task 8. `common/common
 
 - [ ] **Step 6: Full suite + import-smoke + grep guard**
 
-Run: `python3 -m pytest -q`
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest -q`
 Expected: PASS.
 Run: `grep -rn "from common.common import" --include="*.py" . | grep -v '\.venv'`
 Expected: only intentional lines remain (ideally none outside a documented shim).
