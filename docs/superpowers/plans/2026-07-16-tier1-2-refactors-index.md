@@ -8,9 +8,9 @@ Each phase is one branch + one PR, gated by the existing golden/characterization
 
 | Phase | Title | Depends on | Branch | Detailed plan | Status |
 |------|-------|-----------|--------|---------------|--------|
-| A | Split `common/common.py` + in-file simplifications | — | `refactor/common-split` | [phaseA-common-split.md](2026-07-16-phaseA-common-split.md) | **plan ready** |
-| D | Blueprints service layer + dispatch maps | A | `refactor/blueprints-service` | _tbw after A merges_ | pending |
-| B | Merge legacy fixed-display bases | — (snapshot harness first) | `refactor/display-fixed-base` | _tbw_ | pending |
+| A | Split `common/common.py` + in-file simplifications | — | `refactor/common-split` | [phaseA-common-split.md](2026-07-16-phaseA-common-split.md) | **✅ MERGED** into `massive-reworks-and-new-ui` (merge `ec7995f`; `common.py` 3,351→660, 7 modules, suite 879→1029) |
+| D | Blueprints service layer + dispatch maps | A | `refactor/blueprints-service` | _tbw (A merged — ready to author)_ | pending |
+| B | Merge legacy fixed-display bases | — (snapshot harness first) | `refactor/display-fixed-base` | [phaseB-display-fixed-base.md](2026-07-16-phaseB-display-fixed-base.md) | **plan ready** |
 | C | Collapse driver clone matrix + encoder mixin | B | `refactor/display-driver-matrix` | _tbw after B merges_ | pending |
 | E | Meater shared core + delete `bt_meater.py` | — | `refactor/meater-dedup` | _tbw_ | pending |
 | F | Split `ControlMode.run()` | — | `refactor/controlmode-run-split` | _tbw_ | pending |
