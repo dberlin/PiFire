@@ -21,7 +21,7 @@ Item {
 		running: true
 		repeat: true
 		triggeredOnStart: true
-		onTriggered: header.clock = Qt.formatTime(new Date(), "hh:mm")
+		onTriggered: header.clock = Qt.formatTime(new Date(), "h:mm AP")
 	}
 
 	Rectangle {
