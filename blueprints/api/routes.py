@@ -1,18 +1,16 @@
 from flask import current_app, request, jsonify, abort
-from common.common import (
-    process_command,
+from common.common import WriteKind, write_log, deep_update
+from common.datastore_accessors import (
     read_settings,
     write_settings,
     read_control,
     write_control,
-    WriteKind,
     read_pellet_db,
-    write_log,
     read_current,
     read_status,
     read_probe_status,
-    deep_update,
 )
+from common.api_commands import process_command
 from common.app import get_system_command_output, create_ui_hash
 from common.server_status import get_server_status
 from . import api_bp

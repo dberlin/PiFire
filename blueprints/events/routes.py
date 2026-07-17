@@ -1,5 +1,6 @@
 from flask import render_template, request
-from common.common import read_settings, read_control, read_events
+from common.common import read_events
+from common.datastore_accessors import read_settings, read_control
 from common.app import paginate_list
 
 from . import events_bp

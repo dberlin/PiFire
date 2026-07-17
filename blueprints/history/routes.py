@@ -1,7 +1,8 @@
 import os
 import time
 from flask import render_template, request, current_app, jsonify, send_file, redirect
-from common.common import read_settings, read_control, read_current, write_settings, epoch_to_time
+from common.common import epoch_to_time
+from common.datastore_accessors import read_settings, read_control, read_current, write_settings
 from common.app import create_ui_hash, prepare_annotations, prepare_event_totals, prepare_csv
 from file_mgmt.cookfile import read_cookfile, prepare_chartdata
 

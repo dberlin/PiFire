@@ -1,9 +1,9 @@
 from flask import render_template, request, current_app, render_template_string, jsonify
-from common.common import (
+from common.common import WriteKind
+from common.datastore_accessors import (
     read_settings,
     read_control,
     write_control,
-    WriteKind,
     read_tr,
     read_autotune,
     write_autotune,

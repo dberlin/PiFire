@@ -1,7 +1,7 @@
 import os
 from werkzeug.utils import secure_filename
 from flask import render_template, request, current_app, send_file, jsonify, render_template_string
-from common.common import read_settings, read_control
+from common.datastore_accessors import read_settings, read_control
 from common.app import paginate_list, allowed_file
 from file_mgmt.common import update_json_file_data, remove_assets
 from file_mgmt.media import add_asset

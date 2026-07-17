@@ -4,31 +4,21 @@ import pathlib
 import zipfile
 from flask import render_template, current_app, request, send_file
 from werkzeug.utils import secure_filename
-from common.common import (
-    process_command,
+from common.common import WriteKind, write_log, read_generic_json, write_generic_json, get_display_info
+from common.datastore_accessors import (
     read_settings,
-    read_settings_file,
     write_settings,
     read_control,
     write_control,
-    WriteKind,
     read_pellet_db,
-    read_pellet_db_file,
     write_pellet_db,
     read_history,
-    write_log,
-    read_generic_json,
-    write_generic_json,
-    reboot_system,
-    shutdown_system,
-    restart_scripts,
-    default_settings,
-    default_control,
-    backup_settings,
-    backup_pellet_db,
-    get_os_info,
-    get_display_info,
 )
+from common.settings_migration import read_settings_file
+from common.backups import read_pellet_db_file, backup_settings, backup_pellet_db
+from common.system import reboot_system, shutdown_system, restart_scripts, get_os_info
+from common.defaults import default_settings, default_control
+from common.api_commands import process_command
 from common.app import allowed_file, get_supported_cmds, get_system_command_output
 from common.server_status import set_server_status, get_server_status
 from . import admin_bp

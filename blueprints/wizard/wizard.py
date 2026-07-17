@@ -1,4 +1,5 @@
-from common.common import read_settings, read_wizard, load_wizard_install_info
+from common.common import read_wizard
+from common.datastore_accessors import read_settings, load_wizard_install_info
 
 
 def parse_bt_device_info(bt_devices):

@@ -1,14 +1,14 @@
 from flask import render_template, request, redirect, render_template_string
-from common.common import (
+from common.common import read_generic_json
+from common.datastore_accessors import (
     read_settings,
     read_control,
-    process_command,
     read_errors,
     read_warnings,
     read_probe_status,
     write_settings,
-    read_generic_json,
 )
+from common.api_commands import process_command
 from common.app import get_system_command_output
 
 from . import dash_bp

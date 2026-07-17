@@ -1,6 +1,7 @@
 import os
 from flask import render_template, request, send_file, current_app
-from common.common import read_settings, read_control, read_log_file, add_line_numbers
+from common.common import read_log_file, add_line_numbers
+from common.datastore_accessors import read_settings, read_control
 from common.app import paginate_list, allowed_file
 
 from . import logs_bp
