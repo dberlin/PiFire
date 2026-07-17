@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Behavior-preserving EXCEPT one deliberate, sign-off-gated change:** the `_display_loop` reconciliation (Task 5). Every other change must produce pixel-identical render output for 240x320 and 320x480, and for 240x240 only the specific, enumerated layout/menu differences that are consciously re-baselined.
+- **Behavior-preserving. Two small, human-approved changes in Task 5, both effectively behavior-preserving in practice:** (a) the two `_display_loop`s unify to the richer implementation, with the per-transition settle exposed as a `min_transition_delay` class attribute set per resolution to each family's CURRENT value (1.0s for 240x240, 0.1s for the two large) — so steady-state update rate is unchanged and no display regresses; (b) the merged `_menu_display` keeps 240x240's `None`-guard (a crash-fix). Every other change must produce pixel-identical render output for 240x320 and 320x480, and for 240x240 only the specific, enumerated menu differences that are consciously re-baselined.
 - **Serena for ALL code edits** (`replace_symbol_body`, `insert_*_symbol`, `replace_content`, `create_text_file`). Call `initial_instructions` first and activate the project. Never hand-edit code files blind. (New test files may use plain Write.)
 - **Test command is ALWAYS** `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest <args> -q` from the repo root, wrapped in `timeout 180`. Bare `python3 -m pytest` resolves an interpreter without PySide6 and reports false failures. Exit code 124 = a hang; stop and report.
 - **`uvx ruff format <changed files>` before every commit** (standing repo rule; a pre-commit hook also runs it — re-stage and amend if it reformats). `ruff check` is NOT a gate in this repo (it carries hundreds of pre-existing findings); only `ruff format` is.
@@ -422,13 +422,23 @@ In `base_fixed.py`, the square panel already renders through the same methods; t
 
 For each of the enumerated 240x240 menu diffs (explicit `return`s; `Stop`/`Power_` nulling vs `clear_display()`; `"Shutdown..."` vs `"Shutting Down..."`; `menu_active=True` on Hold entry; the `None`-guard), pick ONE behavior for the merged base and document the choice. **Recommended default (confirm at sign-off):** adopt the large bases' behavior (active `clear_display()`, `"Shutting Down..."`, no square-only `return`s) EXCEPT keep 240x240's `None`-guard `if self.in_data is None or self.in_data["primary_setpoint"] == 0:` — it is a strict crash-safety improvement (the large bases `TypeError` if `in_data` is None before first status). The `None`-guard adoption is a second, minor, deliberate behavior change; call it out. Menu rendering that reaches `_display_*` is covered by the goldens; the control-flow diffs (returns, clear vs null) are not fully golden-covered, so reason about each explicitly in your report.
 
-- [ ] **Step 3: Reconcile `_display_loop` to one implementation**
+- [ ] **Step 3: Unify to the richer loop, with the transition settle as a per-display `min_transition_delay` class attribute (DECISION MADE — see below)**
 
-The merged base needs ONE `_display_loop`. **Recommended (confirm at sign-off): adopt `base_240x240.py`'s richer loop** (`monitor_display` pacing, `loop_delay`/`clear_delay`, `continue`-based re-evaluation, post-render `in_data`/`status_data` nulling) as the single implementation, because it is a strict superset of the flat-`0.1s` behavior and gives slow SPI/parallel panels time to draw. This CHANGES behavior for the 11+4 large-base drivers (adds `clear_delay` pauses and monitor pacing). The alternative — demote to the flat loop — changes behavior for the 1 square-base driver (`st7789e`) instead. Update `tests/ui/test_fixed_base_loop.py` to assert the SINGLE reconciled behavior for all three resolutions, and note in the test which resolution's prior behavior changed.
+**The human sign-off in the original Step 4 has already been obtained; this is the settled design — implement it, do not re-ask.** Adopt `base_240x240.py`'s richer `_display_loop` (the `monitor_display` pacing, `loop_delay`/`clear_delay`, `continue`-based re-eval, post-render `in_data`/`status_data` nulling) as the SINGLE loop for all panels. The ONLY behavioral knob that differs between the old loops is the post-transition settle (`clear_delay` — the first-frame hold after a clear/mode-change, which gives slow physical panels time to draw). Expose it as a named class attribute `min_transition_delay` (NOT keyed by `_SQUARE`), so fast displays keep instant transitions and slow ones can settle:
 
-- [ ] **Step 4: ⚠️ STOP — get human sign-off on Steps 2–3 before committing**
+- In `base_fixed.py`, add a class attribute `min_transition_delay = 0.1` (fast default).
+- In `_init_globals`, set the loop's timing from it: `self.loop_delay = 0.1` (steady-state cadence, fixed for all), `self.clear_delay = self.min_transition_delay` (the tunable transition settle), and `self.monitor_display = False`. (`base_fixed` inherited the FLAT loop from `base_320x480` in Task 4, which has NONE of these attrs — you are adding them now.)
+- **Replace `base_fixed.py`'s `_display_loop` with `base_240x240.py`'s richer version VERBATIM** (read it with Serena `find_symbol _display_loop include_body=True` in `display/base_240x240.py`). Keep its `self.clear_delay`/`self.loop_delay`/`self.monitor_display` references as-is — they now resolve to the values `_init_globals` sets from `min_transition_delay`. This keeps the loop byte-identical to the one Task 3 characterized.
 
-Present to the human: (a) the `_display_loop` direction (richer vs flat) and which drivers' timing changes; (b) the `_menu_display` reconciliation choices, especially the `None`-guard adoption. Do not commit the reconciliation until the direction is confirmed. This mirrors Phase A's treatment of `is_not_blank`/except-narrowing: deliberate behavior changes are the human's call.
+**Why this is behavior-preserving in practice** (feeder pushes new data every 0.1s, `display_process.py:42`): all panels stay ~10 fps in steady state (feeder-bound) regardless of loop; the ONLY observable difference is the first-frame-after-transition hold. Setting `min_transition_delay` per resolution to each family's CURRENT value preserves that exactly:
+- `base_240x240` shim → `min_transition_delay = 1.0` (st7789e's current `clear_delay = 1`).
+- `base_240x320` / `base_320x480` shims → `min_transition_delay = 0.1` (their current flat-loop behavior: no post-transition pause; 0.1 == the steady cadence, so no visible settle).
+
+The 15 large-base drivers thus keep instant transitions; the 1 square driver (`st7789e`) keeps its 1 s settle — **all via the shims, zero driver edits.** Update `tests/ui/test_fixed_base_loop.py` to assert the now-unified richer loop for all three resolutions, with `clear_delay` = each resolution's `min_transition_delay` (1.0 for 240x240; 0.1 for the two large), and a comment noting the 15 large-base panels moved from a flat loop to the richer loop with a 0.1 s (i.e. effectively unchanged) transition settle.
+
+- [ ] **Step 4: `_menu_display` None-guard — DECISION MADE**
+
+Keep 240x240's `None`-guard `if self.in_data is None or self.in_data["primary_setpoint"] == 0:` in the merged `_menu_display` (a strict crash-safety improvement — the large bases `TypeError` if `in_data` is None before the first status frame). This is the phase's second small, deliberate, documented behavior change. For the OTHER menu diffs (explicit `return`s, `Stop`/`Power_` `clear_display()` vs nulling, `"Shutdown..."` vs `"Shutting Down..."`, `menu_active=True` on Hold entry), adopt the large bases' behavior (active `clear_display()`, `"Shutting Down..."`, no square-only `return`s, no extra `menu_active`) and document each choice in your report — these control-flow diffs are not golden-covered, so reason about each explicitly.
 
 - [ ] **Step 5: Make `base_240x240.py` a shim**
 
@@ -441,7 +451,11 @@ class DisplayBase(_Base):
     _NOMINAL_WIDTH = 240
     _NOMINAL_HEIGHT = 240
     _SQUARE = True
+    min_transition_delay = 1.0  # st7789e is a slow SPI panel; hold the first
+    #                             frame after a transition so it can fully draw.
 ```
+
+Also set `min_transition_delay = 0.1` explicitly on the `base_240x320` and `base_320x480` shims (from Task 4) so every resolution's transition timing is visible at the shim, not implicit via the base default — a one-line addition to each of those two shims.
 
 - [ ] **Step 6: Re-baseline the 240x240 goldens — explicitly and enumerated**
 
@@ -460,14 +474,19 @@ Expected: green. `base_240x240.py`, `base_240x320.py`, `base_320x480.py` are now
 - [ ] **Step 8: Commit**
 
 ```
-refactor(display): fold 240x240 into base_fixed; reconcile loop + menu
+refactor(display): fold 240x240 into base_fixed; unify the display loop
 
 240x240's layout constants move into base_fixed's square-panel branch; the
-three legacy bases are now shims over one implementation. Deliberate,
-sign-off-gated behavior changes (documented in the PR): _display_loop adopts
-the richer 240x240 pacing for all panels <or the chosen direction>; the merged
-_menu_display keeps 240x240's None-guard crash-fix. Re-baselined 240x240
-golden cases: <enumerate each and why>. All non-menu render output unchanged.
+three legacy bases are now shims over one implementation. The two loops are
+unified to the richer (240x240) _display_loop, with the post-transition
+settle exposed as a per-display `min_transition_delay` class attribute:
+1.0s on the 240x240 shim (st7789e's existing pacing), 0.1s on the two large
+shims (their existing instant-transition behavior) -- so steady-state update
+rate is unchanged (~10fps, feeder-bound) and no display regresses. Second
+deliberate change: the merged _menu_display keeps 240x240's None-guard, a
+crash-fix for entering the Hold menu before the first status frame.
+Re-baselined 240x240 golden cases: <enumerate each and why>. All non-menu
+render output unchanged; the two large bases stay pixel-identical.
 ```
 
 ---
