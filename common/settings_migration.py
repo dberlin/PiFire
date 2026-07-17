@@ -19,17 +19,16 @@ Description: Reading the settings.json FILE and migrating its contents across
 import json
 import os
 
+from common.backups import backup_settings
 from common.common import (
-    backup_settings,
     deep_update,
     read_generic_json,
-    restore_settings,
     semantic_ver_is_lower,
     semantic_ver_to_list,
     write_generic_json,
     write_log,
 )
-from common.datastore_accessors import write_warning
+from common.datastore_accessors import write_settings_store, write_warning
 from common.defaults import default_probe_config, default_settings
 
 
@@ -285,6 +284,29 @@ def downgrade_settings(settings, settings_default):
     else:
         warning = f"Downgrade server version detected. [{settings['versions']['server']} -> {settings_default['versions']['server']}] Resetting settings to defaults, since no backup settings files were found."
         settings = settings_default
+    write_warning(warning)
+    write_log(warning)
+    return settings
+
+
+def restore_settings(settings_default):
+    """Look for backup file to restore from"""
+    backup_manifest = read_generic_json("./backups/manifest.json")
+    if backup_manifest == {}:
+        backup_manifest = {"server_settings": {}, "pelletdb": {"current": ""}}
+        write_generic_json(backup_manifest, "./backups/manifest.json")
+    server_version = settings_default["versions"]["server"]
+    backup_settings_file = backup_manifest["server_settings"].get(server_version, None)
+    if backup_settings_file is not None:
+        warning = f'Something failed when reading the "settings.json" file.  Restoring settings from the following backup settings file: {backup_settings_file}.'
+        # Read the backup FILE (not SQLite -- that's the current, possibly
+        # corrupt/absent, state we're recovering from).
+        settings = read_settings_file(filename=backup_settings_file)
+    else:
+        warning = f'Something failed when reading the "settings.json" file.  Resetting settings to defaults, since no backup settings files were found.'
+        settings = settings_default
+    # Make the recovered settings the new current state in SQLite.
+    write_settings_store(settings)
     write_warning(warning)
     write_log(warning)
     return settings
