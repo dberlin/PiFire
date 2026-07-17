@@ -60,8 +60,8 @@ Rectangle {
 			width: parent.width
 			height: parent.height - (card.compact ? 60 : 78)
 			radius: 14
-			color: Qt.rgba(1, 1, 1, 0.045)
-			border.color: Qt.rgba(1, 1, 1, 0.04)
+			color: Qt.rgba(1, 1, 1, 0.09)
+			border.color: Qt.rgba(1, 1, 1, 0.12)
 			clip: true
 			Rectangle {
 				anchors.bottom: parent.bottom

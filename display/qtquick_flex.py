@@ -18,6 +18,8 @@ PiFire Qt Quick Display Interface Library
 
 import logging
 import multiprocessing
+import os
+import threading
 
 from display.base_flex import DisplayBase
 from common import is_real_hardware, read_control, read_status, write_control, WriteKind
@@ -66,6 +68,21 @@ class Display(DisplayBase):
         ctx = multiprocessing.get_context("spawn")
         self._qt_process = ctx.Process(target=_run_qt_app, args=(self.config, self.units), daemon=True)
         self._qt_process.start()
+        self._watch_qt_process()
+
+    def _watch_qt_process(self):
+        # The Qt/Wayland client runs in _qt_process. If it exits -- e.g. the
+        # compositor (sway) died and Qt tore down the Wayland connection -- the
+        # main display process must exit too instead of spinning its feeder loop
+        # forever. Exiting lets the launcher config's `swaymsg exit` bring sway
+        # down and supervisor restart the stack, and it stops an orphaned process
+        # from holding the DRM master (which blocks the next sway from starting).
+        threading.Thread(target=self._await_qt_exit, name="qt-process-watch", daemon=True).start()
+
+    def _await_qt_exit(self):
+        self._qt_process.join()
+        logging.getLogger("control").error("Qt display child exited; shutting down display process.")
+        os._exit(0)
 
     # ------------------------------------------------------------------
     # Command adapter

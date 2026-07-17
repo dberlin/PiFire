@@ -5,8 +5,8 @@ import ".."
 // Rectangle and bind `pressed` to that element's TapHandler/MouseArea
 // `pressed` property (or a Button's `down`). On press it warms the surface
 // with the accent colour, so the button appears to glow like an ember —
-// which fits the dark, warm palette (the cards are near-black #1a1611, so a
-// plain darken reads as nothing and a white flash fights the theme). The
+// which fits the dark, warm palette (the cards are a dark warm brown #2c231a,
+// so a plain darken reads as nothing and a white flash fights the theme). The
 // tint follows the live accent, so it turns orange/cyan/red with the theme.
 //
 // `tint` defaults to the accent; danger controls can override it to the

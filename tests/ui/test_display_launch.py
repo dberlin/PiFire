@@ -1,3 +1,4 @@
+import shlex
 import sys
 
 import display_launch
@@ -24,18 +25,19 @@ def test_bare_for_pygame_display():
     assert env_updates == {}
 
 
-def test_cage_for_qtquick_flex():
+def test_sway_for_qtquick_flex():
     settings = {"modules": {"display": "qtquick_flex"}}
     argv, env_updates = display_launch.build_launch_argv(settings, {"XDG_RUNTIME_DIR": "/run/user/1000"})
-    assert argv == ["cage", "-d", "-s", "--", sys.executable, "display_process.py"]
+    assert argv == ["sway", "-c", display_launch.SWAY_KIOSK_CONFIG]
     assert env_updates["QT_QPA_PLATFORM"] == "wayland"
     assert env_updates["XDG_RUNTIME_DIR"] == "/run/user/1000"
+    assert env_updates["PIFIRE_DISPLAY_CMD"] == shlex.join([sys.executable, "display_process.py"])
 
 
-def test_cage_for_qtquick_dsi():
+def test_sway_for_qtquick_dsi():
     settings = {"modules": {"display": "qtquick_dsi_1280x720t"}}
     argv, _env = display_launch.build_launch_argv(settings, {})
-    assert argv == ["cage", "-d", "-s", "--", sys.executable, "display_process.py"]
+    assert argv == ["sway", "-c", display_launch.SWAY_KIOSK_CONFIG]
 
 
 def test_xdg_runtime_dir_preserved_when_set():

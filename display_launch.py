@@ -16,9 +16,15 @@ the display parent process.
 
 import logging
 import os
+import shlex
 import sys
 
 from common import read_settings
+
+# Absolute path to the shipped sway kiosk config. display_launch.py lives at the
+# repo root; the config sits under display/sway/. It is only referenced as a
+# file path -- nothing from display/ is imported (PySide6 must not load here).
+SWAY_KIOSK_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "display", "sway", "kiosk.conf")
 
 
 def build_launch_argv(settings, env):
@@ -36,8 +42,16 @@ def build_launch_argv(settings, env):
         return child, {}
 
     runtime_dir = env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-    env_updates = {"QT_QPA_PLATFORM": "wayland", "XDG_RUNTIME_DIR": runtime_dir}
-    return ["cage", "-d", "-s", "--", *child], env_updates
+    env_updates = {
+        "QT_QPA_PLATFORM": "wayland",
+        "XDG_RUNTIME_DIR": runtime_dir,
+        # The kiosk config runs `eval "$PIFIRE_DISPLAY_CMD"` and exits sway when
+        # it returns, so sway's lifetime tracks the display process the way
+        # cage's did. shlex.join keeps the interpreter path intact through the
+        # shell.
+        "PIFIRE_DISPLAY_CMD": shlex.join(child),
+    }
+    return ["sway", "-c", SWAY_KIOSK_CONFIG], env_updates
 
 
 def _ensure_runtime_dir(path):

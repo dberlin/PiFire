@@ -195,7 +195,7 @@ echo "**      Installing Dependencies... (This could take several minutes)   **"
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
 # Install dependencies, exit if failed
-$SUDO apt install python3-dev python3-pip python3-venv python3-scipy nginx git supervisor ttf-mscorefonts-installer gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev bluetooth bluez cage seatd wlr-randr -y 2>&1 | tee -a ~/logs/pifire_install.log
+$SUDO apt install python3-dev python3-pip python3-venv python3-scipy nginx git supervisor ttf-mscorefonts-installer gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev bluetooth bluez sway seatd -y 2>&1 | tee -a ~/logs/pifire_install.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo " !! Failed to install dependencies. Installation cannot continue." | tee -a ~/logs/pifire_install.log
     exit 1
@@ -249,7 +249,7 @@ cd /usr/local/bin
 $SUDO groupadd pifire 
 $SUDO usermod -a -G pifire $USER
 $SUDO usermod -a -G pifire root
-# Seat access for the cage Wayland compositor (QtQuick displays).
+# Seat access for the sway Wayland compositor (QtQuick displays).
 $SUDO systemctl enable --now seatd 2>&1 | tee -a ~/logs/pifire_install.log
 for grp in video input render seat; do
     $SUDO usermod -a -G "$grp" $USER 2>/dev/null || true

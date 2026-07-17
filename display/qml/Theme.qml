@@ -5,11 +5,12 @@ QtObject {
 	// Selected accent — bound live from backend.accentTheme in Main.qml.
 	property string accent: "Ember"
 
-	// Base palette (design-verbatim)
+	// Base palette (design-verbatim; card/inset/cardBorder/trackColor lightened
+	// for sunlight contrast)
 	readonly property color page:        "#0c0a09"
-	readonly property color card:        "#1a1611"
-	readonly property color inset:       "#14100c"
-	readonly property color cardBorder:  Qt.rgba(1, 1, 1, 0.05)
+	readonly property color card:        "#2c231a"
+	readonly property color inset:       "#1c1712"
+	readonly property color cardBorder:  Qt.rgba(1, 1, 1, 0.13)
 	readonly property color textColor:   "#f4ede2"
 	readonly property color dim:         "#8a7f70"
 	readonly property color label:       "#7d7264"
@@ -18,7 +19,7 @@ QtObject {
 	readonly property color okColor:     "#5ec96f"
 	readonly property color warn:        "#ffb020"
 	readonly property color dangerColor: "#ff5a4d"
-	readonly property color trackColor: "#2a241d"
+	readonly property color trackColor: "#4a4034"
 	readonly property color cookingColor: "#ffd23f"
 
 	// SystemCard tokens (design-verbatim, fixed regardless of accent)

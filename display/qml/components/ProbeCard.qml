@@ -79,7 +79,7 @@ Rectangle {
 			width: parent.width
 			height: 6
 			radius: 3
-			color: Qt.rgba(1, 1, 1, 0.06)
+			color: Qt.rgba(1, 1, 1, 0.11)
 			Rectangle {
 				height: parent.height
 				radius: 3
