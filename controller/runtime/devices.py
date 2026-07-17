@@ -8,15 +8,14 @@ kept apart so the two processes never touch each other's hardware."""
 
 import importlib
 
-from common import (
+from common.common import get_probe_info, WriteKind
+from common.datastore_accessors import (
     read_control,
     read_pellet_db,
     write_pellet_db,
     write_control,
     write_errors,
     write_generic_key,
-    get_probe_info,
-    WriteKind,
 )
 from common.i2c_bus import assert_clean_blinka_env
 

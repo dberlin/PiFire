@@ -12,7 +12,8 @@ Run it directly as a script, e.g. `python display_process.py`.
 
 import logging
 
-from common import read_settings, create_logger
+from common.common import create_logger
+from common.datastore_accessors import read_settings
 from controller.runtime.devices import build_display
 from controller.runtime.store import SqliteStore
 from controller.runtime.clock import RealClock

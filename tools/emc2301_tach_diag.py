@@ -27,7 +27,7 @@ import busio
 from adafruit_bus_device.i2c_device import I2CDevice
 from adafruit_extended_bus import ExtendedI2C
 
-from common import read_settings
+from common.datastore_accessors import read_settings
 from probes.base import resolve_i2c_bus
 
 # EMC2301/2/3/5 registers (DS20006532A).

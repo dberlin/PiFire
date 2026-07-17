@@ -17,7 +17,8 @@ from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
-from common import read_current, read_status, read_generic_json
+from common.common import read_generic_json
+from common.datastore_accessors import read_current, read_status
 from display.qtbackend import PiFireBackend
 from display.screen_power import ScreenPowerController
 
@@ -50,7 +51,7 @@ def build_engine(config, backend):
 def build_backend(config):
     """Construct the backend wired to the framework's data + command layer."""
     from display.qtquick_flex import Display
-    from common import read_settings_store
+    from common.datastore_accessors import read_settings_store
 
     def _accent_fn():
         try:
@@ -92,7 +93,7 @@ def _make_backlight():
     """Return a backlight controller: real on hardware, dummy otherwise."""
     from pathlib import Path
 
-    from common import is_real_hardware
+    from common.system import is_real_hardware
 
     if is_real_hardware() and Path("/sys/class/backlight/").exists():
         try:

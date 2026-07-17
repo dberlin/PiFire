@@ -22,18 +22,16 @@ import os
 import requests
 from display.flexobject import *
 from PIL import Image
-from common import (
+from common.common import WriteKind, read_generic_json, display_sleep_timeout
+from common.datastore_accessors import (
     read_control,
     write_control,
-    WriteKind,
-    is_real_hardware,
-    read_generic_json,
-    display_sleep_timeout,
     read_settings,
     write_settings,
     read_status,
     read_current,
 )
+from common.system import is_real_hardware
 
 """
 ==================================================================================

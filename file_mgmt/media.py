@@ -12,7 +12,7 @@ Imported Modules
 """
 import os
 import zipfile
-from common import generate_uuid
+from common.common import generate_uuid
 from file_mgmt.common import update_json_file_data, read_json_file_data
 from PIL import Image, ExifTags
 

@@ -9,7 +9,7 @@
 #
 # *****************************************
 
-from common import write_log
+from common.common import write_log
 
 
 class HopperLevel:

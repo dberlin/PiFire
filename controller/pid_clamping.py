@@ -40,7 +40,7 @@ Imported Libraries
 """
 import time
 import logging
-from common import create_logger
+from common.common import create_logger
 from controller.base import ControllerBase
 
 log_level = logging.DEBUG

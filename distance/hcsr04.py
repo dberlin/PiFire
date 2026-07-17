@@ -19,7 +19,7 @@
 # *****************************************
 
 from hcsr04sensor import sensor
-from common import write_log
+from common.common import write_log
 
 
 class HopperLevel:

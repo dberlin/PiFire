@@ -18,7 +18,7 @@ import logging
 import os
 import sys
 
-from common import read_settings
+from common.datastore_accessors import read_settings
 
 
 def build_launch_argv(settings, env):

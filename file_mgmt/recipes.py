@@ -18,7 +18,8 @@ import zipfile
 import pathlib
 
 from flask import current_app
-from common import read_settings, generate_uuid, convert_temp
+from common.common import generate_uuid, convert_temp
+from common.datastore_accessors import read_settings
 from file_mgmt.common import read_json_file_data
 from file_mgmt.media import unpack_thumb
 
