@@ -1,4 +1,4 @@
-from common.common import default_settings
+from common.defaults import default_settings
 
 
 def test_triggerlevel_defaults_to_active_high():

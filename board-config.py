@@ -21,7 +21,7 @@ import os
 import json
 import subprocess
 
-from common.common import read_settings
+from common.datastore_accessors import read_settings
 
 """
 ==============================================================================

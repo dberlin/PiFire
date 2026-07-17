@@ -21,11 +21,8 @@ _DB_PATH = os.path.join(_TMP_DIR, "webapp_test.db")
 os.environ["PIFIRE_DB_PATH"] = _DB_PATH
 
 from common import datastore  # noqa: E402
-from common.common import (  # noqa: E402
-    WriteKind,
-    default_control,
-    default_pellets,
-    default_settings,
+from common.common import WriteKind  # noqa: E402
+from common.datastore_accessors import (  # noqa: E402
     load_wizard_install_info,
     read_connected_users,
     read_current,
@@ -43,6 +40,7 @@ from common.common import (  # noqa: E402
     write_settings_store,
     write_status,
 )
+from common.defaults import default_control, default_pellets, default_settings  # noqa: E402
 
 datastore._reset_for_tests(_DB_PATH)
 datastore.init()

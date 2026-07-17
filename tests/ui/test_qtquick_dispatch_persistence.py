@@ -21,10 +21,8 @@ import tempfile
 import pytest
 
 from common import datastore
-from common.common import (
-    WriteKind,
-    default_control,
-    default_settings,
+from common.common import WriteKind
+from common.datastore_accessors import (
     execute_control_writes,
     read_control,
     read_settings,
@@ -33,6 +31,7 @@ from common.common import (
     write_settings_store,
     write_status,
 )
+from common.defaults import default_control, default_settings
 
 import display.qtquick_flex as qtquick_flex
 

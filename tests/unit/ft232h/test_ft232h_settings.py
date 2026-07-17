@@ -1,4 +1,4 @@
-from common.common import default_settings
+from common.defaults import default_settings
 
 
 def test_platform_defaults_include_ft232h_block():

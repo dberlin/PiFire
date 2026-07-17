@@ -41,7 +41,7 @@ def resolve_credentials(email, password):
     if email and password:
         return email, password
     try:
-        from common.common import read_settings
+        from common.datastore_accessors import read_settings
 
         devices = read_settings()["probe_settings"]["probe_map"]["probe_devices"]
     except Exception:

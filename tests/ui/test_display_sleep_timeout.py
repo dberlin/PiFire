@@ -1,4 +1,5 @@
-from common.common import default_settings, display_sleep_timeout
+from common.common import display_sleep_timeout
+from common.defaults import default_settings
 
 
 def test_default_settings_has_sleep_timeout():

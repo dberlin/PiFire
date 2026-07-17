@@ -11,7 +11,7 @@ via the probe-cap technique described in harness.py).
 
 import copy
 
-from common.common import default_settings, default_control, default_pellets
+from common.defaults import default_settings, default_control, default_pellets
 
 
 def base_settings():

@@ -25,7 +25,9 @@ from flask_socketio import SocketIO
 from flask_qrcode import QRcode
 from werkzeug.exceptions import InternalServerError
 from common import datastore
-from common.common import read_settings, is_real_hardware, create_logger
+from common.common import create_logger
+from common.datastore_accessors import read_settings
+from common.system import is_real_hardware
 import logging
 
 # First-boot migration: import existing settings.json / pelletdb.json into

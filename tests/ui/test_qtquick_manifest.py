@@ -30,7 +30,7 @@ def test_default_display_config_includes_entry():
     cwd = os.getcwd()
     os.chdir(BASE)
     try:
-        from common.common import _default_display_config
+        from common.defaults import _default_display_config
 
         config = _default_display_config()
     finally:
