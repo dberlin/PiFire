@@ -92,6 +92,7 @@ from unittest import mock
 
 import pytest
 
+import common.api_commands as api_commands
 import common.common as c
 from common.common import WriteKind
 
@@ -739,10 +740,10 @@ def _run_case(case):
     # --- run (with every hazardous / non-deterministic edge neutralized) --
     log_calls = []
     with (
-        mock.patch.object(c, "restart_scripts") as m_restart,
-        mock.patch.object(c, "reboot_system") as m_reboot,
-        mock.patch.object(c, "shutdown_system") as m_shutdown,
-        mock.patch.object(c, "write_log", side_effect=lambda e, **kw: log_calls.append(e)),
+        mock.patch.object(api_commands, "restart_scripts") as m_restart,
+        mock.patch.object(api_commands, "reboot_system") as m_reboot,
+        mock.patch.object(api_commands, "shutdown_system") as m_shutdown,
+        mock.patch.object(api_commands, "write_log", side_effect=lambda e, **kw: log_calls.append(e)),
         mock.patch.object(c.time, "time", return_value=FIXED_NOW),
         mock.patch.object(c.time, "sleep") as m_sleep,
     ):
@@ -1029,7 +1030,7 @@ def test_timer_start_hardcodes_origin_app(seeded):
     c.SqliteQueue("queue_control_write").flush()
     # write_log appends to ./logs/events.log relative to cwd; keep the test from
     # touching the working tree.
-    with mock.patch.object(c, "write_log"):
+    with mock.patch.object(api_commands, "write_log"):
         c.process_command(action="set", arglist=["timer", "start", "300"], origin="api")
     queued = c.SqliteQueue("queue_control_write").list()
     assert [q["origin"] for q in queued] == ["app"]
@@ -1080,9 +1081,9 @@ def test_cmd_branch_never_executes_real_system_commands(seeded):
         "rely on _run_case's mocks, not on this flag -- but verify before relaxing."
     )
     with (
-        mock.patch.object(c, "restart_scripts") as m_restart,
-        mock.patch.object(c, "reboot_system") as m_reboot,
-        mock.patch.object(c, "shutdown_system") as m_shutdown,
+        mock.patch.object(api_commands, "restart_scripts") as m_restart,
+        mock.patch.object(api_commands, "reboot_system") as m_reboot,
+        mock.patch.object(api_commands, "shutdown_system") as m_shutdown,
     ):
         c.process_command(action="cmd", arglist=["restart"], origin="test")
         c.process_command(action="cmd", arglist=["reboot"], origin="test")
