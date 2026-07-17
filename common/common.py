@@ -2503,6 +2503,34 @@ def is_float(string):
     return False
 
 
+def _manual_toggle(control, pin_name, arglist, reset_pwm_when_off=False):
+    """
+    Apply a manual on/off/toggle action to a single manual-output pin
+    (power, igniter, fan, or auger) within the 'set'/'manual' command.
+
+    Mirrors the per-pin blocks that used to be inlined in process_command:
+      - reads/writes control["manual"]["change"] and ["output"] for `pin_name`
+      - a "toggle" request resolves against the live status pin state
+      - `reset_pwm_when_off=True` additionally resets control["manual"]["pwm"]
+        to 100 when the output is turned off (this only applied to the
+        original "fan" branch; do not enable it for the others).
+    """
+    control["manual"]["change"] = pin_name
+    if arglist[2] == "toggle":
+        status = read_status()
+        if status["outpins"][pin_name]:
+            arglist[2] = "false"
+        else:
+            arglist[2] = "true"
+    if arglist[2] == "true":
+        control["manual"]["output"] = True
+    else:
+        control["manual"]["output"] = False
+        if reset_pwm_when_off:
+            control["manual"]["pwm"] = 100
+    return control
+
+
 def process_command(action=None, arglist=[], origin="unknown", kind=WriteKind.MERGE):
     """
     Process incoming command from API or elsewhere
@@ -3062,54 +3090,13 @@ def process_command(action=None, arglist=[], origin="unknown", kind=WriteKind.ME
 
             if control["mode"] == "Manual" or settings["safety"]["allow_manual_changes"]:
                 if arglist[1] == "power":
-                    control["manual"]["change"] = "power"
-                    if arglist[2] == "toggle":
-                        status = read_status()
-                        if status["outpins"]["power"]:
-                            arglist[2] = "false"
-                        else:
-                            arglist[2] = "true"
-                    if arglist[2] == "true":
-                        control["manual"]["output"] = True
-                    else:
-                        control["manual"]["output"] = False
+                    control = _manual_toggle(control, "power", arglist)
                 elif arglist[1] == "igniter":
-                    control["manual"]["change"] = "igniter"
-                    if arglist[2] == "toggle":
-                        status = read_status()
-                        if status["outpins"]["igniter"]:
-                            arglist[2] = "false"
-                        else:
-                            arglist[2] = "true"
-                    if arglist[2] == "true":
-                        control["manual"]["output"] = True
-                    else:
-                        control["manual"]["output"] = False
+                    control = _manual_toggle(control, "igniter", arglist)
                 elif arglist[1] == "fan":
-                    control["manual"]["change"] = "fan"
-                    if arglist[2] == "toggle":
-                        status = read_status()
-                        if status["outpins"]["fan"]:
-                            arglist[2] = "false"
-                        else:
-                            arglist[2] = "true"
-                    if arglist[2] == "true":
-                        control["manual"]["output"] = True
-                    else:
-                        control["manual"]["output"] = False
-                        control["manual"]["pwm"] = 100
+                    control = _manual_toggle(control, "fan", arglist, reset_pwm_when_off=True)
                 elif arglist[1] == "auger":
-                    control["manual"]["change"] = "auger"
-                    if arglist[2] == "toggle":
-                        status = read_status()
-                        if status["outpins"]["auger"]:
-                            arglist[2] = "false"
-                        else:
-                            arglist[2] = "true"
-                    if arglist[2] == "true":
-                        control["manual"]["output"] = True
-                    else:
-                        control["manual"]["output"] = False
+                    control = _manual_toggle(control, "auger", arglist)
                 elif arglist[1] == "pwm" and is_float(arglist[2]):
                     control["manual"]["change"] = "pwm"
                     control["manual"]["output"] = True
