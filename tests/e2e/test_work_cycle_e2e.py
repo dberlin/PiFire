@@ -35,7 +35,7 @@ are fully isolated and hermetic -- no shared server, no residue to restore.
 
 import pytest
 
-import common.common as _ccommon
+import common.datastore_accessors as _ccommon
 from common.common import WriteKind
 from controller.runtime.runner import NormalizedOutput
 

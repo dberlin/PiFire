@@ -21,7 +21,8 @@ monkeypatch them.
 
 import os
 
-from common.common import WriteKind, default_control
+from common.common import WriteKind
+from common.defaults import default_control
 from notify.notifications import check_notify, send_notifications
 from file_mgmt.cookfile import create_cookfile
 from file_mgmt.recipes import convert_recipe_units
