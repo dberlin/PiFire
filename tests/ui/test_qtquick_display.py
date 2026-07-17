@@ -63,3 +63,19 @@ def test_public_stubs_are_noops(monkeypatch, no_spawn):
     assert d.display_status({}, {}) is None
     assert d.display_text("X") is None
     assert d.clear_display() is None
+
+
+def test_await_qt_exit_terminates_process_when_child_dies(monkeypatch, no_spawn):
+    # When the Qt child exits (e.g. sway died), the main process must exit too
+    # rather than spin its feeder loop forever and orphan / hold the DRM master.
+    d = make_display(monkeypatch)
+
+    class DeadProc:
+        def join(self):
+            return None  # already exited
+
+    d._qt_process = DeadProc()
+    exited = {}
+    monkeypatch.setattr(mod.os, "_exit", lambda code: exited.__setitem__("code", code))
+    d._await_qt_exit()
+    assert exited == {"code": 0}
