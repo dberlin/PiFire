@@ -1,16 +1,18 @@
-from common import common as c
+from common import datastore_accessors as c
+from common import defaults
+from common.common import WriteKind, strip_null_members, read_events_records
 from common import datastore
 
 
 def test_control_overwrite_and_read(ds):
-    c.write_control({"mode": "Stop", "n": {"a": 1}}, c.WriteKind.OVERWRITE, origin="t")
+    c.write_control({"mode": "Stop", "n": {"a": 1}}, WriteKind.OVERWRITE, origin="t")
     assert c.read_control() == {"mode": "Stop", "n": {"a": 1}}
 
 
 def test_control_merge_matches_oracle(ds, oracle):
     exp = oracle("control_merge")
-    c.write_control({"mode": "Stop", "nested": {"a": 1, "b": 2}}, c.WriteKind.OVERWRITE, origin="test")
-    c.write_control({"nested": {"b": 9, "c": 3}}, c.WriteKind.MERGE, origin="webapp")
+    c.write_control({"mode": "Stop", "nested": {"a": 1, "b": 2}}, WriteKind.OVERWRITE, origin="test")
+    c.write_control({"nested": {"b": 9, "c": 3}}, WriteKind.MERGE, origin="webapp")
     assert c.read_control() == exp["before_execute"]  # MERGE deferred
     c.execute_control_writes()
     assert c.read_control() == exp["after_execute"]  # deep-merge, origin stripped
@@ -20,8 +22,8 @@ def test_control_merge_preserves_list_nested_nulls(ds):
     # notify_data is a list; its elements carry eta=None. json_patch replaces
     # arrays atomically without walking them, so a null nested inside a list
     # element must survive the merge verbatim (not be treated as a delete).
-    c.write_control({"mode": "Stop", "notify_data": []}, c.WriteKind.OVERWRITE, origin="test")
-    c.write_control({"notify_data": [{"label": "Grill", "eta": None, "target": 0}]}, c.WriteKind.MERGE, origin="notify")
+    c.write_control({"mode": "Stop", "notify_data": []}, WriteKind.OVERWRITE, origin="test")
+    c.write_control({"notify_data": [{"label": "Grill", "eta": None, "target": 0}]}, WriteKind.MERGE, origin="notify")
     c.execute_control_writes()
     nd = c.read_control()["notify_data"]
     assert nd == [{"label": "Grill", "eta": None, "target": 0}]  # eta:None preserved, key present
@@ -32,9 +34,9 @@ def test_control_merge_does_not_delete_dict_nested_null_key(ds):
     # delete the key -- json_patch would (RFC 7386), but strip_null_members drops
     # the null first, so the stored value is left intact. This guards the
     # controller's unconditional control['manual']['change'] access from KeyError.
-    c.write_control({"mode": "Stop", "manual": {"change": "pwm", "output": True}}, c.WriteKind.OVERWRITE, origin="test")
+    c.write_control({"mode": "Stop", "manual": {"change": "pwm", "output": True}}, WriteKind.OVERWRITE, origin="test")
     c.write_control(
-        {"primary_setpoint": 225, "manual": {"change": None, "output": None}}, c.WriteKind.MERGE, origin="app"
+        {"primary_setpoint": 225, "manual": {"change": None, "output": None}}, WriteKind.MERGE, origin="app"
     )
     c.execute_control_writes()
     control = c.read_control()
@@ -46,8 +48,8 @@ def test_control_merge_does_not_delete_dict_nested_null_key(ds):
 def test_control_merge_ignores_client_supplied_nulls(ds):
     # The generic /api/control passthrough merges arbitrary client JSON. A client
     # sending a null is ignored (no-op), never deleting or nulling a stored key.
-    c.write_control({"mode": "Stop", "primary_setpoint": 225}, c.WriteKind.OVERWRITE, origin="test")
-    c.write_control({"mode": None, "primary_setpoint": 300}, c.WriteKind.MERGE, origin="app")
+    c.write_control({"mode": "Stop", "primary_setpoint": 225}, WriteKind.OVERWRITE, origin="test")
+    c.write_control({"mode": None, "primary_setpoint": 300}, WriteKind.MERGE, origin="app")
     c.execute_control_writes()
     control = c.read_control()
     assert control["mode"] == "Stop"  # client null ignored, prior value kept
@@ -58,7 +60,7 @@ def test_control_merge_on_empty_db_seeds_default(ds):
     # With no control:general row yet, a MERGE must still land (seed default, then
     # patch) rather than being silently dropped by the UPDATE.
     assert datastore.get_blob("control:general") is None
-    c.write_control({"primary_setpoint": 275}, c.WriteKind.MERGE, origin="app")
+    c.write_control({"primary_setpoint": 275}, WriteKind.MERGE, origin="app")
     c.execute_control_writes()
     control = c.read_control()
     assert control["primary_setpoint"] == 275
@@ -70,7 +72,7 @@ def test_strip_null_members_recurses_dicts_but_not_lists():
     # lists (and nulls inside them) returned untouched.
     src = {"a": 1, "b": None, "nested": {"x": None, "y": 2}, "items": [{"eta": None}], "z": None}
     stripped = []
-    assert c.strip_null_members(src, stripped) == {"a": 1, "nested": {"y": 2}, "items": [{"eta": None}]}
+    assert strip_null_members(src, stripped) == {"a": 1, "nested": {"y": 2}, "items": [{"eta": None}]}
     # dotted paths of dropped keys reported; list-nested nulls not walked/reported
     assert sorted(stripped) == ["b", "nested.x", "z"]
 
@@ -79,8 +81,8 @@ def test_control_merge_logs_error_when_stripping_nulls(ds, caplog):
     # A MERGE partial carrying a null trips a diagnostic (ERROR level, so it
     # survives control.log's production ERROR gate) naming the stripped path and
     # origin, so the still-sending-nulls source can be found.
-    c.write_control({"mode": "Stop", "manual": {"change": "pwm"}}, c.WriteKind.OVERWRITE, origin="test")
-    c.write_control({"manual": {"change": None}}, c.WriteKind.MERGE, origin="app")
+    c.write_control({"mode": "Stop", "manual": {"change": "pwm"}}, WriteKind.OVERWRITE, origin="test")
+    c.write_control({"manual": {"change": None}}, WriteKind.MERGE, origin="app")
     with caplog.at_level("ERROR", logger="control"):
         c.execute_control_writes()
     hits = [r for r in caplog.records if "stripped null member" in r.message]
@@ -91,8 +93,8 @@ def test_control_merge_logs_error_when_stripping_nulls(ds, caplog):
 
 def test_control_merge_null_free_partial_logs_nothing(ds, caplog):
     # The common case (no nulls) must stay quiet -- no diagnostic noise.
-    c.write_control({"mode": "Stop"}, c.WriteKind.OVERWRITE, origin="test")
-    c.write_control({"primary_setpoint": 225}, c.WriteKind.MERGE, origin="app")
+    c.write_control({"mode": "Stop"}, WriteKind.OVERWRITE, origin="test")
+    c.write_control({"primary_setpoint": 225}, WriteKind.MERGE, origin="app")
     with caplog.at_level("ERROR", logger="control"):
         c.execute_control_writes()
     assert not [r for r in caplog.records if "stripped null member" in r.message]
@@ -139,10 +141,10 @@ def test_flush_control_clears_only_control_not_history(ds):
     c.write_history(
         {"probe_history": {"primary": {"G": 1}, "food": {}, "aux": {}}, "primary_setpoint": 1, "notify_targets": {}}
     )
-    c.write_control({"mode": "Hold"}, c.WriteKind.OVERWRITE, origin="t")
-    c.write_control({"x": 1}, c.WriteKind.MERGE, origin="t")
+    c.write_control({"mode": "Hold"}, WriteKind.OVERWRITE, origin="t")
+    c.write_control({"x": 1}, WriteKind.MERGE, origin="t")
     control = c.read_control(flush=True)
-    assert control == c.default_control()  # reseeded default
+    assert control == defaults.default_control()  # reseeded default
     from common.sqlite_queue import SqliteQueue
 
     assert SqliteQueue("queue_control_write").length() == 0  # queue cleared
@@ -165,9 +167,9 @@ def test_read_events_records_returns_dicts(ds, monkeypatch):
     def fake_read_events(legacy=True):
         return fake_events, len(fake_events)
 
-    monkeypatch.setattr(c, "read_events", fake_read_events)
+    monkeypatch.setattr("common.common.read_events", fake_read_events)
 
-    result = c.read_events_records()
+    result = read_events_records()
 
     assert isinstance(result, list)
     assert len(result) == len(fake_events)
@@ -184,12 +186,12 @@ def test_read_events_records_caps_at_60(ds, monkeypatch):
     def fake_read_events(legacy=True):
         return fake_events, len(fake_events)
 
-    monkeypatch.setattr(c, "read_events", fake_read_events)
+    monkeypatch.setattr("common.common.read_events", fake_read_events)
 
-    result = c.read_events_records()
+    result = read_events_records()
 
     assert len(result) == 60
 
 
 def test_read_events_records_flush_clears_and_returns_empty(ds):
-    assert c.read_events_records(flush=True) == []
+    assert read_events_records(flush=True) == []
