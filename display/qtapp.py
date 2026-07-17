@@ -51,6 +51,7 @@ def build_backend(config):
     """Construct the backend wired to the framework's data + command layer."""
     from display.qtquick_flex import Display
     from common import read_settings_store
+    from common.common import display_sleep_timeout
 
     def _accent_fn():
         try:
@@ -61,13 +62,10 @@ def build_backend(config):
             return "Ember"
 
     def _timeout_fn():
-        # TEMP (hardware testing): blank after 10s regardless of the configured
-        # sleep_timeout, so the app-driven sleep -> swaymsg dpms off -> touch ->
-        # wake path can be exercised quickly. Only fires in Stop mode; the idle
-        # machine never sleeps during a cook. Revert to:
-        #     from common.common import display_sleep_timeout
-        #     return display_sleep_timeout(read_settings_store())
-        return 10
+        try:
+            return display_sleep_timeout(read_settings_store())
+        except Exception:
+            return 300
 
     dispatcher = Display.for_dispatch(config, config.get("units", "F"))
     backend = PiFireBackend(
