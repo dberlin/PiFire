@@ -24,14 +24,24 @@
 
 ### Task 1: Characterize and fix `is_not_blank`
 
-`common/app.py:271-272` currently returns `setting in response and setting != ""` — it tests the *key name*, so it means "key present." All 38 callers (in `blueprints/settings/routes.py`) coerce numerically (`int`/`float`/`min`), so an empty submission today raises `int("")` → 500. Fix it to test the *value*, converting that latent crash into "keep prior value."
+`common/app.py:272-273` currently returns `setting in response and setting != ""` — it tests the *key name*, so it means "key present." Fix it to test the *value*, converting a latent 500 into "keep prior value."
+
+**Verified facts (re-checked against live code; supersede the spec's design box where they differ):**
+- There are **37** call sites, not 38, all in `blueprints/settings/routes.py`, all above line 630.
+- All 37 read `response = request.form` → values are always `str`. The two `request.json` handlers in the same file (lines 654, 669) index directly and never reach this helper.
+- Caller tally: **32 `int()`, 3 `float()`, 1 `min(int(...))`, 1 `selectController`**.
+- **Spec correction:** the design box claims "0 raw-string saves." That is off by one — `selectController` (line 426) does `settings["controller"]["selected"] = response["selectController"]` raw. It does not change the fix (it is a dropdown value used as a dict key, where a whitespace value would silently write a bogus `selected`), but the spec's justification was overstated.
+
+**Two decisions settled with the repo owner before implementation:**
+1. **Use `.strip()`.** `int("   ")` raises `ValueError` exactly as `int("")` does (verified), so a whitespace-only submission reaches the same 500. Since no caller wants whitespace, stripping completes the fix's stated intent rather than leaving it half-done.
+2. **Use `.strip() != ""`, NOT truthiness (`not response[setting]`).** Equivalent today (form values are `str`), but truthiness also swallows `0`/`False`/`None`/`[]`. If this helper ever sees JSON, `{"pmode": 0}` would be treated as blank and a legitimate zero would silently stop saving. `!= ""` is explicit about meaning "empty string" and matches the sibling `is_checked` helper's explicit `== "on"` on the next line. `.strip()` keeps the helper's existing string assumption; a non-`str` value now raises `AttributeError` loudly, which is the correct failure mode for a form helper.
 
 **Files:**
 - Test: `tests/unit/common/test_is_not_blank.py` (create)
-- Modify: `common/app.py:271-272`
+- Modify: `common/app.py:272-273`
 
 **Interfaces:**
-- Produces: `is_not_blank(response, setting) -> bool` — True iff `setting` is a key in `response` **and** `response[setting]` is a non-empty string. Signature unchanged.
+- Produces: `is_not_blank(response, setting) -> bool` — True iff `setting` is a key in `response` **and** `response[setting]` is a string with at least one non-whitespace character. Signature unchanged.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -48,31 +58,44 @@ def test_key_present_with_value_returns_true():
     assert is_not_blank({"pmode": "2"}, "pmode") is True
 
 
+def test_value_with_surrounding_whitespace_is_not_blank():
+    # Stripping decides blankness only; a real value keeps its branch.
+    assert is_not_blank({"pmode": " 2 "}, "pmode") is True
+
+
 def test_key_present_but_empty_returns_false():
-    # Regression: today this is True (helper checks the key name, not the value),
-    # which lets int("") reach the settings route and raise a 500. After the fix,
-    # an empty submission must be treated as blank so the branch is skipped.
+    # Regression: today this is True (the helper compares the key NAME, not the
+    # value, so it is always true for a present key), which lets int("") reach
+    # the settings route and raise a 500. After the fix, an empty submission
+    # must read as blank so the branch is skipped and the prior value stands.
     assert is_not_blank({"pmode": ""}, "pmode") is False
+
+
+def test_key_present_but_whitespace_only_returns_false():
+    # Same 500, same cause: int("   ") raises ValueError exactly as int("") does.
+    # None of the 37 callers save a raw string except selectController, and a
+    # whitespace controller name is garbage there too, so whitespace is blank.
+    assert is_not_blank({"pmode": "   "}, "pmode") is False
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_is_not_blank.py -v`
-Expected: `test_key_present_but_empty_returns_false` FAILS (returns True); the other two PASS.
+Expected: `test_key_present_but_empty_returns_false` and `test_key_present_but_whitespace_only_returns_false` FAIL (both return True); the other three PASS.
 
 - [ ] **Step 3: Apply the fix with Serena**
 
-Use `replace_symbol_body` on `is_not_blank` in `common/app.py`:
+Use `replace_symbol_body` on `is_not_blank` in `common/app.py`. Use exactly this body — `.strip() != ""`, not truthiness (see the two settled decisions above):
 
 ```python
 def is_not_blank(response, setting):
-    return setting in response and response[setting] != ""
+    return setting in response and response[setting].strip() != ""
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_is_not_blank.py -v`
-Expected: 3 PASS.
+Expected: 5 PASS.
 
 - [ ] **Step 5: Run the web suite to confirm no settings route regressed**
 
@@ -83,11 +106,21 @@ Expected: PASS (all settings-route branches still store populated values; empty 
 
 ```bash
 git add tests/unit/common/test_is_not_blank.py common/app.py
-git commit -m "fix(common): is_not_blank checks the submitted value, not the key name
+git commit -F <a message file> with this content:
 
-Empty numeric form fields previously reached int()/float() and raised a
-500; now they are treated as blank and skip the assignment. Gated by new
-characterization tests. Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+fix(common): is_not_blank checks the submitted value, not the key name
+
+The helper compared the key NAME against "", which is always true, so it
+only ever meant "is this key present". Empty and whitespace-only numeric
+form fields therefore reached int()/float() and raised a 500. They now
+read as blank and skip the assignment, keeping the prior value -- the
+original intent. Gated by new characterization tests.
+
+Strips before testing: int("   ") raises ValueError exactly as int("")
+does. Compares against "" rather than using truthiness so a future
+non-string caller cannot have a legitimate 0 silently treated as blank.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 ```
 
 ---
