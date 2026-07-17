@@ -34,7 +34,8 @@
 
 **Two decisions settled with the repo owner before implementation:**
 1. **Use `.strip()`.** `int("   ")` raises `ValueError` exactly as `int("")` does (verified), so a whitespace-only submission reaches the same 500. Since no caller wants whitespace, stripping completes the fix's stated intent rather than leaving it half-done.
-2. **Use `.strip() != ""`, NOT truthiness (`not response[setting]`).** Equivalent today (form values are `str`), but truthiness also swallows `0`/`False`/`None`/`[]`. If this helper ever sees JSON, `{"pmode": 0}` would be treated as blank and a legitimate zero would silently stop saving. `!= ""` is explicit about meaning "empty string" and matches the sibling `is_checked` helper's explicit `== "on"` on the next line. `.strip()` keeps the helper's existing string assumption; a non-`str` value now raises `AttributeError` loudly, which is the correct failure mode for a form helper.
+2. **Use truthiness of the stripped value: `bool(response[setting].strip())`.** An earlier draft of this plan argued for `.strip() != ""` on the grounds that truthiness would swallow a JSON `0`. **That argument was wrong and is withdrawn.** It only held before `.strip()` was added: with the `.strip()` call in front, a non-string value raises `AttributeError` at `(0).strip()` and never reaches the comparison, so `!= ""` guards against nothing. Given `.strip()`, the two forms are equivalent for every possible input, and the comparison is dead noise. This helper is for `request.form` strings only; calling it on JSON never makes sense, and `.strip()` already fails loudly rather than silently if someone tries.
+   - **The `bool()` is required, not decorative.** `setting in response and response[setting].strip()` returns the *stripped string* (`"2"`), not a boolean. Every call site is `if is_not_blank(...)`, so runtime behavior is identical either way — but the tests below assert `is True` / `is False` (identity), and `"2" is True` is `False`. It also keeps this `is_*` predicate's documented `-> bool` interface honest and consistent with the sibling `is_checked`, which returns a real bool from `== "on"`.
 
 **Files:**
 - Test: `tests/unit/common/test_is_not_blank.py` (create)
@@ -85,11 +86,11 @@ Expected: `test_key_present_but_empty_returns_false` and `test_key_present_but_w
 
 - [ ] **Step 3: Apply the fix with Serena**
 
-Use `replace_symbol_body` on `is_not_blank` in `common/app.py`. Use exactly this body — `.strip() != ""`, not truthiness (see the two settled decisions above):
+Use `replace_symbol_body` on `is_not_blank` in `common/app.py`. Use exactly this body (see the settled decisions above — keep the `bool()`):
 
 ```python
 def is_not_blank(response, setting):
-    return setting in response and response[setting].strip() != ""
+    return setting in response and bool(response[setting].strip())
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -117,8 +118,9 @@ read as blank and skip the assignment, keeping the prior value -- the
 original intent. Gated by new characterization tests.
 
 Strips before testing: int("   ") raises ValueError exactly as int("")
-does. Compares against "" rather than using truthiness so a future
-non-string caller cannot have a legitimate 0 silently treated as blank.
+does, so whitespace reached the same crash. The helper is for form
+strings, so .strip() is also the type check -- a non-string fails loudly
+here rather than being silently mishandled downstream.
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 ```

@@ -270,7 +270,7 @@ def create_safe_name(name):
 
 
 def is_not_blank(response, setting):
-    return setting in response and setting != ""
+    return setting in response and bool(response[setting].strip())
 
 
 def is_checked(response, setting):
