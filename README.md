@@ -1,5 +1,25 @@
 # ![Dashboard](static/img/launcher-icon-1x.png) PiFire
-## Raspberry Pi based Smoker Grill Controller
+## ~Raspberry Pi~ Pretty much anything based Smoker Grill Controller
+
+This is a pretty large fork of PiFire, adding support for lots of new things, including:
+
+* MPC based smoker control that has no overshoot and much tighter control of the smoker
+* a QT quick based UI with nice GPU based animations and higher resolution/cleaner display 
+* Lots more temperature probes, include thermoworks RFX, MAX31856
+* Support for EMC2101/2301 based fan controllers for PWM
+* Support for an RP2350 based I2C/PWM board (firmware in a separate project)
+* Support for non-RPI based smokers - including common I2C, SPI, and relay breakouts.
+* No need for redis/valkey anymore, things are stored in SQLite durably.
+* Large refactoring into testable, clean pieces for control, web, and display
+* over 600 new tests to test all the subsystems, including offscreen rendering tests, playwright tests for web, you name it.
+* Lots of other things, including bug fixes, etc.
+
+Over time, things will be upstreamed. This can be considered a very large testbed that is kept working, and moves very very fast.  I'm happy to add support for pretty much
+anything people need.  Over time, as things settle, i will common them out and send PR's to PiFire
+
+The rest of nebhead's README, below, apply pretty well as well, so i've kept them there.
+
+Any bugs you find should be reported here, if they are upstream bugs, i'll point you there. I don't want to burden upstream with bugs that are my fault, that's not cool.
 
 ***Note:*** *This project is continuously evolving, and thus this readme will likely be improved over time, as I find the inspiration to make adjustments.  That being said, I'm sure there will be many errors that I have overlooked or sections that I haven't updated. This project is something I've done for both fun and for self-education.  If you decide to implement this project for yourself, and run into issues/challenges, feel free to submit an issue here on GitHub.  However, I would highly encourage you to dig in and debug the issue as much as you can on your own for the sake of growing your own knowledge.  Also, I have a very demanding day job, a family, and lots of barbecue to make - so please have patience with me.*
 
