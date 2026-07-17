@@ -2531,6 +2531,225 @@ def _manual_toggle(control, pin_name, arglist, reset_pwm_when_off=False):
     return control
 
 
+def _cmd_get_uuid(data, control, settings, arglist, origin, kind):
+    """
+    Get Server Uuid
+    /api/get/uuid
+
+    Returns:
+    {
+        'uuid' : <Server Uuid>
+    }
+    """
+    data["data"]["uuid"] = settings["server_info"]["uuid"]
+
+
+def _cmd_get_versions(data, control, settings, arglist, origin, kind):
+    """
+    Get Server Versions
+    /api/get/versions
+
+    Returns:
+    {
+        'version' : <Server version>,
+        'build' : <Server build>
+    }
+    """
+    data["data"]["version"] = settings["versions"]["server"]
+    data["data"]["build"] = settings["versions"]["build"]
+
+
+def _cmd_get_hopper(data, control, settings, arglist, origin, kind):
+    """
+    Get Hopper Level
+    /api/get/hopper
+
+    Returns:
+    {
+        'hopper' : <level>
+    }
+    """
+    control["hopper_check"] = True
+    write_control(control, kind, origin=origin)
+    time.sleep(3)
+    pelletdb = read_pellet_db()
+    data["data"]["hopper"] = pelletdb["current"]["hopper_level"]
+
+
+def _cmd_get_timer(data, control, settings, arglist, origin, kind):
+    """
+    Get Timer Data
+    /api/get/timer
+
+    Returns:
+    {
+        'start' : control['timer']['start'],
+        'paused' : control['timer']['paused'],
+        'end' : control['timer']['end'],
+        'shutdown' : control['notify_data'][]['shutdown'],
+        'keep_warm' : control['notify_data'][]['keep_warm'],
+    }
+    """
+    data["data"]["start"] = control["timer"]["start"]
+    data["data"]["paused"] = control["timer"]["paused"]
+    data["data"]["end"] = control["timer"]["end"]
+    """ Get index of timer object """
+    for index, notify_obj in enumerate(control["notify_data"]):
+        if notify_obj["type"] == "timer":
+            break
+    data["data"]["shutdown"] = control["notify_data"][index]["shutdown"]
+    data["data"]["keep_warm"] = control["notify_data"][index]["keep_warm"]
+
+
+def _cmd_get_notify(data, control, settings, arglist, origin, kind):
+    """
+    Get Notify Data
+    /api/get/notify
+
+    Returns:
+        [
+            {
+            "eta": null,
+            "keep_warm": false,
+            "label": "Grill",
+            "name": "GrillMain",
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "type": "probe"
+            },
+            ...
+            {
+            "keep_warm": false,
+            "label": "Hopper",
+            "last_check": 0,
+            "req": true,
+            "shutdown": false,
+            "type": "hopper"
+            }
+        ]
+    """
+    data["data"] = control["notify_data"]
+
+
+def _cmd_get_status(data, control, settings, arglist, origin, kind):
+    """
+    Get Status Information for Key Items
+    /api/get/status
+
+    Returns (Example):
+    {
+        "display_mode": "Stop",
+        "lid_open_detected": false,
+        "lid_open_endtime": 0,
+        "mode": "Stop",
+        "name": "Development",
+        "outpins": {
+            "auger": false,
+            "fan": false,
+            "igniter": false,
+            "power": false
+        },
+        "p_mode": 0,
+        "prime_amount": 0,
+        "prime_duration": 0,
+        "s_plus": false,
+        "shutdown_duration": 10,
+        "start_duration": 30,
+        "start_time": 0,
+        "startup_timestamp": 0,
+        "status": "",
+        "ui_hash": 5734093427135650890,
+        "units": "F"
+    }
+    """
+    status = read_status()
+
+    data["data"]["mode"] = control["mode"]
+    data["data"]["display_mode"] = status["mode"]
+    data["data"]["status"] = control["status"]
+    data["data"]["s_plus"] = control["s_plus"]
+    data["data"]["units"] = settings["globals"]["units"]
+    data["data"]["name"] = settings["globals"]["grill_name"]
+    data["data"]["start_time"] = status["start_time"]
+    data["data"]["start_duration"] = status["start_duration"]
+    data["data"]["shutdown_duration"] = status["shutdown_duration"]
+    data["data"]["prime_duration"] = status["prime_duration"]
+    data["data"]["prime_amount"] = status["prime_amount"]
+    data["data"]["lid_open_detected"] = status["lid_open_detected"]
+    data["data"]["lid_open_endtime"] = status["lid_open_endtime"]
+    data["data"]["p_mode"] = status["p_mode"]
+    data["data"]["outpins"] = status["outpins"]
+    data["data"]["startup_timestamp"] = status["startup_timestamp"]
+    data["data"]["ui_hash"] = hash(json.dumps(settings["probe_settings"]["probe_map"]["probe_info"]))
+
+
+def _cmd_get_temp(data, control, settings, arglist, origin, kind):
+    """
+    Get Temperature
+    /api/get/temp/{probe label}
+
+    Returns:
+    {
+        'temp' : <probe temperature>
+        'result' : 'OK'
+    }
+    """
+    current_temps = read_current()
+
+    if arglist[1] in current_temps["P"].keys():
+        data["data"]["temp"] = current_temps["P"][arglist[1]]
+    elif arglist[1] in current_temps["F"].keys():
+        data["data"]["temp"] = current_temps["F"][arglist[1]]
+    elif arglist[1] in current_temps["AUX"].keys():
+        data["data"]["temp"] = current_temps["AUX"][arglist[1]]
+    else:
+        data["result"] = "ERROR"
+        data["message"] = f"Probe {arglist[1]} not found or not specified."
+
+
+def _cmd_get_current(data, control, settings, arglist, origin, kind):
+    """
+    Get Current Temp Data Structure
+    /api/get/current
+
+    Returns (Example):
+    {
+        "AUX": {},
+        "F": {
+            "Probe1": 204,
+            "Probe2": 206
+        },
+        "NT": {
+            "Grill": 0,
+            "Probe1": 0,
+            "Probe2": 0
+        },
+        "P": {
+            "Grill": 518
+        },
+        "PSP": 0,
+        "TS": 1707345482984
+    }
+    """
+    current_temps = read_current()
+
+    data["data"] = current_temps
+
+
+def _cmd_get_mode(data, control, settings, arglist, origin, kind):
+    """
+    Get Current Mode
+    /api/get/mode
+
+    Returns:
+    {
+        'mode' : <Current Mode>
+    }
+    """
+    data["data"]["mode"] = control["mode"]
+
+
 def process_command(action=None, arglist=[], origin="unknown", kind=WriteKind.MERGE):
     """
     Process incoming command from API or elsewhere
@@ -2554,215 +2773,31 @@ def process_command(action=None, arglist=[], origin="unknown", kind=WriteKind.ME
         """ GET Commands """
 
         if arglist[0] == "temp":
-            """
-			Get Temperature 
-			/api/get/temp/{probe label}
-
-
-			Returns: 
-			{ 
-				'temp' : <probe temperature> 
-				'result' : 'OK'
-			}
-			"""
-            current_temps = read_current()
-
-            if arglist[1] in current_temps["P"].keys():
-                data["data"]["temp"] = current_temps["P"][arglist[1]]
-            elif arglist[1] in current_temps["F"].keys():
-                data["data"]["temp"] = current_temps["F"][arglist[1]]
-            elif arglist[1] in current_temps["AUX"].keys():
-                data["data"]["temp"] = current_temps["AUX"][arglist[1]]
-            else:
-                data["result"] = "ERROR"
-                data["message"] = f"Probe {arglist[1]} not found or not specified."
+            _cmd_get_temp(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "current":
-            """
-			Get Current Temp Data Structure 
-			/api/get/current
-
-			Returns (Example): 
-			{
-				"AUX": {},
-				"F": {
-					"Probe1": 204,
-					"Probe2": 206
-				},
-				"NT": {
-					"Grill": 0,
-					"Probe1": 0,
-					"Probe2": 0
-				},
-				"P": {
-					"Grill": 518
-				},
-				"PSP": 0,
-				"TS": 1707345482984
-			}
-			"""
-            current_temps = read_current()
-
-            data["data"] = current_temps
+            _cmd_get_current(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "mode":
-            """
-			Get Current Mode 
-			/api/get/mode
-
-			Returns: 
-			{ 
-				'mode' : <Current Mode> 
-			}
-			"""
-            data["data"]["mode"] = control["mode"]
+            _cmd_get_mode(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "uuid":
-            """
-			Get Server Uuid
-			/api/get/uuid
-
-			Returns: 
-			{ 
-				'uuid' : <Server Uuid> 
-			}
-			"""
-            data["data"]["uuid"] = settings["server_info"]["uuid"]
+            _cmd_get_uuid(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "versions":
-            """
-			Get Server Versions
-			/api/get/versions
-
-			Returns: 
-			{ 
-				'version' : <Server version>,
-				'build' : <Server build>
-			}
-			"""
-            data["data"]["version"] = settings["versions"]["server"]
-            data["data"]["build"] = settings["versions"]["build"]
+            _cmd_get_versions(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "hopper":
-            """
-			Get Hopper Level 
-			/api/get/hopper
-
-			Returns: 
-			{ 
-				'hopper' : <level> 
-			}
-			"""
-            control["hopper_check"] = True
-            write_control(control, kind, origin=origin)
-            time.sleep(3)
-            pelletdb = read_pellet_db()
-            data["data"]["hopper"] = pelletdb["current"]["hopper_level"]
+            _cmd_get_hopper(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "timer":
-            """
-			Get Timer Data
-			/api/get/timer
-
-			Returns:
-			{ 
-				'start' : control['timer']['start'], 
-				'paused' : control['timer']['paused'],
-				'end' : control['timer']['end'], 
-				'shutdown' : control['notify_data'][]['shutdown'],
-				'keep_warm' : control['notify_data'][]['keep_warm'],
-			}
-			"""
-            data["data"]["start"] = control["timer"]["start"]
-            data["data"]["paused"] = control["timer"]["paused"]
-            data["data"]["end"] = control["timer"]["end"]
-            """ Get index of timer object """
-            for index, notify_obj in enumerate(control["notify_data"]):
-                if notify_obj["type"] == "timer":
-                    break
-            data["data"]["shutdown"] = control["notify_data"][index]["shutdown"]
-            data["data"]["keep_warm"] = control["notify_data"][index]["keep_warm"]
+            _cmd_get_timer(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "notify":
-            """
-			Get Notify Data
-			/api/get/notify
-
-			Returns:
-				[
-					{
-					"eta": null,
-					"keep_warm": false,
-					"label": "Grill",
-					"name": "GrillMain",
-					"req": false,
-					"shutdown": false,
-					"target": 0,
-					"type": "probe"
-					},
-					...
-					{
-					"keep_warm": false,
-					"label": "Hopper",
-					"last_check": 0,
-					"req": true,
-					"shutdown": false,
-					"type": "hopper"
-					}
-				]
-			"""
-            data["data"] = control["notify_data"]
+            _cmd_get_notify(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "status":
-            """
-			Get Status Information for Key Items
-			/api/get/status
-
-			Returns (Example):
-			{
-				"display_mode": "Stop",
-				"lid_open_detected": false,
-				"lid_open_endtime": 0,
-				"mode": "Stop",
-				"name": "Development",
-				"outpins": {
-					"auger": false,
-					"fan": false,
-					"igniter": false,
-					"power": false
-				},
-				"p_mode": 0,
-				"prime_amount": 0,
-				"prime_duration": 0,
-				"s_plus": false,
-				"shutdown_duration": 10,
-				"start_duration": 30,
-				"start_time": 0,
-				"startup_timestamp": 0,
-				"status": "",
-				"ui_hash": 5734093427135650890,
-				"units": "F"
-			}
-			"""
-            status = read_status()
-
-            data["data"]["mode"] = control["mode"]
-            data["data"]["display_mode"] = status["mode"]
-            data["data"]["status"] = control["status"]
-            data["data"]["s_plus"] = control["s_plus"]
-            data["data"]["units"] = settings["globals"]["units"]
-            data["data"]["name"] = settings["globals"]["grill_name"]
-            data["data"]["start_time"] = status["start_time"]
-            data["data"]["start_duration"] = status["start_duration"]
-            data["data"]["shutdown_duration"] = status["shutdown_duration"]
-            data["data"]["prime_duration"] = status["prime_duration"]
-            data["data"]["prime_amount"] = status["prime_amount"]
-            data["data"]["lid_open_detected"] = status["lid_open_detected"]
-            data["data"]["lid_open_endtime"] = status["lid_open_endtime"]
-            data["data"]["p_mode"] = status["p_mode"]
-            data["data"]["outpins"] = status["outpins"]
-            data["data"]["startup_timestamp"] = status["startup_timestamp"]
-            data["data"]["ui_hash"] = hash(json.dumps(settings["probe_settings"]["probe_map"]["probe_info"]))
+            _cmd_get_status(data, control, settings, arglist, origin, kind)
 
         else:
             data["result"] = "ERROR"
