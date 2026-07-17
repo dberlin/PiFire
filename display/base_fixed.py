@@ -38,6 +38,11 @@ class DisplayBase:
     _NOMINAL_HEIGHT = 320
     _SQUARE = False
 
+    # Post-transition settle: the first-frame hold after a clear/mode-change that
+    # gives slow physical panels time to draw. Fast panels keep instant
+    # transitions (0.1s == the steady cadence). Shims override per resolution.
+    min_transition_delay = 0.1
+
     def __init__(self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}):
         # Init Global Variables and Constants
         self.dev_pins = dev_pins
@@ -78,6 +83,12 @@ class DisplayBase:
         else:
             self.WIDTH = self._NOMINAL_WIDTH
             self.HEIGHT = self._NOMINAL_HEIGHT
+
+        # Display loop timing: steady-state cadence is fixed; the transition
+        # settle (clear_delay) is tunable per display via min_transition_delay.
+        self.monitor_display = False
+        self.loop_delay = 0.1
+        self.clear_delay = self.min_transition_delay
 
         self.inc_pulse_color = True
         self.icon_color = 100
@@ -243,30 +254,35 @@ class DisplayBase:
         while True:
             if self.input_enabled:
                 self._event_detect()
-
+                if self.menu_active:
+                    time.sleep(self.loop_delay)
             if self.display_timeout:
                 if time.time() > self.display_timeout:
                     self.display_timeout = None
                     if not self.display_active:
                         self.display_command = "clear"
-
             if self.display_command == "clear":
                 self.display_active = False
                 self.display_timeout = None
                 self.display_command = None
+                self.monitor_display = False
                 self._display_clear()
-
+                time.sleep(self.clear_delay)
+                continue
             if self.display_command == "splash":
                 self._display_splash()
                 self.display_timeout = time.time() + 3
                 self.display_command = "clear"
+                self.monitor_display = False
                 time.sleep(3)  # Hold splash screen for 3 seconds
-
+                continue
             if self.display_command == "text":
                 self._display_text()
                 self.display_command = None
+                self.monitor_display = False
                 self.display_timeout = time.time() + 10
-
+                time.sleep(self.loop_delay)
+                continue
             if self.display_command == "network":
                 try:
                     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -282,7 +298,9 @@ class DisplayBase:
                     self.display_command = None
                 else:
                     self.display_text("No IP Found")
-
+                self.monitor_display = False
+                time.sleep(self.loop_delay)
+                continue
             if self.input_enabled:
                 if self.menu_active and not self.display_timeout:
                     if time.time() - self.menu_time > 5:
@@ -291,15 +309,35 @@ class DisplayBase:
                         self.menu["current"]["option"] = 0
                         if not self.display_active:
                             self.display_command = "clear"
+                            time.sleep(self.loop_delay)
+                            continue
                 elif not self.display_timeout and self.display_active:
                     if self.in_data is not None and self.status_data is not None:
                         self._display_current(self.in_data, self.status_data)
-
+                        self.in_data = None
+                        self.status_data = None
+                        """If we are sending the full monitor display for the first time increase loop delay to give display time to handle data."""
+                        if self.monitor_display:
+                            time.sleep(self.loop_delay)
+                            continue
+                        else:
+                            self.monitor_display = True
+                            time.sleep(self.clear_delay)
+                            continue
             elif not self.display_timeout and self.display_active:
                 if self.in_data is not None and self.status_data is not None:
                     self._display_current(self.in_data, self.status_data)
-
-            time.sleep(0.1)
+                    self.in_data = None
+                    self.status_data = None
+                    """If we are sending the full monitor display for the first time increase loop delay to give display time to handle data."""
+                    if self.monitor_display:
+                        time.sleep(self.loop_delay)
+                        continue
+                    else:
+                        self.monitor_display = True
+                        time.sleep(self.clear_delay)
+                        continue
+            time.sleep(self.loop_delay)
 
     """
 	============== Input Callbacks ============= 
@@ -866,21 +904,27 @@ class DisplayBase:
 
         if status_data["outpins"]["fan"]:
             # F = Fan (Upper Left), position (10,10)
-            if self.WIDTH == 240:
+            if self._SQUARE:
+                self._draw_fan_icon(img, (10, 10))
+            elif self.WIDTH == 240:
                 self._draw_fan_icon(img, (10, 50))
             else:
                 self._draw_fan_icon(img, (10, 10))
 
         if status_data["outpins"]["igniter"]:
             # I = Igniter(Center Right)
-            if self.WIDTH == 240:
+            if self._SQUARE:
+                self._draw_ignitor_icon(img, (self.WIDTH - 52, 60))
+            elif self.WIDTH == 240:
                 self._draw_ignitor_icon(img, (self.WIDTH - 52, 170))
             else:
                 self._draw_ignitor_icon(img, (self.WIDTH - 52, 60))
 
         if status_data["outpins"]["auger"]:
             # A = Auger (Center Left)
-            if self.WIDTH == 240:
+            if self._SQUARE:
+                self._draw_auger_icon(img, (10, 60))
+            elif self.WIDTH == 240:
                 self._draw_auger_icon(img, (10, 170))
             else:
                 self._draw_auger_icon(img, (10, 60))
@@ -894,19 +938,25 @@ class DisplayBase:
                 notify_count += 1
 
         if status_data["recipe_paused"]:
-            if self.WIDTH == 240:
+            if self._SQUARE:
+                self._draw_pause_icon(img, (self.WIDTH - 52, 10))
+            elif self.WIDTH == 240:
                 self._draw_pause_icon(img, (self.WIDTH - 52, 50))
             else:
                 self._draw_pause_icon(img, (self.WIDTH - 52, 10))
 
         elif status_data["recipe"]:
-            if self.WIDTH == 240:
+            if self._SQUARE:
+                self._draw_recipe_icon(img, (self.WIDTH - 52, 10))
+            elif self.WIDTH == 240:
                 self._draw_recipe_icon(img, (self.WIDTH - 52, 50))
             else:
                 self._draw_recipe_icon(img, (self.WIDTH - 52, 10))
 
         elif show_notify_indicator:
-            if self.WIDTH == 240:
+            if self._SQUARE:
+                self._draw_notify_icon(img, (self.WIDTH - 52, 10))
+            elif self.WIDTH == 240:
                 self._draw_notify_icon(img, (self.WIDTH - 52, 50))
             else:
                 self._draw_notify_icon(img, (self.WIDTH - 52, 10))
@@ -923,7 +973,9 @@ class DisplayBase:
 
         # Smoke Plus Indicator
         if status_data["s_plus"] and (status_data["mode"] == "Smoke" or status_data["mode"] == "Hold"):
-            if self.WIDTH == 240:
+            if self._SQUARE:
+                self._draw_splus_icon(img, (self.WIDTH - 52, 60))
+            elif self.WIDTH == 240:
                 self._draw_splus_icon(img, (self.WIDTH - 52, 170))
             else:
                 self._draw_splus_icon(img, (self.WIDTH - 52, 60))
@@ -941,7 +993,9 @@ class DisplayBase:
             label_canvas = self._draw_text(
                 text, self.primary_font, 15, hopper_color, rect=True, outline_color=hopper_color, fill_color=(0, 0, 0)
             )
-            if self.WIDTH == 240:
+            if self._SQUARE:
+                coords = self.WIDTH // 2 - (label_canvas.width // 2), self.HEIGHT - 28
+            elif self.WIDTH == 240:
                 coords = self.WIDTH // 2 - (label_canvas.width // 2), self.HEIGHT - 28
             else:
                 coords = self.WIDTH // 2 - (label_canvas.width // 2), (self.HEIGHT // 2) + 50
@@ -950,10 +1004,19 @@ class DisplayBase:
 
         # Current Mode (Bottom Center)
         text = status_data["mode"]  # + ' Mode'
+        mode_font_size = 20 if self._SQUARE else 32
         label_canvas = self._draw_text(
-            text, self.primary_font, 32, (0, 0, 0), rect=True, outline_color=(3, 161, 252), fill_color=(255, 255, 255)
+            text,
+            self.primary_font,
+            mode_font_size,
+            (0, 0, 0),
+            rect=True,
+            outline_color=(3, 161, 252),
+            fill_color=(255, 255, 255),
         )
-        if self.WIDTH == 240:
+        if self._SQUARE:
+            coords = (self.WIDTH // 2 - (label_canvas.width // 2), self.HEIGHT - label_canvas.height - 2)
+        elif self.WIDTH == 240:
             coords = (self.WIDTH // 2 - (label_canvas.width // 2), 0)
         else:
             coords = (self.WIDTH // 2 - (label_canvas.width // 2), self.HEIGHT - 44)
@@ -973,7 +1036,12 @@ class DisplayBase:
             label_canvas = self._draw_text(
                 text, self.primary_font, 15, text_color, rect=True, outline_color=text_color, fill_color=(0, 0, 0)
             )
-            if self.WIDTH == 240:
+            if self._SQUARE:
+                if status_data["mode"] == "Smoke":
+                    coords = self.WIDTH // 2 - (label_canvas.width // 2), 26
+                else:
+                    coords = self.WIDTH - label_canvas.width - 10, 10
+            elif self.WIDTH == 240:
                 if status_data["mode"] == "Smoke":
                     coords = self.WIDTH // 2 - (label_canvas.width // 2), 60
                 else:
@@ -1004,7 +1072,10 @@ class DisplayBase:
             label_canvas = self._draw_text(
                 text, self.primary_font, 26, (0, 200, 0), rect=True, outline_color=(0, 200, 0), fill_color=(0, 0, 0)
             )
-            coords = (int((self.WIDTH // 2) - (label_canvas.width // 2)), int((self.HEIGHT // 2) - 120))
+            coords = (
+                int((self.WIDTH // 2) - (label_canvas.width // 2)),
+                5 if self._SQUARE else int((self.HEIGHT // 2) - 120),
+            )
             img.paste(label_canvas, coords, label_canvas)
 
         # Lid open detection timer display
@@ -1019,7 +1090,10 @@ class DisplayBase:
                 label_canvas = self._draw_text(
                     text, self.primary_font, 18, (0, 200, 0), rect=True, outline_color=(0, 200, 0), fill_color=(0, 0, 0)
                 )
-                coords = (int((self.WIDTH // 2) - (label_canvas.width // 2)), int((self.HEIGHT // 2) - 120))
+                coords = (
+                    int((self.WIDTH // 2) - (label_canvas.width // 2)),
+                    5 if self._SQUARE else int((self.HEIGHT // 2) - 120),
+                )
                 img.paste(label_canvas, coords, label_canvas)
 
         # Display Final Screen
@@ -1200,7 +1274,7 @@ class DisplayBase:
                 elif selected == "Hold":
                     self.display_active = True
                     self.menu["current"]["mode"] = "grill_hold_value"
-                    if self.in_data["primary_setpoint"] == 0:
+                    if self.in_data is None or self.in_data["primary_setpoint"] == 0:
                         if self.units == "F":
                             self.menu["current"]["option"] = 200  # start at 200 for F
                         else:

@@ -7,3 +7,4 @@ class DisplayBase(_Base):
     _NOMINAL_WIDTH = 320
     _NOMINAL_HEIGHT = 240
     _SQUARE = False
+    min_transition_delay = 0.1  # fast panel: no post-transition settle
