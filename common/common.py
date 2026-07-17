@@ -2109,6 +2109,20 @@ def _read_json_key_or_none(key):
     return json.loads(raw) if raw is not None else None
 
 
+def _get_install_status(prefix):
+    return (
+        _read_json_key_or_none(f"{prefix}:percent"),
+        _read_json_key_or_none(f"{prefix}:status"),
+        _read_json_key_or_none(f"{prefix}:output"),
+    )
+
+
+def _set_install_status(prefix, percent, status, output):
+    datastore.set_blob(f"{prefix}:percent", json.dumps(percent))
+    datastore.set_blob(f"{prefix}:status", json.dumps(status))
+    datastore.set_blob(f"{prefix}:output", json.dumps(output))
+
+
 def _read_json_blob(key, default_factory):
     raw = datastore.get_blob(key)
     return json.loads(raw) if raw is not None else default_factory()
@@ -2143,11 +2157,7 @@ def get_wizard_install_status():
 
     :return: Wizard Install (Percent, Status, Output)
     """
-    return (
-        _read_json_key_or_none("wizard:percent"),
-        _read_json_key_or_none("wizard:status"),
-        _read_json_key_or_none("wizard:output"),
-    )
+    return _get_install_status("wizard")
 
 
 def set_wizard_install_status(percent, status, output):
@@ -2158,9 +2168,7 @@ def set_wizard_install_status(percent, status, output):
     :param status: Current Status
     :param output: Output
     """
-    datastore.set_blob("wizard:percent", json.dumps(percent))
-    datastore.set_blob("wizard:status", json.dumps(status))
-    datastore.set_blob("wizard:output", json.dumps(output))
+    _set_install_status("wizard", percent, status, output)
 
 
 def read_updater_manifest(filename="updater/updater_manifest.json"):
@@ -2179,11 +2187,7 @@ def get_updater_install_status():
 
     :return: Wizard Updater (Percent, Status, Output)
     """
-    return (
-        _read_json_key_or_none("updater:percent"),
-        _read_json_key_or_none("updater:status"),
-        _read_json_key_or_none("updater:output"),
-    )
+    return _get_install_status("updater")
 
 
 def set_updater_install_status(percent, status, output):
@@ -2194,9 +2198,7 @@ def set_updater_install_status(percent, status, output):
     :param status: Current Status
     :param output: Output
     """
-    datastore.set_blob("updater:percent", json.dumps(percent))
-    datastore.set_blob("updater:status", json.dumps(status))
-    datastore.set_blob("updater:output", json.dumps(output))
+    _set_install_status("updater", percent, status, output)
 
 
 def process_metrics(metrics_data, augerrate=0.3):
