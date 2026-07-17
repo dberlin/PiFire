@@ -1,13 +1,14 @@
-from common import common as c
+from common import datastore_accessors as c
+from common import defaults
 from common import datastore
 
 
 def test_replace_last_matches_oracle(ds, oracle):
     exp = oracle("metrics_replace_last")
-    m = c.default_metrics()
+    m = defaults.default_metrics()
     m["mode"] = "Startup"
     c.write_metrics(m, new_metric=True)
-    m2 = c.default_metrics()
+    m2 = defaults.default_metrics()
     m2["mode"] = "Hold"
     c.write_metrics(m2, new_metric=False)
     assert c.read_metrics()["mode"] == exp["last"]["mode"] == "Hold"
@@ -20,7 +21,7 @@ def test_new_metric_without_existing_does_not_crash(ds):
 
 
 def test_metrics_columns_queryable(ds):
-    m = c.default_metrics()
+    m = defaults.default_metrics()
     m["mode"] = "Startup"
     m["primary_setpoint"] = 225
     c.write_metrics(m, new_metric=True)
@@ -31,7 +32,7 @@ def test_metrics_columns_queryable(ds):
 
 
 def test_metrics_roundtrip_all_fields(ds):
-    m = c.default_metrics()
+    m = defaults.default_metrics()
     m["id"] = "distinct-id"
     m["starttime"] = 111.0
     m["starttime_c"] = "00:01:00"
@@ -58,7 +59,7 @@ def test_metrics_roundtrip_all_fields(ds):
     c.write_metrics(m, new_metric=True)
     result = c.read_metrics()
 
-    for key, _ in c.metrics_items:
+    for key, _ in defaults.metrics_items:
         if key in ("starttime", "id"):
             continue  # stamped by new_metric=True
         assert result[key] == m[key], key
@@ -74,7 +75,7 @@ def test_metrics_roundtrip_all_fields(ds):
         assert isinstance(result[key], int), f"{key} should round-trip as int, got {type(result[key])}"
 
     # A genuinely-float field must still come back as float.
-    m2 = c.default_metrics()
+    m2 = defaults.default_metrics()
     m2["auger_cycle_time"] = 0.3
     c.write_metrics(m2, new_metric=True)
     result2 = c.read_metrics()

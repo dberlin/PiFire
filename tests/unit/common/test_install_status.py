@@ -1,4 +1,4 @@
-import common.common as c
+import common.datastore_accessors as c
 
 
 def test_set_then_get_wizard(monkeypatch):

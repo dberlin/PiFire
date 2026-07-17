@@ -1,4 +1,4 @@
-import common.common as c
+import common.datastore_accessors as c
 
 
 def test_read_json_blob_returns_default_when_absent(monkeypatch):

@@ -2,8 +2,8 @@ from unittest import mock
 
 import pytest
 
-import common.common as cc
-from common import get_wifi_quality
+import common.system as cc
+from common.system import get_wifi_quality
 
 
 IWCONFIG_OUTPUT = b"""wlan0     IEEE 802.11  ESSID:"MyNet"

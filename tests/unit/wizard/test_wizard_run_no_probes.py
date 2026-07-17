@@ -16,7 +16,8 @@ import logging
 import pytest
 
 import wizard
-from common import common as c
+from common import datastore_accessors, defaults
+from common.common import read_wizard
 
 
 @pytest.fixture
@@ -36,11 +37,11 @@ def no_install(monkeypatch):
 
 
 def test_run_wizard_no_probe_devices(ds, no_install):
-    settings = c.default_settings()
+    settings = defaults.default_settings()
     settings["probe_settings"]["probe_map"]["probe_devices"] = []
-    c.write_settings_store(settings)
+    datastore_accessors.write_settings_store(settings)
 
-    wizard_data = c.read_wizard()
+    wizard_data = read_wizard()
     install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
 
     # No probe devices -> probes profile_selected is empty, but it still carries
@@ -52,14 +53,14 @@ def test_run_wizard_no_probe_devices(ds, no_install):
 
 
 def test_run_wizard_dev_mode_resolves_to_restart_not_reboot(ds, no_install):
-    settings = c.default_settings()
+    settings = defaults.default_settings()
     settings["probe_settings"]["probe_map"]["probe_devices"] = []
-    c.write_settings_store(settings)
+    datastore_accessors.write_settings_store(settings)
 
-    wizard_data = c.read_wizard()
+    wizard_data = read_wizard()
     install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
 
     wizard.run_wizard(settings, wizard_data, install_info)
 
-    percent, status, output = c.get_wizard_install_status()
+    percent, status, output = datastore_accessors.get_wizard_install_status()
     assert percent == 101

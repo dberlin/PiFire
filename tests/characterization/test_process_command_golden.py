@@ -94,6 +94,8 @@ import pytest
 
 import common.api_commands as api_commands
 import common.common as c
+import common.datastore_accessors as dsa
+import common.defaults as defaults
 from common.common import WriteKind
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_golden.json")
@@ -668,7 +670,7 @@ def _canonical_settings():
     assertions real: get/uuid and get/versions still prove process_command
     copies settings->response correctly, they just no longer depend on the host.
     """
-    settings = c.default_settings()
+    settings = defaults.default_settings()
     settings["server_info"]["uuid"] = CANONICAL_UUID
     settings["versions"] = dict(CANONICAL_VERSIONS)
     settings["globals"]["grill_name"] = CANONICAL_GRILL_NAME
@@ -684,7 +686,7 @@ def _canonical_pelletdb():
     have. default_pellets() stamps datetime.now() into pelletid/date_loaded,
     but nothing observed here reads those.
     """
-    pelletdb = c.default_pellets()
+    pelletdb = defaults.default_pellets()
     pelletdb["current"]["hopper_level"] = CANONICAL_HOPPER_LEVEL
     return pelletdb
 
@@ -703,18 +705,18 @@ def _run_case(case):
     # write_settings_store, not write_settings: the latter re-stamps
     # lastupdated.time from the real clock (seeding happens outside the frozen
     # -time block), which is what made an earlier golden drift between runs.
-    c.write_settings_store(settings)
+    dsa.write_settings_store(settings)
     c.datastore.set_blob("pellets:general", json.dumps(_canonical_pelletdb()))
 
-    c.read_status(init=True)
+    dsa.read_status(init=True)
     if case.get("status_patch"):
-        status = c.read_status()
+        status = dsa.read_status()
         _deep_merge(status, case["status_patch"])
-        c.write_status(status)
+        dsa.write_status(status)
 
-    c.read_current(zero_out=True)
+    dsa.read_current(zero_out=True)
     if case.get("current_patch"):
-        current = c.read_current()
+        current = dsa.read_current()
         _deep_merge(current, case["current_patch"])
         # Set the blob directly: common.write_current() takes a different
         # (probe_history-shaped) input and stamps a wall-clock TS into the
@@ -722,20 +724,20 @@ def _run_case(case):
         # own write is a plain set_blob of exactly this shape.
         c.datastore.set_blob("control:current", json.dumps(current))
 
-    control = c.read_control()
+    control = dsa.read_control()
     if case.get("control_patch"):
         _deep_merge(control, case["control_patch"])
     if case.get("control_fn"):
         # For seeding inside notify_data, whose elements _deep_merge cannot
         # reach (lists are replaced wholesale, matching json_patch semantics).
         case["control_fn"](control)
-    c.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
 
     c.SqliteQueue("queue_control_write").flush()
     c.SqliteQueue("queue_systemq").flush()
 
-    pre_control = c.read_control()
-    pre_settings = c.read_settings()
+    pre_control = dsa.read_control()
+    pre_settings = dsa.read_settings()
 
     # --- run (with every hazardous / non-deterministic edge neutralized) --
     log_calls = []
@@ -753,7 +755,7 @@ def _run_case(case):
         kwargs = {"action": case["action"], "arglist": arglist, "origin": case.get("origin", "test")}
         if "kind" in case:
             kwargs["kind"] = case["kind"]
-        result = c.process_command(**kwargs)
+        result = api_commands.process_command(**kwargs)
 
         cmd_calls = [
             name
@@ -771,14 +773,14 @@ def _run_case(case):
     queued_writes = [{"origin": q.get("origin", "<absent>"), "diff": _diff(pre_control, q)} for q in queued]
 
     systemq = c.SqliteQueue("queue_systemq").list()
-    c.execute_control_writes()
+    dsa.execute_control_writes()
 
     return {
         "return": _normalize(result),
         "arglist_after": _normalize(arglist),
         "queued_writes": queued_writes,
-        "control_diff_after_execute": _diff(pre_control, c.read_control()),
-        "settings_diff": _diff(pre_settings, c.read_settings()),
+        "control_diff_after_execute": _diff(pre_control, dsa.read_control()),
+        "settings_diff": _diff(pre_settings, dsa.read_settings()),
         "systemq": systemq,
         "cmd_calls": cmd_calls,
         "sleeps": sleeps,
@@ -800,10 +802,10 @@ def seeded(ds):
     _canonical_settings), so their probe labels, units and notify_data would
     depend on the developer's box and on whatever other suites left behind.
     """
-    c.write_settings_store(_canonical_settings())
+    dsa.write_settings_store(_canonical_settings())
     c.datastore.set_blob("pellets:general", json.dumps(_canonical_pelletdb()))
-    c.read_status(init=True)
-    c.read_current(zero_out=True)
+    dsa.read_status(init=True)
+    dsa.read_current(zero_out=True)
     return ds
 
 
@@ -865,12 +867,12 @@ def test_golden_file_digest_is_pinned():
 
 def test_unknown_action_fallback_is_exact(seeded):
     """Task 7 must preserve this fallback verbatim, message included."""
-    assert c.process_command(action="bogus", arglist=["x"], origin="test") == {
+    assert api_commands.process_command(action="bogus", arglist=["x"], origin="test") == {
         "result": "ERROR",
         "message": "Action [bogus] not valid/recognized.",
         "data": {},
     }
-    assert c.process_command(action=None, arglist=["x"], origin="test") == {
+    assert api_commands.process_command(action=None, arglist=["x"], origin="test") == {
         "result": "ERROR",
         "message": "Action [None] not valid/recognized.",
         "data": {},
@@ -878,13 +880,13 @@ def test_unknown_action_fallback_is_exact(seeded):
 
 
 def test_unknown_subcommand_fallbacks_are_exact(seeded):
-    assert c.process_command(action="get", arglist=["nope"], origin="test")["message"] == (
+    assert api_commands.process_command(action="get", arglist=["nope"], origin="test")["message"] == (
         "Get API Argument: [nope] not recognized."
     )
-    assert c.process_command(action="set", arglist=["nope"], origin="test")["message"] == (
+    assert api_commands.process_command(action="set", arglist=["nope"], origin="test")["message"] == (
         "Set API Argument: nope not recognized."
     )
-    assert c.process_command(action="cmd", arglist=["nope"], origin="test")["message"] == (
+    assert api_commands.process_command(action="cmd", arglist=["nope"], origin="test")["message"] == (
         "CMD API Argument: nope not recognized."
     )
 
@@ -893,33 +895,33 @@ def test_mutable_default_arglist_is_padded_in_place(seeded):
     """`arglist=[]` is a mutable default. The pad-to-4 loop appends INTO it, so
     the default itself is permanently mutated for the life of the process.
     Pinned, not fixed -- see module docstring wart #2."""
-    c.process_command(action="get", origin="test")
-    default_arglist = c.process_command.__defaults__[1]
+    api_commands.process_command(action="get", origin="test")
+    default_arglist = api_commands.process_command.__defaults__[1]
     assert default_arglist == [None, None, None, None]
     # Idempotent afterwards: already length 4, so the pad loop is a no-op.
-    c.process_command(action="get", origin="test")
-    assert c.process_command.__defaults__[1] == [None, None, None, None]
+    api_commands.process_command(action="get", origin="test")
+    assert api_commands.process_command.__defaults__[1] == [None, None, None, None]
 
 
 def test_arglist_is_padded_in_the_callers_list(seeded):
     """process_command mutates the list its caller passed in."""
     arglist = ["temp", "Grill"]
-    c.process_command(action="get", arglist=arglist, origin="test")
+    api_commands.process_command(action="get", arglist=arglist, origin="test")
     assert arglist == ["temp", "Grill", None, None]
 
 
 def test_manual_toggle_rewrites_the_callers_arglist(seeded):
     """set/manual/<output>/toggle resolves 'toggle' against the live pin state
     and writes the resolved 'true'/'false' back into the caller's arglist."""
-    status = c.read_status()
+    status = dsa.read_status()
     status["outpins"]["fan"] = True
-    c.write_status(status)
-    control = c.read_control()
+    dsa.write_status(status)
+    control = dsa.read_control()
     control["mode"] = "Manual"
-    c.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
 
     arglist = ["manual", "fan", "toggle"]
-    c.process_command(action="set", arglist=arglist, origin="test")
+    api_commands.process_command(action="set", arglist=arglist, origin="test")
     assert arglist == ["manual", "fan", "false", None]  # fan was on -> resolved to off
 
 
@@ -934,23 +936,23 @@ def test_only_the_fan_branch_resets_manual_pwm_to_100(seeded):
     drop it, and do not let it spread to the other three.
     """
     for output, expected_pwm in (("fan", 100), ("power", 55), ("igniter", 55), ("auger", 55)):
-        control = c.read_control()
+        control = dsa.read_control()
         control["mode"] = "Manual"
         control["manual"]["pwm"] = 55
-        c.write_control(control, WriteKind.OVERWRITE, origin="seed")
+        dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
 
-        c.process_command(action="set", arglist=["manual", output, "false"], origin="test")
-        c.execute_control_writes()
-        assert c.read_control()["manual"]["pwm"] == expected_pwm, f"output={output}"
+        api_commands.process_command(action="set", arglist=["manual", output, "false"], origin="test")
+        dsa.execute_control_writes()
+        assert dsa.read_control()["manual"]["pwm"] == expected_pwm, f"output={output}"
 
     # ...and only on 'false': turning the fan ON must leave pwm alone.
-    control = c.read_control()
+    control = dsa.read_control()
     control["mode"] = "Manual"
     control["manual"]["pwm"] = 55
-    c.write_control(control, WriteKind.OVERWRITE, origin="seed")
-    c.process_command(action="set", arglist=["manual", "fan", "true"], origin="test")
-    c.execute_control_writes()
-    assert c.read_control()["manual"]["pwm"] == 55
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    api_commands.process_command(action="set", arglist=["manual", "fan", "true"], origin="test")
+    dsa.execute_control_writes()
+    assert dsa.read_control()["manual"]["pwm"] == 55
 
 
 def test_get_status_reads_each_field_from_the_right_blob(seeded):
@@ -965,14 +967,14 @@ def test_get_status_reads_each_field_from_the_right_blob(seeded):
     different value on each side: reading the correct key off the wrong blob
     cannot produce the expected answer.
     """
-    control = c.read_control()
+    control = dsa.read_control()
     _deep_merge(control, _STATUS_A_CONTROL)
-    c.write_control(control, WriteKind.OVERWRITE, origin="seed")
-    status = c.read_status()
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    status = dsa.read_status()
     _deep_merge(status, _STATUS_A_STATUS)
-    c.write_status(status)
+    dsa.write_status(status)
 
-    data = c.process_command(action="get", arglist=["status"], origin="test")["data"]
+    data = api_commands.process_command(action="get", arglist=["status"], origin="test")["data"]
 
     assert data["mode"] == "Hold"  # control['mode'], NOT status['mode']
     assert data["display_mode"] == "Startup"  # status['mode'], NOT control['mode']
@@ -995,19 +997,19 @@ def test_get_status_reads_each_field_from_the_right_blob(seeded):
 
 def test_get_timer_does_not_swap_shutdown_and_keep_warm(seeded):
     """Both default to False, which made the swap invisible."""
-    control = c.read_control()
+    control = dsa.read_control()
     control["timer"] = {"start": 111.0, "paused": 222.0, "end": 333.0}
     _timer_notify(shutdown=True, keep_warm=False)(control)
-    c.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
 
-    data = c.process_command(action="get", arglist=["timer"], origin="test")["data"]
+    data = api_commands.process_command(action="get", arglist=["timer"], origin="test")["data"]
     assert data == {"start": 111.0, "paused": 222.0, "end": 333.0, "shutdown": True, "keep_warm": False}
 
 
 def test_sys_pushes_the_padded_arglist(seeded):
     """The pad-to-4 Nones leak into the systemq payload."""
     c.SqliteQueue("queue_systemq").flush()
-    c.process_command(action="sys", arglist=["restart", "control"], origin="test")
+    api_commands.process_command(action="sys", arglist=["restart", "control"], origin="test")
     assert c.SqliteQueue("queue_systemq").list() == [["restart", "control", None, None]]
 
 
@@ -1015,12 +1017,12 @@ def test_kind_overwrite_is_honored_by_splus_but_ignored_by_pmode(seeded):
     """Wart #8: some branches hard-code WriteKind.MERGE and ignore `kind`.
     Task 6 must not "consistently" thread `kind` through -- that is a change."""
     c.SqliteQueue("queue_control_write").flush()
-    c.process_command(action="set", arglist=["splus", "true"], origin="test", kind=WriteKind.OVERWRITE)
+    api_commands.process_command(action="set", arglist=["splus", "true"], origin="test", kind=WriteKind.OVERWRITE)
     # OVERWRITE writes control:general directly; nothing is queued.
     assert c.SqliteQueue("queue_control_write").length() == 0
-    assert c.read_control()["s_plus"] is True
+    assert dsa.read_control()["s_plus"] is True
 
-    c.process_command(action="set", arglist=["pmode", "5"], origin="test", kind=WriteKind.OVERWRITE)
+    api_commands.process_command(action="set", arglist=["pmode", "5"], origin="test", kind=WriteKind.OVERWRITE)
     # pmode hard-codes MERGE, so it queues despite kind=OVERWRITE.
     assert c.SqliteQueue("queue_control_write").length() == 1
 
@@ -1031,12 +1033,12 @@ def test_timer_start_hardcodes_origin_app(seeded):
     # write_log appends to ./logs/events.log relative to cwd; keep the test from
     # touching the working tree.
     with mock.patch.object(api_commands, "write_log"):
-        c.process_command(action="set", arglist=["timer", "start", "300"], origin="api")
+        api_commands.process_command(action="set", arglist=["timer", "start", "300"], origin="api")
     queued = c.SqliteQueue("queue_control_write").list()
     assert [q["origin"] for q in queued] == ["app"]
 
     c.SqliteQueue("queue_control_write").flush()
-    c.process_command(action="set", arglist=["timer", "shutdown", "true"], origin="api")
+    api_commands.process_command(action="set", arglist=["timer", "shutdown", "true"], origin="api")
     queued = c.SqliteQueue("queue_control_write").list()
     assert [q["origin"] for q in queued] == ["api"]  # this one honors it
 
@@ -1045,13 +1047,13 @@ def test_notify_target_in_celsius_writes_primary_setpoint_instead(seeded):
     """Wart #6: an apparent copy/paste bug. The 'C' path writes
     control['primary_setpoint'] rather than the notify object's target.
     Pinned as current behavior -- report, do not fix."""
-    settings = c.read_settings()
+    settings = dsa.read_settings()
     settings["globals"]["units"] = "C"
-    c.write_settings(settings)
+    dsa.write_settings(settings)
 
-    c.process_command(action="set", arglist=["notify", "Grill", "target", "95.5"], origin="test")
-    c.execute_control_writes()
-    control = c.read_control()
+    api_commands.process_command(action="set", arglist=["notify", "Grill", "target", "95.5"], origin="test")
+    dsa.execute_control_writes()
+    control = dsa.read_control()
     assert control["primary_setpoint"] == 95.5  # <- the bug
     grill = next(o for o in control["notify_data"] if o["label"] == "Grill" and o["type"] == "probe")
     assert grill["target"] == 0  # target was NOT updated
@@ -1060,12 +1062,12 @@ def test_notify_target_in_celsius_writes_primary_setpoint_instead(seeded):
 def test_lid_open_sets_true_on_both_branches(seeded):
     """Wart #5: the if/else are identical -- no argument can clear the flag."""
     for arg in ("toggle", "false", "anything"):
-        control = c.read_control()
+        control = dsa.read_control()
         control["lid_open_toggle"] = False
-        c.write_control(control, WriteKind.OVERWRITE, origin="seed")
-        c.process_command(action="set", arglist=["lid_open", arg], origin="test")
-        c.execute_control_writes()
-        assert c.read_control()["lid_open_toggle"] is True, f"arg={arg}"
+        dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+        api_commands.process_command(action="set", arglist=["lid_open", arg], origin="test")
+        dsa.execute_control_writes()
+        assert dsa.read_control()["lid_open_toggle"] is True, f"arg={arg}"
 
 
 def test_cmd_branch_never_executes_real_system_commands(seeded):
@@ -1076,7 +1078,7 @@ def test_cmd_branch_never_executes_real_system_commands(seeded):
     `sudo systemctl reboot`. If this ever fails, the CASES cmd_* entries are
     executing real reboots -- stop and fix the patching in _run_case.
     """
-    assert c.read_settings()["platform"]["real_hw"] is True, (
+    assert dsa.read_settings()["platform"]["real_hw"] is True, (
         "Assumption changed: real_hw is no longer True by default. The cmd_* cases "
         "rely on _run_case's mocks, not on this flag -- but verify before relaxing."
     )
@@ -1085,9 +1087,9 @@ def test_cmd_branch_never_executes_real_system_commands(seeded):
         mock.patch.object(api_commands, "reboot_system") as m_reboot,
         mock.patch.object(api_commands, "shutdown_system") as m_shutdown,
     ):
-        c.process_command(action="cmd", arglist=["restart"], origin="test")
-        c.process_command(action="cmd", arglist=["reboot"], origin="test")
-        c.process_command(action="cmd", arglist=["shutdown"], origin="test")
+        api_commands.process_command(action="cmd", arglist=["restart"], origin="test")
+        api_commands.process_command(action="cmd", arglist=["reboot"], origin="test")
+        api_commands.process_command(action="cmd", arglist=["shutdown"], origin="test")
     assert m_restart.call_count == 1
     assert m_reboot.call_count == 1
     assert m_shutdown.call_count == 1
