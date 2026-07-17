@@ -2750,6 +2750,411 @@ def _cmd_get_mode(data, control, settings, arglist, origin, kind):
     data["data"]["mode"] = control["mode"]
 
 
+def _cmd_set_psp(data, control, settings, arglist, origin, kind):
+    """
+    Primary Setpoint
+    /api/set/psp/{integer/float temperature}
+    """
+    if is_float(arglist[1]):
+        control["mode"] = "Hold"
+        if settings["globals"]["units"] == "F":
+            control["primary_setpoint"] = int(float(arglist[1]))
+        else:
+            control["primary_setpoint"] = float(arglist[1])
+        control["updated"] = True
+        write_control(control, kind, origin=origin)
+    else:
+        data["result"] = "ERROR"
+        data["message"] = f"Primary set point should be an integer or float in degrees {settings['globals']['units']}"
+
+
+def _cmd_set_units(data, control, settings, arglist, origin, kind):
+    """
+    Units
+    /api/set/units/{C/F}
+    """
+    if arglist[1] in ["C", "F"]:
+        settings = convert_settings_units(arglist[1], settings)
+        write_settings(settings)
+        control["settings_update"] = True
+        write_control(control, kind, origin=origin)
+        control["updated"] = True
+        control["units_change"] = True
+        write_control(control, kind, origin=origin)
+        # print(f'Settings Units Changed to {arglist[1]}')
+    else:
+        data["result"] = "ERROR"
+        data["message"] = f"Set Units {arglist[1]} not recognized."
+
+
+def _cmd_set_mode(data, control, settings, arglist, origin, kind):
+    """
+    Mode
+    /api/set/mode/{mode} where mode = 'startup', 'smoke', 'shutdown', 'stop', 'reignite', 'monitor', 'error'
+    /api/set/mode/prime/{prime amount in grams}[/{next mode}]
+    /api/set/mode/hold/{integer/float temperature}
+    """
+    if arglist[1] in ["startup", "smoke", "shutdown", "stop", "reignite", "monitor", "error", "manual"]:
+        control["mode"] = MODE_MAP[arglist[1]]
+        control["updated"] = True
+        write_control(control, kind, origin=origin)
+    elif arglist[1] == "prime":
+        try:
+            if arglist[2] is not None:
+                if arglist[2].isdigit():
+                    control["mode"] = MODE_MAP[arglist[1]]
+                    control["prime_amount"] = int(arglist[2])
+                    control["updated"] = True
+                    if arglist[3] in ["startup", "monitor"]:
+                        control["next_mode"] = MODE_MAP[arglist[3]]
+                    else:
+                        control["next_mode"] = "Stop"
+                    write_control(control, kind, origin=origin)
+                else:
+                    data["result"] = "ERROR"
+                    data["message"] = f"Prime amount should be an integer in grams."
+            else:
+                data["result"] = "ERROR"
+                data["message"] = f"Prime amount not specified."
+        except:
+            data["result"] = "ERROR"
+            data["message"] = f"Set Mode {arglist[1]} with {arglist[2]} caused an exception."
+    elif arglist[1] == "hold":
+        if arglist[2] is not None:
+            if is_float(arglist[2]):
+                control["mode"] = MODE_MAP[arglist[1]]
+                if settings["globals"]["units"] == "F":
+                    control["primary_setpoint"] = int(float(arglist[2]))
+                else:
+                    control["primary_setpoint"] = float(arglist[2])
+                control["updated"] = True
+                write_control(control, kind, origin=origin)
+            else:
+                data["result"] = "ERROR"
+                data["message"] = f"Set Mode {arglist[1]} with {arglist[2]} failed [not a number]."
+        else:
+            data["result"] = "ERROR"
+            data["message"] = f"Set Mode {arglist[1]} with {arglist[2]} failed [no hold temp specified]."
+    else:
+        data["result"] = "ERROR"
+        data["message"] = f"Get API Argument: {arglist[2]} not recognized."
+
+
+def _cmd_set_pmode(data, control, settings, arglist, origin, kind):
+    """
+    PMode
+    /api/set/pmode/{pmode value} where pmode value is between 0-9
+
+    NOTE: hard-codes WriteKind.MERGE, ignoring the caller's `kind`. Preserved.
+    """
+    if arglist[1] is not None:
+        if arglist[1].isdigit():
+            if int(arglist[1]) >= 0 and int(arglist[1]) < 10:
+                settings["cycle_data"]["PMode"] = int(arglist[1])
+                write_settings(settings)
+                control["settings_update"] = True
+                write_control(control, WriteKind.MERGE, origin=origin)
+            else:
+                data["result"] = "ERROR"
+                data["message"] = f"Set PMode out of range(0-9): {arglist[1]}"
+        else:
+            data["result"] = "ERROR"
+            data["message"] = f"Set PMode invalid value."
+    else:
+        data["result"] = "ERROR"
+        data["message"] = f"Set PMode invalid arguments."
+
+
+def _cmd_set_splus(data, control, settings, arglist, origin, kind):
+    """
+    Smoke Plus
+    /api/set/splus/{true/false}
+    """
+    if arglist[1] == "true":
+        control["s_plus"] = True
+    else:
+        control["s_plus"] = False
+    write_control(control, kind, origin=origin)
+
+
+def _cmd_set_lid_open(data, control, settings, arglist, origin, kind):
+    """
+    Lid Open Toggle
+    /api/set/lid_open/toggle
+
+    NOTE: both branches of the if/else set lid_open_toggle to True, so no value
+    can clear it. Preserved as-is.
+    """
+    if arglist[1] == "toggle":
+        control["lid_open_toggle"] = True
+    else:
+        control["lid_open_toggle"] = True
+
+    write_control(control, kind, origin=origin)
+
+
+def _cmd_set_notify(data, control, settings, arglist, origin, kind):
+    """
+    Notify Settings
+    /api/set/[notify:limit_high:limit_low]/{object}/ where object = probe label, 'Timer', 'Hopper'
+
+    /api/set/notify/{object}/req/{true/false}
+    /api/set/notify/{object}/target/{value}  (not valid for Timer or Hopper)
+    /api/set/notify/{object}/shutdown/{true/false}
+    /api/set/notify/{object}/keep_warm/{true/false}
+
+    NOTE: hard-codes WriteKind.MERGE, ignoring the caller's `kind`. Also, the
+    'target' path under units == 'C' writes control['primary_setpoint'] rather
+    than the notify object's target. Both preserved as-is.
+    """
+    if arglist[1] is not None:
+        if arglist[0] == "limit_high":
+            limit = "probe_limit_high"
+        elif arglist[0] == "limit_low":
+            limit = "probe_limit_low"
+        else:
+            limit = None
+        found = False
+        for index, object in enumerate(control["notify_data"]):
+            if object["label"] == arglist[1]:
+                if limit is not None:
+                    if object["type"] == limit:
+                        found = True
+                        break
+                else:
+                    found = True
+                    break
+
+        if not found:
+            data["result"] = "ERROR"
+            data["message"] = f"Notify object label {arglist[1]} was not found."
+        else:
+            # print(f'{object["label"]} FOUND')
+            if arglist[2] in ["req", "shutdown", "keep_warm", "reignite"]:
+                if arglist[3] == "true":
+                    control["notify_data"][index][arglist[2]] = True
+                else:
+                    control["notify_data"][index][arglist[2]] = False
+            elif arglist[2] == "target" and arglist[1] not in ["Timer", "Hopper"]:
+                if is_float(arglist[3]):
+                    if settings["globals"]["units"] == "F":
+                        control["notify_data"][index]["target"] = int(float(arglist[3]))
+                    else:
+                        control["primary_setpoint"] = float(arglist[3])
+                else:
+                    data["result"] = "ERROR"
+                    data["message"] = f"Notify object target value invalid or missing."
+            else:
+                data["result"] = "ERROR"
+                data["message"] = f"Notify object update failed."
+            write_control(control, WriteKind.MERGE, origin=origin)
+    else:
+        data["result"] = "ERROR"
+        data["message"] = f"Notify object label was not specified."
+
+
+def _cmd_set_pwm(data, control, settings, arglist, origin, kind):
+    """
+    PWM Control
+
+    /api/set/pwm/{true/false}
+    """
+    if arglist[1] == "true":
+        control["pwm_control"] = True
+    else:
+        control["pwm_control"] = False
+    write_control(control, kind, origin=origin)
+
+
+def _cmd_set_duty_cycle(data, control, settings, arglist, origin, kind):
+    """
+    Duty Cycle
+
+    /api/set/duty_cycle/{0-100 percent}
+
+    NOTE: hard-codes WriteKind.MERGE, ignoring the caller's `kind`. Preserved.
+    """
+    if is_float(arglist[1]):
+        duty_cycle = int(arglist[1])
+        if duty_cycle >= 0 and duty_cycle <= 100:
+            control["duty_cycle"] = duty_cycle
+            write_control(control, WriteKind.MERGE, origin=origin)
+        else:
+            data["result"] = "ERROR"
+            data["message"] = f"Duty cycle must be an integer between 0-100."
+    else:
+        data["result"] = "ERROR"
+        data["message"] = f"Duty cycle must be specified as an integer between 0-100 percent."
+
+
+def _cmd_set_tuning_mode(data, control, settings, arglist, origin, kind):
+    """
+    Tuning Mode Enable
+
+    /api/set/tuning_mode/{true/false}
+    """
+    if arglist[1] == "true":
+        control["tuning_mode"] = True
+    else:
+        control["tuning_mode"] = False
+    write_control(control, kind, origin=origin)
+
+
+def _cmd_set_timer(data, control, settings, arglist, origin, kind):
+    """
+    Timer Control
+
+    /api/set/timer/start/{seconds}
+    /api/set/timer/pause
+    /api/set/timer/stop
+    /api/set/timer/shutdown/{true/false}
+    /api/set/timer/keep_warm/{true/false}
+
+    NOTE: the start/pause/stop paths hard-code origin='app', ignoring the
+    caller's `origin`; shutdown/keep_warm honor it. Preserved as-is.
+    """
+
+    """ Get index of timer object """
+    for index, notify_obj in enumerate(control["notify_data"]):
+        if notify_obj["type"] == "timer":
+            break
+    """ Get timestamp """
+    now = time.time()
+
+    if arglist[1] == "start":
+        control["notify_data"][index]["req"] = True
+        # If starting new timer
+        if control["timer"]["paused"] == 0:
+            control["timer"]["start"] = now
+            if is_float(arglist[2]):
+                seconds = int(float(arglist[2]))
+                control["timer"]["end"] = now + seconds
+            else:
+                control["timer"]["end"] = now + 60
+            write_log("Timer started.  Ends at: " + epoch_to_time(control["timer"]["end"]))
+            write_control(control, kind, origin="app")
+        else:  # If Timer was paused, restart with new end time.
+            control["timer"]["end"] = (control["timer"]["end"] - control["timer"]["paused"]) + now
+            control["timer"]["paused"] = 0
+            write_log("Timer unpaused.  Ends at: " + epoch_to_time(control["timer"]["end"]))
+            write_control(control, kind, origin="app")
+    elif arglist[1] == "pause":
+        if control["timer"]["start"] != 0:
+            control["notify_data"][index]["req"] = False
+            control["timer"]["paused"] = now
+            write_log("Timer paused.")
+            write_control(control, kind, origin="app")
+        else:
+            control["notify_data"][index]["req"] = False
+            control["timer"]["start"] = 0
+            control["timer"]["end"] = 0
+            control["timer"]["paused"] = 0
+            control["notify_data"][index]["shutdown"] = False
+            control["notify_data"][index]["keep_warm"] = False
+            write_log("Timer cleared.")
+            write_control(control, kind, origin="app")
+    elif arglist[1] == "stop":
+        control["notify_data"][index]["req"] = False
+        control["timer"]["start"] = 0
+        control["timer"]["end"] = 0
+        control["timer"]["paused"] = 0
+        control["notify_data"][index]["shutdown"] = False
+        control["notify_data"][index]["keep_warm"] = False
+        write_log("Timer stopped.")
+        write_control(control, kind, origin="app")
+    elif arglist[1] == "shutdown":
+        if arglist[2] == "true":
+            control["notify_data"][index]["shutdown"] = True
+        else:
+            control["notify_data"][index]["shutdown"] = False
+        write_control(control, kind, origin=origin)
+    elif arglist[1] == "keep_warm":
+        if arglist[2] == "true":
+            control["notify_data"][index]["keep_warm"] = True
+        else:
+            control["notify_data"][index]["keep_warm"] = False
+        write_control(control, kind, origin=origin)
+    else:
+        data["result"] = "ERROR"
+        data["message"] = f"Timer command not recognized."
+
+
+def _cmd_set_manual(data, control, settings, arglist, origin, kind):
+    """
+    Manual Control
+    Note: Must already be in Manual mode (see set/mode command)
+    /api/set/manual/power/{true/false/toggle}
+    /api/set/manual/igniter/{true/false/toggle}
+    /api/set/manual/fan/{true/false/toggle}
+    /api/set/manual/auger/{true/false/toggle}
+    /api/set/manual/pwm/{speed}
+
+    NOTE: the write_control below is outside the if/elif chain, so a rejected
+    (ERROR) request still writes control when control['manual']['change'] holds
+    a stale value from a previous command. Preserved as-is.
+    """
+
+    if control["mode"] == "Manual" or settings["safety"]["allow_manual_changes"]:
+        if arglist[1] == "power":
+            control = _manual_toggle(control, "power", arglist)
+        elif arglist[1] == "igniter":
+            control = _manual_toggle(control, "igniter", arglist)
+        elif arglist[1] == "fan":
+            control = _manual_toggle(control, "fan", arglist, reset_pwm_when_off=True)
+        elif arglist[1] == "auger":
+            control = _manual_toggle(control, "auger", arglist)
+        elif arglist[1] == "pwm" and is_float(arglist[2]):
+            control["manual"]["change"] = "pwm"
+            control["manual"]["output"] = True
+            control["manual"]["pwm"] = int(float(arglist[2]))
+        else:
+            data["result"] = "ERROR"
+            data["message"] = f"Manual command not recognized or contained an error."
+        if control["manual"]["change"] in ["power", "igniter", "fan", "auger", "pwm"]:
+            write_control(control, kind, origin=origin)
+
+    else:
+        data["result"] = "ERROR"
+        data["message"] = f"Before changing manual outputs, system must be put into Manual mode."
+
+
+def _cmd_cmd_restart(data, control, settings, arglist, origin, kind):
+    """
+    Restart Scripts
+    /api/cmd/restart
+    """
+    restart_scripts()
+
+
+def _cmd_cmd_reboot(data, control, settings, arglist, origin, kind):
+    """
+    Reboot System
+    /api/cmd/reboot
+    """
+    reboot_system()
+
+
+def _cmd_cmd_shutdown(data, control, settings, arglist, origin, kind):
+    """
+    Shutdown System
+    /api/cmd/shutdown
+    """
+    shutdown_system()
+
+
+def _cmd_sys(data, control, settings, arglist, origin, kind):
+    """
+    System Control Commands
+
+    Unlike get/set/cmd, this action has no subcommand ladder: any arglist is
+    pushed to the system queue verbatim. Note that the arglist pushed here is
+    the PADDED one, so trailing Nones leak into the queue payload -- e.g.
+    ['restart'] is pushed as ['restart', None, None, None]. Preserved as-is.
+    """
+    system_command_queue = SqliteQueue("queue_systemq")
+    system_command_queue.push(arglist)
+
+
 def process_command(action=None, arglist=[], origin="unknown", kind=WriteKind.MERGE):
     """
     Process incoming command from API or elsewhere
@@ -2807,344 +3212,39 @@ def process_command(action=None, arglist=[], origin="unknown", kind=WriteKind.ME
         """ SET Commands """
 
         if arglist[0] == "psp":
-            """
-			Primary Setpoint 
-			/api/set/psp/{integer/float temperature}
-			"""
-            if is_float(arglist[1]):
-                control["mode"] = "Hold"
-                if settings["globals"]["units"] == "F":
-                    control["primary_setpoint"] = int(float(arglist[1]))
-                else:
-                    control["primary_setpoint"] = float(arglist[1])
-                control["updated"] = True
-                write_control(control, kind, origin=origin)
-            else:
-                data["result"] = "ERROR"
-                data["message"] = (
-                    f"Primary set point should be an integer or float in degrees {settings['globals']['units']}"
-                )
+            _cmd_set_psp(data, control, settings, arglist, origin, kind)
         elif arglist[0] == "units":
-            """
-			Units
-			/api/set/units/{C/F}
-			"""
-            if arglist[1] in ["C", "F"]:
-                settings = convert_settings_units(arglist[1], settings)
-                write_settings(settings)
-                control["settings_update"] = True
-                write_control(control, kind, origin=origin)
-                control["updated"] = True
-                control["units_change"] = True
-                write_control(control, kind, origin=origin)
-                # print(f'Settings Units Changed to {arglist[1]}')
-            else:
-                data["result"] = "ERROR"
-                data["message"] = f"Set Units {arglist[1]} not recognized."
+            _cmd_set_units(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "mode":
-            """
-			Mode
-			/api/set/mode/{mode} where mode = 'startup', 'smoke', 'shutdown', 'stop', 'reignite', 'monitor', 'error'
-			/api/set/mode/prime/{prime amount in grams}[/{next mode}]
-			/api/set/mode/hold/{integer/float temperature}
-			"""
-            if arglist[1] in ["startup", "smoke", "shutdown", "stop", "reignite", "monitor", "error", "manual"]:
-                control["mode"] = MODE_MAP[arglist[1]]
-                control["updated"] = True
-                write_control(control, kind, origin=origin)
-            elif arglist[1] == "prime":
-                try:
-                    if arglist[2] is not None:
-                        if arglist[2].isdigit():
-                            control["mode"] = MODE_MAP[arglist[1]]
-                            control["prime_amount"] = int(arglist[2])
-                            control["updated"] = True
-                            if arglist[3] in ["startup", "monitor"]:
-                                control["next_mode"] = MODE_MAP[arglist[3]]
-                            else:
-                                control["next_mode"] = "Stop"
-                            write_control(control, kind, origin=origin)
-                        else:
-                            data["result"] = "ERROR"
-                            data["message"] = f"Prime amount should be an integer in grams."
-                    else:
-                        data["result"] = "ERROR"
-                        data["message"] = f"Prime amount not specified."
-                except:
-                    data["result"] = "ERROR"
-                    data["message"] = f"Set Mode {arglist[1]} with {arglist[2]} caused an exception."
-            elif arglist[1] == "hold":
-                if arglist[2] is not None:
-                    if is_float(arglist[2]):
-                        control["mode"] = MODE_MAP[arglist[1]]
-                        if settings["globals"]["units"] == "F":
-                            control["primary_setpoint"] = int(float(arglist[2]))
-                        else:
-                            control["primary_setpoint"] = float(arglist[2])
-                        control["updated"] = True
-                        write_control(control, kind, origin=origin)
-                    else:
-                        data["result"] = "ERROR"
-                        data["message"] = f"Set Mode {arglist[1]} with {arglist[2]} failed [not a number]."
-                else:
-                    data["result"] = "ERROR"
-                    data["message"] = f"Set Mode {arglist[1]} with {arglist[2]} failed [no hold temp specified]."
-            else:
-                data["result"] = "ERROR"
-                data["message"] = f"Get API Argument: {arglist[2]} not recognized."
+            _cmd_set_mode(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "pmode":
-            """
-			PMode
-			/api/set/pmode/{pmode value} where pmode value is between 0-9 
-			"""
-            if arglist[1] is not None:
-                if arglist[1].isdigit():
-                    if int(arglist[1]) >= 0 and int(arglist[1]) < 10:
-                        settings["cycle_data"]["PMode"] = int(arglist[1])
-                        write_settings(settings)
-                        control["settings_update"] = True
-                        write_control(control, WriteKind.MERGE, origin=origin)
-                    else:
-                        data["result"] = "ERROR"
-                        data["message"] = f"Set PMode out of range(0-9): {arglist[1]}"
-                else:
-                    data["result"] = "ERROR"
-                    data["message"] = f"Set PMode invalid value."
-            else:
-                data["result"] = "ERROR"
-                data["message"] = f"Set PMode invalid arguments."
+            _cmd_set_pmode(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "splus":
-            """
-			Smoke Plus 
-			/api/set/splus/{true/false}
-			"""
-            if arglist[1] == "true":
-                control["s_plus"] = True
-            else:
-                control["s_plus"] = False
-            write_control(control, kind, origin=origin)
+            _cmd_set_splus(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "lid_open":
-            """
-			Lid Open Toggle
-			/api/set/lid_open/toggle
-			"""
-            if arglist[1] == "toggle":
-                control["lid_open_toggle"] = True
-            else:
-                control["lid_open_toggle"] = True
-
-            write_control(control, kind, origin=origin)
+            _cmd_set_lid_open(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] in ["notify", "limit_high", "limit_low"]:
-            """
-			Notify Settings
-			/api/set/[notify:limit_high:limit_low]/{object}/ where object = probe label, 'Timer', 'Hopper' 
-
-			/api/set/notify/{object}/req/{true/false} 
-			/api/set/notify/{object}/target/{value}  (not valid for Timer or Hopper)
-			/api/set/notify/{object}/shutdown/{true/false}
-			/api/set/notify/{object}/keep_warm/{true/false} 
-			"""
-
-            if arglist[1] is not None:
-                if arglist[0] == "limit_high":
-                    limit = "probe_limit_high"
-                elif arglist[0] == "limit_low":
-                    limit = "probe_limit_low"
-                else:
-                    limit = None
-                found = False
-                for index, object in enumerate(control["notify_data"]):
-                    if object["label"] == arglist[1]:
-                        if limit is not None:
-                            if object["type"] == limit:
-                                found = True
-                                break
-                        else:
-                            found = True
-                            break
-
-                if not found:
-                    data["result"] = "ERROR"
-                    data["message"] = f"Notify object label {arglist[1]} was not found."
-                else:
-                    # print(f'{object["label"]} FOUND')
-                    if arglist[2] in ["req", "shutdown", "keep_warm", "reignite"]:
-                        if arglist[3] == "true":
-                            control["notify_data"][index][arglist[2]] = True
-                        else:
-                            control["notify_data"][index][arglist[2]] = False
-                    elif arglist[2] == "target" and arglist[1] not in ["Timer", "Hopper"]:
-                        if is_float(arglist[3]):
-                            if settings["globals"]["units"] == "F":
-                                control["notify_data"][index]["target"] = int(float(arglist[3]))
-                            else:
-                                control["primary_setpoint"] = float(arglist[3])
-                        else:
-                            data["result"] = "ERROR"
-                            data["message"] = f"Notify object target value invalid or missing."
-                    else:
-                        data["result"] = "ERROR"
-                        data["message"] = f"Notify object update failed."
-                    write_control(control, WriteKind.MERGE, origin=origin)
-            else:
-                data["result"] = "ERROR"
-                data["message"] = f"Notify object label was not specified."
+            _cmd_set_notify(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "pwm":
-            """
-			PWM Control
-
-			/api/set/pwm/{true/false} 
-			"""
-            if arglist[1] == "true":
-                control["pwm_control"] = True
-            else:
-                control["pwm_control"] = False
-            write_control(control, kind, origin=origin)
+            _cmd_set_pwm(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "duty_cycle":
-            """
-			Duty Cycle
-
-			/api/set/duty_cycle/{0-100 percent} 
-			"""
-            if is_float(arglist[1]):
-                duty_cycle = int(arglist[1])
-                if duty_cycle >= 0 and duty_cycle <= 100:
-                    control["duty_cycle"] = duty_cycle
-                    write_control(control, WriteKind.MERGE, origin=origin)
-                else:
-                    data["result"] = "ERROR"
-                    data["message"] = f"Duty cycle must be an integer between 0-100."
-            else:
-                data["result"] = "ERROR"
-                data["message"] = f"Duty cycle must be specified as an integer between 0-100 percent."
+            _cmd_set_duty_cycle(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "tuning_mode":
-            """
-			Tuning Mode Enable
-
-			/api/set/tuning_mode/{true/false} 
-			"""
-            if arglist[1] == "true":
-                control["tuning_mode"] = True
-            else:
-                control["tuning_mode"] = False
-            write_control(control, kind, origin=origin)
+            _cmd_set_tuning_mode(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "timer":
-            """
-			Timer Control
-
-			/api/set/timer/start/{seconds} 
-			/api/set/timer/pause 
-			/api/set/timer/stop
-			/api/set/timer/shutdown/{true/false}
-			/api/set/timer/keep_warm/{true/false}
-			"""
-
-            """ Get index of timer object """
-            for index, notify_obj in enumerate(control["notify_data"]):
-                if notify_obj["type"] == "timer":
-                    break
-            """ Get timestamp """
-            now = time.time()
-
-            if arglist[1] == "start":
-                control["notify_data"][index]["req"] = True
-                # If starting new timer
-                if control["timer"]["paused"] == 0:
-                    control["timer"]["start"] = now
-                    if is_float(arglist[2]):
-                        seconds = int(float(arglist[2]))
-                        control["timer"]["end"] = now + seconds
-                    else:
-                        control["timer"]["end"] = now + 60
-                    write_log("Timer started.  Ends at: " + epoch_to_time(control["timer"]["end"]))
-                    write_control(control, kind, origin="app")
-                else:  # If Timer was paused, restart with new end time.
-                    control["timer"]["end"] = (control["timer"]["end"] - control["timer"]["paused"]) + now
-                    control["timer"]["paused"] = 0
-                    write_log("Timer unpaused.  Ends at: " + epoch_to_time(control["timer"]["end"]))
-                    write_control(control, kind, origin="app")
-            elif arglist[1] == "pause":
-                if control["timer"]["start"] != 0:
-                    control["notify_data"][index]["req"] = False
-                    control["timer"]["paused"] = now
-                    write_log("Timer paused.")
-                    write_control(control, kind, origin="app")
-                else:
-                    control["notify_data"][index]["req"] = False
-                    control["timer"]["start"] = 0
-                    control["timer"]["end"] = 0
-                    control["timer"]["paused"] = 0
-                    control["notify_data"][index]["shutdown"] = False
-                    control["notify_data"][index]["keep_warm"] = False
-                    write_log("Timer cleared.")
-                    write_control(control, kind, origin="app")
-            elif arglist[1] == "stop":
-                control["notify_data"][index]["req"] = False
-                control["timer"]["start"] = 0
-                control["timer"]["end"] = 0
-                control["timer"]["paused"] = 0
-                control["notify_data"][index]["shutdown"] = False
-                control["notify_data"][index]["keep_warm"] = False
-                write_log("Timer stopped.")
-                write_control(control, kind, origin="app")
-            elif arglist[1] == "shutdown":
-                if arglist[2] == "true":
-                    control["notify_data"][index]["shutdown"] = True
-                else:
-                    control["notify_data"][index]["shutdown"] = False
-                write_control(control, kind, origin=origin)
-            elif arglist[1] == "keep_warm":
-                if arglist[2] == "true":
-                    control["notify_data"][index]["keep_warm"] = True
-                else:
-                    control["notify_data"][index]["keep_warm"] = False
-                write_control(control, kind, origin=origin)
-            else:
-                data["result"] = "ERROR"
-                data["message"] = f"Timer command not recognized."
+            _cmd_set_timer(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "manual":
-            """
-			Manual Control
-			Note: Must already be in Manual mode (see set/mode command)
-			/api/set/manual/power/{true/false/toggle}
-			/api/set/manual/igniter/{true/false/toggle}
-			/api/set/manual/fan/{true/false/toggle}
-			/api/set/manual/auger/{true/false/toggle}
-			/api/set/manual/pwm/{speed}
-			"""
-
-            if control["mode"] == "Manual" or settings["safety"]["allow_manual_changes"]:
-                if arglist[1] == "power":
-                    control = _manual_toggle(control, "power", arglist)
-                elif arglist[1] == "igniter":
-                    control = _manual_toggle(control, "igniter", arglist)
-                elif arglist[1] == "fan":
-                    control = _manual_toggle(control, "fan", arglist, reset_pwm_when_off=True)
-                elif arglist[1] == "auger":
-                    control = _manual_toggle(control, "auger", arglist)
-                elif arglist[1] == "pwm" and is_float(arglist[2]):
-                    control["manual"]["change"] = "pwm"
-                    control["manual"]["output"] = True
-                    control["manual"]["pwm"] = int(float(arglist[2]))
-                else:
-                    data["result"] = "ERROR"
-                    data["message"] = f"Manual command not recognized or contained an error."
-                if control["manual"]["change"] in ["power", "igniter", "fan", "auger", "pwm"]:
-                    write_control(control, kind, origin=origin)
-
-            else:
-                data["result"] = "ERROR"
-                data["message"] = f"Before changing manual outputs, system must be put into Manual mode."
+            _cmd_set_manual(data, control, settings, arglist, origin, kind)
 
         else:
             data["result"] = "ERROR"
@@ -3154,35 +3254,20 @@ def process_command(action=None, arglist=[], origin="unknown", kind=WriteKind.ME
         """ System CMD Commands """
 
         if arglist[0] == "restart":
-            """
-			Restart Scripts 
-			/api/cmd/restart
-			"""
-            restart_scripts()
+            _cmd_cmd_restart(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "reboot":
-            """
-			Reboot System 
-			/api/cmd/reboot
-			"""
-            reboot_system()
+            _cmd_cmd_reboot(data, control, settings, arglist, origin, kind)
 
         elif arglist[0] == "shutdown":
-            """
-			Shutdown System 
-			/api/cmd/shutdown
-			"""
-            shutdown_system()
+            _cmd_cmd_shutdown(data, control, settings, arglist, origin, kind)
 
         else:
             data["result"] = "ERROR"
             data["message"] = f"CMD API Argument: {arglist[0]} not recognized."
 
     elif action == "sys":
-        """ System Control Commands """
-
-        system_command_queue = SqliteQueue("queue_systemq")
-        system_command_queue.push(arglist)
+        _cmd_sys(data, control, settings, arglist, origin, kind)
 
     else:
         data["result"] = "ERROR"
