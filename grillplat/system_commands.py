@@ -12,7 +12,8 @@
 #   Consuming classes must provide self.logger.
 # *****************************************
 
-from common import is_float, get_os_info, get_wifi_quality
+from common.common import is_float
+from common.system import get_os_info, get_wifi_quality
 
 
 class SystemCommandsMixin:

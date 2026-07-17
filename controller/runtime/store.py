@@ -5,7 +5,8 @@ import copy
 from abc import ABC, abstractmethod
 from collections import deque
 
-from common.common import WriteKind, deep_update, default_control, default_metrics, strip_null_members
+from common.common import WriteKind, deep_update, strip_null_members
+from common.defaults import default_control, default_metrics
 
 
 class Queue(ABC):
@@ -213,7 +214,7 @@ class InMemoryStore(Store):
         return self._displayq
 
 
-from common import common as _c
+from common import datastore_accessors as _c
 from common.sqlite_queue import SqliteQueue
 
 

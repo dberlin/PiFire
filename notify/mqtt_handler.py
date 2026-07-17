@@ -19,7 +19,7 @@ import json
 import logging
 import time
 from socket import getfqdn
-from common import create_logger
+from common.common import create_logger
 import psutil
 # from common import write_control
 

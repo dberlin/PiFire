@@ -257,7 +257,7 @@ def init():
 def _first_boot_import():
     import json
 
-    from common import common as c  # deferred to avoid import cycle
+    from common import backups, settings_migration  # deferred to avoid import cycle
 
     # INSERT ... ON CONFLICT DO UPDATE (not a plain INSERT): read_settings_file
     # (via its init=True overlay) can itself detect a corrupted settings.json
@@ -273,10 +273,10 @@ def _first_boot_import():
             # path a live read_settings(init=True) would apply, so imported
             # settings gain new default fields and get upgraded in place
             # instead of being stored as a stale, un-migrated snapshot.
-            settings = c.read_settings_file(init=True)  # the FILE reader, not SQLite
+            settings = settings_migration.read_settings_file(init=True)  # the FILE reader, not SQLite
             conn.execute(upsert, ("settings:general", json.dumps(settings)))
         if conn.execute("SELECT 1 FROM kv WHERE key='pellets:general'").fetchone() is None:
-            pelletdb = c.read_pellet_db_file()  # the FILE reader, not SQLite
+            pelletdb = backups.read_pellet_db_file()  # the FILE reader, not SQLite
             conn.execute(upsert, ("pellets:general", json.dumps(pelletdb)))
 
 

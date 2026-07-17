@@ -1,14 +1,6 @@
 from flask import render_template, request, render_template_string, jsonify
-from common.common import (
-    read_settings,
-    read_control,
-    write_settings,
-    write_control,
-    WriteKind,
-    read_generic_json,
-    generate_uuid,
-    convert_settings_units,
-)
+from common.common import WriteKind, read_generic_json, generate_uuid, convert_settings_units
+from common.datastore_accessors import read_settings, read_control, write_settings, write_control
 from common.app import is_not_blank, is_checked
 
 from . import settings_bp

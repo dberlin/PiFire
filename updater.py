@@ -14,7 +14,22 @@
 ==============================================================================
 """
 
-from common import *
+import json
+import time
+
+from common.common import (
+    write_log,
+    read_updater_manifest,
+    semantic_ver_is_lower,
+    create_logger,
+    write_generic_json,
+)
+from common.datastore_accessors import (
+    set_updater_install_status,
+    read_settings,
+    set_wizard_install_status,
+    write_settings,
+)
 from importlib.metadata import version, PackageNotFoundError
 
 import subprocess

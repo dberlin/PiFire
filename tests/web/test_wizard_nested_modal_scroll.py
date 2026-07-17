@@ -49,17 +49,15 @@ def live_server():
     from werkzeug.serving import make_server
 
     from common import datastore
-    from common.common import (
-        WriteKind,
-        default_control,
-        default_pellets,
-        default_settings,
+    from common.common import WriteKind
+    from common.datastore_accessors import (
         write_control,
         write_pellets_store,
         write_settings_store,
         write_status,
         read_status,
     )
+    from common.defaults import default_control, default_pellets, default_settings
 
     tmp_dir = tempfile.mkdtemp(prefix="pifire_test_wizard_modal_")
     db_path = os.path.join(tmp_dir, "wizard_modal_e2e.db")

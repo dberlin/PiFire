@@ -39,7 +39,7 @@ def test_default_controller_config_includes_mpc():
     cwd = os.getcwd()
     os.chdir(BASE)
     try:
-        from common.common import _default_controller_config
+        from common.defaults import _default_controller_config
 
         cfg = _default_controller_config()
     finally:

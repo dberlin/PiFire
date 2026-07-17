@@ -1,5 +1,5 @@
 from flask import render_template
-from common.common import read_settings, read_control
+from common.datastore_accessors import read_settings, read_control
 
 from . import manual_bp
 

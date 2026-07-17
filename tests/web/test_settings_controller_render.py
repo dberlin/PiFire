@@ -19,7 +19,7 @@ def _render_mpc_controller_config():
     with open(os.path.join(BASE, "controller", "controllers.json")) as f:
         metadata = json.load(f)["metadata"]
 
-    from common.common import _default_controller_config
+    from common.defaults import _default_controller_config
 
     cwd = os.getcwd()
     os.chdir(BASE)

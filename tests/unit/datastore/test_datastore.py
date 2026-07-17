@@ -302,7 +302,7 @@ CREATE TABLE history (
         assert isinstance(psp, int)
 
         # read_history()/PSP end-to-end must also yield an int now.
-        from common import common as c
+        from common import datastore_accessors as c
 
         assert isinstance(c.read_history()[0]["PSP"], int)
     finally:

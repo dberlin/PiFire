@@ -24,6 +24,6 @@ class LiveNotifier(Notifier):
         return check_notify(settings, control, **kwargs)
 
     def get_targets(self, notify_data):
-        from common import get_notify_targets
+        from common.common import get_notify_targets
 
         return get_notify_targets(notify_data)

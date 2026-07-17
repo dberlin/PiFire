@@ -3,16 +3,16 @@ import asyncio
 from flask import render_template, request, jsonify, redirect, render_template_string
 from probes.thermoworks_cloud import discover
 from thermoworks_cloud import AuthenticationError
-from common.common import (
+from common.common import read_wizard
+from common.datastore_accessors import (
     read_settings,
     read_control,
-    read_wizard,
     get_wizard_install_status,
     set_wizard_install_status,
     store_wizard_install_info,
     write_settings,
-    is_real_hardware,
 )
+from common.system import is_real_hardware
 from common.app import get_supported_cmds, process_command, get_system_command_output
 from common.i2c_bus import (
     I2CBusConfigError,

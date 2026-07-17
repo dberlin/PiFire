@@ -22,7 +22,8 @@ import socket
 import qrcode
 import logging
 from PIL import Image, ImageDraw, ImageFont
-from common import read_control, write_control, WriteKind
+from common.common import WriteKind
+from common.datastore_accessors import read_control, write_control
 
 """
 Display base class definition

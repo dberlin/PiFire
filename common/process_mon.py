@@ -26,7 +26,9 @@ import time
 import threading
 import subprocess
 import logging
-from common import create_logger, is_real_hardware, write_control, read_control, WriteKind
+from common.common import create_logger, WriteKind
+from common.datastore_accessors import write_control, read_control
+from common.system import is_real_hardware
 from notify.notifications import *
 
 """

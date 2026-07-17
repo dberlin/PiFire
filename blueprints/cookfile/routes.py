@@ -2,7 +2,8 @@ import datetime
 import os
 from flask import render_template, request, current_app, jsonify, redirect, send_file
 from werkzeug.utils import secure_filename
-from common.common import read_settings, epoch_to_time, generate_uuid
+from common.common import epoch_to_time, generate_uuid
+from common.datastore_accessors import read_settings
 from common.app import (
     prepare_annotations,
     prepare_metrics_csv,

@@ -1,14 +1,15 @@
 import os
 import time
 from flask import render_template, request, jsonify, redirect, render_template_string
-from common.common import read_settings, read_control, write_log, is_real_hardware
+from common.common import write_log
+from common.datastore_accessors import read_settings, read_control
+from common.system import is_real_hardware
 from updater import (
     get_available_updates,
     get_update_data,
-    get_updater_install_status,
-    set_updater_install_status,
     get_log,
 )
+from common.datastore_accessors import get_updater_install_status, set_updater_install_status
 
 from . import update_bp
 

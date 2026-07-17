@@ -1,6 +1,7 @@
 import datetime
 from flask import render_template, request, send_file
-from common.common import read_settings, read_control, read_metrics, process_metrics
+from common.common import process_metrics
+from common.datastore_accessors import read_settings, read_control, read_metrics
 from common.app import prepare_metrics_csv
 
 from . import metrics_bp
