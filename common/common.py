@@ -27,7 +27,7 @@ from logging.handlers import RotatingFileHandler
 from collections.abc import Mapping
 from ratelimitingfilter import RateLimitingFilter
 from common import datastore
-from common.sqlite_queue import SqliteQueue, SqliteMembershipList
+from common.sqlite_queue import SqliteQueue
 from common.sqlite_log_handler import SqliteLogHandler
 
 # *****************************************
