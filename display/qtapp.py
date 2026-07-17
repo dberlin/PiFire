@@ -51,7 +51,6 @@ def build_backend(config):
     """Construct the backend wired to the framework's data + command layer."""
     from display.qtquick_flex import Display
     from common import read_settings_store
-    from common.common import display_sleep_timeout
 
     def _accent_fn():
         try:
@@ -62,10 +61,14 @@ def build_backend(config):
             return "Ember"
 
     def _timeout_fn():
-        try:
-            return display_sleep_timeout(read_settings_store())
-        except Exception:
-            return 300
+        # TEMP: screen blanking disabled pending the sway/DPMS migration.
+        # Under cage, `wlr-randr --off` powers the output down in a way that
+        # stops a touch from waking it on both DSI and HDMI, so the screen can
+        # get stuck dark and unrecoverable. Force never-sleep (0) until the
+        # compositor does real DPMS. To restore the user setting, revert to:
+        #     from common.common import display_sleep_timeout
+        #     return display_sleep_timeout(read_settings_store())
+        return 0
 
     dispatcher = Display.for_dispatch(config, config.get("units", "F"))
     backend = PiFireBackend(
