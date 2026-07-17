@@ -121,7 +121,7 @@ $SUDO dnf -y install \
     gcc gcc-c++ make gcc-gfortran openblas-devel lapack-devel \
     openjpeg-devel glib2-devel \
     libjpeg-turbo-devel zlib-ng-compat-devel freetype-devel lcms2-devel libtiff-devel libwebp-devel \
-    nginx git supervisor cage seatd wlr-randr \
+    nginx git supervisor sway seatd \
     bluez bluez-libs-devel \
     cabextract curl dejavu-sans-fonts fontconfig 2>&1 | tee -a "$LOG"
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
@@ -167,7 +167,7 @@ $SUDO groupadd -f pifire
 $SUDO usermod -a -G pifire "$USER"
 $SUDO usermod -a -G pifire root
 
-# Seat access for the cage Wayland compositor (QtQuick displays).
+# Seat access for the sway Wayland compositor (QtQuick displays).
 $SUDO systemctl enable --now seatd 2>&1 | tee -a "$LOG" || log " ! seatd not enabled (continuing)."
 for grp in video input render seat; do
     $SUDO usermod -a -G "$grp" "$USER" 2>/dev/null || true
@@ -379,7 +379,7 @@ for prog in control webapp display; do
     tmp="/tmp/pifire-$prog.ini"
     cp "/usr/local/bin/pifire/auto-install/supervisor/$prog.conf" "$tmp"
     # display runs as root (like the Raspberry Pi installers) since root was
-    # added to the video/input/render/seat groups above for cage/seatd access.
+    # added to the video/input/render/seat groups above for sway/seatd access.
     if [ "$prog" != "display" ]; then
         echo "user=$USER" >> "$tmp"
     fi

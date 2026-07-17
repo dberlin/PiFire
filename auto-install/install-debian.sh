@@ -134,7 +134,7 @@ $SUDO apt install -y \
     gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev \
     libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev \
     nginx git supervisor \
-    bluetooth bluez cage seatd wlr-randr \
+    bluetooth bluez sway seatd \
     openssl curl 2>&1 | tee -a "$LOG"
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     log " !! Failed to install dependencies. Installation cannot continue."
@@ -190,7 +190,7 @@ $SUDO groupadd -f pifire
 $SUDO usermod -a -G pifire "$USER"
 $SUDO usermod -a -G pifire root
 
-# Seat access for the cage Wayland compositor (QtQuick displays).
+# Seat access for the sway Wayland compositor (QtQuick displays).
 $SUDO systemctl enable --now seatd 2>&1 | tee -a "$LOG" || log " ! seatd not enabled (continuing)."
 for grp in video input render seat; do
     $SUDO usermod -a -G "$grp" "$USER" 2>/dev/null || true
