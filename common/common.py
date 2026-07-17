@@ -3155,6 +3155,68 @@ def _cmd_sys(data, control, settings, arglist, origin, kind):
     system_command_queue.push(arglist)
 
 
+def _process_command_unknown(data, action, arglist):
+    """
+    Fallback for a command with no registered handler.
+
+    Reproduces the four distinct error paths of the original if/elif ladder
+    exactly. Note the inconsistent formatting, preserved as-is: the `get` path
+    brackets the offending argument, while `set` and `cmd` do not.
+
+    `arglist` has already been padded to `max_args`, so `arglist[0]` is always
+    subscriptable here and is None when the caller passed no arguments -- the
+    same value the original ladder's `else` branches interpolated.
+    """
+    data["result"] = "ERROR"
+    if action == "get":
+        data["message"] = f"Get API Argument: [{arglist[0]}] not recognized."
+    elif action == "set":
+        data["message"] = f"Set API Argument: {arglist[0]} not recognized."
+    elif action == "cmd":
+        data["message"] = f"CMD API Argument: {arglist[0]} not recognized."
+    else:
+        data["message"] = f"Action [{action}] not valid/recognized."
+
+
+""" Maps (action, subcommand) -> handler. `set` routes three subcommands to the
+    shared notify handler, exactly as the original `arglist[0] in [...]` test did. """
+_COMMAND_DISPATCH = {
+    ("get", "temp"): _cmd_get_temp,
+    ("get", "current"): _cmd_get_current,
+    ("get", "mode"): _cmd_get_mode,
+    ("get", "uuid"): _cmd_get_uuid,
+    ("get", "versions"): _cmd_get_versions,
+    ("get", "hopper"): _cmd_get_hopper,
+    ("get", "timer"): _cmd_get_timer,
+    ("get", "notify"): _cmd_get_notify,
+    ("get", "status"): _cmd_get_status,
+    ("set", "psp"): _cmd_set_psp,
+    ("set", "units"): _cmd_set_units,
+    ("set", "mode"): _cmd_set_mode,
+    ("set", "pmode"): _cmd_set_pmode,
+    ("set", "splus"): _cmd_set_splus,
+    ("set", "lid_open"): _cmd_set_lid_open,
+    ("set", "notify"): _cmd_set_notify,
+    ("set", "limit_high"): _cmd_set_notify,
+    ("set", "limit_low"): _cmd_set_notify,
+    ("set", "pwm"): _cmd_set_pwm,
+    ("set", "duty_cycle"): _cmd_set_duty_cycle,
+    ("set", "tuning_mode"): _cmd_set_tuning_mode,
+    ("set", "timer"): _cmd_set_timer,
+    ("set", "manual"): _cmd_set_manual,
+    ("cmd", "restart"): _cmd_cmd_restart,
+    ("cmd", "reboot"): _cmd_cmd_reboot,
+    ("cmd", "shutdown"): _cmd_cmd_shutdown,
+}
+
+""" Maps action -> handler for actions that have no subcommand ladder and so
+    cannot be keyed by (action, subcommand). `sys` accepts any arglist and
+    pushes it to the system queue verbatim. """
+_ACTION_DISPATCH = {
+    "sys": _cmd_sys,
+}
+
+
 def process_command(action=None, arglist=[], origin="unknown", kind=WriteKind.MERGE):
     """
     Process incoming command from API or elsewhere
@@ -3174,104 +3236,16 @@ def process_command(action=None, arglist=[], origin="unknown", kind=WriteKind.ME
     for _ in range(max_args - num_args):
         arglist.append(None)
 
-    if action == "get":
-        """ GET Commands """
+    """ Subcommand lookup first, then the action-only table for actions (sys)
+        that dispatch on the action alone. """
+    handler = _COMMAND_DISPATCH.get((action, arglist[0]))
+    if handler is None:
+        handler = _ACTION_DISPATCH.get(action)
 
-        if arglist[0] == "temp":
-            _cmd_get_temp(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "current":
-            _cmd_get_current(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "mode":
-            _cmd_get_mode(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "uuid":
-            _cmd_get_uuid(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "versions":
-            _cmd_get_versions(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "hopper":
-            _cmd_get_hopper(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "timer":
-            _cmd_get_timer(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "notify":
-            _cmd_get_notify(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "status":
-            _cmd_get_status(data, control, settings, arglist, origin, kind)
-
-        else:
-            data["result"] = "ERROR"
-            data["message"] = f"Get API Argument: [{arglist[0]}] not recognized."
-
-    elif action == "set":
-        """ SET Commands """
-
-        if arglist[0] == "psp":
-            _cmd_set_psp(data, control, settings, arglist, origin, kind)
-        elif arglist[0] == "units":
-            _cmd_set_units(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "mode":
-            _cmd_set_mode(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "pmode":
-            _cmd_set_pmode(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "splus":
-            _cmd_set_splus(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "lid_open":
-            _cmd_set_lid_open(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] in ["notify", "limit_high", "limit_low"]:
-            _cmd_set_notify(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "pwm":
-            _cmd_set_pwm(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "duty_cycle":
-            _cmd_set_duty_cycle(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "tuning_mode":
-            _cmd_set_tuning_mode(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "timer":
-            _cmd_set_timer(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "manual":
-            _cmd_set_manual(data, control, settings, arglist, origin, kind)
-
-        else:
-            data["result"] = "ERROR"
-            data["message"] = f"Set API Argument: {arglist[0]} not recognized."
-
-    elif action == "cmd":
-        """ System CMD Commands """
-
-        if arglist[0] == "restart":
-            _cmd_cmd_restart(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "reboot":
-            _cmd_cmd_reboot(data, control, settings, arglist, origin, kind)
-
-        elif arglist[0] == "shutdown":
-            _cmd_cmd_shutdown(data, control, settings, arglist, origin, kind)
-
-        else:
-            data["result"] = "ERROR"
-            data["message"] = f"CMD API Argument: {arglist[0]} not recognized."
-
-    elif action == "sys":
-        _cmd_sys(data, control, settings, arglist, origin, kind)
-
+    if handler is None:
+        _process_command_unknown(data, action, arglist)
     else:
-        data["result"] = "ERROR"
-        data["message"] = f"Action [{action}] not valid/recognized."
+        handler(data, control, settings, arglist, origin, kind)
 
     return data
 
