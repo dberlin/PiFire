@@ -906,8 +906,7 @@ def read_control(flush=False):
     """
     if flush:
         return _flush_control()
-    raw = datastore.get_blob("control:general")
-    return json.loads(raw) if raw is not None else default_control()
+    return _read_json_blob("control:general", default_control)
 
 
 def write_control(control, kind, origin="unknown"):
@@ -920,7 +919,7 @@ def write_control(control, kind, origin="unknown"):
     :param origin: Source label recorded on merge writes.
     """
     if kind is WriteKind.OVERWRITE:
-        datastore.set_blob("control:general", json.dumps(control))
+        _write_json_blob("control:general", control)
     elif kind is WriteKind.MERGE:
         control["origin"] = origin
         SqliteQueue("queue_control_write").push(control)
@@ -1013,8 +1012,7 @@ def read_errors(flush=False):
     if flush:
         write_errors([])
         return []
-    raw = datastore.get_blob("errors")
-    return json.loads(raw) if raw is not None else []
+    return _read_json_blob("errors", list)
 
 
 def write_errors(errors):
@@ -1023,7 +1021,7 @@ def write_errors(errors):
 
     :param errors: Errors
     """
-    datastore.set_blob("errors", json.dumps(errors))
+    _write_json_blob("errors", errors)
 
 
 def read_warnings():
@@ -1221,18 +1219,13 @@ def read_settings_store(init=False):
         settings = read_settings()
         datastore.set_blob("settings:general", json.dumps(settings))
 
-    if not datastore.exists_blob("settings:general"):
-        # Self-heal like read_control()/default_control(): callers throughout the
-        # codebase (is_real_hardware(), default_control(), the mobile blueprint,
-        # etc.) assume read_settings() always returns a fully-populated dict.
-        # Before this SQLite source-of-truth split, that guarantee came from the
-        # settings.json file always existing; now it must come from here until
-        # the first-boot import (Task 13) seeds settings:general at startup.
-        settings = default_settings()
-    else:
-        settings = json.loads(datastore.get_blob("settings:general"))
-
-    return settings
+    # Self-heal like read_control()/default_control(): callers throughout the
+    # codebase (is_real_hardware(), default_control(), the mobile blueprint,
+    # etc.) assume read_settings() always returns a fully-populated dict.
+    # Before this SQLite source-of-truth split, that guarantee came from the
+    # settings.json file always existing; now it must come from here until
+    # the first-boot import (Task 13) seeds settings:general at startup.
+    return _read_json_blob("settings:general", default_settings)
 
 
 def write_settings_store(settings):
@@ -1241,7 +1234,7 @@ def write_settings_store(settings):
 
     :param settings: Settings
     """
-    datastore.set_blob("settings:general", json.dumps(settings))
+    _write_json_blob("settings:general", settings)
 
 
 def backup_settings():
@@ -1561,13 +1554,8 @@ def read_pellets_store(init=False):
         pelletdb = read_pellet_db()
         datastore.set_blob("pellets:general", json.dumps(pelletdb))
 
-    if not datastore.exists_blob("pellets:general"):
-        # Self-heal like read_settings_store(); see comment there.
-        pelletdb = default_pellets()
-    else:
-        pelletdb = json.loads(datastore.get_blob("pellets:general"))
-
-    return pelletdb
+    # Self-heal like read_settings_store(); see comment there.
+    return _read_json_blob("pellets:general", default_pellets)
 
 
 def write_pellets_store(pelletdb):
@@ -1576,7 +1564,7 @@ def write_pellets_store(pelletdb):
 
     :param settings: Settings
     """
-    datastore.set_blob("pellets:general", json.dumps(pelletdb))
+    _write_json_blob("pellets:general", pelletdb)
 
 
 def backup_pellet_db(action="backup", retry_count=0):
@@ -1843,7 +1831,7 @@ def write_current(in_data):
     current["PSP"] = in_data["primary_setpoint"]
     current["NT"] = in_data["notify_targets"]
     current["TS"] = int(time.time() * 1000)  # Timestamp
-    datastore.set_blob("control:current", json.dumps(current))
+    _write_json_blob("control:current", current)
 
 
 def read_current(zero_out=False):
@@ -1869,12 +1857,7 @@ def read_current(zero_out=False):
 
         datastore.set_blob("control:current", json.dumps(current))
 
-    if not datastore.exists_blob("control:current"):
-        current = {}
-    else:
-        current = json.loads(datastore.get_blob("control:current"))
-
-    return current
+    return _read_json_blob("control:current", dict)
 
 
 def write_tr(tr_data):
@@ -1882,7 +1865,7 @@ def write_tr(tr_data):
     Write tr values to SQLite DB
 
     """
-    datastore.set_blob("control:tuning", json.dumps(tr_data))
+    _write_json_blob("control:tuning", tr_data)
 
 
 def read_tr():
@@ -1891,12 +1874,7 @@ def read_tr():
 
     :return: Current probe Tr values structure
     """
-    if not datastore.exists_blob("control:tuning"):
-        tr_data = {}
-    else:
-        tr_data = json.loads(datastore.get_blob("control:tuning"))
-
-    return tr_data
+    return _read_json_blob("control:tuning", dict)
 
 
 def write_autotune(data):
@@ -2108,6 +2086,15 @@ def read_wizard(filename="wizard/wizard_manifest.json"):
 def _read_json_key_or_none(key):
     raw = datastore.get_blob(key)
     return json.loads(raw) if raw is not None else None
+
+
+def _read_json_blob(key, default_factory):
+    raw = datastore.get_blob(key)
+    return json.loads(raw) if raw is not None else default_factory()
+
+
+def _write_json_blob(key, value):
+    datastore.set_blob(key, json.dumps(value))
 
 
 def load_wizard_install_info():
@@ -2347,7 +2334,7 @@ def write_status(status):
 
     :param status: Status Dictionary
     """
-    datastore.set_blob("control:status", json.dumps(status))
+    _write_json_blob("control:status", status)
 
 
 def read_status(init=False):
@@ -2384,8 +2371,7 @@ def read_status(init=False):
         # Match InMemoryStore semantics: absent status reads back as {} (falsy),
         # not a crash. In production the controller seeds status via init=True
         # before any init=False reader runs; this guards the pre-seed/fresh-DB case.
-        raw = datastore.get_blob("control:status")
-        status = json.loads(raw) if raw is not None else {}
+        status = _read_json_blob("control:status", dict)
 
     return status
 
