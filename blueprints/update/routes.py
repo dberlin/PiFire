@@ -7,10 +7,9 @@ from common.system import is_real_hardware
 from updater import (
     get_available_updates,
     get_update_data,
-    get_updater_install_status,
-    set_updater_install_status,
     get_log,
 )
+from common.datastore_accessors import get_updater_install_status, set_updater_install_status
 
 from . import update_bp
 
