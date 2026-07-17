@@ -38,6 +38,7 @@ that whole hazard rather than chasing it further.
 import importlib
 import os
 import sys
+import threading
 import types
 from unittest import mock
 
@@ -126,11 +127,20 @@ def _load_driver(module_path, **stub_kwargs):
 def _instantiate(mod, **overrides):
     """Construct mod.Display with the display/encoder thread(s) and
     os.system blocked, so no real SPI/pygame thread ever starts and no
-    `sudo reboot` can be shelled out."""
+    `sudo reboot` can be shelled out.
+
+    Patches the shared `threading` module's `Thread` attribute directly
+    (rather than `mod.threading.Thread`): every driver module's own
+    `import threading` binds the same singleton `threading` module object,
+    so this one patch covers every `threading.Thread(...)` call site --
+    whether it lives in the driver itself (e.g. st7789e, the pygame/st7789
+    drivers) or in a shared mixin module (`display._luma_panel`,
+    `display._encoder_input`) -- without requiring each driver to keep its
+    own `import threading` around just so tests can reach it."""
     kwargs = dict(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
     kwargs.update(overrides)
     with (
-        mock.patch.object(mod.threading, "Thread") as mock_thread,
+        mock.patch.object(threading, "Thread") as mock_thread,
         mock.patch("os.system", side_effect=AssertionError(f"os.system blocked for {mod.__name__}")),
     ):
         mock_thread.return_value.start = lambda: None
@@ -203,6 +213,11 @@ def test_st7789_device_geometry_override_still_works():
 
 ALL_16_FILENAMES = [c[1].removeprefix("display.") for c in DRIVERS]
 
+# filename -> hardware-stub kwargs, so the manifest test can actually import
+# each module (not just check the file exists) to confirm it exposes a real
+# `class Display`.
+STUB_KWARGS_BY_FILENAME = {c[1].removeprefix("display."): c[3] for c in DRIVERS}
+
 
 def test_manifest_lists_all_16_driver_identifiers():
     """wizard/wizard_manifest.json['modules']['display'] is the manifest the
@@ -211,8 +226,10 @@ def test_manifest_lists_all_16_driver_identifiers():
     `importlib.import_module(f"display.{display_name}")` using this same
     'filename' field at runtime. Confirm all 16 fixed-base driver
     identifiers are still present and each resolves to a real
-    display/<filename>.py module: the shims kept every driver's module
-    name/path unchanged, so the manifest <-> module mapping is unaffected."""
+    display/<filename>.py module exposing a `class Display` (not merely a
+    file that happens to exist at that path): the shims kept every driver's
+    module name/path unchanged, so the manifest <-> module mapping is
+    unaffected."""
     manifest_display = load_wizard_manifest()["modules"]["display"]
     for filename in ALL_16_FILENAMES:
         assert filename in manifest_display, f"{filename} missing from wizard_manifest.json"
@@ -220,4 +237,8 @@ def test_manifest_lists_all_16_driver_identifiers():
         assert entry["filename"] == filename
         assert os.path.exists(os.path.join(REPO_BASE, "display", f"{filename}.py")), (
             f"manifest entry {filename!r} does not resolve to a display/ module"
+        )
+        mod = _load_driver(f"display.{filename}", **STUB_KWARGS_BY_FILENAME[filename])
+        assert isinstance(getattr(mod, "Display", None), type), (
+            f"manifest entry {filename!r} does not resolve to a module exposing class Display"
         )

@@ -16,7 +16,6 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import threading  # noqa: F401  re-exported for tests/ui/test_fixed_base_drivers_load.py's mod.threading.Thread patch
 from luma.lcd.device import ili9341
 from display.base_240x320 import DisplayBase
 from display._luma_panel import LumaPanelMixin

@@ -38,6 +38,7 @@ to recover which callback is wired to which button.
 
 import importlib
 import sys
+import threading
 import types
 from unittest import mock
 
@@ -108,11 +109,16 @@ def _load_driver(module_path, **stub_kwargs):
 def _instantiate(mod, **overrides):
     """Construct mod.Display with the display/encoder thread(s) and
     os.system blocked -- identical safety net to
-    test_fixed_base_drivers_load.py's `_instantiate`."""
+    test_fixed_base_drivers_load.py's `_instantiate`. Patches the shared
+    `threading` module's `Thread` attribute directly (not `mod.threading`):
+    every module's `import threading` binds the same singleton object, and
+    some drivers here (e.g. ili9341e, ili9341b) no longer keep their own
+    `import threading` around now that thread-starting lives in the shared
+    mixins (`display._encoder_input`, `display._luma_panel`)."""
     kwargs = dict(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
     kwargs.update(overrides)
     with (
-        mock.patch.object(mod.threading, "Thread") as mock_thread,
+        mock.patch.object(threading, "Thread") as mock_thread,
         mock.patch("os.system", side_effect=AssertionError(f"os.system blocked for {mod.__name__}")),
     ):
         mock_thread.return_value.start = lambda: None
