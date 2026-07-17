@@ -614,6 +614,87 @@ def read_generic_key(key):
     return json.loads(datastore.get_blob(key))
 
 
+def read_probe_status(probe_info):
+    """
+    Creates a structured status report for all probes in the system by combining probe configuration
+    information with current device status information.
+
+    Args:
+            probe_info (list): List of probe configuration dictionaries containing information about each
+                    probe such as type, label, device, etc.
+
+    Returns:
+            dict: A nested dictionary containing probe status information organized by probe type:
+                    {
+                            'P': {    # Primary probes
+                                    '<probe_label>': {
+                                            'status': {},
+                                            'config': {},
+                                            'enabled': bool,
+                                            'profile': str or None,
+                                            'port': str or None,
+                                            'type': str or None,
+                                            'device': str or None,
+                                            'label': str or None,
+                                            'name': str or None
+                                    }
+                            },
+                            'F': {},  # Food probes (same structure as P)
+                            'AUX': {} # Auxiliary probes (same structure as P)
+                    }
+
+    Example:
+            probe_info = [
+                    {
+                            'type': 'Primary',
+                            'label': 'Grill',
+                            'device': 'device1',
+                            ...
+                    },
+                    ...
+            ]
+            status = read_probe_status(probe_info)
+            # Returns structured status information for all probes
+    """
+    # Get current device status information from the datastore
+    probe_device_info = read_generic_key("probe_device_info")
+    # print(f'Probe Device Info: {probe_device_info}')
+
+    # Initialize the status structure
+    probe_status = {
+        "P": {},  # Primary probes
+        "F": {},  # Food probes
+        "AUX": {},  # Auxiliary probes
+    }
+
+    # Process each probe in the configuration
+    for probe in probe_info:
+        # Determine section based on probe type
+        if probe["type"] == "Primary":
+            section = "P"
+        elif probe["type"] == "Food":
+            section = "F"
+        elif probe["type"] == "Aux":
+            section = "AUX"
+        probe_device = probe["device"]
+
+        # Find matching device status and combine with probe configuration
+        for device in probe_device_info:
+            if device["device"] == probe_device:
+                probe_status[section][probe["label"]] = {}  # Initialize dict for this probe
+                probe_status[section][probe["label"]]["status"] = device.get("status", {})
+                probe_status[section][probe["label"]]["config"] = device.get("config", {})
+                probe_status[section][probe["label"]]["enabled"] = probe.get("enabled", True)
+                probe_status[section][probe["label"]]["profile"] = probe.get("profile", None)
+                probe_status[section][probe["label"]]["port"] = probe.get("port", None)
+                probe_status[section][probe["label"]]["type"] = probe.get("type", None)
+                probe_status[section][probe["label"]]["device"] = probe.get("device", None)
+                probe_status[section][probe["label"]]["label"] = probe.get("label", None)
+                probe_status[section][probe["label"]]["name"] = probe.get("name", None)
+
+    return probe_status
+
+
 def write_generic_key(key, value):
     """
     Write generic data to SQLite DB
