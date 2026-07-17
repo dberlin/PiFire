@@ -37,6 +37,10 @@ def build_engine(config, backend):
     meta = read_generic_json(config["display_data_filename"]).get("metadata", {})
     ctx.setContextProperty("screenWidth", meta.get("screen_width", 1280))
     ctx.setContextProperty("screenHeight", meta.get("screen_height", 720))
+    rotation = int(config.get("rotation", 0) or 0)
+    if rotation not in (90, 180, 270):
+        rotation = 0
+    ctx.setContextProperty("screenRotation", rotation)
     ctx.setContextProperty("splashImage", meta.get("splash_image", ""))
     ctx.setContextProperty("splashDelay", meta.get("splash_delay", 500))
     engine.load(QUrl.fromLocalFile(str(QML_DIR / "Main.qml")))
