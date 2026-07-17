@@ -585,8 +585,8 @@ class ProbeCard(FlexObject):
         draw = ImageDraw.Draw(card)
 
         # Card background + subtle border
-        draw.rounded_rectangle((15, 15, size[0] - 15, size[1] - 15), radius=20, fill=(26, 22, 17, 255))
-        draw.rounded_rectangle((15, 15, size[0] - 15, size[1] - 15), radius=20, outline=(255, 255, 255, 30), width=2)
+        draw.rounded_rectangle((15, 15, size[0] - 15, size[1] - 15), radius=20, fill=(44, 35, 26, 255))
+        draw.rounded_rectangle((15, 15, size[0] - 15, size[1] - 15), radius=20, outline=(255, 255, 255, 33), width=2)
 
         # Top row: probe name (left)
         name_label = self._draw_text(name.upper(), "./static/font/Barlow-SemiBold.ttf", 26, dim_color)
@@ -693,7 +693,7 @@ class GaugeEmber(FlexObject):
         label = self.objectData["label"]
         glow_enabled = self.objectData.get("glow", True)
 
-        track_color = (42, 36, 29, 255)
+        track_color = (74, 64, 52, 255)
         label_color = (125, 114, 100, 255)
         light_color = (248, 242, 232, 255)
         dim_color = (138, 127, 112, 255)
@@ -706,10 +706,10 @@ class GaugeEmber(FlexObject):
         margin = round(size[0] * 0.03)
         radius = round(size[0] * 0.055)
         draw.rounded_rectangle(
-            (margin, margin, size[0] - margin, size[1] - margin), radius=radius, fill=(26, 22, 17, 255)
+            (margin, margin, size[0] - margin, size[1] - margin), radius=radius, fill=(44, 35, 26, 255)
         )
         draw.rounded_rectangle(
-            (margin, margin, size[0] - margin, size[1] - margin), radius=radius, outline=(255, 255, 255, 30), width=2
+            (margin, margin, size[0] - margin, size[1] - margin), radius=radius, outline=(255, 255, 255, 33), width=2
         )
 
         # Arc geometry - matches the GaugeCircle 270 degree sweep starting at 135 degrees
@@ -866,8 +866,8 @@ class SystemCard(FlexObject):
         accent = self.objectData.get("accent", resolve_accent("Ember"))
         data = self.objectData.get("data", {})
 
-        card_fill = (26, 22, 17, 255)  # #1a1611
-        row_fill = (20, 16, 12, 255)  # #14100c
+        card_fill = (44, 35, 26, 255)  # #2c231a
+        row_fill = (28, 23, 18, 255)  # #1c1712
         title_color = (125, 114, 100, 255)  # #7d7264 (dim label)
         label_color = (207, 198, 184, 255)  # #cfc6b8
         dim_color = (125, 114, 100, 255)  # #7d7264
@@ -875,14 +875,14 @@ class SystemCard(FlexObject):
         ignite_color = (255, 122, 26, 255)  # #ff7a1a
         dot_active = (94, 201, 111, 255)  # #5ec96f
         dot_inactive = (74, 68, 60, 255)  # #4a443c
-        row_border_default = (255, 255, 255, 22)
+        row_border_default = (255, 255, 255, 33)
 
         card = Image.new("RGBA", size)
         draw = ImageDraw.Draw(card)
 
         # Card background + subtle border
         draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, fill=card_fill)
-        draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, outline=(255, 255, 255, 30), width=2)
+        draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, outline=(255, 255, 255, 33), width=2)
 
         # Title
         title = self._draw_text("SYSTEM", "./static/font/Barlow-SemiBold.ttf", 20, title_color)
@@ -2221,8 +2221,8 @@ class DutyPill(FlexObject):
             label_color = (143, 224, 154, 255)  # #8fe09a
             value_color = (143, 224, 154, 255)  # #8fe09a
         else:
-            bg_fill = (26, 22, 17, 255)  # #1a1611
-            border_color = (255, 255, 255, 13)  # rgba(255,255,255,0.05)
+            bg_fill = (44, 35, 26, 255)  # #2c231a
+            border_color = (255, 255, 255, 33)  # rgba(255,255,255,0.13)
             label_color = (125, 114, 100, 255)  # #7d7264
             value_color = accent["accent"]
 
@@ -2297,7 +2297,7 @@ class CookTimeBar(FlexObject):
             value_color = (255, 90, 77, 255)
             border_w = 4
         else:
-            card_fill = (26, 22, 17, 255)  # #1a1611
+            card_fill = (44, 35, 26, 255)  # #2c231a
             border_color = (255, 255, 255, 15)  # rgba(255,255,255,0.06)
             label_color = (125, 114, 100, 255)  # #7d7264
             value_color = accent["accent"] if value else (138, 127, 112, 255)
@@ -2391,8 +2391,8 @@ class HopperVertical(FlexObject):
         draw = ImageDraw.Draw(card)
 
         # Card background + subtle border
-        draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, fill=(26, 22, 17, 255))
-        draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, outline=(255, 255, 255, 30), width=2)
+        draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, fill=(44, 35, 26, 255))
+        draw.rounded_rectangle((10, 10, size[0] - 10, size[1] - 10), radius=18, outline=(255, 255, 255, 33), width=2)
 
         # Header row: "HOPPER" label (left)
         header_left = 26
