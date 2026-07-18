@@ -289,6 +289,17 @@ EVENTS = {
 }
 
 
+def _event_logger(settings):
+    """Return the shared 'events' logger, level set from settings.debug_mode."""
+    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
+    return create_logger(
+        "events",
+        filename="./logs/events.log",
+        messageformat="%(asctime)s [%(levelname)s] %(message)s",
+        level=log_level,
+    )
+
+
 def send_notifications(notify_event, label="Probe", target=0):
     """
     Build and send notification based on notify_event and write to log.
@@ -299,10 +310,7 @@ def send_notifications(notify_event, label="Probe", target=0):
     """
     settings = read_settings()
     control = read_control()
-    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
-    eventLogger = create_logger(
-        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
-    )
+    eventLogger = _event_logger(settings)
     ctx = _event_context(settings, control, label, target)
 
     builder = EVENTS.get(notify_event)
@@ -349,10 +357,7 @@ def _send_apprise_notifications(settings, title_message, body_message):
     :param title_message: Message Title
     :param body_message: Message Body
     """
-    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
-    eventLogger = create_logger(
-        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
-    )
+    eventLogger = _event_logger(settings)
     if len(settings["notify_services"]["apprise"]["locations"]):
         eventLogger.info(
             "Sending Apprise Notifications: " + ", ".join(settings["notify_services"]["apprise"]["locations"])
@@ -455,10 +460,7 @@ def _send_onesignal_notification(settings, title_message, body_message, channel)
     :param body_message: Message Body
     :param channel: Android Notifications Channel
     """
-    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
-    eventLogger = create_logger(
-        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
-    )
+    eventLogger = _event_logger(settings)
     app_id = settings["notify_services"]["onesignal"]["app_id"]
     devices = settings["notify_services"]["onesignal"]["devices"]
     url = "https://onesignal.com/api/v1/notifications"
@@ -516,10 +518,7 @@ def _send_ifttt_notification(settings, notify_event, query_args):
     :param notify_event: String Event
     :param query_args: Query Args
     """
-    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
-    eventLogger = create_logger(
-        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
-    )
+    eventLogger = _event_logger(settings)
     key = settings["notify_services"]["ifttt"]["APIKey"]
     url = "https://maker.ifttt.com/trigger/" + notify_event + "/with/key/" + key
 
