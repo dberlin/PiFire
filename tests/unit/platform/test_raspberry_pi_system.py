@@ -58,8 +58,13 @@ def test_network_info_ok_shape():
 
 def test_check_wifi_quality_delegates_to_common(monkeypatch):
     # Pi version is identical to the mixin: `return get_wifi_quality(logger=...)`.
+    # After adopting SystemCommandsMixin, check_wifi_quality is inherited, and
+    # its `get_wifi_quality` reference lives in grillplat.system_commands's
+    # namespace (not rpi's, since the now-unused import was dropped there).
+    import grillplat.system_commands as sysmod
+
     sentinel = {"result": "OK", "message": "x", "data": {"wifi_quality_value": 1}}
-    monkeypatch.setattr(rpi, "get_wifi_quality", lambda logger=None: sentinel)
+    monkeypatch.setattr(sysmod, "get_wifi_quality", lambda logger=None: sentinel)
     assert _bare().check_wifi_quality([]) is sentinel
 
 
