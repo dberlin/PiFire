@@ -9,5 +9,5 @@ Manifest Route for Web Application Integration
 @manifest_bp.route("/")
 def manifest():
     res = make_response(render_template("manifest/manifest.json"), 200)
-    res.headers["Content-Type"] = "text/cache-manifest"
+    res.headers["Content-Type"] = "application/manifest+json"
     return res

@@ -63,8 +63,7 @@ Per-page notes on seeding and interaction style:
   drained back to `False` here (see `controller/runtime/modes/base.py`
   for where that happens in production).
 - **manifest** (`manifest`): tiny, stateless GET; JSON body assertions
-  plus a documented latent-bug assertion on its Content-Type header
-  (see that test's docstring).
+  plus a Content-Type header assertion (see that test's docstring).
 """
 
 import json
@@ -400,16 +399,15 @@ def test_manual_output_toggle_guarded_when_not_manual_via_direct_post(live_serve
 
 
 def test_manifest_get_content(live_server, page):
-    """Plain GET + JSON-content assertions. NOTE (latent bug): the route
-    (`blueprints/manifest/routes.py`) sets `Content-Type` to the legacy,
-    deprecated `text/cache-manifest` (the old HTML5 AppCache mimetype)
-    instead of a PWA-correct `application/manifest+json` (or at least
-    `application/json`) -- asserted here as the actual (buggy) value, not
-    the value a PWA manifest is supposed to serve. See the task report."""
+    """Plain GET + JSON-content assertions. The route
+    (`blueprints/manifest/routes.py`) sets `Content-Type` to the
+    PWA-correct `application/manifest+json`, not the legacy, deprecated
+    `text/cache-manifest` (the old HTML5 AppCache mimetype) it used to
+    serve. See the task report."""
     resp = page.request.get(f"{live_server}/manifest/")
 
     assert resp.status == 200
-    assert "text/cache-manifest" in resp.headers.get("content-type", "")
+    assert "application/manifest+json" in resp.headers.get("content-type", "")
 
     body = json.loads(resp.text())
     assert body["short_name"] == "PiFire"
