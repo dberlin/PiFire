@@ -735,10 +735,13 @@ _ACTION_DISPATCH = {
 }
 
 
-def process_command(action=None, arglist=[], origin="unknown", kind=WriteKind.MERGE):
+def process_command(action=None, arglist=None, origin="unknown", kind=WriteKind.MERGE):
     """
     Process incoming command from API or elsewhere
     """
+    if arglist is None:
+        arglist = []
+
     data = {}
     data["result"] = "OK"
     data["message"] = "Command was accepted successfully."

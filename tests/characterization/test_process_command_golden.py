@@ -58,9 +58,12 @@ characterization captures warts):
   1. get/status `ui_hash` is `hash(json.dumps(probe_info))`. Python salts str
      hashing per-process, so this value changes on every restart even when the
      probe map is identical. Pinned only as "an int is present".
-  2. `arglist=[]` is a mutable default argument. The pad-to-4 loop appends None
-     INTO it, so `process_command.__defaults__[1]` is permanently
-     `[None, None, None, None]` after the first no-arglist call. See
+  2. (FIXED in the latent-bug pass -- was `arglist=[]`, a mutable default
+     argument; the pad-to-4 loop appended None INTO it, so
+     `process_command.__defaults__[1]` became permanently
+     `[None, None, None, None]` after the first no-arglist call.) The default
+     is now `arglist=None`, with `if arglist is None: arglist = []` at the top
+     of the function body, so the default itself is never mutated. See
      `test_mutable_default_arglist_is_padded_in_place`.
   3. The same pad mutates the CALLER's list in place, and `set/manual/*/toggle`
      additionally rewrites `arglist[2]` to 'true'/'false'. Callers see this.
@@ -894,15 +897,16 @@ def test_unknown_subcommand_fallbacks_are_exact(seeded):
 
 
 def test_mutable_default_arglist_is_padded_in_place(seeded):
-    """`arglist=[]` is a mutable default. The pad-to-4 loop appends INTO it, so
-    the default itself is permanently mutated for the life of the process.
-    Pinned, not fixed -- see module docstring wart #2."""
+    """`arglist=None` is the default now (no mutable default). Calling
+    process_command with arglist omitted must NOT create or mutate a shared
+    4-element default list -- the mutable-default wart is FIXED, see module
+    docstring wart #2."""
+    assert api_commands.process_command.__defaults__[1] is None
     api_commands.process_command(action="get", origin="test")
-    default_arglist = api_commands.process_command.__defaults__[1]
-    assert default_arglist == [None, None, None, None]
-    # Idempotent afterwards: already length 4, so the pad loop is a no-op.
+    assert api_commands.process_command.__defaults__[1] is None
+    # Repeated omitted-arglist calls still must not create/mutate a shared default.
     api_commands.process_command(action="get", origin="test")
-    assert api_commands.process_command.__defaults__[1] == [None, None, None, None]
+    assert api_commands.process_command.__defaults__[1] is None
 
 
 def test_arglist_is_padded_in_the_callers_list(seeded):
