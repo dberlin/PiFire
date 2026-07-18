@@ -43,7 +43,7 @@ Imported Libraries
 import time
 import logging
 from common.common import create_logger
-from controller.base import ControllerBase
+from controller.pid_base import PIDControllerBase
 
 log_level = logging.DEBUG
 eventLogger = create_logger(
@@ -55,7 +55,7 @@ Class Definition
 """
 
 
-class Controller(ControllerBase):
+class Controller(PIDControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
         self.pb = config.get("PB", 42.0)
