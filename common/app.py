@@ -3,7 +3,7 @@ Common PiFire WebApp Functions Shared Between Blueprints
 """
 
 from common.common import seconds_to_string, WriteKind
-from common.datastore_accessors import read_settings, read_metrics, write_settings, write_control
+from common.datastore_accessors import read_settings, read_metrics, read_history, write_settings, write_control
 from common.defaults import metrics_items
 from common.api_commands import process_command
 from flask import current_app
@@ -219,27 +219,27 @@ def prepare_csv(data=[], filename=""):
     if data == []:
         data = read_history()
 
-    exd_data = True if "EXD" in data[0].keys() else False
-
-    # Set Standard Labels
-    labels = "Time, "
-    primary_key = list(data[0]["P"].keys())[0]
-    labels += f"{primary_key} Temp, {primary_key} Set Point, {primary_key} Notify Target"
-    for key in data[0]["F"]:
-        labels += f", {key} Temp, {key} Notify Target"
-    for key in data[0]["AUX"]:
-        labels += f", {key} Temp"
-    if exd_data:
-        for key in data[0]["EXD"]:
-            labels += f", {key}"
-
-    # End the labels line
-    labels += "\n"
-
     # Get the length of the data (number of captured events)
     list_length = len(data)
 
     if list_length > 0:
+        exd_data = True if "EXD" in data[0].keys() else False
+
+        # Set Standard Labels
+        labels = "Time, "
+        primary_key = list(data[0]["P"].keys())[0]
+        labels += f"{primary_key} Temp, {primary_key} Set Point, {primary_key} Notify Target"
+        for key in data[0]["F"]:
+            labels += f", {key} Temp, {key} Notify Target"
+        for key in data[0]["AUX"]:
+            labels += f", {key} Temp"
+        if exd_data:
+            for key in data[0]["EXD"]:
+                labels += f", {key}"
+
+        # End the labels line
+        labels += "\n"
+
         writeline = labels
         csvfile.write(writeline)
 
