@@ -4,9 +4,14 @@
 
 **For agentic workers:** REQUIRED SUB-SKILL → **superpowers:subagent-driven-development**. Execute one task at a time, in order. Each task is a pure, independently-revertible extraction under a frozen golden contract; do not batch tasks or "improve" code while extracting.
 
-**Goal:** Shrink the ~420-line `ControlMode.run()` method (`controller/runtime/modes/base.py:230-651`) into a ~130-line skeleton by extracting five private helpers, **preserving exact control-write ordering and every read/write side effect**. This is a pure structural refactor — no behavior change whatsoever.
+**Goal:** Shrink the ~420-line `ControlMode.run()` method (`controller/runtime/modes/base.py:231-652`) into a ~130-line skeleton by extracting five private helpers, **preserving exact control-write ordering and every read/write side effect**. This is a pure structural refactor — no behavior change whatsoever.
 
-> **NOTE (2026-07-18, post-FSM refresh):** this plan was written against the pre-FSM `run()`. The mode-transition FSM has since merged into `massive-reworks-and-new-ui`, which shifted line numbers and changed the switch-off block into a `request_transition(...)` seam call. All line references below are refreshed to the current code. Two FSM additions now live INSIDE `run()` and are NOT extraction targets — they stay inline exactly where they are: the `evaluate_phase(self, ctx, "pre_loop", ...)` guard (~base.py:331-336) and the `evaluate_phase(self, ctx, "pre_act", now, ptemp)` guard + the residual `if self.check_safety(now, ptemp): break` hook (~base.py:515-528, the SAFETY section). Do not touch them. `base.py` already imports `request_transition, evaluate_phase` (line 21), so extracted helpers may call `request_transition` directly.
+> **NOTE (2026-07-18, post-FSM + post-enums refresh):** this plan was written against the pre-FSM `run()`. Since then, TWO refactors merged into `massive-reworks-and-new-ui`:
+>
+> 1. **The mode-transition FSM** — turned the switch-off block into a `request_transition(...)` seam call, and added two inline guard hooks that are NOT extraction targets and stay exactly where they are: `evaluate_phase(self, ctx, "pre_loop", ...)` (~base.py:332-337) and, in the SAFETY section, `evaluate_phase(self, ctx, "pre_act", now, ptemp)` + the residual `if self.check_safety(now, ptemp): break` (~base.py:516-529). Do not touch them.
+> 2. **The Mode/TransitionKind StrEnums** — added `from common.modes import Mode` at base.py line 17, so **every line number cited below is now +1** (anchor on the unchanged `# ...` comment strings, which are the real anchors). AND every mode-string comparison in the quoted blocks is now the enum: `mode == "Manual"` → `mode == Mode.MANUAL`, `control["mode"] == "Recipe"` → `== Mode.RECIPE`, `in ["Smoke","Hold"]` → `in (Mode.SMOKE, Mode.HOLD)`, `self.name == "Smoke"` → `== Mode.SMOKE`, etc. **Extract the ACTUAL current code** — the quoted blocks below illustrate STRUCTURE; the live comparisons are enum-based and come along verbatim in the extraction (behavior-identical). The switch-off seam call is now `request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)` (updated in Task 2's block/helper below).
+>
+> `base.py` already imports `request_transition, evaluate_phase` and `Mode` / `TransitionKind` — extracted helpers may reference them directly.
 
 **Architecture:** `run()` is the shared work-cycle driver for every concrete mode handler (Smoke/Hold/Startup/Shutdown/Monitor/Manual/Reignite/Prime/Recipe/Error subclasses of `ControlMode`). It performs: pre-loop setup (process monitor, metrics, recipe triggers, timers) → a `while status == "Active"` main loop (SENSE / SAFETY / ACT / PUBLISH banners) → post-loop cleanup. The extraction lifts five self-contained blocks into `self._*` helpers called from the same positions, so the control-write sequence observed by the store is byte-for-byte unchanged.
 
@@ -47,7 +52,7 @@ So the pass criterion for every task is: **all 49 tests pass and no assertion li
 
 **Production file (only one is edited):**
 
-- `controller/runtime/modes/base.py` — `ControlMode.run()` at lines **230-651** (the `# ---- shared skeleton ----` comment is on 229). Five helpers are added as siblings; `run()` is rewired to call them.
+- `controller/runtime/modes/base.py` — `ControlMode.run()` at lines **231-652** (the `# ---- shared skeleton ----` comment is on 229). Five helpers are added as siblings; `run()` is rewired to call them.
 
 **Test files that gate every task (never edited — the frozen contract):**
 
@@ -194,7 +199,7 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
 
 > **Scoping note (refreshed to current code):** the extracted block is base.py **376-417** — the four flag blocks only. Lines 362-375 (`now = ...`, `execute_control_writes()`, `control = read_control()`, `self.control = control`, `process_system_commands(ctx)`, and the `if control["updated"]: break`) **stay in `run()`** because they rebind the `control` loop variable and contain the top-of-loop `updated` break; pulling them in would force the helper to also return `control`. Keeping them in the caller makes the helper mutate `control` in place only.
 
-> **Break handling (post-FSM):** the switch-off block (base.py 408-417) contains a `break`. It now performs the Stop transition via the FSM seam — `control["status"] = "active"` then `request_transition(ctx, control, "Stop", kind="terminal")` (which sets `mode="Stop"`/`updated=True` and does the single `write_control(OVERWRITE)`) — NOT the old inline `mode=/updated=/write` triplet. A helper cannot `break` the caller's loop, so it returns a `should_break` flag; `run()` does `if should_break: break`. The pre-break status write + seam call happen inside the helper exactly as in `run()` today, so the store sees the identical write. `request_transition` is a module global in base.py — call it directly.
+> **Break handling (post-FSM + enums):** the switch-off block (base.py 409-418, +1 post-enums) contains a `break`. It now performs the Stop transition via the FSM seam — `control["status"] = "active"` then `request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)` (which sets `mode="Stop"`/`updated=True` and does the single `write_control(OVERWRITE)`) — NOT the old inline `mode=/updated=/write` triplet. A helper cannot `break` the caller's loop, so it returns a `should_break` flag; `run()` does `if should_break: break`. The pre-break status write + seam call happen inside the helper exactly as in `run()` today, so the store sees the identical write. `request_transition` is a module global in base.py — call it directly.
 
 **Current block (base.py 376-417):**
 ```python
@@ -238,7 +243,7 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
                     # The seam sets mode="Stop"/updated + writes; status is not part
                     # of the transition, so set it on control first (single OVERWRITE).
                     control["status"] = "active"
-                    request_transition(ctx, control, "Stop", kind="terminal")
+                    request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
                     break
 ```
 
@@ -294,7 +299,7 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
                 # The seam sets mode="Stop"/updated + writes; status is not part
                 # of the transition, so set it on control first (single OVERWRITE).
                 control["status"] = "active"
-                request_transition(ctx, control, "Stop", kind="terminal")
+                request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
                 return (last, pelletdb, True)
 
         return (last, pelletdb, False)

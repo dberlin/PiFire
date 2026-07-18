@@ -14,11 +14,12 @@ the manual-override block) and threaded through the whole tick.
 import logging
 
 from common.common import WriteKind
+from common.modes import Mode
 from common.process_mon import Process_Monitor
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
 from controller.runtime.system_commands import process_system_commands
-from controller.runtime.transitions import request_transition, evaluate_phase
+from controller.runtime.transitions import request_transition, evaluate_phase, TransitionKind
 
 
 class ControlMode:
@@ -55,7 +56,7 @@ class ControlMode:
       - teardown(ptemp): mode-specific cleanup after the loop ends.
     """
 
-    name: str = ""
+    name: Mode | str = ""
 
     def __init__(self, ctx, state):
         self.ctx = ctx
@@ -143,7 +144,7 @@ class ControlMode:
 
         # If in Smoke Plus Mode but not calling for fan pid control, Cycle the Fan
         if (
-            (self.name == "Smoke" or (self.name == "Hold" and self.state.target_temp_achieved))
+            (self.name == Mode.SMOKE or (self.name == Mode.HOLD and self.state.target_temp_achieved))
             and control["s_plus"]
             and not self.state.fan.assist
             and not self.state.lid.open_detected
@@ -171,7 +172,7 @@ class ControlMode:
                 self.state.fan.cycle_toggle_time = now
                 if (
                     settings["platform"]["dc_fan"]
-                    and (self.name == "Smoke" or (self.name == "Hold" and not control["pwm_control"]))
+                    and (self.name == Mode.SMOKE or (self.name == Mode.HOLD and not control["pwm_control"]))
                     and settings["smoke_plus"]["fan_ramp"]
                 ):
                     grill_platform.pwm_fan_ramp(*ramp_params(settings["smoke_plus"], settings["pwm"]))
@@ -254,8 +255,8 @@ class ControlMode:
         _control.eventLogger.info(f"{mode} Mode started.")
 
         # Pre-Loop Setup Recipe Triggers
-        if control["mode"] == "Recipe":
-            if mode in ["Smoke", "Hold"]:
+        if control["mode"] == Mode.RECIPE:
+            if mode in [Mode.SMOKE, Mode.HOLD]:
                 recipe_trigger_set = False
                 if control["recipe"]["step_data"]["timer"] > 0:
                     for index, item in enumerate(control["notify_data"]):
@@ -413,14 +414,14 @@ class ControlMode:
                     # The seam sets mode="Stop"/updated + writes; status is not part
                     # of the transition, so set it on control first (single OVERWRITE).
                     control["status"] = "active"
-                    request_transition(ctx, control, "Stop", kind="terminal")
+                    request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
                     break
 
             current_output_status = grill_platform.get_output_status()
 
-            if mode == "Manual" or self.settings["safety"]["allow_manual_changes"]:
+            if mode == Mode.MANUAL or self.settings["safety"]["allow_manual_changes"]:
                 if control["manual"]["change"] in ["power", "igniter", "fan", "auger", "pwm"]:
-                    if mode != "Manual":
+                    if mode != Mode.MANUAL:
                         override_time = now + self.settings["safety"]["manual_override_time"]
                     else:
                         override_time = 0
@@ -496,7 +497,7 @@ class ControlMode:
             ptemp = list(sensor_data["primary"].values())[0]  # Primary Temperature or the Pit Temperature
 
             in_data["probe_history"] = sensor_data
-            in_data["primary_setpoint"] = control["primary_setpoint"] if mode == "Hold" else 0
+            in_data["primary_setpoint"] = control["primary_setpoint"] if mode == Mode.HOLD else 0
             in_data["notify_targets"] = ctx.notifications.get_targets(control["notify_data"])
 
             # If Extended Data Mode is Enabled, Populate Extra Data Here
@@ -557,7 +558,7 @@ class ControlMode:
                 status_data["hopper_level"] = pelletdb["current"]["hopper_level"]
                 status_data["units"] = self.settings["globals"]["units"]
                 status_data["mode"] = mode
-                status_data["recipe"] = True if control["mode"] == "Recipe" else False
+                status_data["recipe"] = True if control["mode"] == Mode.RECIPE else False
                 status_data["start_time"] = start_time
                 status_data["start_duration"] = self.state.startup.timer
                 status_data["shutdown_duration"] = self.settings["shutdown"]["shutdown_duration"]
@@ -567,7 +568,7 @@ class ControlMode:
                 status_data["lid_open_endtime"] = 0
                 status_data["p_mode"] = self.state.metrics.get("p_mode", None)
                 status_data["startup_timestamp"] = control["startup_timestamp"]
-                if control["mode"] == "Recipe":
+                if control["mode"] == Mode.RECIPE:
                     status_data["recipe_paused"] = (
                         True
                         if control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]
@@ -604,7 +605,7 @@ class ControlMode:
                 break
 
             # End of Loop Recipe Check
-            if control["mode"] == "Recipe":
+            if control["mode"] == Mode.RECIPE:
                 if control["recipe"]["step_data"]["triggered"] and not control["recipe"]["step_data"]["pause"]:
                     if control["recipe"]["step_data"]["notify"]:
                         ctx.notifications.send("Recipe_Step_Message")

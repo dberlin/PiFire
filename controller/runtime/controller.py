@@ -24,6 +24,7 @@ import os
 
 from common.common import WriteKind
 from common.defaults import default_control
+from common.modes import Mode
 from notify.notifications import check_notify, send_notifications
 from file_mgmt.cookfile import create_cookfile
 from file_mgmt.recipes import convert_recipe_units
@@ -32,7 +33,7 @@ from os.path import exists
 
 from controller.runtime.state import WorkCycleState
 from controller.runtime.system_commands import process_system_commands
-from controller.runtime.transitions import request_transition
+from controller.runtime.transitions import request_transition, TransitionKind
 from controller.runtime.modes.monitor import MonitorMode
 from controller.runtime.modes.manual import ManualMode
 from controller.runtime.modes.shutdown import ShutdownMode
@@ -44,14 +45,14 @@ from controller.runtime.modes.hold import HoldMode
 
 
 _MODE_HANDLERS = {
-    "Monitor": MonitorMode,
-    "Manual": ManualMode,
-    "Shutdown": ShutdownMode,
-    "Prime": PrimeMode,
-    "Startup": StartupMode,
-    "Reignite": ReigniteMode,
-    "Smoke": SmokeMode,
-    "Hold": HoldMode,
+    Mode.MONITOR: MonitorMode,
+    Mode.MANUAL: ManualMode,
+    Mode.SHUTDOWN: ShutdownMode,
+    Mode.PRIME: PrimeMode,
+    Mode.STARTUP: StartupMode,
+    Mode.REIGNITE: ReigniteMode,
+    Mode.SMOKE: SmokeMode,
+    Mode.HOLD: HoldMode,
 }
 
 
@@ -91,7 +92,9 @@ class Controller:
         # The "natural" kind flushes deferred writes, re-reads control, and
         # yields if a higher-priority transition already landed this cycle --
         # behavior-equivalent to the old guarded inline write.
-        return request_transition(self.ctx, self.ctx.store.read_control(), next_mode, kind="natural", setpoint=setpoint)
+        return request_transition(
+            self.ctx, self.ctx.store.read_control(), next_mode, kind=TransitionKind.NATURAL, setpoint=setpoint
+        )
 
     def process_system_commands(self):
         process_system_commands(self.ctx)
@@ -158,19 +161,19 @@ class Controller:
             # 4c. If reignite is required, run a reignite cycle and retry current step
             ctx.store.execute_control_writes()
             control = ctx.store.read_control()
-            if control["mode"] == "Reignite" and control["updated"]:
+            if control["mode"] == Mode.REIGNITE and control["updated"]:
                 control["updated"] = False
-                control["mode"] = "Recipe"
+                control["mode"] = Mode.RECIPE
                 ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                self.work_cycle("Reignite")
+                self.work_cycle(Mode.REIGNITE)
                 control = ctx.store.read_control()
-                if control["updated"] and control["mode"] != "Recipe":
+                if control["updated"] and control["mode"] != Mode.RECIPE:
                     # If another mode was requested (or an error occurred) then exit recipe mode
                     self.eventLogger.info(f"Recipe mode cancelled due to mode change: {control['mode']}")
                     break
                 # 4c-2. Rerun current step
             # 4d. If another mode was requested (or an error occurred) then exit recipe mode
-            elif control["mode"] != "Recipe" and control["updated"]:
+            elif control["mode"] != Mode.RECIPE and control["updated"]:
                 self.eventLogger.info(f"Recipe mode cancelled due to mode change: {control['mode']}")
                 break
             else:
@@ -188,7 +191,7 @@ class Controller:
             # Genuine terminal transition -> route through the seam (mode=Stop,
             # updated, write). The recipe-field cleanup above is carried on the
             # same control dict, so the seam's single OVERWRITE persists it too.
-            request_transition(self.ctx, control, "Stop", kind="terminal")
+            request_transition(self.ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
         else:
             # Cancel/break case: no mode transition here (the requested mode is
             # already in control); just persist the recipe-field cleanup.
@@ -221,7 +224,7 @@ class Controller:
         """ If the user has selected boot-to-monitor mode, then issue the command prior to the main loop """
         if self.settings["globals"]["boot_to_monitor"]:
             control = store.read_control()
-            control["mode"] = "Monitor"
+            control["mode"] = Mode.MONITOR
             control["updated"] = True
             store.write_control(control, WriteKind.OVERWRITE, origin="control")
 
@@ -254,7 +257,7 @@ class Controller:
                 self.eventLogger.info("Switch set to off, going to stop mode.")
                 self.controlLogger.info(f"Switch set to off, going to stop mode.")
                 self.control["updated"] = True  # Change mode
-                self.control["mode"] = "Stop"
+                self.control["mode"] = Mode.STOP
                 store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
 
         self.status = store.read_status()
@@ -340,17 +343,17 @@ class Controller:
                 self.settings = settings = store.read_settings()
                 # Update ADC objects and set profiles
                 self.probe_complex.update_units(settings["globals"]["units"])
-                self.control["mode"] = "Stop"  # Stop any activity
+                self.control["mode"] = Mode.STOP  # Stop any activity
                 self.control["units_change"] = False
                 store.read_history(0, flushhistory=True)  # Clear history data
                 # No need to write control, as it should be written by the 'Stop' mode change
 
             # Check if there was an Error flagged in Monitor Mode - If no, then change status to active
-            if self.control["status"] != "monitor" and self.control["mode"] != "Error":
+            if self.control["status"] != "monitor" and self.control["mode"] != Mode.ERROR:
                 self.control["status"] = "active"  # Set status to active
                 store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
 
-            if self.control["mode"] in ("Stop", "Error"):
+            if self.control["mode"] in (Mode.STOP, Mode.ERROR):
                 grill_platform.auger_off()
                 grill_platform.igniter_off()
                 grill_platform.fan_off()
@@ -359,13 +362,13 @@ class Controller:
                 if len(metrics_list) != 0:
                     store.write_metrics(new_metric=True)
                     metrics = store.read_metrics()
-                    metrics["mode"] = "Stop"
+                    metrics["mode"] = Mode.STOP
                     store.write_metrics(metrics)
-                    if metrics_list[-1]["mode"] != "Prime":
+                    if metrics_list[-1]["mode"] != Mode.PRIME:
                         create_cookfile()
 
                 self.status["p_mode"] = 0
-                self.status["mode"] = "Stop"
+                self.status["mode"] = Mode.STOP
                 self.status["recipe"] = False
                 self.status["recipe_paused"] = False
                 self.status["start_time"] = 0
@@ -374,12 +377,12 @@ class Controller:
                 self.status["startup_timestamp"] = 0
                 store.write_status(self.status)
 
-                if self.control["status"] == "monitor" and self.control["mode"] == "Error":
+                if self.control["status"] == "monitor" and self.control["mode"] == Mode.ERROR:
                     grill_platform.power_on()
                 else:
                     grill_platform.power_off()
 
-                if self.control["mode"] == "Stop":
+                if self.control["mode"] == Mode.STOP:
                     self.eventLogger.info("Stop Mode Started.")
                     store.display_commands().push(("clear", None))
                     self.control["status"] = "inactive"
@@ -387,7 +390,7 @@ class Controller:
                     self.control = store.read_control(flush=True)
                     self.control["updated"] = False
                     self.control["tuning_mode"] = False  # Turn off Tuning Mode on Stop just in case it is on
-                    self.control["next_mode"] = "Stop"
+                    self.control["next_mode"] = Mode.STOP
                     self.control["safety"]["reigniteretries"] = settings["safety"][
                         "reigniteretries"
                     ]  # Reset retry counter to default
@@ -398,11 +401,11 @@ class Controller:
                     self.controlLogger.error("An error has occurred, Stop Mode enabled.")
                     # Reset Control to Defaults but preserve 'Error' mode condition
                     self.control = default_control()
-                    self.control["mode"] = "Error"
+                    self.control["mode"] = Mode.ERROR
                     self.control["status"] = "inactive"
                     self.control["tuning_mode"] = False  # Turn off Tuning Mode on Stop just in case it is on
                     self.control["updated"] = False
-                    self.control["next_mode"] = "Stop"
+                    self.control["next_mode"] = Mode.STOP
                     self.control["safety"]["reigniteretries"] = settings["safety"][
                         "reigniteretries"
                     ]  # Reset retry counter to default
@@ -440,7 +443,7 @@ class Controller:
                 "PiFire is set to OFF. This doesn't prevent startup, but this means the switch won't behave as normal."
             )
         # Call Work Cycle for Startup Mode
-        self.work_cycle("Prime")
+        self.work_cycle(Mode.PRIME)
         # Select Next Mode
         self.settings = settings = store.read_settings()
         self.next_mode(self.control["next_mode"], setpoint=settings["startup"]["start_to_mode"]["primary_setpoint"])
@@ -461,42 +464,42 @@ class Controller:
         # Check if Prime on Startup is selected
         if settings["startup"]["prime_on_startup"] > 0:
             self.control["prime_amount"] = settings["startup"]["prime_on_startup"]
-            self.control["mode"] = "Prime"
+            self.control["mode"] = Mode.PRIME
             store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
             # Call Work Cycle for Prime Mode
-            self.work_cycle("Prime")
+            self.work_cycle(Mode.PRIME)
             self.control = store.read_control()  # Refresh control in case any changes were made during the cycle
-            if self.control["mode"] in ["Prime", "Startup"]:
+            if self.control["mode"] in [Mode.PRIME, Mode.STARTUP]:
                 self.control["updated"] = False
-                self.control["mode"] = "Startup"
+                self.control["mode"] = Mode.STARTUP
         # Check if there was a mode change during Priming
-        if self.control["mode"] == "Startup":
+        if self.control["mode"] == Mode.STARTUP:
             # Setup Next Mode (after startup mode)
             self.control["next_mode"] = settings["startup"]["start_to_mode"]["after_startup_mode"]
             store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
             # Call Work Cycle for Startup Mode
-            self.work_cycle("Startup")
+            self.work_cycle(Mode.STARTUP)
             # Select Next Mode
             self.settings = settings = store.read_settings()
             self.next_mode(self.control["next_mode"], setpoint=settings["startup"]["start_to_mode"]["primary_setpoint"])
 
     def _dispatch_smoke(self):
         # Smoke (smoke cycle)
-        self.work_cycle("Smoke")
+        self.work_cycle(Mode.SMOKE)
         self.next_mode(self.control["next_mode"])
 
     def _dispatch_hold(self):
         # Hold (hold at setpoint)
-        self.work_cycle("Hold")
+        self.work_cycle(Mode.HOLD)
         self.next_mode(self.control["next_mode"])
 
     def _dispatch_shutdown(self):
         # Shutdown (shutdown sequence)
         store = self.ctx.store
         settings = self.settings
-        self.control["next_mode"] = "Stop"
+        self.control["next_mode"] = Mode.STOP
         store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
-        self.work_cycle("Shutdown")
+        self.work_cycle(Mode.SHUTDOWN)
         self.next_mode(self.control["next_mode"])
         if settings["shutdown"]["auto_power_off"]:
             self.eventLogger.info("Shutdown mode ended powering off grill")
@@ -507,11 +510,11 @@ class Controller:
         store = self.ctx.store
         self.control["status"] = "monitor"  # Set status to monitor
         store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
-        self.work_cycle("Monitor")
+        self.work_cycle(Mode.MONITOR)
 
     def _dispatch_manual(self):
         # Manual Mode
-        self.work_cycle("Manual")
+        self.work_cycle(Mode.MANUAL)
 
     def _dispatch_recipe(self):
         # Recipe Mode
@@ -529,17 +532,17 @@ class Controller:
         self.control["next_mode"] = self.control["safety"]["reignitelaststate"]
         setpoint = self.control["primary_setpoint"]
         store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
-        self.work_cycle("Reignite")
+        self.work_cycle(Mode.REIGNITE)
         self.next_mode(self.control["next_mode"], setpoint=setpoint)
 
     _MODE_DISPATCH = {
-        "Prime": _dispatch_prime,
-        "Startup": _dispatch_startup,
-        "Smoke": _dispatch_smoke,
-        "Hold": _dispatch_hold,
-        "Shutdown": _dispatch_shutdown,
-        "Monitor": _dispatch_monitor,
-        "Manual": _dispatch_manual,
-        "Recipe": _dispatch_recipe,
-        "Reignite": _dispatch_reignite,
+        Mode.PRIME: _dispatch_prime,
+        Mode.STARTUP: _dispatch_startup,
+        Mode.SMOKE: _dispatch_smoke,
+        Mode.HOLD: _dispatch_hold,
+        Mode.SHUTDOWN: _dispatch_shutdown,
+        Mode.MONITOR: _dispatch_monitor,
+        Mode.MANUAL: _dispatch_manual,
+        Mode.RECIPE: _dispatch_recipe,
+        Mode.REIGNITE: _dispatch_reignite,
     }

@@ -1,3 +1,4 @@
+from common.modes import Mode
 from controller.runtime.modes.startup import StartupMode
 
 
@@ -11,7 +12,7 @@ class ReigniteMode(StartupMode):
       2. It does not publish cycle_ratio over MQTT the way Startup/Smoke do.
     """
 
-    name = "Reignite"
+    name = Mode.REIGNITE
 
     def _write_startup_timestamp(self):
         pass  # Reignite does not (re)write startup_timestamp

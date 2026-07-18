@@ -1,3 +1,4 @@
+from common.modes import Mode
 from controller.runtime.modes.base import ControlMode
 from controller.runtime.logic.cycle import prime_cycle_times
 
@@ -12,7 +13,7 @@ class PrimeMode(ControlMode):
     `_auger_cycle_tick`. Exits once prime_duration has elapsed since start.
     Teardown is shared with Shutdown/Monitor/Manual: fan+power off."""
 
-    name = "Prime"
+    name = Mode.PRIME
 
     def setup(self):
         import control as _control
@@ -37,7 +38,7 @@ class PrimeMode(ControlMode):
         self.state.cycle.raw_ratio = _ct.cycle_ratio
 
         # Allow for the igniter to be turned on during prime mode - user selected
-        if self.settings["globals"]["prime_ignition"] and control["next_mode"] == "Startup":
+        if self.settings["globals"]["prime_ignition"] and control["next_mode"] == Mode.STARTUP:
             self.grill.igniter_on()
             _control.eventLogger.debug("Igniter ON")
 
