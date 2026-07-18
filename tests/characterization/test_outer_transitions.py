@@ -199,9 +199,10 @@ def test_recipe_cancel_on_mode_change_leaves_requested_mode(monkeypatch):
     assert out["updated"] is True
 
 
-def test_recipe_missing_file_silent_return_leaves_mode(monkeypatch):
-    # Missing recipe file -> recipe_mode returns () with NO mode write (pins the
-    # current stuck-state behavior, gotcha #9).
+def test_recipe_missing_file_transitions_to_stop(monkeypatch):
+    # Missing recipe file -> recipe_mode routes to Stop before returning (bug fix,
+    # gotcha #9). Previously it returned () with no mode write, leaving the
+    # controller stuck idling in Recipe forever.
     c, store = build_controller(monkeypatch, mode="Recipe")
     _install_recipe(monkeypatch, c, store, [_step()], exists=False)
 
@@ -211,7 +212,9 @@ def test_recipe_missing_file_silent_return_leaves_mode(monkeypatch):
 
     assert result == ()
     assert called == []  # never entered the step loop
-    assert store.read_control()["mode"] == "Recipe"  # left unchanged
+    out = store.read_control()
+    assert out["mode"] == "Stop"  # recovers from the stuck Recipe state
+    assert out["updated"] is True  # terminal transition re-arms the outer dispatch
 
 
 # --------------------------------------------------------------------------

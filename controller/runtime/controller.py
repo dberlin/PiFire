@@ -110,20 +110,25 @@ class Controller:
         recipe_file = control["recipe"]["filename"]
 
         if not exists(recipe_file):
-            # File not found, exit
+            # File not found. Recover from the stuck state: the outer tick dispatched
+            # us because mode=="Recipe" with updated already cleared, so a bare return
+            # here would leave the controller idling in Recipe forever. Route to Stop.
             self.eventLogger.warning(f"Recipe file {recipe_file} not found!")
+            request_transition(self.ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
             return ()
 
         # 1. Read metadata from the recipe file
         metadata, status = read_json_file_data(recipe_file, "metadata")
         if status != "OK":
             self.eventLogger.warning(f"Failed to load metadata for {recipe_file}.")
+            request_transition(self.ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
             return ()
 
         # 2. Read recipe steps (& other data) from the recipe file
         recipe, status = read_json_file_data(recipe_file, "recipe")
         if status != "OK":
             self.eventLogger.warning(f"Failed to load recipe data for {recipe_file}.")
+            request_transition(self.ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
             return ()
 
         # 3. Check and convert temperature units, if there is a mismatch
@@ -385,9 +390,12 @@ class Controller:
                 if self.control["mode"] == Mode.STOP:
                     self.eventLogger.info("Stop Mode Started.")
                     store.display_commands().push(("clear", None))
-                    self.control["status"] = "inactive"
-                    # Reset Control to Defaults
+                    # Reset Control to Defaults, then stamp status (mirrors the Error
+                    # branch below). Setting status BEFORE this flush-read was a dead
+                    # assignment -- read_control(flush=True) rebinds control to a fresh
+                    # default_control() (status ""), discarding it, so Stop persisted "".
                     self.control = store.read_control(flush=True)
+                    self.control["status"] = "inactive"
                     self.control["updated"] = False
                     self.control["tuning_mode"] = False  # Turn off Tuning Mode on Stop just in case it is on
                     self.control["next_mode"] = Mode.STOP
