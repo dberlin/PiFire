@@ -265,97 +265,451 @@ def _get_dash_data(settings, pelletdb):
     return dash_data
 
 
+def _get_app_data_settings_data(settings, arg01, arg02):
+    return _response(result="OK", data=settings)
+
+
+def _get_app_data_dash_data(settings, arg01, arg02):
+    pelletdb = read_pellets_store()
+    return _response(result="OK", data=_get_dash_data(settings, pelletdb))
+
+
+def _get_app_data_pellets_data(settings, arg01, arg02):
+    return _response(result="OK", data={"uuid": settings["server_info"]["uuid"], "pellets": read_pellets_store()})
+
+
+def _get_app_data_events_data(settings, arg01, arg02):
+    return _response(result="OK", data={"uuid": settings["server_info"]["uuid"], "events": read_events_records()})
+
+
+def _get_app_data_hopper_level(settings, arg01, arg02):
+    return _response(result="OK", data=read_pellets_store()["current"]["hopper_level"])
+
+
+def _get_app_data_info_data(settings, arg01, arg02):
+    system_info = _get_system_info(read_control())
+    return _response(
+        result="OK",
+        data={
+            "uuid": settings["server_info"]["uuid"],
+            "platformInfo": {
+                "systemModel": system_info["hardware_info"]["cpu_info"]["model"],
+                "cpuModel": system_info["hardware_info"]["cpu_info"]["model_name"],
+                "cpuHardware": system_info["hardware_info"]["cpu_info"]["hardware"],
+                "cpuCores": system_info["hardware_info"]["cpu_info"]["cores"],
+                "cpuFrequency": system_info["hardware_info"]["cpu_info"]["frequency"],
+                "totalRam": system_info["hardware_info"]["total_ram"],
+                "availableRam": system_info["hardware_info"]["available_ram"],
+            },
+            "osInfo": {
+                "prettyName": system_info["os_info"]["PRETTY_NAME"],
+                "version": system_info["os_info"]["VERSION"],
+                "codeName": system_info["os_info"]["VERSION_CODENAME"],
+                "architecture": system_info["os_info"]["ARCHITECTURE"],
+                "bits": system_info["os_info"]["BITS"],
+            },
+            "networkInfo": system_info["network_info"],
+            "cpuThrottled": system_info["cpu_throttled"],
+            "cpuUnderVolt": system_info["cpu_under_voltage"],
+            "wifiQualityValue": system_info["wifi_quality_value"],
+            "wifiQualityMax": system_info["wifi_quality_max"],
+            "wifiQualityPercentage": system_info["wifi_quality_percentage"],
+            "upTime": system_info["uptime"],
+            "cpuTemp": system_info["cpu_temp"],
+            "outPins": settings["platform"]["outputs"],
+            "inPins": settings["platform"]["inputs"],
+            "devPins": settings["platform"]["devices"],
+            "serverVersion": settings["versions"]["server"],
+            "serverBuild": settings["versions"]["build"],
+            "platform": settings["modules"]["grillplat"],
+            "display": settings["modules"]["display"],
+            "distance": settings["modules"]["dist"],
+            "pipList": read_generic_json("pip_list.json"),
+            "dcFan": settings["platform"]["dc_fan"],
+        },
+    )
+
+
+def _get_app_data_manual_data(settings, arg01, arg02):
+    control = read_control()
+    return _response(
+        result="OK",
+        data={
+            "manual": read_status()["outpins"],
+            "active": control["mode"] == "Manual",
+            "dcFan": settings["platform"]["dc_fan"],
+        },
+    )
+
+
+def _get_app_data_recipe_data(settings, arg01, arg02):
+    if arg01 is not None:
+        if arg01 == "details":
+            filelist = get_recipefilelist()
+            recipedetailslist = []
+            for filename in filelist:
+                filepath = f"{recipe_folder}{filename}"
+                recipe_data, status = read_recipefile(filepath)
+                if status == "OK":
+                    recipe_data = _encode_assets(recipe_data)
+                    recipedetailslist.append({"filename": filename, "details": recipe_data})
+            if recipedetailslist:
+                return _response(
+                    result="OK", data={"uuid": settings["server_info"]["uuid"], "recipe_details": recipedetailslist}
+                )
+            else:
+                return _response(result="Error", message="Error: Recipes details not found")
+
+
+_GET_APP_DATA_DISPATCH = {
+    "settings_data": _get_app_data_settings_data,
+    "dash_data": _get_app_data_dash_data,
+    "pellets_data": _get_app_data_pellets_data,
+    "events_data": _get_app_data_events_data,
+    "hopper_level": _get_app_data_hopper_level,
+    "info_data": _get_app_data_info_data,
+    "manual_data": _get_app_data_manual_data,
+    "recipe_data": _get_app_data_recipe_data,
+}
+
+
 def _get_app_data(action=None, arg01=None, arg02=None):
     settings = read_settings_store()
 
-    if action == "settings_data":
-        return _response(result="OK", data=settings)
-
-    elif action == "dash_data":
-        pelletdb = read_pellets_store()
-        return _response(result="OK", data=_get_dash_data(settings, pelletdb))
-
-    elif action == "pellets_data":
-        return _response(result="OK", data={"uuid": settings["server_info"]["uuid"], "pellets": read_pellets_store()})
-
-    elif action == "events_data":
-        return _response(result="OK", data={"uuid": settings["server_info"]["uuid"], "events": read_events_records()})
-
-    elif action == "hopper_level":
-        return _response(result="OK", data=read_pellets_store()["current"]["hopper_level"])
-
-    elif action == "info_data":
-        system_info = _get_system_info(read_control())
-        return _response(
-            result="OK",
-            data={
-                "uuid": settings["server_info"]["uuid"],
-                "platformInfo": {
-                    "systemModel": system_info["hardware_info"]["cpu_info"]["model"],
-                    "cpuModel": system_info["hardware_info"]["cpu_info"]["model_name"],
-                    "cpuHardware": system_info["hardware_info"]["cpu_info"]["hardware"],
-                    "cpuCores": system_info["hardware_info"]["cpu_info"]["cores"],
-                    "cpuFrequency": system_info["hardware_info"]["cpu_info"]["frequency"],
-                    "totalRam": system_info["hardware_info"]["total_ram"],
-                    "availableRam": system_info["hardware_info"]["available_ram"],
-                },
-                "osInfo": {
-                    "prettyName": system_info["os_info"]["PRETTY_NAME"],
-                    "version": system_info["os_info"]["VERSION"],
-                    "codeName": system_info["os_info"]["VERSION_CODENAME"],
-                    "architecture": system_info["os_info"]["ARCHITECTURE"],
-                    "bits": system_info["os_info"]["BITS"],
-                },
-                "networkInfo": system_info["network_info"],
-                "cpuThrottled": system_info["cpu_throttled"],
-                "cpuUnderVolt": system_info["cpu_under_voltage"],
-                "wifiQualityValue": system_info["wifi_quality_value"],
-                "wifiQualityMax": system_info["wifi_quality_max"],
-                "wifiQualityPercentage": system_info["wifi_quality_percentage"],
-                "upTime": system_info["uptime"],
-                "cpuTemp": system_info["cpu_temp"],
-                "outPins": settings["platform"]["outputs"],
-                "inPins": settings["platform"]["inputs"],
-                "devPins": settings["platform"]["devices"],
-                "serverVersion": settings["versions"]["server"],
-                "serverBuild": settings["versions"]["build"],
-                "platform": settings["modules"]["grillplat"],
-                "display": settings["modules"]["display"],
-                "distance": settings["modules"]["dist"],
-                "pipList": read_generic_json("pip_list.json"),
-                "dcFan": settings["platform"]["dc_fan"],
-            },
-        )
-
-    elif action == "manual_data":
-        control = read_control()
-        return _response(
-            result="OK",
-            data={
-                "manual": read_status()["outpins"],
-                "active": control["mode"] == "Manual",
-                "dcFan": settings["platform"]["dc_fan"],
-            },
-        )
-    elif action == "recipe_data":
-        if arg01 is not None:
-            if arg01 == "details":
-                filelist = get_recipefilelist()
-                recipedetailslist = []
-                for filename in filelist:
-                    filepath = f"{recipe_folder}{filename}"
-                    recipe_data, status = read_recipefile(filepath)
-                    if status == "OK":
-                        recipe_data = _encode_assets(recipe_data)
-                        recipedetailslist.append({"filename": filename, "details": recipe_data})
-                if recipedetailslist:
-                    return _response(
-                        result="OK", data={"uuid": settings["server_info"]["uuid"], "recipe_details": recipedetailslist}
-                    )
-                else:
-                    return _response(result="Error", message="Error: Recipes details not found")
-    else:
+    handler = _GET_APP_DATA_DISPATCH.get(action)
+    if handler is None:
         return _response(result="Error", message="Error: Received request without valid action")
+    return handler(settings, arg01, arg02)
+
+
+def _post_app_data_update(settings, type, request):
+    if type == "settings":
+        control = read_control()
+        for key in request.keys():
+            if key in settings.keys():
+                settings = deep_update(settings, request)
+                _write_settings(settings, control)
+                control["settings_update"] = True
+                write_control(control, WriteKind.MERGE, origin="app-socketio")
+                return _response(result="OK", data=settings)
+            else:
+                return _response(result="Error", message="Error: Key not found in settings")
+    elif type == "control":
+        control = read_control()
+        for key in request.keys():
+            if key in control.keys():
+                """
+                    Updating of control input data is now done in common.py > execute_commands() 
+                """
+                write_control(request, WriteKind.MERGE, origin="app-socketio")
+                return _response(result="OK", data=control)
+            else:
+                return _response(result="Error", message="Error: Key not found in control")
+    else:
+        return _response(result="Error", message="Error: Received request without valid type")
+
+
+def _post_app_data_admin(settings, type, request):
+    if type == "clear_history":
+        write_log("Clearing History Log.")
+        read_history(0, flushhistory=True)
+        return _response(result="OK")
+    elif type == "clear_events":
+        write_log("Clearing Events Log.")
+        os.system("rm ./logs/events.log")
+        return _response(result="OK")
+    elif type == "clear_pelletdb":
+        write_log("Clearing Pellet Database.")
+        os.system("rm pelletdb.json")
+        return _response(result="OK")
+    elif type == "clear_pelletdb_log":
+        pelletdb = read_pellets_store()
+        pelletdb["log"].clear()
+        write_pellet_db(pelletdb)
+        write_log("Clearing Pellet Database Log.")
+        return _response(result="OK")
+    elif type == "factory_defaults":
+        read_history(0, flushhistory=True)
+        read_control(flush=True)
+        os.system("rm settings.json")
+        settings = default_settings()
+        control = default_control()
+        _write_settings(settings, control)
+        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        write_log("Resetting Settings, Control, History to factory defaults.")
+        return _response(result="OK")
+    elif type == "reboot":
+        write_log("Admin: Reboot")
+        try:
+            reboot_system()  # Use the improved function from common
+        except Exception as e:
+            write_log(f"Admin: Reboot failed: {e}")
+            # Fallback to original method
+            os.system("sleep 3 && sudo reboot &")
+        return _response(result="OK")
+    elif type == "shutdown":
+        write_log("Admin: Shutdown")
+        try:
+            shutdown_system()  # Use the improved function from common
+        except Exception as e:
+            write_log(f"Admin: Shutdown failed: {e}")
+            # Fallback to original method
+            os.system("sleep 3 && sudo shutdown -h now &")
+        return _response(result="OK")
+    elif type == "restart_control":
+        write_log("Admin: Restart Control")
+        restart_control()
+        return _response(result="OK")
+    elif type == "restart_webapp":
+        write_log("Admin: Restart WebApp")
+        restart_webapp()
+        return _response(result="OK")
+    elif type == "restart_supervisor":
+        write_log("Admin: Restart Supervisor")
+        restart_scripts()
+        return _response(result="OK")
+    else:
+        return _response(result="Error", message="Error: Received request without valid type")
+
+
+def _post_app_data_units(settings, type, request):
+    if type == "f_units" and settings["globals"]["units"] == "C":
+        settings = convert_settings_units("F", settings)
+        control = read_control()
+        _write_settings(settings, control)
+        control["updated"] = True
+        control["units_change"] = True
+        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        write_log("Changed units to Fahrenheit")
+        return _response(result="OK", data=settings)
+    elif type == "c_units" and settings["globals"]["units"] == "F":
+        settings = convert_settings_units("C", settings)
+        control = read_control()
+        _write_settings(settings, control)
+        control["updated"] = True
+        control["units_change"] = True
+        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        write_log("Changed units to Celsius")
+        return _response(result="OK", data=settings)
+    else:
+        return _response(result="Error", message="Error: Units could not be changed")
+
+
+def _post_app_data_pellets(settings, type, request):
+    pelletdb = read_pellets_store()
+    if type == "load_profile":
+        if "profile" in request["pellets_action"]:
+            pelletdb["current"]["pelletid"] = request["pellets_action"]["profile"]
+            now = str(datetime.now())
+            now = now[0:19]
+            pelletdb["current"]["date_loaded"] = now
+            pelletdb["current"]["est_usage"] = 0
+            pelletdb["log"][now] = request["pellets_action"]["profile"]
+            control = read_control()
+            control["hopper_check"] = True
+            write_control(control, WriteKind.MERGE, origin="app-socketio")
+            write_pellet_db(pelletdb)
+            return _response(result="OK")
+        else:
+            return _response(result="Error", message="Error: Profile not included in request")
+    elif type == "hopper_check":
+        control = read_control()
+        control["hopper_check"] = True
+        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        return _response(result="OK")
+    elif type == "edit_brands":
+        if "delete_brand" in request["pellets_action"]:
+            delBrand = request["pellets_action"]["delete_brand"]
+            if delBrand in pelletdb["brands"]:
+                pelletdb["brands"].remove(delBrand)
+            write_pellet_db(pelletdb)
+            return _response(result="OK")
+        elif "new_brand" in request["pellets_action"]:
+            newBrand = request["pellets_action"]["new_brand"]
+            if newBrand not in pelletdb["brands"]:
+                pelletdb["brands"].append(newBrand)
+            write_pellet_db(pelletdb)
+            return _response(result="OK")
+        else:
+            return _response(result="Error", message="Error: Function not specified")
+    elif type == "edit_woods":
+        if "delete_wood" in request["pellets_action"]:
+            delWood = request["pellets_action"]["delete_wood"]
+            if delWood in pelletdb["woods"]:
+                pelletdb["woods"].remove(delWood)
+            write_pellet_db(pelletdb)
+            return _response(result="OK")
+        elif "new_wood" in request["pellets_action"]:
+            newWood = request["pellets_action"]["new_wood"]
+            if newWood not in pelletdb["woods"]:
+                pelletdb["woods"].append(newWood)
+            write_pellet_db(pelletdb)
+            return _response(result="OK")
+        else:
+            return _response(result="Error", message="Error: Function not specified")
+    elif type == "add_profile":
+        profile_id = "".join(filter(str.isalnum, str(datetime.now())))
+        pelletdb["archive"][profile_id] = {
+            "id": profile_id,
+            "brand": request["pellets_action"]["brand_name"],
+            "wood": request["pellets_action"]["wood_type"],
+            "rating": request["pellets_action"]["rating"],
+            "comments": request["pellets_action"]["comments"],
+        }
+        if request["pellets_action"]["add_and_load"]:
+            pelletdb["current"]["pelletid"] = profile_id
+            control = read_control()
+            control["hopper_check"] = True
+            write_control(control, WriteKind.MERGE, origin="app-socketio")
+            now = str(datetime.now())
+            now = now[0:19]
+            pelletdb["current"]["date_loaded"] = now
+            pelletdb["current"]["est_usage"] = 0
+            pelletdb["log"][now] = profile_id
+            write_pellet_db(pelletdb)
+            return _response(result="OK")
+        else:
+            write_pellet_db(pelletdb)
+            return _response(result="OK")
+    if type == "edit_profile":
+        if "profile" in request["pellets_action"]:
+            profile_id = request["pellets_action"]["profile"]
+            pelletdb["archive"][profile_id]["brand"] = request["pellets_action"]["brand_name"]
+            pelletdb["archive"][profile_id]["wood"] = request["pellets_action"]["wood_type"]
+            pelletdb["archive"][profile_id]["rating"] = request["pellets_action"]["rating"]
+            pelletdb["archive"][profile_id]["comments"] = request["pellets_action"]["comments"]
+            write_pellet_db(pelletdb)
+            return _response(result="OK")
+        else:
+            return _response(result="Error", message="Error: Profile not included in request")
+    if type == "delete_profile":
+        if "profile" in request["pellets_action"]:
+            profile_id = request["pellets_action"]["profile"]
+            if pelletdb["current"]["pelletid"] == profile_id:
+                return _response(result="Error", message="Error: Cannot delete current profile")
+            else:
+                pelletdb["archive"].pop(profile_id)
+                for index in pelletdb["log"]:
+                    if pelletdb["log"][index] == profile_id:
+                        pelletdb["log"][index] = "deleted"
+            write_pellet_db(pelletdb)
+            return _response(result="OK")
+        else:
+            return _response(result="Error", message="Error: Profile not included in request")
+    elif type == "delete_log":
+        if "log_item" in request["pellets_action"]:
+            delLog = request["pellets_action"]["log_item"]
+            if delLog in pelletdb["log"]:
+                pelletdb["log"].pop(delLog)
+            write_pellet_db(pelletdb)
+            return _response(result="OK")
+        else:
+            return _response(result="Error", message="Error: Function not specified")
+    else:
+        return _response(result="Error", message="Error: Received request without valid type")
+
+
+def _post_app_data_timer(settings, type, request):
+    control = read_control()
+    for index, notify_obj in enumerate(control["notify_data"]):
+        if notify_obj["type"] == "timer":
+            break
+    if type == "start_timer":
+        control["notify_data"][index]["req"] = True
+        if control["timer"]["paused"] == 0:
+            now = time.time()
+            control["timer"]["start"] = now
+            if "hours_range" in request["timer_action"] and "minutes_range" in request["timer_action"]:
+                seconds = request["timer_action"]["hours_range"] * 60 * 60
+                seconds = seconds + request["timer_action"]["minutes_range"] * 60
+                control["timer"]["end"] = now + seconds
+                control["notify_data"][index]["shutdown"] = request["timer_action"]["timer_shutdown"]
+                control["notify_data"][index]["keep_warm"] = request["timer_action"]["timer_keep_warm"]
+                write_log("Timer started.  Ends at: " + epoch_to_time(control["timer"]["end"]))
+                write_control(control, WriteKind.MERGE, origin="app-socketio")
+                return _response(result="OK")
+            else:
+                return _response(result="Error", message="Error: Start time not specified")
+        else:
+            now = time.time()
+            control["timer"]["end"] = (control["timer"]["end"] - control["timer"]["paused"]) + now
+            control["timer"]["paused"] = 0
+            write_log("Timer unpaused.  Ends at: " + epoch_to_time(control["timer"]["end"]))
+            write_control(control, WriteKind.MERGE, origin="app-socketio")
+            return _response(result="OK")
+    elif type == "pause_timer":
+        control["notify_data"][index]["req"] = False
+        now = time.time()
+        control["timer"]["paused"] = now
+        write_log("Timer paused.")
+        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        return _response(result="OK")
+    elif type == "stop_timer":
+        control["notify_data"][index]["req"] = False
+        control["timer"]["start"] = 0
+        control["timer"]["end"] = 0
+        control["timer"]["paused"] = 0
+        control["notify_data"][index]["shutdown"] = False
+        control["notify_data"][index]["keep_warm"] = False
+        write_log("Timer stopped.")
+        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        return _response(result="OK")
+    else:
+        return _response(result="Error", message="Error: Received request without valid type")
+
+
+def _post_app_data_recipes(settings, type, request):
+    if type == "recipe_delete":
+        if request["recipes_action"]["filename"]:
+            filename = request["recipes_action"]["filename"]
+            filepath = f"{recipe_folder}{filename}"
+            os.system(f"rm {filepath}")
+            return _response(result="OK")
+    elif type == "recipe_start":
+        if request["recipes_action"]["filename"]:
+            control = read_control()
+            filename = request["recipes_action"]["filename"]
+            control["updated"] = True
+            control["mode"] = "Recipe"
+            control["recipe"]["filename"] = recipe_folder + filename
+            write_control(control, WriteKind.MERGE, origin="app-socketio")
+            return _response(result="OK")
+    else:
+        return _response(result="Error", message="Error: Received request without valid type")
+
+
+def _post_app_data_probes(settings, type, request):
+    if type == "probe_update":
+        if all(v in ("name", "label", "profile_id", "enabled") for v in request["probes_action"].keys()):
+            control = read_control()
+            return _update_probe_config(settings, control, request)
+        else:
+            return _response(result="Error", message="Error: Missing required argument, probe cannot be updated")
+    else:
+        return _response(result="Error", message="Error: Received request without valid type")
+
+
+def _post_app_data_notify(settings, type, request):
+    if type == "notify_update":
+        if "label" in request["notify_action"].keys():
+            control = read_control()
+            return _update_notify_data(control, request)
+        else:
+            return _response(result="Error", message="Error: Request missing probe label")
+    else:
+        return _response(result="Error", message="Error: Received request without valid type")
+
+
+_POST_APP_DATA_DISPATCH = {
+    "update_action": _post_app_data_update,
+    "admin_action": _post_app_data_admin,
+    "units_action": _post_app_data_units,
+    "pellets_action": _post_app_data_pellets,
+    "timer_action": _post_app_data_timer,
+    "recipes_action": _post_app_data_recipes,
+    "probes_action": _post_app_data_probes,
+    "notify_action": _post_app_data_notify,
+}
 
 
 def _post_app_data(action=None, type=None, json_data=None):
@@ -366,314 +720,10 @@ def _post_app_data(action=None, type=None, json_data=None):
     else:
         request = {""}
 
-    if action == "update_action":
-        if type == "settings":
-            control = read_control()
-            for key in request.keys():
-                if key in settings.keys():
-                    settings = deep_update(settings, request)
-                    _write_settings(settings, control)
-                    control["settings_update"] = True
-                    write_control(control, WriteKind.MERGE, origin="app-socketio")
-                    return _response(result="OK", data=settings)
-                else:
-                    return _response(result="Error", message="Error: Key not found in settings")
-        elif type == "control":
-            control = read_control()
-            for key in request.keys():
-                if key in control.keys():
-                    """
-                        Updating of control input data is now done in common.py > execute_commands() 
-                    """
-                    write_control(request, WriteKind.MERGE, origin="app-socketio")
-                    return _response(result="OK", data=control)
-                else:
-                    return _response(result="Error", message="Error: Key not found in control")
-        else:
-            return _response(result="Error", message="Error: Received request without valid type")
-
-    elif action == "admin_action":
-        if type == "clear_history":
-            write_log("Clearing History Log.")
-            read_history(0, flushhistory=True)
-            return _response(result="OK")
-        elif type == "clear_events":
-            write_log("Clearing Events Log.")
-            os.system("rm ./logs/events.log")
-            return _response(result="OK")
-        elif type == "clear_pelletdb":
-            write_log("Clearing Pellet Database.")
-            os.system("rm pelletdb.json")
-            return _response(result="OK")
-        elif type == "clear_pelletdb_log":
-            pelletdb = read_pellets_store()
-            pelletdb["log"].clear()
-            write_pellet_db(pelletdb)
-            write_log("Clearing Pellet Database Log.")
-            return _response(result="OK")
-        elif type == "factory_defaults":
-            read_history(0, flushhistory=True)
-            read_control(flush=True)
-            os.system("rm settings.json")
-            settings = default_settings()
-            control = default_control()
-            _write_settings(settings, control)
-            write_control(control, WriteKind.MERGE, origin="app-socketio")
-            write_log("Resetting Settings, Control, History to factory defaults.")
-            return _response(result="OK")
-        elif type == "reboot":
-            write_log("Admin: Reboot")
-            try:
-                reboot_system()  # Use the improved function from common
-            except Exception as e:
-                write_log(f"Admin: Reboot failed: {e}")
-                # Fallback to original method
-                os.system("sleep 3 && sudo reboot &")
-            return _response(result="OK")
-        elif type == "shutdown":
-            write_log("Admin: Shutdown")
-            try:
-                shutdown_system()  # Use the improved function from common
-            except Exception as e:
-                write_log(f"Admin: Shutdown failed: {e}")
-                # Fallback to original method
-                os.system("sleep 3 && sudo shutdown -h now &")
-            return _response(result="OK")
-        elif type == "restart_control":
-            write_log("Admin: Restart Control")
-            restart_control()
-            return _response(result="OK")
-        elif type == "restart_webapp":
-            write_log("Admin: Restart WebApp")
-            restart_webapp()
-            return _response(result="OK")
-        elif type == "restart_supervisor":
-            write_log("Admin: Restart Supervisor")
-            restart_scripts()
-            return _response(result="OK")
-        else:
-            return _response(result="Error", message="Error: Received request without valid type")
-
-    elif action == "units_action":
-        if type == "f_units" and settings["globals"]["units"] == "C":
-            settings = convert_settings_units("F", settings)
-            control = read_control()
-            _write_settings(settings, control)
-            control["updated"] = True
-            control["units_change"] = True
-            write_control(control, WriteKind.MERGE, origin="app-socketio")
-            write_log("Changed units to Fahrenheit")
-            return _response(result="OK", data=settings)
-        elif type == "c_units" and settings["globals"]["units"] == "F":
-            settings = convert_settings_units("C", settings)
-            control = read_control()
-            _write_settings(settings, control)
-            control["updated"] = True
-            control["units_change"] = True
-            write_control(control, WriteKind.MERGE, origin="app-socketio")
-            write_log("Changed units to Celsius")
-            return _response(result="OK", data=settings)
-        else:
-            return _response(result="Error", message="Error: Units could not be changed")
-
-    elif action == "pellets_action":
-        pelletdb = read_pellets_store()
-        if type == "load_profile":
-            if "profile" in request["pellets_action"]:
-                pelletdb["current"]["pelletid"] = request["pellets_action"]["profile"]
-                now = str(datetime.now())
-                now = now[0:19]
-                pelletdb["current"]["date_loaded"] = now
-                pelletdb["current"]["est_usage"] = 0
-                pelletdb["log"][now] = request["pellets_action"]["profile"]
-                control = read_control()
-                control["hopper_check"] = True
-                write_control(control, WriteKind.MERGE, origin="app-socketio")
-                write_pellet_db(pelletdb)
-                return _response(result="OK")
-            else:
-                return _response(result="Error", message="Error: Profile not included in request")
-        elif type == "hopper_check":
-            control = read_control()
-            control["hopper_check"] = True
-            write_control(control, WriteKind.MERGE, origin="app-socketio")
-            return _response(result="OK")
-        elif type == "edit_brands":
-            if "delete_brand" in request["pellets_action"]:
-                delBrand = request["pellets_action"]["delete_brand"]
-                if delBrand in pelletdb["brands"]:
-                    pelletdb["brands"].remove(delBrand)
-                write_pellet_db(pelletdb)
-                return _response(result="OK")
-            elif "new_brand" in request["pellets_action"]:
-                newBrand = request["pellets_action"]["new_brand"]
-                if newBrand not in pelletdb["brands"]:
-                    pelletdb["brands"].append(newBrand)
-                write_pellet_db(pelletdb)
-                return _response(result="OK")
-            else:
-                return _response(result="Error", message="Error: Function not specified")
-        elif type == "edit_woods":
-            if "delete_wood" in request["pellets_action"]:
-                delWood = request["pellets_action"]["delete_wood"]
-                if delWood in pelletdb["woods"]:
-                    pelletdb["woods"].remove(delWood)
-                write_pellet_db(pelletdb)
-                return _response(result="OK")
-            elif "new_wood" in request["pellets_action"]:
-                newWood = request["pellets_action"]["new_wood"]
-                if newWood not in pelletdb["woods"]:
-                    pelletdb["woods"].append(newWood)
-                write_pellet_db(pelletdb)
-                return _response(result="OK")
-            else:
-                return _response(result="Error", message="Error: Function not specified")
-        elif type == "add_profile":
-            profile_id = "".join(filter(str.isalnum, str(datetime.now())))
-            pelletdb["archive"][profile_id] = {
-                "id": profile_id,
-                "brand": request["pellets_action"]["brand_name"],
-                "wood": request["pellets_action"]["wood_type"],
-                "rating": request["pellets_action"]["rating"],
-                "comments": request["pellets_action"]["comments"],
-            }
-            if request["pellets_action"]["add_and_load"]:
-                pelletdb["current"]["pelletid"] = profile_id
-                control = read_control()
-                control["hopper_check"] = True
-                write_control(control, WriteKind.MERGE, origin="app-socketio")
-                now = str(datetime.now())
-                now = now[0:19]
-                pelletdb["current"]["date_loaded"] = now
-                pelletdb["current"]["est_usage"] = 0
-                pelletdb["log"][now] = profile_id
-                write_pellet_db(pelletdb)
-                return _response(result="OK")
-            else:
-                write_pellet_db(pelletdb)
-                return _response(result="OK")
-        if type == "edit_profile":
-            if "profile" in request["pellets_action"]:
-                profile_id = request["pellets_action"]["profile"]
-                pelletdb["archive"][profile_id]["brand"] = request["pellets_action"]["brand_name"]
-                pelletdb["archive"][profile_id]["wood"] = request["pellets_action"]["wood_type"]
-                pelletdb["archive"][profile_id]["rating"] = request["pellets_action"]["rating"]
-                pelletdb["archive"][profile_id]["comments"] = request["pellets_action"]["comments"]
-                write_pellet_db(pelletdb)
-                return _response(result="OK")
-            else:
-                return _response(result="Error", message="Error: Profile not included in request")
-        if type == "delete_profile":
-            if "profile" in request["pellets_action"]:
-                profile_id = request["pellets_action"]["profile"]
-                if pelletdb["current"]["pelletid"] == profile_id:
-                    return _response(result="Error", message="Error: Cannot delete current profile")
-                else:
-                    pelletdb["archive"].pop(profile_id)
-                    for index in pelletdb["log"]:
-                        if pelletdb["log"][index] == profile_id:
-                            pelletdb["log"][index] = "deleted"
-                write_pellet_db(pelletdb)
-                return _response(result="OK")
-            else:
-                return _response(result="Error", message="Error: Profile not included in request")
-        elif type == "delete_log":
-            if "log_item" in request["pellets_action"]:
-                delLog = request["pellets_action"]["log_item"]
-                if delLog in pelletdb["log"]:
-                    pelletdb["log"].pop(delLog)
-                write_pellet_db(pelletdb)
-                return _response(result="OK")
-            else:
-                return _response(result="Error", message="Error: Function not specified")
-        else:
-            return _response(result="Error", message="Error: Received request without valid type")
-
-    elif action == "timer_action":
-        control = read_control()
-        for index, notify_obj in enumerate(control["notify_data"]):
-            if notify_obj["type"] == "timer":
-                break
-        if type == "start_timer":
-            control["notify_data"][index]["req"] = True
-            if control["timer"]["paused"] == 0:
-                now = time.time()
-                control["timer"]["start"] = now
-                if "hours_range" in request["timer_action"] and "minutes_range" in request["timer_action"]:
-                    seconds = request["timer_action"]["hours_range"] * 60 * 60
-                    seconds = seconds + request["timer_action"]["minutes_range"] * 60
-                    control["timer"]["end"] = now + seconds
-                    control["notify_data"][index]["shutdown"] = request["timer_action"]["timer_shutdown"]
-                    control["notify_data"][index]["keep_warm"] = request["timer_action"]["timer_keep_warm"]
-                    write_log("Timer started.  Ends at: " + epoch_to_time(control["timer"]["end"]))
-                    write_control(control, WriteKind.MERGE, origin="app-socketio")
-                    return _response(result="OK")
-                else:
-                    return _response(result="Error", message="Error: Start time not specified")
-            else:
-                now = time.time()
-                control["timer"]["end"] = (control["timer"]["end"] - control["timer"]["paused"]) + now
-                control["timer"]["paused"] = 0
-                write_log("Timer unpaused.  Ends at: " + epoch_to_time(control["timer"]["end"]))
-                write_control(control, WriteKind.MERGE, origin="app-socketio")
-                return _response(result="OK")
-        elif type == "pause_timer":
-            control["notify_data"][index]["req"] = False
-            now = time.time()
-            control["timer"]["paused"] = now
-            write_log("Timer paused.")
-            write_control(control, WriteKind.MERGE, origin="app-socketio")
-            return _response(result="OK")
-        elif type == "stop_timer":
-            control["notify_data"][index]["req"] = False
-            control["timer"]["start"] = 0
-            control["timer"]["end"] = 0
-            control["timer"]["paused"] = 0
-            control["notify_data"][index]["shutdown"] = False
-            control["notify_data"][index]["keep_warm"] = False
-            write_log("Timer stopped.")
-            write_control(control, WriteKind.MERGE, origin="app-socketio")
-            return _response(result="OK")
-        else:
-            return _response(result="Error", message="Error: Received request without valid type")
-    elif action == "recipes_action":
-        if type == "recipe_delete":
-            if request["recipes_action"]["filename"]:
-                filename = request["recipes_action"]["filename"]
-                filepath = f"{recipe_folder}{filename}"
-                os.system(f"rm {filepath}")
-                return _response(result="OK")
-        elif type == "recipe_start":
-            if request["recipes_action"]["filename"]:
-                control = read_control()
-                filename = request["recipes_action"]["filename"]
-                control["updated"] = True
-                control["mode"] = "Recipe"
-                control["recipe"]["filename"] = recipe_folder + filename
-                write_control(control, WriteKind.MERGE, origin="app-socketio")
-                return _response(result="OK")
-        else:
-            return _response(result="Error", message="Error: Received request without valid type")
-    elif action == "probes_action":
-        if type == "probe_update":
-            if all(v in ("name", "label", "profile_id", "enabled") for v in request["probes_action"].keys()):
-                control = read_control()
-                return _update_probe_config(settings, control, request)
-            else:
-                return _response(result="Error", message="Error: Missing required argument, probe cannot be updated")
-        else:
-            return _response(result="Error", message="Error: Received request without valid type")
-    elif action == "notify_action":
-        if type == "notify_update":
-            if "label" in request["notify_action"].keys():
-                control = read_control()
-                return _update_notify_data(control, request)
-            else:
-                return _response(result="Error", message="Error: Request missing probe label")
-        else:
-            return _response(result="Error", message="Error: Received request without valid type")
-    else:
+    handler = _POST_APP_DATA_DISPATCH.get(action)
+    if handler is None:
         return _response(result="Error", message="Error: Received request without valid action")
+    return handler(settings, type, request)
 
 
 def _get_probe_data(probe_type, settings, current, probe_device_info, notify_data):
