@@ -389,8 +389,6 @@ def _post_app_data_update(settings, type, request):
             if key in settings.keys():
                 settings = deep_update(settings, request)
                 _write_settings(settings, control)
-                control["settings_update"] = True
-                write_control(control, WriteKind.MERGE, origin="app-socketio")
                 return _response(result="OK", data=settings)
             else:
                 return _response(result="Error", message="Error: Key not found in settings")
@@ -435,7 +433,6 @@ def _post_app_data_admin(settings, type, request):
         settings = default_settings()
         control = default_control()
         _write_settings(settings, control)
-        write_control(control, WriteKind.MERGE, origin="app-socketio")
         write_log("Resetting Settings, Control, History to factory defaults.")
         return _response(result="OK")
     elif type == "reboot":
