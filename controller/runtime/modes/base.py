@@ -227,34 +227,13 @@ class ControlMode:
             grill_platform.set_duty_cycle(control["duty_cycle"])
             _control.eventLogger.debug("Temp Fan Control: Set to OFF, Fan Returned to Max Duty Cycle")
 
-    # ---- shared skeleton ----
-    def run(self):
+    def _setup_recipe_triggers(self, control):
+        """Pre-loop recipe trigger setup (extracted from run()). Mutates control
+        in place and writes it when any trigger was set."""
         import control as _control  # module global: eventLogger
 
         ctx = self.ctx
         mode = self.name
-        grill_platform = self.grill
-        probe_complex = self.probe_complex
-        dist_device = self.dist_device
-
-        # Setup Process Monitor and Start
-        monitor = Process_Monitor("control", ["supervisorctl", "restart", "control"], timeout=30)
-        monitor.start_monitor()
-
-        # Precondition for entering into main control loop
-        status = "Active"
-
-        # Setup Cycle Parameters
-        self.settings = ctx.store.read_settings()
-        control = ctx.store.read_control()
-        self.control = control
-        pelletdb = ctx.store.read_pellet_db()
-        control["hopper_check"] = True
-        ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-
-        _control.eventLogger.info(f"{mode} Mode started.")
-
-        # Pre-Loop Setup Recipe Triggers
         if control["mode"] == Mode.RECIPE:
             if mode in [Mode.SMOKE, Mode.HOLD]:
                 recipe_trigger_set = False
@@ -284,6 +263,226 @@ class ControlMode:
                     ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
                 else:
                     _control.eventLogger.warning("No trigger set for Hold/Smoke mode in recipe.")
+
+    def _process_control_flags(self, control, now, last, pelletdb):
+        """Per-tick settings/distance/hopper/switch flag handling (extracted from
+        run()). Mutates control in place; returns (last, pelletdb, should_break)."""
+        import control as _control  # module global: eventLogger
+
+        ctx = self.ctx
+        grill_platform = self.grill
+        dist_device = self.dist_device
+
+        # Check if user changed settings and reload
+        if control["settings_update"]:
+            control["settings_update"] = False
+            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            self.settings = ctx.store.read_settings()
+            if self.settings["globals"]["debug_mode"]:
+                _control.eventLogger.setLevel(logging.DEBUG)
+            else:
+                _control.eventLogger.setLevel(logging.INFO)
+            self.on_settings_reload()
+
+        # Check if user changed hopper levels and update if required
+        if control["distance_update"]:
+            empty = self.settings["pelletlevel"]["empty"]
+            full = self.settings["pelletlevel"]["full"]
+            dist_device.update_distances(empty, full)
+            control["distance_update"] = False
+            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+
+        # Check hopper level when requested or every 300 seconds
+        if control["hopper_check"] or (now - self.state.timers.hopper_toggle) > 60:
+            pelletdb = ctx.store.read_pellet_db()
+            override = False
+            if control["hopper_check"]:
+                control["hopper_check"] = False
+                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                override = True
+            pelletdb["current"]["hopper_level"] = dist_device.get_level(override=override)
+            ctx.store.write_pellet_db(pelletdb)
+            self.state.timers.hopper_toggle = now
+            _control.eventLogger.info("Hopper Level Checked @ " + str(pelletdb["current"]["hopper_level"]) + "%")
+
+        # Check for update in ON/OFF Switch
+        if not self.settings["platform"]["standalone"] and last != grill_platform.get_input_status():
+            last = grill_platform.get_input_status()
+            if not last:
+                _control.eventLogger.info("Switch set to off, going to monitor mode.")
+                # The seam sets mode="Stop"/updated + writes; status is not part
+                # of the transition, so set it on control first (single OVERWRITE).
+                control["status"] = "active"
+                request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
+                return (last, pelletdb, True)
+
+        return (last, pelletdb, False)
+
+    def _apply_manual_overrides(self, control, now, current_output_status):
+        """Per-tick manual output overrides (extracted from run()). Mutates control
+        and self.state.manual_override in place."""
+        import control as _control  # module global: eventLogger
+
+        ctx = self.ctx
+        mode = self.name
+        grill_platform = self.grill
+        manual_override = self.state.manual_override
+
+        if mode == Mode.MANUAL or self.settings["safety"]["allow_manual_changes"]:
+            if control["manual"]["change"] in ["power", "igniter", "fan", "auger", "pwm"]:
+                if mode != Mode.MANUAL:
+                    override_time = now + self.settings["safety"]["manual_override_time"]
+                else:
+                    override_time = 0
+
+                if control["manual"]["change"] == "fan":
+                    if control["manual"]["output"] and not current_output_status["fan"]:
+                        grill_platform.fan_on()
+                        _control.eventLogger.debug("Fan ON")
+                    elif not control["manual"]["output"] and current_output_status["fan"]:
+                        grill_platform.fan_off()
+                        _control.eventLogger.debug("Fan OFF")
+                    manual_override["fan"] = override_time
+
+                if control["manual"]["change"] == "auger":
+                    if control["manual"]["output"] and not current_output_status["auger"]:
+                        grill_platform.auger_on()
+                        _control.eventLogger.debug("Auger ON")
+                    elif not control["manual"]["output"] and current_output_status["auger"]:
+                        grill_platform.auger_off()
+                        _control.eventLogger.debug("Auger OFF")
+                    manual_override["auger"] = override_time
+
+                if control["manual"]["change"] == "igniter":
+                    if control["manual"]["output"] and not current_output_status["igniter"]:
+                        grill_platform.igniter_on()
+                        _control.eventLogger.debug("Igniter ON")
+                    elif not control["manual"]["output"] and current_output_status["igniter"]:
+                        grill_platform.igniter_off()
+                        _control.eventLogger.debug("Igniter OFF")
+                    manual_override["igniter"] = override_time
+
+                if control["manual"]["change"] == "power":
+                    if control["manual"]["output"] and not current_output_status["power"]:
+                        grill_platform.power_on()
+                        _control.eventLogger.debug("Power ON")
+                    elif not control["manual"]["output"] and current_output_status["power"]:
+                        grill_platform.power_off()
+                        _control.eventLogger.debug("Power OFF")
+                    manual_override["power"] = override_time
+
+                if (
+                    self.settings["platform"]["dc_fan"]
+                    and control["manual"]["change"] == "pwm"
+                    and current_output_status["fan"]
+                    and not control["manual"]["pwm"] == current_output_status["pwm"]
+                ):
+                    speed = control["manual"]["pwm"]
+                    _control.eventLogger.debug("PWM Speed: " + str(speed) + "%")
+                    grill_platform.set_duty_cycle(speed)
+                    manual_override["pwm"] = override_time
+                    control["manual"]["pwm"] = 100  # Reset PWM
+
+                # Reset to False (not None) to match default_control()'s seed and
+                # keep control free of dict-nested nulls: every consumer treats
+                # these as falsy (== 'pwm', `in [...]`, truthiness), so behavior is
+                # identical, and a null here would be a delete under json_patch merge.
+                control["manual"]["change"] = False
+                control["manual"]["output"] = False
+                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+
+    def _build_status_data(self, control, pelletdb, start_time):
+        """Build the per-0.5s display status dict (extracted from run()). Returns a
+        fresh, fully-populated dict; the caller writes it to the store."""
+        mode = self.name
+        grill_platform = self.grill
+        status_data = {}
+        status_data["notify_data"] = control["notify_data"]
+        status_data["timer"] = control["timer"]
+        status_data["s_plus"] = control["s_plus"]
+        status_data["hopper_level_enabled"] = False if self.settings["modules"]["dist"] == "none" else True
+        status_data["hopper_level"] = pelletdb["current"]["hopper_level"]
+        status_data["units"] = self.settings["globals"]["units"]
+        status_data["mode"] = mode
+        status_data["recipe"] = True if control["mode"] == Mode.RECIPE else False
+        status_data["start_time"] = start_time
+        status_data["start_duration"] = self.state.startup.timer
+        status_data["shutdown_duration"] = self.settings["shutdown"]["shutdown_duration"]
+        status_data["prime_duration"] = 0
+        status_data["prime_amount"] = 0
+        status_data["lid_open_detected"] = False
+        status_data["lid_open_endtime"] = 0
+        status_data["p_mode"] = self.state.metrics.get("p_mode", None)
+        status_data["startup_timestamp"] = control["startup_timestamp"]
+        if control["mode"] == Mode.RECIPE:
+            status_data["recipe_paused"] = (
+                True
+                if control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]
+                else False
+            )
+        else:
+            status_data["recipe_paused"] = False
+        status_data["outpins"] = {}
+        current = grill_platform.get_output_status()
+        for item in self.settings["platform"]["outputs"]:
+            try:
+                status_data["outpins"][item] = current[item]
+            except KeyError:
+                continue
+        status_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
+        if self.settings["platform"].get("dc_fan"):
+            status_data["fan_duty"] = int(control.get("duty_cycle", 0) or 0)
+        else:
+            status_data["fan_duty"] = 100 if status_data["outpins"].get("fan") else 0
+        # ---- mode-specific status fields ----
+        status_data.update(self.status_fragment())
+        return status_data
+
+    def _handle_recipe_end(self, control):
+        """End-of-loop recipe step check (extracted from run()). Returns True when
+        the work loop must break."""
+        ctx = self.ctx
+        if control["mode"] == Mode.RECIPE:
+            if control["recipe"]["step_data"]["triggered"] and not control["recipe"]["step_data"]["pause"]:
+                if control["recipe"]["step_data"]["notify"]:
+                    ctx.notifications.send("Recipe_Step_Message")
+                return True
+            elif control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]:
+                if control["recipe"]["step_data"]["notify"]:
+                    ctx.notifications.send("Recipe_Step_Message")
+                    control["recipe"]["step_data"]["notify"] = False
+                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                # Continue until 'pause' variable is cleared
+        return False
+
+    # ---- shared skeleton ----
+    def run(self):
+        import control as _control  # module global: eventLogger
+
+        ctx = self.ctx
+        mode = self.name
+        grill_platform = self.grill
+        probe_complex = self.probe_complex
+
+        # Setup Process Monitor and Start
+        monitor = Process_Monitor("control", ["supervisorctl", "restart", "control"], timeout=30)
+        monitor.start_monitor()
+
+        # Precondition for entering into main control loop
+        status = "Active"
+
+        # Setup Cycle Parameters
+        self.settings = ctx.store.read_settings()
+        control = ctx.store.read_control()
+        self.control = control
+        pelletdb = ctx.store.read_pellet_db()
+        control["hopper_check"] = True
+        ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+
+        _control.eventLogger.info(f"{mode} Mode started.")
+
+        # Pre-Loop Setup Recipe Triggers
+        self._setup_recipe_triggers(control)
 
         # Get ON/OFF Switch state and set as last state
         last = grill_platform.get_input_status()
@@ -374,113 +573,14 @@ class ControlMode:
             if control["updated"]:
                 break
 
-            # Check if user changed settings and reload
-            if control["settings_update"]:
-                control["settings_update"] = False
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                self.settings = ctx.store.read_settings()
-                if self.settings["globals"]["debug_mode"]:
-                    _control.eventLogger.setLevel(logging.DEBUG)
-                else:
-                    _control.eventLogger.setLevel(logging.INFO)
-                self.on_settings_reload()
-
-            # Check if user changed hopper levels and update if required
-            if control["distance_update"]:
-                empty = self.settings["pelletlevel"]["empty"]
-                full = self.settings["pelletlevel"]["full"]
-                dist_device.update_distances(empty, full)
-                control["distance_update"] = False
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-
-            # Check hopper level when requested or every 300 seconds
-            if control["hopper_check"] or (now - self.state.timers.hopper_toggle) > 60:
-                pelletdb = ctx.store.read_pellet_db()
-                override = False
-                if control["hopper_check"]:
-                    control["hopper_check"] = False
-                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                    override = True
-                pelletdb["current"]["hopper_level"] = dist_device.get_level(override=override)
-                ctx.store.write_pellet_db(pelletdb)
-                self.state.timers.hopper_toggle = now
-                _control.eventLogger.info("Hopper Level Checked @ " + str(pelletdb["current"]["hopper_level"]) + "%")
-
-            # Check for update in ON/OFF Switch
-            if not self.settings["platform"]["standalone"] and last != grill_platform.get_input_status():
-                last = grill_platform.get_input_status()
-                if not last:
-                    _control.eventLogger.info("Switch set to off, going to monitor mode.")
-                    # The seam sets mode="Stop"/updated + writes; status is not part
-                    # of the transition, so set it on control first (single OVERWRITE).
-                    control["status"] = "active"
-                    request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
-                    break
+            # Per-tick settings/distance/hopper/switch flag handling
+            last, pelletdb, _should_break = self._process_control_flags(control, now, last, pelletdb)
+            if _should_break:
+                break
 
             current_output_status = grill_platform.get_output_status()
 
-            if mode == Mode.MANUAL or self.settings["safety"]["allow_manual_changes"]:
-                if control["manual"]["change"] in ["power", "igniter", "fan", "auger", "pwm"]:
-                    if mode != Mode.MANUAL:
-                        override_time = now + self.settings["safety"]["manual_override_time"]
-                    else:
-                        override_time = 0
-
-                    if control["manual"]["change"] == "fan":
-                        if control["manual"]["output"] and not current_output_status["fan"]:
-                            grill_platform.fan_on()
-                            _control.eventLogger.debug("Fan ON")
-                        elif not control["manual"]["output"] and current_output_status["fan"]:
-                            grill_platform.fan_off()
-                            _control.eventLogger.debug("Fan OFF")
-                        manual_override["fan"] = override_time
-
-                    if control["manual"]["change"] == "auger":
-                        if control["manual"]["output"] and not current_output_status["auger"]:
-                            grill_platform.auger_on()
-                            _control.eventLogger.debug("Auger ON")
-                        elif not control["manual"]["output"] and current_output_status["auger"]:
-                            grill_platform.auger_off()
-                            _control.eventLogger.debug("Auger OFF")
-                        manual_override["auger"] = override_time
-
-                    if control["manual"]["change"] == "igniter":
-                        if control["manual"]["output"] and not current_output_status["igniter"]:
-                            grill_platform.igniter_on()
-                            _control.eventLogger.debug("Igniter ON")
-                        elif not control["manual"]["output"] and current_output_status["igniter"]:
-                            grill_platform.igniter_off()
-                            _control.eventLogger.debug("Igniter OFF")
-                        manual_override["igniter"] = override_time
-
-                    if control["manual"]["change"] == "power":
-                        if control["manual"]["output"] and not current_output_status["power"]:
-                            grill_platform.power_on()
-                            _control.eventLogger.debug("Power ON")
-                        elif not control["manual"]["output"] and current_output_status["power"]:
-                            grill_platform.power_off()
-                            _control.eventLogger.debug("Power OFF")
-                        manual_override["power"] = override_time
-
-                    if (
-                        self.settings["platform"]["dc_fan"]
-                        and control["manual"]["change"] == "pwm"
-                        and current_output_status["fan"]
-                        and not control["manual"]["pwm"] == current_output_status["pwm"]
-                    ):
-                        speed = control["manual"]["pwm"]
-                        _control.eventLogger.debug("PWM Speed: " + str(speed) + "%")
-                        grill_platform.set_duty_cycle(speed)
-                        manual_override["pwm"] = override_time
-                        control["manual"]["pwm"] = 100  # Reset PWM
-
-                    # Reset to False (not None) to match default_control()'s seed and
-                    # keep control free of dict-nested nulls: every consumer treats
-                    # these as falsy (== 'pwm', `in [...]`, truthiness), so behavior is
-                    # identical, and a null here would be a delete under json_patch merge.
-                    control["manual"]["change"] = False
-                    control["manual"]["output"] = False
-                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            self._apply_manual_overrides(control, now, current_output_status)
 
             # Grab current probe profiles if they have changed since the last loop.
             if control["probe_profile_update"]:
@@ -551,45 +651,7 @@ class ControlMode:
 
             # Send Current Status / Temperature Data to Display Device every 0.5 second
             if (now - self.state.timers.display_toggle) > 0.5:
-                status_data["notify_data"] = control["notify_data"]
-                status_data["timer"] = control["timer"]
-                status_data["s_plus"] = control["s_plus"]
-                status_data["hopper_level_enabled"] = False if self.settings["modules"]["dist"] == "none" else True
-                status_data["hopper_level"] = pelletdb["current"]["hopper_level"]
-                status_data["units"] = self.settings["globals"]["units"]
-                status_data["mode"] = mode
-                status_data["recipe"] = True if control["mode"] == Mode.RECIPE else False
-                status_data["start_time"] = start_time
-                status_data["start_duration"] = self.state.startup.timer
-                status_data["shutdown_duration"] = self.settings["shutdown"]["shutdown_duration"]
-                status_data["prime_duration"] = 0
-                status_data["prime_amount"] = 0
-                status_data["lid_open_detected"] = False
-                status_data["lid_open_endtime"] = 0
-                status_data["p_mode"] = self.state.metrics.get("p_mode", None)
-                status_data["startup_timestamp"] = control["startup_timestamp"]
-                if control["mode"] == Mode.RECIPE:
-                    status_data["recipe_paused"] = (
-                        True
-                        if control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]
-                        else False
-                    )
-                else:
-                    status_data["recipe_paused"] = False
-                status_data["outpins"] = {}
-                current = grill_platform.get_output_status()
-                for item in self.settings["platform"]["outputs"]:
-                    try:
-                        status_data["outpins"][item] = current[item]
-                    except KeyError:
-                        continue
-                status_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
-                if self.settings["platform"].get("dc_fan"):
-                    status_data["fan_duty"] = int(control.get("duty_cycle", 0) or 0)
-                else:
-                    status_data["fan_duty"] = 100 if status_data["outpins"].get("fan") else 0
-                # ---- mode-specific status fields ----
-                status_data.update(self.status_fragment())
+                status_data = self._build_status_data(control, pelletdb, start_time)
                 ctx.store.write_status(status_data)
                 self.state.timers.display_toggle = ctx.clock.now()
 
@@ -605,17 +667,8 @@ class ControlMode:
                 break
 
             # End of Loop Recipe Check
-            if control["mode"] == Mode.RECIPE:
-                if control["recipe"]["step_data"]["triggered"] and not control["recipe"]["step_data"]["pause"]:
-                    if control["recipe"]["step_data"]["notify"]:
-                        ctx.notifications.send("Recipe_Step_Message")
-                    break
-                elif control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]:
-                    if control["recipe"]["step_data"]["notify"]:
-                        ctx.notifications.send("Recipe_Step_Message")
-                        control["recipe"]["step_data"]["notify"] = False
-                        ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                    # Continue until 'pause' variable is cleared
+            if self._handle_recipe_end(control):
+                break
 
             ctx.clock.sleep(0.05)
 

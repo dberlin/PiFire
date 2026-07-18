@@ -249,12 +249,10 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     assert ("clear", None) in store.display_commands().list()
     assert store.read_status()["mode"] == "Stop"
     control = store.read_control()
-    # NOTE (faithful freeze): the Stop path sets control['status']='inactive'
-    # and THEN does `control = read_control(flush=True)`, which rebinds control
-    # to a fresh default_control() -- so the 'inactive' assignment is discarded
-    # and the persisted status is default_control()'s status (''). This dead
-    # assignment exists in the original __main__ too; preserved as-is.
-    assert control["status"] == ""
+    # Stop persists status='inactive' (bug fix): the assignment now runs AFTER the
+    # `control = read_control(flush=True)` reset, mirroring the Error branch, instead
+    # of before it where it was a dead write discarded by the reset (had persisted '').
+    assert control["status"] == "inactive"
     assert control["updated"] is False
     assert control["next_mode"] == "Stop"
 
