@@ -227,34 +227,13 @@ class ControlMode:
             grill_platform.set_duty_cycle(control["duty_cycle"])
             _control.eventLogger.debug("Temp Fan Control: Set to OFF, Fan Returned to Max Duty Cycle")
 
-    # ---- shared skeleton ----
-    def run(self):
+    def _setup_recipe_triggers(self, control):
+        """Pre-loop recipe trigger setup (extracted from run()). Mutates control
+        in place and writes it when any trigger was set."""
         import control as _control  # module global: eventLogger
 
         ctx = self.ctx
         mode = self.name
-        grill_platform = self.grill
-        probe_complex = self.probe_complex
-        dist_device = self.dist_device
-
-        # Setup Process Monitor and Start
-        monitor = Process_Monitor("control", ["supervisorctl", "restart", "control"], timeout=30)
-        monitor.start_monitor()
-
-        # Precondition for entering into main control loop
-        status = "Active"
-
-        # Setup Cycle Parameters
-        self.settings = ctx.store.read_settings()
-        control = ctx.store.read_control()
-        self.control = control
-        pelletdb = ctx.store.read_pellet_db()
-        control["hopper_check"] = True
-        ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-
-        _control.eventLogger.info(f"{mode} Mode started.")
-
-        # Pre-Loop Setup Recipe Triggers
         if control["mode"] == Mode.RECIPE:
             if mode in [Mode.SMOKE, Mode.HOLD]:
                 recipe_trigger_set = False
@@ -284,6 +263,36 @@ class ControlMode:
                     ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
                 else:
                     _control.eventLogger.warning("No trigger set for Hold/Smoke mode in recipe.")
+
+    # ---- shared skeleton ----
+    def run(self):
+        import control as _control  # module global: eventLogger
+
+        ctx = self.ctx
+        mode = self.name
+        grill_platform = self.grill
+        probe_complex = self.probe_complex
+        dist_device = self.dist_device
+
+        # Setup Process Monitor and Start
+        monitor = Process_Monitor("control", ["supervisorctl", "restart", "control"], timeout=30)
+        monitor.start_monitor()
+
+        # Precondition for entering into main control loop
+        status = "Active"
+
+        # Setup Cycle Parameters
+        self.settings = ctx.store.read_settings()
+        control = ctx.store.read_control()
+        self.control = control
+        pelletdb = ctx.store.read_pellet_db()
+        control["hopper_check"] = True
+        ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+
+        _control.eventLogger.info(f"{mode} Mode started.")
+
+        # Pre-Loop Setup Recipe Triggers
+        self._setup_recipe_triggers(control)
 
         # Get ON/OFF Switch state and set as last state
         last = grill_platform.get_input_status()
