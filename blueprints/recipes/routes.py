@@ -18,8 +18,6 @@ def recipes_page():
         "recipes/index.html",
         settings=settings,
         control=control,
-        page_theme=settings["globals"]["page_theme"],
-        grill_name=settings["globals"]["grill_name"],
     )
 
 

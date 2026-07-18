@@ -642,6 +642,4 @@ def settings_page(action=None):
         settings=settings,
         control=control,
         controller_metadata=controller["metadata"],
-        page_theme=settings["globals"].get("page_theme", "light"),
-        grill_name=settings["globals"].get("grill_name", ""),
     )

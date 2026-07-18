@@ -45,6 +45,4 @@ def logs_page(action=None):
         settings=settings,
         control=control,
         log_file_list=log_file_list,
-        page_theme=settings["globals"].get("page_theme", "light"),
-        grill_name=settings["globals"].get("grill_name", ""),
     )

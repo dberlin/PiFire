@@ -25,6 +25,4 @@ def metrics_page(action=None):
         settings=settings,
         control=control,
         metrics_data=metrics_data,
-        page_theme=settings["globals"].get("page_theme", "light"),
-        grill_name=settings["globals"].get("grill_name", ""),
     )

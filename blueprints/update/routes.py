@@ -33,8 +33,6 @@ def update_page(action=None):
                 alert=alert,
                 settings=settings,
                 update_data=update_data,
-                page_theme=settings["globals"].get("page_theme", "light"),
-                grill_name=settings["globals"].get("grill_name", ""),
             )
         elif action == "updatestatus":
             percent, status, output = get_updater_install_status()
@@ -83,16 +81,12 @@ def update_page(action=None):
                     alert=alert,
                     settings=settings,
                     update_data=update_data,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
             else:
                 set_updater_install_status(0, "Starting Branch Change...", "")
                 os.system(f"{python_exec} updater.py -b {r['branch_target']} &")  # Kickoff Branch Change
                 return render_template(
                     "update/updater-status.html",
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
         if "do_update" in r:
             control = read_control()
@@ -101,8 +95,6 @@ def update_page(action=None):
                 os.system(f"{python_exec} updater.py -u {update_data['branch_target']} -p &")  # Kickoff Update
                 return render_template(
                     "update/updater-status.html",
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
             else:
                 alert = {
@@ -115,8 +107,6 @@ def update_page(action=None):
                     alert=alert,
                     settings=settings,
                     update_data=update_data,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
 
         if "do_upgrade" in r:
@@ -126,8 +116,6 @@ def update_page(action=None):
                 os.system(f"{python_exec} updater.py -i &")
                 return render_template(
                     "update/updater-status.html",
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
             else:
                 alert = {
@@ -140,8 +128,6 @@ def update_page(action=None):
                     alert=alert,
                     settings=settings,
                     update_data=update_data,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
 
         if "show_log" in r:
@@ -162,6 +148,4 @@ def update_page(action=None):
                 settings=settings,
                 action=action,
                 output_html=output_html,
-                page_theme=settings["globals"].get("page_theme", "light"),
-                grill_name=settings["globals"].get("grill_name", ""),
             )

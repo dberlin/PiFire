@@ -184,6 +184,4 @@ def pellets_page(action=None):
         settings=settings,
         control=control,
         units=settings["globals"]["units"],
-        page_theme=settings["globals"].get("page_theme", "light"),
-        grill_name=settings["globals"].get("grill_name", ""),
     )

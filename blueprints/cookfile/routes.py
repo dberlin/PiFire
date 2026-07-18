@@ -199,8 +199,6 @@ def cookfile_page():
                     labels=labels,
                     assets=assets,
                     errors=errors,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
 
         if ("ulmediafn" in requestform) or ("ulthumbfn" in requestform):
@@ -262,8 +260,6 @@ def cookfile_page():
                     labels=labels,
                     assets=assets,
                     errors=errors,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
 
         if "cookfilelist" in requestform:
@@ -297,8 +293,6 @@ def cookfile_page():
                     cookfilename=cookfilename,
                     errortype=errortype,
                     errors=errors,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
 
             # Fix issues with assets
@@ -319,8 +313,6 @@ def cookfile_page():
                     cookfilename=cookfilename,
                     errortype=errortype,
                     errors=errors,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
             else:
                 events = cookfilestruct["events"]
@@ -346,8 +338,6 @@ def cookfile_page():
                     labels=labels,
                     assets=assets,
                     errors=errors,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
 
         if "upgradeCF" in requestform:
@@ -368,8 +358,6 @@ def cookfile_page():
                     cookfilename=cookfilename,
                     errortype=errortype,
                     errors=errors,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
             else:
                 events = cookfilestruct["events"]
@@ -395,8 +383,6 @@ def cookfile_page():
                     labels=labels,
                     assets=assets,
                     errors=errors,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
 
         if "delmedialist" in requestform:
@@ -419,8 +405,6 @@ def cookfile_page():
                     cookfilename=cookfilename,
                     errortype=errortype,
                     errors=errors,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
             else:
                 events = cookfilestruct["events"]
@@ -446,8 +430,6 @@ def cookfile_page():
                     labels=labels,
                     assets=assets,
                     errors=errors,
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                 )
 
     errors.append("Something unexpected has happened.")

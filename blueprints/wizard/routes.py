@@ -93,16 +93,12 @@ def wizard_page(action=None):
                     return render_template_string(
                         _WIZARD_BUS_CONFLICT_PAGE,
                         message=str(exc),
-                        page_theme=settings["globals"].get("page_theme", "light"),
-                        grill_name=settings["globals"].get("grill_name", ""),
                     )
                 store_wizard_install_info(wizardInstallInfo)
                 set_wizard_install_status(0, "Starting Install...", "")
                 os.system(f"{python_exec} wizard.py &")  # Kickoff Installation
                 return render_template(
                     "wizard/wizard-finish.html",
-                    page_theme=settings["globals"].get("page_theme", "light"),
-                    grill_name=settings["globals"].get("grill_name", ""),
                     wizardData=wizardData,
                 )
 
@@ -276,6 +272,4 @@ def wizard_page(action=None):
         errors=errors,
         wizardData=wizardData,
         wizardInstallInfo=wizardInstallInfo,
-        page_theme=settings["globals"].get("page_theme", "light"),
-        grill_name=settings["globals"].get("grill_name", ""),
     )

@@ -52,8 +52,6 @@ def admin_page(action=None):
         return render_template(
             "shutdown.html",
             action=action,
-            page_theme=settings["globals"]["page_theme"],
-            grill_name=settings["globals"]["grill_name"],
         )
 
     elif action == "shutdown":
@@ -64,8 +62,6 @@ def admin_page(action=None):
         return render_template(
             "shutdown.html",
             action=action,
-            page_theme=settings["globals"]["page_theme"],
-            grill_name=settings["globals"]["grill_name"],
         )
 
     elif action == "restart":
@@ -76,8 +72,6 @@ def admin_page(action=None):
         return render_template(
             "shutdown.html",
             action=action,
-            page_theme=settings["globals"]["page_theme"],
-            grill_name=settings["globals"]["grill_name"],
         )
 
     if request.method == "POST" and action == "setting":
@@ -133,8 +127,6 @@ def admin_page(action=None):
                 return render_template(
                     "shutdown.html",
                     action="restart",
-                    page_theme=settings["globals"]["page_theme"],
-                    grill_name=settings["globals"]["grill_name"],
                 )
 
         if "download_logs" in response:
@@ -183,8 +175,6 @@ def admin_page(action=None):
                 return render_template(
                     "shutdown.html",
                     action="restart",
-                    page_theme=settings["globals"]["page_theme"],
-                    grill_name=settings["globals"]["grill_name"],
                 )
             elif remote_file.filename != "":
                 # If the user does not select a file, the browser submits an
@@ -200,8 +190,6 @@ def admin_page(action=None):
                     return render_template(
                         "shutdown.html",
                         action="restart",
-                        page_theme=settings["globals"]["page_theme"],
-                        grill_name=settings["globals"]["grill_name"],
                     )
                 else:
                     errors.append(
@@ -272,8 +260,6 @@ def admin_page(action=None):
         qr_content=url,
         display_info=get_display_info(settings),
         pip_list=pip_list,
-        page_theme=settings["globals"].get("page_theme", "light"),
-        grill_name=settings["globals"].get("grill_name", ""),
         files=files,
         errors=errors,
         warnings=warnings,

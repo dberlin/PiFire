@@ -44,8 +44,6 @@ def dash_page():
         probe_status=probe_status,
         errors=errors,
         warnings=warnings,
-        page_theme=settings["globals"].get("page_theme", "light"),
-        grill_name=settings["globals"].get("grill_name", ""),
     )
 
 

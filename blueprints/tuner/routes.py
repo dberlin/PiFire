@@ -213,6 +213,4 @@ def tuner_page():
         "tuner/index.html",
         settings=settings,
         control=control,
-        page_theme=settings["globals"].get("page_theme", "light"),
-        grill_name=settings["globals"].get("grill_name", ""),
     )

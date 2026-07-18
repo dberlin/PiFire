@@ -107,8 +107,6 @@ def history_page(action=None):
                         labels=labels,
                         assets=assets,
                         errors=errors,
-                        page_theme=settings["globals"].get("page_theme", "light"),
-                        grill_name=settings["globals"].get("grill_name", ""),
                     )
                 else:
                     errors.append(status)
@@ -124,8 +122,6 @@ def history_page(action=None):
                         cookfilename=cookfilename,
                         errortype=errortype,
                         errors=errors,
-                        page_theme=settings["globals"]["page_theme"],
-                        grill_name=settings["globals"]["grill_name"],
                     )
             if "dlcookfile" in response:
                 filename = "./history/" + response["dlcookfile"]
@@ -146,6 +142,4 @@ def history_page(action=None):
         "history/index.html",
         settings=settings,
         control=control,
-        page_theme=settings["globals"].get("page_theme", "light"),
-        grill_name=settings["globals"].get("grill_name", ""),
     )
