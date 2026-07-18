@@ -84,7 +84,8 @@ def update_page(action=None):
                 )
             else:
                 set_updater_install_status(0, "Starting Branch Change...", "")
-                os.system(f"{python_exec} updater.py -b {r['branch_target']} &")  # Kickoff Branch Change
+                if is_real_hardware():
+                    os.system(f"{python_exec} updater.py -b {r['branch_target']} &")  # Kickoff Branch Change
                 return render_template(
                     "update/updater-status.html",
                 )
@@ -92,7 +93,8 @@ def update_page(action=None):
             control = read_control()
             if control["mode"] == "Stop":
                 set_updater_install_status(0, "Starting Update...", "")
-                os.system(f"{python_exec} updater.py -u {update_data['branch_target']} -p &")  # Kickoff Update
+                if is_real_hardware():
+                    os.system(f"{python_exec} updater.py -u {update_data['branch_target']} -p &")  # Kickoff Update
                 return render_template(
                     "update/updater-status.html",
                 )
@@ -113,7 +115,8 @@ def update_page(action=None):
             control = read_control()
             if control["mode"] == "Stop":
                 set_updater_install_status(0, "Starting Upgrade...", "")
-                os.system(f"{python_exec} updater.py -i &")
+                if is_real_hardware():
+                    os.system(f"{python_exec} updater.py -i &")
                 return render_template(
                     "update/updater-status.html",
                 )

@@ -66,7 +66,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.web.conftest import apply_control, requires_chromium
+from tests.web.conftest import apply_control, apply_settings, requires_chromium
 
 pytestmark = requires_chromium
 
@@ -236,3 +236,51 @@ def test_show_log_action_via_direct_post(live_server, page, no_real_subprocess):
     assert "Test commit message" in resp.text()
     assert not no_real_subprocess.os_system_calls
     assert ["git", "log", "origin/main", "-5", '--pretty="%h - %cr : %s"'] in no_real_subprocess.subprocess_calls
+
+
+# --- Non-hardware gate tests (Task 5) -----------------------------------
+#
+# The three update kick-offs (change_branch / do_update / do_upgrade) are
+# gated behind is_real_hardware(), mirroring update_remote_branches. The
+# harness seeds real_hw=True (see module docstring), so the pinning tests
+# above still record the os.system command. These tests flip real_hw=False
+# and assert the shell-out is suppressed while the UI response is still a
+# sane 200. real_hw is restored to True in a finally so the module-scoped
+# live_server's shared datastore isn't left corrupted for sibling tests.
+
+
+def test_change_branch_gated_off_when_not_real_hardware(live_server, page, no_real_subprocess):
+    apply_settings(lambda s: s["platform"].__setitem__("real_hw", False))
+    try:
+        resp = page.request.post(
+            f"{live_server}/update/", form={"change_branch": "true", "branch_target": "other-branch"}
+        )
+
+        assert resp.status == 200
+        assert not no_real_subprocess.os_system_calls
+    finally:
+        apply_settings(lambda s: s["platform"].__setitem__("real_hw", True))
+
+
+def test_do_update_gated_off_when_not_real_hardware(live_server, page, no_real_subprocess):
+    apply_control(lambda c: c.__setitem__("mode", "Stop"))
+    apply_settings(lambda s: s["platform"].__setitem__("real_hw", False))
+    try:
+        resp = page.request.post(f"{live_server}/update/", form={"do_update": "true"})
+
+        assert resp.status == 200
+        assert not no_real_subprocess.os_system_calls
+    finally:
+        apply_settings(lambda s: s["platform"].__setitem__("real_hw", True))
+
+
+def test_do_upgrade_gated_off_when_not_real_hardware(live_server, page, no_real_subprocess):
+    apply_control(lambda c: c.__setitem__("mode", "Stop"))
+    apply_settings(lambda s: s["platform"].__setitem__("real_hw", False))
+    try:
+        resp = page.request.post(f"{live_server}/update/", form={"do_upgrade": "true"})
+
+        assert resp.status == 200
+        assert not no_real_subprocess.os_system_calls
+    finally:
+        apply_settings(lambda s: s["platform"].__setitem__("real_hw", True))
