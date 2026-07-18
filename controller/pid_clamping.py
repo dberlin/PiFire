@@ -56,8 +56,6 @@ Class Definition
 class Controller(ControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
-        self.function_list.append("set_gains")
-        self.function_list.append("get_k")
         self._calculate_gains(config.get("PB", 100.0), config.get("Ti", 180.0), config.get("Td", 45.0))
 
         self.p = 0.0
@@ -147,16 +145,3 @@ class Controller(ControllerBase):
         self.inter = 0.0
         self.derv = 0.0
         self.last_update = time.time()
-
-    def set_gains(self, pb, ti, td):
-        self._calculate_gains(pb, ti, td)
-
-    def set_config(self, config):
-        super().set_config(config)
-        self._calculate_gains(config.get("PB", 100.0), config.get("Ti", 180.0), config.get("Td", 45.0))
-        self.error = 0.0
-        self.inter = 0.0
-        self.derv = 0.0
-
-    def get_k(self):
-        return self.kp, self.ki, self.kd

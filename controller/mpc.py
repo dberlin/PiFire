@@ -83,7 +83,6 @@ def _to_c(value, units):
 class Controller(ControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
-        self.function_list.append("get_control_period")
 
         cfg = dict(_DEFAULTS)
         cfg.update(config or {})

@@ -44,8 +44,6 @@ Class Definition
 class Controller(ControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
-        self.function_list.append("set_gains")
-        self.function_list.append("get_k")
 
         self._calculate_gains(config.get("PB", 60.0), config.get("Ti", 180.0), config.get("Td", 45.0))
 
@@ -171,9 +169,3 @@ class Controller(ControllerBase):
                 self.center = (set_point * 9 / 5 + 32) * self.center_factor
             else:
                 self.center = (set_point * 9 / 5 + 32) * self.center_factor * 1.2
-
-    def set_gains(self, pb, ti, td):
-        self._calculate_gains(pb, ti, td)
-
-    def get_k(self):
-        return self.kp, self.ki, self.kd

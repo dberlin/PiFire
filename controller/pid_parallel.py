@@ -56,8 +56,6 @@ Class Definition
 class Controller(ControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
-        self.function_list.append("set_gains")
-        self.function_list.append("get_k")
 
         self.clamping = config.get("Clamping", True)
 
@@ -136,20 +134,7 @@ class Controller(ControllerBase):
         self.derv = 0.0
         self.last_update = time.time()
 
-    def set_gains(self, kp, ki, kd):
-        self._calculate_gains(kp, ki, kd)
-
-    def set_config(self, config):
-        self.clamping = config.get("Clamping", True)
-        self._calculate_gains(config.get("Kp", 0.01), config.get("Ki", 0.000055), config.get("Kd", 0.45))
-        self.error = 0.0
-        self.inter = 0.0
-        self.derv = 0.0
-
     def _calculate_gains(self, kp, ki, kd):
         self.kp = -1 * kp
         self.ki = -1 * ki
         self.kd = -1 * kd
-
-    def get_k(self):
-        return self.kp, self.ki, self.kd
