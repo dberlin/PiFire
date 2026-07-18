@@ -66,6 +66,18 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
     _check_legal(control.get("mode"), to_mode)
 
     if kind == "natural":
+        # Natural (post-cycle) progressions carry NO display push and NO
+        # notification -- only mode/setpoint/updated + the write. This is
+        # faithful to the legacy next_mode(), which never touched display or
+        # notify, and it is correct by design: display_commands pushes are for
+        # transient OVERLAYS tied to specific events (safety trips push
+        # ("text","ERROR")/("text","Re-Ignite"); terminal cleanup pushes
+        # ("clear",None)). A normal mode change (Startup->Smoke, Smoke->Hold,
+        # Reignite->last-state, ...) needs no overlay -- the display process
+        # reflects it by polling the persisted control["mode"]/status. So the
+        # `display`/`notify` params are intentionally ignored on this branch;
+        # next_mode() (the only natural caller) never passes them.
+        #
         # Yield to any higher-priority transition already requested this cycle.
         store.execute_control_writes()
         control = store.read_control()
