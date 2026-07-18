@@ -350,3 +350,15 @@ def save_settings_and_flag_update(settings, control, *flags, origin="app"):
     for flag in flags:
         control[flag] = True
     write_control(control, WriteKind.MERGE, origin=origin)
+
+
+def api_response(result, message=None, data=None):
+    """
+    Shared Socket.IO response envelope. Relocated from
+    blueprints/mobile/socket_io.py's `_response` (Phase D, Task 5) so it can
+    be shared by any future Socket.IO consumer.
+
+    Returns a bare dict (no jsonify/status) with the same key order as the
+    original: {"data", "result", "message"}.
+    """
+    return {"data": data, "result": result, "message": message}

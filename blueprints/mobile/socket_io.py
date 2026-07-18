@@ -58,7 +58,7 @@ from common.system import (
     gather_system_info,
 )
 from common.api_commands import process_command
-from common.app import update_probe_config, save_settings_and_flag_update
+from common.app import update_probe_config, save_settings_and_flag_update, api_response
 from flask import request
 from app import socketio
 from config import Config
@@ -895,8 +895,9 @@ def _check_control_status():
             write_errors(errors)
 
 
-def _response(result: str, message: str = None, data: dict = None):
-    return {"data": data, "result": result, "message": message}
+# `_response` relocated to `common/app.py` as `api_response` (Phase D, Task 5).
+# Kept as a thin local alias so the 67 call sites in this module don't churn.
+_response = api_response
 
 
 def _get_system_info(control):
