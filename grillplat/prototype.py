@@ -20,7 +20,7 @@ import logging
 
 from gpiozero.threads import GPIOThread
 from common.common import is_float
-from common.system import get_os_info
+from grillplat.system_commands import SystemCommandsMixin
 
 """
 	==============================
@@ -29,7 +29,7 @@ from common.system import get_os_info
 """
 
 
-class GrillPlatform:
+class GrillPlatform(SystemCommandsMixin):
     def __init__(self, config):
         self.logger = logging.getLogger("control")
         try:
@@ -161,47 +161,6 @@ class GrillPlatform:
 	
 	"""
 
-    def supported_commands(self, arglist):
-        supported_commands = [
-            "check_throttled",
-            "check_wifi_quality",
-            "check_cpu_temp",
-            "supported_commands",
-            "check_alive",
-            "scan_bluetooth",
-            "os_info",
-            "network_info",
-            "hardware_info",
-        ]
-
-        data = {
-            "result": "OK",
-            "message": 'Supported commands listed in "data".',
-            "data": {"supported_cmds": supported_commands},
-        }
-        return data
-
-    def check_throttled(self, arglist):
-        """Checks for under-voltage and throttling using vcgencmd.
-
-        Returns:
-                (bool, bool): A tuple of (under_voltage, throttled) indicating their status.
-        """
-        under_voltage = False
-        throttled = False
-
-        if under_voltage or throttled:
-            message = "WARNING: Under-voltage or throttled situation detected"
-        else:
-            message = "No under-voltage or throttling detected."
-
-        data = {
-            "result": "OK",
-            "message": message,
-            "data": {"cpu_under_voltage": under_voltage, "cpu_throttled": throttled},
-        }
-        return data
-
     def check_wifi_quality(self, arglist):
         """Checks the Wi-Fi signal quality on a Raspberry Pi and returns the value (or None if not connected)."""
         # Return None if not connected or if there was an error
@@ -222,79 +181,6 @@ class GrillPlatform:
             temp = 0.0
 
         data = {"result": "OK", "message": "Success.", "data": {"cpu_temp": temp}}
-        return data
-
-    def check_alive(self, arglist):
-        """
-        Simple check to see if the platform is up and running.
-        """
-
-        data = {"result": "OK", "message": "The control script is running.", "data": {}}
-        return data
-
-    def scan_bluetooth(self, arglist):
-        """
-        Scan for bluetooth device addresses using bleak (modern BlueZ D-Bus API).
-        bleak cooperates with bluetoothd rather than fighting it over raw HCI access,
-        making it compatible with BlueZ 5.56+ unlike the unmaintained bluepy library.
-        """
-        import asyncio
-
-        try:
-            from bleak import BleakScanner
-        except ImportError:
-            return {
-                "result": "ERROR",
-                "message": "bleak is not installed. Run: pip install bleak",
-                "data": {"bt_devices": []},
-            }
-
-        bt_devices = []
-        result = "OK"
-        message = "Bluetooth scan completed successfully."
-
-        async def _scan():
-            discovered = await BleakScanner.discover(timeout=5.0)
-            for dev in discovered:
-                name = dev.name or "Unknown"
-                bt_devices.append({"name": name, "hw_id": dev.address.lower(), "info": ""})
-                self.logger.debug(f"scan_bluetooth: Found device {name} ({dev.address})")
-
-        try:
-            asyncio.run(_scan())
-        except Exception as e:
-            result = "ERROR"
-            message = f"Bluetooth scan error: {e}"
-            self.logger.error(f"scan_bluetooth: Error during scan - {e}")
-
-        data = {"result": result, "message": message, "data": {"bt_devices": bt_devices}}
-        return data
-
-    def os_info(self, arglist):
-        """
-        Retrieve OS information such as version and architecture.
-        """
-        os_info = get_os_info()
-
-        data = {"result": "OK", "message": "OS information retrieved successfully.", "data": os_info}
-        return data
-
-    def network_info(self, arglist):
-        """
-        Retrieve network information such as IP address and MAC address.
-        """
-        import netifaces
-
-        ifaces = netifaces.interfaces()
-        net_info = {}
-
-        for iface in ifaces:
-            addrs = netifaces.ifaddresses(iface)
-            ip_addr = addrs.get(netifaces.AF_INET, [{}])[0].get("addr", "N/A")
-            mac_addr = addrs.get(netifaces.AF_LINK, [{}])[0].get("addr", "N/A")
-            net_info[iface] = {"ip_address": ip_addr, "mac_address": mac_addr}
-
-        data = {"result": "OK", "message": "Network information retrieved successfully.", "data": net_info}
         return data
 
     def hardware_info(self, arglist):
