@@ -44,14 +44,14 @@ def backup_settings():
     settings = read_settings()
     write_generic_json(settings, backup_file)
     # Save a path to the backup copy in the updater_manifest.json
-    backup_manifest = read_generic_json("./backups/manifest.json")
+    backup_manifest = read_generic_json(BACKUP_PATH + "manifest.json")
     if backup_manifest == {}:
         backup_manifest = {"server_settings": {}}
-        write_generic_json(backup_manifest, "./backups/manifest.json")
+        write_generic_json(backup_manifest, BACKUP_PATH + "manifest.json")
 
     server_version = settings["versions"]["server"]
     backup_manifest["server_settings"][server_version] = backup_file
-    write_generic_json(backup_manifest, "backups/manifest.json")
+    write_generic_json(backup_manifest, BACKUP_PATH + "manifest.json")
     warning = f'Backed up your current settings to "{backup_file}" and setting these as the recovery settings for server version: {server_version}.'
     write_warning(warning)
     write_log(warning)
@@ -111,10 +111,10 @@ def backup_pellet_db(action="backup", retry_count=0):
             path, so repeated corrupt-backup self-repair recursion is bounded
             (see read_pellet_db_file).
     """
-    backup_manifest = read_generic_json("./backups/manifest.json")
+    backup_manifest = read_generic_json(BACKUP_PATH + "manifest.json")
     if backup_manifest == {}:
         backup_manifest = {"server_settings": {}, "pelletdb": {"current": ""}}
-        write_generic_json(backup_manifest, "./backups/manifest.json")
+        write_generic_json(backup_manifest, BACKUP_PATH + "manifest.json")
 
     if backup_manifest.get("pelletdb", None) == None:
         """ If the structure doesn't exist, create it. """
@@ -130,7 +130,7 @@ def backup_pellet_db(action="backup", retry_count=0):
         write_generic_json(pelletdb, backup_file)
         backup_manifest["pelletdb"]["current"] = backup_file
         message = f"Pellet DB has been backed up to the following file: {backup_file}"
-        write_generic_json(backup_manifest, "./backups/manifest.json")
+        write_generic_json(backup_manifest, BACKUP_PATH + "manifest.json")
         write_log(message)
         return backup_file
     elif action == "restore":
