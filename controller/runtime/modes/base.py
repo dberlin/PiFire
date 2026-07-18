@@ -438,6 +438,23 @@ class ControlMode:
         status_data.update(self.status_fragment())
         return status_data
 
+    def _handle_recipe_end(self, control):
+        """End-of-loop recipe step check (extracted from run()). Returns True when
+        the work loop must break."""
+        ctx = self.ctx
+        if control["mode"] == Mode.RECIPE:
+            if control["recipe"]["step_data"]["triggered"] and not control["recipe"]["step_data"]["pause"]:
+                if control["recipe"]["step_data"]["notify"]:
+                    ctx.notifications.send("Recipe_Step_Message")
+                return True
+            elif control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]:
+                if control["recipe"]["step_data"]["notify"]:
+                    ctx.notifications.send("Recipe_Step_Message")
+                    control["recipe"]["step_data"]["notify"] = False
+                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                # Continue until 'pause' variable is cleared
+        return False
+
     # ---- shared skeleton ----
     def run(self):
         import control as _control  # module global: eventLogger
@@ -650,17 +667,8 @@ class ControlMode:
                 break
 
             # End of Loop Recipe Check
-            if control["mode"] == Mode.RECIPE:
-                if control["recipe"]["step_data"]["triggered"] and not control["recipe"]["step_data"]["pause"]:
-                    if control["recipe"]["step_data"]["notify"]:
-                        ctx.notifications.send("Recipe_Step_Message")
-                    break
-                elif control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]:
-                    if control["recipe"]["step_data"]["notify"]:
-                        ctx.notifications.send("Recipe_Step_Message")
-                        control["recipe"]["step_data"]["notify"] = False
-                        ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                    # Continue until 'pause' variable is cleared
+            if self._handle_recipe_end(control):
+                break
 
             ctx.clock.sleep(0.05)
 
