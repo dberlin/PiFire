@@ -19,6 +19,7 @@ from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
 from controller.runtime.logic.safety import over_max_temp
 from controller.runtime.system_commands import process_system_commands
+from controller.runtime.transitions import request_transition
 
 
 class ControlMode:
@@ -402,10 +403,10 @@ class ControlMode:
                 last = grill_platform.get_input_status()
                 if not last:
                     _control.eventLogger.info("Switch set to off, going to monitor mode.")
-                    control["updated"] = True  # Change mode
-                    control["mode"] = "Stop"
+                    # The seam sets mode="Stop"/updated + writes; status is not part
+                    # of the transition, so set it on control first (single OVERWRITE).
                     control["status"] = "active"
-                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                    request_transition(ctx, control, "Stop", kind="terminal")
                     break
 
             current_output_status = grill_platform.get_output_status()
@@ -509,11 +510,9 @@ class ControlMode:
             # an unsafe temperature breaks the loop without cycling the auger or
             # advancing the controller.
             if over_max_temp(ptemp, self.settings["safety"]):
-                ctx.store.display_commands().push(("text", "ERROR"))
-                control["mode"] = "Error"
-                control["updated"] = True
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                ctx.notifications.send("Grill_Error_01")
+                request_transition(
+                    ctx, control, "Error", kind="safety", display=("text", "ERROR"), notify="Grill_Error_01"
+                )
                 break
 
             # ---- mode-specific per-tick safety check ----
