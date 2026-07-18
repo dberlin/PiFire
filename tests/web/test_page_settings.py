@@ -153,13 +153,15 @@ def test_dashboard_config_via_direct_post(live_server, page):
     branch never calls write_settings -- there is nothing to persist,
     only the returned fragment to assert on.
 
-    Note: passing `selected=""` (empty/omitted) falls back to
-    `settings["dashboard"]["selected"]` in the route, a key
-    default_settings() never populates -- a latent KeyError/500 on that
-    path, discovered while writing this test. Real usage never hits it
-    (the <select> always posts a real dashboard key), so this test only
-    exercises the working, always-valid-selected path; see the task
-    report for this finding.
+    Note: passing `selected=""` (empty/omitted), or a value that doesn't
+    match any known dashboard, used to read
+    `settings["dashboard"]["selected"]` -- a key default_settings() never
+    populates (it populates `["current"]` instead) -- causing a latent
+    KeyError/500 on the empty path, and an IndexError if `dashboards` were
+    ever empty on the invalid-value path. The route now falls back to the
+    persisted `settings["dashboard"]["current"]` (default: "Default"), or
+    the first available dashboard if even that isn't valid, instead of
+    raising.
     """
     resp_basic = page.request.post(f"{live_server}/settings/dashboard_config", form={"selected": "Basic"})
     assert resp_basic.status == 200
@@ -168,6 +170,17 @@ def test_dashboard_config_via_direct_post(live_server, page):
     resp_default = page.request.post(f"{live_server}/settings/dashboard_config", form={"selected": "Default"})
     assert resp_default.status == 200
     assert "default/img/screenshot.png" in resp_default.text()
+
+    # Empty `selected` (the <select>'s initial/omitted state) must not 500;
+    # it falls back to the persisted `current` dashboard ("Default").
+    resp_empty = page.request.post(f"{live_server}/settings/dashboard_config", form={"selected": ""})
+    assert resp_empty.status == 200
+    assert "default/img/screenshot.png" in resp_empty.text()
+
+    # An unrecognized `selected` value must not 500 either; same fallback.
+    resp_invalid = page.request.post(f"{live_server}/settings/dashboard_config", form={"selected": "Nonexistent"})
+    assert resp_invalid.status == 200
+    assert "default/img/screenshot.png" in resp_invalid.text()
 
 
 def test_probe_select_via_direct_post(live_server, page):

@@ -20,10 +20,11 @@ def _settings_display(settings, control, controller, event):
 def _settings_dashboard_config(settings, control, controller, event):
     response = request.form
     selected = response.get("selected", "")
-    if selected == "":
-        selected = settings["dashboard"]["selected"]
-    elif selected not in settings["dashboard"]["dashboards"]:
-        selected = list(settings["dashboard"]["dashboards"].keys())[0]
+    dashboards = settings["dashboard"]["dashboards"]
+    if selected not in dashboards:
+        selected = settings["dashboard"].get("current", "")
+    if selected not in dashboards:
+        selected = next(iter(dashboards), "")
     render_string = "{% from 'settings/_macro_settings.html' import render_dash_settings %}{{ render_dash_settings(selected, settings) }}"
     return render_template_string(render_string, selected=selected, settings=settings)
 
