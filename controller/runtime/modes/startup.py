@@ -1,4 +1,5 @@
 from common.common import WriteKind
+from common.modes import Mode
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.safety import startup_temp_bounds
@@ -20,7 +21,7 @@ class StartupMode(ControlMode):
     `self.state.startup.timer`/exit_temp on every tick (not just once at setup)
     and exits when the timer elapses or exit_temp is reached."""
 
-    name = "Startup"
+    name = Mode.STARTUP
 
     def setup(self):
         import control as _control

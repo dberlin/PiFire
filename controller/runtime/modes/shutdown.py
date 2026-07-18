@@ -1,3 +1,4 @@
+from common.modes import Mode
 from controller.runtime.modes.base import ControlMode
 from controller.runtime.logic.fan import start_fan
 
@@ -9,7 +10,7 @@ class ShutdownMode(ControlMode):
     teardown (shared with Monitor/Manual/Prime). No mode-specific on_tick,
     check_safety, or status_fragment."""
 
-    name = "Shutdown"
+    name = Mode.SHUTDOWN
 
     def setup(self):
         start_fan(self.grill, self.settings)

@@ -1,3 +1,4 @@
+from common.modes import Mode
 from controller.runtime.modes.base import ControlMode
 
 
@@ -8,7 +9,7 @@ class ManualMode(ControlMode):
     unconditionally (regardless of settings['safety']['allow_manual_changes']).
     No mode-specific on_tick/check_safety/should_exit/status_fragment needed."""
 
-    name = "Manual"
+    name = Mode.MANUAL
 
     def setup(self):
         self.grill.fan_off()

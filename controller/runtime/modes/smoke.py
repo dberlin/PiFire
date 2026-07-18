@@ -1,3 +1,4 @@
+from common.modes import Mode
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.smartstart import profile_cycle
@@ -24,7 +25,7 @@ class SmokeMode(ControlMode):
     excludes it). on_publish publishes cycle_ratio to MQTT (shared with
     Startup). No mode-specific teardown."""
 
-    name = "Smoke"
+    name = Mode.SMOKE
 
     def setup(self):
         # NOTE: Recipe-mode trigger setup (gated on `control['mode'] == 'Recipe'

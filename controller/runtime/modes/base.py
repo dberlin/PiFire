@@ -56,7 +56,7 @@ class ControlMode:
       - teardown(ptemp): mode-specific cleanup after the loop ends.
     """
 
-    name: str = ""
+    name: Mode | str = ""
 
     def __init__(self, ctx, state):
         self.ctx = ctx

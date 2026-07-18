@@ -1,4 +1,5 @@
 from common.common import WriteKind
+from common.modes import Mode
 from controller.runtime.logic.cycle import hold_initial_cycle
 from controller.runtime.logic.fan import start_fan, smoke_plus_max_ratio, fan_assist_times
 from controller.runtime.logic.pwm import hold_duty_cycle
@@ -47,7 +48,7 @@ class HoldMode(ControlMode):
     the Shutdown/Monitor/Manual/Prime power-off teardown gate, nor the
     Startup/Reignite afterstarttemp-write teardown gate)."""
 
-    name = "Hold"
+    name = Mode.HOLD
 
     def setup(self):
         import control as _control

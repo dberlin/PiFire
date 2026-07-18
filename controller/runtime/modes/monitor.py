@@ -1,3 +1,4 @@
+from common.modes import Mode
 from controller.runtime.modes.base import ControlMode
 
 
@@ -7,7 +8,7 @@ class MonitorMode(ControlMode):
     the shared skeleton's universal breaks (mode-change, switch-off,
     max-temp, Recipe)."""
 
-    name = "Monitor"
+    name = Mode.MONITOR
 
     def setup(self):
         self.grill.fan_off()
