@@ -1,6 +1,6 @@
 import datetime
 import os
-from flask import render_template, request, current_app, jsonify, redirect, send_file
+from flask import render_template, request, current_app, jsonify, redirect, send_file, abort
 from werkzeug.utils import secure_filename
 from common.common import epoch_to_time, generate_uuid
 from common.datastore_accessors import read_settings
@@ -22,6 +22,9 @@ from . import cookfile_bp
 
 @cookfile_bp.route("/", methods=["POST", "GET"])
 def cookfile_page():
+    if request.method == "GET":
+        abort(404)
+
     settings = read_settings()
     HISTORY_FOLDER = current_app.config["HISTORY_FOLDER"]
 

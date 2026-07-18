@@ -54,18 +54,21 @@ clicking a row's "Open" button submits a real form
 `delmedialist`, `full_graph`, `getcommentassets`, `managemediacomment`,
 `getallmedia`, `navimage`) are covered via direct POST.
 
-Finding: `cookfile_page` has no bare GET render
--------------------------------------------------
+Finding (fixed): `cookfile_page` had no bare GET render
+--------------------------------------------------------
 Every branch in `cookfile_page` is gated behind
 `request.method == "POST"` (json- or form-content-type); a plain
-`GET /cookfile/` falls through to the final
-`jsonify({"result": "ERROR", ...})`. The actual "view one cookfile" page is
-rendered by a DIFFERENT route -- `blueprints/history/routes.py`'s
-`history_page(action="cookfile")`, action `opencookfile` -- which shares the
-same `cookfile/index.html` template. `test_cookfile_page_bare_get_returns_error`
-below characterizes this; `test_history_lists_and_opens_cookfile_via_real_ui`
-drives the real click-path through `history_page` to get onto that template
-for the first time in the browser.
+`GET /cookfile/` used to fall through to the final
+`jsonify({"result": "ERROR", ...})` -- a confusing 200-status JSON error
+envelope. The actual "view one cookfile" page is rendered by a DIFFERENT
+route -- `blueprints/history/routes.py`'s `history_page(action="cookfile")`,
+action `opencookfile` -- which shares the same `cookfile/index.html`
+template. Fixed: `cookfile_page` now returns a documented HTTP 404 for a
+bare GET via an early `if request.method == "GET": abort(404)` guard.
+`test_cookfile_page_bare_get_returns_404` below characterizes this;
+`test_history_lists_and_opens_cookfile_via_real_ui` drives the real
+click-path through `history_page` to get onto that template for the first
+time in the browser.
 
 Previously NOT covered, now fixed and covered:
 - `ulcookfilereq` (cook-file upload) had a latent bug --
@@ -219,12 +222,13 @@ def _read_cookfile_json(history_dir, filename, jsonfile):
     return data
 
 
-def test_cookfile_page_bare_get_returns_error(live_server, page):
-    """Characterizes the finding in the module docstring: there is no bare
-    GET render at `/cookfile/` -- every branch requires a POST body."""
+def test_cookfile_page_bare_get_returns_404(live_server, page):
+    """Characterizes the fix for the finding in the module docstring: a bare
+    GET at `/cookfile/` now returns a documented HTTP 404 (there is no
+    bare-GET render -- every real branch requires a POST body) instead of
+    the confusing 200-status JSON error envelope."""
     resp = page.request.get(f"{live_server}/cookfile/")
-    assert resp.status == 200
-    assert resp.json()["result"] == "ERROR"
+    assert resp.status == 404
 
 
 def test_history_lists_and_opens_cookfile_via_real_ui(live_server, page, _isolated_history_folder):
