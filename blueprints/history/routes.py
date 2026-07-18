@@ -2,6 +2,7 @@ import os
 import time
 from flask import render_template, request, current_app, jsonify, send_file, redirect
 from common.common import epoch_to_time
+from common.modes import Mode
 from common.datastore_accessors import read_settings, read_control, read_current, write_settings
 from common.app import create_ui_hash, prepare_annotations, prepare_event_totals, prepare_csv
 from file_mgmt.cookfile import read_cookfile, prepare_chartdata
@@ -21,7 +22,7 @@ def history_page(action=None):
         # GET - Read current temperatures and set points for history streaming
         control = read_control()
         json_response = {}
-        if control["mode"] in ["Stop", "Error"]:
+        if control["mode"] in [Mode.STOP, Mode.ERROR]:
             json_response["current"] = read_current(zero_out=True)  # Probe Temps Zero'd Out
         else:
             json_response["current"] = read_current()  # Probe Temps Zero'd Out

@@ -58,6 +58,7 @@ from common.system import (
     gather_system_info,
 )
 from common.api_commands import process_command
+from common.modes import Mode
 from common.app import update_probe_config, save_settings_and_flag_update, api_response
 from flask import request
 from app import socketio
@@ -336,7 +337,7 @@ def _get_app_data_manual_data(settings, arg01, arg02):
         result="OK",
         data={
             "manual": read_status()["outpins"],
-            "active": control["mode"] == "Manual",
+            "active": control["mode"] == Mode.MANUAL,
             "dcFan": settings["platform"]["dc_fan"],
         },
     )
@@ -671,7 +672,7 @@ def _post_app_data_recipes(settings, type, request):
             control = read_control()
             filename = request["recipes_action"]["filename"]
             control["updated"] = True
-            control["mode"] = "Recipe"
+            control["mode"] = Mode.RECIPE
             control["recipe"]["filename"] = recipe_folder + filename
             write_control(control, WriteKind.MERGE, origin="app-socketio")
             return _response(result="OK")

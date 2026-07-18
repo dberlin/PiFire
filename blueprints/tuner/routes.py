@@ -1,5 +1,6 @@
 from flask import render_template, request, current_app, render_template_string, jsonify
 from common.common import WriteKind
+from common.modes import Mode
 from common.datastore_accessors import (
     read_settings,
     read_control,
@@ -43,9 +44,9 @@ def tuner_page():
             if control["tuning_mode"]:
                 control["tuning_mode"] = False  # Disable tuning mode
                 write_control(control, WriteKind.MERGE, origin="app")
-            if control["mode"] == "Monitor":
+            if control["mode"] == Mode.MONITOR:
                 # If in Monitor Mode, stop
-                control["mode"] = "Stop"  # Go to Stop mode
+                control["mode"] = Mode.STOP  # Go to Stop mode
                 control["updated"] = True
                 write_control(control, WriteKind.MERGE, origin="app")
         if command == "read_tr":
@@ -53,9 +54,9 @@ def tuner_page():
                 control["tuning_mode"] = True  # Enable tuning mode
                 write_control(control, WriteKind.MERGE, origin="app")
 
-            if control["mode"] == "Stop":
+            if control["mode"] == Mode.STOP:
                 # Turn on Monitor Mode if the system is stopped
-                control["mode"] = "Monitor"  # Enable monitor mode
+                control["mode"] = Mode.MONITOR  # Enable monitor mode
                 control["updated"] = True
                 write_control(control, WriteKind.MERGE, origin="app")
 
@@ -68,9 +69,9 @@ def tuner_page():
             if control["tuning_mode"]:
                 control["tuning_mode"] = False  # Disable tuning mode
                 write_control(control, WriteKind.MERGE, origin="app")
-            if control["mode"] == "Monitor":
+            if control["mode"] == Mode.MONITOR:
                 # If in Monitor Mode, stop
-                control["mode"] = "Stop"  # Go to Stop mode
+                control["mode"] = Mode.STOP  # Go to Stop mode
                 control["updated"] = True
                 write_control(control, WriteKind.MERGE, origin="app")
 
@@ -111,9 +112,9 @@ def tuner_page():
                 read_autotune(flush=True)  # Flush autotune data
                 first_run = True
 
-            if control["mode"] == "Stop":
+            if control["mode"] == Mode.STOP:
                 # Turn on Monitor Mode if the system is stopped
-                control["mode"] = "Monitor"  # Enable monitor mode
+                control["mode"] = Mode.MONITOR  # Enable monitor mode
                 control["updated"] = True
                 write_control(control, WriteKind.MERGE, origin="app")
 

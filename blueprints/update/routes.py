@@ -2,6 +2,7 @@ import os
 import time
 from flask import render_template, request, jsonify, redirect, render_template_string
 from common.common import write_log
+from common.modes import Mode
 from common.datastore_accessors import read_settings, read_control
 from common.system import is_real_hardware
 from updater import (
@@ -91,7 +92,7 @@ def update_page(action=None):
                 )
         if "do_update" in r:
             control = read_control()
-            if control["mode"] == "Stop":
+            if control["mode"] == Mode.STOP:
                 set_updater_install_status(0, "Starting Update...", "")
                 if is_real_hardware():
                     os.system(f"{python_exec} updater.py -u {update_data['branch_target']} -p &")  # Kickoff Update
@@ -113,7 +114,7 @@ def update_page(action=None):
 
         if "do_upgrade" in r:
             control = read_control()
-            if control["mode"] == "Stop":
+            if control["mode"] == Mode.STOP:
                 set_updater_install_status(0, "Starting Upgrade...", "")
                 if is_real_hardware():
                     os.system(f"{python_exec} updater.py -i &")
