@@ -654,3 +654,41 @@ def test_cookfile_update_bare_get_returns_error(live_server, page):
     resp = page.request.get(f"{live_server}/cookfile/update")
     assert resp.status == 200
     assert resp.json() == {"result": "ERROR"}
+
+
+def test_cookfile_update_media_bare_filename_returns_error(live_server, page, _isolated_history_folder):
+    """Task 11: `media` branch reads `read_json_file_data(filename, "comments")`
+    without checking `status`. For a bare/nonexistent filename that read
+    fails and returns `({}, "Error: Unspecified")`, but the branch inits
+    `result = "OK"` and loops `for index in range(0, len(comments))` --
+    zero iterations over the empty dict -- so it falls straight through to
+    `jsonify({"result": "OK"})`: a false success for a file that was never
+    read. Must report "ERROR" instead."""
+    resp = page.request.post(
+        f"{live_server}/cookfile/update",
+        data={
+            "media": True,
+            "filename": "Nonexistent-CookFile.pifire",
+            "assetfilename": "photo.jpg",
+            "commentid": "c1",
+            "state": "unselected",
+        },
+    )
+    assert resp.status == 200
+    assert resp.json() == {"result": "ERROR"}
+
+
+def test_cookfile_update_comments_commentnew_bare_filename_returns_error(live_server, page, _isolated_history_folder):
+    """Task 11: `comments` branch reads `cookfiledata, status =
+    read_json_file_data(...)` but never checks `status` before the
+    `commentnew` sub-branch does `cookfiledata.append(...)`. For a bare/
+    nonexistent filename the read fails and returns `{}` (a dict, not a
+    list) -- `dict.append` doesn't exist, so this used to raise
+    AttributeError -> HTTP 500. Must report a clean "ERROR" result instead
+    of crashing."""
+    resp = page.request.post(
+        f"{live_server}/cookfile/update",
+        data={"comments": True, "filename": "Nonexistent-CookFile.pifire", "commentnew": "First comment"},
+    )
+    assert resp.status == 200
+    assert resp.json() == {"result": "ERROR"}

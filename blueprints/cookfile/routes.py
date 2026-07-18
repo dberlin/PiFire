@@ -445,6 +445,8 @@ def cookfile_update():
         if "comments" in requestjson:
             filename = requestjson["filename"]
             cookfiledata, status = read_json_file_data(filename, "comments")
+            if status != "OK":
+                return jsonify({"result": "ERROR"})
 
             if "commentnew" in requestjson:
                 now = datetime.datetime.now()
@@ -564,6 +566,8 @@ def cookfile_update():
             commentid = requestjson["commentid"]
             state = requestjson["state"]
             comments, status = read_json_file_data(filename, "comments")
+            if status != "OK":
+                return jsonify({"result": "ERROR"})
             result = "OK"
             for index in range(0, len(comments)):
                 if comments[index]["id"] == commentid:
