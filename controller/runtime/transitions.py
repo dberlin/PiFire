@@ -188,11 +188,28 @@ def _flameout_edges(*, setup):
     ]
 
 
-# {mode: {phase: [Edge, ...]}}; the "*" mode applies to every mode at that phase.
-# Smoke's flameout is declarative (Task 15); Hold + the universal max-temp edge
-# are added in Task 16.
+# {mode: {phase: [Edge, ...]}}; the "*" mode applies to every mode at that phase
+# and is walked FIRST (see evaluate_phase), so the universal max-temp trip keeps
+# priority over the mode-specific flameout -- matching the live pre_act order
+# (base.py max-temp before check_safety).
+#
+# NOTE: the inner-loop switch-off -> Stop edge is deliberately NOT migrated here.
+# It lives EARLIER in base.run (before the manual-override actuation block, not
+# at the pre_act safety point) and is stateful (edge-detection on the previous
+# switch reading), so a pure pre_act guard would both move it relative to
+# actuation and drop the edge-detection. It stays as the inline seam call in
+# base.run (like the bespoke recipe/startup writes left direct in Phase 1).
 GUARDS: dict[str, dict[str, list]] = {
+    "*": {
+        "pre_act": [
+            Edge(over_max_temp_guard, "Error", "safety", notify="Grill_Error_01", display=("text", "ERROR")),
+        ],
+    },
     "Smoke": {
+        "pre_loop": _flameout_edges(setup=True),
+        "pre_act": _flameout_edges(setup=False),
+    },
+    "Hold": {
         "pre_loop": _flameout_edges(setup=True),
         "pre_act": _flameout_edges(setup=False),
     },

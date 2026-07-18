@@ -17,7 +17,6 @@ from common.common import WriteKind
 from common.process_mon import Process_Monitor
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
-from controller.runtime.logic.safety import over_max_temp
 from controller.runtime.system_commands import process_system_commands
 from controller.runtime.transitions import request_transition, evaluate_phase
 
@@ -514,25 +513,17 @@ class ControlMode:
                 ctx.store.write_tr(in_data["probe_history"]["tr"])
 
             # ---- SAFETY (before any actuation) ----
-            # Max Temp Safety Control (UNIVERSAL): trip before the mode tick so
+            # Declarative pre_act guards, evaluated BEFORE the merged on_tick so
             # an unsafe temperature breaks the loop without cycling the auger or
-            # advancing the controller.
-            if over_max_temp(ptemp, self.settings["safety"]):
-                request_transition(
-                    ctx, control, "Error", kind="safety", display=("text", "ERROR"), notify="Grill_Error_01"
-                )
-                break
-
-            # ---- declarative pre_act guards (empty until Tasks 15-16; then the
-            # universal max-temp + the mode flameout edges live here). Placed
-            # AFTER the inline max-temp so that while max-temp is still inline
-            # (Task 15) its Error-first priority is preserved; once max-temp
-            # migrates into GUARDS["*"] (Task 16) evaluate_phase walks "*" first,
-            # keeping the same order. A fired guard breaks the loop. ----
+            # advancing the controller. GUARDS["*"]["pre_act"] holds the UNIVERSAL
+            # max-temp trip (walked first, so it keeps priority), then the mode's
+            # flameout edges (GUARDS["Smoke"]/["Hold"]). A fired guard breaks.
             if evaluate_phase(self, ctx, "pre_act", now, ptemp):
                 break
 
-            # ---- mode-specific per-tick safety check ----
+            # ---- mode-specific per-tick safety check (base default no-op now
+            # that Smoke/Hold flameout are declarative guards; the hook remains
+            # for any future mode override) ----
             if self.check_safety(now, ptemp):
                 break
 
