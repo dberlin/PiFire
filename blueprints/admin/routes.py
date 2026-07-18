@@ -16,10 +16,9 @@ from common.datastore_accessors import (
 )
 from common.settings_migration import read_settings_file
 from common.backups import read_pellet_db_file, backup_settings, backup_pellet_db
-from common.system import reboot_system, shutdown_system, restart_scripts, get_os_info
+from common.system import reboot_system, shutdown_system, restart_scripts, gather_system_info
 from common.defaults import default_settings, default_control
-from common.api_commands import process_command
-from common.app import allowed_file, get_supported_cmds, get_system_command_output
+from common.app import allowed_file
 from common.server_status import set_server_status, get_server_status
 from . import admin_bp
 
@@ -250,84 +249,12 @@ def admin_page(action=None):
 
         write_settings(settings)
 
-    """ 
-        Get System Information 
+    """
+        Get System Information
     """
 
-    system_info = {}
-
-    system_info["uptime"] = os.popen("uptime").readline()
-
-    system_info["os_info"] = _get_os_info()
-
-    system_info["network_info"] = {"Unknown": {"ip_address": "0.0.0.0", "mac_address": "00:00:00:00:00:00"}}
-
-    system_info["hardware_info"] = {
-        "total_ram": "Unknown",
-        "available_ram": "Unknown",
-        "cpu_info": {
-            "hardware": "Unknown",
-            "model": "Unknown",
-            "model_name": "Unknown",
-            "cores": "Unknown",
-            "frequency": "Unknown",
-        },
-    }
-
-    supported_cmds = get_supported_cmds()
-
-    if "check_wifi_quality" in supported_cmds:
-        process_command(action="sys", arglist=["check_wifi_quality"], origin="admin")  # Request supported commands
-        data = get_system_command_output(requested="check_wifi_quality")
-        if data["result"] != "OK":
-            event = data["message"]
-            errors.append(event)
-        control["system"]["wifi_quality_value"] = data["data"].get("wifi_quality_value", None)
-        control["system"]["wifi_quality_max"] = data["data"].get("wifi_quality_max", None)
-        control["system"]["wifi_quality_percentage"] = data["data"].get("wifi_quality_percentage", None)
-
-    if "check_throttled" in supported_cmds:
-        process_command(action="sys", arglist=["check_throttled"], origin="admin")  # Request supported commands
-        data = get_system_command_output(requested="check_throttled")
-        if data["result"] != "OK":
-            event = data["message"]
-            errors.append(event)
-        control["system"]["cpu_throttled"] = data["data"].get("cpu_throttled", None)
-        control["system"]["cpu_under_voltage"] = data["data"].get("cpu_under_voltage", None)
-
-        if control["system"]["cpu_throttled"] or control["system"]["cpu_under_voltage"]:
-            event = "CPU Throttled / Undervoltage event has occurred.  Check your power supply for proper voltage."
-            errors.append(event)
-
-    if "check_cpu_temp" in supported_cmds:
-        process_command(action="sys", arglist=["check_cpu_temp"], origin="admin")  # Request supported commands
-        data = get_system_command_output(requested="check_cpu_temp")
-        if data["result"] != "OK":
-            event = data["message"]
-            errors.append(event)
-        control["system"]["cpu_temp"] = data["data"].get("cpu_temp", None)
-
-    if "network_info" in supported_cmds:
-        process_command(action="sys", arglist=["network_info"], origin="admin")
-        data = get_system_command_output(requested="network_info")
-        if data["result"] != "OK":
-            event = data["message"]
-            errors.append(event)
-        else:
-            network_info = data.get("data", None)
-            if network_info:
-                system_info["network_info"] = network_info
-
-    if "hardware_info" in supported_cmds:
-        process_command(action="sys", arglist=["hardware_info"], origin="admin")
-        data = get_system_command_output(requested="hardware_info")
-        if data["result"] != "OK":
-            event = data["message"]
-            errors.append(event)
-        else:
-            system_info["hardware_info"] = data.get("data", {})
-
-    write_control(control, WriteKind.MERGE)
+    system_info, system_info_failures = gather_system_info(control)
+    errors.extend(system_info_failures)
 
     url = request.url_root
 
@@ -363,41 +290,3 @@ def _zip_files_logs(dir_name):
         for file_path in directory.rglob("*.log"):
             archive.write(file_path, arcname=file_path.relative_to(directory))
     return file_name
-
-
-def _get_os_info():
-    os_info = None
-    try:
-        os_info = read_generic_json("os_info.json")
-        if not os_info:
-            os_info = get_os_info()
-
-    except Exception as e:
-        current_app.logger.error(f"Error reading OS info: {e}")
-
-    if not os_info:
-        os_info = {
-            "PRETTY_NAME": "Unknown.",
-            "NAME": "Unknown.",
-            "VERSION_ID": "Unknown.",
-            "VERSION": "Unknown.",
-            "VERSION_CODENAME": "Unknown.",
-            "ARCHITECTURE": "Unknown.",
-            "BITS": "Unknown.",
-        }
-    else:
-        # Ensure the os_info has all expected keys
-        os_info.setdefault("PRETTY_NAME", "Unknown.")
-        os_info.setdefault("NAME", "Unknown.")
-        os_info.setdefault("VERSION_ID", "Unknown.")
-        os_info.setdefault("VERSION", "Unknown.")
-        os_info.setdefault("VERSION_CODENAME", "Unknown.")
-        os_info.setdefault("ARCHITECTURE", "Unknown.")
-        if os_info["ARCHITECTURE"] in ["armv7l", "armv6l", "armv5l", "arm", "i386", "i486", "i586", "i686"]:
-            os_info["BITS"] = "32-Bit"
-        elif os_info["ARCHITECTURE"] in ["aarch64", "x86_64"]:
-            os_info["BITS"] = "64-Bit"
-        else:
-            os_info["BITS"] = "Unknown"
-
-    return os_info

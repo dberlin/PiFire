@@ -56,10 +56,10 @@ from common.system import (
     restart_control,
     restart_webapp,
     restart_scripts,
-    get_os_info,
+    gather_system_info,
 )
 from common.api_commands import process_command
-from common.app import get_supported_cmds, update_probe_config
+from common.app import update_probe_config
 from flask import request
 from app import socketio
 from config import Config
@@ -903,61 +903,7 @@ def _response(result: str, message: str = None, data: dict = None):
 
 
 def _get_system_info(control):
-    system_info = {}
-
-    system_info["uptime"] = os.popen("uptime").readline()
-
-    system_info["os_info"] = _get_os_info()
-
-    system_info["network_info"] = {"Unknown": {"ip_address": "0.0.0.0", "mac_address": "00:00:00:00:00:00"}}
-
-    system_info["hardware_info"] = {
-        "total_ram": "Unknown",
-        "available_ram": "Unknown",
-        "cpu_info": {
-            "hardware": "Unknown",
-            "model": "Unknown",
-            "model_name": "Unknown",
-            "cores": "Unknown",
-            "frequency": "Unknown",
-        },
-    }
-
-    supported_cmds = get_supported_cmds()
-
-    if "check_wifi_quality" in supported_cmds:
-        process_command(action="sys", arglist=["check_wifi_quality"], origin="admin")  # Request supported commands
-        data = get_system_command_output(requested="check_wifi_quality")
-        control["system"]["wifi_quality_value"] = data["data"].get("wifi_quality_value", None)
-        control["system"]["wifi_quality_max"] = data["data"].get("wifi_quality_max", None)
-        control["system"]["wifi_quality_percentage"] = data["data"].get("wifi_quality_percentage", None)
-
-    if "check_throttled" in supported_cmds:
-        process_command(action="sys", arglist=["check_throttled"], origin="admin")  # Request supported commands
-        data = get_system_command_output(requested="check_throttled")
-        control["system"]["cpu_throttled"] = data["data"].get("cpu_throttled", None)
-        control["system"]["cpu_under_voltage"] = data["data"].get("cpu_under_voltage", None)
-
-    if "check_cpu_temp" in supported_cmds:
-        process_command(action="sys", arglist=["check_cpu_temp"], origin="admin")  # Request supported commands
-        data = get_system_command_output(requested="check_cpu_temp")
-        control["system"]["cpu_temp"] = data["data"].get("cpu_temp", None)
-
-    if "network_info" in supported_cmds:
-        process_command(action="sys", arglist=["network_info"], origin="admin")
-        data = get_system_command_output(requested="network_info")
-        if data["result"] == "OK":
-            network_info = data.get("data", None)
-            if network_info:
-                system_info["network_info"] = network_info
-
-    if "hardware_info" in supported_cmds:
-        process_command(action="sys", arglist=["hardware_info"], origin="admin")
-        data = get_system_command_output(requested="hardware_info")
-        if data["result"] == "OK":
-            system_info["hardware_info"] = data.get("data", {})
-
-    write_control(control, WriteKind.MERGE, origin="app-socketio")
+    system_info, _ = gather_system_info(control, origin="app-socketio")
 
     info_details = {
         "wifi_quality_value": control["system"]["wifi_quality_value"],
@@ -973,38 +919,3 @@ def _get_system_info(control):
     }
 
     return info_details
-
-
-def _get_os_info():
-    try:
-        os_info = read_generic_json("os_info.json")
-    except:
-        os_info = None
-
-    if not os_info:
-        os_info = get_os_info()
-
-    if not os_info:
-        os_info = {}
-
-    defaults = {
-        "PRETTY_NAME": "Unknown",
-        "NAME": "Unknown",
-        "VERSION_ID": "Unknown",
-        "VERSION": "Unknown",
-        "VERSION_CODENAME": "Unknown",
-        "ARCHITECTURE": "Unknown",
-    }
-
-    for key, default in defaults.items():
-        os_info.setdefault(key, default)
-
-    arch = os_info["ARCHITECTURE"]
-    if arch in {"armv7l", "armv6l", "armv5l", "arm", "i386", "i486", "i586", "i686"}:
-        os_info["BITS"] = "32-Bit"
-    elif arch in {"aarch64", "x86_64"}:
-        os_info["BITS"] = "64-Bit"
-    else:
-        os_info["BITS"] = "Unknown"
-
-    return os_info
