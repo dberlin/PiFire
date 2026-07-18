@@ -1,9 +1,9 @@
-from common.common import WriteKind
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.safety import evaluate_flameout, SafetyVerdict
 from controller.runtime.logic.smartstart import profile_cycle
 from controller.runtime.modes.base import ControlMode
+from controller.runtime.transitions import request_transition
 
 
 class SmokeMode(ControlMode):
@@ -70,20 +70,18 @@ class SmokeMode(ControlMode):
         )
         if verdict is SafetyVerdict.ERROR:
             status = "Inactive"
-            ctx.store.display_commands().push(("text", "ERROR"))
-            control["mode"] = "Error"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_02")
+            request_transition(ctx, control, "Error", kind="safety", display=("text", "ERROR"), notify="Grill_Error_02")
         elif verdict is SafetyVerdict.REIGNITE:
-            control["safety"]["reigniteretries"] -= 1
-            control["safety"]["reignitelaststate"] = self.name
             status = "Inactive"
-            ctx.store.display_commands().push(("text", "Re-Ignite"))
-            control["mode"] = "Reignite"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_03")
+            request_transition(
+                ctx,
+                control,
+                "Reignite",
+                kind="safety",
+                reignite_from=self.name,
+                display=("text", "Re-Ignite"),
+                notify="Grill_Error_03",
+            )
 
         # Apply Smart Start Settings if Enabled (Smoke re-applies the profile
         # already selected by a prior Startup/Reignite run -- no selection here)
@@ -131,19 +129,17 @@ class SmokeMode(ControlMode):
 
         verdict = evaluate_flameout(ptemp, control["safety"]["startuptemp"], control["safety"]["reigniteretries"])
         if verdict is SafetyVerdict.ERROR:
-            ctx.store.display_commands().push(("text", "ERROR"))
-            control["mode"] = "Error"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_02")
+            request_transition(ctx, control, "Error", kind="safety", display=("text", "ERROR"), notify="Grill_Error_02")
             return True
         elif verdict is SafetyVerdict.REIGNITE:
-            control["safety"]["reigniteretries"] -= 1
-            control["safety"]["reignitelaststate"] = self.name
-            ctx.store.display_commands().push(("text", "Re-Ignite"))
-            control["mode"] = "Reignite"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_03")
+            request_transition(
+                ctx,
+                control,
+                "Reignite",
+                kind="safety",
+                reignite_from=self.name,
+                display=("text", "Re-Ignite"),
+                notify="Grill_Error_03",
+            )
             return True
         return False
