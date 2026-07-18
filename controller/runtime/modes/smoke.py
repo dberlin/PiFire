@@ -1,7 +1,5 @@
-from common.common import WriteKind
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
-from controller.runtime.logic.safety import evaluate_flameout, SafetyVerdict
 from controller.runtime.logic.smartstart import profile_cycle
 from controller.runtime.modes.base import ControlMode
 
@@ -12,19 +10,19 @@ class SmokeMode(ControlMode):
     path, never the Startup/Reignite dc_fan pwm_duty_cycle special case);
     auger ON at setup (shared with Startup/Reignite/Hold/Prime); initializes
     the smoke-cycle timing (shared init path with Startup/Reignite); sets up
-    Recipe-mode triggers (shared with Hold). setup_safety() runs the pre-loop
-    flameout check FIRST (evaluate_flameout against the carried-over
-    afterstarttemp/startuptemp -- can abort into Error/Reignite before the
-    loop even starts), THEN applies smart-start (Smoke skips the
-    Startup/Reignite profile-SELECTION sub-branch and just re-applies
+    Recipe-mode triggers (shared with Hold). The pre-loop and in-loop flameout
+    checks are DECLARATIVE guard edges (GUARDS["Smoke"] in transitions.py, fired
+    by evaluate_phase at base.run's pre_loop/pre_act points) -- setup_safety()
+    survives only to re-apply smart-start (Smoke skips the Startup/Reignite
+    profile-SELECTION sub-branch and just re-applies
     control['smartstart']['profile_selected'] chosen by a prior Startup/
-    Reignite run). Per-tick, on_tick runs the shared (non-Hold) auger-cycle
-    toggle then delegates the fan work entirely to the shared
-    `_smoke_plus_fan_tick` helper -- Smoke never touches the Hold-only lid-
-    open/PWM-duty-from-temp/fan-assist parts (target_temp_achieved stays
-    False for Smoke, so that gate structurally excludes it). on_publish
-    publishes cycle_ratio to MQTT (shared with Startup); check_safety
-    re-checks flameout in-loop. No mode-specific teardown."""
+    Reignite run) and no longer has a check_safety override. Per-tick, on_tick
+    runs the shared (non-Hold) auger-cycle toggle then delegates the fan work
+    entirely to the shared `_smoke_plus_fan_tick` helper -- Smoke never touches
+    the Hold-only lid-open/PWM-duty-from-temp/fan-assist parts
+    (target_temp_achieved stays False for Smoke, so that gate structurally
+    excludes it). on_publish publishes cycle_ratio to MQTT (shared with
+    Startup). No mode-specific teardown."""
 
     name = "Smoke"
 
@@ -59,31 +57,13 @@ class SmokeMode(ControlMode):
         self.ctx.store.write_metrics(self.state.metrics)
 
     def setup_safety(self, ptemp) -> str:
+        # Flameout is now a declarative pre_loop guard (GUARDS["Smoke"], fired by
+        # evaluate_phase in base.run before the loop). This override survives only
+        # for the Smoke-specific smart-start re-application below; it always
+        # returns "Active" (the guard sets status to "Inactive" on a flameout).
         ctx = self.ctx
         control = self.control
         settings = self.settings
-        status = "Active"
-
-        # Check if the temperature of the grill dropped below the startuptemp
-        verdict = evaluate_flameout(
-            control["safety"]["afterstarttemp"], control["safety"]["startuptemp"], control["safety"]["reigniteretries"]
-        )
-        if verdict is SafetyVerdict.ERROR:
-            status = "Inactive"
-            ctx.store.display_commands().push(("text", "ERROR"))
-            control["mode"] = "Error"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_02")
-        elif verdict is SafetyVerdict.REIGNITE:
-            control["safety"]["reigniteretries"] -= 1
-            control["safety"]["reignitelaststate"] = self.name
-            status = "Inactive"
-            ctx.store.display_commands().push(("text", "Re-Ignite"))
-            control["mode"] = "Reignite"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_03")
 
         # Apply Smart Start Settings if Enabled (Smoke re-applies the profile
         # already selected by a prior Startup/Reignite run -- no selection here)
@@ -103,7 +83,7 @@ class SmokeMode(ControlMode):
             self.state.metrics.update(_mbits)
             ctx.store.write_metrics(self.state.metrics)
 
-        return status
+        return "Active"
 
     def on_settings_reload(self):
         _ct = smoke_cycle_times(self.settings["cycle_data"])
@@ -125,25 +105,5 @@ class SmokeMode(ControlMode):
         pid_data = {"cycle_ratio": round(self.state.cycle.ratio, 2)}
         self.ctx.notifications.check(self.settings, self.control, pid_data=pid_data)
 
-    def check_safety(self, now, ptemp) -> bool:
-        ctx = self.ctx
-        control = self.control
-
-        verdict = evaluate_flameout(ptemp, control["safety"]["startuptemp"], control["safety"]["reigniteretries"])
-        if verdict is SafetyVerdict.ERROR:
-            ctx.store.display_commands().push(("text", "ERROR"))
-            control["mode"] = "Error"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_02")
-            return True
-        elif verdict is SafetyVerdict.REIGNITE:
-            control["safety"]["reigniteretries"] -= 1
-            control["safety"]["reignitelaststate"] = self.name
-            ctx.store.display_commands().push(("text", "Re-Ignite"))
-            control["mode"] = "Reignite"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_03")
-            return True
-        return False
+    # check_safety is now a declarative pre_act guard (GUARDS["Smoke"]); the base
+    # ControlMode default (return False) applies here.

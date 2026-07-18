@@ -164,6 +164,142 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
     return control
 
 
+def _event_context(settings, control, label, target):
+    """Assemble the shared runtime values every EVENTS builder may read."""
+    date = datetime.datetime.now()
+    return {
+        "settings": settings,
+        "control": control,
+        "label": label,
+        "target": target,
+        "unit": settings["globals"]["units"],
+        "now": date.strftime("%m-%d %H:%M"),
+        "time": date.strftime("%H:%M"),
+        "day": date.strftime("%m/%d"),
+    }
+
+
+def _evt_probe_achieved(ctx):
+    title = f"{ctx['label']} Target Achieved"
+    body = f"{ctx['label']} target of {ctx['target']}{ctx['unit']} achieved at {ctx['time']} on {ctx['day']}"
+    return title, body, "pifire_temp_alerts", {"value1": True}
+
+
+def _evt_probe_limit(ctx):
+    title = f"{ctx['label']} Limit Reached"
+    body = f"{ctx['label']} limit of {ctx['target']}{ctx['unit']} exceeded at {ctx['time']} on {ctx['day']}"
+    return title, body, "pifire_temp_alerts", {"value1": True}
+
+
+def _evt_timer_expired(ctx):
+    return (
+        "Timer Complete",
+        "Your timer has expired, time to check your cook!",
+        "pifire_timer_alerts",
+        {"value1": "Your timer has expired."},
+    )
+
+
+def _evt_pellet_low(ctx):
+    pelletdb = read_pellet_db()
+    body = f"Your pellet level is currently at {pelletdb['current']['hopper_level']}%"
+    return "Low Pellet Level", body, "pifire_pellet_alerts", {"value1": body}
+
+
+def _evt_grill_error_01(ctx):
+    maxtemp = ctx["settings"]["safety"]["maxtemp"]
+    body = (
+        "Grill exceeded maximum temperature limit of "  # typo fix: "exceded" -> "exceeded" (deliberate, see Task 1 note)
+        + str(maxtemp)
+        + ctx["unit"]
+        + "! Shutting down. "
+        + str(ctx["now"])
+    )
+    return "Grill Error!", body, "pifire_error_alerts", {"value1": str(maxtemp)}
+
+
+def _evt_grill_error_02(ctx):
+    startuptemp = ctx["control"]["safety"]["startuptemp"]
+    body = (
+        "Grill temperature dropped below minimum startup temperature of "
+        + str(startuptemp)
+        + ctx["unit"]
+        + "! Shutting down to prevent firepot overload. "
+        + str(ctx["now"])
+    )
+    return "Grill Error!", body, "pifire_error_alerts", {"value1": str(startuptemp)}
+
+
+def _evt_grill_error_03(ctx):
+    startuptemp = ctx["control"]["safety"]["startuptemp"]
+    body = (
+        "Grill temperature dropped below minimum startup temperature of "
+        + str(startuptemp)
+        + ctx["unit"]
+        + "! Starting a re-ignite attempt, per user settings."
+    )
+    return "Grill Error!", body, "pifire_error_alerts", {"value1": str(startuptemp)}
+
+
+def _evt_recipe_step(ctx):
+    message = ctx["control"]["recipe"]["step_data"]["message"]
+    body = message + str(ctx["now"])
+    return "Recipe Message", body, "pifire_recipe_message", {"value1": message}
+
+
+def _evt_test_notify(ctx):
+    return (
+        "Test Notification",
+        "This is a test notification from PiFire.",
+        "pifire_test_message",
+        {"value1": "This is a test notification from PiFire."},
+    )
+
+
+def _evt_control_stopped(ctx):
+    return (
+        "Control Process Stopped!",
+        "The control process has encountered an issue and has been stopped. "
+        "Check on your grill as soon as possible to prevent damage!",
+        "pifire_error_alerts",
+        {"value1": "Control Process Stopped"},
+    )
+
+
+# Exact-key mapping of event string -> builder(ctx) -> (title, body, channel, query_args).
+# Looked up with EVENTS.get(notify_event); a miss falls through to the Unknown-Notification
+# fallback. Every caller passes an exact literal key (verified repo-wide -- no concatenation),
+# so exact-key lookup is behavior-identical to the old `"<key>" in notify_event` substring
+# ladder. Order is irrelevant for a dict .get().
+#
+# NOTE: "Grill_Error_00" and "Grill_Warning" are intentionally omitted -- both are dead,
+# never-emitted events (verified zero emitters repo-wide); they now route to the
+# Unknown-Notification fallback (approved behavior change, see plan Task 2).
+EVENTS = {
+    "Probe_Temp_Achieved": _evt_probe_achieved,
+    "Probe_Temp_Limit_Alarm": _evt_probe_limit,
+    "Timer_Expired": _evt_timer_expired,
+    "Pellet_Level_Low": _evt_pellet_low,
+    "Grill_Error_01": _evt_grill_error_01,
+    "Grill_Error_02": _evt_grill_error_02,
+    "Grill_Error_03": _evt_grill_error_03,
+    "Recipe_Step_Message": _evt_recipe_step,
+    "Test_Notify": _evt_test_notify,
+    "Control_Process_Stopped": _evt_control_stopped,
+}
+
+
+def _event_logger(settings):
+    """Return the shared 'events' logger, level set from settings.debug_mode."""
+    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
+    return create_logger(
+        "events",
+        filename="./logs/events.log",
+        messageformat="%(asctime)s [%(levelname)s] %(message)s",
+        level=log_level,
+    )
+
+
 def send_notifications(notify_event, label="Probe", target=0):
     """
     Build and send notification based on notify_event and write to log.
@@ -174,110 +310,15 @@ def send_notifications(notify_event, label="Probe", target=0):
     """
     settings = read_settings()
     control = read_control()
-    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
-    eventLogger = create_logger(
-        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
-    )
-    date = datetime.datetime.now()
-    now = date.strftime("%m-%d %H:%M")
-    time = date.strftime("%H:%M")
-    day = date.strftime("%m/%d")
+    eventLogger = _event_logger(settings)
+    ctx = _event_context(settings, control, label, target)
 
-    unit = settings["globals"]["units"]
-
-    if "Probe_Temp_Achieved" in notify_event:
-        title_message = f"{label} Target Achieved"
-        body_message = f"{label} target of {target}{unit} achieved at {time} on {day}"
-        channel = "pifire_temp_alerts"
-        query_args = {"value1": True}
-        eventLogger.info(body_message)
-    elif "Probe_Temp_Limit_Alarm" in notify_event:
-        title_message = f"{label} Limit Reached"
-        body_message = f"{label} limit of {target}{unit} exceeded at {time} on {day}"
-        channel = "pifire_temp_alerts"
-        query_args = {"value1": True}
-        eventLogger.info(body_message)
-    elif "Timer_Expired" in notify_event:
-        title_message = "Timer Complete"
-        body_message = "Your timer has expired, time to check your cook!"
-        channel = "pifire_timer_alerts"
-        query_args = {"value1": "Your timer has expired."}
-        eventLogger.info(body_message)
-    elif "Pellet_Level_Low" in notify_event:
-        pelletdb = read_pellet_db()
-        title_message = "Low Pellet Level"
-        body_message = f"Your pellet level is currently at {pelletdb['current']['hopper_level']}%"
-        channel = "pifire_pellet_alerts"
-        query_args = {"value1": body_message}
-        eventLogger.info(body_message)
-    elif "Grill_Error_00" in notify_event:
-        title_message = "Grill Error!"
-        body_message = "Your grill has experienced an error and will shutdown now. " + str(now)
-        channel = "pifire_error_alerts"
-        query_args = {"value1": "Your grill has experienced an error and will shutdown now. "}
-        eventLogger.info(body_message)
-    elif "Grill_Error_01" in notify_event:
-        title_message = "Grill Error!"
-        body_message = (
-            "Grill exceded maximum temperature limit of "
-            + str(settings["safety"]["maxtemp"])
-            + unit
-            + "! Shutting down. "
-            + str(now)
-        )
-        channel = "pifire_error_alerts"
-        query_args = {"value1": str(settings["safety"]["maxtemp"])}
-        eventLogger.info(body_message)
-    elif "Grill_Error_02" in notify_event:
-        control = read_control()
-        title_message = "Grill Error!"
-        body_message = (
-            "Grill temperature dropped below minimum startup temperature of "
-            + str(control["safety"]["startuptemp"])
-            + unit
-            + "! Shutting down to prevent firepot overload. "
-            + str(now)
-        )
-        channel = "pifire_error_alerts"
-        query_args = {"value1": str(control["safety"]["startuptemp"])}
-        eventLogger.info(body_message)
-    elif "Grill_Error_03" in notify_event:
-        control = read_control()
-        title_message = "Grill Error!"
-        body_message = (
-            "Grill temperature dropped below minimum startup temperature of "
-            + str(control["safety"]["startuptemp"])
-            + unit
-            + "! Starting a re-ignite attempt, per user settings."
-        )
-        channel = "pifire_error_alerts"
-        query_args = {"value1": str(control["safety"]["startuptemp"])}
-        eventLogger.info(body_message)
-    elif "Grill_Warning" in notify_event:
-        title_message = "Grill Warning!"
-        body_message = "Your grill has experienced a warning condition. Please check the logs. " + str(now)
-        channel = "pifire_error_alerts"
-        query_args = {"value1": "General Warning."}
-        eventLogger.info(body_message)
-    elif "Recipe_Step_Message" in notify_event:
-        title_message = "Recipe Message"
-        body_message = control["recipe"]["step_data"]["message"] + str(now)
-        channel = "pifire_recipe_message"
-        query_args = {"value1": control["recipe"]["step_data"]["message"]}
-        eventLogger.info(body_message)
-    elif "Test_Notify" in notify_event:
-        title_message = "Test Notification"
-        body_message = "This is a test notification from PiFire."
-        channel = "pifire_test_message"
-        query_args = {"value1": "This is a test notification from PiFire."}
-        eventLogger.info(body_message)
-    elif "Control_Process_Stopped" in notify_event:
-        title_message = "Control Process Stopped!"
-        body_message = "The control process has encountered an issue and has been stopped. Check on your grill as soon as possible to prevent damage!"
-        channel = "pifire_error_alerts"
-        query_args = {"value1": "Control Process Stopped"}
+    builder = EVENTS.get(notify_event)
+    if builder is not None:
+        title_message, body_message, channel, query_args = builder(ctx)
         eventLogger.info(body_message)
     else:
+        now = ctx["now"]
         title_message = "PiFire: Unknown Notification issue"
         body_message = "Whoops! PiFire had the following unhandled notify event: " + notify_event + " at " + str(now)
         channel = "default"
@@ -316,10 +357,7 @@ def _send_apprise_notifications(settings, title_message, body_message):
     :param title_message: Message Title
     :param body_message: Message Body
     """
-    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
-    eventLogger = create_logger(
-        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
-    )
+    eventLogger = _event_logger(settings)
     if len(settings["notify_services"]["apprise"]["locations"]):
         eventLogger.info(
             "Sending Apprise Notifications: " + ", ".join(settings["notify_services"]["apprise"]["locations"])
@@ -334,6 +372,24 @@ def _send_apprise_notifications(settings, title_message, body_message):
         eventLogger.warning("No Apprise Locations Configured")
 
 
+def _send_apprise_url(settings, urls, title_message, body_message, service_name):
+    """Add each apprise URL and notify; log success/failure under service_name."""
+    eventLogger = _event_logger(settings)
+    appriseHandler = apprise.Apprise()
+    for apprise_url in urls:
+        appriseHandler.add(apprise_url)
+    try:
+        result = appriseHandler.notify(title=title_message, body=body_message)
+        if result:
+            eventLogger.debug(f"{service_name} Notification was a success!")
+        else:
+            eventLogger.warning(f"{service_name} Notification failed!")
+    except Exception as e:
+        eventLogger.warning(f"{service_name} Notification failed: {e}")
+    except:
+        eventLogger.warning(f"{service_name} Notification failed for unknown reason.")
+
+
 def _send_pushover_notification(settings, title_message, body_message):
     """
     Send Pushover Notifications
@@ -342,36 +398,13 @@ def _send_pushover_notification(settings, title_message, body_message):
     :param title_message: Message Title
     :param body_message: Message Body
     """
-    eventLogger = create_logger(
-        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s"
-    )
-    if settings["globals"]["debug_mode"]:
-        eventLogger.setLevel(logging.DEBUG)
-    else:
-        eventLogger.setLevel(logging.INFO)
-
-    appriseHandler = apprise.Apprise()
-
     token = settings["notify_services"]["pushover"]["APIKey"]
     public_url = settings["notify_services"]["pushover"]["PublicURL"]
-
-    for user in settings["notify_services"]["pushover"]["UserKeys"].split(","):
-        user_id = user.strip()
-        apprise_url = f"pover://{user_id}@{token}?url={public_url}"
-        appriseHandler.add(apprise_url)
-
-    try:
-        result = appriseHandler.notify(title=title_message, body=body_message)
-
-        if result:
-            eventLogger.debug(f"Pushover Notification to {user} was a success!")
-        else:
-            eventLogger.warning(f"Pushover Notification to {user} failed!")
-
-    except Exception as e:
-        eventLogger.warning(f"Pushover Notification to {user} failed: {e}")
-    except:
-        eventLogger.warning(f"Pushover Notification to {user} failed for unknown reason.")
+    urls = [
+        f"pover://{user.strip()}@{token}?url={public_url}"
+        for user in settings["notify_services"]["pushover"]["UserKeys"].split(",")
+    ]
+    _send_apprise_url(settings, urls, title_message, body_message, "Pushover")
 
 
 def _send_pushbullet_notification(settings, title_message, body_message):
@@ -383,34 +416,10 @@ def _send_pushbullet_notification(settings, title_message, body_message):
     :param body_message: Message Body
     :return:
     """
-    eventLogger = create_logger(
-        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s"
-    )
-    if settings["globals"]["debug_mode"]:
-        eventLogger.setLevel(logging.DEBUG)
-    else:
-        eventLogger.setLevel(logging.INFO)
-
-    appriseHandler = apprise.Apprise()
-
     api_key = settings["notify_services"]["pushbullet"]["APIKey"]
     public_url = settings["notify_services"]["pushbullet"]["PublicURL"]
-
-    apprise_url = f"pbul://{api_key}@{api_key}?url={public_url}"
-    appriseHandler.add(apprise_url)
-
-    try:
-        result = appriseHandler.notify(title=title_message, body=body_message)
-
-        if result:
-            eventLogger.debug(f"Push Bullet Notification to {api_key} was a success!")
-        else:
-            eventLogger.warning(f"Push Bullet Notification to {api_key} failed!")
-
-    except Exception as e:
-        eventLogger.warning(f"Push Bullet Notification to {api_key} failed: {e}")
-    except:
-        eventLogger.warning(f"Push Bullet Notification to {api_key} failed for unknown reason.")
+    urls = [f"pbul://{api_key}@{api_key}?url={public_url}"]
+    _send_apprise_url(settings, urls, title_message, body_message, "Pushbullet")
 
 
 def _send_onesignal_notification(settings, title_message, body_message, channel):
@@ -422,10 +431,7 @@ def _send_onesignal_notification(settings, title_message, body_message, channel)
     :param body_message: Message Body
     :param channel: Android Notifications Channel
     """
-    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
-    eventLogger = create_logger(
-        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
-    )
+    eventLogger = _event_logger(settings)
     app_id = settings["notify_services"]["onesignal"]["app_id"]
     devices = settings["notify_services"]["onesignal"]["devices"]
     url = "https://onesignal.com/api/v1/notifications"
@@ -483,10 +489,7 @@ def _send_ifttt_notification(settings, notify_event, query_args):
     :param notify_event: String Event
     :param query_args: Query Args
     """
-    log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
-    eventLogger = create_logger(
-        "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
-    )
+    eventLogger = _event_logger(settings)
     key = settings["notify_services"]["ifttt"]["APIKey"]
     url = "https://maker.ifttt.com/trigger/" + notify_event + "/with/key/" + key
 

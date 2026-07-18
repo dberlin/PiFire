@@ -2,7 +2,6 @@ from common.common import WriteKind
 from controller.runtime.logic.cycle import hold_initial_cycle
 from controller.runtime.logic.fan import start_fan, smoke_plus_max_ratio, fan_assist_times
 from controller.runtime.logic.pwm import hold_duty_cycle
-from controller.runtime.logic.safety import evaluate_flameout, SafetyVerdict
 from controller.runtime.modes.base import ControlMode
 import controller.runtime.runner as _runner_mod
 
@@ -22,10 +21,11 @@ class HoldMode(ControlMode):
     `commands_fan()`), lid-open detection, and the PWM-duty-from-temp-profile /
     fan-assist-PID fan control paths.
 
-    setup_safety() runs the pre-loop flameout check FIRST (evaluate_flameout
-    against the carried-over afterstarttemp/startuptemp -- can abort into
-    Error/Reignite before the loop even starts), THEN also aborts to
-    'Inactive' if the runner failed to build (controller module load error).
+    The pre-loop and in-loop flameout checks are DECLARATIVE guard edges
+    (GUARDS["Hold"] in transitions.py, fired by evaluate_phase at base.run's
+    pre_loop/pre_act points). setup_safety() survives only to abort to 'Inactive'
+    if the runner failed to build (controller module load error); there is no
+    check_safety override.
 
     Per-tick, on_tick() first handles the `controller_update` reconfigure
     request, then runs the Hold-specific controller sub-block (submit the
@@ -42,7 +42,6 @@ class HoldMode(ControlMode):
     `_smoke_plus_fan_tick` helper (gated on target_temp_achieved for Hold,
     unlike Smoke which always runs it).
 
-    check_safety() re-checks flameout in-loop before any actuation.
     status_fragment() adds the Hold-only primary_setpoint/lid_open_detected/
     lid_open_endtime status fields. No mode-specific teardown (Hold is not in
     the Shutdown/Monitor/Manual/Prime power-off teardown gate, nor the
@@ -100,35 +99,11 @@ class HoldMode(ControlMode):
         self.state.controller.cycle_start = self.ctx.clock.now()
 
     def setup_safety(self, ptemp) -> str:
-        ctx = self.ctx
-        control = self.control
-        status = "Active"
-
-        # Check if the temperature of the grill dropped below the startuptemp
-        verdict = evaluate_flameout(
-            control["safety"]["afterstarttemp"], control["safety"]["startuptemp"], control["safety"]["reigniteretries"]
-        )
-        if verdict is SafetyVerdict.ERROR:
-            status = "Inactive"
-            ctx.store.display_commands().push(("text", "ERROR"))
-            control["mode"] = "Error"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_02")
-        elif verdict is SafetyVerdict.REIGNITE:
-            control["safety"]["reigniteretries"] -= 1
-            control["safety"]["reignitelaststate"] = self.name
-            status = "Inactive"
-            ctx.store.display_commands().push(("text", "Re-Ignite"))
-            control["mode"] = "Reignite"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_03")
-
-        if self._controller_status == "Inactive":
-            status = "Inactive"
-
-        return status
+        # Flameout is now a declarative pre_loop guard (GUARDS["Hold"], fired by
+        # evaluate_phase in base.run before the loop). This override survives only
+        # for the Hold-specific controller-build-failure abort: if the runner
+        # failed to build (controller module load error), skip the work loop.
+        return "Inactive" if self._controller_status == "Inactive" else "Active"
 
     def on_tick(self, now, ptemp, current_output_status):
         import control as _control
@@ -309,28 +284,8 @@ class HoldMode(ControlMode):
             controller_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
             self.ctx.notifications.check(settings, control, pid_data=controller_data)
 
-    def check_safety(self, now, ptemp) -> bool:
-        ctx = self.ctx
-        control = self.control
-
-        verdict = evaluate_flameout(ptemp, control["safety"]["startuptemp"], control["safety"]["reigniteretries"])
-        if verdict is SafetyVerdict.ERROR:
-            ctx.store.display_commands().push(("text", "ERROR"))
-            control["mode"] = "Error"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_02")
-            return True
-        elif verdict is SafetyVerdict.REIGNITE:
-            control["safety"]["reigniteretries"] -= 1
-            control["safety"]["reignitelaststate"] = self.name
-            ctx.store.display_commands().push(("text", "Re-Ignite"))
-            control["mode"] = "Reignite"
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-            ctx.notifications.send("Grill_Error_03")
-            return True
-        return False
+    # check_safety is now a declarative pre_act guard (GUARDS["Hold"]); the base
+    # ControlMode default (return False) applies here.
 
     def status_fragment(self) -> dict:
         return {"lid_open_detected": self.state.lid.open_detected, "lid_open_endtime": self.state.lid.expires}

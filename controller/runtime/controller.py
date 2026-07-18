@@ -19,6 +19,7 @@ Notification/cookfile helpers (`check_notify`, `send_notifications`,
 monkeypatch them.
 """
 
+import copy
 import os
 
 from common.common import WriteKind
@@ -31,6 +32,7 @@ from os.path import exists
 
 from controller.runtime.state import WorkCycleState
 from controller.runtime.system_commands import process_system_commands
+from controller.runtime.transitions import request_transition
 from controller.runtime.modes.monitor import MonitorMode
 from controller.runtime.modes.manual import ManualMode
 from controller.runtime.modes.shutdown import ShutdownMode
@@ -86,16 +88,10 @@ class Controller:
         return run_work_cycle(mode, self.ctx)
 
     def next_mode(self, next_mode, setpoint=0):
-        ctx = self.ctx
-        ctx.store.execute_control_writes()
-        control = ctx.store.read_control()
-        # If no other request, then transition to next mode, otherwise exit
-        if not control["updated"]:
-            control["mode"] = next_mode
-            control["primary_setpoint"] = setpoint if next_mode == "Hold" else 0  # If next mode is 'Hold'
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-        return control
+        # The "natural" kind flushes deferred writes, re-reads control, and
+        # yields if a higher-priority transition already landed this cycle --
+        # behavior-equivalent to the old guarded inline write.
+        return request_transition(self.ctx, self.ctx.store.read_control(), next_mode, kind="natural", setpoint=setpoint)
 
     def process_system_commands(self):
         process_system_commands(self.ctx)
@@ -138,7 +134,12 @@ class Controller:
         while step_num < num_steps:
             # 4a. Setup all step data and write to control
             control["recipe"]["step"] = step_num
-            control["recipe"]["step_data"] = recipe["steps"][step_num]
+            # Copy the step so the in-place trigger_temps remap below does not
+            # corrupt the source recipe -- otherwise a reignite retry (which
+            # re-enters step setup for the same step_num) reads a step whose
+            # trigger_temps were already replaced with the probe-mapped form and
+            # KeyErrors on ["primary"].
+            control["recipe"]["step_data"] = copy.deepcopy(recipe["steps"][step_num])
             """ Setup trigger_temps structure that the work_cycle expects, mapping to real probes """
             trigger_temps = {}
             trigger_temps[settings["recipe"]["probe_map"]["primary"]] = recipe["steps"][step_num]["trigger_temps"][
@@ -183,10 +184,15 @@ class Controller:
 
         # If recipe is exiting normally (i.e. no other mode requested, then initiate stop mode)
         if not control["updated"] or (step_num == num_steps):
-            control["updated"] = True
-            control["mode"] = "Stop"
             self.eventLogger.info("Recipe mode ended.")
-        ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            # Genuine terminal transition -> route through the seam (mode=Stop,
+            # updated, write). The recipe-field cleanup above is carried on the
+            # same control dict, so the seam's single OVERWRITE persists it too.
+            request_transition(self.ctx, control, "Stop", kind="terminal")
+        else:
+            # Cancel/break case: no mode transition here (the requested mode is
+            # already in control); just persist the recipe-field cleanup.
+            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
 
         return ()
 
@@ -406,102 +412,134 @@ class Controller:
 
                 store.read_current(zero_out=True)  # Zero out the current values
 
-            # Prime (dump preset amount of pellets into the firepot)
-            elif self.control["mode"] == "Prime":
-                if not settings["platform"]["standalone"] and not grill_platform.get_input_status():
-                    self.eventLogger.warning(
-                        "PiFire is set to OFF. This doesn't prevent startup, but this means the switch won't behave as normal."
-                    )
-                # Call Work Cycle for Startup Mode
-                self.work_cycle("Prime")
-                # Select Next Mode
-                self.settings = settings = store.read_settings()
-                self.next_mode(
-                    self.control["next_mode"], setpoint=settings["startup"]["start_to_mode"]["primary_setpoint"]
-                )
+            else:
+                # Per-mode work cycle dispatch (Prime/Startup/Smoke/Hold/Shutdown/
+                # Monitor/Manual/Recipe/Reignite). The Stop/Error terminal cleanup
+                # above stays inline (it is not a per-mode work cycle).
+                handler = self._MODE_DISPATCH.get(self.control["mode"])
+                if handler is not None:
+                    handler(self)
 
-            # Startup (startup sequence)
-            elif self.control["mode"] == "Startup":
-                if not settings["platform"]["standalone"] and not grill_platform.get_input_status():
-                    self.eventLogger.warning(
-                        "PiFire is set to OFF. This doesn't prevent startup, but this means the switch won't behave as normal."
-                    )
-                self.settings = settings = store.read_settings()
-                # Clear History (in the case it wasn't already cleared fromt he last run)
-                self.eventLogger.debug("Clearing History and Current Log on Startup Mode.")
-                store.read_history(0, flushhistory=True)  # Clear all history
-                # Check if Prime on Startup is selected
-                if settings["startup"]["prime_on_startup"] > 0:
-                    self.control["prime_amount"] = settings["startup"]["prime_on_startup"]
-                    self.control["mode"] = "Prime"
-                    store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
-                    # Call Work Cycle for Prime Mode
-                    self.work_cycle("Prime")
-                    self.control = (
-                        store.read_control()
-                    )  # Refresh control in case any changes were made during the cycle
-                    if self.control["mode"] in ["Prime", "Startup"]:
-                        self.control["updated"] = False
-                        self.control["mode"] = "Startup"
-                # Check if there was a mode change during Priming
-                if self.control["mode"] == "Startup":
-                    # Setup Next Mode (after startup mode)
-                    self.control["next_mode"] = settings["startup"]["start_to_mode"]["after_startup_mode"]
-                    store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
-                    # Call Work Cycle for Startup Mode
-                    self.work_cycle("Startup")
-                    # Select Next Mode
-                    self.settings = settings = store.read_settings()
-                    self.next_mode(
-                        self.control["next_mode"], setpoint=settings["startup"]["start_to_mode"]["primary_setpoint"]
-                    )
-
-            # Smoke (smoke cycle)
-            elif self.control["mode"] == "Smoke":
-                self.work_cycle("Smoke")
-                self.next_mode(self.control["next_mode"])
-
-            # Hold (hold at setpoint)
-            elif self.control["mode"] == "Hold":
-                self.work_cycle("Hold")
-                self.next_mode(self.control["next_mode"])
-
-            # Shutdown (shutdown sequence)
-            elif self.control["mode"] == "Shutdown":
-                self.control["next_mode"] = "Stop"
-                store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
-                self.work_cycle("Shutdown")
-                self.next_mode(self.control["next_mode"])
-                if settings["shutdown"]["auto_power_off"]:
-                    self.eventLogger.info("Shutdown mode ended powering off grill")
-                    os.system("sleep 3 && sudo shutdown -h now &")
-
-            # Monitor (monitor the OEM controller)
-            elif self.control["mode"] == "Monitor":
-                self.control["status"] = "monitor"  # Set status to monitor
-                store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
-                self.work_cycle("Monitor")
-
-            # Manual Mode
-            elif self.control["mode"] == "Manual":
-                self.work_cycle("Manual")
-
-            # Recipe Mode
-            elif self.control["mode"] == "Recipe":
-                self.recipe_mode(start_step=self.control["recipe"]["start_step"])
-
-            # Reignite (reignite sequence)
-            elif self.control["mode"] == "Reignite":
-                if (not settings["platform"]["standalone"]) and (not grill_platform.get_input_status()):
-                    self.eventLogger.warning(
-                        "PiFire is set to OFF. This doesn't prevent reignite, "
-                        "but this means the switch won't behave as normal."
-                    )
-                self.control["next_mode"] = self.control["safety"]["reignitelaststate"]
-                setpoint = self.control["primary_setpoint"]
-                store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
-                self.work_cycle("Reignite")
-                self.next_mode(self.control["next_mode"], setpoint=setpoint)
+            # Dispatch handlers may reload settings (Prime/Startup read fresh);
+            # re-sync the local so the MQTT check below sees what the legacy
+            # elif-ladder saw.
+            settings = self.settings
 
         if settings["notify_services"].get("mqtt") != None and settings["notify_services"]["mqtt"]["enabled"]:
             check_notify(settings, self.control, pelletdb=self.pelletdb)
+
+    # --- per-mode dispatch handlers (registered in _MODE_DISPATCH below) ---
+
+    def _dispatch_prime(self):
+        # Prime (dump preset amount of pellets into the firepot)
+        store = self.ctx.store
+        settings = self.settings
+        grill_platform = self.grill_platform
+        if not settings["platform"]["standalone"] and not grill_platform.get_input_status():
+            self.eventLogger.warning(
+                "PiFire is set to OFF. This doesn't prevent startup, but this means the switch won't behave as normal."
+            )
+        # Call Work Cycle for Startup Mode
+        self.work_cycle("Prime")
+        # Select Next Mode
+        self.settings = settings = store.read_settings()
+        self.next_mode(self.control["next_mode"], setpoint=settings["startup"]["start_to_mode"]["primary_setpoint"])
+
+    def _dispatch_startup(self):
+        # Startup (startup sequence)
+        store = self.ctx.store
+        settings = self.settings
+        grill_platform = self.grill_platform
+        if not settings["platform"]["standalone"] and not grill_platform.get_input_status():
+            self.eventLogger.warning(
+                "PiFire is set to OFF. This doesn't prevent startup, but this means the switch won't behave as normal."
+            )
+        self.settings = settings = store.read_settings()
+        # Clear History (in the case it wasn't already cleared fromt he last run)
+        self.eventLogger.debug("Clearing History and Current Log on Startup Mode.")
+        store.read_history(0, flushhistory=True)  # Clear all history
+        # Check if Prime on Startup is selected
+        if settings["startup"]["prime_on_startup"] > 0:
+            self.control["prime_amount"] = settings["startup"]["prime_on_startup"]
+            self.control["mode"] = "Prime"
+            store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            # Call Work Cycle for Prime Mode
+            self.work_cycle("Prime")
+            self.control = store.read_control()  # Refresh control in case any changes were made during the cycle
+            if self.control["mode"] in ["Prime", "Startup"]:
+                self.control["updated"] = False
+                self.control["mode"] = "Startup"
+        # Check if there was a mode change during Priming
+        if self.control["mode"] == "Startup":
+            # Setup Next Mode (after startup mode)
+            self.control["next_mode"] = settings["startup"]["start_to_mode"]["after_startup_mode"]
+            store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            # Call Work Cycle for Startup Mode
+            self.work_cycle("Startup")
+            # Select Next Mode
+            self.settings = settings = store.read_settings()
+            self.next_mode(self.control["next_mode"], setpoint=settings["startup"]["start_to_mode"]["primary_setpoint"])
+
+    def _dispatch_smoke(self):
+        # Smoke (smoke cycle)
+        self.work_cycle("Smoke")
+        self.next_mode(self.control["next_mode"])
+
+    def _dispatch_hold(self):
+        # Hold (hold at setpoint)
+        self.work_cycle("Hold")
+        self.next_mode(self.control["next_mode"])
+
+    def _dispatch_shutdown(self):
+        # Shutdown (shutdown sequence)
+        store = self.ctx.store
+        settings = self.settings
+        self.control["next_mode"] = "Stop"
+        store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+        self.work_cycle("Shutdown")
+        self.next_mode(self.control["next_mode"])
+        if settings["shutdown"]["auto_power_off"]:
+            self.eventLogger.info("Shutdown mode ended powering off grill")
+            os.system("sleep 3 && sudo shutdown -h now &")
+
+    def _dispatch_monitor(self):
+        # Monitor (monitor the OEM controller)
+        store = self.ctx.store
+        self.control["status"] = "monitor"  # Set status to monitor
+        store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+        self.work_cycle("Monitor")
+
+    def _dispatch_manual(self):
+        # Manual Mode
+        self.work_cycle("Manual")
+
+    def _dispatch_recipe(self):
+        # Recipe Mode
+        self.recipe_mode(start_step=self.control["recipe"]["start_step"])
+
+    def _dispatch_reignite(self):
+        # Reignite (reignite sequence)
+        store = self.ctx.store
+        settings = self.settings
+        grill_platform = self.grill_platform
+        if (not settings["platform"]["standalone"]) and (not grill_platform.get_input_status()):
+            self.eventLogger.warning(
+                "PiFire is set to OFF. This doesn't prevent reignite, but this means the switch won't behave as normal."
+            )
+        self.control["next_mode"] = self.control["safety"]["reignitelaststate"]
+        setpoint = self.control["primary_setpoint"]
+        store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+        self.work_cycle("Reignite")
+        self.next_mode(self.control["next_mode"], setpoint=setpoint)
+
+    _MODE_DISPATCH = {
+        "Prime": _dispatch_prime,
+        "Startup": _dispatch_startup,
+        "Smoke": _dispatch_smoke,
+        "Hold": _dispatch_hold,
+        "Shutdown": _dispatch_shutdown,
+        "Monitor": _dispatch_monitor,
+        "Manual": _dispatch_manual,
+        "Recipe": _dispatch_recipe,
+        "Reignite": _dispatch_reignite,
+    }
