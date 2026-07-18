@@ -34,14 +34,14 @@
 Imported Libraries
 """
 import time
-from controller.base import ControllerBase
+from controller.pid_base import PIDControllerBase
 
 """
 Class Definition
 """
 
 
-class Controller(ControllerBase):
+class Controller(PIDControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
 
@@ -68,17 +68,6 @@ class Controller(ControllerBase):
         self.last = 150
 
         self.set_target(0.0)
-
-    def _calculate_gains(self, pb, ti, td):
-        if pb == 0:
-            self.kp = 0
-        else:
-            self.kp = -1 / pb
-        if ti == 0:
-            self.ki = 0
-        else:
-            self.ki = self.kp / ti
-        self.kd = self.kp * td
 
     def update(self, current):
         # P
@@ -108,10 +97,3 @@ class Controller(ControllerBase):
         self.last_update = time.time()
 
         return self.u
-
-    def set_target(self, set_point):
-        self.set_point = set_point
-        self.error = 0.0
-        self.inter = 0.0
-        self.derv = 0.0
-        self.last_update = time.time()
