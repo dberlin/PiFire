@@ -19,7 +19,7 @@ from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
 from controller.runtime.logic.safety import over_max_temp
 from controller.runtime.system_commands import process_system_commands
-from controller.runtime.transitions import request_transition
+from controller.runtime.transitions import request_transition, evaluate_phase
 
 
 class ControlMode:
@@ -320,6 +320,11 @@ class ControlMode:
 
         # ---- mode-specific pre-loop safety check (abort contract) ----
         status = self.setup_safety(ptemp)
+        # ---- declarative pre_loop guards (empty until Tasks 15-16; then the
+        # flameout edges live here instead of in setup_safety). A fired guard
+        # aborts the loop exactly as setup_safety returning "Inactive" does. ----
+        if evaluate_phase(self, ctx, "pre_loop", ctx.clock.now(), ptemp):
+            status = "Inactive"
 
         # Apply Smart Start Settings if Enabled (default; Startup/Reignite/Smoke
         # override self.state.startup.timer from their own setup())
@@ -513,6 +518,15 @@ class ControlMode:
                 request_transition(
                     ctx, control, "Error", kind="safety", display=("text", "ERROR"), notify="Grill_Error_01"
                 )
+                break
+
+            # ---- declarative pre_act guards (empty until Tasks 15-16; then the
+            # universal max-temp + the mode flameout edges live here). Placed
+            # AFTER the inline max-temp so that while max-temp is still inline
+            # (Task 15) its Error-first priority is preserved; once max-temp
+            # migrates into GUARDS["*"] (Task 16) evaluate_phase walks "*" first,
+            # keeping the same order. A fired guard breaks the loop. ----
+            if evaluate_phase(self, ctx, "pre_act", now, ptemp):
                 break
 
             # ---- mode-specific per-tick safety check ----

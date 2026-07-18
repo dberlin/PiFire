@@ -142,15 +142,17 @@ def test_universal_star_edges_apply_to_any_mode(monkeypatch):
     assert control["mode"] == "Stop"
 
 
-def test_mode_edges_take_priority_over_star_edges(monkeypatch):
+def test_star_edges_take_priority_over_mode_edges(monkeypatch):
+    # Universal "*" edges are walked BEFORE mode-specific edges: this preserves
+    # the live pre_act order where universal max-temp beats mode check_safety.
     control = _control("Smoke")
     guards = {
-        "Smoke": {"pre_act": [Edge(_true, "Error", "safety")]},
-        "*": {"pre_act": [Edge(_true, "Stop", "terminal")]},
+        "Smoke": {"pre_act": [Edge(_true, "Reignite", "safety")]},
+        "*": {"pre_act": [Edge(_true, "Error", "safety")]},
     }
     mode_obj, ctx, store, notifier = _setup("Smoke", control, monkeypatch, guards)
     evaluate_phase(mode_obj, ctx, "pre_act", now=0, ptemp=100)
-    assert control["mode"] == "Error"  # mode-specific edge is listed first
+    assert control["mode"] == "Error"  # universal edge won over the mode edge
 
 
 def test_no_match_returns_false_and_writes_nothing(monkeypatch):

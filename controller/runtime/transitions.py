@@ -169,11 +169,17 @@ def over_max_temp_guard(mode_obj, ctx, control, ptemp, now):
 
 
 def evaluate_phase(mode_obj, ctx, phase, now, ptemp) -> bool:
-    """Walk the mode's edges for `phase` (mode-specific then universal "*") in
-    priority order; fire the first whose guard is True via request_transition and
-    return True. No match -> return False (no write)."""
+    """Walk the phase's edges in priority order; fire the first whose guard is
+    True via request_transition and return True. No match -> return False (no
+    write).
+
+    PRIORITY: universal "*" edges are walked BEFORE the mode-specific edges. This
+    preserves the live pre_act ordering, where the UNIVERSAL max-temp trip
+    (base.py:511) is evaluated before the mode's check_safety flameout
+    (base.py:520) -- so on a (pathological) tick that satisfies both, max-temp
+    (Error/Grill_Error_01) still wins. Universal safety takes precedence."""
     control = mode_obj.control
-    edges = GUARDS.get(mode_obj.name, {}).get(phase, []) + GUARDS.get("*", {}).get(phase, [])
+    edges = GUARDS.get("*", {}).get(phase, []) + GUARDS.get(mode_obj.name, {}).get(phase, [])
     for edge in edges:
         if edge.guard(mode_obj, ctx, control, ptemp, now):
             request_transition(
