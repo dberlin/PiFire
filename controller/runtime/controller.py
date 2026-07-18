@@ -19,6 +19,7 @@ Notification/cookfile helpers (`check_notify`, `send_notifications`,
 monkeypatch them.
 """
 
+import copy
 import os
 
 from common.common import WriteKind
@@ -133,7 +134,12 @@ class Controller:
         while step_num < num_steps:
             # 4a. Setup all step data and write to control
             control["recipe"]["step"] = step_num
-            control["recipe"]["step_data"] = recipe["steps"][step_num]
+            # Copy the step so the in-place trigger_temps remap below does not
+            # corrupt the source recipe -- otherwise a reignite retry (which
+            # re-enters step setup for the same step_num) reads a step whose
+            # trigger_temps were already replaced with the probe-mapped form and
+            # KeyErrors on ["primary"].
+            control["recipe"]["step_data"] = copy.deepcopy(recipe["steps"][step_num])
             """ Setup trigger_temps structure that the work_cycle expects, mapping to real probes """
             trigger_temps = {}
             trigger_temps[settings["recipe"]["probe_map"]["primary"]] = recipe["steps"][step_num]["trigger_temps"][

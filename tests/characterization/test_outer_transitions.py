@@ -16,8 +16,6 @@ edge, so os.system is never on any path exercised here; the recorder confirms it
 is never invoked.
 """
 
-import pytest
-
 from common.common import WriteKind
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.characterization.test_controller_loop_golden import (
@@ -139,20 +137,17 @@ def test_recipe_step_dispatch_and_normal_end_to_stop(monkeypatch):
     assert out["updated"] is True
 
 
-def test_recipe_reignite_during_step_handshake_then_reenters_step(monkeypatch):
+def test_recipe_reignite_during_step_handshake_then_retries_step(monkeypatch):
     # Step work cycle returns Reignite+updated -> recipe performs the reignite
-    # HANDSHAKE (clear updated, set mode="Recipe", write) then runs a Reignite
-    # work cycle, then RE-ENTERS the same step (step_num NOT incremented).
+    # HANDSHAKE (clear updated, set mode="Recipe", write), runs a Reignite work
+    # cycle, then RE-ENTERS the same step (step_num NOT incremented) and re-runs it.
     #
-    # DEVIATION FROM PLAN (faithful freeze): the plan predicted a clean
-    # "re-run the step then Stop", but re-entering step setup (4a) today raises
-    # KeyError -- step_data['trigger_temps'] was mutated IN PLACE to its
-    # probe-mapped form on the first pass (control['recipe']['step_data'] aliases
-    # the recipe's step dict, then line 149 replaces its trigger_temps), so the
-    # retry's line 144 lookup of ['trigger_temps']['primary'] fails. This is a
-    # latent bug that is out of scope for this behavior-preserving refactor; it
-    # is pinned here so a refactor cannot silently change it. We assert the
-    # handshake that IS observable, and that re-entry raises.
+    # This used to raise KeyError on the retry -- control['recipe']['step_data']
+    # aliased the recipe's step dict, and remapping trigger_temps in place
+    # corrupted the source so the retry's ['trigger_temps']['primary'] lookup
+    # failed. Fixed by deep-copying the step into step_data; the source recipe
+    # stays pristine, so the retry succeeds. The second Smoke pass does not
+    # re-trip, the step completes, and the recipe ends normally in Stop.
     c, store = build_controller(monkeypatch, mode="Recipe")
     steps = [_step("Smoke", 225)]
     _install_recipe(monkeypatch, c, store, steps)
@@ -170,16 +165,17 @@ def test_recipe_reignite_during_step_handshake_then_reenters_step(monkeypatch):
             cur["updated"] = True
             store.write_control(cur, WriteKind.OVERWRITE, origin="test")
         elif mode == "Reignite":
-            # Captured AFTER the handshake write (line 160-163), BEFORE retry.
+            # Captured AFTER the handshake write (clear updated, set Recipe), BEFORE retry.
             handshake["mode"] = cur["mode"]
             handshake["updated"] = cur["updated"]
 
     c.work_cycle = _wc
-    with pytest.raises(KeyError):
-        c.recipe_mode(start_step=0)
+    c.recipe_mode(start_step=0)
 
-    assert calls == ["Smoke", "Reignite"]  # trip -> reignite handshake, then re-enter (crash)
+    # trip -> reignite handshake -> retry the step (no crash, no re-trip)
+    assert calls == ["Smoke", "Reignite", "Smoke"]
     assert handshake == {"mode": "Recipe", "updated": False}  # handshake cleared updated + set Recipe
+    assert store.read_control()["mode"] == "Stop"  # step completes -> recipe ends in Stop
 
 
 def test_recipe_cancel_on_mode_change_leaves_requested_mode(monkeypatch):
