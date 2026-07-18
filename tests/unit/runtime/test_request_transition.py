@@ -1,0 +1,192 @@
+"""Unit tests for the request_transition() seam (controller/runtime/transitions.py).
+
+Uses a fake ctx (fake store + notifications) that records writes / notifies /
+display pushes. Asserts the resulting persisted control VALUES + side effects
+(the observable contract) -- not intra-write field order.
+"""
+
+from controller.runtime.transitions import request_transition, TransitionError
+import controller.runtime.transitions as transitions_mod
+
+
+class _FakeDisplay:
+    def __init__(self):
+        self.pushed = []
+
+    def push(self, cmd):
+        self.pushed.append(cmd)
+
+
+class _FakeStore:
+    def __init__(self, control):
+        self._control = control
+        self.writes = []
+        self.flushed = 0
+        self._display = _FakeDisplay()
+
+    def execute_control_writes(self):
+        self.flushed += 1
+
+    def read_control(self):
+        return self._control
+
+    def write_control(self, control, kind, origin=None):
+        self._control = control
+        self.writes.append((kind, origin))
+
+    def display_commands(self):
+        return self._display
+
+
+class _FakeNotifier:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, name):
+        self.sent.append(name)
+
+
+class _FakeCtx:
+    def __init__(self, store, notifier):
+        self.store = store
+        self.notifications = notifier
+
+
+def _ctx(control):
+    store = _FakeStore(control)
+    notifier = _FakeNotifier()
+    return _FakeCtx(store, notifier), store, notifier
+
+
+def _base_control(**over):
+    control = {
+        "mode": "Smoke",
+        "updated": False,
+        "primary_setpoint": 0,
+        "safety": {"reigniteretries": 2, "reignitelaststate": ""},
+    }
+    control.update(over)
+    return control
+
+
+# --------------------------------------------------------------------------
+# kind="natural"
+# --------------------------------------------------------------------------
+
+
+def test_natural_applies_when_not_updated_hold_keeps_setpoint():
+    control = _base_control(mode="Smoke", updated=False, primary_setpoint=0)
+    ctx, store, notifier = _ctx(control)
+    out = request_transition(ctx, control, "Hold", kind="natural", setpoint=225)
+    assert out["mode"] == "Hold"
+    assert out["primary_setpoint"] == 225  # Hold => setpoint applied
+    assert out["updated"] is True
+    assert len(store.writes) == 1
+    assert store.flushed == 1  # flushed before re-reading
+    assert notifier.sent == []
+    assert store._display.pushed == []
+
+
+def test_natural_forces_setpoint_zero_when_not_hold():
+    control = _base_control(mode="Startup", updated=False, primary_setpoint=300)
+    ctx, store, notifier = _ctx(control)
+    out = request_transition(ctx, control, "Smoke", kind="natural", setpoint=225)
+    assert out["mode"] == "Smoke"
+    assert out["primary_setpoint"] == 0  # non-Hold target forces 0
+    assert out["updated"] is True
+
+
+def test_natural_yields_when_already_updated():
+    control = _base_control(mode="Error", updated=True)
+    ctx, store, notifier = _ctx(control)
+    out = request_transition(ctx, control, "Smoke", kind="natural", setpoint=0)
+    assert out["mode"] == "Error"  # yielded: safety trip survives
+    assert store.writes == []  # no write when yielding
+    assert store.flushed == 1
+
+
+# --------------------------------------------------------------------------
+# kind="safety"
+# --------------------------------------------------------------------------
+
+
+def test_safety_error_write():
+    control = _base_control(mode="Smoke", primary_setpoint=225)
+    ctx, store, notifier = _ctx(control)
+    out = request_transition(ctx, control, "Error", kind="safety", display=("text", "ERROR"), notify="Grill_Error_02")
+    assert out["mode"] == "Error"
+    assert out["updated"] is True
+    assert store._display.pushed == [("text", "ERROR")]
+    assert notifier.sent == ["Grill_Error_02"]
+    assert len(store.writes) == 1
+    # Authoritative kinds never touch primary_setpoint or reignite fields.
+    assert out["primary_setpoint"] == 225
+    assert out["safety"]["reigniteretries"] == 2
+
+
+def test_safety_reignite_decrements_and_records_last_state():
+    control = _base_control(mode="Smoke", primary_setpoint=225)
+    ctx, store, notifier = _ctx(control)
+    out = request_transition(
+        ctx,
+        control,
+        "Reignite",
+        kind="safety",
+        reignite_from="Smoke",
+        display=("text", "Re-Ignite"),
+        notify="Grill_Error_03",
+    )
+    assert out["mode"] == "Reignite"
+    assert out["updated"] is True
+    assert out["safety"]["reigniteretries"] == 1  # decremented from 2
+    assert out["safety"]["reignitelaststate"] == "Smoke"
+    assert store._display.pushed == [("text", "Re-Ignite")]
+    assert notifier.sent == ["Grill_Error_03"]
+    assert out["primary_setpoint"] == 225  # untouched
+
+
+# --------------------------------------------------------------------------
+# kind="terminal"
+# --------------------------------------------------------------------------
+
+
+def test_terminal_stop_write():
+    control = _base_control(mode="Shutdown", primary_setpoint=225)
+    ctx, store, notifier = _ctx(control)
+    out = request_transition(ctx, control, "Stop", kind="terminal")
+    assert out["mode"] == "Stop"
+    assert out["updated"] is True
+    assert len(store.writes) == 1
+    assert notifier.sent == []  # no notify
+    assert store._display.pushed == []  # no display
+    assert out["primary_setpoint"] == 225  # untouched
+
+
+# --------------------------------------------------------------------------
+# ALLOWED_EXITS legality (empty registry => no-op passthrough in Task 3)
+# --------------------------------------------------------------------------
+
+
+def test_empty_registry_is_noop_passthrough():
+    assert transitions_mod.ALLOWED_EXITS == {}
+    control = _base_control(mode="Manual", updated=False)
+    ctx, store, notifier = _ctx(control)
+    # No entry for "Manual" -> _check_legal is a no-op; no TransitionError.
+    out = request_transition(ctx, control, "Reignite", kind="safety")
+    assert out["mode"] == "Reignite"
+
+
+def test_legality_check_fires_when_registry_populated(monkeypatch):
+    # Populate a temporary registry to prove _check_legal raises on an illegal edge.
+    monkeypatch.setattr(transitions_mod, "ALLOWED_EXITS", {"Manual": {"Stop", "Error"}})
+    control = _base_control(mode="Manual", updated=False)
+    ctx, store, notifier = _ctx(control)
+    try:
+        request_transition(ctx, control, "Reignite", kind="safety")
+    except TransitionError:
+        pass
+    else:
+        raise AssertionError("expected TransitionError for illegal Manual -> Reignite")
+    # A legal edge passes.
+    out = request_transition(ctx, control, "Stop", kind="terminal")
+    assert out["mode"] == "Stop"
