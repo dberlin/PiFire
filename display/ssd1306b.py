@@ -26,6 +26,7 @@ from luma.core.render import canvas
 from luma.oled.device import ssd1306
 from PIL import Image, ImageDraw, ImageFont
 from common.common import WriteKind  # Common Library for WebUI and Control Program
+from common.modes import Mode
 from common.datastore_accessors import read_control, write_control
 from gpiozero import Button
 
@@ -344,7 +345,7 @@ class Display:
         if self.menu["current"]["mode"] == "none":
             control = read_control()
             # If in an inactive mode
-            if control["mode"] == "Stop" or control["mode"] == "Error" or control["mode"] == "Monitor":
+            if control["mode"] == Mode.STOP or control["mode"] == Mode.ERROR or control["mode"] == Mode.MONITOR:
                 self.menu["current"]["mode"] = "inactive"
             else:  # Use the active menu
                 self.menu["current"]["mode"] = "active"
@@ -380,7 +381,7 @@ class Display:
                 control = read_control()
                 control["primary_setpoint"] = self.menu["current"]["option"]
                 control["updated"] = True
-                control["mode"] = "Hold"
+                control["mode"] = Mode.HOLD
                 write_control(control, WriteKind.MERGE, origin="display")
                 self.menu["current"]["mode"] = "none"
                 self.menu["current"]["option"] = 0
@@ -432,7 +433,7 @@ class Display:
                     self.menu_time = 0
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Startup"
+                    control["mode"] = Mode.STARTUP
                     write_control(control, WriteKind.MERGE, origin="display")
                 elif selected == "Monitor":
                     self.menu["current"]["mode"] = "none"
@@ -441,7 +442,7 @@ class Display:
                     self.menu_time = 0
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Monitor"
+                    control["mode"] = Mode.MONITOR
                     write_control(control, WriteKind.MERGE, origin="display")
                 elif selected == "Stop":
                     self.menu["current"]["mode"] = "none"
@@ -451,7 +452,7 @@ class Display:
                     self.clear_display()
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Stop"
+                    control["mode"] = Mode.STOP
                     write_control(control, WriteKind.MERGE, origin="display")
                 # Active Mode
                 elif selected == "Shutdown":
@@ -462,7 +463,7 @@ class Display:
                     self.clear_display()
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Shutdown"
+                    control["mode"] = Mode.SHUTDOWN
                     write_control(control, WriteKind.MERGE, origin="display")
                 elif selected == "Hold":
                     self.menu["current"]["mode"] = "grill_hold_value"
@@ -478,7 +479,7 @@ class Display:
                     self.clear_display()
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Smoke"
+                    control["mode"] = Mode.SMOKE
                     write_control(control, WriteKind.MERGE, origin="display")
                 elif selected == "SmokePlus":
                     self.menu["current"]["mode"] = "none"

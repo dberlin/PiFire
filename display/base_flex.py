@@ -23,6 +23,7 @@ import requests
 from display.flexobject import *
 from PIL import Image
 from common.common import WriteKind, read_generic_json, display_sleep_timeout
+from common.modes import Mode
 from common.datastore_accessors import (
     read_control,
     write_control,
@@ -237,7 +238,7 @@ class DisplayBase:
         # self.last_in_data = {}
         # self.last_status_data = {}
         if self.status_data is not None or self.in_data is not None:
-            self.status_data["mode"] = "Stop"
+            self.status_data["mode"] = Mode.STOP
             for outpin in self.status_data["outpins"]:
                 if outpin != "pwm":
                     self.status_data["outpins"][outpin] = False
@@ -452,34 +453,34 @@ class DisplayBase:
         """Returns (button_type, button_list, button_active) for the button_row
         object, mirroring the existing control_panel branch and Qt's
         Menus.controlPanelForMode (display/qml/Menus.js)."""
-        if recipe and mode != "Shutdown":
+        if recipe and mode != Mode.SHUTDOWN:
             type_item = "Error"
-            if mode in ("Startup", "Reignite"):
+            if mode in (Mode.STARTUP, Mode.REIGNITE):
                 type_item = "Startup"
-            elif mode == "Smoke":
+            elif mode == Mode.SMOKE:
                 type_item = "Smoke"
-            elif mode == "Hold":
+            elif mode == Mode.HOLD:
                 type_item = "Hold"
             button_type = ["Next", type_item, "Stop", "Shutdown"]
             button_list = ["cmd_next_step", "cmd_none", "cmd_stop", "cmd_shutdown"]
             button_active = "Next" if recipe_paused else mode
             return button_type, button_list, button_active
 
-        if mode in ("Startup", "Reignite"):
+        if mode in (Mode.STARTUP, Mode.REIGNITE):
             return ["Startup", "Smoke", "Hold", "Stop"], ["cmd_startup", "cmd_smoke", "input_hold", "cmd_stop"], mode
-        if mode == "Smoke":
+        if mode == Mode.SMOKE:
             return (
                 ["Set Temp", "Hold", "Stop", "Shutdown"],
                 ["input_hold", "input_hold", "cmd_stop", "cmd_shutdown"],
                 mode,
             )
-        if mode == "Hold":
+        if mode == Mode.HOLD:
             return (
                 ["Set Temp", "Smoke", "Stop", "Shutdown"],
                 ["input_hold", "cmd_smoke", "cmd_stop", "cmd_shutdown"],
                 mode,
             )
-        if mode == "Shutdown":
+        if mode == Mode.SHUTDOWN:
             return (
                 ["Smoke", "Hold", "Stop", "Shutdown"],
                 ["cmd_smoke", "input_hold", "cmd_stop", "cmd_shutdown"],
@@ -492,9 +493,9 @@ class DisplayBase:
     def _duty_pills(status_data):
         """Returns (left_data, right_data) dicts for duty_pill_left/duty_pill_right:
         AUGER/FAN DUTY while Hold is active, otherwise P-MODE/SMOKE+."""
-        mode = status_data.get("mode", "Stop")
+        mode = status_data.get("mode", Mode.STOP)
         outpins = status_data.get("outpins", {})
-        if mode == "Hold":
+        if mode == Mode.HOLD:
             left = {
                 "label": "AUGER DUTY",
                 "value": f"{round(status_data.get('cycle_ratio', 0) * 100)}%",
@@ -517,17 +518,17 @@ class DisplayBase:
         branch (Prime/Startup/Reignite/Shutdown countdown, or Hold lid-open
         pause countdown). Returns (seconds, label); seconds is 0 and label is
         '' when no countdown is active."""
-        mode = status_data.get("mode", "Stop")
-        if mode in ("Prime", "Startup", "Reignite", "Shutdown"):
-            if mode in ("Startup", "Reignite"):
+        mode = status_data.get("mode", Mode.STOP)
+        if mode in (Mode.PRIME, Mode.STARTUP, Mode.REIGNITE, Mode.SHUTDOWN):
+            if mode in (Mode.STARTUP, Mode.REIGNITE):
                 duration = status_data.get("start_duration", 0)
-            elif mode == "Prime":
+            elif mode == Mode.PRIME:
                 duration = status_data.get("prime_duration", 0)
             else:
                 duration = status_data.get("shutdown_duration", 0)
             countdown = int(duration - (now - status_data.get("start_time", now)))
             return max(countdown, 0), "Timer"
-        elif mode == "Hold" and status_data.get("lid_open_detected"):
+        elif mode == Mode.HOLD and status_data.get("lid_open_detected"):
             countdown = int(status_data.get("lid_open_endtime", now) - now)
             return max(countdown, 0), "Lid Pause"
         return 0, ""
@@ -554,8 +555,8 @@ class DisplayBase:
             return {"label": label, "value": value}
 
         timestamp = status_data.get("startup_timestamp", 0) or 0
-        mode = status_data.get("mode", "Stop")
-        if timestamp and mode not in ("Stop", "Monitor"):
+        mode = status_data.get("mode", Mode.STOP)
+        if timestamp and mode not in (Mode.STOP, Mode.MONITOR):
             elapsed = max(int(now - timestamp), 0)
             hours, minutes, secs = elapsed // 3600, (elapsed % 3600) // 60, elapsed % 60
             value = (f"{hours}:" if hours else "") + f"{minutes:02d}:{secs:02d}"
@@ -581,7 +582,7 @@ class DisplayBase:
                 self.status_data["recipe_paused"] != self.last_status_data.get("recipe_paused", "None")
             ):
                 """ Disable Screen Timeout When not in Stop Mode """
-                if self.status_data["mode"] not in ["Stop"]:
+                if self.status_data["mode"] not in [Mode.STOP]:
                     self.display_timeout = None
                 else:
                     self.display_timeout = time.time() + self.TIMEOUT
@@ -590,7 +591,7 @@ class DisplayBase:
                 if "mode_bar" in self.dash_map.keys():
                     object_data = self.display_object_list[self.dash_map["mode_bar"]].get_object_data()
 
-                    if self.status_data["recipe"] and self.status_data["mode"] != "Shutdown":
+                    if self.status_data["recipe"] and self.status_data["mode"] != Mode.SHUTDOWN:
                         object_data["text"] = "Recipe: " + self.status_data["mode"]
                     else:
                         object_data["text"] = self.status_data["mode"]
@@ -603,23 +604,23 @@ class DisplayBase:
                         """ Recipe Mode """
                         list_item = "cmd_none"
                         type_item = "Error"
-                        if self.status_data["mode"] in ["Startup", "Reignite"]:
+                        if self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
                             type_item = "Startup"
-                        elif self.status_data["mode"] == "Smoke":
+                        elif self.status_data["mode"] == Mode.SMOKE:
                             type_item = "Smoke"
-                        elif self.status_data["mode"] == "Hold":
+                        elif self.status_data["mode"] == Mode.HOLD:
                             type_item = "Hold"
-                        elif self.status_data["mode"] == "Shutdown":
+                        elif self.status_data["mode"] == Mode.SHUTDOWN:
                             type_item = "None"
                         object_data["button_list"] = ["cmd_next_step", list_item, "cmd_stop", "cmd_shutdown"]
                         object_data["button_type"] = ["Next", type_item, "Stop", "Shutdown"]
                         if self.status_data["recipe_paused"]:
                             object_data["button_active"] = "Next"
-                    elif self.status_data["mode"] in ["Startup", "Reignite"]:
+                    elif self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
                         """ Startup Mode """
                         object_data["button_list"] = ["cmd_startup", "cmd_smoke", "input_hold", "cmd_stop"]
                         object_data["button_type"] = ["Startup", "Smoke", "Hold", "Stop"]
-                    elif self.status_data["mode"] in ["Smoke", "Hold", "Shutdown"]:
+                    elif self.status_data["mode"] in [Mode.SMOKE, Mode.HOLD, Mode.SHUTDOWN]:
                         """ Smoke, Hold or Shutdown Modes """
                         object_data["button_list"] = ["cmd_smoke", "input_hold", "cmd_stop", "cmd_shutdown"]
                         object_data["button_type"] = ["Smoke", "Hold", "Stop", "Shutdown"]
@@ -646,7 +647,7 @@ class DisplayBase:
                     object_data["data"]["mode_label"] = self.status_data["mode"].upper()
                     self.display_object_list[self.dash_map["primary_gauge"]].update_object_data(object_data)
                 """ Lid Open Button Update """
-                if "lid_open_button" in self.dash_map.keys() and self.status_data["mode"] == "Hold":
+                if "lid_open_button" in self.dash_map.keys() and self.status_data["mode"] == Mode.HOLD:
                     object_data = self.display_object_list[self.dash_map["lid_open_button"]].get_object_data()
                     if self.status_data.get("lid_open_detected", False):
                         object_data["active"] = True
@@ -659,7 +660,13 @@ class DisplayBase:
                 object_data = self.display_object_list[self.dash_map["header_bar"]].get_object_data()
                 object_data.setdefault("data", {})
                 new_clock = time.strftime("%H:%M")
-                new_cooking = self.status_data["mode"] in ("Startup", "Reignite", "Smoke", "Hold", "Recipe")
+                new_cooking = self.status_data["mode"] in (
+                    Mode.STARTUP,
+                    Mode.REIGNITE,
+                    Mode.SMOKE,
+                    Mode.HOLD,
+                    Mode.RECIPE,
+                )
                 if (
                     object_data["data"].get("clock") != new_clock
                     or object_data["data"].get("ip") != self.ip_address
@@ -770,10 +777,10 @@ class DisplayBase:
                 self.display_object_list[self.dash_map["system_card"]].update_object_data(object_data)
 
             """ Update Timer Output """
-            if self.status_data["mode"] in ["Prime", "Startup", "Reignite", "Shutdown"]:
-                if self.status_data["mode"] in ["Startup", "Reignite"]:
+            if self.status_data["mode"] in [Mode.PRIME, Mode.STARTUP, Mode.REIGNITE, Mode.SHUTDOWN]:
+                if self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
                     duration = self.status_data["start_duration"]
-                elif self.status_data["mode"] in ["Prime"]:
+                elif self.status_data["mode"] in [Mode.PRIME]:
                     duration = self.status_data["prime_duration"]
                 else:
                     duration = self.status_data["shutdown_duration"]
@@ -791,7 +798,7 @@ class DisplayBase:
                         object_data["label"] = "Timer"
                         self.display_object_list[self.dash_map["timer"]].update_object_data(object_data)
 
-            elif self.status_data["mode"] in ["Hold"] and self.status_data["lid_open_detected"]:
+            elif self.status_data["mode"] in [Mode.HOLD] and self.status_data["lid_open_detected"]:
                 """ In Hold Mode, use timer for lid open detection """
                 countdown = (
                     int(self.status_data["lid_open_endtime"] - time.time())
@@ -826,7 +833,7 @@ class DisplayBase:
 
             """ In Hold Mode, Check Lid Indicator """
             if (
-                self.status_data["mode"] in ["Hold"]
+                self.status_data["mode"] in [Mode.HOLD]
                 and self.last_status_data["lid_open_detected"] != self.status_data["lid_open_detected"]
                 and "lid_indicator" in self.dash_map.keys()
             ):
@@ -847,7 +854,7 @@ class DisplayBase:
 
             """ In Hold Mode, Show Lid Indicator Button (when lid_open_detected is False)"""
             if (
-                self.status_data["mode"] in ["Hold"]
+                self.status_data["mode"] in [Mode.HOLD]
                 and self.last_status_data["lid_open_detected"] != self.status_data["lid_open_detected"]
                 and "lid_open_button" in self.dash_map.keys()
             ):
@@ -860,7 +867,7 @@ class DisplayBase:
 
             """ Update PMode """
             if (
-                self.status_data["mode"] in ["Startup", "Reignite", "Smoke"]
+                self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE, Mode.SMOKE]
                 and (
                     (self.status_data["mode"] != self.last_status_data.get("mode", "None"))
                     or (self.status_data["p_mode"] != self.last_status_data.get("p_mode", "None"))
@@ -969,7 +976,7 @@ class DisplayBase:
         self.units = self.status_data["units"]
 
         """ Wake the display to the dash if it's currently off """
-        if self.display_active == None and self.status_data["mode"] != "Stop":
+        if self.display_active == None and self.status_data["mode"] != Mode.STOP:
             self.display_active = "dash"
             self.display_init = True
             self._wake_display()
