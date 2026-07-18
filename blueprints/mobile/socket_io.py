@@ -59,7 +59,7 @@ from common.system import (
     get_os_info,
 )
 from common.api_commands import process_command
-from common.app import get_supported_cmds
+from common.app import get_supported_cmds, update_probe_config
 from flask import request
 from app import socketio
 from config import Config
@@ -819,42 +819,11 @@ def _encode_img(recipe_id, asset_filename, thumb=False):
 
 def _update_probe_config(settings, control, request):
     probe_config = request["probes_action"]
-    label = probe_config.get("label", "")
-    probe_edited = {}
+    probe_dto = probe_config
 
-    for index, probe in enumerate(settings["probe_settings"]["probe_map"]["probe_info"]):
-        if probe["label"] == label:
-            probe_edited["label"] = probe["label"]
-            probe_edited["name"] = probe_config.get(
-                "name", settings["probe_settings"]["probe_map"]["probe_info"][index]["name"]
-            )
-            probe_edited["type"] = probe_config.get(
-                "type", settings["probe_settings"]["probe_map"]["probe_info"][index]["type"]
-            )
-            probe_edited["port"] = probe_config.get(
-                "port", settings["probe_settings"]["probe_map"]["probe_info"][index]["port"]
-            )
-            probe_edited["device"] = probe_config.get(
-                "device", settings["probe_settings"]["probe_map"]["probe_info"][index]["device"]
-            )
-            probe_edited["enabled"] = probe_config.get(
-                "enabled", settings["probe_settings"]["probe_map"]["probe_info"][index]["enabled"]
-            )
-            profile_id = probe_config.get(
-                "profile_id", settings["probe_settings"]["probe_map"]["probe_info"][index]["profile"]["id"]
-            )
-            if profile_id != probe["profile"]["id"]:
-                probe_edited["profile"] = settings["probe_settings"]["probe_profiles"].get(
-                    profile_id, settings["probe_settings"]["probe_map"]["probe_info"][index]["profile"]
-                )
-            else:
-                probe_edited["profile"] = settings["probe_settings"]["probe_map"]["probe_info"][index]["profile"]
-            break
+    settings, control, result = update_probe_config(settings, control, probe_dto)
 
-    if probe_edited:
-        settings["probe_settings"]["probe_map"]["probe_info"][index] = probe_edited
-        settings["history_page"]["probe_config"][label]["name"] = probe_edited["name"]
-        control["probe_profile_update"] = True
+    if result == "success":
         control["settings_update"] = True
         # Take all settings and write them
         _write_settings(settings, control)

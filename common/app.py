@@ -278,3 +278,60 @@ def is_not_blank(response, setting):
 
 def is_checked(response, setting):
     return setting in response and response[setting] == "on"
+
+
+def update_probe_config(settings, control, probe_dto):
+    """
+    Shared probe-config-update helper for `settings_page`'s `probe_config_save`
+    action and socket_io's `_update_probe_config`.
+
+    `probe_dto` is a normalized dict: `label` plus any of `name`/`type`/`port`/
+    `device`/`enabled`/`profile_id`, already resolved by the caller (e.g. the
+    `enabled` coercion differs per caller and must be resolved BEFORE calling
+    this helper). Mutates and returns `settings`/`control` (sets
+    `control["probe_profile_update"] = True` on success); does not write
+    anything to disk and does not build a response envelope - both remain the
+    caller's responsibility.
+
+    Returns (settings, control, result) where result is "success" or
+    "label_not_found".
+    """
+    label = probe_dto.get("label", "")
+    probe_edited = {}
+
+    for index, probe in enumerate(settings["probe_settings"]["probe_map"]["probe_info"]):
+        if probe["label"] == label:
+            probe_edited["label"] = probe["label"]
+            probe_edited["name"] = probe_dto.get(
+                "name", settings["probe_settings"]["probe_map"]["probe_info"][index]["name"]
+            )
+            probe_edited["type"] = probe_dto.get(
+                "type", settings["probe_settings"]["probe_map"]["probe_info"][index]["type"]
+            )
+            probe_edited["port"] = probe_dto.get(
+                "port", settings["probe_settings"]["probe_map"]["probe_info"][index]["port"]
+            )
+            probe_edited["device"] = probe_dto.get(
+                "device", settings["probe_settings"]["probe_map"]["probe_info"][index]["device"]
+            )
+            probe_edited["enabled"] = probe_dto.get(
+                "enabled", settings["probe_settings"]["probe_map"]["probe_info"][index]["enabled"]
+            )
+            profile_id = probe_dto.get(
+                "profile_id", settings["probe_settings"]["probe_map"]["probe_info"][index]["profile"]["id"]
+            )
+            if profile_id != probe["profile"]["id"]:
+                probe_edited["profile"] = settings["probe_settings"]["probe_profiles"].get(
+                    profile_id, settings["probe_settings"]["probe_map"]["probe_info"][index]["profile"]
+                )
+            else:
+                probe_edited["profile"] = settings["probe_settings"]["probe_map"]["probe_info"][index]["profile"]
+            break
+
+    if probe_edited:
+        settings["probe_settings"]["probe_map"]["probe_info"][index] = probe_edited
+        settings["history_page"]["probe_config"][label]["name"] = probe_edited["name"]
+        control["probe_profile_update"] = True
+        return settings, control, "success"
+    else:
+        return settings, control, "label_not_found"

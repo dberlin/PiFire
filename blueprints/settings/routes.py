@@ -1,7 +1,7 @@
 from flask import render_template, request, render_template_string, jsonify
 from common.common import WriteKind, read_generic_json, generate_uuid, convert_settings_units
 from common.datastore_accessors import read_settings, read_control, write_settings, write_control
-from common.app import is_not_blank, is_checked
+from common.app import is_not_blank, is_checked, update_probe_config
 
 from . import settings_bp
 
@@ -71,40 +71,12 @@ def settings_page(action=None):
 
     if request.method == "POST" and action == "probe_config_save":
         probe_config = request.json
-        label = probe_config.get("label", "")
-        probe_edited = {}
+        probe_dto = dict(probe_config)
+        probe_dto["enabled"] = True if probe_config.get("enabled", False) == "true" else False
 
-        for index, probe in enumerate(settings["probe_settings"]["probe_map"]["probe_info"]):
-            if probe["label"] == label:
-                probe_edited["label"] = probe["label"]
-                probe_edited["name"] = probe_config.get(
-                    "name", settings["probe_settings"]["probe_map"]["probe_info"][index]["name"]
-                )
-                probe_edited["type"] = probe_config.get(
-                    "type", settings["probe_settings"]["probe_map"]["probe_info"][index]["type"]
-                )
-                probe_edited["port"] = probe_config.get(
-                    "port", settings["probe_settings"]["probe_map"]["probe_info"][index]["port"]
-                )
-                probe_edited["device"] = probe_config.get(
-                    "device", settings["probe_settings"]["probe_map"]["probe_info"][index]["device"]
-                )
-                probe_edited["enabled"] = True if probe_config.get("enabled", False) == "true" else False
-                profile_id = probe_config.get(
-                    "profile_id", settings["probe_settings"]["probe_map"]["probe_info"][index]["profile"]["id"]
-                )
-                if profile_id != probe["profile"]["id"]:
-                    probe_edited["profile"] = settings["probe_settings"]["probe_profiles"].get(
-                        profile_id, settings["probe_settings"]["probe_map"]["probe_info"][index]["profile"]
-                    )
-                else:
-                    probe_edited["profile"] = settings["probe_settings"]["probe_map"]["probe_info"][index]["profile"]
-                break
+        settings, control, result = update_probe_config(settings, control, probe_dto)
 
-        if probe_edited:
-            settings["probe_settings"]["probe_map"]["probe_info"][index] = probe_edited
-            settings["history_page"]["probe_config"][label]["name"] = probe_edited["name"]
-            control["probe_profile_update"] = True
+        if result == "success":
             # Take all settings and write them
             write_settings(settings)
             write_control(control, WriteKind.MERGE, origin="app")
