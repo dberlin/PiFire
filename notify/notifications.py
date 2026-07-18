@@ -24,6 +24,7 @@ import apprise
 import logging
 import math
 from common.common import WriteKind, create_logger
+from common.modes import Mode
 from common.datastore_accessors import (
     write_settings,
     write_control,
@@ -102,7 +103,7 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
                         send_notifications(
                             "Probe_Temp_Achieved", label=item["label"], target=in_data["notify_targets"][item["label"]]
                         )
-                        if control["mode"] == "Recipe":
+                        if control["mode"] == Mode.RECIPE:
                             if control["recipe"]["step_data"]["trigger_temps"][item["label"]] > 0:
                                 control["recipe"]["step_data"]["triggered"] = True
                         control["notify_data"][index]["req"] = False
@@ -118,7 +119,7 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
             elif item["type"] == "timer":
                 if time.time() >= control["timer"]["end"]:
                     send_notifications("Timer_Expired")
-                    if control["mode"] == "Recipe":
+                    if control["mode"] == Mode.RECIPE:
                         if control["recipe"]["step_data"]["timer"] > 0:
                             control["recipe"]["step_data"]["triggered"] = True
                     control["timer"]["start"] = 0
@@ -140,23 +141,29 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
             """ Do Shutdown or Keep Warm if Requested """
             if (
                 item["shutdown"]
-                and control["mode"] in ("Reignite", "Startup", "Smoke", "Hold")
+                and control["mode"] in (Mode.REIGNITE, Mode.STARTUP, Mode.SMOKE, Mode.HOLD)
                 and not control["notify_data"][index]["req"]
             ):
-                control["mode"] = "Shutdown"
+                control["mode"] = Mode.SHUTDOWN
                 control["updated"] = True
                 control["notify_data"][index]["shutdown"] = False
             elif (
-                item["keep_warm"] and control["mode"] in ("Smoke", "Hold") and not control["notify_data"][index]["req"]
+                item["keep_warm"]
+                and control["mode"] in (Mode.SMOKE, Mode.HOLD)
+                and not control["notify_data"][index]["req"]
             ):
-                control["mode"] = "Hold"
+                control["mode"] = Mode.HOLD
                 control["primary_setpoint"] = settings["keep_warm"]["temp"]
                 control["s_plus"] = settings["keep_warm"]["s_plus"]
                 control["updated"] = True
                 control["notify_data"][index]["keep_warm"] = False
-            elif item.get("reignite", False) and item.get("triggered", False) and control["mode"] in ("Smoke", "Hold"):
+            elif (
+                item.get("reignite", False)
+                and item.get("triggered", False)
+                and control["mode"] in (Mode.SMOKE, Mode.HOLD)
+            ):
                 control["safety"]["reignitelaststate"] = control["mode"]
-                control["mode"] = "Reignite"
+                control["mode"] = Mode.REIGNITE
                 control["updated"] = True
 
             write_control(control, WriteKind.OVERWRITE, origin="notifications")
