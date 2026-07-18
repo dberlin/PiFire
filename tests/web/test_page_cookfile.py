@@ -67,14 +67,15 @@ below characterizes this; `test_history_lists_and_opens_cookfile_via_real_ui`
 drives the real click-path through `history_page` to get onto that template
 for the first time in the browser.
 
-NOT covered (see task report for details):
-- `ulcookfilereq` (cook-file upload) and the `ulmediafn`/`ulthumbfn` (media
-  upload) form actions in `cookfile_page`: `ulcookfilereq` has a latent bug
-  (`remotefile.save(os.path.join("HISTORY_FOLDER", filename))` -- the
-  literal string `"HISTORY_FOLDER"`, not the variable) that would create a
-  real `./HISTORY_FOLDER/` directory under the process's cwd (the actual
-  repo checkout, since live_server runs in-process) if exercised --
-  deliberately not triggered to avoid polluting the repo tree; see report.
+Previously NOT covered, now fixed and covered:
+- `ulcookfilereq` (cook-file upload) had a latent bug --
+  `remotefile.save(os.path.join("HISTORY_FOLDER", filename))` used the
+  literal string `"HISTORY_FOLDER"`, not the `HISTORY_FOLDER` variable --
+  that would create a real `./HISTORY_FOLDER/` directory under the
+  process's cwd (the actual repo checkout, since live_server runs
+  in-process) instead of saving to the configured history folder. Fixed;
+  `test_upload_cookfile_saves_to_configured_history_folder` below covers
+  it and asserts no `./HISTORY_FOLDER/` dir leaks into cwd.
 - `repairCF`/`upgradeCF` ARE covered (our fabricated file's version matches
   the live `settings["versions"]["cookfile"]`, so both are effectively
   no-op upgrades that still exercise the full read/rewrite path).
@@ -408,6 +409,48 @@ def test_upload_media_and_thumbnail_via_direct_post(live_server, page, _isolated
     assert metadata["thumbnail"] != ""
     assets_after = _read_cookfile_json(history_dir, filename, "assets")
     assert len(assets_after) == 2
+
+
+def test_upload_cookfile_saves_to_configured_history_folder(live_server, page, _isolated_history_folder):
+    """`ulcookfilereq` (cook-file upload) previously saved via
+    `remotefile.save(os.path.join("HISTORY_FOLDER", filename))` -- the
+    LITERAL string `"HISTORY_FOLDER"`, not the `HISTORY_FOLDER` variable --
+    so uploads landed in a `./HISTORY_FOLDER/` dir under the process's cwd
+    instead of the configured (here, isolated temp) history folder. This
+    asserts the upload lands in the configured folder and that no stray
+    `./HISTORY_FOLDER/` dir is created in cwd; any such dir is cleaned up
+    in `finally` so a RED run against the buggy code doesn't pollute the
+    repo tree."""
+    history_dir = _isolated_history_folder
+    stray_dir = os.path.join(os.getcwd(), "HISTORY_FOLDER")
+    filename = "E2E-Upload.pifire"
+    file_contents = b"fake cookfile contents"
+
+    try:
+        resp = page.request.post(
+            f"{live_server}/cookfile/",
+            multipart={
+                "ulcookfilereq": "true",
+                "ulcookfile": {
+                    "name": filename,
+                    "mimeType": "application/octet-stream",
+                    "buffer": file_contents,
+                },
+            },
+        )
+        assert resp.status == 200
+
+        configured_path = history_dir + filename
+        assert os.path.isfile(configured_path), (
+            "upload should land in the configured HISTORY_FOLDER (temp dir), "
+            f"not cwd's literal ./HISTORY_FOLDER/ (exists={os.path.exists(stray_dir)})"
+        )
+        with open(configured_path, "rb") as f:
+            assert f.read() == file_contents
+
+        assert not os.path.exists(stray_dir), "upload leaked into cwd's literal ./HISTORY_FOLDER/ dir"
+    finally:
+        shutil.rmtree(stray_dir, ignore_errors=True)
 
 
 # --- cookfile_update ------------------------------------------------------

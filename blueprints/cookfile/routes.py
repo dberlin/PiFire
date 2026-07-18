@@ -162,7 +162,7 @@ def cookfile_page():
                 # empty file without a filename.
                 if remotefile and allowed_file(remotefile.filename):
                     filename = secure_filename(remotefile.filename)
-                    remotefile.save(os.path.join("HISTORY_FOLDER", filename))
+                    remotefile.save(os.path.join(HISTORY_FOLDER, filename))
                 else:
                     errors.append("Disallowed File Upload.")
                 return redirect("/history")
