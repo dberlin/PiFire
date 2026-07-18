@@ -23,6 +23,290 @@ from common.server_status import set_server_status, get_server_status
 from . import admin_bp
 
 
+class _AdminActionContext:
+    """Mutable state shared across the admin_page action handlers.
+
+    Handlers mutate settings/control/pelletdb/errors/success in place; the
+    route's tail render sees those mutations because it holds the same objects.
+    """
+
+    def __init__(self, settings, control, pelletdb, errors, warnings, success, backup_path):
+        self.settings = settings
+        self.control = control
+        self.pelletdb = pelletdb
+        self.errors = errors
+        self.warnings = warnings
+        self.success = success
+        self.backup_path = backup_path
+
+
+def _admin_reboot(ctx):
+    event = "Admin: Reboot"
+    write_log(event)
+    set_server_status("rebooting")
+    reboot_system()
+    return render_template(
+        "shutdown.html",
+        action="reboot",
+    )
+
+
+def _admin_shutdown(ctx):
+    event = "Admin: Shutdown"
+    write_log(event)
+    set_server_status("shutdown")
+    shutdown_system()
+    return render_template(
+        "shutdown.html",
+        action="shutdown",
+    )
+
+
+def _admin_restart(ctx):
+    event = "Admin: Restart Server"
+    write_log(event)
+    set_server_status("restarting")
+    restart_scripts()
+    return render_template(
+        "shutdown.html",
+        action="restart",
+    )
+
+
+def _admin_setting_debugenabled(ctx):
+    settings = ctx.settings
+    control = ctx.control
+    response = request.form
+
+    control["settings_update"] = True
+    if response["debugenabled"] == "disabled":
+        write_log("Debug Mode Disabled.")
+        settings["globals"]["debug_mode"] = False
+        write_settings(settings)
+        write_control(control, WriteKind.MERGE, origin="app")
+    else:
+        settings["globals"]["debug_mode"] = True
+        write_settings(settings)
+        write_control(control, WriteKind.MERGE, origin="app")
+        write_log("Debug Mode Enabled.")
+
+
+def _admin_setting_clearhistory(ctx):
+    response = request.form
+    if response["clearhistory"] == "true":
+        write_log("Clearing History Log.")
+        read_history(0, flushhistory=True)
+
+
+def _admin_setting_clearevents(ctx):
+    response = request.form
+    if response["clearevents"] == "true":
+        write_log("Clearing Events Log.")
+        os.system("rm ./logs/events.log")
+
+
+def _admin_setting_clearpelletdb(ctx):
+    response = request.form
+    if response["clearpelletdb"] == "true":
+        write_log("Clearing Pellet Database.")
+        os.system("rm pelletdb.json")
+
+
+def _admin_setting_clearpelletdblog(ctx):
+    pelletdb = ctx.pelletdb
+    response = request.form
+    if response["clearpelletdblog"] == "true":
+        write_log("Clearing Pellet Database Log.")
+        pelletdb["log"].clear()
+        write_pellet_db(pelletdb)
+
+
+def _admin_setting_factorydefaults(ctx):
+    response = request.form
+    if response["factorydefaults"] == "true":
+        write_log("Resetting Settings, Control and History to factory defaults.")
+        read_history(0, flushhistory=True)
+        read_control(flush=True)
+        os.system("rm settings.json")
+        os.system("rm pelletdb.json")
+        settings = default_settings()
+        control = default_control()
+        write_settings(settings)
+        write_control(control, WriteKind.MERGE, origin="app")
+        set_server_status("restarting")
+        restart_scripts()
+        return render_template(
+            "shutdown.html",
+            action="restart",
+        )
+
+
+def _admin_setting_download_logs(ctx):
+    zip_file = _zip_files_logs("logs")
+    return send_file(zip_file, as_attachment=True, max_age=0)
+
+
+def _admin_setting_delete_logs(ctx):
+    # Delete *.log files in logs/
+    try:
+        os.system("rm logs/*.log")
+        ctx.success.append("Log files deleted.")
+    except:
+        ctx.errors.append("There was an error deleting the log files.")
+
+
+def _admin_setting_download_settings(ctx):
+    # settings.json is not kept in sync -- SQLite is the source of
+    # truth at runtime. Write the current settings out to a temp
+    # file to download, same pattern as 'download_control' below.
+    filename = "/tmp/settings.json"
+    write_generic_json(ctx.settings, filename)
+    return send_file(filename, as_attachment=True, max_age=0)
+
+
+def _admin_setting_download_control(ctx):
+    filename = "/tmp/control_general.json"
+    write_generic_json(ctx.control, filename)
+    return send_file(filename, as_attachment=True, max_age=0)
+
+
+def _admin_setting_download_pip_list(ctx):
+    filename = "pip_list.json"
+    return send_file(filename, as_attachment=True, max_age=0)
+
+
+def _admin_setting_backupsettings(ctx):
+    backup_file = backup_settings()
+    return send_file(backup_file, as_attachment=True, max_age=0)
+
+
+def _admin_setting_restoresettings(ctx):
+    # Assume we have request.files and local file in response
+    remote_file = request.files["uploadfile"]
+    local_file = request.form["localfile"]
+
+    if local_file != "none":
+        new_settings = read_settings_file(filename=ctx.backup_path + local_file)
+        write_settings(new_settings)
+        set_server_status("restarting")
+        restart_scripts()
+        return render_template(
+            "shutdown.html",
+            action="restart",
+        )
+    elif remote_file.filename != "":
+        # If the user does not select a file, the browser submits an
+        # empty file without a filename.
+        if remote_file and allowed_file(remote_file.filename):
+            filename = secure_filename(remote_file.filename)
+            remote_file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], filename))
+            ctx.success.append("Successfully restored settings.")
+            new_settings = read_settings_file(filename=ctx.backup_path + filename)
+            write_settings(new_settings)
+            set_server_status("restarting")
+            restart_scripts()
+            return render_template(
+                "shutdown.html",
+                action="restart",
+            )
+        else:
+            ctx.errors.append(
+                "There was an error restoring settings.  File either is a disallowed type or was not found."
+            )
+    else:
+        ctx.errors.append("There was an error restoring settings.  Restore file wasn't specified or found")
+
+
+def _admin_setting_backuppelletdb(ctx):
+    backup_file = backup_pellet_db(action="backup")
+    return send_file(backup_file, as_attachment=True, max_age=0)
+
+
+def _admin_setting_restorepelletdb(ctx):
+    # Assume we have request.files and local file in response
+    remote_file = request.files["uploadfile"]
+    local_file = request.form["localfile"]
+
+    if local_file != "none":
+        pelletdb = read_pellet_db_file(filename=ctx.backup_path + local_file)
+        write_pellet_db(pelletdb)
+        ctx.success.append("Successfully restored pellet database.")
+    elif remote_file.filename != "":
+        # If the user does not select a file, the browser submits an
+        # empty file without a filename.
+        if remote_file and allowed_file(remote_file.filename):
+            filename = secure_filename(remote_file.filename)
+            remote_file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], filename))
+            ctx.success.append("Successfully restored pellet database.")
+            pelletdb = read_pellet_db_file(filename=ctx.backup_path + filename)
+            write_pellet_db(pelletdb)
+        else:
+            ctx.errors.append(
+                "There was an error restoring the pellet database.  File either is a disallowed type or was not found."
+            )
+    else:
+        ctx.errors.append("There was an error restoring pellet database.  Restore file wasn't specified or found")
+
+
+# Sub-actions of the `setting` POST action are gated on RESPONSE KEYS (not an
+# `action` value). Ordering matters: several branches early-return, and the
+# original evaluated these in this exact sequence with independent (non-elif)
+# `if key in response` checks -- preserved here by iterating in insertion order.
+_ADMIN_SETTING_DISPATCH = {
+    "debugenabled": _admin_setting_debugenabled,
+    "clearhistory": _admin_setting_clearhistory,
+    "clearevents": _admin_setting_clearevents,
+    "clearpelletdb": _admin_setting_clearpelletdb,
+    "clearpelletdblog": _admin_setting_clearpelletdblog,
+    "factorydefaults": _admin_setting_factorydefaults,
+    "download_logs": _admin_setting_download_logs,
+    "delete_logs": _admin_setting_delete_logs,
+    "download_settings": _admin_setting_download_settings,
+    "download_control": _admin_setting_download_control,
+    "download_pip_list": _admin_setting_download_pip_list,
+    "backupsettings": _admin_setting_backupsettings,
+    "restoresettings": _admin_setting_restoresettings,
+    "backuppelletdb": _admin_setting_backuppelletdb,
+    "restorepelletdb": _admin_setting_restorepelletdb,
+}
+
+
+def _admin_setting(ctx):
+    if request.method != "POST":
+        return None
+    response = request.form
+    for key, handler in _ADMIN_SETTING_DISPATCH.items():
+        if key in response:
+            result = handler(ctx)
+            if result is not None:
+                return result
+    return None
+
+
+def _admin_boot(ctx):
+    if request.method != "POST":
+        return None
+    settings = ctx.settings
+    response = request.form
+
+    if "boot_to_monitor" in response:
+        settings["globals"]["boot_to_monitor"] = True
+    else:
+        settings["globals"]["boot_to_monitor"] = False
+
+    write_settings(settings)
+    return None
+
+
+_ADMIN_DISPATCH = {
+    "reboot": _admin_reboot,
+    "shutdown": _admin_shutdown,
+    "restart": _admin_restart,
+    "setting": _admin_setting,
+    "boot": _admin_boot,
+}
+
+
 @admin_bp.route("/<action>", methods=["POST", "GET"])
 @admin_bp.route("/", methods=["POST", "GET"])
 def admin_page(action=None):
@@ -44,198 +328,21 @@ def admin_page(action=None):
         if not allowed_file(file):
             files.remove(file)
 
-    if action == "reboot":
-        event = "Admin: Reboot"
-        write_log(event)
-        server_status = set_server_status("rebooting")
-        reboot_system()
-        return render_template(
-            "shutdown.html",
-            action=action,
-        )
+    ctx = _AdminActionContext(
+        settings=settings,
+        control=control,
+        pelletdb=pelletdb,
+        errors=errors,
+        warnings=warnings,
+        success=success,
+        backup_path=BACKUP_PATH,
+    )
 
-    elif action == "shutdown":
-        event = "Admin: Shutdown"
-        write_log(event)
-        server_status = set_server_status("shutdown")
-        shutdown_system()
-        return render_template(
-            "shutdown.html",
-            action=action,
-        )
-
-    elif action == "restart":
-        event = "Admin: Restart Server"
-        write_log(event)
-        server_status = set_server_status("restarting")
-        restart_scripts()
-        return render_template(
-            "shutdown.html",
-            action=action,
-        )
-
-    if request.method == "POST" and action == "setting":
-        response = request.form
-
-        if "debugenabled" in response:
-            control["settings_update"] = True
-            if response["debugenabled"] == "disabled":
-                write_log("Debug Mode Disabled.")
-                settings["globals"]["debug_mode"] = False
-                write_settings(settings)
-                write_control(control, WriteKind.MERGE, origin="app")
-            else:
-                settings["globals"]["debug_mode"] = True
-                write_settings(settings)
-                write_control(control, WriteKind.MERGE, origin="app")
-                write_log("Debug Mode Enabled.")
-
-        if "clearhistory" in response:
-            if response["clearhistory"] == "true":
-                write_log("Clearing History Log.")
-                read_history(0, flushhistory=True)
-
-        if "clearevents" in response:
-            if response["clearevents"] == "true":
-                write_log("Clearing Events Log.")
-                os.system("rm ./logs/events.log")
-
-        if "clearpelletdb" in response:
-            if response["clearpelletdb"] == "true":
-                write_log("Clearing Pellet Database.")
-                os.system("rm pelletdb.json")
-
-        if "clearpelletdblog" in response:
-            if response["clearpelletdblog"] == "true":
-                write_log("Clearing Pellet Database Log.")
-                pelletdb["log"].clear()
-                write_pellet_db(pelletdb)
-
-        if "factorydefaults" in response:
-            if response["factorydefaults"] == "true":
-                write_log("Resetting Settings, Control and History to factory defaults.")
-                read_history(0, flushhistory=True)
-                read_control(flush=True)
-                os.system("rm settings.json")
-                os.system("rm pelletdb.json")
-                settings = default_settings()
-                control = default_control()
-                write_settings(settings)
-                write_control(control, WriteKind.MERGE, origin="app")
-                server_status = set_server_status("restarting")
-                restart_scripts()
-                return render_template(
-                    "shutdown.html",
-                    action="restart",
-                )
-
-        if "download_logs" in response:
-            zip_file = _zip_files_logs("logs")
-            return send_file(zip_file, as_attachment=True, max_age=0)
-
-        if "delete_logs" in response:
-            # Delete *.log files in logs/
-            try:
-                os.system("rm logs/*.log")
-                success.append("Log files deleted.")
-            except:
-                errors.append("There was an error deleting the log files.")
-
-        if "download_settings" in response:
-            # settings.json is not kept in sync -- SQLite is the source of
-            # truth at runtime. Write the current settings out to a temp
-            # file to download, same pattern as 'download_control' below.
-            filename = "/tmp/settings.json"
-            write_generic_json(settings, filename)
-            return send_file(filename, as_attachment=True, max_age=0)
-
-        if "download_control" in response:
-            filename = "/tmp/control_general.json"
-            write_generic_json(control, filename)
-            return send_file(filename, as_attachment=True, max_age=0)
-
-        if "download_pip_list" in response:
-            filename = "pip_list.json"
-            return send_file(filename, as_attachment=True, max_age=0)
-
-        if "backupsettings" in response:
-            backup_file = backup_settings()
-            return send_file(backup_file, as_attachment=True, max_age=0)
-
-        if "restoresettings" in response:
-            # Assume we have request.files and local file in response
-            remote_file = request.files["uploadfile"]
-            local_file = request.form["localfile"]
-
-            if local_file != "none":
-                new_settings = read_settings_file(filename=BACKUP_PATH + local_file)
-                write_settings(new_settings)
-                server_status = set_server_status("restarting")
-                restart_scripts()
-                return render_template(
-                    "shutdown.html",
-                    action="restart",
-                )
-            elif remote_file.filename != "":
-                # If the user does not select a file, the browser submits an
-                # empty file without a filename.
-                if remote_file and allowed_file(remote_file.filename):
-                    filename = secure_filename(remote_file.filename)
-                    remote_file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], filename))
-                    success.append("Successfully restored settings.")
-                    new_settings = read_settings_file(filename=BACKUP_PATH + filename)
-                    write_settings(new_settings)
-                    server_status = set_server_status("restarting")
-                    restart_scripts()
-                    return render_template(
-                        "shutdown.html",
-                        action="restart",
-                    )
-                else:
-                    errors.append(
-                        "There was an error restoring settings.  File either is a disallowed type or was not found."
-                    )
-            else:
-                errors.append("There was an error restoring settings.  Restore file wasn't specified or found")
-
-        if "backuppelletdb" in response:
-            backup_file = backup_pellet_db(action="backup")
-            return send_file(backup_file, as_attachment=True, max_age=0)
-
-        if "restorepelletdb" in response:
-            # Assume we have request.files and local file in response
-            remote_file = request.files["uploadfile"]
-            local_file = request.form["localfile"]
-
-            if local_file != "none":
-                pelletdb = read_pellet_db_file(filename=BACKUP_PATH + local_file)
-                write_pellet_db(pelletdb)
-                success.append("Successfully restored pellet database.")
-            elif remote_file.filename != "":
-                # If the user does not select a file, the browser submits an
-                # empty file without a filename.
-                if remote_file and allowed_file(remote_file.filename):
-                    filename = secure_filename(remote_file.filename)
-                    remote_file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], filename))
-                    success.append("Successfully restored pellet database.")
-                    pelletdb = read_pellet_db_file(filename=BACKUP_PATH + filename)
-                    write_pellet_db(pelletdb)
-                else:
-                    errors.append(
-                        "There was an error restoring the pellet database.  File either is a disallowed type or was not found."
-                    )
-            else:
-                errors.append("There was an error restoring pellet database.  Restore file wasn't specified or found")
-
-    if request.method == "POST" and action == "boot":
-        response = request.form
-
-        if "boot_to_monitor" in response:
-            settings["globals"]["boot_to_monitor"] = True
-        else:
-            settings["globals"]["boot_to_monitor"] = False
-
-        write_settings(settings)
+    handler = _ADMIN_DISPATCH.get(action)
+    if handler is not None:
+        result = handler(ctx)
+        if result is not None:
+            return result
 
     """
         Get System Information
