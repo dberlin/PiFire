@@ -35,18 +35,16 @@ Imported Libraries
 """
 import time
 import math
-from controller.base import ControllerBase
+from controller.pid_base import PIDControllerBase
 
 """
 Class Definition
 """
 
 
-class Controller(ControllerBase):
+class Controller(PIDControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
-        self.function_list.append("set_gains")
-        self.function_list.append("get_k")
 
         pb = config.get("PB", 60.0)
         ti = config.get("Ti", 180.0)
@@ -84,17 +82,6 @@ class Controller(ControllerBase):
         self.new_target = False
 
         self.set_target(0.0)
-
-    def _calculate_gains(self, pb, ti, td):
-        if pb == 0:
-            self.kp = 0
-        else:
-            self.kp = -1 / pb
-        if ti == 0:
-            self.ki = 0
-        else:
-            self.ki = self.kp / ti
-        self.kd = self.kp * td
 
     def update(self, current):
         # Elapsed time since last update
@@ -184,13 +171,3 @@ class Controller(ControllerBase):
                 self.center = (set_point * 9 / 5 + 32) * self.center_factor
             else:
                 self.center = (set_point * 9 / 5 + 32) * self.center_factor * 1.2
-
-    def set_gains(self, pb, ti, td):
-        self._calculate_gains(pb, ti, td)
-        if self.ki == 0:
-            self.inter_max = 0
-        else:
-            self.inter_max = abs(self.center / self.ki)
-
-    def get_k(self):
-        return self.kp, self.ki, self.kd

@@ -43,7 +43,7 @@ Imported Libraries
 import time
 import logging
 from common.common import create_logger
-from controller.base import ControllerBase
+from controller.pid_base import PIDControllerBase
 
 log_level = logging.DEBUG
 eventLogger = create_logger(
@@ -55,11 +55,9 @@ Class Definition
 """
 
 
-class Controller(ControllerBase):
+class Controller(PIDControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
-        self.function_list.append("set_gains")
-        self.function_list.append("get_k")
         self.pb = config.get("PB", 42.0)
         self.ti = config.get("Ti", 180.0)
         self.td = config.get("Td", 45.0)
@@ -154,22 +152,3 @@ class Controller(ControllerBase):
         self.inter = 0.0
         self.derv = 0.0
         self.last_update = time.time()
-
-    def set_gains(self, pb, ti, td):
-        self.pb = pb
-        self.ti = ti
-        self.td = td
-        self._calculate_gains()
-
-    def set_config(self, config):
-        super().set_config(config)
-        self.pb = config.get("PB", 42.0)
-        self.ti = config.get("Ti", 180.0)
-        self.td = config.get("Td", 45.0)
-        self._calculate_gains()
-        self.error = 0.0
-        self.inter = 0.0
-        self.derv = 0.0
-
-    def get_k(self):
-        return self.kp, self.ki, self.kd
