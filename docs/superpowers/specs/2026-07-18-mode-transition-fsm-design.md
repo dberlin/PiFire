@@ -134,12 +134,23 @@ family per commit, the existing golden as a second net, `os.system` patched ever
 revert the branch — the seam is additive until the call sites are repointed, so partial revert is
 clean.
 
-## Open question for review
+## Resolution (decided; see the plan)
 
-Two viable shapes for the edge description, to decide after reading the full inventory:
-- **(a) Central `TRANSITIONS` table** — one dict listing every `(from, guard) → (to, effects)`.
-  Most inspectable; risks divorcing the edge from the mode that owns it.
-- **(b) Per-mode `allowed_exits()`** — each `ControlMode` declares its own exits/guards.
-  Keeps edge next to state; the "whole graph" is assembled by asking every mode.
-Recommendation leans (b) for cohesion with the existing template-method design, with a
-generated/asserted global view for inspectability. Final call in the plan.
+Scope grew to **two phases on one branch** (user chose to include the guard-engine now, given the
+"observable-behavior, not mechanism" freedom that unlocks it):
+
+- **Phase 1** — a clean single-mechanism seam `request_transition(ctx, control, to, *, kind, …)` where
+  `kind ∈ {natural, safety, terminal}` sets priority (`natural` yields to an already-requested
+  transition; the others are authoritative). One dispatch map for `tick()`. Per-mode `ALLOWED_EXITS`
+  with a legality assertion. A few bespoke `updated`-manipulating writes (Startup↔Prime handshake,
+  recipe reignite-retry) are characterized but NOT seam-routed.
+- **Phase 2** — a declarative guard-engine: per-phase edge tables `GUARDS[mode][phase] = [Edge(...)]`
+  evaluated by `evaluate_phase()` at the EXISTING pipeline phases (`pre_loop` = setup_safety point,
+  `pre_act` = in-loop-before-actuation). Preserving the phase points is mandatory — moving a guard
+  relative to actuation changes whether the auger/fan cycles on a trip tick (observable).
+
+The open "central table vs per-mode" question resolved to a **hybrid**: a central `GUARDS`/`ALLOWED_EXITS`
+registry keyed by mode (inspectable, one asserted graph snapshot) rather than methods scattered on each
+class — chosen because the guards are pure predicates over `(ctx, control, ptemp)` and read best as data.
+
+Full plan: [`../plans/2026-07-18-mode-transition-fsm.md`](../plans/2026-07-18-mode-transition-fsm.md).
