@@ -391,6 +391,53 @@ class ControlMode:
                 control["manual"]["output"] = False
                 ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
 
+    def _build_status_data(self, control, pelletdb, start_time):
+        """Build the per-0.5s display status dict (extracted from run()). Returns a
+        fresh, fully-populated dict; the caller writes it to the store."""
+        mode = self.name
+        grill_platform = self.grill
+        status_data = {}
+        status_data["notify_data"] = control["notify_data"]
+        status_data["timer"] = control["timer"]
+        status_data["s_plus"] = control["s_plus"]
+        status_data["hopper_level_enabled"] = False if self.settings["modules"]["dist"] == "none" else True
+        status_data["hopper_level"] = pelletdb["current"]["hopper_level"]
+        status_data["units"] = self.settings["globals"]["units"]
+        status_data["mode"] = mode
+        status_data["recipe"] = True if control["mode"] == Mode.RECIPE else False
+        status_data["start_time"] = start_time
+        status_data["start_duration"] = self.state.startup.timer
+        status_data["shutdown_duration"] = self.settings["shutdown"]["shutdown_duration"]
+        status_data["prime_duration"] = 0
+        status_data["prime_amount"] = 0
+        status_data["lid_open_detected"] = False
+        status_data["lid_open_endtime"] = 0
+        status_data["p_mode"] = self.state.metrics.get("p_mode", None)
+        status_data["startup_timestamp"] = control["startup_timestamp"]
+        if control["mode"] == Mode.RECIPE:
+            status_data["recipe_paused"] = (
+                True
+                if control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]
+                else False
+            )
+        else:
+            status_data["recipe_paused"] = False
+        status_data["outpins"] = {}
+        current = grill_platform.get_output_status()
+        for item in self.settings["platform"]["outputs"]:
+            try:
+                status_data["outpins"][item] = current[item]
+            except KeyError:
+                continue
+        status_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
+        if self.settings["platform"].get("dc_fan"):
+            status_data["fan_duty"] = int(control.get("duty_cycle", 0) or 0)
+        else:
+            status_data["fan_duty"] = 100 if status_data["outpins"].get("fan") else 0
+        # ---- mode-specific status fields ----
+        status_data.update(self.status_fragment())
+        return status_data
+
     # ---- shared skeleton ----
     def run(self):
         import control as _control  # module global: eventLogger
@@ -587,45 +634,7 @@ class ControlMode:
 
             # Send Current Status / Temperature Data to Display Device every 0.5 second
             if (now - self.state.timers.display_toggle) > 0.5:
-                status_data["notify_data"] = control["notify_data"]
-                status_data["timer"] = control["timer"]
-                status_data["s_plus"] = control["s_plus"]
-                status_data["hopper_level_enabled"] = False if self.settings["modules"]["dist"] == "none" else True
-                status_data["hopper_level"] = pelletdb["current"]["hopper_level"]
-                status_data["units"] = self.settings["globals"]["units"]
-                status_data["mode"] = mode
-                status_data["recipe"] = True if control["mode"] == Mode.RECIPE else False
-                status_data["start_time"] = start_time
-                status_data["start_duration"] = self.state.startup.timer
-                status_data["shutdown_duration"] = self.settings["shutdown"]["shutdown_duration"]
-                status_data["prime_duration"] = 0
-                status_data["prime_amount"] = 0
-                status_data["lid_open_detected"] = False
-                status_data["lid_open_endtime"] = 0
-                status_data["p_mode"] = self.state.metrics.get("p_mode", None)
-                status_data["startup_timestamp"] = control["startup_timestamp"]
-                if control["mode"] == Mode.RECIPE:
-                    status_data["recipe_paused"] = (
-                        True
-                        if control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]
-                        else False
-                    )
-                else:
-                    status_data["recipe_paused"] = False
-                status_data["outpins"] = {}
-                current = grill_platform.get_output_status()
-                for item in self.settings["platform"]["outputs"]:
-                    try:
-                        status_data["outpins"][item] = current[item]
-                    except KeyError:
-                        continue
-                status_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
-                if self.settings["platform"].get("dc_fan"):
-                    status_data["fan_duty"] = int(control.get("duty_cycle", 0) or 0)
-                else:
-                    status_data["fan_duty"] = 100 if status_data["outpins"].get("fan") else 0
-                # ---- mode-specific status fields ----
-                status_data.update(self.status_fragment())
+                status_data = self._build_status_data(control, pelletdb, start_time)
                 ctx.store.write_status(status_data)
                 self.state.timers.display_toggle = ctx.clock.now()
 
