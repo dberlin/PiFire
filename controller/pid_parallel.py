@@ -41,7 +41,7 @@ Imported Libraries
 import time
 import logging
 from common.common import create_logger
-from controller.base import ControllerBase
+from controller.pid_base import PIDControllerBase
 
 log_level = logging.DEBUG
 eventLogger = create_logger(
@@ -53,7 +53,7 @@ Class Definition
 """
 
 
-class Controller(ControllerBase):
+class Controller(PIDControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
 
@@ -126,13 +126,6 @@ class Controller(ControllerBase):
         self.last_update = time.time()
 
         return self.u
-
-    def set_target(self, set_point):
-        self.set_point = set_point
-        self.error = 0.0
-        self.inter = 0.0
-        self.derv = 0.0
-        self.last_update = time.time()
 
     def _calculate_gains(self, kp, ki, kd):
         self.kp = -1 * kp
