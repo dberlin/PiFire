@@ -31,6 +31,7 @@ from os.path import exists
 
 from controller.runtime.state import WorkCycleState
 from controller.runtime.system_commands import process_system_commands
+from controller.runtime.transitions import request_transition
 from controller.runtime.modes.monitor import MonitorMode
 from controller.runtime.modes.manual import ManualMode
 from controller.runtime.modes.shutdown import ShutdownMode
@@ -86,16 +87,10 @@ class Controller:
         return run_work_cycle(mode, self.ctx)
 
     def next_mode(self, next_mode, setpoint=0):
-        ctx = self.ctx
-        ctx.store.execute_control_writes()
-        control = ctx.store.read_control()
-        # If no other request, then transition to next mode, otherwise exit
-        if not control["updated"]:
-            control["mode"] = next_mode
-            control["primary_setpoint"] = setpoint if next_mode == "Hold" else 0  # If next mode is 'Hold'
-            control["updated"] = True
-            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-        return control
+        # The "natural" kind flushes deferred writes, re-reads control, and
+        # yields if a higher-priority transition already landed this cycle --
+        # behavior-equivalent to the old guarded inline write.
+        return request_transition(self.ctx, self.ctx.store.read_control(), next_mode, kind="natural", setpoint=setpoint)
 
     def process_system_commands(self):
         process_system_commands(self.ctx)
