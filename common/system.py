@@ -165,7 +165,7 @@ def get_os_info(filepath="os_info.json", loggername="events"):
 
     except Exception as e:
         event = f"Error getting OS info: {str(e)}"
-        write_log(event, level="error", loggername=loggername)
+        write_log(event, loggername=loggername)
         return os_info
 
 
