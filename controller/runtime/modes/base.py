@@ -318,6 +318,79 @@ class ControlMode:
 
         return (last, pelletdb, False)
 
+    def _apply_manual_overrides(self, control, now, current_output_status):
+        """Per-tick manual output overrides (extracted from run()). Mutates control
+        and self.state.manual_override in place."""
+        import control as _control  # module global: eventLogger
+
+        ctx = self.ctx
+        mode = self.name
+        grill_platform = self.grill
+        manual_override = self.state.manual_override
+
+        if mode == Mode.MANUAL or self.settings["safety"]["allow_manual_changes"]:
+            if control["manual"]["change"] in ["power", "igniter", "fan", "auger", "pwm"]:
+                if mode != Mode.MANUAL:
+                    override_time = now + self.settings["safety"]["manual_override_time"]
+                else:
+                    override_time = 0
+
+                if control["manual"]["change"] == "fan":
+                    if control["manual"]["output"] and not current_output_status["fan"]:
+                        grill_platform.fan_on()
+                        _control.eventLogger.debug("Fan ON")
+                    elif not control["manual"]["output"] and current_output_status["fan"]:
+                        grill_platform.fan_off()
+                        _control.eventLogger.debug("Fan OFF")
+                    manual_override["fan"] = override_time
+
+                if control["manual"]["change"] == "auger":
+                    if control["manual"]["output"] and not current_output_status["auger"]:
+                        grill_platform.auger_on()
+                        _control.eventLogger.debug("Auger ON")
+                    elif not control["manual"]["output"] and current_output_status["auger"]:
+                        grill_platform.auger_off()
+                        _control.eventLogger.debug("Auger OFF")
+                    manual_override["auger"] = override_time
+
+                if control["manual"]["change"] == "igniter":
+                    if control["manual"]["output"] and not current_output_status["igniter"]:
+                        grill_platform.igniter_on()
+                        _control.eventLogger.debug("Igniter ON")
+                    elif not control["manual"]["output"] and current_output_status["igniter"]:
+                        grill_platform.igniter_off()
+                        _control.eventLogger.debug("Igniter OFF")
+                    manual_override["igniter"] = override_time
+
+                if control["manual"]["change"] == "power":
+                    if control["manual"]["output"] and not current_output_status["power"]:
+                        grill_platform.power_on()
+                        _control.eventLogger.debug("Power ON")
+                    elif not control["manual"]["output"] and current_output_status["power"]:
+                        grill_platform.power_off()
+                        _control.eventLogger.debug("Power OFF")
+                    manual_override["power"] = override_time
+
+                if (
+                    self.settings["platform"]["dc_fan"]
+                    and control["manual"]["change"] == "pwm"
+                    and current_output_status["fan"]
+                    and not control["manual"]["pwm"] == current_output_status["pwm"]
+                ):
+                    speed = control["manual"]["pwm"]
+                    _control.eventLogger.debug("PWM Speed: " + str(speed) + "%")
+                    grill_platform.set_duty_cycle(speed)
+                    manual_override["pwm"] = override_time
+                    control["manual"]["pwm"] = 100  # Reset PWM
+
+                # Reset to False (not None) to match default_control()'s seed and
+                # keep control free of dict-nested nulls: every consumer treats
+                # these as falsy (== 'pwm', `in [...]`, truthiness), so behavior is
+                # identical, and a null here would be a delete under json_patch merge.
+                control["manual"]["change"] = False
+                control["manual"]["output"] = False
+                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+
     # ---- shared skeleton ----
     def run(self):
         import control as _control  # module global: eventLogger
@@ -443,68 +516,7 @@ class ControlMode:
 
             current_output_status = grill_platform.get_output_status()
 
-            if mode == Mode.MANUAL or self.settings["safety"]["allow_manual_changes"]:
-                if control["manual"]["change"] in ["power", "igniter", "fan", "auger", "pwm"]:
-                    if mode != Mode.MANUAL:
-                        override_time = now + self.settings["safety"]["manual_override_time"]
-                    else:
-                        override_time = 0
-
-                    if control["manual"]["change"] == "fan":
-                        if control["manual"]["output"] and not current_output_status["fan"]:
-                            grill_platform.fan_on()
-                            _control.eventLogger.debug("Fan ON")
-                        elif not control["manual"]["output"] and current_output_status["fan"]:
-                            grill_platform.fan_off()
-                            _control.eventLogger.debug("Fan OFF")
-                        manual_override["fan"] = override_time
-
-                    if control["manual"]["change"] == "auger":
-                        if control["manual"]["output"] and not current_output_status["auger"]:
-                            grill_platform.auger_on()
-                            _control.eventLogger.debug("Auger ON")
-                        elif not control["manual"]["output"] and current_output_status["auger"]:
-                            grill_platform.auger_off()
-                            _control.eventLogger.debug("Auger OFF")
-                        manual_override["auger"] = override_time
-
-                    if control["manual"]["change"] == "igniter":
-                        if control["manual"]["output"] and not current_output_status["igniter"]:
-                            grill_platform.igniter_on()
-                            _control.eventLogger.debug("Igniter ON")
-                        elif not control["manual"]["output"] and current_output_status["igniter"]:
-                            grill_platform.igniter_off()
-                            _control.eventLogger.debug("Igniter OFF")
-                        manual_override["igniter"] = override_time
-
-                    if control["manual"]["change"] == "power":
-                        if control["manual"]["output"] and not current_output_status["power"]:
-                            grill_platform.power_on()
-                            _control.eventLogger.debug("Power ON")
-                        elif not control["manual"]["output"] and current_output_status["power"]:
-                            grill_platform.power_off()
-                            _control.eventLogger.debug("Power OFF")
-                        manual_override["power"] = override_time
-
-                    if (
-                        self.settings["platform"]["dc_fan"]
-                        and control["manual"]["change"] == "pwm"
-                        and current_output_status["fan"]
-                        and not control["manual"]["pwm"] == current_output_status["pwm"]
-                    ):
-                        speed = control["manual"]["pwm"]
-                        _control.eventLogger.debug("PWM Speed: " + str(speed) + "%")
-                        grill_platform.set_duty_cycle(speed)
-                        manual_override["pwm"] = override_time
-                        control["manual"]["pwm"] = 100  # Reset PWM
-
-                    # Reset to False (not None) to match default_control()'s seed and
-                    # keep control free of dict-nested nulls: every consumer treats
-                    # these as falsy (== 'pwm', `in [...]`, truthiness), so behavior is
-                    # identical, and a null here would be a delete under json_patch merge.
-                    control["manual"]["change"] = False
-                    control["manual"]["output"] = False
-                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            self._apply_manual_overrides(control, now, current_output_status)
 
             # Grab current probe profiles if they have changed since the last loop.
             if control["probe_profile_update"]:
