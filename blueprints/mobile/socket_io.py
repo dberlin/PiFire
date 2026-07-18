@@ -46,7 +46,6 @@ from common.datastore_accessors import (
     write_connected_user,
     read_connected_users,
     remove_connected_user,
-    write_settings,
     write_errors,
 )
 from common.defaults import default_settings, default_control
@@ -59,7 +58,7 @@ from common.system import (
     gather_system_info,
 )
 from common.api_commands import process_command
-from common.app import update_probe_config
+from common.app import update_probe_config, save_settings_and_flag_update
 from flask import request
 from app import socketio
 from config import Config
@@ -881,9 +880,7 @@ def _update_notify_data(control, request):
 
 
 def _write_settings(settings, control):
-    control["settings_update"] = True
-    write_settings(settings)
-    write_control(control, WriteKind.MERGE, origin="app-socketio")
+    save_settings_and_flag_update(settings, control, "settings_update", origin="app-socketio")
 
 
 def _check_control_status():

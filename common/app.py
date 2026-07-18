@@ -2,8 +2,8 @@
 Common PiFire WebApp Functions Shared Between Blueprints
 """
 
-from common.common import seconds_to_string
-from common.datastore_accessors import read_settings, read_metrics
+from common.common import seconds_to_string, WriteKind
+from common.datastore_accessors import read_settings, read_metrics, write_settings, write_control
 from common.defaults import metrics_items
 from common.api_commands import process_command
 from flask import current_app
@@ -335,3 +335,18 @@ def update_probe_config(settings, control, probe_dto):
         return settings, control, "success"
     else:
         return settings, control, "label_not_found"
+
+
+def save_settings_and_flag_update(settings, control, *flags, origin="app"):
+    """
+    Shared "write settings + set one-or-more control update-flags + merge-write
+    control" helper for the repeated persistence tail used by several
+    settings/admin/socket_io actions.
+
+    Writes `settings` to disk, sets `control[flag] = True` for each flag name
+    in `flags`, then merge-writes `control`. Mutates `control` in place.
+    """
+    write_settings(settings)
+    for flag in flags:
+        control[flag] = True
+    write_control(control, WriteKind.MERGE, origin=origin)

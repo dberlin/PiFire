@@ -1,7 +1,7 @@
 from flask import render_template, request, render_template_string, jsonify
 from common.common import WriteKind, read_generic_json, generate_uuid, convert_settings_units
 from common.datastore_accessors import read_settings, read_control, write_settings, write_control
-from common.app import is_not_blank, is_checked, update_probe_config
+from common.app import is_not_blank, is_checked, update_probe_config, save_settings_and_flag_update
 
 from . import settings_bp
 
@@ -219,15 +219,11 @@ def settings_page(action=None):
             if key in response:
                 settings["notify_services"]["wled"]["profile_numbers"][state] = max(1, min(250, int(response[key])))
 
-        """ Update Control to Indicate a Settings Update """
-        control["settings_update"] = True
-
         event["type"] = "updated"
         event["text"] = "Successfully updated notification settings."
 
-        # Take all settings and write them
-        write_settings(settings)
-        write_control(control, WriteKind.MERGE, origin="app")
+        # Take all settings and write them, and indicate a settings update
+        save_settings_and_flag_update(settings, control, "settings_update", origin="app")
 
     if request.method == "POST" and action == "editprofile":
         response = request.form
@@ -416,10 +412,7 @@ def settings_page(action=None):
         event["type"] = "updated"
         event["text"] = "Successfully updated cycle settings."
 
-        control["settings_update"] = True
-
-        write_settings(settings)
-        write_control(control, WriteKind.MERGE, origin="app")
+        save_settings_and_flag_update(settings, control, "settings_update", origin="app")
 
     if request.method == "POST" and action == "pwm":
         response = request.form
@@ -440,10 +433,7 @@ def settings_page(action=None):
         event["type"] = "updated"
         event["text"] = "Successfully updated PWM settings."
 
-        control["settings_update"] = True
-
-        write_settings(settings)
-        write_control(control, WriteKind.MERGE, origin="app")
+        save_settings_and_flag_update(settings, control, "settings_update", origin="app")
 
     if request.method == "POST" and action == "startup":
         response = request.form
@@ -489,10 +479,7 @@ def settings_page(action=None):
         event["type"] = "updated"
         event["text"] = "Successfully updated startup/shutdown settings."
 
-        control["settings_update"] = True
-
-        write_settings(settings)
-        write_control(control, WriteKind.MERGE, origin="app")
+        save_settings_and_flag_update(settings, control, "settings_update", origin="app")
 
     if request.method == "POST" and action == "history":
         response = request.form
@@ -601,10 +588,7 @@ def settings_page(action=None):
         event["type"] = "updated"
         event["text"] = "Successfully updated pellet settings."
 
-        control["settings_update"] = True
-
-        write_settings(settings)
-        write_control(control, WriteKind.MERGE, origin="app")
+        save_settings_and_flag_update(settings, control, "settings_update", origin="app")
 
     """
     Smart Start Settings
