@@ -163,22 +163,31 @@ def test_terminal_stop_write():
 
 
 # --------------------------------------------------------------------------
-# ALLOWED_EXITS legality (empty registry => no-op passthrough in Task 3)
+# ALLOWED_EXITS legality (Task 10: populated graph, enforced)
 # --------------------------------------------------------------------------
 
+# Committed snapshot of the whole legal-exit graph -- the single-place FSM view.
+# A change to ALLOWED_EXITS must be reflected here (visible in review).
+_EXPECTED_GRAPH = {
+    "Prime": {"Startup", "Stop", "Error"},
+    "Startup": {"Prime", "Smoke", "Hold", "Monitor", "Stop", "Error", "Reignite"},
+    "Smoke": {"Hold", "Monitor", "Shutdown", "Stop", "Error", "Reignite"},
+    "Hold": {"Smoke", "Monitor", "Shutdown", "Stop", "Error", "Reignite"},
+    "Reignite": {"Smoke", "Hold", "Startup", "Stop", "Error"},
+    "Shutdown": {"Stop", "Error"},
+    "Monitor": {"Stop", "Error"},
+    "Manual": {"Stop", "Error"},
+    "Recipe": {"Recipe", "Smoke", "Hold", "Stop", "Error", "Reignite"},
+}
 
-def test_empty_registry_is_noop_passthrough():
-    assert transitions_mod.ALLOWED_EXITS == {}
-    control = _base_control(mode="Manual", updated=False)
-    ctx, store, notifier = _ctx(control)
-    # No entry for "Manual" -> _check_legal is a no-op; no TransitionError.
-    out = request_transition(ctx, control, "Reignite", kind="safety")
-    assert out["mode"] == "Reignite"
+
+def test_allowed_exits_matches_committed_snapshot():
+    # Whole state-machine graph in one asserted view (Step 3 inspectability).
+    assert transitions_mod.ALLOWED_EXITS == _EXPECTED_GRAPH
 
 
-def test_legality_check_fires_when_registry_populated(monkeypatch):
-    # Populate a temporary registry to prove _check_legal raises on an illegal edge.
-    monkeypatch.setattr(transitions_mod, "ALLOWED_EXITS", {"Manual": {"Stop", "Error"}})
+def test_illegal_edge_raises_transition_error():
+    # Manual's declared exits are {Stop, Error}; Manual -> Reignite is illegal.
     control = _base_control(mode="Manual", updated=False)
     ctx, store, notifier = _ctx(control)
     try:
@@ -187,6 +196,30 @@ def test_legality_check_fires_when_registry_populated(monkeypatch):
         pass
     else:
         raise AssertionError("expected TransitionError for illegal Manual -> Reignite")
-    # A legal edge passes.
-    out = request_transition(ctx, control, "Stop", kind="terminal")
-    assert out["mode"] == "Stop"
+
+
+def test_legal_edges_pass():
+    # Every edge exercised by the characterization suite is legal (no raise).
+    for from_mode, to_mode, kind in [
+        ("Smoke", "Error", "safety"),
+        ("Smoke", "Reignite", "safety"),
+        ("Smoke", "Stop", "terminal"),
+        ("Hold", "Error", "safety"),
+        ("Hold", "Reignite", "safety"),
+        ("Recipe", "Stop", "terminal"),
+    ]:
+        control = _base_control(mode=from_mode, updated=False)
+        ctx, store, notifier = _ctx(control)
+        out = request_transition(ctx, control, to_mode, kind=kind)
+        assert out["mode"] == to_mode
+
+
+def test_unlisted_source_mode_is_noop_passthrough():
+    # Terminal Stop/Error are omitted from the graph -> _check_legal is a no-op
+    # for them (models the post-trip natural next_mode read that then yields).
+    assert "Stop" not in transitions_mod.ALLOWED_EXITS
+    assert "Error" not in transitions_mod.ALLOWED_EXITS
+    control = _base_control(mode="Error", updated=True)
+    ctx, store, notifier = _ctx(control)
+    out = request_transition(ctx, control, "Stop", kind="natural", setpoint=0)
+    assert out["mode"] == "Error"  # yielded, no TransitionError from unlisted source

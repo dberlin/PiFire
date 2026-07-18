@@ -24,8 +24,27 @@ from common.common import WriteKind
 
 _UNSET = object()
 
-# Filled in Task 10; empty here so the legality check is a no-op until then.
-ALLOWED_EXITS: dict[str, set[str]] = {}
+# The explicit mode-transition graph: every legal `from -> {to, ...}` edge the
+# seam may perform. Derived from the transition inventory + the characterization
+# suite. `to` targets for the cycling modes are data-driven (control['next_mode']),
+# so a mode's set is the UNION of its universal safety/switch-off targets
+# (Error/Reignite/Stop) and every mode it can legally advance into.
+#
+# Terminal pseudo-states Stop and Error are intentionally OMITTED (not listed):
+# they never initiate a seam transition, and a post-trip `natural` next_mode call
+# momentarily reads mode=="Error"/"Stop" before yielding -- leaving them unlisted
+# makes _check_legal a no-op for that spurious source so the yield is unaffected.
+ALLOWED_EXITS: dict[str, set[str]] = {
+    "Prime": {"Startup", "Stop", "Error"},
+    "Startup": {"Prime", "Smoke", "Hold", "Monitor", "Stop", "Error", "Reignite"},
+    "Smoke": {"Hold", "Monitor", "Shutdown", "Stop", "Error", "Reignite"},
+    "Hold": {"Smoke", "Monitor", "Shutdown", "Stop", "Error", "Reignite"},
+    "Reignite": {"Smoke", "Hold", "Startup", "Stop", "Error"},
+    "Shutdown": {"Stop", "Error"},
+    "Monitor": {"Stop", "Error"},
+    "Manual": {"Stop", "Error"},
+    "Recipe": {"Recipe", "Smoke", "Hold", "Stop", "Error", "Reignite"},
+}
 
 
 class TransitionError(RuntimeError):
