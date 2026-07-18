@@ -112,9 +112,8 @@ def test_pellet_level_low(monkeypatch):
 def test_grill_error_01(monkeypatch):
     rec = _capture(monkeypatch, "Grill_Error_01")
     assert rec["title"] == "Grill Error!"
-    # NOTE: pins the CURRENT product-string typo. Task 2 corrects
-    # "exceded" -> "exceeded" and flips this assertion in the same commit.
-    assert rec["body"].startswith("Grill exceded maximum temperature limit of 550F! Shutting down. ")
+    # Approved behavior change (Task 2): "exceded" -> "exceeded" typo fix.
+    assert rec["body"].startswith("Grill exceeded maximum temperature limit of 550F! Shutting down. ")
     assert rec["channel"] == "pifire_error_alerts"
     assert rec["query_args"] == {"value1": "550"}
 
@@ -175,6 +174,32 @@ def test_unmatched_event_falls_back(monkeypatch):
     assert rec["body"].startswith("Whoops! PiFire had the following unhandled notify event: Zzz at ")
     assert rec["channel"] == "default"
     assert rec["query_args"] == {"value1": "Unknown Notification issue"}
+
+
+def test_grill_error_00_is_dropped_and_falls_back(monkeypatch, caplog):
+    # Approved behavior change (Task 2): Grill_Error_00 is a dead, never-emitted
+    # event and is dropped from EVENTS -- it now routes to the Unknown-Notification
+    # fallback, logged at ERROR.
+    with caplog.at_level("ERROR", logger="events"):
+        rec = _capture(monkeypatch, "Grill_Error_00")
+    assert rec["title"] == "PiFire: Unknown Notification issue"
+    assert rec["body"].startswith("Whoops! PiFire had the following unhandled notify event: Grill_Error_00 at ")
+    assert rec["channel"] == "default"
+    assert rec["query_args"] == {"value1": "Unknown Notification issue"}
+    assert any(r.levelname == "ERROR" for r in caplog.records)
+
+
+def test_grill_warning_is_dropped_and_falls_back(monkeypatch, caplog):
+    # Approved behavior change (Task 2): Grill_Warning is a dead, never-emitted
+    # event and is dropped from EVENTS -- it now routes to the Unknown-Notification
+    # fallback, logged at ERROR.
+    with caplog.at_level("ERROR", logger="events"):
+        rec = _capture(monkeypatch, "Grill_Warning")
+    assert rec["title"] == "PiFire: Unknown Notification issue"
+    assert rec["body"].startswith("Whoops! PiFire had the following unhandled notify event: Grill_Warning at ")
+    assert rec["channel"] == "default"
+    assert rec["query_args"] == {"value1": "Unknown Notification issue"}
+    assert any(r.levelname == "ERROR" for r in caplog.records)
 
 
 def test_fan_out_gating_only_ifttt_and_onesignal_fire(monkeypatch):
