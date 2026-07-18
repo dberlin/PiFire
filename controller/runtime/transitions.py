@@ -21,12 +21,20 @@ no-op passthrough.
 """
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Callable, Optional
 
 from common.common import WriteKind
 from controller.runtime.logic.safety import evaluate_flameout, over_max_temp, SafetyVerdict
 
 _UNSET = object()
+
+
+class TransitionKind(StrEnum):
+    NATURAL = "natural"
+    SAFETY = "safety"
+    TERMINAL = "terminal"
+
 
 # The explicit mode-transition graph: every legal `from -> {to, ...}` edge the
 # seam may perform. Derived from the transition inventory + the characterization
@@ -65,7 +73,7 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
     store = ctx.store
     _check_legal(control.get("mode"), to_mode)
 
-    if kind == "natural":
+    if kind == TransitionKind.NATURAL:
         # Natural (post-cycle) progressions carry NO display push and NO
         # notification -- only mode/setpoint/updated + the write. This is
         # faithful to the legacy next_mode(), which never touched display or
@@ -133,7 +141,7 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
 class Edge:
     guard: Callable  # (mode_obj, ctx, control, ptemp, now) -> bool
     to: str
-    kind: str
+    kind: TransitionKind
     notify: Optional[str] = None
     display: Optional[tuple] = None
     reignite_from_self: bool = False
@@ -188,11 +196,11 @@ def _flameout_edges(*, setup):
     err_guard = flameout_error_setup if setup else flameout_error_inloop
     reig_guard = flameout_reignite_setup if setup else flameout_reignite_inloop
     return [
-        Edge(err_guard, "Error", "safety", notify="Grill_Error_02", display=("text", "ERROR")),
+        Edge(err_guard, "Error", TransitionKind.SAFETY, notify="Grill_Error_02", display=("text", "ERROR")),
         Edge(
             reig_guard,
             "Reignite",
-            "safety",
+            TransitionKind.SAFETY,
             reignite_from_self=True,
             notify="Grill_Error_03",
             display=("text", "Re-Ignite"),
@@ -214,7 +222,9 @@ def _flameout_edges(*, setup):
 GUARDS: dict[str, dict[str, list]] = {
     "*": {
         "pre_act": [
-            Edge(over_max_temp_guard, "Error", "safety", notify="Grill_Error_01", display=("text", "ERROR")),
+            Edge(
+                over_max_temp_guard, "Error", TransitionKind.SAFETY, notify="Grill_Error_01", display=("text", "ERROR")
+            ),
         ],
     },
     "Smoke": {

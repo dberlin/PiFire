@@ -18,7 +18,7 @@ from common.process_mon import Process_Monitor
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
 from controller.runtime.system_commands import process_system_commands
-from controller.runtime.transitions import request_transition, evaluate_phase
+from controller.runtime.transitions import request_transition, evaluate_phase, TransitionKind
 
 
 class ControlMode:
@@ -413,7 +413,7 @@ class ControlMode:
                     # The seam sets mode="Stop"/updated + writes; status is not part
                     # of the transition, so set it on control first (single OVERWRITE).
                     control["status"] = "active"
-                    request_transition(ctx, control, "Stop", kind="terminal")
+                    request_transition(ctx, control, "Stop", kind=TransitionKind.TERMINAL)
                     break
 
             current_output_status = grill_platform.get_output_status()

@@ -32,7 +32,7 @@ from os.path import exists
 
 from controller.runtime.state import WorkCycleState
 from controller.runtime.system_commands import process_system_commands
-from controller.runtime.transitions import request_transition
+from controller.runtime.transitions import request_transition, TransitionKind
 from controller.runtime.modes.monitor import MonitorMode
 from controller.runtime.modes.manual import ManualMode
 from controller.runtime.modes.shutdown import ShutdownMode
@@ -91,7 +91,9 @@ class Controller:
         # The "natural" kind flushes deferred writes, re-reads control, and
         # yields if a higher-priority transition already landed this cycle --
         # behavior-equivalent to the old guarded inline write.
-        return request_transition(self.ctx, self.ctx.store.read_control(), next_mode, kind="natural", setpoint=setpoint)
+        return request_transition(
+            self.ctx, self.ctx.store.read_control(), next_mode, kind=TransitionKind.NATURAL, setpoint=setpoint
+        )
 
     def process_system_commands(self):
         process_system_commands(self.ctx)
@@ -188,7 +190,7 @@ class Controller:
             # Genuine terminal transition -> route through the seam (mode=Stop,
             # updated, write). The recipe-field cleanup above is carried on the
             # same control dict, so the seam's single OVERWRITE persists it too.
-            request_transition(self.ctx, control, "Stop", kind="terminal")
+            request_transition(self.ctx, control, "Stop", kind=TransitionKind.TERMINAL)
         else:
             # Cancel/break case: no mode transition here (the requested mode is
             # already in control); just persist the recipe-field cleanup.
