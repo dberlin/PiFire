@@ -25,6 +25,7 @@ from enum import StrEnum
 from typing import Callable, Optional
 
 from common.common import WriteKind
+from common.modes import Mode
 from controller.runtime.logic.safety import evaluate_flameout, over_max_temp, SafetyVerdict
 
 _UNSET = object()
@@ -46,16 +47,16 @@ class TransitionKind(StrEnum):
 # they never initiate a seam transition, and a post-trip `natural` next_mode call
 # momentarily reads mode=="Error"/"Stop" before yielding -- leaving them unlisted
 # makes _check_legal a no-op for that spurious source so the yield is unaffected.
-ALLOWED_EXITS: dict[str, set[str]] = {
-    "Prime": {"Startup", "Stop", "Error"},
-    "Startup": {"Prime", "Smoke", "Hold", "Monitor", "Stop", "Error", "Reignite"},
-    "Smoke": {"Hold", "Monitor", "Shutdown", "Stop", "Error", "Reignite"},
-    "Hold": {"Smoke", "Monitor", "Shutdown", "Stop", "Error", "Reignite"},
-    "Reignite": {"Smoke", "Hold", "Startup", "Stop", "Error"},
-    "Shutdown": {"Stop", "Error"},
-    "Monitor": {"Stop", "Error"},
-    "Manual": {"Stop", "Error"},
-    "Recipe": {"Recipe", "Smoke", "Hold", "Stop", "Error", "Reignite"},
+ALLOWED_EXITS: dict[Mode, set[Mode]] = {
+    Mode.PRIME: {Mode.STARTUP, Mode.STOP, Mode.ERROR},
+    Mode.STARTUP: {Mode.PRIME, Mode.SMOKE, Mode.HOLD, Mode.MONITOR, Mode.STOP, Mode.ERROR, Mode.REIGNITE},
+    Mode.SMOKE: {Mode.HOLD, Mode.MONITOR, Mode.SHUTDOWN, Mode.STOP, Mode.ERROR, Mode.REIGNITE},
+    Mode.HOLD: {Mode.SMOKE, Mode.MONITOR, Mode.SHUTDOWN, Mode.STOP, Mode.ERROR, Mode.REIGNITE},
+    Mode.REIGNITE: {Mode.SMOKE, Mode.HOLD, Mode.STARTUP, Mode.STOP, Mode.ERROR},
+    Mode.SHUTDOWN: {Mode.STOP, Mode.ERROR},
+    Mode.MONITOR: {Mode.STOP, Mode.ERROR},
+    Mode.MANUAL: {Mode.STOP, Mode.ERROR},
+    Mode.RECIPE: {Mode.RECIPE, Mode.SMOKE, Mode.HOLD, Mode.STOP, Mode.ERROR, Mode.REIGNITE},
 }
 
 
@@ -93,7 +94,7 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
             return control
         control["mode"] = to_mode
         if setpoint is not _UNSET:
-            control["primary_setpoint"] = setpoint if to_mode == "Hold" else 0
+            control["primary_setpoint"] = setpoint if to_mode == Mode.HOLD else 0
         control["updated"] = True
         store.write_control(control, WriteKind.OVERWRITE, origin="control")
         return control
@@ -140,7 +141,7 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
 @dataclass(frozen=True)
 class Edge:
     guard: Callable  # (mode_obj, ctx, control, ptemp, now) -> bool
-    to: str
+    to: Mode
     kind: TransitionKind
     notify: Optional[str] = None
     display: Optional[tuple] = None
@@ -196,10 +197,10 @@ def _flameout_edges(*, setup):
     err_guard = flameout_error_setup if setup else flameout_error_inloop
     reig_guard = flameout_reignite_setup if setup else flameout_reignite_inloop
     return [
-        Edge(err_guard, "Error", TransitionKind.SAFETY, notify="Grill_Error_02", display=("text", "ERROR")),
+        Edge(err_guard, Mode.ERROR, TransitionKind.SAFETY, notify="Grill_Error_02", display=("text", "ERROR")),
         Edge(
             reig_guard,
-            "Reignite",
+            Mode.REIGNITE,
             TransitionKind.SAFETY,
             reignite_from_self=True,
             notify="Grill_Error_03",
@@ -219,19 +220,23 @@ def _flameout_edges(*, setup):
 # switch reading), so a pure pre_act guard would both move it relative to
 # actuation and drop the edge-detection. It stays as the inline seam call in
 # base.run (like the bespoke recipe/startup writes left direct in Phase 1).
-GUARDS: dict[str, dict[str, list]] = {
-    "*": {
+GUARDS: dict[Mode | str, dict[str, list]] = {
+    "*": {  # "*" is a wildcard applying to every mode, NOT a Mode value.
         "pre_act": [
             Edge(
-                over_max_temp_guard, "Error", TransitionKind.SAFETY, notify="Grill_Error_01", display=("text", "ERROR")
+                over_max_temp_guard,
+                Mode.ERROR,
+                TransitionKind.SAFETY,
+                notify="Grill_Error_01",
+                display=("text", "ERROR"),
             ),
         ],
     },
-    "Smoke": {
+    Mode.SMOKE: {
         "pre_loop": _flameout_edges(setup=True),
         "pre_act": _flameout_edges(setup=False),
     },
-    "Hold": {
+    Mode.HOLD: {
         "pre_loop": _flameout_edges(setup=True),
         "pre_act": _flameout_edges(setup=False),
     },
