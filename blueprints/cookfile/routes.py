@@ -221,8 +221,7 @@ def cookfile_page():
                     cookfilestruct, status = read_cookfile(cookfilename)
                     parent_id = cookfilestruct["metadata"]["id"]
                     tmp_path = f"/tmp/pifire/{parent_id}"
-                    if not os.path.exists(tmp_path):
-                        os.mkdir(tmp_path)
+                    os.makedirs(tmp_path, exist_ok=True)
 
                     if remotefile and allowed_file(remotefile.filename):
                         filename = secure_filename(remotefile.filename)

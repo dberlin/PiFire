@@ -60,8 +60,7 @@ def recipes_data(filename=None):
                     recipe_data, status = read_recipefile(filepath)
                     parent_id = recipe_data["metadata"]["id"]
                     tmp_path = f"/tmp/pifire/{parent_id}"
-                    if not os.path.exists(tmp_path):
-                        os.mkdir(tmp_path)
+                    os.makedirs(tmp_path, exist_ok=True)
 
                     if remotefile and allowed_file(remotefile.filename):
                         asset_filename = secure_filename(remotefile.filename)

@@ -632,3 +632,65 @@ def test_uploadassets_via_direct_post(live_server, page, _isolated_recipe_folder
     recipe_data = _read_recipe(recipe_dir, filename)
     assert len(recipe_data["assets"]) == 1
     assert recipe_data["assets"][0]["type"] == "png"
+
+
+@pytest.fixture
+def _tmp_pifire_absent(tmp_path):
+    """Ensure the real, shared `/tmp/pifire` asset-scratch dir is ABSENT for
+    the duration of the test, so `test_uploadassets_creates_missing_tmp_pifire_parent_dir`
+    below can exercise a genuinely fresh environment. `/tmp/pifire` is a real
+    absolute path that may already exist on this machine and be in use by
+    other processes/tests (see `test_uploadassets_via_direct_post` above,
+    which pre-creates it) -- so if it exists, rename it out of the way to a
+    unique backup path (derived from this test's own `tmp_path`, never
+    time/random, to keep the id deterministic-per-test) and restore it in
+    `finally`; whatever the test itself creates at `/tmp/pifire` is removed
+    afterward either way, leaving the directory in its original state."""
+    real_path = "/tmp/pifire"
+    backup_path = f"/tmp/pifire.bak.{tmp_path.name}"
+    backed_up = os.path.exists(real_path)
+    if backed_up:
+        os.rename(real_path, backup_path)
+    try:
+        yield
+    finally:
+        if os.path.exists(real_path):
+            shutil.rmtree(real_path, ignore_errors=True)
+        if backed_up:
+            os.rename(backup_path, real_path)
+
+
+def test_uploadassets_creates_missing_tmp_pifire_parent_dir(
+    live_server, page, _isolated_recipe_folder, _tmp_pifire_absent
+):
+    """Regression test for the latent bug documented in
+    `test_uploadassets_via_direct_post` above: with the `/tmp/pifire`
+    PARENT dir genuinely absent (a fresh environment's very first asset
+    upload ever), the handler used to do
+    `tmp_path = f"/tmp/pifire/{parent_id}"; if not os.path.exists(tmp_path):
+    os.mkdir(tmp_path)` -- `os.mkdir` only creates the leaf dir, so it raised
+    a bare `FileNotFoundError` (-> 500) since `/tmp/pifire` itself didn't
+    exist. Fixed to `os.makedirs(tmp_path, exist_ok=True)`, which creates
+    both levels and doesn't error if they already exist."""
+    assert not os.path.exists("/tmp/pifire")
+    recipe_dir = _isolated_recipe_folder
+    filename = _create_recipe(page, live_server, recipe_dir)
+
+    png_buffer = io.BytesIO()
+    Image.new("RGB", (16, 16), (255, 0, 0)).save(png_buffer, format="PNG")
+
+    resp = page.request.post(
+        f"{live_server}/recipes/data",
+        multipart={
+            "uploadassets": "true",
+            "filename": filename,
+            "assetfiles": {"name": "test-asset.png", "mimeType": "image/png", "buffer": png_buffer.getvalue()},
+        },
+    )
+    assert resp.status == 200
+    body = resp.json()
+    assert body["result"] == "success"
+    assert body["errors"] == []
+
+    recipe_data = _read_recipe(recipe_dir, filename)
+    assert len(recipe_data["assets"]) == 1

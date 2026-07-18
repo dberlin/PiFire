@@ -411,6 +411,64 @@ def test_upload_media_and_thumbnail_via_direct_post(live_server, page, _isolated
     assert len(assets_after) == 2
 
 
+@pytest.fixture
+def _tmp_pifire_absent(tmp_path):
+    """Ensure the real, shared `/tmp/pifire` asset-scratch dir is ABSENT for
+    the duration of the test (mirrors the fixture of the same name in
+    test_page_recipes.py). `/tmp/pifire` is a real absolute path that may
+    already exist on this machine and be in use by other processes/tests
+    (see `test_upload_media_and_thumbnail_via_direct_post` above, which
+    pre-creates it) -- so if it exists, rename it out of the way to a unique
+    backup path (derived from this test's own `tmp_path`, never time/random)
+    and restore it in `finally`; whatever the test itself creates at
+    `/tmp/pifire` is removed afterward either way, leaving the directory in
+    its original state."""
+    real_path = "/tmp/pifire"
+    backup_path = f"/tmp/pifire.bak.{tmp_path.name}"
+    backed_up = os.path.exists(real_path)
+    if backed_up:
+        os.rename(real_path, backup_path)
+    try:
+        yield
+    finally:
+        if os.path.exists(real_path):
+            shutil.rmtree(real_path, ignore_errors=True)
+        if backed_up:
+            os.rename(backup_path, real_path)
+
+
+def test_upload_media_creates_missing_tmp_pifire_parent_dir(
+    live_server, page, _isolated_history_folder, _tmp_pifire_absent
+):
+    """Regression test for the latent bug documented in
+    `test_upload_media_and_thumbnail_via_direct_post` above: with the
+    `/tmp/pifire` PARENT dir genuinely absent (a fresh environment's very
+    first asset upload ever), `ulmediafn`'s handler used to do
+    `tmp_path = f"/tmp/pifire/{parent_id}"; if not os.path.exists(tmp_path):
+    os.mkdir(tmp_path)` -- `os.mkdir` only creates the leaf dir, so it raised
+    a bare `FileNotFoundError` (-> 500) since `/tmp/pifire` itself didn't
+    exist. Fixed to `os.makedirs(tmp_path, exist_ok=True)`, which creates
+    both levels and doesn't error if they already exist."""
+    assert not os.path.exists("/tmp/pifire")
+    history_dir = _isolated_history_folder
+    filename = _write_cookfile(history_dir, "E2E-UploadMedia-FreshEnv")
+
+    png_buffer = io.BytesIO()
+    Image.new("RGB", (16, 16), (0, 255, 0)).save(png_buffer, format="PNG")
+    resp = page.request.post(
+        f"{live_server}/cookfile/",
+        multipart={
+            "ulmediafn": filename,
+            "ulmedia": {"name": "media1.png", "mimeType": "image/png", "buffer": png_buffer.getvalue()},
+        },
+    )
+    assert resp.status == 200
+    assert "Comments" in resp.text()
+    assets = _read_cookfile_json(history_dir, filename, "assets")
+    assert len(assets) == 1
+    assert assets[0]["type"] == "png"
+
+
 def test_upload_cookfile_saves_to_configured_history_folder(live_server, page, _isolated_history_folder):
     """`ulcookfilereq` (cook-file upload) previously saved via
     `remotefile.save(os.path.join("HISTORY_FOLDER", filename))` -- the
