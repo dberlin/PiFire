@@ -24,10 +24,11 @@ Actions covered here:
 NOT covered (needs live/recorded history data or a real cookfile on disk,
 neither of which this control-loop-less harness produces):
 - `cookfile` (open/delete/download an existing .pifire cook file)
-- `export` (CSV export -- `prepare_csv()` indexes into `read_history()[0]`
-  unconditionally and throws IndexError when history is empty; this is a
-  latent bug independent of these tests, not something to route around by
-  fabricating history data here)
+- `export` (CSV export with actually-recorded history data -- the
+  previously-latent empty-history crash in `prepare_csv()` is now covered
+  directly by tests/unit/common/test_prepare_csv.py and at the route level
+  by tests/web/test_history_export_route.py, neither of which need this
+  Playwright harness)
 """
 
 import pytest
