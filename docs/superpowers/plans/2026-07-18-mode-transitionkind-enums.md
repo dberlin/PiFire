@@ -4,7 +4,7 @@
 
 **Goal:** Replace the bare `"Smoke"`/`"Hold"`/… mode string literals and the `"natural"`/`"safety"`/`"terminal"` transition-kind literals with `Mode` and `TransitionKind` `str`-enums, across the **controller domain** — so the FSM (dispatch map, `ALLOWED_EXITS`, `GUARDS`, `request_transition`) and the mode classes reference typed constants instead of magic strings, with zero runtime behavior change.
 
-**Architecture:** `Mode` is a `class Mode(str, Enum)` whose members' values are the exact existing strings (`Mode.SMOKE = "Smoke"`). Because it subclasses `str`, a `Mode` member **is** its string: `Mode.SMOKE == "Smoke"` is `True`, `json.dumps` serializes it to `"Smoke"`, and it hashes/compares identically — so the persisted `control["mode"]` JSON is byte-identical, cross-process string writes (web/display) still match, and recipe-file mode strings still dispatch. `Mode` lives in `common/` so every process *can* adopt it later; this plan converts only `controller/**`. `TransitionKind` is controller-internal (never serialized). Datastore values read back from JSON are plain `str` (the enum type is lost on deserialize), which is fine: all mode comparisons use `==` (verified — no `is`, no `isinstance`), so `control["mode"] == Mode.SMOKE` holds whether `control["mode"]` is a `Mode` or a plain `str`.
+**Architecture:** `Mode` is a `class Mode(StrEnum)` (`enum.StrEnum`, Python 3.11+; we're on 3.14) whose members' values are the exact existing strings (`Mode.SMOKE = "Smoke"`). **Use `StrEnum`, NOT a hand-rolled `class Mode(str, Enum)`** — the latter inherits `Enum.__str__`, so `str(Mode.SMOKE)` / `f"{Mode.SMOKE}"` yield `"Mode.SMOKE"`, a real behavior change anywhere a mode is stringified for a log or display. `StrEnum` overrides `__str__`/`__format__` to return the value, so a `Mode` member **is** its string in every context: `Mode.SMOKE == "Smoke"`, `str(Mode.SMOKE) == "Smoke"`, `f"{Mode.SMOKE}" == "Smoke"`, `json.dumps` → `"Smoke"`, and it hashes/compares identically — so the persisted `control["mode"]` JSON is byte-identical, cross-process string writes (web/display) still match, and recipe-file mode strings still dispatch. `Mode` lives in `common/` so every process *can* adopt it later; this plan converts only `controller/**`. `TransitionKind` is controller-internal (never serialized) but is also a `StrEnum` for consistency + clean logging. Datastore values read back from JSON are plain `str` (the enum type is lost on deserialize), which is fine: all mode comparisons use `==` (verified — no `is`, no `isinstance`), so `control["mode"] == Mode.SMOKE` holds whether `control["mode"]` is a `Mode` or a plain `str`.
 
 **Tech Stack:** Python 3.14, `enum.Enum`, pytest, `uv`/`uvx ruff`.
 
@@ -30,7 +30,7 @@
 ## File Structure
 
 ```
-common/modes.py                              (NEW — class Mode(str, Enum))
+common/modes.py                              (NEW — class Mode(StrEnum))
 controller/runtime/transitions.py            (MODIFIED — TransitionKind enum; Mode in ALLOWED_EXITS/GUARDS/Edge/kind)
 controller/runtime/controller.py             (MODIFIED — _MODE_HANDLERS/_MODE_DISPATCH keys, tick() comparisons, next_mode)
 controller/runtime/modes/base.py             (MODIFIED — run() mode comparisons)
@@ -41,7 +41,7 @@ tests/unit/runtime/test_transitionkind_enum.py (NEW — Task 2)
 
 ---
 
-## Task 1 — Add `Mode(str, Enum)` + prove str-interop [COMMIT FIRST]
+## Task 1 — Add `Mode(StrEnum)` + prove str-interop [COMMIT FIRST]
 
 The whole refactor's safety rests on `str`-enum transparency. Pin it before converting anything.
 
@@ -58,8 +58,16 @@ from common.modes import Mode
 
 def test_member_is_its_string():
     assert Mode.SMOKE == "Smoke"
-    assert Mode.SMOKE == "Smoke" and isinstance(Mode.SMOKE, str)
+    assert isinstance(Mode.SMOKE, str)
     assert Mode.STOP == "Stop" and Mode.ERROR == "Error" and Mode.RECIPE == "Recipe"
+
+def test_str_and_format_return_the_value_not_the_member_repr():
+    # This is exactly why StrEnum (not `class Mode(str, Enum)`) is required:
+    # `(str, Enum)` would give "Mode.SMOKE" here, a behavior change in any log/display.
+    assert str(Mode.SMOKE) == "Smoke"
+    assert f"{Mode.SMOKE}" == "Smoke"
+    assert "%s" % Mode.HOLD == "Hold"
+    assert "mode is " + Mode.ERROR == "mode is Error"
 
 def test_json_serializes_to_plain_string():
     assert json.dumps({"mode": Mode.SMOKE}) == json.dumps({"mode": "Smoke"})
@@ -86,15 +94,17 @@ def test_all_eleven_values_exact():
 - [ ] **Step 3: Implement** `common/modes.py`:
 
 ```python
-"""Canonical controller mode names as a str-enum. Members ARE their string
-values (Mode.SMOKE == "Smoke"), so they serialize to plain JSON, compare equal
-to the persisted control["mode"] string, and interoperate as dict keys / set
-members with plain strings written by other processes and recipe files."""
+"""Canonical controller mode names as a StrEnum. Members ARE their string
+values (Mode.SMOKE == "Smoke", str(Mode.SMOKE) == "Smoke"), so they serialize to
+plain JSON, compare/stringify equal to the persisted control["mode"] string, and
+interoperate as dict keys / set members with plain strings written by other
+processes and recipe files. StrEnum (not `class Mode(str, Enum)`) is required so
+str()/format yield the value, not "Mode.SMOKE"."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Mode(str, Enum):
+class Mode(StrEnum):
     STARTUP = "Startup"
     SMOKE = "Smoke"
     HOLD = "Hold"
@@ -113,17 +123,17 @@ class Mode(str, Enum):
 
 ---
 
-## Task 2 — Add `TransitionKind(str, Enum)` + convert `transitions.py` kinds [COMMIT]
+## Task 2 — Add `TransitionKind(StrEnum)` + convert `transitions.py` kinds [COMMIT]
 
 **Files:** `controller/runtime/transitions.py`, `tests/unit/runtime/test_transitionkind_enum.py` (new). Also updates the `kind=` call sites in `controller/runtime/modes/{smoke,hold,base}.py` and `controller/runtime/controller.py` (the `request_transition(..., kind="...")` calls) — grep `kind=` to find all.
 
 **Interfaces — Produces:** `transitions.TransitionKind` (`NATURAL`/`SAFETY`/`TERMINAL`). `request_transition`'s `kind` param and `Edge.kind` now hold `TransitionKind`.
 
 - [ ] **Step 1: Failing test** (`test_transitionkind_enum.py`): `TransitionKind.NATURAL == "natural"`; assert the seam still dispatches — a `kind=TransitionKind.NATURAL` call yields when updated, `TransitionKind.SAFETY` applies authoritatively (reuse the fake-ctx pattern from `test_request_transition.py`). Run → FAIL (`TransitionKind` undefined).
-- [ ] **Step 2: Implement.** In `transitions.py` add:
+- [ ] **Step 2: Implement.** In `transitions.py` add `from enum import StrEnum`, then:
 
 ```python
-class TransitionKind(str, Enum):
+class TransitionKind(StrEnum):
     NATURAL = "natural"
     SAFETY = "safety"
     TERMINAL = "terminal"
@@ -204,5 +214,5 @@ class TransitionKind(str, Enum):
 
 - **Spec coverage:** transition kinds (Task 2) and all controller-domain mode strings (Tasks 3–6) converted; interop proven first (Task 1). ✅
 - **Placeholder scan:** enum defs and interop tests are concrete; per-file conversions are described by pattern + the specific comparison/write sites (grep-locatable) rather than quoting all 149 — the conversion is mechanical (`"X"` → `Mode.X`) and the gate (byte-identical goldens) catches any miss. ✅
-- **Type consistency:** `Mode(str, Enum)` and `TransitionKind(str, Enum)` names stable across tasks; `Edge.kind: TransitionKind`; `name = Mode.*`. ✅
+- **Type consistency:** `Mode(StrEnum)` and `TransitionKind(StrEnum)` (both `enum.StrEnum`, not `(str, Enum)`) names stable across tasks; `Edge.kind: TransitionKind`; `name = Mode.*`. ✅
 - **Behavior-preserving:** `str`-enum ⇒ identical serialization/comparison/hashing; goldens + FSM char suites gate every task with zero assertion edits; the `str`-interop is pinned in Task 1 before any conversion. ✅
