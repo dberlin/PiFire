@@ -177,6 +177,26 @@ def read_control_from_server():
     return read_control()
 
 
+def drain_control_writes():
+    """Apply any queued `WriteKind.MERGE` control writes to `control:general`.
+
+    `write_control(..., WriteKind.MERGE, ...)` (used by several routes --
+    e.g. pellets' `hopperlevel`/`loadprofile`, tuner's mode toggles -- and
+    by `apply_control` below) only *queues* the partial; per
+    common.datastore_accessors.execute_control_writes()'s docstring, the
+    deep-merge into `control:general` is applied when that function runs.
+    In production that happens every iteration of the real control-runtime
+    loop (controller/runtime/controller.py). This test harness's
+    `live_server` runs only the Flask app -- no control loop -- so queued
+    merges never drain on their own. Call this after driving a UI action
+    or POST that performs a MERGE write, before reading back via
+    `read_control_from_server()`, to observe the result the next real
+    control-loop tick would have produced."""
+    from common.datastore_accessors import execute_control_writes
+
+    execute_control_writes()
+
+
 # --- Precondition seeding helpers ---------------------------------------
 
 
@@ -199,7 +219,12 @@ def apply_settings(mutate):
 def apply_control(mutate, *, origin="test-web-e2e"):
     """Read current control, apply `mutate(control)` in place (or have it
     return a replacement dict), write the result back (MERGE), and return
-    it. See apply_settings() for the pattern."""
+    it. See apply_settings() for the pattern.
+
+    The MERGE write is drained immediately (see drain_control_writes()) so
+    the read-back the caller does right after this call sees the change --
+    without that, it would sit queued forever in this control-loop-less
+    harness."""
     from common.common import WriteKind
     from common.datastore_accessors import read_control, write_control
 
@@ -207,4 +232,5 @@ def apply_control(mutate, *, origin="test-web-e2e"):
     result = mutate(control)
     final = result if result is not None else control
     write_control(final, WriteKind.MERGE, origin=origin)
+    drain_control_writes()
     return final
