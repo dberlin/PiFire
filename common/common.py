@@ -73,7 +73,7 @@ def create_logger(
 		Note: If the a log-level change is needed, the developer should directly set the log level on the logger, instead of using 
 		this function.  
 	"""
-    if not logger.hasHandlers():
+    if not logger.handlers:
         logger.setLevel(level)
         formatter = logging.Formatter(fmt=messageformat, datefmt="%Y-%m-%d %H:%M:%S %z")
         # datefmt='%Y-%m-%d %H:%M:%S'
