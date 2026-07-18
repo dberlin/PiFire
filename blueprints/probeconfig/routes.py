@@ -322,14 +322,19 @@ def _probeconfig_ports_add_edit_probe(r, settings, wizardData, wizardInstallInfo
             for index, device in enumerate(wizardInstallInfo["probe_map"]["probe_devices"]):
                 if "virtual" in device["module"] and new_probe["device"] == device["device"]:
                     input_probes = device["config"]["probes_list"]
-                    for probe in range(len(wizardInstallInfo["probe_map"]["probe_info"]), 0, -1):
-                        if wizardInstallInfo["probe_map"]["probe_info"][probe]["label"] == new_probe["label"]:
-                            # Found the virtual probe first, current location is OK
+                    for probe in range(len(wizardInstallInfo["probe_map"]["probe_info"]) - 1, -1, -1):
+                        if probe == found:
+                            # Found the virtual probe's own entry first (by
+                            # index, not label -- the label may have just
+                            # been renamed), current location is OK
                             wizardInstallInfo["probe_map"]["probe_info"][found] = new_probe
                             break
                         elif wizardInstallInfo["probe_map"]["probe_info"][probe]["label"] in input_probes:
-                            # Found one of the input probes first, fix by inserting edited probe config here
-                            wizardInstallInfo["probe_map"]["probe_info"].insert(probe, new_probe)
+                            # Found one of the input probes first (at a higher
+                            # index than our own entry), fix by inserting the
+                            # edited probe config right after it so it still
+                            # sorts after every input probe for this device
+                            wizardInstallInfo["probe_map"]["probe_info"].insert(probe + 1, new_probe)
                             # Remove the previous config from the list
                             wizardInstallInfo["probe_map"]["probe_info"].pop(found)
                             break

@@ -52,21 +52,11 @@ signals:
 
 1. `"VIRT" in new_probe["port"]` -- the probe BEING EDITED is itself the
    virtual/aggregate probe (device_port selects the virtual device's own
-   port, e.g. "VirtDev:VIRT0"). Walks `probe_info` **backwards** via
-   `range(len(probe_info), 0, -1)` looking for whichever comes first scanning
-   from the end: the virtual probe's own (still-current) entry -- meaning
-   position is already OK -- or one of its input probes' entries -- meaning
-   the virtual entry needs to move to right after that input. **This branch
-   is unreachable without crashing**: `range(len(probe_info), 0, -1)`'s FIRST
-   value is `len(probe_info)` itself, an out-of-bounds index for a 0-indexed
-   list of that length, and the loop's first statement indexes into it with
-   no bounds check -- so this raises `IndexError` -> HTTP 500 on literally
-   every call, confirmed empirically below
-   (`test_editing_the_virtual_probe_itself_currently_returns_500`). This is a
-   pre-existing bug in probeconfig_page, not introduced by this test suite;
-   it is pinned here (not fixed -- this task is test-only) so an upcoming
-   refactor either preserves the crash consciously or is credited with
-   fixing a real bug, rather than silently changing undocumented behavior.
+   port, e.g. "VirtDev:VIRT0"). Walks `probe_info` **backwards** looking for
+   whichever comes first scanning from the end: the virtual probe's own
+   (still-current) entry -- meaning position is already OK -- or one of its
+   input probes' entries -- meaning the virtual entry needs to move to right
+   after that input.
 2. `elif in_virtual_device != []` -- the probe BEING EDITED is one of a
    virtual device's INPUT probes (its old label appeared in some virtual
    device's `probes_list`). Walks `probe_info` **forwards**: if the edited
@@ -470,19 +460,21 @@ def test_edit_probe_input_probe_out_of_order_reorders_before_virtual_probe(live_
     assert vdev["config"]["probes_list"] == ["Input1Renamed", "Input2"]
 
 
-def test_editing_the_virtual_probe_itself_currently_returns_500(live_server, page):
+def test_editing_the_virtual_probe_itself_succeeds_and_stays_in_place(live_server, page):
     """Characterizes the OTHER ordering branch (`"VIRT" in new_probe["port"]`
     -- editing the virtual/aggregate probe's own entry, as opposed to one of
-    its inputs). Per the module docstring, this branch's backward walk
-    `range(len(probe_info), 0, -1)` starts at the out-of-bounds index
-    `len(probe_info)` and indexes into the list with no bounds check on its
-    very first iteration, so it raises IndexError -> HTTP 500 on every call
-    reaching it, confirmed empirically against the real live_server before
-    writing this test. This is a pre-existing bug, not something introduced
-    or fixed by this test suite (test-only task -- no app code changes
-    here); pinning the current (broken) behavior means a refactor that
-    changes it will show up as an intentional diff instead of a silent
-    behavior change."""
+    its inputs). This branch's backward walk used to start at the
+    out-of-bounds index `len(probe_info)` (an off-by-one -> IndexError ->
+    HTTP 500 on every call, regardless of whether reordering was even
+    needed) and identified "this is my own entry" by comparing the list
+    entry's label to the *new* (possibly renamed) label -- which never
+    matches when renaming, corrupting the list instead of leaving it alone.
+    Fixed: the walk starts at `len(probe_info) - 1` and identifies its own
+    entry by index (`probe == found`), which is rename-safe. Seeded already
+    in the correct order (virtual entry last, after both its inputs), so
+    the "current position is OK" path fires immediately on the very first
+    (now in-bounds) iteration: the entry is replaced in place and renamed,
+    and the list order is unchanged."""
     _seed_probe_map(
         probe_devices=[
             _ds18b20_device("TempSensor"),
@@ -509,4 +501,46 @@ def test_editing_the_virtual_probe_itself_currently_returns_500(live_server, pag
         },
     )
 
-    assert resp.status == 500
+    assert resp.status == 200
+    probe_map = _probe_map()
+    assert [p["label"] for p in probe_map["probe_info"]] == ["Input1", "Input2", "VirtProbeRenamed"]
+
+
+def test_editing_the_virtual_probe_itself_out_of_order_reorders_after_inputs(live_server, page):
+    """Companion to the above for the "insert" sub-path of the same branch:
+    the virtual entry is seeded OUT of order (ahead of its own inputs), so
+    the backward walk hits an input probe before it hits the virtual's own
+    entry, forcing a reorder. The edited entry must land AFTER every input
+    probe belonging to its device, not merely before the one that was found
+    scanning backwards -- inserting at `probe` (the found input's own
+    index) rather than `probe + 1` would leave the last input probe after
+    the virtual entry, violating the invariant."""
+    _seed_probe_map(
+        probe_devices=[
+            _ds18b20_device("TempSensor"),
+            _virtual_average_device("VirtDev", ["Input1", "Input2"]),
+        ],
+        probe_info=[
+            _probe("VirtProbe", "VirtDev", "VIRT0", probe_type="Aux"),
+            _probe("Input1", "TempSensor", "DS0"),
+            _probe("Input2", "TempSensor", "DS0"),
+        ],
+    )
+
+    resp = page.request.post(
+        f"{live_server}/probeconfig/",
+        form={
+            "section": "ports",
+            "action": "edit_probe",
+            "name": "VirtProbe",
+            "probe_config_name": "VirtProbeRenamed",
+            "probe_config_device_port": "VirtDev:VIRT0",
+            "probe_config_type": "Aux",
+            "probe_config_profile_id": "TWPS00",
+            "probe_config_enabled": "true",
+        },
+    )
+
+    assert resp.status == 200
+    probe_map = _probe_map()
+    assert [p["label"] for p in probe_map["probe_info"]] == ["Input1", "Input2", "VirtProbeRenamed"]
