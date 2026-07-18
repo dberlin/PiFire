@@ -243,3 +243,51 @@ def test_fan_out_gating_only_ifttt_and_onesignal_fire(monkeypatch):
     assert counters["pushover"] == 0
     assert counters["mqtt"] == 0
     assert counters["wled"] == 0
+
+
+class _FakeAppriseHandler:
+    """Records .add(...) URLs and .notify(...) kwargs; never touches the network."""
+
+    def __init__(self):
+        self.added_urls = []
+        self.notify_calls = []
+
+    def add(self, url):
+        self.added_urls.append(url)
+
+    def notify(self, title, body):
+        self.notify_calls.append({"title": title, "body": body})
+        return True
+
+
+def test_send_pushover_notification_builds_apprise_urls(monkeypatch):
+    fake = _FakeAppriseHandler()
+    monkeypatch.setattr(N.apprise, "Apprise", lambda: fake)
+    settings = _base_settings()
+    settings["notify_services"]["pushover"] = {
+        "APIKey": "tok",
+        "UserKeys": "u1, u2",
+        "PublicURL": "http://x",
+        "enabled": True,
+    }
+
+    N._send_pushover_notification(settings, "Title", "Body")
+
+    assert fake.added_urls == ["pover://u1@tok?url=http://x", "pover://u2@tok?url=http://x"]
+    assert fake.notify_calls == [{"title": "Title", "body": "Body"}]
+
+
+def test_send_pushbullet_notification_builds_apprise_url(monkeypatch):
+    fake = _FakeAppriseHandler()
+    monkeypatch.setattr(N.apprise, "Apprise", lambda: fake)
+    settings = _base_settings()
+    settings["notify_services"]["pushbullet"] = {
+        "APIKey": "k",
+        "PublicURL": "http://y",
+        "enabled": True,
+    }
+
+    N._send_pushbullet_notification(settings, "Title", "Body")
+
+    assert fake.added_urls == ["pbul://k@k?url=http://y"]
+    assert fake.notify_calls == [{"title": "Title", "body": "Body"}]
