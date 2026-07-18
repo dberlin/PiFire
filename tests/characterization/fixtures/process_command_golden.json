@@ -7724,22 +7724,722 @@
     ],
     "cmd_calls": [],
     "control_diff_after_execute": {
-      "primary_setpoint": [
-        0,
-        95.2
+      "notify_data": [
+        [
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Grill",
+            "name": "Grill",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "type": "probe"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Grill",
+            "name": "Grill",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_high"
+          },
+          {
+            "condition": "equal_below",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Grill",
+            "name": "Grill",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_low"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe1",
+            "name": "Probe-1",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "type": "probe"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe1",
+            "name": "Probe-1",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_high"
+          },
+          {
+            "condition": "equal_below",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe1",
+            "name": "Probe-1",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_low"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe2",
+            "name": "Probe-2",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "type": "probe"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe2",
+            "name": "Probe-2",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_high"
+          },
+          {
+            "condition": "equal_below",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe2",
+            "name": "Probe-2",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_low"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe3",
+            "name": "Probe-3",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "type": "probe"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe3",
+            "name": "Probe-3",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_high"
+          },
+          {
+            "condition": "equal_below",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe3",
+            "name": "Probe-3",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_low"
+          },
+          {
+            "keep_warm": false,
+            "label": "Timer",
+            "req": false,
+            "shutdown": false,
+            "type": "timer"
+          },
+          {
+            "keep_warm": false,
+            "label": "Hopper",
+            "last_check": 0,
+            "req": true,
+            "shutdown": false,
+            "type": "hopper"
+          },
+          {
+            "keep_warm": false,
+            "label": "Test",
+            "req": false,
+            "shutdown": false,
+            "type": "test"
+          }
+        ],
+        [
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Grill",
+            "name": "Grill",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 95.2,
+            "type": "probe"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Grill",
+            "name": "Grill",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_high"
+          },
+          {
+            "condition": "equal_below",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Grill",
+            "name": "Grill",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_low"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe1",
+            "name": "Probe-1",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "type": "probe"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe1",
+            "name": "Probe-1",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_high"
+          },
+          {
+            "condition": "equal_below",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe1",
+            "name": "Probe-1",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_low"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe2",
+            "name": "Probe-2",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "type": "probe"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe2",
+            "name": "Probe-2",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_high"
+          },
+          {
+            "condition": "equal_below",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe2",
+            "name": "Probe-2",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_low"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe3",
+            "name": "Probe-3",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "type": "probe"
+          },
+          {
+            "condition": "equal_above",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe3",
+            "name": "Probe-3",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_high"
+          },
+          {
+            "condition": "equal_below",
+            "eta": null,
+            "keep_warm": false,
+            "label": "Probe3",
+            "name": "Probe-3",
+            "reignite": false,
+            "req": false,
+            "shutdown": false,
+            "target": 0,
+            "triggered": false,
+            "type": "probe_limit_low"
+          },
+          {
+            "keep_warm": false,
+            "label": "Timer",
+            "req": false,
+            "shutdown": false,
+            "type": "timer"
+          },
+          {
+            "keep_warm": false,
+            "label": "Hopper",
+            "last_check": 0,
+            "req": true,
+            "shutdown": false,
+            "type": "hopper"
+          },
+          {
+            "keep_warm": false,
+            "label": "Test",
+            "req": false,
+            "shutdown": false,
+            "type": "test"
+          }
+        ]
       ]
     },
     "log_calls": [],
     "queued_writes": [
       {
         "diff": {
+          "notify_data": [
+            [
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Grill",
+                "name": "Grill",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "type": "probe"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Grill",
+                "name": "Grill",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_high"
+              },
+              {
+                "condition": "equal_below",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Grill",
+                "name": "Grill",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_low"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe1",
+                "name": "Probe-1",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "type": "probe"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe1",
+                "name": "Probe-1",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_high"
+              },
+              {
+                "condition": "equal_below",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe1",
+                "name": "Probe-1",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_low"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe2",
+                "name": "Probe-2",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "type": "probe"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe2",
+                "name": "Probe-2",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_high"
+              },
+              {
+                "condition": "equal_below",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe2",
+                "name": "Probe-2",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_low"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe3",
+                "name": "Probe-3",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "type": "probe"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe3",
+                "name": "Probe-3",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_high"
+              },
+              {
+                "condition": "equal_below",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe3",
+                "name": "Probe-3",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_low"
+              },
+              {
+                "keep_warm": false,
+                "label": "Timer",
+                "req": false,
+                "shutdown": false,
+                "type": "timer"
+              },
+              {
+                "keep_warm": false,
+                "label": "Hopper",
+                "last_check": 0,
+                "req": true,
+                "shutdown": false,
+                "type": "hopper"
+              },
+              {
+                "keep_warm": false,
+                "label": "Test",
+                "req": false,
+                "shutdown": false,
+                "type": "test"
+              }
+            ],
+            [
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Grill",
+                "name": "Grill",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 95.2,
+                "type": "probe"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Grill",
+                "name": "Grill",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_high"
+              },
+              {
+                "condition": "equal_below",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Grill",
+                "name": "Grill",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_low"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe1",
+                "name": "Probe-1",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "type": "probe"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe1",
+                "name": "Probe-1",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_high"
+              },
+              {
+                "condition": "equal_below",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe1",
+                "name": "Probe-1",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_low"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe2",
+                "name": "Probe-2",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "type": "probe"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe2",
+                "name": "Probe-2",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_high"
+              },
+              {
+                "condition": "equal_below",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe2",
+                "name": "Probe-2",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_low"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe3",
+                "name": "Probe-3",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "type": "probe"
+              },
+              {
+                "condition": "equal_above",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe3",
+                "name": "Probe-3",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_high"
+              },
+              {
+                "condition": "equal_below",
+                "eta": null,
+                "keep_warm": false,
+                "label": "Probe3",
+                "name": "Probe-3",
+                "reignite": false,
+                "req": false,
+                "shutdown": false,
+                "target": 0,
+                "triggered": false,
+                "type": "probe_limit_low"
+              },
+              {
+                "keep_warm": false,
+                "label": "Timer",
+                "req": false,
+                "shutdown": false,
+                "type": "timer"
+              },
+              {
+                "keep_warm": false,
+                "label": "Hopper",
+                "last_check": 0,
+                "req": true,
+                "shutdown": false,
+                "type": "hopper"
+              },
+              {
+                "keep_warm": false,
+                "label": "Test",
+                "req": false,
+                "shutdown": false,
+                "type": "test"
+              }
+            ]
+          ],
           "origin": [
             "<absent>",
             "test"
-          ],
-          "primary_setpoint": [
-            0,
-            95.2
           ]
         },
         "origin": "test"

@@ -429,9 +429,8 @@ def _cmd_set_notify(data, control, settings, arglist, origin, kind):
     /api/set/notify/{object}/shutdown/{true/false}
     /api/set/notify/{object}/keep_warm/{true/false}
 
-    NOTE: hard-codes WriteKind.MERGE, ignoring the caller's `kind`. Also, the
-    'target' path under units == 'C' writes control['primary_setpoint'] rather
-    than the notify object's target. Both preserved as-is.
+    NOTE: hard-codes WriteKind.MERGE, ignoring the caller's `kind`. Preserved
+    as-is.
     """
     if arglist[1] is not None:
         if arglist[0] == "limit_high":
@@ -466,7 +465,7 @@ def _cmd_set_notify(data, control, settings, arglist, origin, kind):
                     if settings["globals"]["units"] == "F":
                         control["notify_data"][index]["target"] = int(float(arglist[3]))
                     else:
-                        control["primary_setpoint"] = float(arglist[3])
+                        control["notify_data"][index]["target"] = float(arglist[3])
                 else:
                     data["result"] = "ERROR"
                     data["message"] = f"Notify object target value invalid or missing."

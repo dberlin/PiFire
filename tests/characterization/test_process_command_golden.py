@@ -68,10 +68,11 @@ characterization captures warts):
      the queue payload: `['restart'] -> ['restart', None, None, None]`.
   5. set/lid_open sets `lid_open_toggle = True` in BOTH the 'toggle' branch and
      its else branch -- the if/else is a no-op and no value can clear it.
-  6. set/notify/<label>/target with units == 'C' writes
-     `control['primary_setpoint']` instead of the notify object's target. The
-     'F' path correctly writes `notify_data[i]['target']`. Almost certainly a
-     copy/paste bug; frozen as-is.
+  6. (FIXED in the latent-bug pass) set/notify/<label>/target with units == 'C'
+     used to write `control['primary_setpoint']` instead of the notify object's
+     target (an apparent copy/paste bug). It now writes `notify_data[i]['target']`
+     on both paths -- as a float under 'C' (fractional targets), an int under 'F'.
+     The `set_notify_target_c` golden was re-captured for this fix.
   7. set/manual's error branch still writes control when
      `control['manual']['change']` holds a stale value from a previous command,
      even though the request was rejected with result == 'ERROR'.
@@ -102,7 +103,7 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_g
 
 # SHA-256 of the golden fixture. Pinned so the contract cannot be regenerated
 # without an obvious, reviewable edit to this line. See module docstring.
-GOLDEN_SHA256 = "092fe8efede9703a3c873a8da53a24780a6339ce766d243f8a7cfbdb3f0f13cc"
+GOLDEN_SHA256 = "49e31076dc4ceee7d3a2075d51ebc6e22664ff5e0bb8617fc189f459c4eb0bc7"
 
 # Frozen wall clock. The set/timer branches stamp time.time() into control.
 FIXED_NOW = 1700000000.0
@@ -187,7 +188,7 @@ CANONICAL_HOPPER_LEVEL = 42
 # | set    | notify      | shutdown / keep_warm / reignite     | set_notify_shutdown/_keep_warm/|
 # |        |             |                                     | set_notify_reignite            |
 # | set    | notify      | target + float + units F            | set_notify_target_f            |
-# | set    | notify      | target + float + units C (wart #6)  | set_notify_target_c            |
+# | set    | notify      | target + float + units C (#6 FIXED) | set_notify_target_c            |
 # | set    | notify      | target not a float -> ERROR         | set_notify_target_not_a_number |
 # | set    | notify      | target on Timer -> falls to ERROR   | set_notify_target_timer        |
 # | set    | notify      | unknown field -> ERROR              | set_notify_unknown_field       |
@@ -1043,10 +1044,11 @@ def test_timer_start_hardcodes_origin_app(seeded):
     assert [q["origin"] for q in queued] == ["api"]  # this one honors it
 
 
-def test_notify_target_in_celsius_writes_primary_setpoint_instead(seeded):
-    """Wart #6: an apparent copy/paste bug. The 'C' path writes
-    control['primary_setpoint'] rather than the notify object's target.
-    Pinned as current behavior -- report, do not fix."""
+def test_notify_target_in_celsius_writes_the_notify_target(seeded):
+    """The 'C' path writes the notify object's target (kept a float, since
+    Celsius targets can be fractional), leaving control['primary_setpoint']
+    untouched. Formerly wart #6 (an apparent copy/paste bug); FIXED in the
+    latent-bug pass."""
     settings = dsa.read_settings()
     settings["globals"]["units"] = "C"
     dsa.write_settings(settings)
@@ -1054,9 +1056,9 @@ def test_notify_target_in_celsius_writes_primary_setpoint_instead(seeded):
     api_commands.process_command(action="set", arglist=["notify", "Grill", "target", "95.5"], origin="test")
     dsa.execute_control_writes()
     control = dsa.read_control()
-    assert control["primary_setpoint"] == 95.5  # <- the bug
     grill = next(o for o in control["notify_data"] if o["label"] == "Grill" and o["type"] == "probe")
-    assert grill["target"] == 0  # target was NOT updated
+    assert grill["target"] == 95.5
+    assert control["primary_setpoint"] == 0  # unchanged  # target was NOT updated
 
 
 def test_lid_open_sets_true_on_both_branches(seeded):
