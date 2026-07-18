@@ -17,10 +17,12 @@ are NOT bugs to fix here):
 - ``timer_action`` finds the ``notify_data`` timer entry by index, then
   branches on ``control["timer"]["paused"]`` -- two distinct paths under
   ``type == "start_timer"`` (fresh-start vs unpause). Both are pinned.
-- The ``timer_action`` loop's ``index`` CARRIES OVER when no ``notify_data``
-  entry is of ``type == "timer"``: it then mutates whatever entry the last
-  loop iteration left ``index`` pointing at. This latent index bug is
-  pinned (``test_timer_action_latent_index_bug_no_timer_entry``), NOT fixed.
+- The ``timer_action`` loop's ``index`` used to CARRY OVER when no
+  ``notify_data`` entry was of ``type == "timer"``, mutating whatever entry
+  the last loop iteration left ``index`` pointing at. This is now fixed:
+  the loop initializes ``index = None`` and the handler returns an Error
+  envelope without mutating anything when no timer entry is found
+  (``test_timer_action_no_timer_entry_returns_error_without_mutation``).
 - ``recipe_data`` with ``arg01=None``, and ``recipe_delete``/``recipe_start``
   with a falsy filename, fall through every ``return`` and yield ``None``.
   Pinned as-is.
@@ -661,22 +663,21 @@ def test_post_timer_invalid_type(sio):
     assert resp["message"] == "Error: Received request without valid type"
 
 
-def test_timer_action_latent_index_bug_no_timer_entry(sio):
-    """LATENT BUG (pinned, not fixed): when notify_data has NO ``type ==
-    "timer"`` entry, the finder loop's ``index`` carries over its last value
-    and the handler mutates the WRONG entry. With a single non-timer entry,
-    ``index`` stays 0 and ``stop_timer`` clobbers that entry's fields."""
+def test_timer_action_no_timer_entry_returns_error_without_mutation(sio):
+    """Fixed behavior: when notify_data has NO ``type == "timer"`` entry, the
+    finder loop must not fall back to a stale/last ``index``. The handler
+    returns an Error envelope and leaves the (non-timer) entry untouched."""
     control = read_control()
     control["notify_data"] = [{"type": "probe", "label": "X", "req": True, "shutdown": True, "keep_warm": True}]
     write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
     resp = sio.mod._post_app_data("timer_action", "stop_timer", json.dumps({"timer_action": {}}))
-    assert resp["result"] == "OK"
+    assert resp["result"] == "Error"
     _drain()
     control = read_control()
-    # The non-timer entry at index 0 was mutated as if it were the timer entry.
-    assert control["notify_data"][0]["req"] is False
-    assert control["notify_data"][0]["shutdown"] is False
-    assert control["notify_data"][0]["keep_warm"] is False
+    # The non-timer entry at index 0 must be left untouched.
+    assert control["notify_data"][0]["req"] is True
+    assert control["notify_data"][0]["shutdown"] is True
+    assert control["notify_data"][0]["keep_warm"] is True
 
 
 # =====================================================================

@@ -611,9 +611,13 @@ def _post_app_data_pellets(settings, type, request):
 
 def _post_app_data_timer(settings, type, request):
     control = read_control()
-    for index, notify_obj in enumerate(control["notify_data"]):
+    index = None
+    for i, notify_obj in enumerate(control["notify_data"]):
         if notify_obj["type"] == "timer":
+            index = i
             break
+    if index is None:
+        return _response(result="Error", message="Error: No timer entry found")
     if type == "start_timer":
         control["notify_data"][index]["req"] = True
         if control["timer"]["paused"] == 0:
