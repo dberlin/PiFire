@@ -486,7 +486,7 @@ def default_control():
 
     control["timer"] = {"start": 0, "paused": 0, "end": 0, "shutdown": False}
 
-    control["manual"] = {"change": False, "fan": False, "auger": False, "igniter": False, "power": False, "pwm": 100}
+    control["manual"] = {"change": False, "pwm": 100}
 
     control["smartstart"] = {"startuptemp": 0, "profile_selected": 0}
 

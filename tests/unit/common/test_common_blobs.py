@@ -4,6 +4,14 @@ from common.common import WriteKind, strip_null_members, read_events_records
 from common import datastore
 
 
+def test_default_control_manual_has_only_change_and_pwm_keys():
+    # The per-pin boolean sub-keys (fan/auger/igniter/power) are vestigial: the
+    # live manual-command handler (common/api_commands.py) only reads/writes
+    # control['manual']['change'] (holds the active pin NAME, e.g. "igniter"),
+    # ['output'] (set by the handler), and ['pwm']. Pins the intended shape.
+    assert set(defaults.default_control()["manual"].keys()) == {"change", "pwm"}
+
+
 def test_control_overwrite_and_read(ds):
     c.write_control({"mode": "Stop", "n": {"a": 1}}, WriteKind.OVERWRITE, origin="t")
     assert c.read_control() == {"mode": "Stop", "n": {"a": 1}}
