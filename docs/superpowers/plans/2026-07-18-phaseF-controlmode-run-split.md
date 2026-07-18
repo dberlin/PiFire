@@ -4,7 +4,9 @@
 
 **For agentic workers:** REQUIRED SUB-SKILL → **superpowers:subagent-driven-development**. Execute one task at a time, in order. Each task is a pure, independently-revertible extraction under a frozen golden contract; do not batch tasks or "improve" code while extracting.
 
-**Goal:** Shrink the ~414-line `ControlMode.run()` method (`controller/runtime/modes/base.py:230-643`) into a ~120-line skeleton by extracting five private helpers, **preserving exact control-write ordering and every read/write side effect**. This is a pure structural refactor — no behavior change whatsoever.
+**Goal:** Shrink the ~420-line `ControlMode.run()` method (`controller/runtime/modes/base.py:230-651`) into a ~130-line skeleton by extracting five private helpers, **preserving exact control-write ordering and every read/write side effect**. This is a pure structural refactor — no behavior change whatsoever.
+
+> **NOTE (2026-07-18, post-FSM refresh):** this plan was written against the pre-FSM `run()`. The mode-transition FSM has since merged into `massive-reworks-and-new-ui`, which shifted line numbers and changed the switch-off block into a `request_transition(...)` seam call. All line references below are refreshed to the current code. Two FSM additions now live INSIDE `run()` and are NOT extraction targets — they stay inline exactly where they are: the `evaluate_phase(self, ctx, "pre_loop", ...)` guard (~base.py:331-336) and the `evaluate_phase(self, ctx, "pre_act", now, ptemp)` guard + the residual `if self.check_safety(now, ptemp): break` hook (~base.py:515-528, the SAFETY section). Do not touch them. `base.py` already imports `request_transition, evaluate_phase` (line 21), so extracted helpers may call `request_transition` directly.
 
 **Architecture:** `run()` is the shared work-cycle driver for every concrete mode handler (Smoke/Hold/Startup/Shutdown/Monitor/Manual/Reignite/Prime/Recipe/Error subclasses of `ControlMode`). It performs: pre-loop setup (process monitor, metrics, recipe triggers, timers) → a `while status == "Active"` main loop (SENSE / SAFETY / ACT / PUBLISH banners) → post-loop cleanup. The extraction lifts five self-contained blocks into `self._*` helpers called from the same positions, so the control-write sequence observed by the store is byte-for-byte unchanged.
 
@@ -21,7 +23,7 @@ Copy these verbatim into your working context; they are binding for every task.
   ```
   Bare `python`/`pytest` HANGS or false-fails (no PySide6 in system python). Always go through `uv run`.
 - **Before every commit:** `uvx ruff format <changed>` then `uvx ruff check <changed>`.
-- **Edits via Serena symbolic tools:** add each helper with `insert_after_symbol` (anchored on `ControlMode/run`); swap each extracted block for its call site inside `run()` with `replace_symbol_body` on `ControlMode/run` (or a uniquely-anchored `Edit` of just that block). Do not hand-retype the whole method from memory.
+- **Edits — plain Read/Edit preferred.** The tasks below name Serena symbolic tools (`insert_after_symbol`/`replace_symbol_body`), but **if you are executing in a git worktree, DO NOT use Serena — it silently edits the MAIN checkout, not your worktree** (this bit Phases H, I, and the FSM). Use plain `Edit`/`Write` anchored on the quoted code blocks instead. Either way: add each helper as a sibling of `run()`, and swap each extracted block for its one-line call site. Do not hand-retype the whole method from memory — anchor on the exact quoted blocks.
 - **Commit with `git commit -F <msgfile>`** (zsh eats backticks in `-m`). Co-author trailer, exactly:
   ```
   Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
@@ -45,7 +47,7 @@ So the pass criterion for every task is: **all 49 tests pass and no assertion li
 
 **Production file (only one is edited):**
 
-- `controller/runtime/modes/base.py` — `ControlMode.run()` at lines **230-643** (the `# ---- shared skeleton ----` comment is on 229). Five helpers are added as siblings; `run()` is rewired to call them.
+- `controller/runtime/modes/base.py` — `ControlMode.run()` at lines **230-651** (the `# ---- shared skeleton ----` comment is on 229). Five helpers are added as siblings; `run()` is rewired to call them.
 
 **Test files that gate every task (never edited — the frozen contract):**
 
@@ -74,7 +76,7 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
    ```
    git switch -c refactor/controlmode-run-split
    ```
-2. Establish the baseline. Run the gate command. Confirm **`49 passed`** BEFORE touching anything. If it is not green at baseline, STOP — the golden is not a stable contract and extraction cannot be verified.
+2. Establish the baseline. Run the gate command. Confirm it is green BEFORE touching anything. Expected **`49 passed`** (27 + 17 + 5) — the FSM merge left `test_modes_golden.py`, `test_controller_loop_golden.py`, and `test_work_cycle_e2e.py` byte-unchanged, so 49 should still hold; but the FSM merged AFTER this plan was written, so **confirm the actual count and freeze whatever you observe** as the baseline. If it is not green at baseline, STOP — the golden is not a stable contract and extraction cannot be verified.
 3. Record the baseline count; every later task must reproduce exactly this.
 
 **No commit** (branch creation only).
@@ -190,11 +192,11 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
 - **Consumes:** `control` (mutated in place), `now`, `last` (reassigned inside → must be returned), `pelletdb` (reassigned inside the hopper block → must be returned), `self.settings` (reassigned in the settings-update branch), `self.state.timers.hopper_toggle`, `self.grill` (input/output status), `self.dist_device`. Own `import control as _control`.
 - **Side effects (must preserve exactly):** the four flag blocks in order — **settings_update → distance_update → hopper_check → switch**; conditional `ctx.store.write_control` in each; `self.on_settings_reload()`; `dist_device.update_distances`; `dist_device.get_level`; `ctx.store.write_pellet_db`; may set `control` to Stop and **request a loop break** (switch-off path).
 
-> **Scoping note (deviation from spec's literal `358-409`):** the extracted block is base.py **368-409** — the four flag blocks only. Lines 356-367 (`now = ...`, `execute_control_writes()`, `control = read_control()`, `self.control = control`, `process_system_commands(ctx)`, and the `if control["updated"]: break`) **stay in `run()`** because they rebind the `control` loop variable and contain the top-of-loop `updated` break; pulling them in would force the helper to also return `control`. Keeping them in the caller makes the helper mutate `control` in place only.
+> **Scoping note (refreshed to current code):** the extracted block is base.py **376-417** — the four flag blocks only. Lines 362-375 (`now = ...`, `execute_control_writes()`, `control = read_control()`, `self.control = control`, `process_system_commands(ctx)`, and the `if control["updated"]: break`) **stay in `run()`** because they rebind the `control` loop variable and contain the top-of-loop `updated` break; pulling them in would force the helper to also return `control`. Keeping them in the caller makes the helper mutate `control` in place only.
 
-> **Break handling:** the switch-off block (base.py 400-409) contains a `break`. A helper cannot `break` the caller's loop, so it returns a `should_break` flag; `run()` does `if should_break: break`. The pre-break `write_control` + `control` mutations happen inside the helper exactly as before, so the store sees the identical write.
+> **Break handling (post-FSM):** the switch-off block (base.py 408-417) contains a `break`. It now performs the Stop transition via the FSM seam — `control["status"] = "active"` then `request_transition(ctx, control, "Stop", kind="terminal")` (which sets `mode="Stop"`/`updated=True` and does the single `write_control(OVERWRITE)`) — NOT the old inline `mode=/updated=/write` triplet. A helper cannot `break` the caller's loop, so it returns a `should_break` flag; `run()` does `if should_break: break`. The pre-break status write + seam call happen inside the helper exactly as in `run()` today, so the store sees the identical write. `request_transition` is a module global in base.py — call it directly.
 
-**Current block (base.py 368-409):**
+**Current block (base.py 376-417):**
 ```python
             # Check if user changed settings and reload
             if control["settings_update"]:
@@ -233,10 +235,10 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
                 last = grill_platform.get_input_status()
                 if not last:
                     _control.eventLogger.info("Switch set to off, going to monitor mode.")
-                    control["updated"] = True  # Change mode
-                    control["mode"] = "Stop"
+                    # The seam sets mode="Stop"/updated + writes; status is not part
+                    # of the transition, so set it on control first (single OVERWRITE).
                     control["status"] = "active"
-                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                    request_transition(ctx, control, "Stop", kind="terminal")
                     break
 ```
 
@@ -289,10 +291,10 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
             last = grill_platform.get_input_status()
             if not last:
                 _control.eventLogger.info("Switch set to off, going to monitor mode.")
-                control["updated"] = True  # Change mode
-                control["mode"] = "Stop"
+                # The seam sets mode="Stop"/updated + writes; status is not part
+                # of the transition, so set it on control first (single OVERWRITE).
                 control["status"] = "active"
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                request_transition(ctx, control, "Stop", kind="terminal")
                 return (last, pelletdb, True)
 
         return (last, pelletdb, False)
@@ -316,15 +318,15 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
 
 **Interfaces:**
 - **Produces:** `def _apply_manual_overrides(self, control, now, current_output_status) -> None`
-- **Consumes:** `control` (mutated in place), `now`, `current_output_status`, `self.name` (mode), `self.settings`, `self.grill`, `self.state.manual_override` (mutated in place — same dict object seeded at base.py 351-352, so no return needed). Own `import control as _control`.
+- **Consumes:** `control` (mutated in place), `now`, `current_output_status`, `self.name` (mode), `self.settings`, `self.grill`, `self.state.manual_override` (mutated in place — same dict object seeded at base.py 359-360, so no return needed). Own `import control as _control`.
 - **Side effects (must preserve exactly):** the fan/auger/igniter/power/pwm actuation order; `self.state.manual_override[*]` timestamp writes; `control["manual"]["pwm"] = 100` reset; final `control["manual"]["change"]=False` / `["output"]=False` + `ctx.store.write_control`. **No return.**
 
-> **`manual_override` note:** base.py 351-352 stays in `run()` (`manual_override = {...}; self.state.manual_override = manual_override`). The helper reads/writes `self.state.manual_override` — the identical dict object — so in-place mutation is faithful and nothing needs threading back.
+> **`manual_override` note:** base.py 359-360 stays in `run()` (`manual_override = {...}; self.state.manual_override = manual_override`). The helper reads/writes `self.state.manual_override` — the identical dict object — so in-place mutation is faithful and nothing needs threading back.
 
-**Current block (base.py 413-474):** the `if mode == "Manual" or self.settings["safety"]["allow_manual_changes"]:` block through `ctx.store.write_control(...)`. (Full body captured in live code; extract it verbatim.)
+**Current block (base.py 421-482):** the `if mode == "Manual" or self.settings["safety"]["allow_manual_changes"]:` block through `ctx.store.write_control(...)`. (Full body captured in live code; extract it verbatim.)
 
 **Steps:**
-1. `insert_after_symbol` on `ControlMode/run` — add the helper. Body is the verbatim 413-474 block with these substitutions only: `mode` → `self.name`, `grill_platform` → `self.grill`, `manual_override` → `self.state.manual_override`, and a leading `import control as _control` / `ctx = self.ctx`:
+1. `insert_after_symbol` on `ControlMode/run` — add the helper. Body is the verbatim 421-482 block with these substitutions only: `mode` → `self.name`, `grill_platform` → `self.grill`, `manual_override` → `self.state.manual_override`, and a leading `import control as _control` / `ctx = self.ctx`:
    ```python
     def _apply_manual_overrides(self, control, now, current_output_status):
         """Per-tick manual output overrides (extracted from run()). Mutates control
@@ -399,7 +401,7 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
                 control["manual"]["output"] = False
                 ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
    ```
-2. In `run()`, replace the whole 413-474 block with the call (it sits right after `current_output_status = grill_platform.get_output_status()`):
+2. In `run()`, replace the whole 421-482 block with the call (it sits right after `current_output_status = grill_platform.get_output_status()` at base.py:419):
    ```python
             self._apply_manual_overrides(control, now, current_output_status)
    ```
@@ -418,12 +420,12 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
 - **Consumes:** `control`, `pelletdb`, `start_time`, `self.name` (mode), `self.settings`, `self.state` (startup.timer, metrics, cycle.ratio), `self.grill` (output status), `self.status_fragment()`.
 - **Returns:** the fully-populated `status_data` dict (mode-specific fields merged via `status_fragment()`).
 
-> **Fresh-dict faithfulness:** the original block (base.py 546-585) overwrites **every** key of `status_data` each pass and never reads a prior value, so returning a fresh dict and reassigning `status_data = self._build_status_data(...)` is behaviorally identical to the in-place population. The `ctx.store.write_status(status_data)` and `self.state.timers.display_toggle = ctx.clock.now()` calls (base.py 585-586) **stay in `run()`** after the call, and `status_data` remains the persistent loop local so the post-loop `if status_data != {}` check (base.py 641) is unaffected. The `status_data = {}` init at base.py 347 stays.
+> **Fresh-dict faithfulness:** the original block (base.py 553-591) overwrites **every** key of `status_data` each pass and never reads a prior value, so returning a fresh dict and reassigning `status_data = self._build_status_data(...)` is behaviorally identical to the in-place population. The `ctx.store.write_status(status_data)` and `self.state.timers.display_toggle = ctx.clock.now()` calls (base.py 592-593) **stay in `run()`** after the call, and `status_data` remains the persistent loop local so the post-loop `if status_data != {}` check (base.py 648) is unaffected. The `status_data = {}` init at base.py 355 stays.
 
-**Current block (base.py 546-585):** everything from `status_data["notify_data"] = control["notify_data"]` through `status_data.update(self.status_fragment())` (i.e. inside `if (now - self.state.timers.display_toggle) > 0.5:`, up to but NOT including `ctx.store.write_status(status_data)`).
+**Current block (base.py 553-591):** everything from `status_data["notify_data"] = control["notify_data"]` through `status_data.update(self.status_fragment())` (i.e. inside `if (now - self.state.timers.display_toggle) > 0.5:` at base.py:551, up to but NOT including `ctx.store.write_status(status_data)`).
 
 **Steps:**
-1. `insert_after_symbol` on `ControlMode/run` — add the helper. It opens a fresh `status_data = {}`, then the verbatim 546-584 body with `mode` → `self.name` and `grill_platform` → `self.grill`, and `return status_data`:
+1. `insert_after_symbol` on `ControlMode/run` — add the helper. It opens a fresh `status_data = {}`, then the verbatim 553-591 body with `mode` → `self.name` and `grill_platform` → `self.grill`, and `return status_data`:
    ```python
     def _build_status_data(self, control, pelletdb, start_time):
         """Build the per-0.5s display status dict (extracted from run()). Returns a
@@ -472,7 +474,7 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
         status_data.update(self.status_fragment())
         return status_data
    ```
-2. In `run()`, replace the 546-584 body with a single assignment, leaving the write + toggle in place:
+2. In `run()`, replace the 553-591 body with a single assignment, leaving the write + toggle in place:
    ```python
             # Send Current Status / Temperature Data to Display Device every 0.5 second
             if (now - self.state.timers.display_toggle) > 0.5:
@@ -495,9 +497,9 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
 - **Consumes:** `control` (mutated in place: the pause-branch clears `["recipe"]["step_data"]["notify"]`), `self.ctx` (notifications + store write).
 - **Side effects (must preserve exactly):** `ctx.notifications.send("Recipe_Step_Message")` in both triggered branches; in the paused branch, `notify=False` + `ctx.store.write_control`. Returns `True` only in the triggered-and-not-paused branch (the original `break`).
 
-> **Break handling:** original base.py 599-611 has a `break` at 604 (triggered & not paused). The helper returns `True` there; the paused branch and the non-Recipe fall-through return `False`. `run()` does `if self._handle_recipe_end(control): break`.
+> **Break handling:** original base.py 606-617 has a `break` at 611 (triggered & not paused). The helper returns `True` there; the paused branch and the non-Recipe fall-through return `False`. `run()` does `if self._handle_recipe_end(control): break`.
 
-**Current block (base.py 599-611):**
+**Current block (base.py 606-617):**
 ```python
             # End of Loop Recipe Check
             if control["mode"] == "Recipe":
@@ -533,7 +535,7 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
                 # Continue until 'pause' variable is cleared
         return False
    ```
-2. In `run()`, replace the 599-611 block with:
+2. In `run()`, replace the 606-617 block with:
    ```python
             # End of Loop Recipe Check
             if self._handle_recipe_end(control):
@@ -550,7 +552,7 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
 **Files:** `controller/runtime/modes/base.py` (read-only review; no functional change).
 
 **Steps:**
-1. Read the post-extraction `run()` (`find_symbol ControlMode/run`). Confirm it is now a **~120-line skeleton**: pre-loop setup → `while status == "Active"` with the SENSE/SAFETY/ACT/PUBLISH banners intact and the five extracted blocks now single-line `self._*` calls → post-loop cleanup. Confirm the five helpers sit as siblings immediately after `run()`.
+1. Read the post-extraction `run()`. Confirm it is now a **~130-line skeleton**: pre-loop setup → `while status == "Active"` with the SENSE/SAFETY/ACT/PUBLISH banners intact and the five extracted blocks now single-line `self._*` calls → post-loop cleanup. The SAFETY section still contains the FSM's inline `if evaluate_phase(self, ctx, "pre_act", now, ptemp): break` and the residual `if self.check_safety(now, ptemp): break` — these are NOT extracted and must remain inline; likewise the pre-loop `if evaluate_phase(self, ctx, "pre_loop", start_time, ptemp): ...` stays. Confirm the five helpers sit as siblings immediately after `run()`.
 2. Confirm **control-write ordering is unchanged** by eye: every `ctx.store.write_control(..., origin="control")` that existed in the original still fires from the same logical position (now inside the helpers), and no new writes were introduced. The `WriteKind` import and `logging` import are still used (helper 2 uses `logging.DEBUG/INFO`; all helpers use `WriteKind.OVERWRITE`).
 3. Optional cosmetic-only cleanup: if `ctx` / `grill_platform` / etc. aliases at the top of `run()` are now unused after extraction, ruff-check will flag them (`F841`). Only remove aliases ruff reports as unused — do not touch anything ruff does not flag. (Expected still-used in `run()`: `ctx`, `mode`, `grill_platform`, `probe_complex`, `_control`, `monitor`, `start_time`, `status_data`, `in_data`, `pelletdb`, `last`, `control`.)
 4. `uvx ruff format controller/runtime/modes/base.py` + `uvx ruff check controller/runtime/modes/base.py` → clean.
@@ -566,7 +568,7 @@ timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
    timeout 180 env QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
      tests/characterization/ tests/e2e/ -q
    ```
-   Expect all green with **zero assertion edits** anywhere.
+   This now also covers the FSM's sibling characterization suites — `test_mode_transitions.py`, `test_outer_transitions.py`, `test_guard_engine.py`, `test_request_transition.py` — which exercise `run()`'s safety/switch-off/recipe paths (the ones Tasks 2 & 5 touch). Expect all green with **zero assertion edits** anywhere.
 6. If (and only if) a cosmetic alias cleanup was made in step 3, commit it: `refactor(modes): drop now-unused run() locals after helper extraction` + co-author trailer. Otherwise no commit (verification only).
 
 ---

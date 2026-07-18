@@ -17,8 +17,8 @@ from common.common import WriteKind
 from common.process_mon import Process_Monitor
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
-from controller.runtime.logic.safety import over_max_temp
 from controller.runtime.system_commands import process_system_commands
+from controller.runtime.transitions import request_transition, evaluate_phase
 
 
 class ControlMode:
@@ -328,6 +328,14 @@ class ControlMode:
         start_time = ctx.clock.now()
         self.state.timers.start_time = start_time
 
+        # ---- declarative pre_loop guards (empty until Tasks 15-16; then the
+        # flameout edges live here instead of in setup_safety). A fired guard
+        # aborts the loop exactly as setup_safety returning "Inactive" does. This
+        # reuses start_time (no extra clock read) -- the pre_loop flameout guards
+        # do not use `now`. ----
+        if evaluate_phase(self, ctx, "pre_loop", start_time, ptemp):
+            status = "Inactive"
+
         # Set time since toggle for temperature
         self.state.timers.temp_toggle = start_time
         # Set time since toggle for checking ETA
@@ -402,10 +410,10 @@ class ControlMode:
                 last = grill_platform.get_input_status()
                 if not last:
                     _control.eventLogger.info("Switch set to off, going to monitor mode.")
-                    control["updated"] = True  # Change mode
-                    control["mode"] = "Stop"
+                    # The seam sets mode="Stop"/updated + writes; status is not part
+                    # of the transition, so set it on control first (single OVERWRITE).
                     control["status"] = "active"
-                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                    request_transition(ctx, control, "Stop", kind="terminal")
                     break
 
             current_output_status = grill_platform.get_output_status()
@@ -505,18 +513,17 @@ class ControlMode:
                 ctx.store.write_tr(in_data["probe_history"]["tr"])
 
             # ---- SAFETY (before any actuation) ----
-            # Max Temp Safety Control (UNIVERSAL): trip before the mode tick so
+            # Declarative pre_act guards, evaluated BEFORE the merged on_tick so
             # an unsafe temperature breaks the loop without cycling the auger or
-            # advancing the controller.
-            if over_max_temp(ptemp, self.settings["safety"]):
-                ctx.store.display_commands().push(("text", "ERROR"))
-                control["mode"] = "Error"
-                control["updated"] = True
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                ctx.notifications.send("Grill_Error_01")
+            # advancing the controller. GUARDS["*"]["pre_act"] holds the UNIVERSAL
+            # max-temp trip (walked first, so it keeps priority), then the mode's
+            # flameout edges (GUARDS["Smoke"]/["Hold"]). A fired guard breaks.
+            if evaluate_phase(self, ctx, "pre_act", now, ptemp):
                 break
 
-            # ---- mode-specific per-tick safety check ----
+            # ---- mode-specific per-tick safety check (base default no-op now
+            # that Smoke/Hold flameout are declarative guards; the hook remains
+            # for any future mode override) ----
             if self.check_safety(now, ptemp):
                 break
 

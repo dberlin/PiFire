@@ -34,19 +34,16 @@
 Imported Libraries
 """
 import time
-from controller.base import ControllerBase
+from controller.pid_base import PIDControllerBase
 
 """
 Class Definition
 """
 
 
-class Controller(ControllerBase):
+class Controller(PIDControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
-
-        self.function_list.append("set_gains")
-        self.function_list.append("get_k")
 
         self._calculate_gains(config.get("PB", 60.0), config.get("Ti", 180.0), config.get("Td", 45.0))
 
@@ -71,17 +68,6 @@ class Controller(ControllerBase):
         self.last = 150
 
         self.set_target(0.0)
-
-    def _calculate_gains(self, pb, ti, td):
-        if pb == 0:
-            self.kp = 0
-        else:
-            self.kp = -1 / pb
-        if ti == 0:
-            self.ki = 0
-        else:
-            self.ki = self.kp / ti
-        self.kd = self.kp * td
 
     def update(self, current):
         # P
@@ -111,33 +97,3 @@ class Controller(ControllerBase):
         self.last_update = time.time()
 
         return self.u
-
-    def set_target(self, set_point):
-        self.set_point = set_point
-        self.error = 0.0
-        self.inter = 0.0
-        self.derv = 0.0
-        self.last_update = time.time()
-
-    def set_gains(self, pb, ti, td):
-        self._calculate_gains(pb, ti, td)
-        if self.ki != 0:
-            self.inter_max = abs(self.center / self.ki)
-        else:
-            self.inter_max = 0
-
-    def get_k(self):
-        return self.kp, self.ki, self.kd
-
-    def set_config(self, config):
-        super().set_config(config)
-        self.error = 0.0
-        self.inter = 0.0
-        self.derv = 0.0
-        self.last_update = time.time()
-        self._calculate_gains(config.get("PB", 60.0), config.get("Ti", 180.0), config.get("Td", 45.0))
-        self.center = config.get("center", 0.5)
-        if self.ki != 0:
-            self.inter_max = abs(self.center / self.ki)
-        else:
-            self.inter_max = 0
