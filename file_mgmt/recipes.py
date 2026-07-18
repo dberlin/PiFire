@@ -159,28 +159,37 @@ def create_recipefile():
     files_list = ["metadata", "recipe", "comments", "assets"]
     if not os.path.exists(RECIPE_FOLDER):
         os.mkdir(RECIPE_FOLDER)
-    os.mkdir(f"{RECIPE_FOLDER}{title}")  # Make temporary folder for all recipe files
+
+    recipe_file_path = f"{RECIPE_FOLDER}{title}"
+    recipe_file_name = f"{recipe_file_path}.pfrecipe"
+    recipe_file_duplicate = 0
+    while os.path.exists(recipe_file_name):
+        # If file path exists, attempt to add a new path
+        recipe_file_duplicate += 1
+        recipe_file_name = f"{recipe_file_path}-{recipe_file_duplicate}.pfrecipe"
+
+    os.mkdir(recipe_file_path)  # Make temporary folder for all recipe files
 
     for item in files_list:
         json_data_string = json.dumps(file_data[item], indent=2, sort_keys=True)
-        filename = f"{RECIPE_FOLDER}{title}/{item}.json"
+        filename = f"{recipe_file_path}/{item}.json"
         with open(filename, "w+") as recipe_file:
             recipe_file.write(json_data_string)
 
     # 2. Create empty data folder(s) & add default data
-    os.mkdir(f"{RECIPE_FOLDER}{title}/assets")
-    os.mkdir(f"{RECIPE_FOLDER}{title}/assets/thumbs")
+    os.mkdir(f"{recipe_file_path}/assets")
+    os.mkdir(f"{recipe_file_path}/assets/thumbs")
 
     # 3. Create ZIP file of the folder
-    directory = pathlib.Path(f"{RECIPE_FOLDER}{title}/")
-    filename = f"{RECIPE_FOLDER}{title}.pfrecipe"
+    directory = pathlib.Path(f"{recipe_file_path}/")
+    filename = recipe_file_name
 
     with zipfile.ZipFile(filename, "w", zipfile.ZIP_DEFLATED) as archive:
         for file_path in directory.rglob("*"):
             archive.write(file_path, arcname=file_path.relative_to(directory))
 
     # 4. Cleanup temporary files
-    command = f"rm -rf {RECIPE_FOLDER}{title}"
+    command = f"rm -rf {recipe_file_path}"
     os.system(command)
     return filename
 
