@@ -127,9 +127,8 @@ class Edge:
     reignite_from_self: bool = False
 
 
-# {mode: {phase: [Edge, ...]}}; the "*" mode applies to every mode at that phase.
-# Empty here (Task 13); Smoke/Hold/universal edges are filled in Tasks 15-16.
-GUARDS: dict[str, dict[str, list]] = {}
+# GUARDS ({mode: {phase: [Edge, ...]}}; "*" applies to every mode) is defined
+# below, after the guard predicates it references.
 
 
 # ---- guard predicates (pure; no writes) ----
@@ -166,6 +165,38 @@ def flameout_reignite_inloop(mode_obj, ctx, control, ptemp, now):
 def over_max_temp_guard(mode_obj, ctx, control, ptemp, now):
     # pre_act universal max-temp; needs the mode's safety settings.
     return over_max_temp(ptemp, mode_obj.settings["safety"])
+
+
+def _flameout_edges(*, setup):
+    """The Error/Reignite flameout edge pair for one phase. `setup` selects the
+    pre_loop variant (reads afterstarttemp) vs the pre_act variant (reads ptemp);
+    error is listed before reignite (matching the live if/elif order). Reignite
+    decrements retries + records reignitelaststate=mode.name via
+    reignite_from_self."""
+    err_guard = flameout_error_setup if setup else flameout_error_inloop
+    reig_guard = flameout_reignite_setup if setup else flameout_reignite_inloop
+    return [
+        Edge(err_guard, "Error", "safety", notify="Grill_Error_02", display=("text", "ERROR")),
+        Edge(
+            reig_guard,
+            "Reignite",
+            "safety",
+            reignite_from_self=True,
+            notify="Grill_Error_03",
+            display=("text", "Re-Ignite"),
+        ),
+    ]
+
+
+# {mode: {phase: [Edge, ...]}}; the "*" mode applies to every mode at that phase.
+# Smoke's flameout is declarative (Task 15); Hold + the universal max-temp edge
+# are added in Task 16.
+GUARDS: dict[str, dict[str, list]] = {
+    "Smoke": {
+        "pre_loop": _flameout_edges(setup=True),
+        "pre_act": _flameout_edges(setup=False),
+    },
+}
 
 
 def evaluate_phase(mode_obj, ctx, phase, now, ptemp) -> bool:

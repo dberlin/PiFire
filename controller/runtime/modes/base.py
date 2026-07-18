@@ -320,11 +320,6 @@ class ControlMode:
 
         # ---- mode-specific pre-loop safety check (abort contract) ----
         status = self.setup_safety(ptemp)
-        # ---- declarative pre_loop guards (empty until Tasks 15-16; then the
-        # flameout edges live here instead of in setup_safety). A fired guard
-        # aborts the loop exactly as setup_safety returning "Inactive" does. ----
-        if evaluate_phase(self, ctx, "pre_loop", ctx.clock.now(), ptemp):
-            status = "Inactive"
 
         # Apply Smart Start Settings if Enabled (default; Startup/Reignite/Smoke
         # override self.state.startup.timer from their own setup())
@@ -333,6 +328,14 @@ class ControlMode:
         # Set the start time
         start_time = ctx.clock.now()
         self.state.timers.start_time = start_time
+
+        # ---- declarative pre_loop guards (empty until Tasks 15-16; then the
+        # flameout edges live here instead of in setup_safety). A fired guard
+        # aborts the loop exactly as setup_safety returning "Inactive" does. This
+        # reuses start_time (no extra clock read) -- the pre_loop flameout guards
+        # do not use `now`. ----
+        if evaluate_phase(self, ctx, "pre_loop", start_time, ptemp):
+            status = "Inactive"
 
         # Set time since toggle for temperature
         self.state.timers.temp_toggle = start_time
