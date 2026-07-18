@@ -565,10 +565,7 @@ def test_pellets_via_real_ui(live_server, page):
     page.fill("#warning_level", "35")
     page.fill("#full", "5")
     page.fill("#empty", "95")
-    # auger_rate's <input step="0.05">; a value off that step (e.g. 0.42)
-    # fails the browser's native constraint validation and silently blocks
-    # the submit (no request is ever sent) -- use a step-aligned value.
-    page.fill("#auger_rate", "0.35")
+    page.fill("#auger_rate", "0.42")
     page.locator("#prime_ignition").check(force=True)
 
     with page.expect_navigation():
@@ -580,7 +577,7 @@ def test_pellets_via_real_ui(live_server, page):
     assert settings["pelletlevel"]["warning_level"] == 35
     assert settings["pelletlevel"]["full"] == 5
     assert settings["pelletlevel"]["empty"] == 95
-    assert settings["globals"]["augerrate"] == 0.35
+    assert settings["globals"]["augerrate"] == 0.42
     assert settings["globals"]["prime_ignition"] is True
 
     drain_control_writes()
