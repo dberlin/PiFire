@@ -9,7 +9,7 @@ Each phase is one branch + one PR, gated by the existing golden/characterization
 | Phase | Title | Depends on | Branch | Detailed plan | Status |
 |------|-------|-----------|--------|---------------|--------|
 | A | Split `common/common.py` + in-file simplifications | — | `refactor/common-split` | [phaseA-common-split.md](2026-07-16-phaseA-common-split.md) | **✅ MERGED** into `massive-reworks-and-new-ui` (merge `ec7995f`; `common.py` 3,351→660, 7 modules, suite 879→1029) |
-| D | Blueprints service layer + dispatch maps | A | `refactor/blueprints-service` | _tbw (A merged — ready to author)_ | pending |
+| D | Blueprints service layer + dispatch maps | A | `refactor/blueprints-service` | [phaseD-blueprints-service.md](2026-07-16-phaseD-blueprints-service.md) | **plan ready** (D2's per-action characterization net now exists as the merged Playwright web suite) |
 | B | Merge legacy fixed-display bases | — (snapshot harness first) | `refactor/display-fixed-base` | [phaseB-display-fixed-base.md](2026-07-16-phaseB-display-fixed-base.md) | **✅ MERGED + PUSHED** (merge `2dd7d1b`; 3 bases → `base_fixed` + 3 shims, ~2,760 lines removed, suite 1029→1154; golden net never re-baselined) |
 | C | Collapse driver clone matrix + encoder mixin | B | `refactor/display-driver-matrix` | [phaseC-display-driver-matrix.md](2026-07-16-phaseC-display-driver-matrix.md) | **✅ MERGED + PUSHED** (merge `08c8402`; 3 input/panel mixins, 16 drivers thinned, net −642 lines; file count + manifest kept, shims kept) |
 | E | Meater shared core + delete `bt_meater.py` | — | `refactor/meater-dedup` | _tbw_ | pending |
