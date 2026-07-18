@@ -66,8 +66,9 @@ characterization captures warts):
      additionally rewrites `arglist[2]` to 'true'/'false'. Callers see this.
   4. action=='sys' pushes the PADDED arglist, so the trailing Nones leak into
      the queue payload: `['restart'] -> ['restart', None, None, None]`.
-  5. set/lid_open sets `lid_open_toggle = True` in BOTH the 'toggle' branch and
-     its else branch -- the if/else is a no-op and no value can clear it.
+  5. (FIXED in the latent-bug pass -- was a no-op if/else) set/lid_open
+     unconditionally sets `lid_open_toggle = True` regardless of arglist[1];
+     no argument can clear the flag.
   6. (FIXED in the latent-bug pass) set/notify/<label>/target with units == 'C'
      used to write `control['primary_setpoint']` instead of the notify object's
      target (an apparent copy/paste bug). It now writes `notify_data[i]['target']`
@@ -1061,8 +1062,9 @@ def test_notify_target_in_celsius_writes_the_notify_target(seeded):
     assert control["primary_setpoint"] == 0  # unchanged  # target was NOT updated
 
 
-def test_lid_open_sets_true_on_both_branches(seeded):
-    """Wart #5: the if/else are identical -- no argument can clear the flag."""
+def test_lid_open_always_sets_true_regardless_of_arg(seeded):
+    """Wart #5 (if/else collapsed to an unconditional set): behavior is
+    unchanged -- any arg still sets the flag True and none can clear it."""
     for arg in ("toggle", "false", "anything"):
         control = dsa.read_control()
         control["lid_open_toggle"] = False

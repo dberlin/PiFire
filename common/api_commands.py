@@ -408,13 +408,10 @@ def _cmd_set_lid_open(data, control, settings, arglist, origin, kind):
     Lid Open Toggle
     /api/set/lid_open/toggle
 
-    NOTE: both branches of the if/else set lid_open_toggle to True, so no value
-    can clear it. Preserved as-is.
+    NOTE: lid_open_toggle is unconditionally set to True regardless of arglist[1],
+    so no value can clear it. Preserved as-is.
     """
-    if arglist[1] == "toggle":
-        control["lid_open_toggle"] = True
-    else:
-        control["lid_open_toggle"] = True
+    control["lid_open_toggle"] = True
 
     write_control(control, kind, origin=origin)
 
