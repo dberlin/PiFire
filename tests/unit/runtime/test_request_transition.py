@@ -186,6 +186,63 @@ def test_allowed_exits_matches_committed_snapshot():
     assert transitions_mod.ALLOWED_EXITS == _EXPECTED_GRAPH
 
 
+# Committed snapshot of the whole declarative guard graph -- {mode: {phase:
+# [(guard_name, to, kind)]}} -- the second half of the single-place FSM view.
+# A change to GUARDS must be reflected here (visible in review).
+_EXPECTED_GUARDS = {
+    "*": {
+        "pre_act": [("over_max_temp_guard", "Error", "safety")],
+    },
+    "Smoke": {
+        "pre_loop": [
+            ("flameout_error_setup", "Error", "safety"),
+            ("flameout_reignite_setup", "Reignite", "safety"),
+        ],
+        "pre_act": [
+            ("flameout_error_inloop", "Error", "safety"),
+            ("flameout_reignite_inloop", "Reignite", "safety"),
+        ],
+    },
+    "Hold": {
+        "pre_loop": [
+            ("flameout_error_setup", "Error", "safety"),
+            ("flameout_reignite_setup", "Reignite", "safety"),
+        ],
+        "pre_act": [
+            ("flameout_error_inloop", "Error", "safety"),
+            ("flameout_reignite_inloop", "Reignite", "safety"),
+        ],
+    },
+}
+
+
+def _guard_dump():
+    return {
+        mode: {phase: [(edge.guard.__name__, edge.to, edge.kind) for edge in edges] for phase, edges in phases.items()}
+        for mode, phases in transitions_mod.GUARDS.items()
+    }
+
+
+def test_guards_match_committed_snapshot():
+    # The whole declarative guard graph in one asserted view (Task 17 Step 1).
+    assert _guard_dump() == _EXPECTED_GUARDS
+
+
+def test_every_guard_edge_target_is_a_legal_exit():
+    # Cross-check the two declarations agree: every GUARDS edge's `to` is in the
+    # source mode's ALLOWED_EXITS (Task 17 Step 2). The universal "*" edges apply
+    # to every mode, so their target must be a legal exit for EVERY declared mode.
+    allowed = transitions_mod.ALLOWED_EXITS
+    for mode, phases in transitions_mod.GUARDS.items():
+        for phase, edges in phases.items():
+            for edge in edges:
+                if mode == "*":
+                    for source_mode, exits in allowed.items():
+                        assert edge.to in exits, f"universal edge -> {edge.to} illegal from {source_mode}"
+                else:
+                    assert edge.to in allowed[mode], f"{mode} -> {edge.to} ({phase}) not in ALLOWED_EXITS"
+
+
 def test_illegal_edge_raises_transition_error():
     # Manual's declared exits are {Stop, Error}; Manual -> Reignite is illegal.
     control = _base_control(mode="Manual", updated=False)
