@@ -264,6 +264,60 @@ class ControlMode:
                 else:
                     _control.eventLogger.warning("No trigger set for Hold/Smoke mode in recipe.")
 
+    def _process_control_flags(self, control, now, last, pelletdb):
+        """Per-tick settings/distance/hopper/switch flag handling (extracted from
+        run()). Mutates control in place; returns (last, pelletdb, should_break)."""
+        import control as _control  # module global: eventLogger
+
+        ctx = self.ctx
+        grill_platform = self.grill
+        dist_device = self.dist_device
+
+        # Check if user changed settings and reload
+        if control["settings_update"]:
+            control["settings_update"] = False
+            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            self.settings = ctx.store.read_settings()
+            if self.settings["globals"]["debug_mode"]:
+                _control.eventLogger.setLevel(logging.DEBUG)
+            else:
+                _control.eventLogger.setLevel(logging.INFO)
+            self.on_settings_reload()
+
+        # Check if user changed hopper levels and update if required
+        if control["distance_update"]:
+            empty = self.settings["pelletlevel"]["empty"]
+            full = self.settings["pelletlevel"]["full"]
+            dist_device.update_distances(empty, full)
+            control["distance_update"] = False
+            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+
+        # Check hopper level when requested or every 300 seconds
+        if control["hopper_check"] or (now - self.state.timers.hopper_toggle) > 60:
+            pelletdb = ctx.store.read_pellet_db()
+            override = False
+            if control["hopper_check"]:
+                control["hopper_check"] = False
+                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+                override = True
+            pelletdb["current"]["hopper_level"] = dist_device.get_level(override=override)
+            ctx.store.write_pellet_db(pelletdb)
+            self.state.timers.hopper_toggle = now
+            _control.eventLogger.info("Hopper Level Checked @ " + str(pelletdb["current"]["hopper_level"]) + "%")
+
+        # Check for update in ON/OFF Switch
+        if not self.settings["platform"]["standalone"] and last != grill_platform.get_input_status():
+            last = grill_platform.get_input_status()
+            if not last:
+                _control.eventLogger.info("Switch set to off, going to monitor mode.")
+                # The seam sets mode="Stop"/updated + writes; status is not part
+                # of the transition, so set it on control first (single OVERWRITE).
+                control["status"] = "active"
+                request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
+                return (last, pelletdb, True)
+
+        return (last, pelletdb, False)
+
     # ---- shared skeleton ----
     def run(self):
         import control as _control  # module global: eventLogger
@@ -272,7 +326,6 @@ class ControlMode:
         mode = self.name
         grill_platform = self.grill
         probe_complex = self.probe_complex
-        dist_device = self.dist_device
 
         # Setup Process Monitor and Start
         monitor = Process_Monitor("control", ["supervisorctl", "restart", "control"], timeout=30)
@@ -383,48 +436,10 @@ class ControlMode:
             if control["updated"]:
                 break
 
-            # Check if user changed settings and reload
-            if control["settings_update"]:
-                control["settings_update"] = False
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                self.settings = ctx.store.read_settings()
-                if self.settings["globals"]["debug_mode"]:
-                    _control.eventLogger.setLevel(logging.DEBUG)
-                else:
-                    _control.eventLogger.setLevel(logging.INFO)
-                self.on_settings_reload()
-
-            # Check if user changed hopper levels and update if required
-            if control["distance_update"]:
-                empty = self.settings["pelletlevel"]["empty"]
-                full = self.settings["pelletlevel"]["full"]
-                dist_device.update_distances(empty, full)
-                control["distance_update"] = False
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-
-            # Check hopper level when requested or every 300 seconds
-            if control["hopper_check"] or (now - self.state.timers.hopper_toggle) > 60:
-                pelletdb = ctx.store.read_pellet_db()
-                override = False
-                if control["hopper_check"]:
-                    control["hopper_check"] = False
-                    ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                    override = True
-                pelletdb["current"]["hopper_level"] = dist_device.get_level(override=override)
-                ctx.store.write_pellet_db(pelletdb)
-                self.state.timers.hopper_toggle = now
-                _control.eventLogger.info("Hopper Level Checked @ " + str(pelletdb["current"]["hopper_level"]) + "%")
-
-            # Check for update in ON/OFF Switch
-            if not self.settings["platform"]["standalone"] and last != grill_platform.get_input_status():
-                last = grill_platform.get_input_status()
-                if not last:
-                    _control.eventLogger.info("Switch set to off, going to monitor mode.")
-                    # The seam sets mode="Stop"/updated + writes; status is not part
-                    # of the transition, so set it on control first (single OVERWRITE).
-                    control["status"] = "active"
-                    request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
-                    break
+            # Per-tick settings/distance/hopper/switch flag handling
+            last, pelletdb, _should_break = self._process_control_flags(control, now, last, pelletdb)
+            if _should_break:
+                break
 
             current_output_status = grill_platform.get_output_status()
 
