@@ -20,7 +20,11 @@ ALLOWED_EXITS is filled in Task 10; while it is empty the legality check is a
 no-op passthrough.
 """
 
+from dataclasses import dataclass
+from typing import Callable, Optional
+
 from common.common import WriteKind
+from controller.runtime.logic.safety import evaluate_flameout, over_max_temp, SafetyVerdict
 
 _UNSET = object()
 
@@ -86,3 +90,100 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
     if notify is not None:
         ctx.notifications.send(notify)
     return control
+
+
+# ==========================================================================
+# Phase 2 -- declarative phased guard-engine.
+#
+# The transition GUARDS live in data: {mode: {phase: [Edge, ...]}}. An engine
+# (evaluate_phase) walks a mode's edges for a pipeline phase in priority order
+# and fires the first whose guard predicate is True, routing it through
+# request_transition. Guards MUST keep evaluating at their EXISTING pipeline
+# phases:
+#   - "pre_loop": the setup_safety point (after the first probe read, before the
+#     work loop). Flameout here reads control['safety']['afterstarttemp'].
+#   - "pre_act":  the in-loop SAFETY section, BEFORE any actuation (on_tick).
+#     Max-temp + flameout here read the fresh in-loop `ptemp`.
+# Moving a guard relative to actuation would change whether the auger/fan cycle
+# on the trip tick (observable), so the wiring (Task 14) inserts evaluate_phase
+# AT those two points only.
+#
+# GUARD PREDICATE SIGNATURE (deviation from the plan's (ctx, control, ptemp, now)):
+# predicates take `mode_obj` as well, because over_max_temp needs the mode's
+# settings (mode_obj.settings) and the flameout wrap needs the mode name. The
+# pre_loop/pre_act flameout split into *_setup (afterstarttemp) and *_inloop
+# (ptemp) variants is required by live code -- setup_safety and check_safety read
+# DIFFERENT temperatures (verified in smoke.py/hold.py; inventory rows 4-11).
+# ==========================================================================
+
+
+@dataclass(frozen=True)
+class Edge:
+    guard: Callable  # (mode_obj, ctx, control, ptemp, now) -> bool
+    to: str
+    kind: str
+    notify: Optional[str] = None
+    display: Optional[tuple] = None
+    reignite_from_self: bool = False
+
+
+# {mode: {phase: [Edge, ...]}}; the "*" mode applies to every mode at that phase.
+# Empty here (Task 13); Smoke/Hold/universal edges are filled in Tasks 15-16.
+GUARDS: dict[str, dict[str, list]] = {}
+
+
+# ---- guard predicates (pure; no writes) ----
+
+
+def flameout_error_setup(mode_obj, ctx, control, ptemp, now):
+    # pre_loop flameout: reads the carried-over afterstarttemp (NOT ptemp).
+    safety = control["safety"]
+    return (
+        evaluate_flameout(safety["afterstarttemp"], safety["startuptemp"], safety["reigniteretries"])
+        is SafetyVerdict.ERROR
+    )
+
+
+def flameout_reignite_setup(mode_obj, ctx, control, ptemp, now):
+    safety = control["safety"]
+    return (
+        evaluate_flameout(safety["afterstarttemp"], safety["startuptemp"], safety["reigniteretries"])
+        is SafetyVerdict.REIGNITE
+    )
+
+
+def flameout_error_inloop(mode_obj, ctx, control, ptemp, now):
+    # pre_act flameout: reads the fresh in-loop ptemp.
+    safety = control["safety"]
+    return evaluate_flameout(ptemp, safety["startuptemp"], safety["reigniteretries"]) is SafetyVerdict.ERROR
+
+
+def flameout_reignite_inloop(mode_obj, ctx, control, ptemp, now):
+    safety = control["safety"]
+    return evaluate_flameout(ptemp, safety["startuptemp"], safety["reigniteretries"]) is SafetyVerdict.REIGNITE
+
+
+def over_max_temp_guard(mode_obj, ctx, control, ptemp, now):
+    # pre_act universal max-temp; needs the mode's safety settings.
+    return over_max_temp(ptemp, mode_obj.settings["safety"])
+
+
+def evaluate_phase(mode_obj, ctx, phase, now, ptemp) -> bool:
+    """Walk the mode's edges for `phase` (mode-specific then universal "*") in
+    priority order; fire the first whose guard is True via request_transition and
+    return True. No match -> return False (no write)."""
+    control = mode_obj.control
+    edges = GUARDS.get(mode_obj.name, {}).get(phase, []) + GUARDS.get("*", {}).get(phase, [])
+    for edge in edges:
+        if edge.guard(mode_obj, ctx, control, ptemp, now):
+            request_transition(
+                ctx,
+                control,
+                edge.to,
+                kind=edge.kind,
+                notify=edge.notify,
+                display=edge.display,
+                reignite_from=mode_obj.name if edge.reignite_from_self else None,
+            )
+            return True
+    return False
