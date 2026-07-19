@@ -14,7 +14,7 @@ the manual-override block) and threaded through the whole tick.
 import logging
 
 from common.common import WriteKind
-from common.modes import Mode
+from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
@@ -312,7 +312,7 @@ class ControlMode:
                 _control.eventLogger.info("Switch set to off, going to monitor mode.")
                 # The seam sets mode="Stop"/updated + writes; status is not part
                 # of the transition, so set it on control first (single OVERWRITE).
-                control["status"] = "active"
+                control["status"] = StatusState.ACTIVE
                 request_transition(ctx, control, Mode.STOP, kind=TransitionKind.TERMINAL)
                 return (last, pelletdb, True)
 

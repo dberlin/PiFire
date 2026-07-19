@@ -125,3 +125,7 @@ pifire.db-shm
 
 # Serena MCP server project config (local tool state; never committed)
 .serena/
+
+# Local git worktrees created by agent workflows
+.worktrees/
+worktrees/

@@ -18,7 +18,7 @@ import os
 import time
 
 from common.common import generate_uuid, get_probe_list, read_generic_json, read_updater_manifest
-from common.modes import Mode
+from common.modes import Mode, StatusState
 
 # Set of default colors for charts.  Contains list of tuples (primary color, secondary color).
 COLOR_LIST = [
@@ -458,7 +458,7 @@ def default_control():
 
     control["lid_open_toggle"] = False  # Request to set lid_open so that the controller will pause
 
-    control["status"] = ""
+    control["status"] = StatusState.UNSET
 
     control["probe_profile_update"] = False
 
