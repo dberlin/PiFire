@@ -2,12 +2,12 @@
 Common PiFire WebApp Functions Shared Between Blueprints
 """
 
-from common.common import seconds_to_string, WriteKind
+from common.common import seconds_to_string, WriteKind, epoch_to_time
 from common.modes import Mode
 from common.datastore_accessors import read_settings, read_metrics, read_history, write_settings, write_control
 from common.defaults import metrics_items
 from common.api_commands import process_command
-from flask import current_app
+from flask import current_app, render_template
 from common.sqlite_queue import SqliteQueue
 import time
 import json
@@ -267,6 +267,61 @@ def prepare_csv(data=[], filename=""):
     csvfile.close()
 
     return exportfilename
+
+
+def render_cookfile_page(cookfilestruct, settings, cookfilename, filenameonly, errors):
+    """
+    Shared cook-file page renderer. Reshapes a freshly-read `cookfilestruct`
+    (mutating it in place: `\\n`->`<br>` on comment text, epoch->display-time on
+    metadata start/end) and returns the `cookfile/index.html` render Response.
+
+    Extracted (route-cleanup Task 3) from six byte-identical copies of the
+    reshape+render block: `blueprints/cookfile/routes.py` (thumbSelected,
+    ulmedia/ulthumb, repairCF, upgradeCF, delmedialist) and
+    `blueprints/history/routes.py` (opencookfile). The six copies differed only
+    in the already-computed `cookfilename`/`filenameonly` expressions fed in as
+    kwargs, so both are parameters here.
+    """
+    events = cookfilestruct["events"]
+    event_totals = prepare_event_totals(events)
+    comments = cookfilestruct["comments"]
+    for comment in comments:
+        comment["text"] = comment["text"].replace("\n", "<br>")
+    metadata = cookfilestruct["metadata"]
+    metadata["starttime"] = epoch_to_time(metadata["starttime"] / 1000)
+    metadata["endtime"] = epoch_to_time(metadata["endtime"] / 1000)
+    labels = cookfilestruct["graph_labels"]
+    assets = cookfilestruct["assets"]
+
+    return render_template(
+        "cookfile/index.html",
+        settings=settings,
+        cookfilename=cookfilename,
+        filenameonly=filenameonly,
+        events=events,
+        event_totals=event_totals,
+        comments=comments,
+        metadata=metadata,
+        labels=labels,
+        assets=assets,
+        errors=errors,
+    )
+
+
+def classify_cookfile_error(status):
+    """
+    Shared cook-file error classifier. Extracted (route-cleanup Task 3) from
+    five byte-identical copies of the `errortype` if/elif/else in
+    `blueprints/cookfile/routes.py` (repairCF x2, upgradeCF, delmedialist) and
+    `blueprints/history/routes.py` (opencookfile). Returns the errortype string
+    used by the `cferror.html` templates.
+    """
+    if "version" in status:
+        return "version"
+    elif "asset" in status:
+        return "asset"
+    else:
+        return "other"
 
 
 def create_safe_name(name):
