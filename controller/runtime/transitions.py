@@ -43,6 +43,37 @@ def should_keep_power_on(mode, status):
     return status == StatusState.MONITOR and mode == Mode.ERROR
 
 
+# The status-transition table: control["status"] is a second state axis,
+# orthogonal to Mode, with its own (small) set of driving edges. Unlike
+# ALLOWED_EXITS this is NOT an enforced legality gate (status has no
+# _check_legal equivalent) -- it is a single inspectable definition of what
+# drives each status change, snapshot-tested (test_status_transitions.py) so
+# it cannot silently drift from the real write sites in
+# controller/runtime/controller.py and controller/runtime/modes/base.py.
+STATUS_TRANSITIONS = (
+    {
+        "from": "UNSET / any (not MONITOR, mode != Error)",
+        "to": StatusState.ACTIVE,
+        "trigger": "an update lands while operating",
+    },
+    {
+        "from": "any",
+        "to": StatusState.MONITOR,
+        "trigger": "Monitor mode dispatched",
+    },
+    {
+        "from": "ACTIVE / MONITOR",
+        "to": StatusState.INACTIVE,
+        "trigger": "Stop or Error cleanup",
+    },
+    {
+        "from": "MONITOR",
+        "to": StatusState.MONITOR,
+        "trigger": "persists through an Error (enables should_keep_power_on)",
+    },
+)
+
+
 # The explicit mode-transition graph: every legal `from -> {to, ...}` edge the
 # seam may perform. Derived from the transition inventory + the characterization
 # suite. `to` targets for the cycling modes are data-driven (control['next_mode']),
