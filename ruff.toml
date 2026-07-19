@@ -1,2 +1,23 @@
 # Line length is relaxed: ~99% of existing lines fit within 120 columns.
 line-length = 120
+
+[lint]
+# Initial Ruff adoption baseline, captured during P0 gates.
+# Keep syntax/error detection from default Ruff, but ignore current legacy rule families
+# so `uv run ruff check .` can be used as a passing merge gate for new refactors.
+# Remove these ignores incrementally in focused cleanup PRs.
+ignore = [
+    "E401",  # multiple imports on one line
+    "E402",  # module import not at top of file
+    "E711",  # comparison to None should use is/is not
+    "E712",  # comparison to True/False should use is/is not
+    "E713",  # membership test should use not in
+    "E721",  # type comparison should use isinstance
+    "E722",  # bare except
+    "E731",  # lambda assignment
+    "F401",  # unused imports
+    "F403",  # star imports
+    "F405",  # names from star imports
+    "F541",  # f-string without placeholders
+    "F841",  # unused variables
+]
