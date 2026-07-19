@@ -24,7 +24,7 @@ import os
 
 from common.common import WriteKind
 from common.defaults import default_control
-from common.modes import Mode
+from common.modes import Mode, StatusState
 from notify.notifications import check_notify, send_notifications
 from file_mgmt.cookfile import create_cookfile
 from file_mgmt.recipes import convert_recipe_units
@@ -33,7 +33,7 @@ from os.path import exists
 
 from controller.runtime.state import WorkCycleState
 from controller.runtime.system_commands import process_system_commands
-from controller.runtime.transitions import request_transition, TransitionKind
+from controller.runtime.transitions import request_transition, should_keep_power_on, TransitionKind
 from controller.runtime.modes.monitor import MonitorMode
 from controller.runtime.modes.manual import ManualMode
 from controller.runtime.modes.shutdown import ShutdownMode
@@ -354,8 +354,8 @@ class Controller:
                 # No need to write control, as it should be written by the 'Stop' mode change
 
             # Check if there was an Error flagged in Monitor Mode - If no, then change status to active
-            if self.control["status"] != "monitor" and self.control["mode"] != Mode.ERROR:
-                self.control["status"] = "active"  # Set status to active
+            if self.control["status"] != StatusState.MONITOR and self.control["mode"] != Mode.ERROR:
+                self.control["status"] = StatusState.ACTIVE  # Set status to active
                 store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
 
             if self.control["mode"] in (Mode.STOP, Mode.ERROR):
@@ -382,7 +382,7 @@ class Controller:
                 self.status["startup_timestamp"] = 0
                 store.write_status(self.status)
 
-                if self.control["status"] == "monitor" and self.control["mode"] == Mode.ERROR:
+                if should_keep_power_on(self.control["mode"], self.control["status"]):
                     grill_platform.power_on()
                 else:
                     grill_platform.power_off()
@@ -395,7 +395,7 @@ class Controller:
                     # assignment -- read_control(flush=True) rebinds control to a fresh
                     # default_control() (status ""), discarding it, so Stop persisted "".
                     self.control = store.read_control(flush=True)
-                    self.control["status"] = "inactive"
+                    self.control["status"] = StatusState.INACTIVE
                     self.control["updated"] = False
                     self.control["tuning_mode"] = False  # Turn off Tuning Mode on Stop just in case it is on
                     self.control["next_mode"] = Mode.STOP
@@ -410,7 +410,7 @@ class Controller:
                     # Reset Control to Defaults but preserve 'Error' mode condition
                     self.control = default_control()
                     self.control["mode"] = Mode.ERROR
-                    self.control["status"] = "inactive"
+                    self.control["status"] = StatusState.INACTIVE
                     self.control["tuning_mode"] = False  # Turn off Tuning Mode on Stop just in case it is on
                     self.control["updated"] = False
                     self.control["next_mode"] = Mode.STOP
@@ -516,7 +516,7 @@ class Controller:
     def _dispatch_monitor(self):
         # Monitor (monitor the OEM controller)
         store = self.ctx.store
-        self.control["status"] = "monitor"  # Set status to monitor
+        self.control["status"] = StatusState.MONITOR  # Set status to monitor
         store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
         self.work_cycle(Mode.MONITOR)
 
