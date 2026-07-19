@@ -20,3 +20,16 @@ class Mode(StrEnum):
     STOP = "Stop"
     ERROR = "Error"
     RECIPE = "Recipe"
+
+
+class StatusState(StrEnum):
+    """The controller's second state axis: control["status"], orthogonal to
+    Mode. StrEnum so the four string values -- a published contract the
+    web/mobile UI display verbatim and which persist in control["status"] --
+    stay byte-identical (str(StatusState.UNSET) == "", not "StatusState.UNSET").
+    """
+
+    ACTIVE = "active"
+    MONITOR = "monitor"
+    INACTIVE = "inactive"
+    UNSET = ""

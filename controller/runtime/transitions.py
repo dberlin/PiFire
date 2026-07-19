@@ -25,7 +25,7 @@ from enum import StrEnum
 from typing import Callable, Optional
 
 from common.common import WriteKind
-from common.modes import Mode
+from common.modes import Mode, StatusState
 from controller.runtime.logic.safety import evaluate_flameout, over_max_temp, SafetyVerdict
 
 _UNSET = object()
@@ -35,6 +35,12 @@ class TransitionKind(StrEnum):
     NATURAL = "natural"
     SAFETY = "safety"
     TERMINAL = "terminal"
+
+
+def should_keep_power_on(mode, status):
+    """The one mode x status coupling: a Monitor-mode error keeps the OEM
+    controller powered on; every other terminal condition powers off."""
+    return status == StatusState.MONITOR and mode == Mode.ERROR
 
 
 # The explicit mode-transition graph: every legal `from -> {to, ...}` edge the
