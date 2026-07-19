@@ -97,6 +97,63 @@ def temp_to_tr(temp, a, b, c, units="F"):
     return int(Tr)
 
 
+def calc_auto_tune_status(data, units, status_data):
+    """
+    Given the accumulated autotune datapoints (list of {"ref_T":..., "probe_Tr":...})
+    and the configured units, determine the high/low/medium temp+Tr selection and
+    whether the spread is wide enough to be considered "ready". Mutates and returns
+    status_data with the "high_temp"/"high_tr"/"low_temp"/"low_tr"/"medium_temp"/
+    "medium_tr"/"ready" keys populated.
+
+    Caller is expected to guard this with `if len(data) > 10:` before invoking.
+    """
+    temp_list = []
+    tr_list = []
+    for datapoint in data:
+        """
+        Check if the ref_T value is already in the list and overwrite if so.
+        This assumes that the last temperature is the most recent and is likely
+        the most accurate resistance value to take.
+        """
+        if datapoint["ref_T"] in temp_list:
+            index = temp_list.index(datapoint["ref_T"])
+            tr_list[index] = datapoint["probe_Tr"]
+        else:
+            temp_list.append(datapoint["ref_T"])
+            tr_list.append(datapoint["probe_Tr"])
+
+    # Determine High Temp / Tr
+    status_data["high_temp"] = max(temp_list)
+    index = temp_list.index(max(temp_list))
+    status_data["high_tr"] = tr_list[index]
+
+    # Determine Low Temp / Tr
+    status_data["low_temp"] = min(temp_list)
+    index = temp_list.index(min(temp_list))
+    status_data["low_tr"] = tr_list[index]
+
+    # Determine Medium Temp / Tr
+    # Find best fit to Medium Temp
+    medium_temp = ((status_data["high_temp"] - status_data["low_temp"]) // 2) + status_data["low_temp"]
+    delta_temp = 1000  # Initial value is outside of any normal expected bounds
+    for index, temp in enumerate(temp_list):
+        if abs(temp - medium_temp) < delta_temp:
+            delta_temp = abs(temp - medium_temp)
+            delta_index = index
+    status_data["medium_temp"] = temp_list[delta_index]
+    status_data["medium_tr"] = tr_list[delta_index]
+    # Minimum range to be able to calculate temp
+    if units == "F":
+        min_range = 50
+    else:
+        min_range = 25
+
+    if (status_data["high_temp"] - status_data["low_temp"]) >= min_range:
+        status_data["ready"] = True
+
+    return status_data
+
+
 def tr_to_temp(tr, a, b, c, units="F"):
     try:
         # Steinhart Hart Equation
