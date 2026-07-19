@@ -18,6 +18,7 @@ import os
 import time
 
 from common.common import generate_uuid, get_probe_list, read_generic_json, read_updater_manifest
+from common.modes import Mode
 
 # Set of default colors for charts.  Contains list of tuples (primary color, secondary color).
 COLOR_LIST = [
@@ -441,9 +442,9 @@ def default_control():
 
     control["updated"] = True
 
-    control["mode"] = "Stop"
+    control["mode"] = Mode.STOP
 
-    control["next_mode"] = "Stop"
+    control["next_mode"] = Mode.STOP
 
     control["s_plus"] = settings["smoke_plus"]["enabled"]  # Smoke-Plus Feature Enable/Disable
 

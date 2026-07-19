@@ -21,6 +21,7 @@ import pygame
 from pygame import image as PyImage
 
 from PIL import Image, ImageFilter
+from common.modes import Mode
 from display.base_flex import DisplayBase
 from display.flexobject import FlexObject
 from pathlib import Path
@@ -318,13 +319,13 @@ class Display(DisplayBase):
 				"""
                 self._capture_background()
                 self._store_dash_objects()
-                if self.status_data["mode"] == "Stop":
+                if self.status_data["mode"] == Mode.STOP:
                     self.display_active = "menu_main"
-                elif self.status_data["mode"] in ["Startup", "Reignite", "Smoke", "Hold", "Shutdown"]:
+                elif self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE, Mode.SMOKE, Mode.HOLD, Mode.SHUTDOWN]:
                     self.display_active = "menu_main_active_normal"
-                elif self.status_data["mode"] == "Monitor":
+                elif self.status_data["mode"] == Mode.MONITOR:
                     self.display_active = "menu_main_active_monitor"
-                elif self.status_data["mode"] == "Recipe":
+                elif self.status_data["mode"] == Mode.RECIPE:
                     self.display_active = "menu_main_active_recipe"
                 else:
                     self.display_active = "menu_main"

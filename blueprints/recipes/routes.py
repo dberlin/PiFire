@@ -2,6 +2,7 @@ import os
 from werkzeug.utils import secure_filename
 from flask import render_template, request, current_app, send_file, jsonify, render_template_string
 from common.datastore_accessors import read_settings, read_control
+from common.modes import Mode
 from common.app import paginate_list, allowed_file
 from file_mgmt.common import update_json_file_data, remove_assets
 from file_mgmt.media import add_asset
@@ -272,7 +273,7 @@ def recipes_data(filename=None):
                 return render_template_string(render_string, recipe_data=recipe_data)
         if "reciperunstatus" in requestform:
             control = read_control()
-            if control["mode"] != "Recipe":
+            if control["mode"] != Mode.RECIPE:
                 filename = requestform["filename"]
                 filepath = f"{RECIPE_FOLDER}{filename}"
             else:

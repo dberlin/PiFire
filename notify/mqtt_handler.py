@@ -20,6 +20,7 @@ import logging
 import time
 from socket import getfqdn
 from common.common import create_logger
+from common.modes import Mode
 import psutil
 # from common import write_control
 
@@ -490,14 +491,14 @@ class MqttNotificationHandler:
             self.last_mode = data["mode"]
 
             # Zero the PID data if not controlling
-            if data["mode"] not in ["Hold"]:
+            if data["mode"] not in [Mode.HOLD]:
                 payload = {}
                 for key in self.PID_SENSORS:
                     payload[key] = 0
                 self._publish("pid", payload)
 
             # Zero the temps if stopped
-            if data["mode"] == "Stop":
+            if data["mode"] == Mode.STOP:
                 primary_data = {}
                 food_data = {}
                 aux_data = {}

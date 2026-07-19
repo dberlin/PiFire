@@ -4,6 +4,7 @@ from flask import render_template, request, jsonify, redirect, render_template_s
 from probes.thermoworks_cloud import discover
 from thermoworks_cloud import AuthenticationError
 from common.common import read_wizard
+from common.modes import Mode
 from common.datastore_accessors import (
     read_settings,
     read_control,
@@ -80,7 +81,7 @@ def wizard_page(action=None):
             return redirect("/")
 
         if action == "finish":
-            if control["mode"] == "Stop":
+            if control["mode"] == Mode.STOP:
                 wizardInstallInfo = prepare_wizard_data(r)
                 # Whole-config check on the user's in-progress selections (probes +
                 # distance + fan controller). Unlike the per-probe step, this sees the
@@ -260,7 +261,7 @@ def wizard_page(action=None):
 
     store_wizard_install_info(wizardInstallInfo)
 
-    if control["mode"] != "Stop":
+    if control["mode"] != Mode.STOP:
         errors.append(
             "PiFire configuration wizard cannot be run while the system is active.  Please stop the current cook before continuing."
         )

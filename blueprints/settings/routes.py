@@ -1,5 +1,6 @@
 from flask import render_template, request, render_template_string, jsonify
 from common.common import WriteKind, read_generic_json, generate_uuid, convert_settings_units
+from common.modes import Mode
 from common.datastore_accessors import read_settings, read_control, write_settings, write_control
 from common.app import is_not_blank, is_checked, update_probe_config, save_settings_and_flag_update
 
@@ -496,7 +497,7 @@ def _settings_history(settings, control, controller, event):
         settings["history_page"]["datapoints"] = int(response["datapoints"])
 
     # This check should be the last in this group
-    if control["mode"] != "Stop" and is_checked(response, "ext_data") != settings["globals"]["ext_data"]:
+    if control["mode"] != Mode.STOP and is_checked(response, "ext_data") != settings["globals"]["ext_data"]:
         event["type"] = "error"
         event["text"] = "This setting cannot be changed in any active mode.  Stop the grill and try again."
     else:

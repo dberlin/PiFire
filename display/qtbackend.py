@@ -15,6 +15,8 @@ import time
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Property, Qt, Signal, Slot
 
+from common.modes import Mode
+
 
 class FoodProbeModel(QAbstractListModel):
     NameRole = Qt.UserRole + 1
@@ -136,7 +138,7 @@ class PiFireBackend(QObject):
         in_data, status = self._fetch_fn()
         if status is None or in_data is None:
             return
-        self._set("_mode", status.get("mode", "Stop"), self.modeChanged)
+        self._set("_mode", status.get("mode", Mode.STOP), self.modeChanged)
         self._set("_units", status.get("units", "F"), self.unitsChanged)
         p = in_data.get("P", {})
         primary_key = next(iter(p), None)
@@ -162,11 +164,11 @@ class PiFireBackend(QObject):
         now = self._now()
         self._update_timer_text(status, now)
         self._update_cook_elapsed(status, now)
-        mode = status.get("mode", "Stop")
+        mode = status.get("mode", Mode.STOP)
         recipe = bool(status.get("recipe", False))
-        mode_text = f"Recipe: {mode}" if recipe and mode != "Shutdown" else mode
+        mode_text = f"Recipe: {mode}" if recipe and mode != Mode.SHUTDOWN else mode
         self._set("_mode_text", mode_text, self.modeTextChanged)
-        self._set("_p_mode_active", mode in ("Startup", "Reignite", "Smoke"), self.statusChanged)
+        self._set("_p_mode_active", mode in (Mode.STARTUP, Mode.REIGNITE, Mode.SMOKE), self.statusChanged)
         if (now - self._last_settings_check) >= 1.0:
             self._last_settings_check = now
             if self._accent_fn is not None:
@@ -176,7 +178,7 @@ class PiFireBackend(QObject):
         self._update_idle(mode, now)
 
     def _update_timer_text(self, status, now):
-        mode = status.get("mode", "Stop")
+        mode = status.get("mode", Mode.STOP)
         duration_key = {
             "Startup": "start_duration",
             "Reignite": "start_duration",
@@ -190,7 +192,7 @@ class PiFireBackend(QObject):
             remaining = max(remaining, 0)
             text = f"{remaining // 60:02d}:{remaining % 60:02d}"
             label = "Timer"
-        elif mode == "Hold" and status.get("lid_open_detected") and status.get("lid_open_endtime"):
+        elif mode == Mode.HOLD and status.get("lid_open_detected") and status.get("lid_open_endtime"):
             remaining = max(int(status["lid_open_endtime"] - now), 0)
             text = f"{remaining // 60:02d}:{remaining % 60:02d}"
             label = "Lid Pause"
@@ -199,7 +201,7 @@ class PiFireBackend(QObject):
 
     def _update_cook_elapsed(self, status, now):
         ts = status.get("startup_timestamp", 0) or 0
-        if ts and status.get("mode", "Stop") not in ("Stop", "Monitor"):
+        if ts and status.get("mode", Mode.STOP) not in (Mode.STOP, Mode.MONITOR):
             secs = max(int(now - ts), 0)
             h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
             text = (f"{h}:" if h else "") + f"{m:02d}:{s:02d}"
@@ -211,7 +213,7 @@ class PiFireBackend(QObject):
         # The screen never sleeps during an active cook; in Stop it sleeps after
         # TIMEOUT seconds of no interaction. TIMEOUT <= 0 disables sleeping and
         # wakes an already-asleep screen. Leaving Stop auto-wakes.
-        if mode != "Stop":
+        if mode != Mode.STOP:
             self._set("_asleep", False, self.asleepChanged)
         elif self.TIMEOUT <= 0:
             self._set("_asleep", False, self.asleepChanged)

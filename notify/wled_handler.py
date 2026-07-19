@@ -51,6 +51,7 @@ Required settings format:
 import logging
 import time
 import requests
+from common.modes import Mode
 from notify.wled_profiles import WLEDProfileManager, WLED_COLORS, WLED_EFFECTS
 
 
@@ -437,15 +438,15 @@ class WLEDNotificationHandler:
                 self.notify_duration = 1  # Reset duration for state changes
 
                 # Map PiFire modes to suggested states
-                if control["mode"] == "Stop":
+                if control["mode"] == Mode.STOP:
                     self.send_suggested_preset("idle", suggested_config)
-                elif control["mode"] in ["Startup", "Prime"]:
+                elif control["mode"] in [Mode.STARTUP, Mode.PRIME]:
                     self.send_suggested_preset("booting", suggested_config)
-                elif control["mode"] == "Reignite":
+                elif control["mode"] == Mode.REIGNITE:
                     self.send_suggested_preset("preheat", suggested_config)
-                elif control["mode"] in ["Smoke", "Hold"]:
+                elif control["mode"] in [Mode.SMOKE, Mode.HOLD]:
                     self.send_suggested_preset("cooking", suggested_config)
-                elif control["mode"] == "Shutdown":
+                elif control["mode"] == Mode.SHUTDOWN:
                     self.send_suggested_preset("cooldown", suggested_config)
                 else:
                     self.send_suggested_preset("idle", suggested_config)

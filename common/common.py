@@ -27,6 +27,7 @@ from logging.handlers import RotatingFileHandler
 from collections.abc import Mapping
 from ratelimitingfilter import RateLimitingFilter
 from common import datastore
+from common.modes import Mode
 from common.sqlite_queue import SqliteQueue
 from common.sqlite_log_handler import SqliteLogHandler
 
@@ -460,7 +461,7 @@ def process_metrics(metrics_data, augerrate=0.3):
             endtime = epoch_to_time(metrics_data[index]["endtime"] / 1000)
         metrics_data[index]["endtime_c"] = endtime
         # Time in Mode
-        if metrics_data[index]["mode"] == "Stop":
+        if metrics_data[index]["mode"] == Mode.STOP:
             timeinmode = "NA"
         elif metrics_data[index]["endtime"] == 0:
             timeinmode = "Active"
@@ -597,16 +598,16 @@ def deep_update(dictionary, updates):
 
 
 MODE_MAP = {
-    "startup": "Startup",
-    "smoke": "Smoke",
-    "shutdown": "Shutdown",
-    "stop": "Stop",
-    "reignite": "Reignite",
-    "monitor": "Monitor",
-    "error": "Error",
-    "prime": "Prime",
-    "hold": "Hold",
-    "manual": "Manual",
+    "startup": Mode.STARTUP,
+    "smoke": Mode.SMOKE,
+    "shutdown": Mode.SHUTDOWN,
+    "stop": Mode.STOP,
+    "reignite": Mode.REIGNITE,
+    "monitor": Mode.MONITOR,
+    "error": Mode.ERROR,
+    "prime": Mode.PRIME,
+    "hold": Mode.HOLD,
+    "manual": Mode.MANUAL,
 }
 
 

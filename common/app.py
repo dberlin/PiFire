@@ -3,6 +3,7 @@ Common PiFire WebApp Functions Shared Between Blueprints
 """
 
 from common.common import seconds_to_string, WriteKind
+from common.modes import Mode
 from common.datastore_accessors import read_settings, read_metrics, read_history, write_settings, write_control
 from common.defaults import metrics_items
 from common.api_commands import process_command
@@ -107,21 +108,21 @@ def prepare_annotations(displayed_starttime, metrics_data=[]):
             # starttime = epoch_to_time(metrics_data[index]['starttime']/1000)
             mode = metrics_data[index]["mode"]
             color = "blue"
-            if mode == "Startup":
+            if mode == Mode.STARTUP:
                 color = "green"
-            elif mode == "Stop":
+            elif mode == Mode.STOP:
                 color = "red"
-            elif mode == "Shutdown":
+            elif mode == Mode.SHUTDOWN:
                 color = "black"
-            elif mode == "Reignite":
+            elif mode == Mode.REIGNITE:
                 color = "orange"
-            elif mode == "Error":
+            elif mode == Mode.ERROR:
                 color = "red"
-            elif mode == "Hold":
+            elif mode == Mode.HOLD:
                 color = "blue"
-            elif mode == "Smoke":
+            elif mode == Mode.SMOKE:
                 color = "grey"
-            elif mode in ["Monitor", "Manual"]:
+            elif mode in [Mode.MONITOR, Mode.MANUAL]:
                 color = "purple"
             annotation = {
                 "type": "line",

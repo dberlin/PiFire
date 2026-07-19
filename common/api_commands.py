@@ -16,6 +16,7 @@ import json
 import time
 
 from common.common import MODE_MAP, WriteKind, convert_settings_units, epoch_to_time, is_float, write_log
+from common.modes import Mode
 from common.datastore_accessors import (
     read_control,
     read_current,
@@ -282,7 +283,7 @@ def _cmd_set_psp(data, control, settings, arglist, origin, kind):
     /api/set/psp/{integer/float temperature}
     """
     if is_float(arglist[1]):
-        control["mode"] = "Hold"
+        control["mode"] = Mode.HOLD
         if settings["globals"]["units"] == "F":
             control["primary_setpoint"] = int(float(arglist[1]))
         else:
@@ -616,7 +617,7 @@ def _cmd_set_manual(data, control, settings, arglist, origin, kind):
     a stale value from a previous command. Preserved as-is.
     """
 
-    if control["mode"] == "Manual" or settings["safety"]["allow_manual_changes"]:
+    if control["mode"] == Mode.MANUAL or settings["safety"]["allow_manual_changes"]:
         if arglist[1] == "power":
             control = _manual_toggle(control, "power", arglist)
         elif arglist[1] == "igniter":

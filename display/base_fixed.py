@@ -24,6 +24,7 @@ import qrcode
 import logging
 from PIL import Image, ImageDraw, ImageFont
 from common.common import WriteKind
+from common.modes import Mode
 from common.datastore_accessors import read_control, write_control
 
 """
@@ -790,9 +791,9 @@ class DisplayBase:
         temps[1] = in_data["primary_setpoint"]
         if temps[1] <= 0:
             percents[1] = 0
-        elif self.units == "F" and status_data["mode"] == "Hold":
+        elif self.units == "F" and status_data["mode"] == Mode.HOLD:
             percents[1] = round((temps[1] / 600) * 100)  # F Temp Range [0 - 600F] for Grill
-        elif self.units == "C" and status_data["mode"] == "Hold":
+        elif self.units == "C" and status_data["mode"] == Mode.HOLD:
             percents[1] = round((temps[1] / 300) * 100)  # C Temp Range [0 - 300C] for Grill
 
         temps[2] = in_data["notify_targets"][label]
@@ -972,7 +973,7 @@ class DisplayBase:
                 )
 
         # Smoke Plus Indicator
-        if status_data["s_plus"] and (status_data["mode"] == "Smoke" or status_data["mode"] == "Hold"):
+        if status_data["s_plus"] and (status_data["mode"] == Mode.SMOKE or status_data["mode"] == Mode.HOLD):
             if self._SQUARE:
                 self._draw_splus_icon(img, (self.WIDTH - 52, 60))
             elif self.WIDTH == 240:
@@ -1029,7 +1030,7 @@ class DisplayBase:
         self._text_circle(draw, position, size, text)
 
         # Smoke / Startup / Reignite P-Mode (Upper Center)
-        if status_data["mode"] in ["Startup", "Reignite", "Smoke"]:
+        if status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE, Mode.SMOKE]:
             text = f"PMode: {status_data['p_mode']}"
             text_color = (0, 250, 0)
 
@@ -1037,17 +1038,17 @@ class DisplayBase:
                 text, self.primary_font, 15, text_color, rect=True, outline_color=text_color, fill_color=(0, 0, 0)
             )
             if self._SQUARE:
-                if status_data["mode"] == "Smoke":
+                if status_data["mode"] == Mode.SMOKE:
                     coords = self.WIDTH // 2 - (label_canvas.width // 2), 26
                 else:
                     coords = self.WIDTH - label_canvas.width - 10, 10
             elif self.WIDTH == 240:
-                if status_data["mode"] == "Smoke":
+                if status_data["mode"] == Mode.SMOKE:
                     coords = self.WIDTH // 2 - (label_canvas.width // 2), 60
                 else:
                     coords = self.WIDTH // 2 - (label_canvas.width // 2), 210
             else:
-                if status_data["mode"] == "Smoke":
+                if status_data["mode"] == Mode.SMOKE:
                     coords = self.WIDTH // 2 - (label_canvas.width // 2), 26
                 else:
                     coords = self.WIDTH - label_canvas.width - 10, 10
@@ -1055,10 +1056,10 @@ class DisplayBase:
             img.paste(label_canvas, coords, label_canvas)
 
         # Display Countdown for Startup / Reignite / Shutdown / Prime
-        if status_data["mode"] in ["Startup", "Reignite", "Shutdown", "Prime"]:
-            if status_data["mode"] in ["Startup", "Reignite"]:
+        if status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE, Mode.SHUTDOWN, Mode.PRIME]:
+            if status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
                 duration = status_data["start_duration"]
-            elif status_data["mode"] in ["Prime"]:
+            elif status_data["mode"] in [Mode.PRIME]:
                 duration = status_data["prime_duration"]
             else:
                 duration = status_data["shutdown_duration"]
@@ -1079,7 +1080,7 @@ class DisplayBase:
             img.paste(label_canvas, coords, label_canvas)
 
         # Lid open detection timer display
-        if status_data["mode"] in ["Hold"]:
+        if status_data["mode"] in [Mode.HOLD]:
             if status_data["lid_open_detected"]:
                 duration = (
                     int(status_data["lid_open_endtime"] - time.time())
@@ -1115,9 +1116,9 @@ class DisplayBase:
         if self.menu["current"]["mode"] == "none":
             control = read_control()
             # If in an inactive mode
-            if control["mode"] in ["Stop", "Error", "Monitor", "Prime"]:
+            if control["mode"] in [Mode.STOP, Mode.ERROR, Mode.MONITOR, Mode.PRIME]:
                 self.menu["current"]["mode"] = "inactive"
-            elif control["mode"] in ["Recipe"]:
+            elif control["mode"] in [Mode.RECIPE]:
                 self.menu["current"]["mode"] = "active_recipe"
             else:  # Use the active menu
                 self.menu["current"]["mode"] = "active"
@@ -1154,7 +1155,7 @@ class DisplayBase:
                 control = read_control()
                 control["primary_setpoint"] = self.menu["current"]["option"]
                 control["updated"] = True
-                control["mode"] = "Hold"
+                control["mode"] = Mode.HOLD
                 write_control(control, WriteKind.MERGE, origin="display")
                 self.menu["current"]["mode"] = "none"
                 self.menu["current"]["option"] = 0
@@ -1206,7 +1207,7 @@ class DisplayBase:
                     self.menu_time = 0
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Startup"
+                    control["mode"] = Mode.STARTUP
                     write_control(control, WriteKind.MERGE, origin="display")
                 elif selected == "Monitor":
                     self.display_active = True
@@ -1216,7 +1217,7 @@ class DisplayBase:
                     self.menu_time = 0
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Monitor"
+                    control["mode"] = Mode.MONITOR
                     write_control(control, WriteKind.MERGE, origin="display")
                 elif selected == "Stop":
                     self.menu["current"]["mode"] = "none"
@@ -1226,7 +1227,7 @@ class DisplayBase:
                     self.clear_display()
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Stop"
+                    control["mode"] = Mode.STOP
                     write_control(control, WriteKind.MERGE, origin="display")
                 elif selected == "Power":
                     self.menu["current"]["mode"] = "power_menu"
@@ -1235,7 +1236,7 @@ class DisplayBase:
                     self.clear_display()
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Stop"
+                    control["mode"] = Mode.STOP
                     write_control(control, WriteKind.MERGE, origin="display")
 
                     if "Off" in selected:
@@ -1269,7 +1270,7 @@ class DisplayBase:
                     self.menu_time = 0
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Shutdown"
+                    control["mode"] = Mode.SHUTDOWN
                     write_control(control, WriteKind.MERGE, origin="display")
                 elif selected == "Hold":
                     self.display_active = True
@@ -1289,7 +1290,7 @@ class DisplayBase:
                     self.menu_time = 0
                     control = read_control()
                     control["updated"] = True
-                    control["mode"] = "Smoke"
+                    control["mode"] = Mode.SMOKE
                     write_control(control, WriteKind.MERGE, origin="display")
                 elif selected == "SmokePlus":
                     self.menu["current"]["mode"] = "none"
@@ -1326,7 +1327,7 @@ class DisplayBase:
                     self.menu_active = False
                     self.menu_time = 0
                     control["updated"] = True
-                    control["mode"] = "Prime"
+                    control["mode"] = Mode.PRIME
                     write_control(control, WriteKind.MERGE, origin="display")
                 elif "NextStep" in selected:
                     self.display_active = True
