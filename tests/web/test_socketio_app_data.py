@@ -832,24 +832,32 @@ def test_post_update_control_empty_request_returns_none(sio):
     assert resp is None
 
 
-def test_post_app_data_missing_json_data_crashes_on_set_not_dict(sio):
-    """LATENT BUG (blueprints/mobile/socket_io.py:723): when ``json_data`` is
-    None, ``_post_app_data`` defaults ``request = {""}`` -- a *set*
-    containing the empty string, not an empty dict ``{}``. Every
-    action-group handler that calls ``request.keys()`` or subscripts
-    ``request["..._action"]`` (update, pellets, timer, recipes, probes,
-    notify) blows up with an AttributeError/TypeError instead of returning
-    a clean Error envelope, whenever a caller omits ``json_data``.
-    ``admin_action``/``units_action`` happen to never touch ``request``, so
-    they're unaffected -- which is exactly why this was never caught by
-    hand-testing (see the existing admin/units tests above, none of which
-    pass a third argument). Severity: medium -- a malformed/legacy client
-    that omits ``json_data`` on any of the other 6 actions gets an unhandled
-    exception surfaced through Socket.IO instead of a graceful Error
-    envelope. Pinning the crash here verbatim, per task instructions, rather
-    than fixing ``{""}`` -> ``{}`` in production code."""
-    with pytest.raises(AttributeError):
-        sio.mod._post_app_data("update_action", "settings")
+def test_post_app_data_missing_json_data_update_action_returns_none(sio):
+    """FIXED (blueprints/mobile/socket_io.py): ``_post_app_data`` used to
+    default ``request = {""}`` when ``json_data`` was omitted -- a *set*
+    containing the empty string, not an empty dict ``{}``. ``update_action``
+    only iterates ``request.keys()``, so an empty dict degrades gracefully:
+    the ``for`` loop body never runs and the handler falls off the end,
+    returning ``None`` -- the exact same outcome already pinned above for
+    an explicit ``json.dumps({})`` payload
+    (``test_post_update_settings_empty_request_returns_none``). No crash."""
+    resp = sio.mod._post_app_data("update_action", "settings")
+    assert resp is None
+
+
+@pytest.mark.parametrize(
+    "action", ["pellets_action", "timer_action", "recipes_action", "probes_action", "notify_action"]
+)
+def test_post_app_data_missing_json_data_returns_error_envelope(sio, action):
+    """FIXED (blueprints/mobile/socket_io.py): unlike ``update_action``,
+    these five action-groups subscript ``request["..._action"]``
+    unconditionally (not via ``.get``), so even an empty dict ``{}`` would
+    still raise ``KeyError``. For these, ``_post_app_data`` now returns the
+    same Error envelope style used elsewhere in this module (e.g. "without
+    valid action") *before* ever calling the handler, instead of crashing."""
+    resp = sio.mod._post_app_data(action, "whatever")
+    assert resp["result"] == "Error"
+    assert resp["message"] == "Error: Received request without JSON data"
 
 
 # =====================================================================
