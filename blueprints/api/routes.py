@@ -122,7 +122,7 @@ def _api_post_settings(settings, request_json):
                 "message": "Settings updated successfully.",
             }
         ), 201
-    except:
+    except Exception:
         return jsonify(
             {
                 "settings": "error",  # Keeping for compatibility
@@ -140,7 +140,7 @@ def _api_post_control(settings, request_json):
         # Update control data with request JSON
         write_control(request_json, WriteKind.MERGE, origin="app")
         return jsonify({"control": "success", "result": "success", "message": "Settings updated successfully."}), 201
-    except:
+    except Exception:
         return jsonify({"control": "error", "result": "error", "message": "Settings update failed."}), 201
 
 
