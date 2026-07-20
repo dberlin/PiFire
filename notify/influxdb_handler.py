@@ -6,7 +6,12 @@ import threading
 class InfluxNotificationHandler:
     def __init__(self, settings) -> None:
         self.queue = []
-        self.last_updated = time.time()
+        # Seeded to 0 (not time.time()) so the very first notify() call after
+        # construction -- the caller constructs the handler then calls
+        # notify() in the same statement sequence
+        # (notify/notifications.py:_send_influxdb_notification) -- is not
+        # immediately swallowed by the 1s debounce in notify().
+        self.last_updated = 0
 
         t1 = threading.Thread(
             target=self.publishing_thread,
@@ -48,9 +53,16 @@ class InfluxNotificationHandler:
 
             try:
                 buf = self.queue.copy()
-                self.queue.clear()
                 if len(buf) > 0:
                     write_api.write(bucket, org, buf)
+                    # Only drop the points we just wrote successfully -- not
+                    # the whole queue -- so any points appended concurrently
+                    # (by notify(), on another thread) while write() was in
+                    # flight are preserved. If write() raises, the except
+                    # below runs instead and self.queue is left untouched
+                    # entirely, so the buffered points are retried on the
+                    # next loop iteration instead of being silently dropped.
+                    del self.queue[: len(buf)]
                 time.sleep(5)
             except:
                 write_api = None
@@ -72,16 +84,22 @@ class InfluxNotificationHandler:
             return default
 
         PrimaryKey = list(in_data["probe_history"]["primary"].keys())[0]
-        Probe1Key = list(in_data["probe_history"]["food"].keys())[0]
-        Probe2Key = list(in_data["probe_history"]["food"].keys())[1]
+        # Grills may be configured with 0, 1, or 2+ food probes -- don't
+        # assume >=2 are present. Missing probes degrade to 0.0 rather than
+        # raising IndexError (which had no handler anywhere up the call
+        # chain and would silently kill notify() for any non-2-food-probe
+        # configuration).
+        food_probe_keys = list(in_data["probe_history"]["food"].keys())
+        Probe1Key = food_probe_keys[0] if len(food_probe_keys) > 0 else None
+        Probe2Key = food_probe_keys[1] if len(food_probe_keys) > 1 else None
 
         PrimaryTemp = in_data["probe_history"]["primary"][PrimaryKey]
         PrimarySetpoint = in_data["primary_setpoint"]
         PrimaryNotify = in_data["notify_targets"][PrimaryKey]
-        Probe1Temp = in_data["probe_history"]["food"][Probe1Key]
-        Probe1Notify = in_data["notify_targets"][Probe1Key]
-        Probe2Temp = in_data["probe_history"]["food"][Probe2Key]
-        Probe2Notify = in_data["notify_targets"][Probe2Key]
+        Probe1Temp = in_data["probe_history"]["food"][Probe1Key] if Probe1Key is not None else 0.0
+        Probe1Notify = in_data["notify_targets"][Probe1Key] if Probe1Key is not None else 0.0
+        Probe2Temp = in_data["probe_history"]["food"][Probe2Key] if Probe2Key is not None else 0.0
+        Probe2Notify = in_data["notify_targets"][Probe2Key] if Probe2Key is not None else 0.0
 
         p = (
             Point(name)
