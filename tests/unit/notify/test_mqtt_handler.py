@@ -753,6 +753,29 @@ def test_autodiscover_primary_setpoint_uses_global_units(patched_client):
     assert discovery["unit_of_measurement"] == "°F"
 
 
+def test_autodiscover_non_scalar_value_defaults_to_plain_sensor(patched_client):
+    # Pins the `component = "sensor"` default for values that aren't
+    # bool/str/int/float. A dict value hits none of the datatype branches; the
+    # default keeps `component` bound (was UnboundLocalError at publish time).
+    handler = _make_handler(patched_client)
+    result = _discover(handler, "system", {"weird": {"nested": 1}})
+    topic, discovery = result["weird"]
+    assert "/sensor/" in topic
+    assert topic.endswith("/system_weird/config")
+    assert discovery["value_template"] == "{{ value_json.weird }}"
+    # No scalar-only enrichment applied.
+    assert "state_class" not in discovery
+    assert "system_weird" in handler.initialized_topics
+
+
+def test_autodiscover_none_value_defaults_to_plain_sensor(patched_client):
+    # Same guard as above for a None value (another non-scalar type).
+    handler = _make_handler(patched_client)
+    result = _discover(handler, "system", {"maybe": None})
+    topic, _ = result["maybe"]
+    assert "/sensor/" in topic
+
+
 def test_autodiscover_skips_already_initialized_topic(patched_client):
     handler = _make_handler(patched_client)
     handler.last["devices_auger"] = True

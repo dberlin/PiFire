@@ -342,6 +342,10 @@ class MqttNotificationHandler:
 
                     datatype = type(data[device])
 
+                    # Default component for any value type we don't special-case
+                    # below (dict/list/None); scalar branches override as needed.
+                    component = "sensor"
+
                     if datatype == bool:
                         component = "binary_sensor"
                         discovery["payload_on"] = True
