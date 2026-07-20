@@ -21,17 +21,19 @@ Every external boundary (requests, apprise, the mqtt/wled/influxdb handler
 classes, the datastore accessors) is mocked. No real network call, MQTT
 broker, or WLED device is ever touched.
 
-LATENT BUG (documented, not fixed -- see test_onesignal_invalid_player_id_cleanup_uses_wrong_settings_key):
+FIXED BUG (see test_onesignal_invalid_player_id_cleanup_removes_device):
 notify/notifications.py:483-489 -- the OneSignal invalid-player-id cleanup
-reads/writes `settings["onesignal"]["devices"]`, but every other access in
-this function (and the whole app's settings schema) nests OneSignal config
-under `settings["notify_services"]["onesignal"]`. Production settings.json
-has no top-level "onesignal" key, so this raises KeyError, which is
-swallowed by the enclosing `except Exception`. Net effect: OneSignal's
-automatic invalid-device cleanup silently never runs, and a real HTTP
-success gets logged as "OneSignal Notification failed: 'onesignal'"
-instead -- misleading anyone reading logs. Severity: medium (feature
-dead, error message misdirects).
+used to read/write `settings["onesignal"]["devices"]`, but every other
+access in this function (and the whole app's settings schema) nests
+OneSignal config under `settings["notify_services"]["onesignal"]`
+(see common/defaults.py:365). Production settings.json has no top-level
+"onesignal" key, so this raised KeyError, which was swallowed by the
+enclosing `except Exception`. Net effect: OneSignal's automatic
+invalid-device cleanup silently never ran, and a real HTTP success got
+logged as "OneSignal Notification failed: 'onesignal'" instead --
+misleading anyone reading logs. Fixed to use the real
+`settings["notify_services"]["onesignal"]["devices"]` path in all three
+spots.
 """
 
 import math
@@ -248,16 +250,16 @@ def test_onesignal_generic_exception_is_caught_and_logged(monkeypatch):
     assert any("OneSignal Notification failed" in str(c.args[0]) for c in logger.warning.call_args_list)
 
 
-def test_onesignal_invalid_player_id_cleanup_uses_wrong_settings_key(monkeypatch):
-    """LATENT BUG (see module docstring): the invalid_player_ids cleanup
-    block reads/writes settings["onesignal"]["devices"] instead of
-    settings["notify_services"]["onesignal"]["devices"]. Production
-    settings have no top-level "onesignal" key, so this KeyErrors and is
-    swallowed by the surrounding `except Exception`, meaning:
-      1. write_settings() is never actually called to prune the device.
-      2. A real HTTP 200 success gets mis-logged as a generic failure.
-    This test pins that exact (buggy) behavior rather than "fixing" it.
-    notify/notifications.py:483-489.
+def test_onesignal_invalid_player_id_cleanup_removes_device(monkeypatch):
+    """The invalid_player_ids cleanup block must read/write
+    settings["notify_services"]["onesignal"]["devices"] -- the actual
+    schema (see common/defaults.py:365, `services["onesignal"] = {...,
+    "devices": {}}`), not a nonexistent top-level settings["onesignal"].
+    A real settings dict never has a top-level "onesignal" key, so on the
+    buggy code this used to KeyError (swallowed by the surrounding
+    `except Exception`), meaning write_settings() was never called to
+    prune the device and a real HTTP 200 success got mis-logged as a
+    generic failure. notify/notifications.py:483-489.
     """
     logger = MagicMock()
     monkeypatch.setattr(N, "_event_logger", lambda settings: logger)
@@ -274,30 +276,36 @@ def test_onesignal_invalid_player_id_cleanup_uses_wrong_settings_key(monkeypatch
     resp.json.return_value = {"errors": {"invalid_player_ids": ["bad-device"]}}
     monkeypatch.setattr(N.requests, "post", MagicMock(return_value=resp))
 
-    # Must not raise -- the KeyError is caught internally.
     N._send_onesignal_notification(settings, "Title", "Body", "chan")
 
-    # The cleanup never actually ran: write_settings was never called, and
-    # the device is still present in the "real" (notify_services-nested) config.
-    write_settings_mock.assert_not_called()
-    assert "bad-device" in settings["notify_services"]["onesignal"]["devices"]
-    # The HTTP call *succeeded* (status 200) yet gets logged as a failure.
-    assert any("OneSignal Notification failed" in str(c.args[0]) for c in logger.warning.call_args_list)
+    # The cleanup actually ran against the real (notify_services-nested)
+    # settings path: the invalid device was pruned and persisted.
+    write_settings_mock.assert_called_once()
+    assert "bad-device" not in settings["notify_services"]["onesignal"]["devices"]
+    assert any("invalid id and has been removed" in str(c.args[0]) for c in logger.info.call_args_list)
+    # The HTTP call succeeded (status 200) and must NOT be logged as a failure.
+    assert not any("OneSignal Notification failed" in str(c.args[0]) for c in logger.warning.call_args_list)
 
 
-def test_onesignal_invalid_player_id_cleanup_succeeds_if_schema_matched(monkeypatch):
-    """Covers the cleanup's "success" branch (info log + pop + write_settings)
-    that only executes if settings *did* carry a matching top-level
-    "onesignal" key -- which real settings.json never does (see the bug test
-    above). Included purely to exercise these lines; not representative of
-    production data."""
+def test_onesignal_invalid_player_id_cleanup_removes_only_invalid_device(monkeypatch):
+    """When only one of several registered devices comes back as an
+    invalid_player_id, only that device is pruned -- the rest of
+    settings["notify_services"]["onesignal"]["devices"] is left intact --
+    and the info log names the correct device. Exercises the same
+    real-schema cleanup path as the test above with multiple devices
+    registered, to guard against a cleanup that clears the whole dict or
+    logs the wrong device_name."""
     logger = MagicMock()
     monkeypatch.setattr(N, "_event_logger", lambda settings: logger)
     write_settings_mock = MagicMock()
     monkeypatch.setattr(N, "write_settings", write_settings_mock)
 
-    settings = _onesignal_settings(devices={"bad-device": {"device_name": "Old Phone"}})
-    settings["onesignal"] = {"devices": {"bad-device": {"device_name": "Old Phone"}}}
+    settings = _onesignal_settings(
+        devices={
+            "bad-device": {"device_name": "Old Phone"},
+            "good-device": {"device_name": "New Phone"},
+        }
+    )
 
     resp = MagicMock()
     resp.status_code = 200
@@ -308,8 +316,11 @@ def test_onesignal_invalid_player_id_cleanup_succeeds_if_schema_matched(monkeypa
     N._send_onesignal_notification(settings, "Title", "Body", "chan")
 
     write_settings_mock.assert_called_once()
-    assert "bad-device" not in settings["onesignal"]["devices"]
-    assert any("invalid id and has been removed" in str(c.args[0]) for c in logger.info.call_args_list)
+    devices = settings["notify_services"]["onesignal"]["devices"]
+    assert "bad-device" not in devices
+    assert "good-device" in devices
+    assert any("Old Phone" in str(c.args[0]) for c in logger.info.call_args_list)
+    assert not any("OneSignal Notification failed" in str(c.args[0]) for c in logger.warning.call_args_list)
 
 
 def test_onesignal_bare_except_branch_is_reachable(monkeypatch):

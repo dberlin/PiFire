@@ -480,13 +480,13 @@ def _send_onesignal_notification(settings, title_message, body_message, channel)
             if "errors" in json_response:
                 if "invalid_player_ids" in json_response["errors"]:
                     for device in json_response["errors"]["invalid_player_ids"]:
-                        if device in settings["onesignal"]["devices"]:
+                        if device in settings["notify_services"]["onesignal"]["devices"]:
                             eventLogger.info(
                                 "OneSignal: "
-                                + settings["onesignal"]["devices"][device]["device_name"]
+                                + settings["notify_services"]["onesignal"]["devices"][device]["device_name"]
                                 + " has an invalid id and has been removed"
                             )
-                            settings["onesignal"]["devices"].pop(device)
+                            settings["notify_services"]["onesignal"]["devices"].pop(device)
                             write_settings(settings)
 
         except Exception as e:
