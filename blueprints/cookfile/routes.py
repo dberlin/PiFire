@@ -1,5 +1,7 @@
 import datetime
 import os
+import shutil
+import tempfile
 from flask import render_template, request, current_app, jsonify, redirect, send_file, abort
 from werkzeug.utils import secure_filename
 from common.common import generate_uuid
@@ -228,21 +230,23 @@ def _cf_form_ulmedia(settings, HISTORY_FOLDER, errors):
         if remotefile.filename != "":
             # Reload Cook File
             cookfilestruct, status = read_cookfile(cookfilename)
-            parent_id = cookfilestruct["metadata"]["id"]
-            tmp_path = f"/tmp/pifire/{parent_id}"
-            os.makedirs(tmp_path, exist_ok=True)
-
-            if remotefile and allowed_file(remotefile.filename):
-                filename = secure_filename(remotefile.filename)
-                pathfile = os.path.join(tmp_path, filename)
-                remotefile.save(pathfile)
-                asset_id, asset_filetype = add_asset(cookfilename, tmp_path, filename)
-                if "ulthumbfn" in requestform:
-                    set_thumbnail(cookfilename, f"{asset_id}.{asset_filetype}")
-                #  Reload all of the data
-                cookfilestruct, status = read_cookfile(cookfilename)
-            else:
-                errors.append("Disallowed File Upload.")
+            #  Stage the upload in a private, per-request temp dir (unique,
+            #  0700, app-owned) instead of a predictable world-writable path.
+            staging = tempfile.mkdtemp(prefix="pifire-upload-")
+            try:
+                if remotefile and allowed_file(remotefile.filename):
+                    filename = secure_filename(remotefile.filename)
+                    pathfile = os.path.join(staging, filename)
+                    remotefile.save(pathfile)
+                    asset_id, asset_filetype = add_asset(cookfilename, staging, filename)
+                    if "ulthumbfn" in requestform:
+                        set_thumbnail(cookfilename, f"{asset_id}.{asset_filetype}")
+                    #  Reload all of the data
+                    cookfilestruct, status = read_cookfile(cookfilename)
+                else:
+                    errors.append("Disallowed File Upload.")
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
 
     if status == "OK":
         return render_cookfile_page(cookfilestruct, settings, cookfilename, filenameonly, errors)

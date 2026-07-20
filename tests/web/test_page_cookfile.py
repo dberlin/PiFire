@@ -366,7 +366,9 @@ def test_delmedialist_via_direct_post(live_server, page, _isolated_history_folde
     assert comments_after[0]["assets"] == []
 
 
-def test_upload_media_and_thumbnail_via_direct_post(live_server, page, _isolated_history_folder):
+def test_upload_media_and_thumbnail_via_direct_post(
+    live_server, page, _isolated_history_folder, _static_img_tmp_cleanup
+):
     """`ulmediafn`/`ulthumbfn` run the same real Pillow media pipeline as
     recipes' `uploadassets` (file_mgmt/media.py's `add_asset`, plus
     `set_thumbnail` for the thumbnail variant) -- exercised with real
@@ -374,14 +376,16 @@ def test_upload_media_and_thumbnail_via_direct_post(live_server, page, _isolated
     correctly use the local `HISTORY_FOLDER` variable (not a literal
     string), so they're safe to drive against the isolated temp dir.
 
-    Latent bug worked around: same as recipes' `uploadassets` (see
-    test_page_recipes.py) -- `os.mkdir(tmp_path)` for `/tmp/pifire/<id>`
-    has no parent creation, and a freshly-written cookfile has zero
-    existing assets so the lazy `/tmp/pifire` creation inside
-    `read_json_file_data`'s asset-unpack loop never fires. Pre-create it."""
-    os.makedirs("/tmp/pifire", exist_ok=True)
+    Staging security: the handler stages each upload in a private per-request
+    `tempfile.mkdtemp(prefix="pifire-upload-")` cleaned in a `finally`; there
+    is no predictable `/tmp/pifire/{id}` staging path any more. Asserted below
+    (no `/tmp/pifire` dir created, no `pifire-upload-*` staging dir survives)."""
     history_dir = _isolated_history_folder
     filename = _write_cookfile(history_dir, "E2E-UploadMedia")
+    parent_id = _read_cookfile_json(history_dir, filename, "metadata")["id"]
+
+    tmp_root = tempfile.gettempdir()
+    staging_before = {n for n in os.listdir(tmp_root) if n.startswith("pifire-upload-")}
 
     png_buffer = io.BytesIO()
     Image.new("RGB", (16, 16), (0, 255, 0)).save(png_buffer, format="PNG")
@@ -414,63 +418,70 @@ def test_upload_media_and_thumbnail_via_direct_post(live_server, page, _isolated
     assets_after = _read_cookfile_json(history_dir, filename, "assets")
     assert len(assets_after) == 2
 
+    # No predictable staging path for this asset, and no per-request staging
+    # dir survives. (A machine-wide `/tmp/pifire` may exist as cruft from the
+    # old code; the invariant is that THIS flow never wrote a predictable path.)
+    assert not os.path.exists(f"/tmp/pifire/{parent_id}")
+    staging_after = {n for n in os.listdir(tmp_root) if n.startswith("pifire-upload-")}
+    assert staging_after == staging_before
+
 
 @pytest.fixture
-def _tmp_pifire_absent(tmp_path):
-    """Ensure the real, shared `/tmp/pifire` asset-scratch dir is ABSENT for
-    the duration of the test (mirrors the fixture of the same name in
-    test_page_recipes.py). `/tmp/pifire` is a real absolute path that may
-    already exist on this machine and be in use by other processes/tests
-    (see `test_upload_media_and_thumbnail_via_direct_post` above, which
-    pre-creates it) -- so if it exists, rename it out of the way to a unique
-    backup path (derived from this test's own `tmp_path`, never time/random)
-    and restore it in `finally`; whatever the test itself creates at
-    `/tmp/pifire` is removed afterward either way, leaving the directory in
-    its original state."""
-    real_path = "/tmp/pifire"
-    backup_path = f"/tmp/pifire.bak.{tmp_path.name}"
-    backed_up = os.path.exists(real_path)
-    if backed_up:
-        os.rename(real_path, backup_path)
-    try:
-        yield
-    finally:
-        if os.path.exists(real_path):
-            shutil.rmtree(real_path, ignore_errors=True)
-        if backed_up:
-            os.rename(backup_path, real_path)
+def _static_img_tmp_cleanup():
+    """`ulmediafn`/`ulthumbfn` re-read the cookfile after `add_asset`, and any
+    read with unpackassets=True creates a `./static/img/tmp/{id}` symlink in
+    the repo working tree pointing at the process-private `pifire-assets-*`
+    base. That dir is `.gitignore`d, but remove any symlinks the test creates
+    so the working tree stays tidy regardless."""
+    base = "./static/img/tmp"
+    before = set(os.listdir(base)) if os.path.isdir(base) else set()
+    yield
+    if os.path.isdir(base):
+        for name in set(os.listdir(base)) - before:
+            path = os.path.join(base, name)
+            if os.path.islink(path):
+                os.unlink(path)
 
 
-def test_upload_media_creates_missing_tmp_pifire_parent_dir(
-    live_server, page, _isolated_history_folder, _tmp_pifire_absent
+def test_uploaded_cookfile_asset_is_served_from_static_img_tmp(
+    live_server, page, _isolated_history_folder, _static_img_tmp_cleanup
 ):
-    """Regression test for the latent bug documented in
-    `test_upload_media_and_thumbnail_via_direct_post` above: with the
-    `/tmp/pifire` PARENT dir genuinely absent (a fresh environment's very
-    first asset upload ever), `ulmediafn`'s handler used to do
-    `tmp_path = f"/tmp/pifire/{parent_id}"; if not os.path.exists(tmp_path):
-    os.mkdir(tmp_path)` -- `os.mkdir` only creates the leaf dir, so it raised
-    a bare `FileNotFoundError` (-> 500) since `/tmp/pifire` itself didn't
-    exist. Fixed to `os.makedirs(tmp_path, exist_ok=True)`, which creates
-    both levels and doesn't error if they already exist."""
-    assert not os.path.exists("/tmp/pifire")
+    """SAFETY-CRITICAL browser-serving invariant: uploading media re-reads the
+    cookfile (unpackassets=True), which creates the `./static/img/tmp/{id}`
+    symlink, and the bytes served at `/static/img/tmp/{id}/{asset}` exactly
+    match the fullsize asset stored inside the cookfile zip. The static
+    symlink NAME / served URL are unchanged by the mkdtemp private-base
+    rework -- only the physical storage moved off the predictable
+    `/tmp/pifire` path."""
     history_dir = _isolated_history_folder
-    filename = _write_cookfile(history_dir, "E2E-UploadMedia-FreshEnv")
+    filename = _write_cookfile(history_dir, "E2E-ServeMedia")
+    parent_id = _read_cookfile_json(history_dir, filename, "metadata")["id"]
 
     png_buffer = io.BytesIO()
-    Image.new("RGB", (16, 16), (0, 255, 0)).save(png_buffer, format="PNG")
+    Image.new("RGB", (24, 24), (200, 20, 20)).save(png_buffer, format="PNG")
     resp = page.request.post(
         f"{live_server}/cookfile/",
         multipart={
             "ulmediafn": filename,
-            "ulmedia": {"name": "media1.png", "mimeType": "image/png", "buffer": png_buffer.getvalue()},
+            "ulmedia": {"name": "served.png", "mimeType": "image/png", "buffer": png_buffer.getvalue()},
         },
     )
     assert resp.status == 200
-    assert "Comments" in resp.text()
     assets = _read_cookfile_json(history_dir, filename, "assets")
     assert len(assets) == 1
-    assert assets[0]["type"] == "png"
+    asset = assets[0]
+    asset_arcname = f"{asset['id']}.{asset['type']}"
+
+    with zipfile.ZipFile(history_dir + filename) as zf:
+        archived_bytes = zf.read(f"assets/{asset_arcname}")
+
+    assert os.path.islink(f"./static/img/tmp/{parent_id}")
+    # NOT under a predictable /tmp/pifire path.
+    assert not os.path.exists(f"/tmp/pifire/{parent_id}")
+
+    served = page.request.get(f"{live_server}/static/img/tmp/{parent_id}/{asset_arcname}")
+    assert served.status == 200
+    assert served.body() == archived_bytes
 
 
 def test_upload_cookfile_saves_to_configured_history_folder(live_server, page, _isolated_history_folder):

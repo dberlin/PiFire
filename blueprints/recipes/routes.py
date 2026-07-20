@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 from werkzeug.utils import secure_filename
 from flask import render_template, request, current_app, send_file, jsonify, render_template_string
 from common.datastore_accessors import read_settings, read_control
@@ -87,17 +89,19 @@ def _recipes_form_uploadassets(RECIPE_FOLDER):
         if remotefile.filename != "":
             # Load the Recipe File
             recipe_data, status = read_recipefile(filepath)
-            parent_id = recipe_data["metadata"]["id"]
-            tmp_path = f"/tmp/pifire/{parent_id}"
-            os.makedirs(tmp_path, exist_ok=True)
-
-            if remotefile and allowed_file(remotefile.filename):
-                asset_filename = secure_filename(remotefile.filename)
-                pathfile = os.path.join(tmp_path, asset_filename)
-                remotefile.save(pathfile)
-                add_asset(filepath, tmp_path, asset_filename)
-            else:
-                errors.append("Disallowed File Upload.")
+            #  Stage the upload in a private, per-request temp dir (unique,
+            #  0700, app-owned) instead of a predictable world-writable path.
+            staging = tempfile.mkdtemp(prefix="pifire-upload-")
+            try:
+                if remotefile and allowed_file(remotefile.filename):
+                    asset_filename = secure_filename(remotefile.filename)
+                    pathfile = os.path.join(staging, asset_filename)
+                    remotefile.save(pathfile)
+                    add_asset(filepath, staging, asset_filename)
+                else:
+                    errors.append("Disallowed File Upload.")
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
     if len(errors):
         status = "error"
     else:
