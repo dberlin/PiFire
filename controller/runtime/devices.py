@@ -56,7 +56,7 @@ def build_display(settings, *, errors, event_log, control_log):
         disp_rotation = 0
         error_event = (
             f"An error occurred loading the [{settings['modules']['display']}] display module.  The "
-            f'"display_none" module has been loaded instead.  This sometimes means that the hardware is '
+            f'"display.none" module has been loaded instead.  This sometimes means that the hardware is '
             f"not connected properly, or the module is not configured.  Please run the configuration wizard "
             f"again from the admin panel to fix this issue."
         )
@@ -90,7 +90,7 @@ def build_display(settings, *, errors, event_log, control_log):
         )
         error_event = (
             f"An error occurred configuring the [{settings['modules']['display']}] display object.  The "
-            f'"display_none" module has been loaded instead.  This sometimes means that the hardware is '
+            f'"display.none" module has been loaded instead.  This sometimes means that the hardware is '
             f"not connected properly, or the module is not configured.  Please run the configuration wizard "
             f"again from the admin panel to fix this issue."
         )
