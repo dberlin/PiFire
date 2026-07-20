@@ -48,7 +48,7 @@ import logging
 import struct  # NEW: required for battery unpack in DataDelegate
 
 from probes.base import ProbeInterface
-from bluepy.btle import *
+from bluepy.btle import DefaultDelegate, Scanner, Peripheral, BTLEDisconnectError
 # from icecream import ic  # For debugging
 
 """
