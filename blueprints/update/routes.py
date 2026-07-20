@@ -15,6 +15,149 @@ from common.datastore_accessors import get_updater_install_status, set_updater_i
 from . import update_bp
 
 
+def _update_get_updatestatus(settings):
+    percent, status, output = get_updater_install_status()
+    return jsonify({"percent": percent, "status": status, "output": output})
+
+
+def _update_get_post_message(settings):
+    try:
+        with open("./updater/post-update-message.html", "r") as file:
+            post_update_message_html = " ".join(line.rstrip() for line in file)
+    except:
+        post_update_message_html = "An error has occurred fetching the post-update message."
+    return render_template_string(post_update_message_html)
+
+
+def _update_get_check(settings):
+    update_data = {}
+    update_data["version"] = settings["versions"]["server"]
+
+    avail_updates_struct = get_available_updates()
+
+    if avail_updates_struct["success"]:
+        commits_behind = avail_updates_struct["commits_behind"]
+    else:
+        event = avail_updates_struct["message"]
+        write_log(event)
+        return jsonify({"result": "failure", "message": avail_updates_struct["message"]})
+
+    return jsonify({"result": "success", "current": update_data["version"], "behind": commits_behind})
+
+
+_UPDATE_GET_DISPATCH = {
+    "updatestatus": _update_get_updatestatus,
+    "post-message": _update_get_post_message,
+    "check": _update_get_check,
+}
+
+
+def _update_post_update_remote_branches(r, settings, update_data, python_exec, action):
+    if is_real_hardware():
+        os.system(f"{python_exec} updater.py -r &")  # Update branches from remote
+        time.sleep(5)  # Artificial delay to avoid race condition
+    return redirect("/update")
+
+
+def _update_post_change_branch(r, settings, update_data, python_exec, action):
+    if update_data["branch_target"] in r["branch_target"]:
+        alert = {
+            "type": "success",
+            "text": f"Current branch {update_data['branch_target']} already set to {r['branch_target']}",
+        }
+        return render_template(
+            "update/updater.html",
+            alert=alert,
+            settings=settings,
+            update_data=update_data,
+        )
+    else:
+        set_updater_install_status(0, "Starting Branch Change...", "")
+        if is_real_hardware():
+            os.system(f"{python_exec} updater.py -b {r['branch_target']} &")  # Kickoff Branch Change
+        return render_template(
+            "update/updater-status.html",
+        )
+
+
+def _update_post_do_update(r, settings, update_data, python_exec, action):
+    control = read_control()
+    if control["mode"] == Mode.STOP:
+        set_updater_install_status(0, "Starting Update...", "")
+        if is_real_hardware():
+            os.system(f"{python_exec} updater.py -u {update_data['branch_target']} -p &")  # Kickoff Update
+        return render_template(
+            "update/updater-status.html",
+        )
+    else:
+        alert = {
+            "type": "error",
+            "text": f"PiFire System Update cannot be completed when the system is active.  Please shutdown/stop your smoker before retrying.",
+        }
+        update_data = get_update_data(settings)
+        return render_template(
+            "update/updater.html",
+            alert=alert,
+            settings=settings,
+            update_data=update_data,
+        )
+
+
+def _update_post_do_upgrade(r, settings, update_data, python_exec, action):
+    control = read_control()
+    if control["mode"] == Mode.STOP:
+        set_updater_install_status(0, "Starting Upgrade...", "")
+        if is_real_hardware():
+            os.system(f"{python_exec} updater.py -i &")
+        return render_template(
+            "update/updater-status.html",
+        )
+    else:
+        alert = {
+            "type": "error",
+            "text": f"PiFire System Upgrade cannot be completed when the system is active.  Please shutdown/stop your smoker before retrying.",
+        }
+        update_data = get_update_data(settings)
+        return render_template(
+            "update/updater.html",
+            alert=alert,
+            settings=settings,
+            update_data=update_data,
+        )
+
+
+def _update_post_show_log(r, settings, update_data, python_exec, action):
+    if r["show_log"].isnumeric():
+        action = "log"
+        result, error_msg = get_log(num_commits=int(r["show_log"]))
+        if error_msg == "":
+            output_html = f"*** Getting latest updates from origin/{update_data['branch_target']} ***<br><br>"
+            output_html += result
+        else:
+            output_html = (
+                f"*** Getting latest updates from origin/{update_data['branch_target']} ERROR Occurred ***<br><br>"
+            )
+            output_html += error_msg
+    else:
+        output_html = "*** Error, Number of Commits Not Defined! ***<br><br>"
+
+    return render_template(
+        "update/updater_out.html",
+        settings=settings,
+        action=action,
+        output_html=output_html,
+    )
+
+
+_UPDATE_POST_DISPATCH = {
+    "update_remote_branches": _update_post_update_remote_branches,
+    "change_branch": _update_post_change_branch,
+    "do_update": _update_post_do_update,
+    "do_upgrade": _update_post_do_upgrade,
+    "show_log": _update_post_show_log,
+}
+
+
 @update_bp.route("/<action>", methods=["POST", "GET"])
 @update_bp.route("/", methods=["POST", "GET"])
 def update_page(action=None):
@@ -35,121 +178,17 @@ def update_page(action=None):
                 settings=settings,
                 update_data=update_data,
             )
-        elif action == "updatestatus":
-            percent, status, output = get_updater_install_status()
-            return jsonify({"percent": percent, "status": status, "output": output})
 
-        elif action == "post-message":
-            try:
-                with open("./updater/post-update-message.html", "r") as file:
-                    post_update_message_html = " ".join(line.rstrip() for line in file)
-            except:
-                post_update_message_html = "An error has occurred fetching the post-update message."
-            return render_template_string(post_update_message_html)
-        elif action == "check":
-            update_data = {}
-            update_data["version"] = settings["versions"]["server"]
-
-            avail_updates_struct = get_available_updates()
-
-            if avail_updates_struct["success"]:
-                commits_behind = avail_updates_struct["commits_behind"]
-            else:
-                event = avail_updates_struct["message"]
-                write_log(event)
-                return jsonify({"result": "failure", "message": avail_updates_struct["message"]})
-
-            return jsonify({"result": "success", "current": update_data["version"], "behind": commits_behind})
+        handler = _UPDATE_GET_DISPATCH.get(action)
+        if handler is not None:
+            return handler(settings)
 
     if request.method == "POST":
         r = request.form
         update_data = get_update_data(settings)
 
-        if "update_remote_branches" in r:
-            if is_real_hardware():
-                os.system(f"{python_exec} updater.py -r &")  # Update branches from remote
-                time.sleep(5)  # Artificial delay to avoid race condition
-            return redirect("/update")
-
-        if "change_branch" in r:
-            if update_data["branch_target"] in r["branch_target"]:
-                alert = {
-                    "type": "success",
-                    "text": f"Current branch {update_data['branch_target']} already set to {r['branch_target']}",
-                }
-                return render_template(
-                    "update/updater.html",
-                    alert=alert,
-                    settings=settings,
-                    update_data=update_data,
-                )
-            else:
-                set_updater_install_status(0, "Starting Branch Change...", "")
-                if is_real_hardware():
-                    os.system(f"{python_exec} updater.py -b {r['branch_target']} &")  # Kickoff Branch Change
-                return render_template(
-                    "update/updater-status.html",
-                )
-        if "do_update" in r:
-            control = read_control()
-            if control["mode"] == Mode.STOP:
-                set_updater_install_status(0, "Starting Update...", "")
-                if is_real_hardware():
-                    os.system(f"{python_exec} updater.py -u {update_data['branch_target']} -p &")  # Kickoff Update
-                return render_template(
-                    "update/updater-status.html",
-                )
-            else:
-                alert = {
-                    "type": "error",
-                    "text": f"PiFire System Update cannot be completed when the system is active.  Please shutdown/stop your smoker before retrying.",
-                }
-                update_data = get_update_data(settings)
-                return render_template(
-                    "update/updater.html",
-                    alert=alert,
-                    settings=settings,
-                    update_data=update_data,
-                )
-
-        if "do_upgrade" in r:
-            control = read_control()
-            if control["mode"] == Mode.STOP:
-                set_updater_install_status(0, "Starting Upgrade...", "")
-                if is_real_hardware():
-                    os.system(f"{python_exec} updater.py -i &")
-                return render_template(
-                    "update/updater-status.html",
-                )
-            else:
-                alert = {
-                    "type": "error",
-                    "text": f"PiFire System Upgrade cannot be completed when the system is active.  Please shutdown/stop your smoker before retrying.",
-                }
-                update_data = get_update_data(settings)
-                return render_template(
-                    "update/updater.html",
-                    alert=alert,
-                    settings=settings,
-                    update_data=update_data,
-                )
-
-        if "show_log" in r:
-            if r["show_log"].isnumeric():
-                action = "log"
-                result, error_msg = get_log(num_commits=int(r["show_log"]))
-                if error_msg == "":
-                    output_html = f"*** Getting latest updates from origin/{update_data['branch_target']} ***<br><br>"
-                    output_html += result
-                else:
-                    output_html = f"*** Getting latest updates from origin/{update_data['branch_target']} ERROR Occurred ***<br><br>"
-                    output_html += error_msg
-            else:
-                output_html = "*** Error, Number of Commits Not Defined! ***<br><br>"
-
-            return render_template(
-                "update/updater_out.html",
-                settings=settings,
-                action=action,
-                output_html=output_html,
-            )
+        for key, handler in _UPDATE_POST_DISPATCH.items():
+            if key in r:
+                result = handler(r, settings, update_data, python_exec, action)
+                if result is not None:
+                    return result
