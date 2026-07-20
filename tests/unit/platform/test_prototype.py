@@ -55,31 +55,28 @@ def test_init_stores_config_scalars():
     assert p.current == {}
 
 
-def test_init_with_dc_fan_seeds_ramp_thread_and_raw_pwm_seed():
+def test_init_with_dc_fan_seeds_ramp_thread_and_pwm_at_full_speed():
     p = GrillPlatform(_config(dc_fan=True))
     assert p._ramp_thread is None
-    # Seeded directly as the raw percent 100, NOT run through set_duty_cycle's
-    # inverted (100-percent)/100.0 convention -- see the LATENT BUG test below,
-    # which shows this makes get_output_status() nonsensical until a real
-    # fan_on()/set_duty_cycle() call happens.
-    assert p.out_pins["pwm"] == 100
+    # Seeded through set_duty_cycle's inverted (100-percent)/100.0 convention
+    # (percent=100 -> 0.0), so get_output_status() reports a sane 100% initial
+    # fan speed instead of the old nonsensical raw-percent seed -- see
+    # test_get_output_status_immediately_after_init_is_sane below.
+    assert p.out_pins["pwm"] == pytest.approx(0.0)
 
 
-def test_init_config_parse_failure_is_logged_but_leaves_object_broken(caplog):
-    """LATENT BUG (grillplat/prototype.py:35-52, low/medium severity):
-
-    __init__ wraps config.get(...) parsing in a bare `except:` that only logs
-    "Error parsing platform configuration." -- it never sets safe defaults,
-    returns, or re-raises. The very next unconditional line, `if self.dc_fan:`,
-    then raises an *unhandled* AttributeError because self.dc_fan was never
-    assigned. So the except clause doesn't actually protect construction: a
-    malformed config still crashes the constructor, just with a confusing
-    AttributeError instead of the original, more informative error (e.g.
-    'NoneType has no attribute get'), after printing a misleading "check your
-    settings.json" message that implies the problem was handled.
+def test_init_config_parse_failure_is_logged_and_reraised(caplog):
+    """Regression test (grillplat/prototype.py:35-44): __init__ wraps
+    config.get(...) parsing in a bare `except:` that logs "Error parsing
+    platform configuration." and now re-raises the original exception,
+    matching raspberry_pi_all.py's identical log-then-raise pattern for the
+    same block. This used to swallow the exception and fall through to an
+    unconditional `if self.dc_fan:`, which raised a confusing, unrelated
+    AttributeError ('GrillPlatform' object has no attribute 'dc_fan') instead
+    of the original, more informative error.
     """
     with caplog.at_level(logging.ERROR, logger="control"):
-        with pytest.raises(AttributeError, match="dc_fan"):
+        with pytest.raises(AttributeError, match="NoneType"):
             GrillPlatform(None)
     assert "Error parsing platform configuration" in caplog.text
 
@@ -215,21 +212,18 @@ def test_get_output_status_with_dc_fan_reports_duty_and_frequency():
     assert status["frequency"] == 15000
 
 
-def test_get_output_status_immediately_after_init_is_nonsensical_before_first_duty_cycle_call():
-    """LATENT BUG (grillplat/prototype.py:47 vs 116, medium severity):
-
-    __init__ seeds out_pins["pwm"] = 100 -- a raw percent -- but
-    get_output_status() (and set_duty_cycle()) treat out_pins["pwm"] as the
-    *inverted* 0.0-1.0 duty-cycle fraction produced by
-    `(100 - percent) / 100.0`. Calling get_output_status() right after
-    construction, before any fan_on()/set_duty_cycle() call, therefore
-    computes 100 - (100 * 100) = -9900 instead of a plausible 0-100 value.
-    Any consumer (e.g. a status/web API) that reads output status before the
-    fan has ever been driven would see this nonsensical negative number.
+def test_get_output_status_immediately_after_init_is_sane():
+    """Regression test (grillplat/prototype.py:47 vs 116): __init__ now seeds
+    out_pins["pwm"] using the same inverted 0.0-1.0 duty-cycle convention that
+    get_output_status()/set_duty_cycle() read/write, instead of a raw percent.
+    Calling get_output_status() right after construction, before any
+    fan_on()/set_duty_cycle() call, reports a sane 100% fan speed (matching
+    raspberry_pi_all's initial current_fan_speed_percent = 100) instead of the
+    old nonsensical -9900.
     """
     p = GrillPlatform(_config(dc_fan=True))
     status = p.get_output_status()
-    assert status["pwm"] == -9900
+    assert status["pwm"] == pytest.approx(100.0)
 
 
 # ---------------------------------------------------------------------------

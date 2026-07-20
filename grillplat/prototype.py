@@ -41,10 +41,15 @@ class GrillPlatform(SystemCommandsMixin):
             self.current = {}
         except:
             self.logger.error("Error parsing platform configuration.  Check your settings.json file.")
+            raise
 
         if self.dc_fan:
             self._ramp_thread = None
-            self.out_pins["pwm"] = 100
+            # out_pins["pwm"] stores the inverted duty-cycle float produced by
+            # set_duty_cycle()/read by get_output_status() -- (100 - percent) / 100.0 --
+            # not a raw percent. Seed it for an initial reported fan speed of 100%,
+            # matching raspberry_pi_all's initial current_fan_speed_percent = 100.
+            self.out_pins["pwm"] = 0.0
 
         self.out_pins["auger"] = False
         self.out_pins["fan"] = False
