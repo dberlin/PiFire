@@ -16,6 +16,7 @@ Description: Reading the settings.json FILE and migrating its contents across
 ==============================================================================
 """
 
+import copy
 import json
 import os
 
@@ -124,8 +125,19 @@ def upgrade_settings(prev_ver, settings, settings_default):
     if prev_ver[0] <= 1 and prev_ver[1] <= 4:
         settings["versions"] = settings_default["versions"]
         settings["globals"]["first_time_setup"] = True  # Force configuration for probes
-        settings["startup"]["start_to_mode"]["primary_setpoint"] = settings["start_to_mode"]["grill1_setpoint"]
-        settings["start_to_mode"].pop("grill1_setpoint")
+        # v1.4's legacy top-level start_to_mode only carried grill1_setpoint.
+        # Reshape it (in place, at the top level) into the modern start_to_mode
+        # structure -- carrying the user's configured setpoint into
+        # primary_setpoint -- so the later v1.6/1.7 startup-split block below
+        # moves the real, populated value (not an empty dict) into
+        # settings["startup"]["start_to_mode"]. Popping only the grill1_setpoint
+        # sub-key here (leaving {}) let that later block clobber the migrated
+        # value with an empty dict, crashing the controller on first startup.
+        legacy_setpoint = settings["start_to_mode"].get(
+            "grill1_setpoint", settings_default["startup"]["start_to_mode"]["primary_setpoint"]
+        )
+        settings["start_to_mode"] = copy.deepcopy(settings_default["startup"]["start_to_mode"])
+        settings["start_to_mode"]["primary_setpoint"] = legacy_setpoint
         settings["dashboard"] = settings_default["dashboard"]
         # Move Notification Settings
         settings["notify_services"] = {}
@@ -164,8 +176,12 @@ def upgrade_settings(prev_ver, settings, settings_default):
             "startup_exit_temp", settings_default["startup"]["startup_exit_temp"]
         )
         settings["globals"].pop("startup_exit_temp", None)
-        settings["startup"]["start_to_mode"] = settings.get(
-            "start_to_mode", settings_default["startup"]["start_to_mode"]
+        # Move the top-level start_to_mode into the new startup section. Treat a
+        # present-but-EMPTY dict the same as missing (fall back to defaults) so a
+        # partially-migrated legacy value can never leave startup.start_to_mode
+        # empty (which would KeyError the controller on first startup).
+        settings["startup"]["start_to_mode"] = settings.get("start_to_mode") or copy.deepcopy(
+            settings_default["startup"]["start_to_mode"]
         )
         settings.pop("start_to_mode", None)
         settings["startup"]["smartstart"] = settings.get("smartstart", settings_default["startup"]["smartstart"])

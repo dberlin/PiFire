@@ -23,12 +23,7 @@ Rate of change is: current - last / cycle time
 
 import pandas as pd
 import argparse
-from sklearn.neighbors import KNeighborsRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
 from joblib import dump, load
 
 

@@ -31,7 +31,6 @@ Description:
 *****************************************
 """
 import logging
-import math
 import ADS1115
 from probes.base import ProbeInterface, resolve_i2c_bus
 

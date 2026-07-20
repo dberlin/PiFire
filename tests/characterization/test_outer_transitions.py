@@ -255,6 +255,37 @@ def test_prime_on_startup_handshake(monkeypatch):
     assert ("next_mode", "Smoke", 225) in calls
 
 
+def test_startup_dispatch_survives_empty_start_to_mode(monkeypatch):
+    # Regression guard for the v1.4->current upgrade crash: a settings dict
+    # whose startup.start_to_mode is empty (as a broken migration could leave
+    # it) must NOT KeyError in _dispatch_startup. The controller's .get()
+    # fallbacks supply the shipped defaults (after_startup_mode="Smoke",
+    # primary_setpoint=165).
+    settings = base_settings()
+    settings["startup"]["prime_on_startup"] = 10
+    settings["startup"]["start_to_mode"] = {}  # malformed / wiped by a bad migration
+    c, store = build_controller(monkeypatch, mode="Startup", settings=settings, control_over={"updated": True})
+    calls = _spy_dispatch(c)
+    c.tick()  # must not raise
+    out = store.read_control()
+    assert out["mode"] == "Startup"
+    assert out["next_mode"] == "Smoke"  # after_startup_mode default
+    assert ("next_mode", "Smoke", 165) in calls  # primary_setpoint default
+
+
+def test_prime_dispatch_survives_missing_start_to_mode(monkeypatch):
+    # _dispatch_prime reads start_to_mode.primary_setpoint too (site :457).
+    # With start_to_mode absent entirely it must fall back to the default 165,
+    # not KeyError.
+    settings = base_settings()
+    settings["startup"].pop("start_to_mode", None)
+    c, store = build_controller(monkeypatch, mode="Prime", settings=settings, control_over={"updated": True})
+    calls = _spy_dispatch(c)
+    c.tick()  # must not raise
+    # next_mode was invoked with the default setpoint (no crash on the missing key).
+    assert any(call[0] == "next_mode" and call[2] == 165 for call in calls if len(call) == 3)
+
+
 def test_reignite_dispatch_carries_last_state_and_setpoint(monkeypatch):
     # Reignite dispatch: next_mode <- safety.reignitelaststate, setpoint carried
     # from primary_setpoint.

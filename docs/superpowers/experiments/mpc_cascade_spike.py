@@ -14,7 +14,6 @@ warnings.filterwarnings("ignore")
 import numpy as np
 from scipy.linalg import expm
 import do_mpc
-from casadi import exp as cexp
 
 np.random.seed(0)
 

@@ -11,4 +11,4 @@ PiFire Display Interface Library
 *****************************************
 """
 
-from display.qtquick_flex import Display
+from display.qtquick_flex import Display  # noqa: F401  # public re-export

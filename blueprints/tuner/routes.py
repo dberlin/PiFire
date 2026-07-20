@@ -10,7 +10,6 @@ from common.datastore_accessors import (
     write_autotune,
     read_current,
 )
-from common.app import paginate_list
 from .tuner import *
 
 from . import tuner_bp
