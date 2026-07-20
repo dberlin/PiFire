@@ -9,9 +9,11 @@ read_control/write_control/read_pellet_db/write_pellet_db/write_errors/
 write_generic_key calls never touch the repo's real pifire.db.
 
 Two genuinely broken code paths were found while writing these tests and are
-documented (not papered over) below -- see the LATENT BUG docstrings on
-test_build_display_import_failure_crashes_on_broken_fallback_name and
-test_build_display_import_failure_hits_second_latent_bug_after_error_recorded.
+now FIXED -- see the docstrings on
+test_build_display_import_failure_falls_back_to_none_module and
+test_build_display_import_failure_uses_default_display_config_and_rotation,
+which used to pin the crashes via `pytest.raises` and now assert the
+corrected fallback behavior.
 """
 
 import importlib
@@ -417,33 +419,38 @@ def test_build_display_configure_failure_debug_mode_reraises(ds, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_build_display_import_failure_crashes_on_broken_fallback_name(ds):
-    """LATENT BUG (controller/runtime/devices.py:54, MEDIUM severity).
+def test_build_display_import_failure_falls_back_to_none_module(ds):
+    """FIXED (was LATENT BUG, controller/runtime/devices.py:54, MEDIUM
+    severity).
 
     When the *configured* display module fails to import, the except
-    handler's own fallback is:
+    handler's own fallback used to be:
 
         DisplayModule = importlib.import_module("display_none")
 
     But no top-level "display_none" module exists anywhere in the repo --
     only "display.none" (dotted, in the display/ package) does. So the
-    "safe" fallback itself raises ModuleNotFoundError, which is not caught
-    by anything and propagates straight out of build_display(). The display
-    process crashes with an unrelated, confusing traceback instead of
-    degrading to the simulated display -- i.e. the entire
-    import-failure-recovery feature this except block exists to provide has
-    never actually worked. (Coverage on this except body was 0% before this
-    test suite; nothing in the existing test/production code path had ever
-    exercised it.) This test pins the CURRENT (broken) behavior; see the
-    companion test below for a second, compounding bug in the same block.
+    "safe" fallback itself raised ModuleNotFoundError, uncaught, escaping
+    build_display() entirely. (Coverage on this except body was 0% before
+    this test suite; nothing in the existing test/production code path had
+    ever exercised it.) FIX: the fallback now imports "display.none" (the
+    real module, same dotted-name convention as the primary import path).
+    This test confirms the display process now degrades gracefully to the
+    null/none display instead of crashing; see the companion test below for
+    the second, compounding bug in the same block (also fixed).
     """
     from controller.runtime.devices import build_display
 
     settings = _settings()
     settings["modules"]["display"] = "nonexistent_display_xyz"
+    control_log = _RecordingLogger()
 
-    with pytest.raises(ModuleNotFoundError, match="display_none"):
-        build_display(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+    display, errors = build_display(settings, errors=[], event_log=_RecordingLogger(), control_log=control_log)
+
+    assert len(errors) == 1
+    assert "nonexistent_display_xyz" in errors[0]
+    assert control_log.exceptions
+    assert type(display).__module__ == "display.none"
 
 
 def test_build_display_import_failure_debug_mode_reraises_original_error(ds, monkeypatch):
@@ -478,35 +485,40 @@ def test_build_display_import_failure_debug_mode_reraises_original_error(ds, mon
     assert len(errors) == 1
 
 
-def test_build_display_import_failure_hits_second_latent_bug_after_error_recorded(ds, monkeypatch):
-    """LATENT BUG #2 (controller/runtime/devices.py:71 and :85, MEDIUM
-    severity, compounds the bug above).
+def test_build_display_import_failure_uses_default_display_config_and_rotation(ds, monkeypatch):
+    """FIXED (was LATENT BUG #2, controller/runtime/devices.py:71 and :85,
+    MEDIUM severity, compounded the bug above).
 
-    Isolates the *next* failure that would surface if bug #1 (the
-    "display_none" name) were fixed, by monkeypatching that import to
-    resolve. Even then: the except block (lines 45-66) never assigns
-    `display_config` / `disp_rotation` as fallback values before falling
-    through to the code below it that reads them. So execution crashes with
-    UnboundLocalError on `disp_rotation` while evaluating the primary
-    Display(...) call (line 71) -- caught by the *next* bare except -- and
-    then crashes AGAIN on the same unbound name while evaluating the
-    fallback Display(...) call (line 85), this time escaping uncaught.
+    Isolates the failure that used to surface once bug #1 (the
+    "display_none" name) was fixed, by monkeypatching that import to
+    resolve (now via the real "display.none" name). Previously: the except
+    block never assigned `display_config` / `disp_rotation` as fallback
+    values before falling through to the code below it that reads them, so
+    execution crashed with UnboundLocalError on `disp_rotation` while
+    evaluating the primary Display(...) call -- caught by the *next* bare
+    except -- then crashed AGAIN on the same unbound name while evaluating
+    the fallback Display(...) call, this time escaping uncaught.
 
-    Net effect: fixing bug #1 alone is not sufficient to make the
-    import-failure recovery path work; the recovery path is broken twice
-    over. The error *is* still recorded into `errors` before the second
-    crash (asserted below), so a caller polling `errors`/write_errors would
-    at least see the first failure logged even though the function itself
-    never returns.
+    FIX: the except block now assigns `display_config = {}` and
+    `disp_rotation = 0` as sensible defaults. This test captures the exact
+    kwargs passed into the (mocked) display module's `Display(...)`
+    constructor -- `rotation=0`, `config={}` -- instead of crashing, and
+    confirms the error was still recorded into `errors` along the way.
     """
     from controller.runtime.devices import build_display
+
+    captured = {}
+
+    class _CapturingDisplay:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
 
     monkeypatch.setattr(
         "controller.runtime.devices.importlib.import_module",
         _selective_import(
             {
                 "display.nonexistent_display_xyz": ModuleNotFoundError,
-                "display_none": _FakeModule(Display=_RaisingDisplay),
+                "display.none": _FakeModule(Display=_CapturingDisplay),
             }
         ),
     )
@@ -514,10 +526,14 @@ def test_build_display_import_failure_hits_second_latent_bug_after_error_recorde
     settings["modules"]["display"] = "nonexistent_display_xyz"
     errors = []
 
-    with pytest.raises(UnboundLocalError, match="disp_rotation"):
-        build_display(settings, errors=errors, event_log=_RecordingLogger(), control_log=_RecordingLogger())
+    display, errors = build_display(
+        settings, errors=errors, event_log=_RecordingLogger(), control_log=_RecordingLogger()
+    )
 
-    # The except block's own error-recording (lines 55-64) ran and mutated
-    # the caller's `errors` list before the later, uncaught crash.
+    # The except block's own error-recording (lines 55-64) ran.
     assert len(errors) == 1
     assert "nonexistent_display_xyz" in errors[0]
+    # display_config/disp_rotation got sensible defaults instead of being
+    # unbound.
+    assert captured["rotation"] == 0
+    assert captured["config"] == {}
