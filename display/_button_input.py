@@ -24,7 +24,6 @@ PiFire Display Interface Library
  Imported Libraries
 """
 import time
-import threading
 from gpiozero import Button
 
 """

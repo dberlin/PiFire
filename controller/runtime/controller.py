@@ -454,7 +454,10 @@ class Controller:
         self.work_cycle(Mode.PRIME)
         # Select Next Mode
         self.settings = settings = store.read_settings()
-        self.next_mode(self.control["next_mode"], setpoint=settings["startup"]["start_to_mode"]["primary_setpoint"])
+        self.next_mode(
+            self.control["next_mode"],
+            setpoint=settings["startup"].get("start_to_mode", {}).get("primary_setpoint", 165),
+        )
 
     def _dispatch_startup(self):
         # Startup (startup sequence)
@@ -483,13 +486,16 @@ class Controller:
         # Check if there was a mode change during Priming
         if self.control["mode"] == Mode.STARTUP:
             # Setup Next Mode (after startup mode)
-            self.control["next_mode"] = settings["startup"]["start_to_mode"]["after_startup_mode"]
+            self.control["next_mode"] = settings["startup"].get("start_to_mode", {}).get("after_startup_mode", "Smoke")
             store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
             # Call Work Cycle for Startup Mode
             self.work_cycle(Mode.STARTUP)
             # Select Next Mode
             self.settings = settings = store.read_settings()
-            self.next_mode(self.control["next_mode"], setpoint=settings["startup"]["start_to_mode"]["primary_setpoint"])
+            self.next_mode(
+                self.control["next_mode"],
+                setpoint=settings["startup"].get("start_to_mode", {}).get("primary_setpoint", 165),
+            )
 
     def _dispatch_smoke(self):
         # Smoke (smoke cycle)

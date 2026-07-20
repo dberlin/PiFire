@@ -66,7 +66,8 @@ class Display:
 
         while True:
             pygame.time.delay(100)
-            events = pygame.event.get()  # Gets events (required for key presses to be registered)
+            # Gets events (required for key presses to be registered)
+            events = pygame.event.get()  # noqa: F841  # event-pump
 
             """ Normal display loop"""
             if self.display_timeout:

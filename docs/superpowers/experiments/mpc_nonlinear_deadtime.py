@@ -11,7 +11,7 @@ Also runs a large setpoint step (95 -> 130 C) to probe whether the nonlinearity
 helps where linearization error is largest (wide temperature excursions).
 """
 
-import warnings, sys, time
+import warnings, sys
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, "docs/superpowers/experiments")

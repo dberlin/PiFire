@@ -56,7 +56,6 @@ def _history_stream(settings, control, HISTORY_FOLDER, errors):
 
 def _history_refresh(settings, control, HISTORY_FOLDER, errors):
     # POST - Get number of minutes into the history to refresh the history chart
-    control = read_control()
     request_json = request.json
     if "num_mins" in request_json:
         num_items = (
@@ -143,7 +142,6 @@ def _history_setmins(settings, control, HISTORY_FOLDER, errors):
     response = request.form
     if "minutes" in response:
         if response["minutes"] != "":
-            num_items = int(response["minutes"]) * 20
             settings["history_page"]["minutes"] = int(response["minutes"])
             write_settings(settings)
     return None

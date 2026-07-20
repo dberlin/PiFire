@@ -25,7 +25,14 @@ from common.i2c_bus import (
 from common.usb_serial import discover_usb_serial_devices
 
 from . import wizard_bp
-from .wizard import *
+from .wizard import (
+    parse_bt_device_info,
+    get_settings_dependencies_values,
+    wizardInstallInfoDefaults,
+    wizardInstallInfoExisting,
+    prepare_wizard_data,
+    wizard_bus_kinds,
+)
 
 
 # Full-page error shown when the finish step's assembled config has an
