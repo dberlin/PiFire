@@ -489,6 +489,61 @@ def test_deletefile_via_direct_post(live_server, page, _isolated_recipe_folder):
     assert not os.path.exists(recipe_dir + filename)
 
 
+def test_deletefile_rejects_path_traversal_filename(live_server, page, _isolated_recipe_folder):
+    """`deletefile` used to shell out via `os.system(f"rm {filepath}")` with
+    the JSON `filename` interpolated unsanitized -- a command-injection /
+    path-traversal hole. It's now `secure_filename()` + `os.path.isfile()`
+    gated `os.remove()`. A traversal filename must not delete anything
+    outside RECIPE_FOLDER (here, a sentinel file one directory up) and must
+    report {"result": "error"}, not "success"."""
+    recipe_dir = _isolated_recipe_folder
+    outside_dir = os.path.dirname(os.path.dirname(recipe_dir))
+    sentinel_path = os.path.join(outside_dir, "sentinel.pfrecipe")
+    with open(sentinel_path, "w") as f:
+        f.write("do-not-delete")
+    try:
+        resp = page.request.post(
+            f"{live_server}/recipes/data",
+            data={"deletefile": "true", "filename": "../sentinel.pfrecipe"},
+        )
+        assert resp.status == 200
+        assert resp.json()["result"] == "error"
+        assert os.path.exists(sentinel_path)
+    finally:
+        os.remove(sentinel_path)
+
+
+def test_deletefile_rejects_shell_injection_filename(live_server, page, _isolated_recipe_folder):
+    """A filename crafted to break out of the old `os.system(f"rm
+    {filepath}")` shell-out (e.g. `x; touch /tmp/pwned`) must not create
+    any file and must report {"result": "error"}. Since the fix replaced
+    the shell-out with `os.remove()` entirely, there is no shell to inject
+    into any more -- this pins that behavior."""
+    recipe_dir = _isolated_recipe_folder
+    pwned_path = "/tmp/pifire_test_pwned_marker"
+    if os.path.exists(pwned_path):
+        os.remove(pwned_path)
+    resp = page.request.post(
+        f"{live_server}/recipes/data",
+        data={"deletefile": "true", "filename": f"x; touch {pwned_path}"},
+    )
+    assert resp.status == 200
+    assert resp.json()["result"] == "error"
+    assert not os.path.exists(pwned_path)
+
+
+def test_deletefile_rejects_nonexistent_filename(live_server, page, _isolated_recipe_folder):
+    """A filename that resolves inside RECIPE_FOLDER but doesn't exist on
+    disk should also report {"result": "error"}, not silently "succeed"."""
+    recipe_dir = _isolated_recipe_folder
+    resp = page.request.post(
+        f"{live_server}/recipes/data",
+        data={"deletefile": "true", "filename": "does-not-exist.pfrecipe"},
+    )
+    assert resp.status == 200
+    assert resp.json()["result"] == "error"
+
+
 def test_assetchange_via_direct_post(live_server, page, _isolated_recipe_folder):
     recipe_dir = _isolated_recipe_folder
     filename = _create_recipe(page, live_server, recipe_dir)
