@@ -9,7 +9,6 @@ def test_check_throttled_reports_ok_and_false(x86_platform):
 
 
 def test_check_cpu_temp_uses_psutil(x86_platform):
-    import grillplat.x86_numato as mod
 
     fake_reading = mock.Mock(current=47.0)
     with mock.patch("psutil.sensors_temperatures", return_value={"coretemp": [fake_reading]}):

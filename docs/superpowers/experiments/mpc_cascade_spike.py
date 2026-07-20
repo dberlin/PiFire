@@ -14,7 +14,6 @@ warnings.filterwarnings("ignore")
 import numpy as np
 from scipy.linalg import expm
 import do_mpc
-from casadi import exp as cexp
 
 np.random.seed(0)
 
@@ -156,7 +155,6 @@ def build_truth():
     sim = do_mpc.simulator.Simulator(m)
     sim.set_param(t_step=Ts)
     tvp_t = sim.get_tvp_template()
-    state = {"t": 0.0}
 
     def tvp_fun(t_now):
         tvp_t["T_amb"] = 18.0 - 8.0 * (t_now / T_END)  # ambient drift down

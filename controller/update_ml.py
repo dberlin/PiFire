@@ -23,12 +23,7 @@ Rate of change is: current - last / cycle time
 
 import pandas as pd
 import argparse
-from sklearn.neighbors import KNeighborsRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
 from joblib import dump, load
 
 
@@ -74,7 +69,7 @@ def create_new_model(infile="ml_dataset.csv", outfile="ml_model.joblib", test=Fa
 def update_model(infile="ml_model.joblib", test=False):
     print(f" - Loading model from {infile}")
     try:
-        model = load(infile)
+        load(infile)
     except:
         print(f" - ERROR: Failed to read file {infile}")
         return

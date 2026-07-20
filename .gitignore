@@ -129,3 +129,10 @@ pifire.db-shm
 # Local git worktrees created by agent workflows
 .worktrees/
 worktrees/
+
+# Coverage measurement artifacts (regenerate via pytest --cov; see docs/coverage/README.md)
+coverage.json
+coverage.xml
+htmlcov/
+.coverage
+.coverage.*

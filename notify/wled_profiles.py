@@ -22,7 +22,6 @@ Profile Mapping:
 
 import logging
 import requests
-import json
 import time
 
 # Color definitions for WLED profiles (RGB values)

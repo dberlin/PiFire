@@ -90,7 +90,7 @@ class RTDDevice:
 
         self.spi.xfer2([0x80, config])
         time.sleep(0.25)
-        t = self.temperature
+        t = self.temperature  # noqa: F841  # priming-read
 
     def read_rtd(self):
         msb = self.spi.xfer2([0x01, 0x00])[1]
