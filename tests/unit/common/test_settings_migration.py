@@ -177,40 +177,28 @@ def test_upgrade_settings_v1_4_cascade_migrates_notify_probe_and_platform():
     assert result["globals"]["updated_message"] is True
 
 
-def test_upgrade_settings_v1_4_cascade_loses_start_to_mode_BUG():
-    """LATENT BUG (severity: HIGH), common/settings_migration.py:127-128 + :167-170.
+def test_upgrade_settings_v1_4_cascade_preserves_start_to_mode():
+    """Regression for a HIGH-severity upgrade crash (was
+    common/settings_migration.py:127-128 + :167-170).
 
-    Block 1 (prev_ver<=1.4) moves the legacy top-level
-    `start_to_mode.grill1_setpoint` into
-    `startup.start_to_mode.primary_setpoint`, but only pops the
-    `grill1_setpoint` SUB-key (line 128) -- it leaves an empty
-    `settings["start_to_mode"] == {}` dict sitting at the top level instead
-    of removing the whole key.
-
-    The later v1.6/1.7-build<=45 block (lines 167-170) then does:
+    Block 1 (prev_ver<=1.4) carries the legacy top-level
+    `start_to_mode.grill1_setpoint` forward into the modern
+    `start_to_mode.primary_setpoint`. Previously it wrote straight into
+    `settings["startup"]["start_to_mode"]` and popped only the
+    `grill1_setpoint` SUB-key, leaving an empty
+    `settings["start_to_mode"] == {}` at the top level. The later
+    v1.6/1.7-build<=45 block then did:
         settings["startup"]["start_to_mode"] = settings.get("start_to_mode", <default>)
-        settings.pop("start_to_mode", None)
-    `.get()` treats "key present but empty" as "here is the real legacy
-    data" rather than falling back to the default -- so it overwrites the
-    startup.start_to_mode dict Block 1 JUST populated with `{}`, discarding
-    both the user's migrated primary_setpoint AND the normal defaults
-    (after_startup_mode, primary_setpoint, start_to_hold_prompt).
+    and `.get()` treated "present but empty" as real data, overwriting the
+    populated startup dict with `{}` -- wiping the user's setpoint AND the
+    defaults (after_startup_mode, primary_setpoint, start_to_hold_prompt).
+    controller/runtime/controller.py then KeyError'd on first startup after
+    such an upgrade.
 
-    This is reachable in production: any install upgrading directly from
-    v1.4.x-or-earlier to current runs both blocks in the same
-    upgrade_settings() call (prev_ver is fixed for the whole call), so this
-    is not a hypothetical edge case -- it is the standard "upgrade after a
-    long gap" path.
-
-    Impact beyond silent data loss: controller/runtime/controller.py:457
-    and :492 do `settings["startup"]["start_to_mode"]["primary_setpoint"]`
-    with no .get() fallback -- so the grill controller raises a KeyError
-    the first time it tries to leave startup mode after such an upgrade.
-
-    This test pins the CURRENT (buggy) behavior rather than silently
-    routing around it, so a future fix (e.g. `settings.pop("start_to_mode",
-    None)` at the end of Block 1 instead of popping only the sub-key) will
-    be a visible, deliberate test update.
+    Fix reshapes the legacy top-level start_to_mode into the modern shape so
+    the later startup-split block moves the real, populated value (and the
+    later block now also falls back to the default on an empty dict). This
+    test asserts the CORRECT end state.
     """
     d = _base()
     old = copy.deepcopy(d)
@@ -228,10 +216,15 @@ def test_upgrade_settings_v1_4_cascade_loses_start_to_mode_BUG():
 
     result = upgrade_settings([1, 4, 0], old, d)
 
-    # Current (buggy) behavior: start_to_mode ends up empty, NOT the user's
-    # migrated setpoint (225) and NOT the sane defaults either.
-    assert result["startup"]["start_to_mode"] == {}
-    assert "primary_setpoint" not in result["startup"]["start_to_mode"]
+    # Correct behavior: the user's legacy grill1_setpoint (225) survives the
+    # whole cascade into startup.start_to_mode.primary_setpoint, and the modern
+    # start_to_mode retains its full default shape (never an empty dict).
+    stm = result["startup"]["start_to_mode"]
+    assert stm["primary_setpoint"] == 225  # migrated setpoint survives
+    assert stm["after_startup_mode"] == d["startup"]["start_to_mode"]["after_startup_mode"]
+    assert stm["start_to_hold_prompt"] == d["startup"]["start_to_mode"]["start_to_hold_prompt"]
+    # legacy top-level start_to_mode key fully removed
+    assert "start_to_mode" not in result
 
 
 def test_upgrade_settings_block4_platform_migration_prototype_branch():
