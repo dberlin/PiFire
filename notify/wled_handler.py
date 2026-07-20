@@ -424,9 +424,6 @@ class WLEDNotificationHandler:
 
     def _notify_suggested(self, notifyevent, control, settings):
         """Handle notifications using suggested presets (direct control)."""
-
-    def _notify_suggested(self, notifyevent, control, settings):
-        """Handle notifications using suggested presets (direct control)."""
         suggested_config = self.config.get("suggested_config", {})
 
         if notifyevent == "GRILL_STATE" and self.last_updated < time.time() - self.notify_duration:
