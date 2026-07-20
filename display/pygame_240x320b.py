@@ -60,7 +60,8 @@ class Display(DisplayBase):
         while True:
             """ Add pygame key test here. """
             pygame.time.delay(50)
-            events = pygame.event.get()  # Gets events (required for key presses to be registered)
+            # Gets events (required for key presses to be registered)
+            events = pygame.event.get()  # noqa: F841  # event-pump
             # This will give us a dictionary where each key has a value of 1 or 0. Where 1 is pressed and 0 is not pressed.
             keys = pygame.key.get_pressed()
             if keys[pygame.K_UP]:

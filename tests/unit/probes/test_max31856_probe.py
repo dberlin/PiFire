@@ -2,8 +2,6 @@ import sys
 import types
 import importlib
 
-import pytest
-
 
 def _install_fake_adafruit(monkeypatch):
     """Install a fake adafruit_max31856 so the probe imports without hardware."""

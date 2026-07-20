@@ -23,8 +23,7 @@ sudo pip3 install scikit-learn
 """
 import time
 from controller.base import ControllerBase
-from sklearn.linear_model import LinearRegression
-from joblib import dump, load
+from joblib import load
 
 """
 Class Definition

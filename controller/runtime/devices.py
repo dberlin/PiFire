@@ -127,7 +127,6 @@ def build_devices(settings, *, errors, event_log, control_log):
 
     platform_config = settings["platform"]
     platform_config["frequency"] = settings["pwm"]["frequency"]
-    units = settings["globals"]["units"]
 
     """
 	Set up GrillPlatform Module

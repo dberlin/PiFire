@@ -23,7 +23,7 @@ from probes.kalman import TempKalman
 
 # resolve_i2c_bus / find_i2c_bus now live in the shared factory; re-export so
 # existing `from probes.base import resolve_i2c_bus` imports keep working.
-from common.i2c_bus import find_i2c_bus, resolve_i2c_bus
+from common.i2c_bus import find_i2c_bus, resolve_i2c_bus  # noqa: F401  # public re-export
 
 """
 *****************************************

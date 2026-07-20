@@ -30,7 +30,7 @@ from common.common import create_logger, WriteKind
 from common.modes import Mode
 from common.datastore_accessors import write_control, read_control
 from common.system import is_real_hardware
-from notify.notifications import *
+from notify.notifications import send_notifications
 
 """
 ==============================================================================

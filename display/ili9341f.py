@@ -23,11 +23,9 @@ from luma.lcd.device import ili9341
 from gpiozero import Button
 from pyky040 import pyky040
 
-from PIL import Image, ImageFilter
+from PIL import ImageFilter
 from common.modes import Mode
 from display.base_flex import DisplayBase
-from display.flexobject import FlexObject
-from display.flexrect import Rect
 
 """
 Dummy backlight class for prototyping 
