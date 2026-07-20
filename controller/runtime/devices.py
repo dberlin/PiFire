@@ -51,7 +51,9 @@ def build_display(settings, *, errors, event_log, control_log):
 
     except:
         control_log.exception(f"Error occurred loading the display module ({display_name}). Trace dump: ")
-        DisplayModule = importlib.import_module("display_none")
+        DisplayModule = importlib.import_module("display.none")
+        display_config = {}
+        disp_rotation = 0
         error_event = (
             f"An error occurred loading the [{settings['modules']['display']}] display module.  The "
             f'"display_none" module has been loaded instead.  This sometimes means that the hardware is '

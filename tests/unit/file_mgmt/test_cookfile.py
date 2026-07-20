@@ -15,32 +15,31 @@ is always `[]` in these fixtures so `read_json_file_data`'s default
 `unpackassets=True` path (used internally by `read_cookfile`) never touches
 `./static/img/tmp/`.
 
-Three LATENT BUGS found and pinned (not fixed) here -- see each test's
-docstring for detail:
+Three latent bugs were found and are now FIXED here (each test below
+originally pinned the crash/loss via `pytest.raises`/an under-populated
+assertion; each has been flipped to assert the corrected behavior):
 
 1. HIGH -- `upgrade_cookfile`'s pre-v1.5.0 `graph_data` conversion branch
-   (file_mgmt/cookfile.py:278) always crashes with `KeyError: 'history_page'`
-   because it calls `default_probe_config()` (common/defaults.py:315) with an
-   ad-hoc dict that only has a `probe_settings` key. Since `graph_data` is
-   processed before `graph_labels`/`events`/`comments`/`assets` in
-   `json_types`, NO pre-v1.5.0 `.pifire` file can currently be upgraded --
-   the very feature `upgrade_cookfile` exists for is unreachable for its
-   oldest supported input.
-2. HIGH -- `read_cookfile` (file_mgmt/cookfile.py:183) crashes with
+   (file_mgmt/cookfile.py:266-286) crashed with `KeyError: 'history_page'`
+   because it called `default_probe_config()` (common/defaults.py:315) with
+   an ad-hoc dict that only had a `probe_settings` key. FIX: the ad-hoc dict
+   now also carries `"history_page": {"probe_config": {}}` -- the other key
+   `default_probe_config()` unconditionally reads (to check for reusable
+   pre-existing per-probe config) -- so it takes the "build fresh defaults"
+   branch for all three probes instead of raising.
+2. HIGH -- `read_cookfile` (file_mgmt/cookfile.py:183) crashed with
    `KeyError: 'version'` on a corrupt/non-zip `.pifire` file, instead of
    returning the `status` error string `read_json_file_data` already
-   produced. The version-check block runs BEFORE the `if status != "OK":
-   break` guard, so the documented corrupt-file error path
-   (`blueprints/cookfile/routes.py` branches on `status != "OK"` to render
-   `cferror.html`) is unreachable -- a corrupt upload/history file 500s the
-   Flask route instead of showing the friendly error page.
+   produced. FIX: the `if status != "OK": break` guard now runs immediately
+   after each read, before the metadata version-check block touches the
+   (possibly empty, on error) dict -- so a corrupt file now returns the
+   documented `("Error: ...", ...)` status shape instead of crashing.
 3. LOW/MEDIUM -- `prepare_chartdata`'s history-population loop
-   (file_mgmt/cookfile.py:423-427) does `for key in probe_mapper["primarysp"]:
-   ... ; break` -- it only ever appends the primary-setpoint series for the
-   FIRST "Primary"-type probe, per index. If a probe_config has more than one
-   "Primary" probe (schema-permitted, if unusual), every additional Primary
-   probe's setpoint series is silently left permanently empty across the
-   whole chart -- no crash, just missing chart data.
+   (file_mgmt/cookfile.py:423-427) did `for key in probe_mapper["primarysp"]:
+   ... ; break` -- it only ever appended the primary-setpoint series for the
+   FIRST "Primary"-type probe, per index. FIX: the `break` was removed, so
+   every "Primary"-type probe's setpoint series is now filled from the same
+   shared `history["PSP"]` value at each index.
 """
 
 import json
@@ -298,18 +297,16 @@ def test_prepare_chartdata_custom_chart_info_skips_default_template():
     assert "lineTension" not in grill_chart_obj
 
 
-def test_prepare_chartdata_multiple_primary_probes_only_first_gets_setpoint_data():
-    """LATENT BUG (#3, LOW/MEDIUM severity) -- file_mgmt/cookfile.py:419-427.
+def test_prepare_chartdata_multiple_primary_probes_all_get_setpoint_data():
+    """FIXED (was LATENT BUG #3, LOW/MEDIUM severity) --
+    file_mgmt/cookfile.py:423-427.
 
-    `for key in probe_mapper["primarysp"]: chart_data[...].append(...);
-    break` appends the shared `history["PSP"]` value to only the FIRST
-    "Primary"-type probe's series, per history index, then `break`s out of
-    the inner loop. With two "Primary" probes in probe_config (allowed by
-    the schema, if atypical), the second Primary probe's setpoint series is
-    NEVER populated across the entire chart -- not even a placeholder, just
-    permanently `[]` -- even though real PSP data exists in history. No
-    crash, just silently-dropped chart data for any multi-primary
-    configuration."""
+    `for key in probe_mapper["primarysp"]: chart_data[...].append(...)`
+    (the trailing `break` was removed) now appends the shared
+    `history["PSP"]` value to EVERY "Primary"-type probe's series, per
+    history index -- not just the first. With two "Primary" probes in
+    probe_config (allowed by the schema, if atypical), both probes' setpoint
+    series are populated identically from the single shared PSP value."""
     probe_config = {
         "grill1": dict(_PROBE_CONFIG["grill1"]),
         "grill2": dict(_PROBE_CONFIG["grill1"], name="Grill 2"),
@@ -329,9 +326,12 @@ def test_prepare_chartdata_multiple_primary_probes_only_first_gets_setpoint_data
         {"x": 1000, "y": 225},
         {"x": 2000, "y": 230},
     ]
-    # The bug: grill2 is also "Primary", has its own primarysp chart slot,
-    # but it never receives any data points at all.
-    assert result["chart_data"][pm["primarysp"]["grill2"]]["data"] == []
+    # Fixed: grill2 is also "Primary" and now receives the same shared PSP
+    # series as grill1, instead of staying permanently empty.
+    assert result["chart_data"][pm["primarysp"]["grill2"]]["data"] == [
+        {"x": 1000, "y": 225},
+        {"x": 2000, "y": 230},
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -413,27 +413,31 @@ def test_read_cookfile_old_version_returns_warning_and_only_metadata(ds, tmp_pat
     assert struct["metadata"]["version"] == "1.0.0"
 
 
-def test_read_cookfile_corrupt_zip_raises_keyerror_instead_of_returning_status(ds, tmp_path):
-    """LATENT BUG (#2, HIGH severity) -- file_mgmt/cookfile.py:183.
+def test_read_cookfile_corrupt_zip_returns_error_status_instead_of_crashing(ds, tmp_path):
+    """FIXED (was LATENT BUG #2, HIGH severity) -- file_mgmt/cookfile.py:183.
 
     `read_json_file_data()` (file_mgmt/common.py) already handles a corrupt
-    (non-zip) file gracefully, returning `({}, "Error: ...")`. But
-    `read_cookfile`'s metadata-version-check block runs UNCONDITIONALLY right
-    after that read, before the `status != "OK"` guard:
-    `fileversion = semantic_ver_to_list(cook_file_struct["metadata"]["version"])`
-    -- indexing `["version"]` on the empty `{}` dict raises `KeyError:
-    'version'`, propagating out of `read_cookfile` entirely instead of
-    returning the documented error status. Every caller in
-    blueprints/cookfile/routes.py and blueprints/history/routes.py branches
-    on `status != "OK"` to render a friendly `cferror.html` -- for a genuinely
-    corrupt `.pifire` (the exact case this is meant to handle), the route
-    would 500 instead."""
+    (non-zip) file gracefully, returning `({}, "Error: ...")`. Previously,
+    `read_cookfile`'s metadata-version-check block ran UNCONDITIONALLY right
+    after that read, before the `status != "OK"` guard, so indexing
+    `["version"]` on the empty `{}` dict raised `KeyError: 'version'`. FIX:
+    the `if status != "OK": break` guard now runs immediately after each
+    read, before the version-check code touches `cook_file_struct`, so a
+    corrupt file returns the documented error-status shape instead. Every
+    caller in blueprints/cookfile/routes.py and blueprints/history/routes.py
+    branches on `status != "OK"` to render a friendly `cferror.html` -- for a
+    genuinely corrupt `.pifire` (the exact case this is meant to handle),
+    the route now gets the status string it expects instead of a 500."""
     path = str(tmp_path / "corrupt.pifire")
     with open(path, "wb") as f:
         f.write(b"this is not a zip file")
 
-    with pytest.raises(KeyError, match="version"):
-        read_cookfile(path)
+    struct, status = read_cookfile(path)
+
+    assert status != "OK"
+    assert status.startswith("Error")
+    # Only "metadata" was attempted before the read failure broke the loop.
+    assert struct == {"metadata": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -592,25 +596,53 @@ def _stub_probe_config(_settings_dict):
     }
 
 
-def test_upgrade_cookfile_pre_1_5_0_graph_data_conversion_crashes(ds, tmp_path):
-    """LATENT BUG (#1, HIGH severity) -- file_mgmt/cookfile.py:278.
+def test_upgrade_cookfile_pre_1_5_0_graph_data_conversion_succeeds_with_real_probe_config(ds, tmp_path):
+    """FIXED (was LATENT BUG #1, HIGH severity) -- file_mgmt/cookfile.py:278.
 
     `upgrade_cookfile`'s pre-v1.5.0 `graph_data` conversion branch builds an
-    ad-hoc `probe_info = {"probe_settings": {...}}` dict and calls
-    `default_probe_config(probe_info)`. `default_probe_config()`
-    (common/defaults.py:315) unconditionally reads
-    `settings["history_page"]["probe_config"]` -- a key the ad-hoc dict never
-    has -- raising `KeyError: 'history_page'`. Since `json_types` processes
-    `graph_data` before `graph_labels`/`events`/`comments`/`assets`, this
-    crash happens on EVERY real pre-v1.5.0 `.pifire` file, before any of
-    those later members are converted: there is currently no way to upgrade
-    (or repair, which calls the same code) the oldest cookfile schema
-    version `upgrade_cookfile` claims to support."""
+    ad-hoc `probe_info` dict and calls `default_probe_config(probe_info)`.
+    `default_probe_config()` (common/defaults.py:315) unconditionally reads
+    `settings["history_page"]["probe_config"]` to check for pre-existing
+    per-probe config to reuse -- a key the ad-hoc dict previously never had,
+    raising `KeyError: 'history_page'` on every real pre-v1.5.0 `.pifire`
+    file. FIX: the ad-hoc dict now also carries
+    `"history_page": {"probe_config": {}}`, so `default_probe_config()`
+    takes its normal "no existing entry -> build fresh defaults" branch for
+    each probe instead of crashing.
+
+    This test uses the REAL, unpatched `default_probe_config()` (unlike
+    `test_upgrade_cookfile_pre_1_5_0_full_conversion_with_working_probe_config`
+    below, which uses a stub to characterize the surrounding logic in
+    isolation) -- it is the end-to-end proof that the oldest supported
+    cookfile schema version can now actually be upgraded, and that the
+    output is a genuinely valid modern `graph_data`/probe_mapper structure:
+    all three probes present, only the "Primary" probe (grill1) has a
+    primarysp chart slot, and the real history values flow through
+    correctly."""
     path = str(tmp_path / "old_unpatched.pifire")
     _write_old_format_pifire(path)
 
-    with pytest.raises(KeyError, match="history_page"):
-        upgrade_cookfile(path)
+    struct, status = upgrade_cookfile(path)
+
+    assert status == "OK"
+
+    graph_data = struct["graph_data"]
+    pm = graph_data["probe_mapper"]
+    assert set(pm["probes"]) == {"grill1", "probe1", "probe2"}
+    assert set(pm["targets"]) == {"grill1", "probe1", "probe2"}
+    # Only grill1 is "Primary" -- it alone gets a primarysp chart slot.
+    assert set(pm["primarysp"]) == {"grill1"}
+
+    grill_series = graph_data["chart_data"][pm["probes"]["grill1"]]["data"]
+    assert [p["y"] for p in grill_series] == [100, 110]
+    grill_sp_series = graph_data["chart_data"][pm["primarysp"]["grill1"]]["data"]
+    assert [p["y"] for p in grill_sp_series] == [225, 225]
+    assert graph_data["time_labels"] == [1000, 2000]
+
+    # The rest of the (already-correct) conversion still runs after this
+    # branch: metadata bumped to current, raw_data reconstructed.
+    assert struct["metadata"]["version"] == _current_version(ds)
+    assert struct["raw_data"][0]["P"]["grill1"] == 100
 
 
 def test_upgrade_cookfile_pre_1_5_0_full_conversion_with_working_probe_config(ds, tmp_path, monkeypatch):
