@@ -17,7 +17,6 @@ import warnings, sys
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 import numpy as np
-from scipy.linalg import expm
 import do_mpc
 from casadi import exp as cexp
 from collections import deque

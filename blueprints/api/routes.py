@@ -1,4 +1,4 @@
-from flask import current_app, request, jsonify, abort
+from flask import request, jsonify, abort
 from common.common import WriteKind, write_log, deep_update
 from common.datastore_accessors import (
     read_settings,

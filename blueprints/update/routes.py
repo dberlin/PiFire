@@ -174,7 +174,6 @@ _UPDATE_POST_DISPATCH = {
 @update_bp.route("/", methods=["POST", "GET"])
 def update_page(action=None):
     settings = read_settings()
-    control = read_control()
 
     # Create Alert Structure for Alert Notification
     alert = {"type": "", "text": ""}

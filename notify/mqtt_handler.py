@@ -319,7 +319,7 @@ class MqttNotificationHandler:
 
         if self._publish_data(topic=f"{self._mqtt_settings['id']}/{context}", payload=json.dumps(payload)):
             # Publish home assitant auto-discovery info
-            if self._check_homeassistant:
+            if self._check_homeassistant():
                 self._create_autodiscover(context, data)
 
     def _subscribe(self, topic):
@@ -341,6 +341,10 @@ class MqttNotificationHandler:
                     discovery["name"] = device.title().replace("_", " ")
 
                     datatype = type(data[device])
+
+                    # Default component for any value type we don't special-case
+                    # below (dict/list/None); scalar branches override as needed.
+                    component = "sensor"
 
                     if datatype == bool:
                         component = "binary_sensor"
@@ -369,6 +373,9 @@ class MqttNotificationHandler:
                             suffix = "RTD Ohms"
 
                         elif context.startswith("probe_data"):
+                            # Generic probe_data context (not primary/food/aux/tr);
+                            # default to the temperature suffix used by those probes.
+                            suffix = "Temp"
                             # Find this probes name in the settings
                             for probe in self._probe_settings:
                                 if probe["label"] == device:
@@ -446,11 +453,15 @@ class MqttNotificationHandler:
                 if key == "notify_data":
                     for device in data[key]:
                         # new_context = context + '_' + key + '_' + device['label']
+                        new_context = None
                         for probe in self._probe_settings:
                             if probe["label"] == device["label"]:
                                 new_context = context + "_" + key + "_" + probe["port"]
                                 break
-                        self.notify(new_context, device)
+                        # Only recurse when a configured probe's port resolved the
+                        # context; skip unknown labels rather than misroute/crash.
+                        if new_context is not None:
+                            self.notify(new_context, device)
                 elif isinstance(data[key], dict):
                     new_context = context + "_" + key
                     self.notify(new_context, data[key])

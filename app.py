@@ -144,7 +144,7 @@ def index():
 """
 # Register mobile blueprint and provide it with socketio instance
 # (socketio is created once, above, right after the Flask app.)
-from blueprints.mobile import mobile_bp, socket_io
+from blueprints.mobile import mobile_bp
 
 mobile_bp.socketio = socketio
 app.register_blueprint(mobile_bp, url_prefix="/mobile")

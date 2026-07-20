@@ -310,7 +310,7 @@ _ADMIN_DISPATCH = {
 @admin_bp.route("/<action>", methods=["POST", "GET"])
 @admin_bp.route("/", methods=["POST", "GET"])
 def admin_page(action=None):
-    server_status = get_server_status()
+    get_server_status()
     settings = read_settings()
     control = read_control()
     pelletdb = read_pellet_db()

@@ -1,4 +1,3 @@
-import numpy as np
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF
 
 PARAMS = dict(C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55, T_amb=20.0)

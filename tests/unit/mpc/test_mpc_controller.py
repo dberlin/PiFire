@@ -1,7 +1,6 @@
 import os
 import shutil
 import time
-import numpy as np
 import pytest
 from controller.mpc import Controller, _DEFAULTS
 
