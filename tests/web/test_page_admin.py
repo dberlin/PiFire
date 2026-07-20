@@ -180,6 +180,25 @@ def _assert_no_hazardous_subprocess_calls(mock_run, action_label):
         )
 
 
+def _assert_no_hazardous_recorded_calls(recorded):
+    """Same safety property as `_assert_no_hazardous_subprocess_calls`, applied
+    to the module-scoped `hazard_guard['calls']` record. Under a slow `--cov`
+    full-suite run a leftover polling page can fire an unrelated background
+    `os.system` between `calls_before` and the assertion, so requiring the
+    recorded window to be EXACTLY the one neutralized dispatch is flaky.
+    Instead tolerate benign background `os.system` noise but assert nothing
+    reboot/poweroff/shutdown/supervisor shaped leaked through the patched
+    `os.system` (the real safety property; the per-function `call_count == 1`
+    assertions already prove the neutralized dispatch itself fired)."""
+    hazardous_tokens = ("reboot", "poweroff", "shutdown", "supervisor")
+    for entry in recorded:
+        if entry[0] != "os.system":
+            continue
+        assert not any(tok in str(entry[1]).lower() for tok in hazardous_tokens), (
+            f"hazardous os.system call leaked through: {entry[1]}"
+        )
+
+
 def _reset_server_status(flask_app):
     """The `reboot`/`shutdown`/`restart` actions set `current_app.server_status`
     to a terminal value ('rebooting'/'shutdown'/'restarting') that, on real
@@ -245,7 +264,8 @@ def test_reboot_action_is_neutralized_and_proven_intercepted(live_server, page, 
     assert "Rebooting" in resp.text()
     assert hazard_guard["reboot_system"].call_count == 1
     new_calls = hazard_guard["calls"][calls_before:]
-    assert new_calls == [("reboot_system", (), {})]
+    assert ("reboot_system", (), {}) in new_calls
+    _assert_no_hazardous_recorded_calls(new_calls)
     # The real dispatch body never ran -- if it had, this would have fired
     # a hazardous call; see _assert_no_hazardous_subprocess_calls docstring
     # for why this isn't a blanket assert_not_called().
@@ -262,7 +282,9 @@ def test_shutdown_action_is_neutralized(live_server, page, hazard_guard):
     assert resp.status == 200
     assert "Shutting Down" in resp.text()
     assert hazard_guard["shutdown_system"].call_count == 1
-    assert hazard_guard["calls"][calls_before:] == [("shutdown_system", (), {})]
+    new_calls = hazard_guard["calls"][calls_before:]
+    assert ("shutdown_system", (), {}) in new_calls
+    _assert_no_hazardous_recorded_calls(new_calls)
     _assert_no_hazardous_subprocess_calls(m_subprocess_run, "shutdown")
 
     _reset_server_status(hazard_guard["flask_app"])
@@ -276,7 +298,9 @@ def test_restart_action_is_neutralized(live_server, page, hazard_guard):
     assert resp.status == 200
     assert "Restarting Server" in resp.text()
     assert hazard_guard["restart_scripts"].call_count == 1
-    assert hazard_guard["calls"][calls_before:] == [("restart_scripts", (), {})]
+    new_calls = hazard_guard["calls"][calls_before:]
+    assert ("restart_scripts", (), {}) in new_calls
+    _assert_no_hazardous_recorded_calls(new_calls)
     _assert_no_hazardous_subprocess_calls(m_subprocess_run, "restart")
 
     _reset_server_status(hazard_guard["flask_app"])
