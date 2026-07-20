@@ -668,16 +668,12 @@ def test_dashboard_config_current_also_invalid_falls_back_to_first(live_server, 
     empty-only case in test_dashboard_config_via_direct_post, which falls
     back to the (valid) `current`.
 
-    NOTE: `settings['dashboard']['current']` must be restored to a valid
-    dashboard before this test returns -- unlike this AJAX-fragment action
-    (which has its own fallback), the base page template
-    (settings/index.html -> _macro_settings.html's render_dash_select)
-    indexes `dashboards[current]` directly with NO equivalent guard, so an
-    invalid `current` left behind would 500 every subsequent test in this
-    module that renders the full settings page. That asymmetry -- the fix
-    protects the fragment endpoint but not the page reading the same
-    persisted field -- is noted here rather than chased since fixing the
-    template is out of this task's route-coverage scope."""
+    NOTE: `settings['dashboard']['current']` is restored to a valid dashboard
+    before this test returns regardless -- the base page template
+    (settings/index.html -> _macro_settings.html's render_dash_select) now
+    has its own equivalent first-dashboard fallback guard too (see
+    test_settings_page_survives_invalid_dashboard_current below), but there's
+    no need to rely on that here."""
     apply_settings(lambda s: s["dashboard"].__setitem__("current", "NoSuchDashboard"))
     try:
         resp = page.request.post(f"{live_server}/settings/dashboard_config", form={"selected": ""})
@@ -686,6 +682,22 @@ def test_dashboard_config_current_also_invalid_falls_back_to_first(live_server, 
         # ("Default") is the second-fallback target; its screenshot path is
         # served from /dash/static/default/img/screenshot.png.
         assert "default/img/screenshot.png" in resp.text()
+    finally:
+        apply_settings(lambda s: s["dashboard"].__setitem__("current", "Default"))
+
+
+def test_settings_page_survives_invalid_dashboard_current(live_server, page):
+    """Regression test (blueprints/settings/templates/settings/_macro_settings.html,
+    render_dash_select): the base settings page used to index
+    settings['dashboard']['dashboards'][settings['dashboard']['current']]
+    directly with no fallback guard, unlike the already-fixed
+    _settings_dashboard_config AJAX route (routes.py:28). A stale/invalid
+    `dashboard.current` used to 500 the entire settings page on render; the
+    macro now falls back to the first known dashboard, same as the route."""
+    apply_settings(lambda s: s["dashboard"].__setitem__("current", "NoSuchDashboard"))
+    try:
+        resp = page.request.get(f"{live_server}/settings/")
+        assert resp.status == 200
     finally:
         apply_settings(lambda s: s["dashboard"].__setitem__("current", "Default"))
 
@@ -828,19 +840,14 @@ def test_notify_device_delete_and_edit(live_server, page):
     assert read_settings_from_server()["notify_services"]["onesignal"]["devices"]["dev-edit"] == dev
 
 
-def test_notify_delete_nonexistent_device_crashes_uncaught(live_server, page):
-    """LATENT BUG (blueprints/settings/routes.py:162), severity LOW-MEDIUM:
-    `delete_device` pops straight from the devices dict with NO exception
-    handling -- unlike every other delete-style branch in this route
-    (editprofile's `delete`, e.g., wraps the same pop in try/except and
-    turns a missing id into a graceful `event['type']='error'`). POSTing a
-    `delete_device` id that isn't in the devices dict (a stale device list,
-    a double-click, two browser tabs racing) raises an uncaught KeyError,
-    and the whole settings-page render 500s instead of showing an inline
-    error. Pinned as a characterization test (route-coverage task scope --
-    not fixing), not silently green-washed."""
+def test_notify_delete_nonexistent_device_is_a_clean_noop(live_server, page):
+    """Regression test (blueprints/settings/routes.py:162): `delete_device`
+    now pops with `.pop(DeviceID, None)` instead of a bare `.pop(DeviceID)`,
+    so a `delete_device` id that isn't in the devices dict (a stale device
+    list, a double-click, two browser tabs racing) is a clean no-op instead
+    of an uncaught KeyError that 500s the whole settings-page render."""
     resp = page.request.post(f"{live_server}/settings/notify", form={"delete_device": "does-not-exist"})
-    assert resp.status == 500
+    assert resp.status == 200
 
 
 # ---- editprofile: the entire `delete` branch, plus edit's error arms -----
@@ -1168,30 +1175,26 @@ def test_startup_blank_and_unchecked_skips_every_guarded_field(live_server, page
     assert startup["startup"]["start_to_mode"]["start_to_hold_prompt"] is False  # unchecked -> explicit False
 
 
-def test_startup_prime_on_startup_out_of_range_is_not_actually_clamped(live_server, page):
-    """LATENT BUG (blueprints/settings/routes.py:457-461), severity MEDIUM:
+def test_startup_prime_on_startup_out_of_range_is_clamped(live_server, page):
+    """Regression test (blueprints/settings/routes.py:457-461):
 
         if is_not_blank(response, "prime_on_startup"):
             prime_amount = int(response["prime_on_startup"])
             if prime_amount < 0 or prime_amount > 200:
                 prime_amount = 0  # Validate input, set to disabled if exceeding limits.
-            settings["startup"]["prime_on_startup"] = int(response["prime_on_startup"])
+            settings["startup"]["prime_on_startup"] = prime_amount
 
-    `prime_amount` is computed and clamped to 0 when out of [0, 200], but
-    the clamped variable is never used -- the last line re-parses
-    `response["prime_on_startup"]` directly, so the validation is a no-op
-    and any out-of-range value (this is the "how much pellet primer to run
-    on startup" setting, a real actuator-timing value) is saved verbatim.
-    Pinned as a characterization test (route-coverage task scope -- not
-    fixing); documents the ACTUAL (buggy) behavior, not the intended one."""
+    `prime_amount` is computed and clamped to 0 when out of [0, 200], and the
+    clamped variable is now actually saved (previously the last line re-parsed
+    `response["prime_on_startup"]` directly, making the validation a no-op --
+    this is the "how much pellet primer to run on startup" setting, a real
+    actuator-timing value)."""
     resp = page.request.post(
         f"{live_server}/settings/startup",
         form={"after_startup_mode": "Smoke", "startup_mode_setpoint": "165", "prime_on_startup": "250"},
     )
     assert resp.status == 200
-    # Intended behavior (per the dead comment) would clamp this to 0.
-    # Actual behavior: the out-of-range value passes straight through.
-    assert read_settings_from_server()["startup"]["prime_on_startup"] == 250
+    assert read_settings_from_server()["startup"]["prime_on_startup"] == 0
 
 
 def test_startup_pwm_duty_cycle_clamped_to_pwm_settings_range(live_server, page):
