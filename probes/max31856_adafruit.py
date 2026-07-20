@@ -32,7 +32,6 @@ Description:
  Imported Libraries
 *****************************************
 """
-import logging
 import adafruit_max31856
 from probes.base import ProbeInterface, resolve_spi_bus
 

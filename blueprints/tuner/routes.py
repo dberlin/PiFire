@@ -1,4 +1,4 @@
-from flask import render_template, request, current_app, render_template_string, jsonify
+from flask import render_template, request, render_template_string, jsonify
 from common.common import WriteKind
 from common.modes import Mode
 from common.datastore_accessors import (
@@ -10,8 +10,7 @@ from common.datastore_accessors import (
     write_autotune,
     read_current,
 )
-from common.app import paginate_list
-from .tuner import *
+from .tuner import calc_shh_coefficients, calc_shh_chart, calc_auto_tune_status
 
 from . import tuner_bp
 
@@ -20,7 +19,6 @@ from . import tuner_bp
 def tuner_page():
     settings = read_settings()
     control = read_control()
-    LOGS_FOLDER = current_app.config["LOGS_FOLDER"]
 
     # This POST path will load/render portions of the tuner page
     if request.method == "POST" and ("form" in request.content_type):

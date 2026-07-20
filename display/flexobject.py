@@ -1180,6 +1180,15 @@ class StatusIcon(FlexObject):
         canvas = Image.new("RGBA", size)
         canvas.paste(icon, center, icon)
 
+        # SmokePlus overlays a "+" glyph on the cloud icon to indicate Smoke Plus is active.
+        # (Mirrors the cloud+plus composition used by SmokePlusStatus.)
+        if type == "SmokePlus":
+            plus_icon = self._create_icon(text, int(font_size * 0.5), icon_color)
+            plus_icon = plus_icon.crop(plus_icon.getbbox())
+            # Position the plus badge over the upper-right of the centered cloud.
+            plus_pos = (center[0] + icon_size[2] - plus_icon.width, center[1])
+            canvas.paste(plus_icon, plus_pos, plus_icon)
+
         canvas = canvas.resize(output_size)
 
         return canvas
@@ -1284,7 +1293,6 @@ class MenuGeneric(FlexObject):
             button_height = 50
             button_padding = 10
             button_width = size[0] // 2 - menu_padding - (button_padding * 2)
-            column = 0
             button_area_position = (menu_padding + button_padding, 80)
             button_area_size = (
                 size[0] - (menu_padding * 2) - (button_padding * 2),

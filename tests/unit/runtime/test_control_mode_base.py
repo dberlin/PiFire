@@ -14,7 +14,6 @@ from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
 from controller.runtime.state import WorkCycleState
 from controller.runtime.modes.base import ControlMode
-from common.common import WriteKind
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.distance import FakeDistance
 from tests.fakes.notifier import FakeNotifier
