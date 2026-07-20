@@ -72,9 +72,21 @@ def _update_post_change_branch(r, settings, update_data, python_exec, action):
             update_data=update_data,
         )
     else:
+        branch_target = r["branch_target"]
+        if branch_target not in update_data.get("branches", []):
+            alert = {
+                "type": "error",
+                "text": f"Invalid branch target: {branch_target}",
+            }
+            return render_template(
+                "update/updater.html",
+                alert=alert,
+                settings=settings,
+                update_data=update_data,
+            )
         set_updater_install_status(0, "Starting Branch Change...", "")
         if is_real_hardware():
-            os.system(f"{python_exec} updater.py -b {r['branch_target']} &")  # Kickoff Branch Change
+            os.system(f"{python_exec} updater.py -b {branch_target} &")  # Kickoff Branch Change
         return render_template(
             "update/updater-status.html",
         )
