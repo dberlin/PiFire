@@ -350,7 +350,6 @@ def parse_config_line(config_line):
 
     for item in split_line:
         item_split = item.split("=")
-        item_dict = {}
         if len(item_split) > 1:
             if feature is not None:
                 config_dict[feature][item_split[0]] = item_split[1]

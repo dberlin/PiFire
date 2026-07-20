@@ -47,7 +47,7 @@ Description:
 import logging
 import time
 import threading
-from w1thermsensor import W1ThermSensor, Unit, Sensor
+from w1thermsensor import W1ThermSensor, Sensor
 from probes.base import ProbeInterface
 
 """

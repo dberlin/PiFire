@@ -309,9 +309,9 @@ class WLEDNotificationHandler:
             else:
                 brightness = 255  # Use full brightness like the curl command
 
-            # Use orange_cooking color and running effect with same parameters as curl command
+            # Use the user-configured cooking color and running effect with same parameters as curl command
             self.send_direct_command(
-                color="orange_cooking",
+                color=cooking_color,
                 brightness=brightness,
                 effect="running",
                 speed=160,  # sx from curl command
@@ -421,9 +421,6 @@ class WLEDNotificationHandler:
             self.notify_duration = self.config.get("notify_duration", 120)
             self.last_mode = None  # Reset last mode to allow state change notifications
             self.logger.info(f"WLED Profile notification sent for event {notifyevent} (profile {profile_number})")
-
-    def _notify_suggested(self, notifyevent, control, settings):
-        """Handle notifications using suggested presets (direct control)."""
 
     def _notify_suggested(self, notifyevent, control, settings):
         """Handle notifications using suggested presets (direct control)."""

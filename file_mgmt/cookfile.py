@@ -21,7 +21,6 @@ from common.common import (
     generate_uuid,
     process_metrics,
     semantic_ver_to_list,
-    epoch_to_time,
     unpack_history,
     create_logger,
 )
@@ -180,6 +179,8 @@ def read_cookfile(filename):
     json_types = ["metadata", "graph_data", "raw_data", "graph_labels", "events", "comments", "assets"]
     for jsonfile in json_types:
         cook_file_struct[jsonfile], status = read_json_file_data(filename, jsonfile)
+        if status != "OK":
+            break  # Exit loop and function, error string in status
         if jsonfile == "metadata":
             fileversion = semantic_ver_to_list(cook_file_struct["metadata"]["version"])
             minfileversion = semantic_ver_to_list(
@@ -191,8 +192,7 @@ def read_cookfile(filename):
                 and (fileversion[2] >= minfileversion[2])
             ):
                 status = "WARNING: Older cookfile version format! "
-        if status != "OK":
-            break  # Exit loop and function, error string in status
+                break  # Exit loop and function, error string in status
 
     return (cook_file_struct, status)
 
@@ -274,7 +274,14 @@ def upgrade_cookfile(cookfilename, repair=False):
                                 {"name": "Probe 2", "label": "probe2", "type": "Food", "enabled": True},
                             ]
                         }
-                    }
+                    },
+                    # default_probe_config() unconditionally reads
+                    # settings["history_page"]["probe_config"] to check for
+                    # pre-existing per-probe color/config entries to reuse. This
+                    # ad-hoc conversion dict has none (it's not real settings),
+                    # so an empty dict here just means "build fresh defaults for
+                    # every probe" -- required key, not optional.
+                    "history_page": {"probe_config": {}},
                 }
                 probe_config = default_probe_config(probe_info)
                 history = {
@@ -425,7 +432,6 @@ def prepare_chartdata(probe_config, chart_info={}, num_items=10, reduce=True, da
                 chart_data[probe_mapper["primarysp"][key]]["data"].append(
                     {"x": history["T"][index], "y": history["PSP"][index]}
                 )
-                break
 
             time_labels.append(history["T"][index])
     else:

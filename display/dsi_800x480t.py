@@ -20,10 +20,9 @@ import multiprocessing
 import pygame
 from pygame import image as PyImage
 
-from PIL import Image, ImageFilter
+from PIL import ImageFilter
 from common.modes import Mode
 from display.base_flex import DisplayBase
-from display.flexobject import FlexObject
 from pathlib import Path
 
 """
