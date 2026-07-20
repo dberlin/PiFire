@@ -219,7 +219,7 @@ class Meater:
         """
 
         try:
-            contents = self.peripheral.notify(
+            self.peripheral.notify(
                 "a75cc7fc-c956-488f-ac2a-2dbc08b63a04",
                 "7edda774-045e-4bbf-909b-45d1991a2876",
                 lambda data: self.notification_handler(data),
@@ -429,7 +429,7 @@ class Meater_Pro:
         """
 
         try:
-            contents = self.peripheral.notify(
+            self.peripheral.notify(
                 "c9e2746c-59f1-4e54-a0dd-e1e54555cf8b",
                 "7edda774-045e-4bbf-909b-45d1991a2876",
                 lambda data: self.notification_handler(data),

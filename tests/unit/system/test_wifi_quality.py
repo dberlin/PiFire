@@ -1,3 +1,4 @@
+import subprocess
 from unittest import mock
 
 import pytest
@@ -99,3 +100,106 @@ def test_detect_wireless_interface_falls_back_to_wlan0():
         mock.patch.object(cc.os.path, "isdir", return_value=False),
     ):
         assert cc._detect_wireless_interface() == "wlan0"
+
+
+def test_detect_wireless_interface_falls_back_to_wlan0_on_oserror():
+    """/sys/class/net may not exist at all (e.g. sandboxed/odd environments);
+    os.listdir raising OSError should be swallowed, not propagated."""
+    with mock.patch.object(cc.os, "listdir", side_effect=OSError("no such directory")):
+        assert cc._detect_wireless_interface() == "wlan0"
+
+
+def test_get_wifi_quality_auto_detects_interface_when_not_supplied():
+    with (
+        mock.patch.object(cc, "_detect_wireless_interface", return_value="wlp3s0") as detect,
+        mock.patch.object(cc.subprocess, "check_output", return_value=IWCONFIG_OUTPUT) as check_output,
+    ):
+        data = get_wifi_quality()
+
+    detect.assert_called_once()
+    assert data["result"] == "OK"
+    # The auto-detected interface name is what's passed through to iwconfig.
+    assert check_output.call_args.args[0] == ["iwconfig", "wlp3s0"]
+
+
+def test_iwconfig_output_without_link_quality_falls_back_to_iw():
+    """iwconfig succeeds (no FileNotFoundError) but its output has no
+    'Link Quality=' field -- the parser returns None rather than raising, so
+    the loop must fall through to the iw parser (400->389 continue branch)."""
+    no_quality_output = b'wlan0     IEEE 802.11  ESSID:"MyNet"\n          Mode:Managed\n'
+
+    def fake(cmd, **kwargs):
+        if cmd[0] == "iwconfig":
+            return no_quality_output
+        return _iw_output(-60)
+
+    with mock.patch.object(cc.subprocess, "check_output", side_effect=fake):
+        data = get_wifi_quality(interface="wlan0")
+
+    assert data["result"] == "OK"
+    # 2 * (-60 + 100) = 80
+    assert data["data"]["wifi_quality_value"] == 80
+
+
+def test_iw_output_without_signal_line_yields_error_result():
+    no_signal_output = b"Not connected.\n"
+
+    def fake(cmd, **kwargs):
+        if cmd[0] == "iwconfig":
+            raise FileNotFoundError("iwconfig")
+        return no_signal_output
+
+    with mock.patch.object(cc.subprocess, "check_output", side_effect=fake):
+        data = get_wifi_quality(interface="wlan0")
+
+    assert data["result"] == "ERROR"
+    assert data["data"] == {}
+
+
+def test_called_process_error_from_iwconfig_falls_back_to_iw_and_logs():
+    logger = mock.Mock()
+
+    def fake(cmd, **kwargs):
+        if cmd[0] == "iwconfig":
+            raise subprocess.CalledProcessError(returncode=1, cmd=cmd)
+        return _iw_output(-50)
+
+    with mock.patch.object(cc.subprocess, "check_output", side_effect=fake):
+        data = get_wifi_quality(interface="wlan0", logger=logger)
+
+    assert data["result"] == "OK"
+    # logger.debug called at least once for the iwconfig failure and once for
+    # the final "get_wifi_quality called" trace line.
+    assert logger.debug.call_count >= 2
+    assert any("failed to obtain wifi quality" in str(c) for c in logger.debug.call_args_list)
+    assert any("get_wifi_quality called" in str(c) for c in logger.debug.call_args_list)
+
+
+def test_called_process_error_without_logger_does_not_raise():
+    """Same as the CalledProcessError case above but with no logger supplied
+    -- the `if logger:` guard inside the except block must skip cleanly
+    (397->399 branch) rather than erroring on a None.debug() call."""
+
+    def fake(cmd, **kwargs):
+        if cmd[0] == "iwconfig":
+            raise subprocess.CalledProcessError(returncode=1, cmd=cmd)
+        return _iw_output(-50)
+
+    with mock.patch.object(cc.subprocess, "check_output", side_effect=fake):
+        data = get_wifi_quality(interface="wlan0")
+
+    assert data["result"] == "OK"
+
+
+def test_logger_debug_called_on_missing_tool_and_final_trace():
+    logger = mock.Mock()
+
+    def fake(cmd, **kwargs):
+        if cmd[0] == "iwconfig":
+            raise FileNotFoundError("iwconfig")
+        return _iw_output(-70)
+
+    with mock.patch.object(cc.subprocess, "check_output", side_effect=fake):
+        get_wifi_quality(interface="wlan0", logger=logger)
+
+    assert any("not found; trying next method" in str(c) for c in logger.debug.call_args_list)

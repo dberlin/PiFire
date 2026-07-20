@@ -24,7 +24,7 @@ import threading
 from luma.core.interface.serial import i2c
 from luma.core.render import canvas
 from luma.oled.device import ssd1306
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageFont
 from common.common import WriteKind  # Common Library for WebUI and Control Program
 from common.modes import Mode
 from common.datastore_accessors import read_control, write_control

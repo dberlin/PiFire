@@ -4,8 +4,6 @@ import sys
 import types
 import importlib
 
-import pytest
-
 
 def _install_fakes(monkeypatch):
     """Install fake hardware modules so the probe imports without hardware."""

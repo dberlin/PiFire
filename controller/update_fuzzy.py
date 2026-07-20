@@ -99,6 +99,8 @@ def create_fuzzy_pickle(plot=False):
     rules.append(ctrl.Rule(delta["pSmall"] & current["Low"], cycleratio["Short"]))
 
     rules.append(ctrl.Rule(delta["zAligned"] & (current["High"] | current["Low"]), cycleratio["Tiny"]))
+    rules.append(ctrl.Rule(delta["zAligned"] & current["MediumLow"], cycleratio["Tiny"]))
+    rules.append(ctrl.Rule(delta["zAligned"] & current["MediumHigh"], cycleratio["Short"]))
 
     rules.append(ctrl.Rule(delta["nSmall"] & current["High"], cycleratio["Short"]))
     rules.append(ctrl.Rule(delta["nSmall"] & current["MediumHigh"], cycleratio["Short"]))

@@ -1,7 +1,5 @@
 from unittest import mock
 
-import pytest
-
 
 def _build(chip):
     """Build the platform with hardware mocked. chip=None means no

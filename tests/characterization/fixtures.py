@@ -9,8 +9,6 @@ here. Individual tests may override further, but should not make things
 via the probe-cap technique described in harness.py).
 """
 
-import copy
-
 from common.defaults import default_settings, default_control, default_pellets
 
 

@@ -1,5 +1,4 @@
 import os
-import numpy as np
 from controller.mpc import Controller, _DEFAULTS
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
