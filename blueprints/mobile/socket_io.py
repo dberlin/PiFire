@@ -115,9 +115,6 @@ def handle_disconnect():
                 thread = None
 
 
-from flask_socketio import emit
-
-
 @socketio.on("listen_app_data")
 def listen_app_data(force=False):
     global thread
@@ -714,17 +711,38 @@ _POST_APP_DATA_DISPATCH = {
 }
 
 
+# pellets_action/timer_action/recipes_action/probes_action/notify_action
+# subscript request["..._action"] unconditionally (not via .get()), so an
+# empty dict would still raise KeyError. update_action/admin_action/
+# units_action either don't touch `request` at all or only iterate its
+# keys, so an empty dict degrades gracefully for them (see the pinned
+# "empty settings/control request returns None" tests below).
+_ACTIONS_REQUIRING_JSON_DATA = {
+    "pellets_action",
+    "timer_action",
+    "recipes_action",
+    "probes_action",
+    "notify_action",
+}
+
+
 def _post_app_data(action=None, type=None, json_data=None):
     settings = read_settings_store()
-
-    if json_data is not None:
-        request = json.loads(json_data)
-    else:
-        request = {""}
 
     handler = _POST_APP_DATA_DISPATCH.get(action)
     if handler is None:
         return _response(result="Error", message="Error: Received request without valid action")
+
+    if json_data is not None:
+        request = json.loads(json_data)
+    elif action in _ACTIONS_REQUIRING_JSON_DATA:
+        # Bail out with the same Error envelope style used everywhere else
+        # in this module, before ever calling a handler that would crash
+        # trying to subscript a missing key.
+        return _response(result="Error", message="Error: Received request without JSON data")
+    else:
+        request = {}
+
     return handler(settings, type, request)
 
 

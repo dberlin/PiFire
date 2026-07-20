@@ -35,20 +35,31 @@ helpers and ``os.system("rm ...")``. The ``sio`` fixture patches
 tests/web/test_page_admin.py's hazard_guard. Nothing destructive runs.
 """
 
+import base64
+import builtins
 import json
+import threading
 import types
 from unittest import mock
 
 import pytest
+from flask import request as flask_request
 
+from app import app as flask_app
+from common import datastore
 from common.common import WriteKind
 from common.datastore_accessors import (
     execute_control_writes,
+    read_connected_users,
     read_control,
+    read_current,
+    read_errors,
     read_pellets_store,
     read_settings,
     read_status,
+    write_connected_user,
     write_control,
+    write_errors,
     write_generic_key,
     write_pellet_db,
     write_settings_store,
@@ -801,3 +812,678 @@ def test_post_invalid_action(sio):
     resp = sio.mod._post_app_data("bogus_action", "whatever", json.dumps({}))
     assert resp["result"] == "Error"
     assert resp["message"] == "Error: Received request without valid action"
+
+
+# =====================================================================
+# _post_app_data -- update_action empty-request fall-through (no `return`
+# is reached when the request dict has zero keys, so the function falls off
+# the end and implicitly returns None -- same latent-fallthrough idiom
+# already pinned for recipes_action above).
+# =====================================================================
+
+
+def test_post_update_settings_empty_request_returns_none(sio):
+    resp = sio.mod._post_app_data("update_action", "settings", json.dumps({}))
+    assert resp is None
+
+
+def test_post_update_control_empty_request_returns_none(sio):
+    resp = sio.mod._post_app_data("update_action", "control", json.dumps({}))
+    assert resp is None
+
+
+def test_post_app_data_missing_json_data_update_action_returns_none(sio):
+    """FIXED (blueprints/mobile/socket_io.py): ``_post_app_data`` used to
+    default ``request = {""}`` when ``json_data`` was omitted -- a *set*
+    containing the empty string, not an empty dict ``{}``. ``update_action``
+    only iterates ``request.keys()``, so an empty dict degrades gracefully:
+    the ``for`` loop body never runs and the handler falls off the end,
+    returning ``None`` -- the exact same outcome already pinned above for
+    an explicit ``json.dumps({})`` payload
+    (``test_post_update_settings_empty_request_returns_none``). No crash."""
+    resp = sio.mod._post_app_data("update_action", "settings")
+    assert resp is None
+
+
+@pytest.mark.parametrize(
+    "action", ["pellets_action", "timer_action", "recipes_action", "probes_action", "notify_action"]
+)
+def test_post_app_data_missing_json_data_returns_error_envelope(sio, action):
+    """FIXED (blueprints/mobile/socket_io.py): unlike ``update_action``,
+    these five action-groups subscript ``request["..._action"]``
+    unconditionally (not via ``.get``), so even an empty dict ``{}`` would
+    still raise ``KeyError``. For these, ``_post_app_data`` now returns the
+    same Error envelope style used elsewhere in this module (e.g. "without
+    valid action") *before* ever calling the handler, instead of crashing."""
+    resp = sio.mod._post_app_data(action, "whatever")
+    assert resp["result"] == "Error"
+    assert resp["message"] == "Error: Received request without JSON data"
+
+
+# =====================================================================
+# _post_app_data -- admin_action reboot/shutdown exception fallback paths
+# =====================================================================
+
+
+def test_post_admin_reboot_exception_falls_back_to_os_system(sio):
+    with mock.patch.object(sio.mod, "reboot_system", side_effect=RuntimeError("boom")):
+        resp = sio.mod._post_app_data("admin_action", "reboot")
+    assert resp["result"] == "OK"
+    assert any(c[0] == "os.system" and "reboot" in c[1] for c in sio.calls)
+
+
+def test_post_admin_shutdown_exception_falls_back_to_os_system(sio):
+    with mock.patch.object(sio.mod, "shutdown_system", side_effect=RuntimeError("boom")):
+        resp = sio.mod._post_app_data("admin_action", "shutdown")
+    assert resp["result"] == "OK"
+    assert any(c[0] == "os.system" and "shutdown" in c[1] for c in sio.calls)
+
+
+# =====================================================================
+# _post_app_data -- pellets_action branches not hit by the happy-path tests
+# above: the "target not present in the collection" half of each
+# if/elif (edit_brands / edit_woods), the delete_profile log-rewrite loop
+# body, and the delete_log "not present" half.
+# =====================================================================
+
+
+def test_post_pellets_edit_brands_delete_not_present_still_ok(sio):
+    payload = json.dumps({"pellets_action": {"delete_brand": "NoSuchBrand"}})
+    before = list(read_pellets_store()["brands"])
+    resp = sio.mod._post_app_data("pellets_action", "edit_brands", payload)
+    assert resp["result"] == "OK"
+    assert read_pellets_store()["brands"] == before
+
+
+def test_post_pellets_edit_brands_new_duplicate_not_appended_twice(sio):
+    existing = read_pellets_store()["brands"][0]
+    payload = json.dumps({"pellets_action": {"new_brand": existing}})
+    resp = sio.mod._post_app_data("pellets_action", "edit_brands", payload)
+    assert resp["result"] == "OK"
+    assert read_pellets_store()["brands"].count(existing) == 1
+
+
+def test_post_pellets_edit_woods_delete_not_present_still_ok(sio):
+    payload = json.dumps({"pellets_action": {"delete_wood": "NoSuchWood"}})
+    before = list(read_pellets_store()["woods"])
+    resp = sio.mod._post_app_data("pellets_action", "edit_woods", payload)
+    assert resp["result"] == "OK"
+    assert read_pellets_store()["woods"] == before
+
+
+def test_post_pellets_edit_woods_new_duplicate_not_appended_twice(sio):
+    existing = read_pellets_store()["woods"][0]
+    payload = json.dumps({"pellets_action": {"new_wood": existing}})
+    resp = sio.mod._post_app_data("pellets_action", "edit_woods", payload)
+    assert resp["result"] == "OK"
+    assert read_pellets_store()["woods"].count(existing) == 1
+
+
+def test_post_pellets_delete_profile_rewrites_matching_log_entries(sio):
+    # Seed a log entry that references the profile being deleted, so the
+    # inner `for index in pelletdb["log"]` rewrite loop body (line 592)
+    # actually executes.
+    pelletdb = read_pellets_store()
+    pelletdb["archive"]["deadbeef"] = {"id": "deadbeef", "brand": "B", "wood": "W", "rating": 1, "comments": ""}
+    pelletdb["log"]["2020-01-01 00:00:00"] = "deadbeef"
+    write_pellet_db(pelletdb)
+    payload = json.dumps({"pellets_action": {"profile": "deadbeef"}})
+    resp = sio.mod._post_app_data("pellets_action", "delete_profile", payload)
+    assert resp["result"] == "OK"
+    assert read_pellets_store()["log"]["2020-01-01 00:00:00"] == "deleted"
+
+
+def test_post_pellets_delete_log_not_present_still_ok(sio):
+    payload = json.dumps({"pellets_action": {"log_item": "2099-01-01 00:00:00"}})
+    before = dict(read_pellets_store()["log"])
+    resp = sio.mod._post_app_data("pellets_action", "delete_log", payload)
+    assert resp["result"] == "OK"
+    assert read_pellets_store()["log"] == before
+
+
+# =====================================================================
+# _get_app_data -- recipe_data "details" found-result path (arg01="details"
+# with at least one file that parses OK), plus the skip-on-bad-status branch.
+# =====================================================================
+
+
+def test_get_recipe_data_details_found(sio):
+    recipe_data = {"metadata": {"id": "rid3"}}
+    with (
+        mock.patch.object(sio.mod, "get_recipefilelist", return_value=["foo.pfrecipe"]),
+        mock.patch.object(sio.mod, "read_recipefile", return_value=(recipe_data, "OK")),
+    ):
+        resp = sio.mod._get_app_data("recipe_data", "details")
+    assert resp["result"] == "OK"
+    assert resp["data"]["recipe_details"] == [{"filename": "foo.pfrecipe", "details": recipe_data}]
+    assert resp["data"]["uuid"] == read_settings()["server_info"]["uuid"]
+
+
+def test_get_recipe_data_non_details_arg01_returns_none(sio):
+    # Same latent fall-through as arg01=None: any arg01 other than "details"
+    # (the outer `if arg01 is not None` is entered but the inner
+    # `if arg01 == "details"` is not) hits no `return` -> implicit None.
+    resp = sio.mod._get_app_data("recipe_data", "bogus")
+    assert resp is None
+
+
+def test_get_recipe_data_details_skips_non_ok_status(sio):
+    # A file that fails to parse (status != "OK") is excluded from the
+    # results list -> falls through to the "no results" Error branch.
+    with (
+        mock.patch.object(sio.mod, "get_recipefilelist", return_value=["bad.pfrecipe"]),
+        mock.patch.object(sio.mod, "read_recipefile", return_value=({}, "Error")),
+    ):
+        resp = sio.mod._get_app_data("recipe_data", "details")
+    assert resp["result"] == "Error"
+    assert resp["message"] == "Error: Recipes details not found"
+
+
+# =====================================================================
+# _post_app_data -- notify_action branches not hit above: the "no
+# target_temp" (probe) else-branch and the "has high/low_limit_temp"
+# if-branches for probe_limit_high / probe_limit_low. A single label
+# ("Grill") always has one entry of each of the 3 types in notify_data, so
+# one call exercises all three simultaneously.
+# =====================================================================
+
+
+def test_post_notify_update_high_limit_branch(sio):
+    payload = json.dumps(
+        {
+            "notify_action": {
+                "label": "Grill",
+                "high_limit_temp": 300,
+                "high_limit_shutdown": True,
+                "high_limit_req": True,
+            }
+        }
+    )
+    resp = sio.mod._post_app_data("notify_action", "notify_update", payload)
+    assert resp["result"] == "OK"
+    _drain()
+    control = read_control()
+    probe_entry = next(n for n in control["notify_data"] if n["type"] == "probe" and n["label"] == "Grill")
+    high_entry = next(n for n in control["notify_data"] if n["type"] == "probe_limit_high" and n["label"] == "Grill")
+    # "probe" entry took the else-branch (no target_temp key) -> zeroed out.
+    assert probe_entry["target"] == 0
+    assert probe_entry["req"] is False
+    # "probe_limit_high" entry took the if-branch.
+    assert high_entry["target"] == 300
+    assert high_entry["shutdown"] is True
+    assert high_entry["req"] is True
+
+
+def test_post_notify_update_low_limit_branch(sio):
+    payload = json.dumps(
+        {
+            "notify_action": {
+                "label": "Grill",
+                "low_limit_temp": 50,
+                "low_limit_shutdown": True,
+                "low_limit_reignite": True,
+                "low_limit_req": True,
+            }
+        }
+    )
+    resp = sio.mod._post_app_data("notify_action", "notify_update", payload)
+    assert resp["result"] == "OK"
+    _drain()
+    control = read_control()
+    low_entry = next(n for n in control["notify_data"] if n["type"] == "probe_limit_low" and n["label"] == "Grill")
+    assert low_entry["target"] == 50
+    assert low_entry["shutdown"] is True
+    assert low_entry["reignite"] is True
+    assert low_entry["req"] is True
+
+
+# =====================================================================
+# _get_probe_max_temp -- all 4 (probe_type x units) branches
+# =====================================================================
+
+
+def test_get_probe_max_temp_all_branches(sio):
+    settings = read_settings()
+    config = settings["dashboard"]["dashboards"]["Default"]["config"]
+    settings["globals"]["units"] = "F"
+    assert sio.mod._get_probe_max_temp("Primary", settings) == config["max_primary_temp_F"]
+    assert sio.mod._get_probe_max_temp("Food", settings) == config["max_food_temp_F"]
+    settings["globals"]["units"] = "C"
+    assert sio.mod._get_probe_max_temp("Primary", settings) == config["max_primary_temp_C"]
+    assert sio.mod._get_probe_max_temp("Food", settings) == config["max_food_temp_C"]
+
+
+# =====================================================================
+# _get_timer_notify_data -- found vs. not-found
+# =====================================================================
+
+
+def test_get_timer_notify_data_found(sio):
+    notify_data = [
+        {"type": "probe", "keep_warm": True, "shutdown": True},
+        {"type": "timer", "keep_warm": True, "shutdown": False},
+    ]
+    assert sio.mod._get_timer_notify_data(notify_data) == {"keep_warm": True, "shutdown": False}
+
+
+def test_get_timer_notify_data_not_found_defaults(sio):
+    notify_data = [{"type": "probe", "keep_warm": True, "shutdown": True}]
+    assert sio.mod._get_timer_notify_data(notify_data) == {"keep_warm": False, "shutdown": False}
+
+
+# =====================================================================
+# _get_probe_data / _get_dash_data -- full structure, including the
+# device-status merge and the (production-unreachable) "AUX" section.
+# =====================================================================
+
+
+def test_get_dash_data_and_probe_data_full_structure(sio):
+    # Give the Grill (Primary) probe req=True on all 3 notify entries sharing
+    # its label, so both the assignment lines AND the `if req: hasNotifications
+    # = True` sub-branch are exercised for probe / probe_limit_high /
+    # probe_limit_low simultaneously (default notify_data has exactly one
+    # entry of each type per non-Aux probe label).
+    control = read_control()
+    for entry in control["notify_data"]:
+        if entry["label"] == "Grill":
+            entry["req"] = True
+    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
+
+    # Seed `current` the way the control-loop does at startup (read_current()
+    # with no init returns a bare {} -- KeyError otherwise; see
+    # read_current(zero_out=True) in common/datastore_accessors.py).
+    current = read_current(zero_out=True)
+    current["P"]["Grill"] = 225
+    current["F"]["Probe1"] = 150
+    current["PSP"] = 225
+    datastore.set_blob("control:current", json.dumps(current))
+
+    # Two device entries whose "device" matches every default probe (they
+    # all use "proto_adc") -- the merge loop has no `break`, so BOTH are
+    # applied to every probe in order: the first (full status) exercises
+    # every "key in status" True branch, the second (empty status) exercises
+    # every False branch, for the same set of keys in one test.
+    write_generic_key(
+        "probe_device_info",
+        [
+            {
+                "device": "proto_adc",
+                "status": {
+                    "battery_charging": True,
+                    "battery_percentage": 88,
+                    "battery_voltage": 3.7,
+                    "connected": True,
+                    "error": "sensor drift",
+                },
+            },
+            {"device": "proto_adc", "status": {}},
+            # A non-matching device entry exercises the loop's "no match,
+            # keep scanning" branch too.
+            {"device": "some-other-device", "status": {"connected": False}},
+        ],
+    )
+
+    settings = read_settings()
+    pelletdb = read_pellets_store()
+    dash = sio.mod._get_dash_data(settings, pelletdb)
+
+    assert dash["grillName"] == settings["globals"]["grill_name"]
+    assert dash["uuid"] == settings["server_info"]["uuid"]
+    assert dash["hopperLevel"] == pelletdb["current"]["hopper_level"]
+
+    primary = dash["primaryProbe"]
+    assert primary["label"] == "Grill"
+    assert primary["temp"] == 225
+    assert primary["setTemp"] == 225
+    assert primary["hasNotifications"] is True
+    assert primary["targetReq"] is True
+    assert primary["highLimitReq"] is True
+    assert primary["lowLimitReq"] is True
+    assert primary["status"]["batteryCharging"] is True
+    assert primary["status"]["batteryPercentage"] == 88
+    assert primary["status"]["batteryVoltage"] == 3.7
+    assert primary["status"]["connected"] is True
+    assert primary["status"]["error"] == "sensor drift"
+
+    food = {p["label"]: p for p in dash["foodProbes"]}
+    assert set(food) == {"Probe1", "Probe2", "Probe3"}
+    assert food["Probe1"]["temp"] == 150
+
+
+def test_get_probe_data_aux_section_direct_call(sio):
+    # `_get_probe_data`'s "AUX" `section` branch (the final `else` at
+    # blueprints/mobile/socket_io.py:740) is only reachable when called with
+    # a probe_type other than "Primary"/"Food" -- no call site in the app
+    # ever does this (`_get_dash_data` only ever passes "Food"/"Primary").
+    # Exercised directly here purely for coverage of otherwise-dead code.
+    settings = read_settings()
+    settings["probe_settings"]["probe_map"]["probe_info"].append(
+        {"type": "Aux", "label": "AuxProbe", "name": "AuxProbe", "device": "proto_adc", "enabled": True}
+    )
+    current = {"P": {}, "F": {}, "AUX": {"AuxProbe": 77}, "PSP": 0, "NT": {}}
+    result = sio.mod._get_probe_data("Aux", settings, current, [], [])
+    assert len(result) == 1
+    assert result[0]["label"] == "AuxProbe"
+    assert result[0]["temp"] == 77
+
+
+# =====================================================================
+# _encode_assets / _encode_img
+# =====================================================================
+
+
+def test_encode_assets_missing_assets_key_is_a_noop(sio):
+    recipe_data = {"metadata": {"id": "rid1"}}
+    result = sio.mod._encode_assets(recipe_data)
+    assert result is recipe_data
+    assert "assets" not in result
+
+
+def test_encode_assets_missing_file_yields_empty_string(sio):
+    # No such file on disk -> `_encode_img`'s bare `except:` swallows the
+    # FileNotFoundError and returns "".
+    recipe_data = {"metadata": {"id": "rid1"}, "assets": [{"filename": "missing.jpg"}]}
+    result = sio.mod._encode_assets(recipe_data)
+    asset = result["assets"][0]
+    assert asset["encoded_image"] == ""
+    assert asset["encoded_thumb"] == ""
+
+
+def test_encode_img_success_reads_and_b64_encodes(sio, tmp_path):
+    # Redirect only the one expected cwd-relative path to a tmp_path file, so
+    # this doesn't write into the real repo's static/img/tmp tree.
+    real_open = builtins.open
+    expected_path = "./static/img/tmp/rid2/pic.jpg"
+    payload = b"hello-bytes"
+    (tmp_path / "pic.jpg").write_bytes(payload)
+
+    def fake_open(path, *args, **kwargs):
+        if path == expected_path:
+            return real_open(tmp_path / "pic.jpg", *args, **kwargs)
+        return real_open(path, *args, **kwargs)
+
+    with mock.patch("builtins.open", side_effect=fake_open):
+        encoded = sio.mod._encode_img("rid2", "pic.jpg")
+    assert encoded == base64.b64encode(payload).decode("utf-8")
+
+
+# =====================================================================
+# _check_control_status
+# =====================================================================
+
+
+def test_check_control_status_appends_error_when_not_alive(sio):
+    with (
+        mock.patch.object(sio.mod, "process_command") as m_pc,
+        mock.patch.object(sio.mod, "get_system_command_output", return_value={"result": "Error"}),
+    ):
+        sio.mod._check_control_status()
+    m_pc.assert_called_once_with(action="sys", arglist=["check_alive"], origin="app-socketio")
+    errors = read_errors()
+    assert any("did not respond" in e for e in errors)
+
+
+def test_check_control_status_does_not_duplicate_existing_error(sio):
+    error_text = (
+        "The control process did not respond to a request and may be stopped.  "
+        "Try reloading the page or restarting the system.  Check logs for details."
+    )
+    write_errors([error_text])
+    with (
+        mock.patch.object(sio.mod, "process_command"),
+        mock.patch.object(sio.mod, "get_system_command_output", return_value={"result": "Error"}),
+    ):
+        sio.mod._check_control_status()
+    assert read_errors().count(error_text) == 1
+
+
+def test_check_control_status_alive_appends_no_error(sio):
+    with (
+        mock.patch.object(sio.mod, "process_command"),
+        mock.patch.object(sio.mod, "get_system_command_output", return_value={"result": "OK"}),
+    ):
+        sio.mod._check_control_status()
+    assert read_errors() == []
+
+
+# =====================================================================
+# _get_system_info
+# =====================================================================
+
+
+def test_get_system_info_maps_control_and_system_info_fields(sio):
+    control = read_control()
+    control["system"] = {
+        "wifi_quality_value": 11,
+        "wifi_quality_max": 22,
+        "wifi_quality_percentage": 33,
+        "cpu_throttled": False,
+        "cpu_under_voltage": True,
+        "cpu_temp": 61.2,
+    }
+    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
+    canned_system_info = {
+        "network_info": {"iface": "eth0"},
+        "hardware_info": {"cpu_info": {}},
+        "os_info": {"PRETTY_NAME": "X"},
+        "uptime": "up 1 day",
+    }
+    with mock.patch.object(sio.mod, "gather_system_info", return_value=(canned_system_info, {})):
+        info = sio.mod._get_system_info(read_control())
+    assert info["wifi_quality_value"] == 11
+    assert info["wifi_quality_max"] == 22
+    assert info["wifi_quality_percentage"] == 33
+    assert info["cpu_throttled"] is False
+    assert info["cpu_under_voltage"] is True
+    assert info["cpu_temp"] == 61.2
+    assert info["network_info"] == {"iface": "eth0"}
+    assert info["hardware_info"] == {"cpu_info": {}}
+    assert info["os_info"] == {"PRETTY_NAME": "X"}
+    assert info["uptime"] == "up 1 day"
+
+
+# =====================================================================
+# get_app_data / post_app_data -- thin @socketio.on wrappers
+# =====================================================================
+
+
+def test_get_app_data_wrapper_delegates_to_get_app_data(sio):
+    resp = sio.mod.get_app_data(action="settings_data")
+    assert resp["result"] == "OK"
+    assert resp["data"] == read_settings()
+
+
+def test_post_app_data_wrapper_delegates_to_post_app_data(sio):
+    resp = sio.mod.post_app_data(action="admin_action", type="clear_history")
+    assert resp["result"] == "OK"
+
+
+# =====================================================================
+# listen_app_data -- thread start/dedupe bookkeeping. `start_background_task`
+# is stubbed so no real background thread is ever spawned (the real
+# `_emit_app_data` loop is characterized separately below, driven directly).
+# Always restores the module's `thread`/`thread_event` globals in `finally`,
+# since they're process-wide singletons shared with any real Socket.IO
+# connections (e.g. the Playwright live-server suite) running later in the
+# same test session.
+# =====================================================================
+
+
+def test_listen_app_data_starts_background_task_once_then_dedupes(sio):
+    assert sio.mod.thread is None
+    calls = []
+
+    def fake_start_bg(target, *args, **kwargs):
+        calls.append((target, args, kwargs))
+        return mock.Mock(name="fake-thread-handle")
+
+    try:
+        with mock.patch.object(sio.mod.socketio, "start_background_task", side_effect=fake_start_bg):
+            resp1 = sio.mod.listen_app_data(force=True)
+            first_thread = sio.mod.thread
+            # Second call while a thread is already running must NOT start
+            # another one (the `if thread is None` guard).
+            resp2 = sio.mod.listen_app_data(force=False)
+        assert resp1["result"] == "OK"
+        assert resp2["result"] == "OK"
+        assert len(calls) == 1
+        assert sio.mod.thread is first_thread
+    finally:
+        sio.mod.thread = None
+        sio.mod.thread_event.clear()
+
+
+# =====================================================================
+# handle_connect / handle_disconnect -- the two @socketio.on("connect"/
+# "disconnect") handlers. Driven directly (not via a real Socket.IO test
+# client) with a Flask test_request_context supplying `request.sid`.
+# `listen_app_data` is stubbed for the connect test to avoid spawning a real
+# background thread. Thread-global cleanup is guaranteed via `finally` for
+# the same cross-test-contamination reason as above.
+# =====================================================================
+
+
+def test_handle_connect_registers_user_and_triggers_listener(sio):
+    with mock.patch.object(sio.mod, "listen_app_data") as m_listen:
+        with flask_app.test_request_context():
+            flask_request.sid = "sid-connect-1"
+            sio.mod.handle_connect()
+    m_listen.assert_called_once_with(force=True)
+    assert "sid-connect-1" in read_connected_users()
+
+
+def test_handle_disconnect_other_users_remain_no_join(sio):
+    write_connected_user("sid-a")
+    write_connected_user("sid-b")
+    fake_thread = mock.Mock(name="should-not-be-touched")
+    sio.mod.thread = fake_thread
+    try:
+        with flask_app.test_request_context():
+            flask_request.sid = "sid-a"
+            sio.mod.handle_disconnect()
+        assert "sid-a" not in read_connected_users()
+        assert "sid-b" in read_connected_users()
+        fake_thread.join.assert_not_called()
+        assert sio.mod.thread is fake_thread
+    finally:
+        sio.mod.thread = None
+        sio.mod.thread_event.clear()
+
+
+def test_handle_disconnect_last_user_no_thread_to_join(sio):
+    # Last user disconnects but no background thread was ever started
+    # (module `thread` global is already None) -- the `if thread is not
+    # None:` guard's False branch.
+    write_connected_user("sid-only")
+    assert sio.mod.thread is None
+    try:
+        with flask_app.test_request_context():
+            flask_request.sid = "sid-only"
+            sio.mod.handle_disconnect()
+        assert read_connected_users() == []
+        assert sio.mod.thread is None
+    finally:
+        sio.mod.thread = None
+        sio.mod.thread_event.clear()
+
+
+def test_handle_disconnect_last_user_joins_and_clears_thread(sio):
+    write_connected_user("sid-only")
+    fake_thread = mock.Mock(name="fake-thread-handle")
+    sio.mod.thread = fake_thread
+    sio.mod.thread_event.set()
+    try:
+        with flask_app.test_request_context():
+            flask_request.sid = "sid-only"
+            sio.mod.handle_disconnect()
+        assert read_connected_users() == []
+        fake_thread.join.assert_called_once()
+        assert sio.mod.thread is None
+        assert not sio.mod.thread_event.is_set()
+    finally:
+        sio.mod.thread = None
+        sio.mod.thread_event.clear()
+
+
+# =====================================================================
+# _emit_app_data -- the background-task loop body. Driven directly with a
+# real threading.Event, stubbing `socketio.sleep`/`socketio.emit` (so no
+# real 1s sleeps or real Socket.IO broadcasts happen) and `_get_dash_data`
+# (its internals are covered separately above). `socketio.sleep`'s stub
+# clears the event to terminate the loop after N iterations.
+# =====================================================================
+
+
+def test_emit_app_data_force_refresh_emits_all_three_once(sio):
+    event = threading.Event()
+    event.set()
+    emitted = []
+    sio.mod.thread = "sentinel-before"  # proves the `finally: thread = None` ran
+
+    def fake_sleep(_seconds):
+        event.clear()
+
+    with (
+        mock.patch.object(sio.mod, "_get_dash_data", return_value={"sentinel": "dash"}),
+        mock.patch.object(sio.mod.socketio, "emit", side_effect=lambda name, data: emitted.append(name)),
+        mock.patch.object(sio.mod.socketio, "sleep", side_effect=fake_sleep),
+    ):
+        sio.mod._emit_app_data(event, True)
+
+    assert emitted == ["socket_event_data", "socket_pellet_data", "socket_dash_data"]
+    assert not event.is_set()
+    assert sio.mod.thread is None
+
+
+def test_emit_app_data_periodic_control_status_check(sio):
+    # The `if (now - check_control_time) > 30: _check_control_status()`
+    # branch only fires once 30+ (mocked) seconds have elapsed between
+    # iterations. Drive `time.time()` directly to cross that threshold on
+    # the 2nd of 2 iterations.
+    event = threading.Event()
+    event.set()
+    time_values = iter([1000.0, 1000.0, 1040.0])
+    sleep_calls = {"n": 0}
+
+    def fake_time():
+        return next(time_values)
+
+    def fake_sleep(_seconds):
+        sleep_calls["n"] += 1
+        if sleep_calls["n"] >= 2:
+            event.clear()
+
+    with (
+        mock.patch.object(sio.mod, "_get_dash_data", return_value={"sentinel": "dash"}),
+        mock.patch.object(sio.mod.socketio, "emit"),
+        mock.patch.object(sio.mod.socketio, "sleep", side_effect=fake_sleep),
+        mock.patch.object(sio.mod.time, "time", side_effect=fake_time),
+        mock.patch.object(sio.mod, "_check_control_status") as m_check,
+    ):
+        sio.mod._emit_app_data(event, True)
+
+    m_check.assert_called_once()
+
+
+def test_emit_app_data_skips_emit_when_data_unchanged(sio):
+    # force_refresh=False: iteration 1 always emits (previous_* starts as
+    # "" != a dict); iteration 2 sees identical data and must NOT re-emit.
+    event = threading.Event()
+    event.set()
+    emitted = []
+    state = {"n": 0}
+
+    def fake_sleep(_seconds):
+        state["n"] += 1
+        if state["n"] >= 2:
+            event.clear()
+
+    with (
+        mock.patch.object(sio.mod, "_get_dash_data", return_value={"sentinel": "dash"}),
+        mock.patch.object(sio.mod.socketio, "emit", side_effect=lambda name, data: emitted.append(name)),
+        mock.patch.object(sio.mod.socketio, "sleep", side_effect=fake_sleep),
+    ):
+        sio.mod._emit_app_data(event, False)
+
+    assert emitted == ["socket_event_data", "socket_pellet_data", "socket_dash_data"]
+    assert sio.mod.thread is None

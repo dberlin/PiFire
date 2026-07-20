@@ -6,11 +6,10 @@ Discovers WLED devices on the network using mDNS/Bonjour and HTTP queries
 
 import socket
 import requests
-import json
 import threading
 import time
 from zeroconf import ServiceBrowser, Zeroconf, ServiceInfo
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 
 class WLEDDeviceInfo:

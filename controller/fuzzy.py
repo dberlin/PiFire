@@ -27,9 +27,6 @@ Imported Libraries
 """
 import time
 from controller.base import ControllerBase
-import numpy as np
-import skfuzzy as fuzz
-from skfuzzy import control as ctrl
 import pickle
 import pathlib
 import logging
@@ -51,7 +48,7 @@ class Controller(ControllerBase):
             import subprocess
 
             command = ["python", "update_fuzzy.py"]
-            update_fuzzy = subprocess.run(command)
+            subprocess.run(command)
 
         try:
             with open("./controller/fuzzy.pickle", "rb") as pickle_file:

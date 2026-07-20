@@ -20,8 +20,40 @@ import logging
 import socket
 import os
 import requests
-from display.flexobject import *
-from PIL import Image
+
+# The widget classes below are never referenced by literal name in this file;
+# _build_objects() resolves them dynamically via
+# globals()[FlexObject_TypeMap[object_data["type"]]], so every class named as
+# a FlexObject_TypeMap value must be present in this module's globals().
+from display.flexobject import (
+    FlexObject_TypeMap,
+    resolve_accent,
+    GaugeCircle,  # noqa: F401  # dynamic-dispatch
+    GaugeCompact,  # noqa: F401  # dynamic-dispatch
+    ModeBar,  # noqa: F401  # dynamic-dispatch
+    ControlPanel,  # noqa: F401  # dynamic-dispatch
+    StatusIcon,  # noqa: F401  # dynamic-dispatch
+    MenuIcon,  # noqa: F401  # dynamic-dispatch
+    MenuGeneric,  # noqa: F401  # dynamic-dispatch
+    MenuQRCode,  # noqa: F401  # dynamic-dispatch
+    InputNumber,  # noqa: F401  # dynamic-dispatch
+    InputNumberSimple,  # noqa: F401  # dynamic-dispatch
+    TimerStatus,  # noqa: F401  # dynamic-dispatch
+    AlertMessage,  # noqa: F401  # dynamic-dispatch
+    FlexButton,  # noqa: F401  # dynamic-dispatch
+    SPlusStatus,  # noqa: F401  # dynamic-dispatch
+    PModeStatus,  # noqa: F401  # dynamic-dispatch
+    HopperStatus,  # noqa: F401  # dynamic-dispatch
+    ProbeCard,  # noqa: F401  # dynamic-dispatch
+    GaugeEmber,  # noqa: F401  # dynamic-dispatch
+    SystemCard,  # noqa: F401  # dynamic-dispatch
+    DutyPill,  # noqa: F401  # dynamic-dispatch
+    CookTimeBar,  # noqa: F401  # dynamic-dispatch
+    HopperVertical,  # noqa: F401  # dynamic-dispatch
+    HeaderBar,  # noqa: F401  # dynamic-dispatch
+    ButtonRow,  # noqa: F401  # dynamic-dispatch
+)
+from PIL import Image, ImageFilter
 from common.common import WriteKind, read_generic_json, display_sleep_timeout
 from common.modes import Mode
 from common.datastore_accessors import (

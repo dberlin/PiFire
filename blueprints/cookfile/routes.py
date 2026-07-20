@@ -595,9 +595,6 @@ _COOKFILE_UPDATE_DISPATCH = {
 
 @cookfile_bp.route("/update", methods=["POST", "GET"])
 def cookfile_update():
-    settings = read_settings()
-    HISTORY_FOLDER = current_app.config["HISTORY_FOLDER"]
-
     if request.method == "POST":
         requestjson = request.json
         for key, handler in _COOKFILE_UPDATE_DISPATCH.items():
