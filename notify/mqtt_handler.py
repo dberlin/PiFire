@@ -319,7 +319,7 @@ class MqttNotificationHandler:
 
         if self._publish_data(topic=f"{self._mqtt_settings['id']}/{context}", payload=json.dumps(payload)):
             # Publish home assitant auto-discovery info
-            if self._check_homeassistant:
+            if self._check_homeassistant():
                 self._create_autodiscover(context, data)
 
     def _subscribe(self, topic):

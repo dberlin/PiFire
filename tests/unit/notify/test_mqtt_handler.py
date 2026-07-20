@@ -18,16 +18,22 @@ _create_autodiscover's datatype/context branches, and notify()'s
 dispatch/recursion/mode-change logic (including psutil-backed "system"
 context, mocked so no real host introspection leaks into assertions).
 
-Two known latent bugs in the source are exercised carefully but not
-triggered/fixed here (out of scope for a coverage-only pass):
-  - `_publish` checks `if self._check_homeassistant:` (missing `()`), so
-    autodiscovery publish is unconditionally attempted regardless of the
-    configured homeassistant_autodiscovery_topic.
+Four latent bugs that earlier coverage passes routed *around* are now
+fixed in the source and pinned here (each formerly-dodged path is
+exercised directly):
+  - `_publish` now calls `self._check_homeassistant()` (was a missing `()`
+    on the bound method, so autodiscovery fired unconditionally): pinned by
+    the enabled/disabled pair of `_publish` autodiscover-gating tests.
   - `_create_autodiscover`'s generic `elif context.startswith("probe_data")`
-    branch references a `suffix` local that is only bound by an earlier,
-    mutually-exclusive `if`/`elif` -- if a probe label ever matches inside
-    that branch, it raises UnboundLocalError. Tests avoid a matching label
-    there and note the gap instead of hitting it.
+    branch now defaults `suffix = "Temp"` (was an UnboundLocalError when a
+    probe label matched inside that branch): pinned by the matching-label
+    generic probe_data test.
+  - `_create_autodiscover` now defaults `component = "sensor"` for non-scalar
+    values (dict/list/None previously left `component` unbound -> crash at the
+    `_publish_autodiscover` call): pinned by the non-scalar value test.
+  - `notify()`'s `notify_data` loop now guards `new_context` (a no-match
+    label previously raised NameError or misrouted with a stale value):
+    pinned by the unknown-label recursion test.
 """
 
 import json
@@ -505,6 +511,22 @@ def test_publish_devices_first_value_triggers_publish_and_autodiscover(patched_c
     calls = [c for c in handler.client.publish_calls if c["topic"] == "PiFireTest/devices"]
     assert calls and json.loads(calls[-1]["payload"]) == {"auger": True}
     handler._create_autodiscover.assert_called_once_with("devices", {"auger": True})
+
+
+def test_publish_skips_autodiscover_when_homeassistant_disabled(patched_client):
+    # Pins the `if self._check_homeassistant():` gate: with the autodiscovery
+    # topic blank, the data still publishes but autodiscovery is suppressed.
+    # (Before the `()` fix the bound method was always truthy, so this path
+    # was impossible to reach.)
+    handler = _make_handler(patched_client, homeassistant_autodiscovery_topic="")
+    handler.last_conn_time = 0
+    handler._create_autodiscover = mock.Mock()
+
+    handler._publish("devices", {"auger": True})
+
+    calls = [c for c in handler.client.publish_calls if c["topic"] == "PiFireTest/devices"]
+    assert calls and json.loads(calls[-1]["payload"]) == {"auger": True}  # data still published
+    handler._create_autodiscover.assert_not_called()  # but autodiscovery suppressed
 
 
 def test_publish_devices_unchanged_value_does_not_republish(patched_client):
