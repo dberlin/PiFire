@@ -199,6 +199,26 @@ def test_change_branch_different_branch_via_direct_post(live_server, page, no_re
     assert "updater.py -b other-branch &" in no_real_subprocess.os_system_calls[0]
 
 
+def test_change_branch_rejects_unknown_branch_target(live_server, page, no_real_subprocess):
+    """`change_branch` used to interpolate `branch_target` straight into
+    `os.system(f"{python_exec} updater.py -b {branch_target} &")` with no
+    validation -- a command-injection hole. It's now checked against
+    `update_data["branches"]` (populated by `get_available_branches()`,
+    which the canned `git branch -a` output above resolves to
+    `["main", "other-branch"]`) before ever reaching os.system. A target
+    outside that list, including a shell-metacharacter payload, must be
+    rejected with an "Invalid branch target" alert and must NOT invoke
+    os.system."""
+    resp = page.request.post(
+        f"{live_server}/update/",
+        form={"change_branch": "true", "branch_target": "nonexistent-branch; touch /tmp/pwned"},
+    )
+
+    assert resp.status == 200
+    assert "Invalid branch target" in resp.text()
+    assert not no_real_subprocess.os_system_calls
+
+
 def test_do_update_when_stopped_via_direct_post(live_server, page, no_real_subprocess):
     apply_control(lambda c: c.__setitem__("mode", "Stop"))
 

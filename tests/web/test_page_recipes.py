@@ -39,7 +39,9 @@ NOT covered (see task report for details):
 - The upload-then-process round trip for `uploadassets` IS covered with a
   real in-memory PNG (Pillow), so the actual PIL rotate/thumbnail/resize
   pipeline in file_mgmt/media.py's `add_asset` runs for real, not mocked.
-  It requires `/tmp/pifire` to already exist -- see the latent bug noted at
+  Upload staging now uses a private per-request `tempfile.mkdtemp(
+  prefix="pifire-upload-")` that is `shutil.rmtree`'d in a `finally`, so no
+  predictable `/tmp/pifire/{id}` staging path exists any more -- see
   `test_uploadassets_via_direct_post`.
 
 Latent bug: `create_recipefile()` has no same-title dedup
@@ -489,6 +491,61 @@ def test_deletefile_via_direct_post(live_server, page, _isolated_recipe_folder):
     assert not os.path.exists(recipe_dir + filename)
 
 
+def test_deletefile_rejects_path_traversal_filename(live_server, page, _isolated_recipe_folder):
+    """`deletefile` used to shell out via `os.system(f"rm {filepath}")` with
+    the JSON `filename` interpolated unsanitized -- a command-injection /
+    path-traversal hole. It's now `secure_filename()` + `os.path.isfile()`
+    gated `os.remove()`. A traversal filename must not delete anything
+    outside RECIPE_FOLDER (here, a sentinel file one directory up) and must
+    report {"result": "error"}, not "success"."""
+    recipe_dir = _isolated_recipe_folder
+    outside_dir = os.path.dirname(os.path.dirname(recipe_dir))
+    sentinel_path = os.path.join(outside_dir, "sentinel.pfrecipe")
+    with open(sentinel_path, "w") as f:
+        f.write("do-not-delete")
+    try:
+        resp = page.request.post(
+            f"{live_server}/recipes/data",
+            data={"deletefile": "true", "filename": "../sentinel.pfrecipe"},
+        )
+        assert resp.status == 200
+        assert resp.json()["result"] == "error"
+        assert os.path.exists(sentinel_path)
+    finally:
+        os.remove(sentinel_path)
+
+
+def test_deletefile_rejects_shell_injection_filename(live_server, page, _isolated_recipe_folder):
+    """A filename crafted to break out of the old `os.system(f"rm
+    {filepath}")` shell-out (e.g. `x; touch /tmp/pwned`) must not create
+    any file and must report {"result": "error"}. Since the fix replaced
+    the shell-out with `os.remove()` entirely, there is no shell to inject
+    into any more -- this pins that behavior."""
+    recipe_dir = _isolated_recipe_folder
+    pwned_path = "/tmp/pifire_test_pwned_marker"
+    if os.path.exists(pwned_path):
+        os.remove(pwned_path)
+    resp = page.request.post(
+        f"{live_server}/recipes/data",
+        data={"deletefile": "true", "filename": f"x; touch {pwned_path}"},
+    )
+    assert resp.status == 200
+    assert resp.json()["result"] == "error"
+    assert not os.path.exists(pwned_path)
+
+
+def test_deletefile_rejects_nonexistent_filename(live_server, page, _isolated_recipe_folder):
+    """A filename that resolves inside RECIPE_FOLDER but doesn't exist on
+    disk should also report {"result": "error"}, not silently "succeed"."""
+    recipe_dir = _isolated_recipe_folder
+    resp = page.request.post(
+        f"{live_server}/recipes/data",
+        data={"deletefile": "true", "filename": "does-not-exist.pfrecipe"},
+    )
+    assert resp.status == 200
+    assert resp.json()["result"] == "error"
+
+
 def test_assetchange_via_direct_post(live_server, page, _isolated_recipe_folder):
     recipe_dir = _isolated_recipe_folder
     filename = _create_recipe(page, live_server, recipe_dir)
@@ -591,6 +648,23 @@ def test_download_recipe_file_via_get(live_server, page, _isolated_recipe_folder
     assert filename in (resp.headers.get("content-disposition") or "")
 
 
+@pytest.fixture
+def _static_img_tmp_cleanup():
+    """Unpacking a recipe's assets (any read of the `.pfrecipe` with
+    unpackassets=True) creates a `./static/img/tmp/{id}` symlink in the repo
+    working tree pointing at the process-private `pifire-assets-*` base. That
+    dir is `.gitignore`d, but remove any symlinks the test creates so the
+    working tree stays tidy regardless."""
+    base = "./static/img/tmp"
+    before = set(os.listdir(base)) if os.path.isdir(base) else set()
+    yield
+    if os.path.isdir(base):
+        for name in set(os.listdir(base)) - before:
+            path = os.path.join(base, name)
+            if os.path.islink(path):
+                os.unlink(path)
+
+
 def test_uploadassets_via_direct_post(live_server, page, _isolated_recipe_folder):
     """`uploadassets` runs the real media pipeline (file_mgmt/media.py's
     `add_asset`: rotate/thumbnail/resize via Pillow, then appends both the
@@ -598,23 +672,19 @@ def test_uploadassets_via_direct_post(live_server, page, _isolated_recipe_folder
     real in-memory PNG rather than mocked, to prove the pipeline itself
     works end-to-end, not just that the route wires it up.
 
-    Latent bug worked around: `uploadassets`' handler does
-    `tmp_path = f"/tmp/pifire/{parent_id}"; if not os.path.exists(tmp_path):
-    os.mkdir(tmp_path)` with NO `os.makedirs(..., exist_ok=True)`/parent
-    creation -- if the shared `/tmp/pifire` parent doesn't exist yet (only
-    ever created, lazily, inside `read_json_file_data`'s asset-unpacking
-    loop when a file already HAS >=1 asset), this raises a bare
-    `FileNotFoundError` -> 500. A freshly created recipe has zero assets,
-    so that lazy creation never fires -- this is a real gap for a device's
-    very first asset upload ever. Pre-creating `/tmp/pifire` here mirrors
-    what a long-running real device would already have from any earlier
-    asset view/upload, so the test can still exercise the real pipeline."""
-    os.makedirs("/tmp/pifire", exist_ok=True)
+    Staging security: the handler stages the upload in a private per-request
+    `tempfile.mkdtemp(prefix="pifire-upload-")` that is `shutil.rmtree`'d in
+    a `finally`. There is no predictable `/tmp/pifire/{id}` staging path any
+    more -- this test also pins that (a) no `/tmp/pifire` dir is created by
+    the flow and (b) no `pifire-upload-*` staging dir survives the request."""
     recipe_dir = _isolated_recipe_folder
     filename = _create_recipe(page, live_server, recipe_dir)
 
     png_buffer = io.BytesIO()
     Image.new("RGB", (16, 16), (255, 0, 0)).save(png_buffer, format="PNG")
+
+    tmp_root = tempfile.gettempdir()
+    staging_before = {n for n in os.listdir(tmp_root) if n.startswith("pifire-upload-")}
 
     resp = page.request.post(
         f"{live_server}/recipes/data",
@@ -633,64 +703,58 @@ def test_uploadassets_via_direct_post(live_server, page, _isolated_recipe_folder
     assert len(recipe_data["assets"]) == 1
     assert recipe_data["assets"][0]["type"] == "png"
 
-
-@pytest.fixture
-def _tmp_pifire_absent(tmp_path):
-    """Ensure the real, shared `/tmp/pifire` asset-scratch dir is ABSENT for
-    the duration of the test, so `test_uploadassets_creates_missing_tmp_pifire_parent_dir`
-    below can exercise a genuinely fresh environment. `/tmp/pifire` is a real
-    absolute path that may already exist on this machine and be in use by
-    other processes/tests (see `test_uploadassets_via_direct_post` above,
-    which pre-creates it) -- so if it exists, rename it out of the way to a
-    unique backup path (derived from this test's own `tmp_path`, never
-    time/random, to keep the id deterministic-per-test) and restore it in
-    `finally`; whatever the test itself creates at `/tmp/pifire` is removed
-    afterward either way, leaving the directory in its original state."""
-    real_path = "/tmp/pifire"
-    backup_path = f"/tmp/pifire.bak.{tmp_path.name}"
-    backed_up = os.path.exists(real_path)
-    if backed_up:
-        os.rename(real_path, backup_path)
-    try:
-        yield
-    finally:
-        if os.path.exists(real_path):
-            shutil.rmtree(real_path, ignore_errors=True)
-        if backed_up:
-            os.rename(backup_path, real_path)
+    # No predictable staging path for this asset, and the per-request staging
+    # dir was cleaned. (A machine-wide `/tmp/pifire` may exist as cruft from
+    # the old code; the invariant is that THIS flow wrote no predictable path.)
+    parent_id = recipe_data["metadata"]["id"]
+    assert not os.path.exists(f"/tmp/pifire/{parent_id}")
+    staging_after = {n for n in os.listdir(tmp_root) if n.startswith("pifire-upload-")}
+    assert staging_after == staging_before
 
 
-def test_uploadassets_creates_missing_tmp_pifire_parent_dir(
-    live_server, page, _isolated_recipe_folder, _tmp_pifire_absent
+def test_uploaded_recipe_asset_is_served_from_static_img_tmp(
+    live_server, page, _isolated_recipe_folder, _static_img_tmp_cleanup
 ):
-    """Regression test for the latent bug documented in
-    `test_uploadassets_via_direct_post` above: with the `/tmp/pifire`
-    PARENT dir genuinely absent (a fresh environment's very first asset
-    upload ever), the handler used to do
-    `tmp_path = f"/tmp/pifire/{parent_id}"; if not os.path.exists(tmp_path):
-    os.mkdir(tmp_path)` -- `os.mkdir` only creates the leaf dir, so it raised
-    a bare `FileNotFoundError` (-> 500) since `/tmp/pifire` itself didn't
-    exist. Fixed to `os.makedirs(tmp_path, exist_ok=True)`, which creates
-    both levels and doesn't error if they already exist."""
-    assert not os.path.exists("/tmp/pifire")
+    """SAFETY-CRITICAL browser-serving invariant: after an asset upload, a
+    recipe read (here the real `recipeview` action, which any page render
+    also does) unpacks the asset, creates the `./static/img/tmp/{id}`
+    symlink, and the bytes served at `/static/img/tmp/{id}/{asset}` exactly
+    match the fullsize asset stored inside the recipe zip. The static symlink
+    NAME / served URL are unchanged by the mkdtemp private-base rework -- only
+    the physical storage moved off the predictable `/tmp/pifire` path."""
     recipe_dir = _isolated_recipe_folder
     filename = _create_recipe(page, live_server, recipe_dir)
 
     png_buffer = io.BytesIO()
-    Image.new("RGB", (16, 16), (255, 0, 0)).save(png_buffer, format="PNG")
-
-    resp = page.request.post(
+    Image.new("RGB", (24, 24), (10, 200, 30)).save(png_buffer, format="PNG")
+    up = page.request.post(
         f"{live_server}/recipes/data",
         multipart={
             "uploadassets": "true",
             "filename": filename,
-            "assetfiles": {"name": "test-asset.png", "mimeType": "image/png", "buffer": png_buffer.getvalue()},
+            "assetfiles": {"name": "served.png", "mimeType": "image/png", "buffer": png_buffer.getvalue()},
         },
     )
-    assert resp.status == 200
-    body = resp.json()
-    assert body["result"] == "success"
-    assert body["errors"] == []
+    assert up.status == 200
 
     recipe_data = _read_recipe(recipe_dir, filename)
-    assert len(recipe_data["assets"]) == 1
+    parent_id = recipe_data["metadata"]["id"]
+    asset = recipe_data["assets"][0]
+    asset_arcname = f"{asset['id']}.{asset['type']}"
+
+    # The archived fullsize bytes are the source of truth for what must serve.
+    import zipfile
+
+    with zipfile.ZipFile(recipe_dir + filename) as zf:
+        archived_bytes = zf.read(f"assets/{asset_arcname}")
+
+    # A real recipe read unpacks assets + creates the served symlink.
+    view = page.request.post(f"{live_server}/recipes/data", data={"recipeview": "true", "filename": filename})
+    assert view.status == 200
+    assert os.path.islink(f"./static/img/tmp/{parent_id}")
+    # NOT under a predictable /tmp/pifire path.
+    assert not os.path.exists(f"/tmp/pifire/{parent_id}")
+
+    served = page.request.get(f"{live_server}/static/img/tmp/{parent_id}/{asset_arcname}")
+    assert served.status == 200
+    assert served.body() == archived_bytes

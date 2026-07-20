@@ -25,6 +25,22 @@ Functions
 =========
 """
 
+# Process-wide private base directory for unpacked asset/thumbnail images.
+# Lazily created as a 0700, app-owned, unique mkdtemp instead of the old
+# predictable, world-writable shared temp path (symlink/pre-creation attack
+# surface, no cleanup). The static symlink NAME (./static/img/tmp/{id}) and
+# thus the browser-facing served URL are unchanged -- only the base moves.
+_ASSET_TMP_BASE = None
+
+
+def get_asset_tmp_base():
+    """Return the process-wide private base dir for unpacked assets, creating
+    it lazily (and re-creating it if it was removed out from under us)."""
+    global _ASSET_TMP_BASE
+    if _ASSET_TMP_BASE is None or not os.path.isdir(_ASSET_TMP_BASE):
+        _ASSET_TMP_BASE = tempfile.mkdtemp(prefix="pifire-assets-")
+    return _ASSET_TMP_BASE
+
 
 def read_json_file_data(filename, jsonfile, unpackassets=True):
     """
@@ -51,21 +67,17 @@ def read_json_file_data(filename, jsonfile, unpackassets=True):
                     #  Read the file(s) into memory
                     data = archive.read(f"assets/{mediafile}")  # Read bytes into variable
                     thumb = archive.read(f"assets/thumbs/{mediafile}")  # Read bytes into variable
-                    if not os.path.exists(f"/tmp/pifire"):
-                        os.mkdir(f"/tmp/pifire")
-                    if not os.path.exists(f"/tmp/pifire/{parent_id}"):
-                        os.mkdir(f"/tmp/pifire/{parent_id}")
-                    if not os.path.exists(f"/tmp/pifire/{parent_id}/thumbs"):
-                        os.mkdir(f"/tmp/pifire/{parent_id}/thumbs")
+                    base = get_asset_tmp_base()
+                    os.makedirs(os.path.join(base, parent_id, "thumbs"), mode=0o700, exist_ok=True)
                     #  Write fullsize image to disk
                     destination = open(
-                        f"/tmp/pifire/{parent_id}/{id}.{filetype}", "wb"
+                        os.path.join(base, parent_id, f"{id}.{filetype}"), "wb"
                     )  # Write bytes to proper destination
                     destination.write(data)
                     destination.close()
                     #  Write thumbnail image to disk
                     destination = open(
-                        f"/tmp/pifire/{parent_id}/thumbs/{id}.{filetype}", "wb"
+                        os.path.join(base, parent_id, "thumbs", f"{id}.{filetype}"), "wb"
                     )  # Write bytes to proper destination
                     destination.write(thumb)
                     destination.close()
@@ -73,7 +85,7 @@ def read_json_file_data(filename, jsonfile, unpackassets=True):
                     if not os.path.exists("./static/img/tmp"):
                         os.mkdir(f"./static/img/tmp")
                     if not os.path.exists(f"./static/img/tmp/{parent_id}"):
-                        os.symlink(f"/tmp/pifire/{parent_id}", f"./static/img/tmp/{parent_id}")
+                        os.symlink(os.path.join(base, parent_id), f"./static/img/tmp/{parent_id}")
 
     except zipfile.BadZipFile as error:
         status = f"Error: {error}"
@@ -243,9 +255,8 @@ def remove_assets(filename, assetlist, filetype="cookfile"):
 
     # Traverse list of asset files from the compressed file, remove asset and thumb
     try:
-        tmpdir = f"/tmp/pifire/{metadata['id']}"
-        if not os.path.exists(tmpdir):
-            os.mkdir(tmpdir)
+        tmpdir = os.path.join(get_asset_tmp_base(), metadata["id"])
+        os.makedirs(tmpdir, mode=0o700, exist_ok=True)
         with zipfile.ZipFile(filename, mode="r") as archive:
             new_archive = zipfile.ZipFile(f"{tmpdir}/new.pifire", "w", zipfile.ZIP_DEFLATED)
             for item in archive.infolist():

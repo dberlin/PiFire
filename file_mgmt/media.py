@@ -13,7 +13,7 @@ Imported Modules
 import os
 import zipfile
 from common.common import generate_uuid
-from file_mgmt.common import update_json_file_data, read_json_file_data
+from file_mgmt.common import update_json_file_data, read_json_file_data, get_asset_tmp_base
 from PIL import Image, ExifTags
 
 
@@ -168,14 +168,11 @@ def unpack_thumb(thumbname, filename, tmp_id):
             thumb = archive.read(f"assets/thumbs/{thumbname}")  # Read bytes into variable
 
             if not os.path.exists(f"./static/img/tmp/{tmp_id}/{thumbname}"):
-                if not os.path.exists(f"/tmp/pifire"):
-                    os.mkdir(f"/tmp/pifire")
-
-                if not os.path.exists(f"/tmp/pifire/{tmp_id}"):
-                    os.mkdir(f"/tmp/pifire/{tmp_id}")
+                base = get_asset_tmp_base()
+                os.makedirs(os.path.join(base, tmp_id), mode=0o700, exist_ok=True)
 
                 #  Write fullsize image to disk
-                destination = open(f"/tmp/pifire/{tmp_id}/{thumbname}", "wb")  # Write bytes to proper destination
+                destination = open(os.path.join(base, tmp_id, thumbname), "wb")  # Write bytes to proper destination
                 destination.write(thumb)
                 destination.close()
                 path_filename = f"{tmp_id}/{thumbname}"
@@ -184,7 +181,7 @@ def unpack_thumb(thumbname, filename, tmp_id):
                 if not os.path.exists("./static/img/tmp"):
                     os.mkdir(f"./static/img/tmp")
                 if not os.path.exists(f"./static/img/tmp/{tmp_id}"):
-                    os.symlink(f"/tmp/pifire/{tmp_id}", f"./static/img/tmp/{tmp_id}")
+                    os.symlink(os.path.join(base, tmp_id), f"./static/img/tmp/{tmp_id}")
             else:
                 path_filename = f"{tmp_id}/{thumbname}"
     except:
