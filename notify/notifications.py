@@ -374,7 +374,16 @@ def _send_apprise_notifications(settings, title_message, body_message):
         for location in settings["notify_services"]["apprise"]["locations"]:
             appriseHandler.add(location)
 
-        result = appriseHandler.notify(title=title_message, body=body_message)
+        try:
+            result = appriseHandler.notify(title=title_message, body=body_message)
+            if result:
+                eventLogger.debug("Apprise Notification was a success!")
+            else:
+                eventLogger.warning("Apprise Notification failed!")
+        except Exception as e:
+            eventLogger.warning(f"Apprise Notification failed: {e}")
+        except:
+            eventLogger.warning("Apprise Notification failed for unknown reason.")
     else:
         eventLogger.warning("No Apprise Locations Configured")
 
