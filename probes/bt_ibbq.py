@@ -65,9 +65,9 @@ class ScanDelegate(DefaultDelegate):
 
     def handleDiscovery(self, dev, isNewDev, isNewData):
         if isNewDev:
-            logger_msg = f"(ibbq) Discovered device {dev.addr}"
-            # self.logger.debug(logger_msg)
+            # self.logger.debug(f"(ibbq) Discovered device {dev.addr}")
             # ic(logger_msg)
+            pass
 
 
 class DataDelegate(DefaultDelegate):
@@ -172,12 +172,12 @@ class iBBQ_Device:
         # iBBQ static characteristics
         SETTINGS_RESULTS = 0xFFF1
         PAIR_UUID = 0xFFF2
-        HISTORY_UUID = 0xFFF3  # Don't know how this works, here for completeness
+        HISTORY_UUID = 0xFFF3  # noqa: F841  # completeness # Don't know how this works, here for completeness
         REALTIMEDATA_UUID = 0xFFF4
         CMD_UUID = 0xFFF5
         # Static hex little endian ones and zeros
         ON = bytearray.fromhex("01 00")
-        OFF = bytearray.fromhex("00 00")
+        OFF = bytearray.fromhex("00 00")  # noqa: F841  # completeness
 
         # NEW: Additional observed xBBQ initialization messages (safe on older units)
         XBBQ_MSG_0823 = bytearray.fromhex("08 23 00 00 00 00")  # NEW

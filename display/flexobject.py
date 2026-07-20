@@ -1293,7 +1293,6 @@ class MenuGeneric(FlexObject):
             button_height = 50
             button_padding = 10
             button_width = size[0] // 2 - menu_padding - (button_padding * 2)
-            column = 0
             button_area_position = (menu_padding + button_padding, 80)
             button_area_size = (
                 size[0] - (menu_padding * 2) - (button_padding * 2),

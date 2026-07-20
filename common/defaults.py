@@ -17,7 +17,7 @@ import math
 import os
 import time
 
-from common.common import generate_uuid, get_probe_list, read_generic_json, read_updater_manifest
+from common.common import generate_uuid, read_generic_json, read_updater_manifest
 from common.modes import Mode, StatusState
 
 # Set of default colors for charts.  Contains list of tuples (primary color, secondary color).
@@ -505,8 +505,6 @@ def default_control():
 def default_notify(settings):
     notify_data = []
     """ Get list of Probes """
-
-    probe_list = get_probe_list(settings)
 
     """ Build list of probe notification data """
 

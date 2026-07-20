@@ -69,7 +69,7 @@ def create_new_model(infile="ml_dataset.csv", outfile="ml_model.joblib", test=Fa
 def update_model(infile="ml_model.joblib", test=False):
     print(f" - Loading model from {infile}")
     try:
-        model = load(infile)
+        load(infile)
     except:
         print(f" - ERROR: Failed to read file {infile}")
         return

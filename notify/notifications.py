@@ -638,7 +638,6 @@ def _estimate_eta(temperatures, target_temperature, interval_seconds=3, max_hist
             return None
 
         slope = numerator / denominator
-        intercept = mean_y - slope * mean_x
 
         # If temperature isn't rising (or is falling), we can't predict ETA
         if slope <= 0:

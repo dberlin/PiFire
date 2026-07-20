@@ -70,18 +70,15 @@ def read_settings_file(filename="settings.json", init=False, retry_count=0):
 
         # Overlay the read values over the top of the default settings
         #  This ensures that any NEW fields are captured.
-        update_settings = False  # set flag in case an update needs to be written back
 
         # Prevent the wizard from popping up on existing installations
         if "first_time_setup" not in settings["globals"].keys():
             settings["globals"]["first_time_setup"] = False
-            update_settings = True
 
         # If default version is different from what is currently saved, update version in saved settings
         if "versions" not in settings.keys():
             """ Upgrading from extremely old version """
             settings["versions"] = settings_default["versions"]
-            update_settings = True
         elif semantic_ver_is_lower(settings["versions"]["server"], settings_default["versions"]["server"]):
             """ Upgrade Path """
             backup_settings()  # Backup Old Settings Before Performing Upgrade
@@ -91,12 +88,10 @@ def read_settings_file(filename="settings.json", init=False, retry_count=0):
             prev_ver = semantic_ver_to_list(settings["versions"]["server"])
             settings = upgrade_settings(prev_ver, settings, settings_default)
             settings["versions"] = settings_default["versions"]
-            update_settings = True
         elif semantic_ver_is_lower(settings_default["versions"]["server"], settings["versions"]["server"]):
             """ Downgrade Path """
             backup_settings()  # Backup Old Settings Before Performing Downgrade
             settings = downgrade_settings(settings, settings_default)
-            update_settings = True
         elif (settings_default["versions"]["server"] == settings["versions"]["server"]) and (
             settings["versions"]["build"] <= settings_default["versions"]["build"]
         ):
@@ -104,15 +99,12 @@ def read_settings_file(filename="settings.json", init=False, retry_count=0):
             prev_ver = semantic_ver_to_list(settings["versions"]["server"])
             settings = upgrade_settings(prev_ver, settings, settings_default)
             settings["versions"] = settings_default["versions"]
-            update_settings = True
 
         if settings["versions"].get("build", None) != settings_default["versions"]["build"]:
             settings["versions"]["build"] = settings_default["versions"]["build"]
-            update_settings = True
 
         # Overlay the original settings on top of the default settings
         settings = deep_update(settings_default, settings)
-        update_settings = True
         settings["history_page"]["probe_config"] = default_probe_config(
             settings
         )  # Fix issue with probe_configs resetting to defaults

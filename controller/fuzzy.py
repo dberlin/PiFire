@@ -48,7 +48,7 @@ class Controller(ControllerBase):
             import subprocess
 
             command = ["python", "update_fuzzy.py"]
-            update_fuzzy = subprocess.run(command)
+            subprocess.run(command)
 
         try:
             with open("./controller/fuzzy.pickle", "rb") as pickle_file:
