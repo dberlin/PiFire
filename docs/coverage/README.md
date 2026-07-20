@@ -74,3 +74,35 @@ Chromium isn't installed in the environment, that whole tier is skipped by pytes
 **its coverage is absent from the report** (the code paths it would exercise show as
 uncovered, not "skipped"). If you see a suspiciously low `blueprints/` percentage,
 check the pytest summary line for a skip count before assuming a regression.
+
+## Coverage gate (changed lines)
+
+The global coverage number above (57.9% line / 43.4% branch) is a **legacy baseline**,
+not a gate — most of the codebase predates coverage measurement, and requiring the
+whole repo to hit some threshold would either block unrelated work or invite gaming the
+number. Instead, [`diff-cover`](https://github.com/Bachmann1234/diff-cover) gates only
+the lines a branch actually **adds or changes**, comparing against the coverage XML
+report and a `git diff` against a base branch.
+
+Run this before merging any branch:
+
+```bash
+QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/ --cov --cov-report=xml -q
+uv run diff-cover coverage.xml --compare-branch=massive-reworks-and-new-ui --fail-under=80
+```
+
+- The first command runs the full suite and additionally emits `coverage.xml` (Cobertura
+  format), the input `diff-cover` needs — the `--cov-report=json`/`html` reports from the
+  baseline command above are for human/tooling consumption and aren't consumed here.
+- The second command diffs the current branch against `massive-reworks-and-new-ui`,
+  finds the lines that are new or modified, cross-references them against
+  `coverage.xml`, and **fails only if fewer than 80% of those changed lines are
+  covered** — printing the specific uncovered new lines when it fails.
+- This means: legacy code with 0% coverage that you don't touch never blocks you: only
+  the lines *you* add or change need tests. The global % isn't enforced by this gate —
+  treat it as a trend to watch via `htmlcov/index.html`, not a pass/fail check.
+- `coverage.xml` is a regenerated artifact (git-ignored, like `coverage.json`/
+  `htmlcov/`) — do not commit it.
+- This is a documented pre-merge command, not a `pytest addopts` change: it does not run
+  automatically and does not fail the test suite itself. Run it by hand (or wire it into
+  CI) before merging.
