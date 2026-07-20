@@ -369,6 +369,9 @@ class MqttNotificationHandler:
                             suffix = "RTD Ohms"
 
                         elif context.startswith("probe_data"):
+                            # Generic probe_data context (not primary/food/aux/tr);
+                            # default to the temperature suffix used by those probes.
+                            suffix = "Temp"
                             # Find this probes name in the settings
                             for probe in self._probe_settings:
                                 if probe["label"] == device:

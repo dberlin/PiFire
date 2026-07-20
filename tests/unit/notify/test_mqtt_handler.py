@@ -670,12 +670,25 @@ def test_autodiscover_probe_data_tr_is_diagnostic_ohms(patched_client):
 
 def test_autodiscover_generic_probe_data_context_no_label_match(patched_client):
     # Exercises the `elif context.startswith("probe_data")` branch's for-loop
-    # without matching a probe label (matching would hit an unrelated,
-    # pre-existing NameError on an unbound `suffix` -- out of scope here).
+    # with no matching probe label: name/topic stay at their pre-loop defaults.
     handler = _make_handler(patched_client)
     result = _discover(handler, "probe_data_extra", {"no_such_probe_label": 1})
-    _, discovery = result["no_such_probe_label"]
+    topic, discovery = result["no_such_probe_label"]
     assert discovery["state_class"] == "measurement"
+    assert discovery["name"] == "No Such Probe Label"  # default, suffix not appended
+    assert topic.endswith("/probe_data_extra_no_such_probe_label/config")  # topic_name unchanged
+
+
+def test_autodiscover_generic_probe_data_context_matching_label(patched_client):
+    # Pins the `suffix = "Temp"` default in the generic probe_data branch: a
+    # matching probe label appends the suffix and rewrites topic_name to the
+    # probe's port. (Before the fix this raised UnboundLocalError on `suffix`.)
+    handler = _make_handler(patched_client)
+    result = _discover(handler, "probe_data_extra", {"Grill": 225})
+    topic, discovery = result["Grill"]
+    assert discovery["state_class"] == "measurement"
+    assert discovery["name"] == "Grill Temp"  # base name + generic-branch suffix
+    assert topic.endswith("/probe_data_extra_ADC0/config")  # topic_name -> probe port
 
 
 def test_autodiscover_control_notify_sets_target_name(patched_client):
