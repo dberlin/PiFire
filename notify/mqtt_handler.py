@@ -453,11 +453,15 @@ class MqttNotificationHandler:
                 if key == "notify_data":
                     for device in data[key]:
                         # new_context = context + '_' + key + '_' + device['label']
+                        new_context = None
                         for probe in self._probe_settings:
                             if probe["label"] == device["label"]:
                                 new_context = context + "_" + key + "_" + probe["port"]
                                 break
-                        self.notify(new_context, device)
+                        # Only recurse when a configured probe's port resolved the
+                        # context; skip unknown labels rather than misroute/crash.
+                        if new_context is not None:
+                            self.notify(new_context, device)
                 elif isinstance(data[key], dict):
                     new_context = context + "_" + key
                     self.notify(new_context, data[key])

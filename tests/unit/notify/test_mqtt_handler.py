@@ -825,6 +825,23 @@ def test_notify_notify_data_recurses_with_probe_port(patched_client):
     spy.assert_any_call("devices_notify_data_ADC1", {"label": "Probe1", "target": 225})
 
 
+def test_notify_notify_data_unknown_label_skips_recursion(patched_client):
+    # Pins the `new_context` guard in the notify_data loop: a label matching no
+    # configured probe resolves no port, so the recursive notify is skipped
+    # entirely (was a NameError / stale-value misroute before the guard).
+    handler = _make_handler(patched_client)
+    spy = mock.MagicMock(wraps=handler.notify)
+    handler.notify = spy
+    handler._publish = mock.Mock()
+
+    handler.notify("devices", {"notify_data": [{"label": "NoSuchProbe", "target": 225}]})
+
+    # Only the outer call happened; no `devices_notify_data_*` recursion.
+    spy.assert_called_once_with("devices", {"notify_data": [{"label": "NoSuchProbe", "target": 225}]})
+    recursed = [c for c in spy.call_args_list if str(c.args[0]).startswith("devices_notify_data")]
+    assert recursed == []
+
+
 def test_notify_nested_dict_recurses_into_publishable_context(patched_client):
     # "probe_data" itself is not in CONTEXTS (so the outer call doesn't
     # publish), but "probe_data" + "_" + "primary" == "probe_data_primary",
