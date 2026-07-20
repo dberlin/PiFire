@@ -309,9 +309,9 @@ class WLEDNotificationHandler:
             else:
                 brightness = 255  # Use full brightness like the curl command
 
-            # Use orange_cooking color and running effect with same parameters as curl command
+            # Use the user-configured cooking color and running effect with same parameters as curl command
             self.send_direct_command(
-                color="orange_cooking",
+                color=cooking_color,
                 brightness=brightness,
                 effect="running",
                 speed=160,  # sx from curl command
