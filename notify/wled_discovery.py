@@ -8,7 +8,7 @@ import socket
 import requests
 import threading
 import time
-from zeroconf import ServiceBrowser, Zeroconf, ServiceInfo
+from zeroconf import ServiceBrowser, Zeroconf
 from typing import List, Dict
 
 
@@ -71,20 +71,37 @@ class WLEDDiscovery:
             if info:
                 # Parse the service info
                 device_name = name.replace("._http._tcp.local.", "")
-                ip_address = socket.inet_ntoa(info.addresses[0])
+
+                addresses = info.addresses
+                if not addresses:
+                    print(f"Skipping service {name}: no addresses advertised")
+                    return
+                raw_address = addresses[0]
+                if len(raw_address) == 4:
+                    ip_address = socket.inet_ntoa(raw_address)
+                elif len(raw_address) == 16:
+                    ip_address = socket.inet_ntop(socket.AF_INET6, raw_address)
+                else:
+                    print(f"Skipping service {name}: unrecognized address length {len(raw_address)}")
+                    return
                 port = info.port
 
-                # Check if this looks like a WLED device
-                if self._is_wled_device(device_name, info):
-                    device = WLEDDeviceInfo(device_name, ip_address, port)
+                # _is_wled_device previously existed here as a name/TXT-record
+                # filter, but it unconditionally returned True regardless of
+                # its own matching logic -- it was dead code that could never
+                # reject a device. Removed; every HTTP service reaching this
+                # point is still validated for real via the HTTP probe below
+                # (_get_device_info / device.online), which is the actual
+                # filter in effect today.
+                device = WLEDDeviceInfo(device_name, ip_address, port)
 
-                    # Try to get device details via HTTP
-                    self._get_device_info(device)
+                # Try to get device details via HTTP
+                self._get_device_info(device)
 
-                    # Only add if we got valid device info
-                    if device.online:
-                        self.discovered_devices.append(device)
-                        print(f"Discovered WLED device: {device.name} at {device.ip}:{device.port}")
+                # Only add if we got valid device info
+                if device.online:
+                    self.discovered_devices.append(device)
+                    print(f"Discovered WLED device: {device.name} at {device.ip}:{device.port}")
 
         except Exception as e:
             # Suppress common zeroconf errors that don't affect functionality
@@ -98,27 +115,6 @@ class WLEDDiscovery:
     def update_service(self, zeroconf: Zeroconf, type_: str, name: str) -> None:
         """Callback when a service is updated"""
         pass
-
-    def _is_wled_device(self, device_name: str, info: ServiceInfo) -> bool:
-        """Check if the discovered service is likely a WLED device"""
-        # Check common WLED device name patterns
-        wled_patterns = ["wled", "esp8266", "esp32", "led"]
-        device_name_lower = device_name.lower()
-
-        # Check device name
-        for pattern in wled_patterns:
-            if pattern in device_name_lower:
-                return True
-
-        # Check TXT records for WLED-specific info
-        if info.properties:
-            txt_records = {k.decode("utf-8"): v.decode("utf-8") for k, v in info.properties.items()}
-            if "app" in txt_records and "wled" in txt_records["app"].lower():
-                return True
-            if "product" in txt_records and "wled" in txt_records["product"].lower():
-                return True
-
-        return True  # Default to true for HTTP services, we'll validate via HTTP
 
     def _get_device_info(self, device: WLEDDeviceInfo) -> None:
         """Get device information via HTTP/JSON API"""
@@ -160,13 +156,18 @@ class WLEDDiscovery:
 
         except Exception as e:
             print(f"Error getting device info for {device.ip}: {e}")
-            # Still mark as online if we can reach it, even if we can't get full info
+            # Still mark as online if we can reach it, even if we can't get full info.
+            # Only fill in placeholder values for fields that are still unset --
+            # a partial parse before the exception (e.g. version/mac/product
+            # from a good /json/info response, followed by a crash while
+            # parsing "leds") already has good data that must not be
+            # clobbered by the generic fallback below.
             try:
                 simple_response = requests.get(f"http://{device.ip}:{device.port}/", timeout=3)
                 if simple_response.status_code == 200:
                     device.online = True
-                    device.product = "WLED (Unknown Version)"
-                    device.led_count = 0  # Unknown
+                    if not device.product:
+                        device.product = "WLED (Unknown Version)"
             except:
                 pass
 
@@ -196,8 +197,15 @@ class WLEDDiscovery:
         devices = []
 
         # This is a basic implementation - could be enhanced with proper network scanning
-        # For now, just scan common IP ranges
-        base_ip = "192.168.1."  # Could be made configurable
+        # For now, just scan the /24 implied by network_range's first three octets
+        # (the IP sweep below always covers .1-.254 of a single /24, matching the
+        # "x.x.x.0/24" default). Falls back to 192.168.1. if network_range doesn't
+        # look like a dotted-quad.
+        network_octets = network_range.split("/")[0].split(".")
+        if len(network_octets) >= 3:
+            base_ip = ".".join(network_octets[:3]) + "."
+        else:
+            base_ip = "192.168.1."
 
         def check_ip(ip):
             try:

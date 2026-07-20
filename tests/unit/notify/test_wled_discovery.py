@@ -16,40 +16,59 @@ test process:
   replaced with a synchronous fake Thread so the IP-sweep logic runs
   deterministically and fast, without real OS threads or real network I/O.
 
-Also documents three latent bugs found while writing these tests (not fixed
-here, per the coverage-round2 charter -- characterize, don't green-wash):
+Also documents four latent bugs found while writing these tests
+(coverage-round2), all since FIXED here -- the pinning tests were flipped to
+assert the fixed behavior:
 
 1. notify/wled_discovery.py:74 -- ``socket.inet_ntoa(info.addresses[0])``
-   assumes an IPv4 4-byte address and ignores every address past index 0.
-   An IPv6-only mDNS announcement (or one with an empty ``addresses`` list)
-   raises inside the broad ``try`` at add_service and is silently swallowed
-   by ``except Exception`` -- the device is just dropped with no IPv6
-   fallback. Severity: medium (functional gap: IPv6-only WLED devices are
-   never discovered, and the failure is invisible).
+   used to assume an IPv4 4-byte address and ignore every address past
+   index 0. An IPv6-only mDNS announcement (or one with an empty
+   ``addresses`` list) raised inside the broad ``try`` at add_service and
+   was silently swallowed by ``except Exception`` -- the device was just
+   dropped with no IPv6 fallback. Fixed: ``add_service`` now branches on the
+   raw address length -- 4 bytes uses ``inet_ntoa``, 16 bytes uses
+   ``socket.inet_ntop(AF_INET6, ...)``, and anything else (including empty)
+   is skipped gracefully with a logged message instead of raising. See
+   ``test_add_service_handles_ipv6_address_fixed`` and
+   ``test_add_service_empty_addresses_skips_gracefully_fixed``.
 
-2. notify/wled_discovery.py:102-121 -- ``_is_wled_device`` computes a
+2. notify/wled_discovery.py:102-121 -- ``_is_wled_device`` computed a
    name/TXT-record match against ``wled_patterns`` but then unconditionally
-   ``return True`` regardless of the result. The matching logic is dead
-   code; the function can never return False. Severity: low (misleading /
-   dead code, not a crash, but the name promises filtering it doesn't do).
+   ``return True`` regardless of the result -- dead code that could never
+   return False. JUDGMENT: removed entirely rather than "fixed", since the
+   real (and only) filter in effect was always the HTTP probe
+   (``_get_device_info`` / ``device.online``) a few lines later -- making the
+   dead matcher return real answers would have started excluding devices
+   that are discovered today, which is a behavior change nobody asked for.
+   Removing it preserves current behavior exactly while deleting misleading
+   dead code. All ``_is_wled_device``-specific tests below were removed
+   along with the method.
 
 3. notify/wled_discovery.py:161-171 -- in ``_get_device_info``, if the
-   primary parse succeeds partially (e.g. ``device.version``/``device.mac``/
+   primary parse succeeded partially (e.g. ``device.version``/``device.mac``/
    ``device.product`` already assigned from a good ``/json/info`` response)
-   and then a *later* statement in the same ``try`` block raises (e.g.
+   and then a *later* statement in the same ``try`` block raised (e.g.
    ``info_data["leds"].get(...)`` when ``leds`` isn't a dict), the except
-   handler's HTTP fallback overwrites the already-correct ``device.product``
-   with the placeholder ``"WLED (Unknown Version)"`` and resets
-   ``device.led_count`` to 0 -- discarding good data already parsed.
-   Severity: medium (data loss / misleading info surfaced to the UI).
+   handler's HTTP fallback overwrote the already-correct ``device.product``
+   with the placeholder ``"WLED (Unknown Version)"`` and reset
+   ``device.led_count`` to 0 -- discarding good data already parsed. Fixed
+   by only filling in the placeholder ``product`` when it's still unset, and
+   no longer touching ``led_count`` in the fallback at all (it already
+   defaults to 0 and must never be reset once parsed). See
+   ``test_get_device_info_leds_not_a_dict_preserves_parsed_data_fixed``.
 
-4. notify/wled_discovery.py:193-230 -- ``discover_network_scan`` accepts a
-   ``network_range`` parameter but never uses it: ``base_ip`` is hardcoded
-   to ``"192.168.1."`` (the code even says "Could be made configurable").
-   Passing any other range silently scans 192.168.1.1-254 instead.
-   Severity: low (this method is currently dead code -- unreachable from
-   ``discover_all``, which only calls ``discover_mdns_devices`` -- but is a
-   real bug if ever wired up or called directly).
+4. notify/wled_discovery.py:193-230 -- ``discover_network_scan`` accepted a
+   ``network_range`` parameter but never used it: ``base_ip`` was hardcoded
+   to ``"192.168.1."`` (the code even said "Could be made configurable").
+   JUDGMENT: wired the parameter through (small change -- parse the first
+   three octets out of ``network_range`` for ``base_ip``, falling back to
+   ``192.168.1.`` if it doesn't look like a dotted-quad) rather than
+   deleting the function, since it's real, independently-tested logic with
+   its own test coverage already in this file -- removal would have thrown
+   away more than it saved. It remains unreachable from ``discover_all``
+   (that call is still commented out there), so this fix has no effect on
+   the currently-live discovery path. See
+   ``test_discover_network_scan_honors_network_range_parameter_fixed``.
 """
 
 import socket
@@ -238,41 +257,68 @@ def test_add_service_none_info_is_a_noop():
     assert discovery.discovered_devices == []
 
 
-def test_add_service_suppresses_exceptions():
-    """LATENT BUG #1 (medium): an empty addresses list makes
-    socket.inet_ntoa(info.addresses[0]) raise IndexError. That's caught by
-    the broad `except Exception` in add_service and silently swallowed --
-    the device is dropped with no IPv6/no-address fallback, and no error
-    surfaces to the caller."""
+def test_add_service_empty_addresses_skips_gracefully_fixed():
+    """FIXED LATENT BUG #1: an empty addresses list used to make
+    socket.inet_ntoa(info.addresses[0]) raise IndexError, silently caught by
+    the broad `except Exception` in add_service. Now add_service explicitly
+    guards on an empty addresses list and returns early with a logged
+    message -- same externally-visible outcome (device not discovered), but
+    via an intentional guard instead of an accidental crash-and-swallow."""
     discovery = WLEDDiscovery()
     fake_zc = MagicMock()
     info = MagicMock()
-    info.addresses = []  # no IPv4 address advertised (e.g. IPv6-only)
+    info.addresses = []  # no address advertised at all
     info.port = 80
     info.properties = {}
     fake_zc.get_service_info.return_value = info
 
     # Must not raise.
-    discovery.add_service(fake_zc, "_http._tcp.local.", "IPv6Only._http._tcp.local.")
+    discovery.add_service(fake_zc, "_http._tcp.local.", "NoAddress._http._tcp.local.")
 
     assert discovery.discovered_devices == []
 
 
-def test_add_service_skips_when_is_wled_device_returns_false():
-    """Exercises the (currently unreachable in production, see LATENT BUG #2)
-    branch where _is_wled_device says no -- the device is never even
-    HTTP-probed."""
+def test_add_service_handles_ipv6_address_fixed():
+    """FIXED LATENT BUG #1: a 16-byte (IPv6) address used to reach
+    socket.inet_ntoa, which raises for anything other than a 4-byte
+    address -- silently dropping IPv6-only devices. Now a 16-byte address is
+    decoded via socket.inet_ntop(AF_INET6, ...) and the device is discovered
+    normally."""
     discovery = WLEDDiscovery()
     fake_zc = MagicMock()
-    fake_zc.get_service_info.return_value = _fake_service_info()
+    info = MagicMock()
+    info.addresses = [socket.inet_pton(socket.AF_INET6, "fe80::1234")]
+    info.port = 80
+    info.properties = {}
+    fake_zc.get_service_info.return_value = info
 
-    with (
-        patch.object(WLEDDiscovery, "_is_wled_device", return_value=False),
-        patch("notify.wled_discovery.requests.get") as mock_get,
-    ):
-        discovery.add_service(fake_zc, "_http._tcp.local.", "NotWLED._http._tcp.local.")
+    info_json = {"ver": "0.14.0", "name": "IPv6 WLED", "mac": "aa:bb:cc:dd:ee:ff", "product": "WLED"}
+    state_json = {"seg": [{"stop": 30}]}
 
-    mock_get.assert_not_called()
+    with patch("notify.wled_discovery.requests.get") as mock_get:
+        mock_get.side_effect = [_ok_json_response(info_json), _ok_json_response(state_json)]
+        discovery.add_service(fake_zc, "_http._tcp.local.", "IPv6 WLED._http._tcp.local.")
+
+    assert len(discovery.discovered_devices) == 1
+    device = discovery.discovered_devices[0]
+    assert device.ip == "fe80::1234"
+    assert device.online is True
+
+
+def test_add_service_unrecognized_address_length_skips_gracefully_fixed():
+    """An address that's neither 4 nor 16 bytes (malformed/unexpected) is
+    skipped gracefully rather than passed to inet_ntoa/inet_ntop, which
+    would raise."""
+    discovery = WLEDDiscovery()
+    fake_zc = MagicMock()
+    info = MagicMock()
+    info.addresses = [b"\x01\x02\x03"]  # 3 bytes -- neither IPv4 nor IPv6
+    info.port = 80
+    info.properties = {}
+    fake_zc.get_service_info.return_value = info
+
+    discovery.add_service(fake_zc, "_http._tcp.local.", "Malformed._http._tcp.local.")
+
     assert discovery.discovered_devices == []
 
 
@@ -300,48 +346,10 @@ def test_remove_service_and_update_service_are_noops():
 
 
 # ---------------------------------------------------------------------------
-# _is_wled_device
+# _is_wled_device -- REMOVED (LATENT BUG #2, dead code). See module
+# docstring for the removal rationale; this test block used to exercise the
+# now-deleted method and is intentionally gone along with it.
 # ---------------------------------------------------------------------------
-
-
-def test_is_wled_device_matches_name_pattern():
-    discovery = WLEDDiscovery()
-    info = MagicMock()
-    info.properties = {}
-    assert discovery._is_wled_device("my-wled-strip", info) is True
-
-
-def test_is_wled_device_matches_txt_records():
-    discovery = WLEDDiscovery()
-    info = MagicMock()
-    info.properties = {b"app": b"WLED", b"product": b"WLED"}
-    assert discovery._is_wled_device("some-device", info) is True
-
-
-def test_is_wled_device_always_true_even_with_no_match():
-    """LATENT BUG #2 (low): the pattern/TXT-record checks above are dead
-    code -- _is_wled_device unconditionally `return True` at the end
-    regardless of whether anything matched, so it can never filter out a
-    non-WLED HTTP service by name or TXT record. Documented here rather
-    than "fixed" per the coverage-round2 charter."""
-    discovery = WLEDDiscovery()
-    info = MagicMock()
-    info.properties = {b"app": b"totally-unrelated-service"}
-    assert discovery._is_wled_device("printer", info) is True
-
-
-def test_is_wled_device_matches_product_txt_record_only():
-    discovery = WLEDDiscovery()
-    info = MagicMock()
-    info.properties = {b"product": b"WLED Controller"}
-    assert discovery._is_wled_device("some-device", info) is True
-
-
-def test_is_wled_device_with_no_properties():
-    discovery = WLEDDiscovery()
-    info = MagicMock()
-    info.properties = None
-    assert discovery._is_wled_device("printer", info) is True
 
 
 # ---------------------------------------------------------------------------
@@ -486,14 +494,16 @@ def test_get_device_info_exception_fallback_non_200_stays_offline():
     assert device.product == ""
 
 
-def test_get_device_info_leds_not_a_dict_clobbers_good_data_on_fallback():
-    """LATENT BUG #3 (medium): info_data["leds"] is expected to be a dict
+def test_get_device_info_leds_not_a_dict_preserves_parsed_data_fixed():
+    """FIXED LATENT BUG #3: info_data["leds"] is expected to be a dict
     (info_data["leds"].get("count", 0)) but here it's an int. That raises
     AttributeError *after* device.version/name/mac/product were already
     correctly assigned from the same response. The outer except's HTTP
-    fallback then overwrites the already-correct device.product with the
-    placeholder "WLED (Unknown Version)" and resets led_count to 0 --
-    losing data that was already parsed successfully."""
+    fallback used to unconditionally overwrite the already-correct
+    device.product with the placeholder "WLED (Unknown Version)" and reset
+    led_count to 0. Now the fallback only fills in product if it's still
+    unset, and never touches led_count -- so data already parsed
+    successfully survives the later crash."""
     device = WLEDDeviceInfo("x", "10.0.0.5", 80)
     discovery = WLEDDiscovery()
 
@@ -514,14 +524,13 @@ def test_get_device_info_leds_not_a_dict_clobbers_good_data_on_fallback():
         ]
         discovery._get_device_info(device)
 
-    # version/mac were parsed correctly before the crash and are preserved...
+    # version/mac/product were parsed correctly before the crash and are all
+    # preserved -- the fallback no longer clobbers them.
     assert device.version == "0.14.0"
     assert device.mac == "aa:bb:cc"
-    # ...but product/led_count get clobbered by the generic fallback despite
-    # already having good values from info_json.
     assert device.online is True
-    assert device.product == "WLED (Unknown Version)"
-    assert device.led_count == 0
+    assert device.product == "WLED Pro"
+    assert device.led_count == 0  # never got a chance to be set differently
 
 
 # ---------------------------------------------------------------------------
@@ -583,17 +592,17 @@ def test_discover_mdns_devices_when_browser_is_falsy_skips_cancel():
     assert result == []
 
 
-def test_discover_network_scan_ignores_network_range_parameter():
-    """LATENT BUG #4 (low, dead code): network_range is accepted but never
-    used -- base_ip is hardcoded to "192.168.1.". Prove it by passing a
-    completely different range and observing the scan still only ever
-    probes 192.168.1.*."""
+def test_discover_network_scan_honors_network_range_parameter_fixed():
+    """FIXED LATENT BUG #4: network_range used to be accepted but never
+    used -- base_ip was hardcoded to "192.168.1.". Now the first three
+    octets of network_range are used as base_ip. Prove it by passing a
+    different range and observing the scan probes that range instead."""
     discovery = WLEDDiscovery()
     probed_ips = []
 
     def fake_get_device_info(self, device):
         probed_ips.append(device.ip)
-        if device.ip == "192.168.1.5":
+        if device.ip == "10.0.0.5":
             device.online = True
 
     with (
@@ -602,10 +611,48 @@ def test_discover_network_scan_ignores_network_range_parameter():
     ):
         devices = discovery.discover_network_scan(network_range="10.0.0.0/24")
 
-    assert all(ip.startswith("192.168.1.") for ip in probed_ips)
+    assert all(ip.startswith("10.0.0.") for ip in probed_ips)
     assert len(probed_ips) == 254
     assert len(devices) == 1
-    assert devices[0].ip == "192.168.1.5"
+    assert devices[0].ip == "10.0.0.5"
+
+
+def test_discover_network_scan_default_range_still_scans_192_168_1():
+    """The default network_range ("192.168.1.0/24") still scans
+    192.168.1.* when the caller doesn't override it."""
+    discovery = WLEDDiscovery()
+    probed_ips = []
+
+    def fake_get_device_info(self, device):
+        probed_ips.append(device.ip)
+
+    with (
+        patch("notify.wled_discovery.threading.Thread", ImmediateThread),
+        patch.object(WLEDDiscovery, "_get_device_info", fake_get_device_info),
+    ):
+        discovery.discover_network_scan()
+
+    assert all(ip.startswith("192.168.1.") for ip in probed_ips)
+    assert len(probed_ips) == 254
+
+
+def test_discover_network_scan_malformed_range_falls_back_to_default():
+    """A network_range that doesn't look like a dotted-quad (fewer than 3
+    octets) falls back to the 192.168.1. default rather than crashing."""
+    discovery = WLEDDiscovery()
+    probed_ips = []
+
+    def fake_get_device_info(self, device):
+        probed_ips.append(device.ip)
+
+    with (
+        patch("notify.wled_discovery.threading.Thread", ImmediateThread),
+        patch.object(WLEDDiscovery, "_get_device_info", fake_get_device_info),
+    ):
+        discovery.discover_network_scan(network_range="not-an-ip")
+
+    assert all(ip.startswith("192.168.1.") for ip in probed_ips)
+    assert len(probed_ips) == 254
 
 
 def test_discover_network_scan_check_ip_exception_is_swallowed():
