@@ -521,7 +521,6 @@ def test_deletefile_rejects_shell_injection_filename(live_server, page, _isolate
     any file and must report {"result": "error"}. Since the fix replaced
     the shell-out with `os.remove()` entirely, there is no shell to inject
     into any more -- this pins that behavior."""
-    recipe_dir = _isolated_recipe_folder
     pwned_path = "/tmp/pifire_test_pwned_marker"
     if os.path.exists(pwned_path):
         os.remove(pwned_path)
@@ -537,7 +536,6 @@ def test_deletefile_rejects_shell_injection_filename(live_server, page, _isolate
 def test_deletefile_rejects_nonexistent_filename(live_server, page, _isolated_recipe_folder):
     """A filename that resolves inside RECIPE_FOLDER but doesn't exist on
     disk should also report {"result": "error"}, not silently "succeed"."""
-    recipe_dir = _isolated_recipe_folder
     resp = page.request.post(
         f"{live_server}/recipes/data",
         data={"deletefile": "true", "filename": "does-not-exist.pfrecipe"},

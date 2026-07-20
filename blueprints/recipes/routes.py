@@ -401,7 +401,7 @@ def _recipes_json_assetchange(RECIPE_FOLDER):
     section = requestjson["section"]
     section_index = requestjson["index"]
     asset_name = requestjson["asset_name"]
-    asset_id = requestjson["asset_id"]
+    requestjson["asset_id"]  # required field; validated by presence, value unused
     action = requestjson["action"]
     if action == "add":
         if section in ["ingredients", "instructions"]:
@@ -438,8 +438,6 @@ _RECIPES_JSON_DISPATCH = {
 @recipes_bp.route("/data/upload", methods=["POST", "GET"])
 @recipes_bp.route("/data/download/<filename>", methods=["GET"])
 def recipes_data(filename=None):
-    settings = read_settings()
-    control = read_control()
     RECIPE_FOLDER = current_app.config["RECIPE_FOLDER"]
 
     if (request.method == "GET") and (filename is not None):

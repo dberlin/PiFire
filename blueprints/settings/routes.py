@@ -1,5 +1,5 @@
 from flask import render_template, request, render_template_string, jsonify
-from common.common import WriteKind, read_generic_json, generate_uuid, convert_settings_units
+from common.common import WriteKind, read_generic_json, generate_uuid
 from common.modes import Mode
 from common.datastore_accessors import read_settings, read_control, write_settings, write_control
 from common.app import is_not_blank, is_checked, update_probe_config, save_settings_and_flag_update

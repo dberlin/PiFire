@@ -93,13 +93,9 @@ def read_pellet_db_file(filename="pelletdb.json", retry_count=0):
 
     # Overlay the read values over the top of the default values
     #  This ensures that any NEW fields are captured.
-    update_db = False  # set flag in case an update needs to be written back
-
     for key in pelletdb.keys():
         if key in pelletdb_struct.keys():
             pelletdb[key] = pelletdb_struct[key].copy()
-        else:
-            update_db = True
 
     return pelletdb
 

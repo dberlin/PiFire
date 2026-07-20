@@ -31,8 +31,9 @@ Requirements:
         A ThermoWorks Cloud account (email/password) with at least one connected device.
 """
 
-from thermoworks_cloud import AuthFactory, ThermoworksCloud, ResourceNotFoundError, AuthenticationError
-from aiohttp import ClientSession, ClientError
+from thermoworks_cloud import AuthFactory, ThermoworksCloud, ResourceNotFoundError
+from thermoworks_cloud import AuthenticationError  # noqa: F401  # public re-export (probe.AuthenticationError used by callers/tests)
+from aiohttp import ClientSession
 
 import asyncio
 import logging

@@ -4,4 +4,4 @@ metrics_bp = Blueprint(
     "metrics_bp", __name__, template_folder="templates", static_folder="static", url_prefix="/metrics"
 )
 
-from . import routes
+from . import routes  # noqa: F401  # side-effect import: registers blueprint routes

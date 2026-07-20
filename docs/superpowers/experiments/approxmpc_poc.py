@@ -11,7 +11,7 @@ net (learns MPC_Q - Q_ss(d) with the analytic offset-free feedforward added
 back). Reports band and per-step time vs the full MPC.
 """
 
-import warnings, sys, time, os, shutil
+import warnings, sys, time, os
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")

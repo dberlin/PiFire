@@ -20,9 +20,9 @@ Profile Mapping:
 - Night Mode: Very dim amber glow
 """
 
+import copy
 import logging
 import requests
-import json
 import time
 
 # Color definitions for WLED profiles (RGB values)
@@ -77,7 +77,13 @@ DEFAULT_PROFILE_NUMBERS = {
     "probe_alarm": 8,
     "low_pellets": 9,
     "timer_done": 10,
-    "error": 11,
+    # Keyed "error_fault" (not "error") to match the WLED_PROFILE_DEFINITIONS
+    # entry below and the real app settings default
+    # (common/defaults.py:services["wled"]["profile_numbers"]) -- previously
+    # this was "error", which never matched either of those, so the error
+    # preset was silently never pushed and any user override of it was
+    # silently ignored. See get_profile_number_for_event() below.
+    "error_fault": 11,
     "night_mode": 12,
 }
 
@@ -302,6 +308,14 @@ class WLEDProfileManager:
 
     def _apply_user_customizations(self, profile_name, profile_data):
         """Apply user customizations to profile data."""
+        # Deep-copy defensively: profile_data's nested "seg"/"col" structures
+        # may be the very same objects living inside the module-level
+        # WLED_PROFILE_DEFINITIONS constant (callers commonly build it via a
+        # shallow .copy()). Mutating those nested dicts in place would
+        # corrupt the shared constant for the lifetime of the process; a
+        # deep copy here means this method only ever mutates its own data.
+        profile_data = copy.deepcopy(profile_data)
+
         wled_config = self.settings.get("notify_services", {}).get("wled", {})
         suggested_config = wled_config.get("suggested_config", {})
 
@@ -476,14 +490,14 @@ class WLEDProfileManager:
             "Pellet_Level_Low": "low_pellets",
             "Grill_Warning": "low_pellets",
             "Recipe_Step_Message": "target_reached",
-            "Grill_Error": "error",
-            "Control_Process_Stopped": "error",
+            "Grill_Error": "error_fault",
+            "Control_Process_Stopped": "error_fault",
         }
 
         # Handle events that contain certain keywords
         for keyword, profile_state in event_mapping.items():
             if keyword in event:
-                return self.profile_numbers.get(profile_state, self.profile_numbers["error"])
+                return self.profile_numbers.get(profile_state, self.profile_numbers["error_fault"])
 
         # Default fallback
-        return self.profile_numbers.get("error", self.profile_numbers["idle"])
+        return self.profile_numbers.get("error_fault", self.profile_numbers["idle"])

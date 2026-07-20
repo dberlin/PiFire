@@ -37,13 +37,11 @@ import pytest
 
 import common.datastore_accessors as _ccommon
 from common.common import WriteKind
-from controller.runtime.runner import NormalizedOutput
 
 from tests.characterization.harness import run_mode
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.fakes.probes import FakeProbes
 from tests.fakes.grill import FakeGrillPlatform
-from tests.fakes.runner import FakeControllerRunner
 
 
 @pytest.fixture
