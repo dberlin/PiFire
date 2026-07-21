@@ -9,14 +9,17 @@
                           test_fixed_base_drivers_load.py. This file drives
                           each one's actual status-render path (splash/text/
                           current/network/clear), which that file does not.
-  dsi_800x480t.py     -- display.base_flex.DisplayBase subclass (a "flex"
+  dsi_base.py         -- display.base_flex.DisplayBase subclass (a "flex"
                           driver over a real pygame framebuffer surface,
                           faked here exactly like test_fixed_drivers_methods
                           .py's ili9341f/protoflex coverage: construct with
                           the multiprocessing display worker and threading
                           menu timers patched to no-ops, then drive the
                           render/input methods directly rather than running
-                          the real infinite _display_loop).
+                          the real infinite _display_loop). This is the
+                          resolution-agnostic engine behind the dsi_800x480t/
+                          dsi_1024x600t/dsi_1024x768t/dsi_1280x720t stubs;
+                          this file exercises it via the 800x480 JSON layout.
   qtapp.py            -- the Qt Quick display-process host: build_engine/
                           build_backend/_fetch/_make_backlight/DummyBacklight
                           /bind_backend_power, driven directly under
@@ -25,7 +28,7 @@
 
 None of the four pygame drivers spawn a real background thread/process
 during these tests: `threading.Thread` (all four) and `multiprocessing.
-Process` (dsi_800x480t only) are patched to no-ops for every construction,
+Process` (dsi_base only) are patched to no-ops for every construction,
 mirroring test_fixed_base_drivers_load.py / test_fixed_drivers_methods.py's
 `_no_bg_threads`/`_no_multiprocessing` guards, so no infinite `while True`
 loop ever actually starts. `os.system` is blocked (raises AssertionError) for
@@ -52,7 +55,7 @@ import pytest
 from PIL import ImageDraw
 from PySide6.QtGui import QGuiApplication
 
-import display.dsi_800x480t as dsi_mod
+import display.dsi_base as dsi_mod
 import display.pygame_240x320 as mod_320
 import display.pygame_240x320b as mod_320b
 import display.pygame_64x128 as mod_64
@@ -473,7 +476,7 @@ def test_pygame_240x320b_event_detect_opens_menu_and_renders_it(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# dsi_800x480t.py -- display.base_flex.DisplayBase subclass ("flex" driver).
+# dsi_base.py -- display.base_flex.DisplayBase subclass ("flex" driver).
 # Mirrors test_fixed_drivers_methods.py's ili9341f/protoflex coverage
 # pattern: construct with the multiprocessing display worker patched to a
 # no-op, then drive the render/input methods directly against a real pygame
