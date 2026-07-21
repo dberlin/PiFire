@@ -55,7 +55,17 @@ dev = [
 branch = true
 concurrency = ["thread"]          # web/ui tests run the app in a background thread; without this the route code reads as 0%
 source = ["blueprints", "common", "controller", "display", "file_mgmt", "grillplat", "notify", "probes"]
-omit = ["tests/*", "*/__pycache__/*", "*/.venv/*", "*/venv/*"]
+omit = [
+    "tests/*",
+    "*/__pycache__/*",
+    "*/.venv/*",
+    "*/venv/*",
+    # BLE-only probes: require bluepy + real Bluetooth hardware to exercise
+    # meaningfully; deferred from the coverage floor by decision 2026-07-21.
+    "probes/bt_meater.py",
+    "probes/bt_meater_exp.py",
+    "probes/bt_ibbq.py",
+]
 
 [tool.coverage.report]
 show_missing = true

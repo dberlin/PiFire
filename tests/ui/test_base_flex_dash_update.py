@@ -1,7 +1,7 @@
 """
 Tests for Task 24: wiring live data + accent into the new "ember" pygame
 flexobjects (probe_card, gauge_ember, system_card, duty_pill, hopper_vertical,
-header_bar, button_row) in display/base_flex.py.
+header_bar, button_row) in display/_base_flex.py.
 
 The bespoke 1280x720 ember layout JSON does not exist yet (Task 25), so this
 builds a minimal in-memory layout containing just the new-type objects (using
@@ -14,7 +14,7 @@ directly as staticmethods, independent of the DisplayBase plumbing.
 import json
 import os
 
-from display.base_flex import DisplayBase, NEW_EMBER_FLEX_TYPES
+from display._base_flex import DisplayBase, NEW_EMBER_FLEX_TYPES
 from display.flexobject import resolve_accent
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

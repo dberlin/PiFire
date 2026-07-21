@@ -57,7 +57,7 @@ def _scale_obj(obj, scale, xoff, yoff):
 
 def _flex_obj(name, obj_type, position, size, **extra):
     """Common FlexObject schema keys every dash object needs (see
-    display/flexobject.py::FlexObject and display/base_flex.py::_draw_objects,
+    display/flexobject.py::FlexObject and display/_base_flex.py::_draw_objects,
     both of which access 'animation_enabled'/'glow' directly)."""
     obj = {
         "name": name,
@@ -78,7 +78,7 @@ def _flex_obj(name, obj_type, position, size, **extra):
 def _dashboard_1280x720():
     """Bespoke ember-style profile_1.dash for the 1280x720 DSI display (Task 25),
     built from the new flexobject types (Tasks 17-23) wired up by
-    display/base_flex.py (Task 24). Decoupled from the 800x480 scaler used by
+    display/_base_flex.py (Task 24). Decoupled from the 800x480 scaler used by
     every other resolution/profile.
 
     Layout (see .superpowers/sdd/progress.md "pygame flexobject data
@@ -92,9 +92,9 @@ def _dashboard_1280x720():
         pills, and the hopper_vertical pellet-level card.
 
     'cook_time' uses the horizontal 'cook_time_bar' widget (label left, value
-    right, spanning the full gauge width); base_flex._cook_time_data() feeds it
-    {'label': ..., 'value': ...} (see display/base_flex.py). When the lid opens
-    base_flex feeds a 'Lid Pause' countdown and the bar recolors red, so the
+    right, spanning the full gauge width); _base_flex._cook_time_data() feeds it
+    {'label': ..., 'value': ...} (see display/_base_flex.py). When the lid opens
+    _base_flex feeds a 'Lid Pause' countdown and the bar recolors red, so the
     ember dashboards need no separate lid_alert overlay. The existing 'timer' type
     (TimerStatus) does not fit - it reads data['seconds'] and only shows a
     live countdown ("Ns"), so it can't render the pre-formatted mm:ss/H:MM:SS
@@ -189,7 +189,7 @@ def _dashboard_1024x600():
     'cook_time_bar' widget (label left, value right) instead of the vertical
     'duty_pill' - spanning the full gauge width as a stadium-shaped pill
     distorts the stacked pill text, so this bar renders on an aspect-matched
-    canvas. When the lid opens the bar recolors red (base_flex feeds a 'Lid
+    canvas. When the lid opens the bar recolors red (_base_flex feeds a 'Lid
     Pause' countdown); there is no separate lid_alert overlay.
     """
     dash = [

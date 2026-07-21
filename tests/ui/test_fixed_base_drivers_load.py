@@ -1,4 +1,4 @@
-"""Task 6 (Phase B): prove the base_240x240/base_240x320/base_320x480 shims
+"""Task 6 (Phase B): prove the _base_240x240/_base_240x320/_base_320x480 shims
 are transparent to every one of the 16 legacy display driver subclasses, and
 that the wizard's display driver manifest still resolves all of them.
 
@@ -23,14 +23,14 @@ not just the encoder ones. `os.system` is neutralized too, mirroring
 `sudo reboot` -- see the repo's history of real reboot incidents from
 unmocked display `os.system` calls.
 
-IMPORTANT ordering hazard: `display.base_fixed` (and therefore PIL/qrcode/
+IMPORTANT ordering hazard: `display._base_fixed` (and therefore PIL/qrcode/
 common, which it imports at module scope) must already be imported for real
 BEFORE any hardware-stub overlay is installed. If a driver is imported for
 the first time while sys.modules already contains the fake luma/pyky040/etc.
 entries, `_init_background`'s call to `PIL.Image.open` on a perfectly valid
 JPEG asset intermittently raises `UnidentifiedImageError` (empirically
 confirmed while writing this test: instantiating st7789e first through the
-overlay failed there 100% of the time; pre-warming `display.base_fixed`
+overlay failed there 100% of the time; pre-warming `display._base_fixed`
 before installing any overlay fixed it every time). Pre-warming below avoids
 that whole hazard rather than chasing it further.
 """
@@ -44,7 +44,7 @@ from unittest import mock
 
 import pytest
 
-import display.base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see module docstring
+import display._base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see module docstring
 
 from tests.conftest import REPO_BASE, load_wizard_manifest
 
@@ -61,7 +61,7 @@ EXPECTED_DIMENSIONS = {
 }
 
 # Expected min_transition_delay per shim (Task 5): the one place the unified
-# base_fixed loop still varies per resolution.
+# _base_fixed loop still varies per resolution.
 EXPECTED_DELAY = {
     "240x240": 1.0,
     "240x320": 0.1,
