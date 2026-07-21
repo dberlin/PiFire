@@ -9,7 +9,7 @@ notably st7789e losing its slow-panel post-transition settle delay). Phase C
 deliberately keeps this module -- see base_240x240.py/base_240x320.py for the
 other two resolution profiles."""
 
-from display.base_fixed import DisplayBase as _Base
+from display.base_fixed import _DisplayBase as _Base
 
 
 class DisplayBase(_Base):

@@ -1,7 +1,7 @@
 """Compat shim: 240x320 fixed display base. Real implementation in base_fixed.
 Kept intentionally as the resolution-profile layer; see base_320x480.py."""
 
-from display.base_fixed import DisplayBase as _Base
+from display.base_fixed import _DisplayBase as _Base
 
 
 class DisplayBase(_Base):
