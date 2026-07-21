@@ -800,31 +800,28 @@ def test_hopper_status_full_level():
     # Note: the bar-clamp branch (`current_level_adjusted > 360`) is
     # unreachable for any level within the documented 0-100 range, since
     # int((level/100)*320)+40 tops out at exactly 360 when level == 100.
-    # A level above 100 instead crashes with IndexError in the
-    # color_levels lookup (`color_levels[max(color_index - 1, 0)]`) - see
-    # test_hopper_status_out_of_range_level_raises_index_error below, which
-    # pins that latent bug with a runnable characterization test
-    # (production code is not modified per task constraints).
     obj = HopperStatus("hopper_status", _hopper_status_obj(100), BG())
     assert obj.get_object_canvas().size == (400, 200)
 
 
-def test_hopper_status_out_of_range_level_raises_index_error():
-    """Pins a latent bug: HopperStatus does not clamp data['level'] to 0-100.
+def test_hopper_status_out_of_range_level_clamps_to_top_color():
+    """FIXED: HopperStatus did not clamp data['level'] to 0-100.
 
     `color_index = int(level // (100/len(color_levels)))` then indexes
     `color_levels[max(color_index-1, 0)]`. With the 4-entry color_levels
     used by `_hopper_status_obj` (valid indices 0-3), level=150 gives
-    color_index = int(150 // 25) = 6, so the lookup is
-    color_levels[max(6-1, 0)] == color_levels[5], which is out of range
-    and raises IndexError instead of clamping/drawing.
+    color_index = int(150 // 25) = 6, so the lookup was
+    color_levels[max(6-1, 0)] == color_levels[5], out of range, and raised
+    IndexError instead of clamping/drawing.
 
-    This test PINS the current (buggy) behavior. If HopperStatus is later
-    fixed to clamp out-of-range levels instead of crashing, this test
-    should be updated/flipped to assert the clamped, non-crashing result.
+    The index is now also clamped from above
+    (`min(..., len(color_levels) - 1)`), so an out-of-range level renders
+    using the nearest valid (topmost) color level instead of crashing. In-
+    range behavior (test_hopper_status_zero/mid/full_level above) is
+    unchanged.
     """
-    with pytest.raises(IndexError):
-        HopperStatus("hopper_status", _hopper_status_obj(150), BG())
+    obj = HopperStatus("hopper_status", _hopper_status_obj(150), BG())
+    assert obj.get_object_canvas().size == (400, 200)
 
 
 # ---------------------------------------------------------------------------

@@ -2127,7 +2127,9 @@ class HopperStatus(FlexObject):
 
         color_index = int(self.objectData["data"]["level"] // (100 / len(self.objectData["color_levels"])))
         # print(f'color_index = {color_index-1} level={self.objectData["data"]["level"]}')
-        fg_color = self.objectData["color_levels"][max(color_index - 1, 0)]
+        fg_color = self.objectData["color_levels"][
+            min(max(color_index - 1, 0), len(self.objectData["color_levels"]) - 1)
+        ]
 
         # Create canvas & drawing object
         canvas = Image.new("RGBA", size)
