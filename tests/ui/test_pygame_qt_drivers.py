@@ -40,6 +40,7 @@ modules call the removed Pillow `ImageFont.getsize()` API (all use
 `font.getbbox()`), so no font-fallback fixture or pinned-bug test is needed.
 """
 
+import contextlib
 import multiprocessing
 import threading
 import time
@@ -48,6 +49,7 @@ from unittest import mock
 
 import pygame
 import pytest
+from PIL import ImageDraw
 from PySide6.QtGui import QGuiApplication
 
 import display.dsi_800x480t as dsi_mod
@@ -96,22 +98,36 @@ def test_pygame_64x128_draw_methods_run_without_error():
     pygame.init()
     try:
         d.display_surface = pygame.display.set_mode(size=(d.WIDTH, d.HEIGHT), flags=pygame.SHOWN)
+        blank = pygame.image.tobytes(d.display_surface, "RGB")
 
         d._display_splash()
+        after_splash = pygame.image.tobytes(d.display_surface, "RGB")
 
         d.display_data = "225"
         d._display_text()
+        after_text = pygame.image.tobytes(d.display_surface, "RGB")
 
         d._display_current(_IN_DATA_64, _STATUS_64)
         assert d.units == "F"
+        after_current = pygame.image.tobytes(d.display_surface, "RGB")
 
         # "nothing lit up, no notification" branches.
         status_off = dict(_STATUS_64, outpins={"fan": False, "igniter": False, "auger": False}, notify_data=[])
         d._display_current(_IN_DATA_64, status_off)
 
         d._display_network("192.168.1.50")  # real qrcode.make(...) call
+        after_network = pygame.image.tobytes(d.display_surface, "RGB")
 
         d._display_clear()
+        after_clear = pygame.image.tobytes(d.display_surface, "RGB")
+
+        # Real-draw proof: each stage's fill+blit actually changed the real
+        # surface's pixels, not just "didn't raise".
+        assert after_splash != blank, "_display_splash did not draw anything"
+        assert after_text != after_splash, "_display_text did not draw anything new"
+        assert after_current != after_text, "_display_current did not draw anything new"
+        assert after_network != after_current, "_display_network (QR code) did not draw anything new"
+        assert after_clear != after_network, "_display_clear did not draw anything"
     finally:
         pygame.quit()
 
@@ -148,6 +164,47 @@ def _instantiate_fixed(mod, **overrides):
     ):
         mock_thread.return_value.start = lambda: None
         return mod.Display(**kwargs)
+
+
+@contextlib.contextmanager
+def _fixed_driver_guarded(mod, **overrides):
+    """Constructs a base_fixed-family driver (pygame_240x320/240x320b) with
+    `os.system` kept neutralized as a recording no-op for the FULL body of
+    the `with` block -- not just construction.
+
+    `base_fixed._menu_display`'s "Power_" branch calls
+    `os.system("... sudo reboot ...")` / `os.system("... shutdown ...")`
+    UNCONDITIONALLY, with no `real_hardware` gate (unlike base_flex's
+    equivalent in `_command_handler`). Any test that goes on to call
+    `_event_detect()` / `_display_loop()` / otherwise drive menu navigation
+    on one of these drivers must keep `os.system` patched for as long as it
+    can reach `_menu_display` -- constructing under the patch and then
+    letting it expire before the real risk (menu navigation) happens is
+    avoidance-by-design, not a guard. Use `_instantiate_fixed` instead for
+    tests that never touch `_event_detect`/`_display_loop`/menu state."""
+    kwargs = dict(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
+    kwargs.update(overrides)
+    with (
+        mock.patch.object(threading, "Thread") as mock_thread,
+        mock.patch("os.system") as mock_os_system,
+    ):
+        mock_thread.return_value.start = lambda: None
+        d = mod.Display(**kwargs)
+        yield d, mock_os_system
+
+
+def _assert_no_reboot_or_shutdown(mock_os_system):
+    """Defense-in-depth proof for the `_fixed_driver_guarded` tests: even
+    though none of them intentionally select a menu "Power_" item, confirm
+    the neutralized `os.system` was never actually asked to reboot, shut
+    down, or power off the machine running the test suite."""
+    dangerous_terms = ("reboot", "shutdown", "poweroff", "power off")
+    for call in mock_os_system.call_args_list:
+        command = str(call.args[0]) if call.args else ""
+        lowered = command.lower()
+        assert not any(term in lowered for term in dangerous_terms), (
+            f"os.system was called with a reboot/shutdown-shaped command: {command!r}"
+        )
 
 
 def _in_data_320(food_count=2):
@@ -190,28 +247,56 @@ def _drive_fixed_status_render(d):
     subclasses: splash, text, several _display_current variants (hitting the
     food-probe-count / mode / recipe / notify branches), network, clear. Each
     call reaches the driver's own `_display_canvas`/`_display_clear`
-    override."""
+    override.
+
+    Returns a dict of {stage_name: raw RGB bytes of `d.display_surface`
+    captured right after that stage's draw call}, so callers can assert the
+    driver actually painted something different at each stage rather than
+    merely "didn't raise" -- `_display_canvas` fills white then blits the
+    freshly-rendered PIL image, and `_display_clear` fills solid black, so a
+    real draw is expected to change the surface's bytes every time."""
     pygame.init()
+    snapshots = {}
     try:
         d.display_surface = pygame.display.set_mode(size=(d.WIDTH, d.HEIGHT), flags=pygame.SHOWN)
+        snapshots["blank"] = pygame.image.tobytes(d.display_surface, "RGB")
 
         d._display_splash()
+        snapshots["splash"] = pygame.image.tobytes(d.display_surface, "RGB")
 
         d.display_data = "225"
         d._display_text()
+        snapshots["text"] = pygame.image.tobytes(d.display_surface, "RGB")
 
         d._display_current(_in_data_320(2), _status_320(mode="Hold"))
+        snapshots["current_1"] = pygame.image.tobytes(d.display_surface, "RGB")
         d._display_current(_in_data_320(1), _status_320(mode="Smoke", p_mode=3, recipe=True))
         d._display_current(_in_data_320(0), _status_320(mode="Startup", recipe_paused=True))
         d._display_current(
             _in_data_320(2), _status_320(mode="Hold", lid_open_detected=True, lid_open_endtime=1e15, s_plus=True)
         )
+        snapshots["current_4"] = pygame.image.tobytes(d.display_surface, "RGB")
 
         d._display_network("192.168.1.50")
+        snapshots["network"] = pygame.image.tobytes(d.display_surface, "RGB")
 
         d._display_clear()
+        snapshots["clear"] = pygame.image.tobytes(d.display_surface, "RGB")
     finally:
         pygame.quit()
+    return snapshots
+
+
+def _assert_fixed_status_render_drew_something(snapshots):
+    """Concrete "it actually drew" proof for `_drive_fixed_status_render`'s
+    caller tests: each named stage must differ from the previous one --
+    splash overwrites the blank surface, the first _display_current call
+    overwrites splash, the network QR code overwrites the last status frame,
+    and clear (solid black fill) overwrites the QR code."""
+    assert snapshots["splash"] != snapshots["blank"], "_display_splash did not draw anything"
+    assert snapshots["current_1"] != snapshots["splash"], "_display_current did not draw anything new"
+    assert snapshots["network"] != snapshots["current_4"], "_display_network (QR code) did not draw anything new"
+    assert snapshots["clear"] != snapshots["network"], "_display_clear did not draw anything"
 
 
 def test_pygame_240x320_constructs():
@@ -222,7 +307,8 @@ def test_pygame_240x320_constructs():
 
 def test_pygame_240x320_draw_status_render_path():
     d = _instantiate_fixed(mod_320)
-    _drive_fixed_status_render(d)
+    snapshots = _drive_fixed_status_render(d)
+    _assert_fixed_status_render_drew_something(snapshots)
 
 
 def _stop_loop_after(n_events, on_event=None):
@@ -256,27 +342,28 @@ def test_pygame_240x320_display_loop_drives_each_command_branch(monkeypatch):
     # cannot reach (that helper calls the draw methods directly, not the
     # loop that dispatches to them). `pygame.time.delay` is patched to a
     # no-op so the loop's real `splash` branch doesn't cost 3 real seconds.
-    d = _instantiate_fixed(mod_320)
-    monkeypatch.setattr(pygame.time, "delay", lambda ms: None)
+    with _fixed_driver_guarded(mod_320) as (d, mock_os_system):
+        monkeypatch.setattr(pygame.time, "delay", lambda ms: None)
 
-    def on_event(n):
-        if n == 2:
-            d.display_command = "text"
-            d.display_data = "225"
-        elif n == 3:
-            d.display_command = "network"
-        elif n == 4:
-            d.display_timeout = None
-            d.display_active = True
-            d.in_data = _in_data_320(1)
-            d.status_data = _status_320()
+        def on_event(n):
+            if n == 2:
+                d.display_command = "text"
+                d.display_data = "225"
+            elif n == 3:
+                d.display_command = "network"
+            elif n == 4:
+                d.display_timeout = None
+                d.display_active = True
+                d.in_data = _in_data_320(1)
+                d.status_data = _status_320()
 
-    monkeypatch.setattr(pygame.event, "get", _stop_loop_after(5, on_event))
-    try:
-        with pytest.raises(RuntimeError, match="loop-guard-stop"):
-            d._display_loop()
-    finally:
-        pygame.quit()
+        monkeypatch.setattr(pygame.event, "get", _stop_loop_after(5, on_event))
+        try:
+            with pytest.raises(RuntimeError, match="loop-guard-stop"):
+                d._display_loop()
+        finally:
+            pygame.quit()
+        _assert_no_reboot_or_shutdown(mock_os_system)
 
 
 def test_pygame_240x320b_constructs_with_menu():
@@ -288,7 +375,8 @@ def test_pygame_240x320b_constructs_with_menu():
 
 def test_pygame_240x320b_draw_status_render_path():
     d = _instantiate_fixed(mod_320b)
-    _drive_fixed_status_render(d)
+    snapshots = _drive_fixed_status_render(d)
+    _assert_fixed_status_render_drew_something(snapshots)
 
 
 def test_pygame_240x320b_display_loop_drives_each_command_and_menu_timeout_branch(monkeypatch):
@@ -297,35 +385,37 @@ def test_pygame_240x320b_display_loop_drives_each_command_and_menu_timeout_branc
     # the dummy driver) and adds the `_event_detect()` call plus the
     # menu-inactivity-timeout branch (menu_active and > 5s idle -> closes the
     # menu, and clears the display if nothing else is active).
-    d = _instantiate_fixed(mod_320b)
-    monkeypatch.setattr(pygame.time, "delay", lambda ms: None)
+    with _fixed_driver_guarded(mod_320b) as (d, mock_os_system):
+        monkeypatch.setattr(pygame.time, "delay", lambda ms: None)
 
-    def on_event(n):
-        if n == 2:
-            d.display_command = "text"
-            d.display_data = "225"
-        elif n == 3:
-            d.display_command = "network"
-        elif n == 4:
-            # menu idle-timeout branch, with display_active False so it also
-            # re-arms display_command = "clear" for the next iteration.
-            d.display_timeout = None
-            d.menu_active = True
-            d.menu_time = time.time() - 10
-            d.display_active = False
-        elif n == 6:
-            d.menu_active = False
-            d.display_timeout = None
-            d.display_active = True
-            d.in_data = _in_data_320(1)
-            d.status_data = _status_320()
+        def on_event(n):
+            if n == 2:
+                d.display_command = "text"
+                d.display_data = "225"
+            elif n == 3:
+                d.display_command = "network"
+            elif n == 4:
+                # menu idle-timeout branch, with display_active False so it
+                # also re-arms display_command = "clear" for the next
+                # iteration.
+                d.display_timeout = None
+                d.menu_active = True
+                d.menu_time = time.time() - 10
+                d.display_active = False
+            elif n == 6:
+                d.menu_active = False
+                d.display_timeout = None
+                d.display_active = True
+                d.in_data = _in_data_320(1)
+                d.status_data = _status_320()
 
-    monkeypatch.setattr(pygame.event, "get", _stop_loop_after(7, on_event))
-    try:
-        with pytest.raises(RuntimeError, match="loop-guard-stop"):
-            d._display_loop()
-    finally:
-        pygame.quit()
+        monkeypatch.setattr(pygame.event, "get", _stop_loop_after(7, on_event))
+        try:
+            with pytest.raises(RuntimeError, match="loop-guard-stop"):
+                d._display_loop()
+        finally:
+            pygame.quit()
+        _assert_no_reboot_or_shutdown(mock_os_system)
 
 
 def _fake_control_pair(initial_mode=Mode.STOP):
@@ -346,31 +436,40 @@ def _fake_control_pair(initial_mode=Mode.STOP):
 
 
 def test_pygame_240x320b_event_detect_unknown_command_is_a_noop():
-    d = _instantiate_fixed(mod_320b)
-    d.input_event = "GARBAGE"
-    d._event_detect()  # not UP/DOWN/ENTER -> early return; input_event is left as-is
-    assert d.input_event == "GARBAGE"
-    assert d.menu_active is False
-    assert d.display_timeout is None
+    with _fixed_driver_guarded(mod_320b) as (d, mock_os_system):
+        d.input_event = "GARBAGE"
+        d._event_detect()  # not UP/DOWN/ENTER -> early return; input_event is left as-is
+        assert d.input_event == "GARBAGE"
+        assert d.menu_active is False
+        assert d.display_timeout is None
+        _assert_no_reboot_or_shutdown(mock_os_system)
 
 
 def test_pygame_240x320b_event_detect_opens_menu_and_renders_it(monkeypatch):
     import display.base_fixed as base_fixed_mod
 
-    d = _instantiate_fixed(mod_320b)
-    _state, read_control, write_control, _calls = _fake_control_pair(Mode.STOP)
-    monkeypatch.setattr(base_fixed_mod, "read_control", read_control)
-    monkeypatch.setattr(base_fixed_mod, "write_control", write_control)
+    with _fixed_driver_guarded(mod_320b) as (d, mock_os_system):
+        _state, read_control, write_control, _calls = _fake_control_pair(Mode.STOP)
+        monkeypatch.setattr(base_fixed_mod, "read_control", read_control)
+        monkeypatch.setattr(base_fixed_mod, "write_control", write_control)
 
-    pygame.init()
-    try:
-        d.display_surface = pygame.display.set_mode(size=(d.WIDTH, d.HEIGHT), flags=pygame.SHOWN)
-        d.input_event = "ENTER"
-        d._event_detect()  # dispatches to base_fixed._menu_display("ENTER"), draws via our _display_canvas
-        assert d.menu_active is True
-        assert d.menu["current"]["mode"] == "inactive"
-    finally:
-        pygame.quit()
+        pygame.init()
+        try:
+            d.display_surface = pygame.display.set_mode(size=(d.WIDTH, d.HEIGHT), flags=pygame.SHOWN)
+            d.input_event = "ENTER"
+            d._event_detect()  # dispatches to base_fixed._menu_display("ENTER"), draws via our _display_canvas
+            assert d.menu_active is True
+            assert d.menu["current"]["mode"] == "inactive"
+        finally:
+            pygame.quit()
+
+        # Defense-in-depth: base_fixed._menu_display's "Power_" branch calls
+        # os.system(...reboot/shutdown...) UNCONDITIONALLY, no real_hardware
+        # gate. This test only opens the menu (mode "none" -> "inactive"),
+        # never navigates to and selects a "Power_" item, so os.system must
+        # not have been touched at all -- not merely "not reboot-shaped".
+        mock_os_system.assert_not_called()
+        _assert_no_reboot_or_shutdown(mock_os_system)
 
 
 # ---------------------------------------------------------------------------
@@ -502,15 +601,28 @@ def test_dsi_800x480t_canvas_render_path_against_real_surface(monkeypatch):
     pygame.init()
     try:
         d.display_surface = pygame.display.set_mode(size=(d.WIDTH, d.HEIGHT), flags=pygame.SHOWN)
+        blank = pygame.image.tobytes(d.display_surface, "RGB")
+
         with mock.patch.object(pygame.time, "delay"):
             d._display_splash()  # base_flex generic splash -> our no-arg _display_canvas()
+            after_splash = pygame.image.tobytes(d.display_surface, "RGB")
             d._display_clear()  # _sleep_display + fill + update + canvas reset
+            after_clear = pygame.image.tobytes(d.display_surface, "RGB")
 
         d._display_background()
         d._capture_background()
         assert d.menu_background is not None
         d._display_menu_background()
         d._display_canvas()
+        after_menu_background = pygame.image.tobytes(d.display_surface, "RGB")
+
+        # Each step must have actually repainted the real surface, not just
+        # avoided raising: splash blits the splash art, clear does a solid
+        # black fill, and the background/menu-background/canvas sequence
+        # blits the (blurred) background image -- three distinct real draws.
+        assert after_splash != blank, "_display_splash did not draw anything onto the real surface"
+        assert after_clear != after_splash, "_display_clear did not repaint the surface"
+        assert after_menu_background != after_clear, "_display_menu_background/_display_canvas did not draw anything"
     finally:
         pygame.quit()
 
@@ -520,7 +632,23 @@ def test_dsi_800x480t_canvas_to_surface_rotates_for_non_zero_rotation(monkeypatc
     pygame.init()
     try:
         d.display_surface = pygame.display.set_mode(size=(d.WIDTH, d.HEIGHT), flags=pygame.SHOWN)
+
+        # Paint an asymmetric marker into the top-left corner of the source
+        # canvas. A 180-degree rotation leaves DIMENSIONS unchanged (unlike
+        # 90/270, already covered by the profile_2 test above), so the only
+        # way to prove the rotate(expand=True) branch actually ran -- rather
+        # than falling through to the `else: canvas.copy()` branch -- is to
+        # check ORIENTATION: the marker must have moved to the bottom-right.
+        marker_size = 20
+        ImageDraw.Draw(d.display_canvas).rectangle([0, 0, marker_size - 1, marker_size - 1], fill=(255, 0, 0, 255))
+
         d._canvas_to_surface()  # self.ROTATION == 180 -> rotate(expand=True) branch
+
+        assert d.transform_canvas.size == d.display_canvas.size  # 180 degrees: dimensions unchanged
+        top_left = d.transform_canvas.getpixel((0, 0))
+        bottom_right = d.transform_canvas.getpixel((d.WIDTH - 1, d.HEIGHT - 1))
+        assert top_left != (255, 0, 0, 255), "marker should have rotated away from the top-left corner"
+        assert bottom_right == (255, 0, 0, 255), "180-degree rotation should move the marker to the bottom-right"
     finally:
         pygame.quit()
 
