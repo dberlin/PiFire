@@ -5,10 +5,11 @@ module can be reloaded and exercised without real SPI hardware. Covers:
   - RTDDevice register decode -> a known real-world resistance/temperature
     (PT1000 @ 100C, IEC 60751 standard value).
   - The fault-bit branch (get_fault()'s per-bit debug logging).
-  - A pinned latent bug: RTDDevice.resistance's except-handler references
+  - Fixed bug: RTDDevice.resistance's except-handler used to reference
     self.device_info, which RTDDevice never sets (only ReadProbes does), so
-    an SPI read failure raises AttributeError instead of degrading to
-    resistance=0 as the code intends.
+    an SPI read failure raised AttributeError instead of degrading to
+    resistance=0 as the code intends. Now logs via self.cs instead and
+    degrades gracefully.
   - ReadProbes._init_device's config parsing (defaults + overrides).
   - ReadProbes.read_all_ports (its own override, not the base one) across
     the primary/food/aux group-assignment branches, in both F and C units.
@@ -185,24 +186,34 @@ def test_get_status_returns_status_dict(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Pinned latent bug: resistance's except-handler itself raises AttributeError
+# Fixed bug: resistance's except-handler now degrades gracefully to 0
 # ---------------------------------------------------------------------------
 
 
-def test_resistance_error_path_raises_attributeerror_latent_bug(monkeypatch):
-    """PINNED BEHAVIOR (latent bug, not fixed here): RTDDevice.resistance's
-    except-handler logs via self.device_info['ports'][0], but RTDDevice never
-    sets self.device_info (only ReadProbes does -- RTDDevice is a plain
-    hardware-facing class). So when read_rtd() raises, the except block
-    itself raises AttributeError, masking the original SPI exception and
-    propagating out unhandled instead of degrading to resistance=0 as the
-    surrounding try/except clearly intends. This fires as early as
-    RTDDevice.__init__ -> config() -> the priming `self.temperature` read.
+def test_resistance_error_path_degrades_to_zero_and_logs(monkeypatch, caplog):
+    """FIXED: RTDDevice.resistance's except-handler used to log via
+    self.device_info['ports'][0], but RTDDevice never sets self.device_info
+    (only ReadProbes does -- RTDDevice is a plain hardware-facing class). So
+    when read_rtd() raised, the except block itself raised AttributeError,
+    masking the original SPI exception and propagating out unhandled instead
+    of degrading to resistance=0 as the surrounding try/except clearly
+    intends. The handler now logs using self.cs (an attribute RTDDevice
+    actually sets in __init__, and the same identifying attribute get_fault()
+    already logs with), and no longer references self.device_info.
+
+    This fires as early as RTDDevice.__init__ -> config() -> the priming
+    `self.temperature` read, so simply constructing the device with a
+    failing SPI exercises it -- confirm construction now succeeds (no
+    exception propagates), the device degrades to resistance=0, and the
+    fault is still logged.
     """
     probe = _load_probe(monkeypatch, msb=0x52, lsb=0x76, xfer_error_on=0x01)
 
-    with pytest.raises(AttributeError):
-        probe.RTDDevice(cs=1)
+    with caplog.at_level(logging.ERROR):
+        device = probe.RTDDevice(cs=1)
+
+    assert device.resistance == 0
+    assert "SPI CS 1" in caplog.text
 
 
 # ---------------------------------------------------------------------------
