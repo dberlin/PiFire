@@ -72,7 +72,7 @@ class Controller(ControllerBase):
         self.last_time = now
 
         if self.last_temp == -99:
-            self.last_temp == current
+            self.last_temp = current
             cycle_time = self.cycle_time
 
         # Pass inputs to the ControlSystem using Antecedent labels with Pythonic API
