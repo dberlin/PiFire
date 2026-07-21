@@ -28,7 +28,6 @@ import pygame
 from pygame import image as PyImage
 
 from PIL import ImageFilter
-from common.modes import Mode
 from display._base_flex import DisplayBase
 from display._flex_helpers import DummyBacklight  # noqa: F401  # re-exported for isinstance checks
 from pathlib import Path
@@ -166,56 +165,7 @@ class Display(DisplayBase):
             """ Normal display loop"""
             self._event_detect()
 
-            if self.display_active != None:
-                if self.display_timeout:
-                    if time.time() > self.display_timeout:
-                        self.display_timeout = None
-                        self.display_active = None
-                        self.display_init = True
-
-                if self.display_active == "home":
-                    if self.display_init:
-                        """ Initialize Home Screen """
-                        self._build_objects(self.background)
-                        self.display_init = False
-                        self.display_updated = True
-
-                elif self.display_active == "dash":
-                    if self.display_init:
-                        """ Initialize Dash Screen """
-                        if self.dash_object_list == []:
-                            self._init_dash()
-                        self._restore_dash_objects()
-                        self._update_dash_objects()
-                        self.display_init = False
-                        self.display_updated = True
-                    else:
-                        self._update_dash_objects()
-                    self._display_background()
-
-                elif self.display_active is not None:
-                    if (("menu_" in self.display_active) or ("input_" in self.display_active)) and self.display_init:
-                        """ Initialize Menu / Input Dialog """
-                        self._display_menu_background()
-                        self._build_objects(self.menu_background)
-                        self.display_init = False
-                        self.display_updated = True
-
-                """ Draw all objects. Perform any animations that need to be displayed. """
-                self._draw_objects()
-
-                if self.display_updated:
-                    self._display_canvas()
-                    self.display_update = False
-
-            else:
-                if self.display_init:
-                    self._display_clear()
-                    self.display_init = False
-                    if not self.HOME_ENABLED:
-                        self.display_active = "dash"
-                        self._init_dash()
-                        self.display_active = None
+            self._display_loop_render_step()
 
             self.clock.tick(self.FRAMERATE)
 
@@ -283,138 +233,17 @@ class Display(DisplayBase):
     def _debounce(self):
         pygame.time.delay(self.DEBOUNCE)
 
-    def _event_detect(self):
-        """
-        Called to detect input events from buttons, encoder, touch, etc.
-        """
-        user_input = self.input_event  # Save to variable to prevent spurious changes
-        self.command = None
-        if user_input:
-            if self.display_timeout is not None:
-                self.display_timeout = time.time() + self.TIMEOUT
-            if user_input not in ["UP", "DOWN", "ENTER", "TOUCH"]:
-                self.input_event = None
-                self.touch_pos = (0, 0)
-                return
-            elif user_input == "TOUCH" and self.input_touch:
-                self._process_touch()
-            elif user_input in ["UP", "DOWN", "ENTER"] and (self.input_button or self.input_encoder):
-                self._process_button()
-
-            # Clear the input event and touch_pos
-            self.input_event = None
-            self.touch_pos = (0, 0)
-
-    def _process_button(self):
-        self._debounce()
-        if self.display_active:
-            if "dash" in self.display_active:
-                """
-				Process dash button events
-				"""
-                self._capture_background()
-                self._store_dash_objects()
-                if self.status_data["mode"] == Mode.STOP:
-                    self.display_active = "menu_main"
-                elif self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE, Mode.SMOKE, Mode.HOLD, Mode.SHUTDOWN]:
-                    self.display_active = "menu_main_active_normal"
-                elif self.status_data["mode"] == Mode.MONITOR:
-                    self.display_active = "menu_main_active_monitor"
-                elif self.status_data["mode"] == Mode.RECIPE:
-                    self.display_active = "menu_main_active_recipe"
-                else:
-                    self.display_active = "menu_main"
-                self.display_init = True
-            elif "menu_" in self.display_active:
-                """
-				Process menu button events
-				"""
-                objectData = self.display_object_list[0].get_object_data()
-                button_selected = objectData["data"].get("button_selected", None)
-                button_list = objectData.get("button_list", [])
-
-                if button_selected is not None and button_list != []:
-                    if self.input_event == "UP":
-                        if button_selected <= 1:
-                            objectData["data"]["button_selected"] = (
-                                len(button_list) - 1
-                            )  # Note: button_list has extra close_menu entry at index 0
-                        else:
-                            objectData["data"]["button_selected"] -= 1
-                        self.display_object_list[0].update_object_data(updated_objectData=objectData)
-                    elif self.input_event == "DOWN":
-                        if len(button_list) - 1 > button_selected:
-                            objectData["data"]["button_selected"] += 1
-                        else:
-                            objectData["data"]["button_selected"] = 1
-                        self.display_object_list[0].update_object_data(updated_objectData=objectData)
-                    elif self.input_event == "ENTER":
-                        if "cmd_" in objectData["button_list"][button_selected]:
-                            self.command = objectData["button_list"][button_selected]
-                            if objectData.get("button_value", False):
-                                self.command_data = objectData["button_value"][button_selected]
-                            else:
-                                self.command_data = None
-                            self._command_handler()
-                        elif objectData["button_list"][button_selected] == "menu_close":
-                            self.display_active = "dash"
-                            self.display_init = True
-                        elif ("menu_" in objectData["button_list"][button_selected]) or (
-                            "input_" in objectData["button_list"][button_selected]
-                        ):
-                            if self.display_active == "dash":
-                                self._capture_background()
-                                self._store_dash_objects()
-                            if (
-                                ("input_" in self.display_active)
-                                and ("input_" in objectData["button_list"][button_selected])
-                                and ("button_value" in list(objectData.keys()))
-                            ):
-                                self.input_origin = objectData["button_value"][button_selected]
-                            self.display_active = objectData["button_list"][button_selected]
-                            self.display_init = True
-                        elif "button_" in button_selected:
-                            objectData["data"]["input"] = objectData["button_list"][button_selected].replace(
-                                "button_", ""
-                            )
-                            self.display_object_list[0].update_object_data(updated_objectData=objectData)
-                elif self.input_event == "ENTER" and button_selected == None:
-                    self.display_active = "dash"
-                    self.display_init = True
-            elif "input_" in self.display_active:
-                """
-				Process input button events
-				"""
-                objectData = self.display_object_list[0].get_object_data()
-                if self.input_event == "UP":
-                    objectData["data"]["input"] = "up"
-                    self.display_object_list[0].update_object_data(updated_objectData=objectData)
-                if self.input_event == "DOWN":
-                    objectData["data"]["input"] = "down"
-                    self.display_object_list[0].update_object_data(updated_objectData=objectData)
-                if self.input_event == "ENTER":
-                    self.command = objectData["command"]
-                    self._command_handler()
-                    self.display_active = "dash"
-                    self.display_init = True
-        else:
-            """
-			Wake the display & go to home/dash
-			"""
-            self._wake_display()
-            self.display_active = "home" if self.HOME_ENABLED else "dash"
-            self.display_init = True
-            self.display_timeout = time.time() + self.TIMEOUT
-
     def _process_touch(self):
+        """
+        Applies the DSI-specific rotation correction to self.touch_pos (real
+        touchscreen coordinates need it; ili9341f.py does not touch-transform
+        since it has no touch input implemented) then delegates to the shared
+        collision-detection loop on the base class.
+        """
         if self.display_active:
             """
 			Loop through current displayed objects and check for touch collisions
 			"""
-            # Draw the touch position on the canvas for debugging where self.display_canvas is the PIL Image object
-            # self.display_canvas.paste((255,0,0,255), (self.touch_pos[0], self.touch_pos[1], self.touch_pos[0] + 10, self.touch_pos[1] + 10))
-            # self._display_canvas()
-
             if self.ROTATION == 90:
                 self.touch_pos = (self.WIDTH - self.touch_pos[1], self.touch_pos[0])
             elif self.ROTATION == 180:
@@ -422,46 +251,10 @@ class Display(DisplayBase):
             elif self.ROTATION == 270:
                 self.touch_pos = (self.touch_pos[1], self.HEIGHT - self.touch_pos[0])
 
-            # Draw the touch position on the canvas for debugging
-            # self.display_canvas.paste((255,255,0,255), (self.touch_pos[0], self.touch_pos[1], self.touch_pos[0] + 10, self.touch_pos[1] + 10))
-            # self._display_canvas()
-
-            for pointer, object in enumerate(self.display_object_list):
-                objectData = object.get_object_data()
-                for index, touch_area in enumerate(objectData["touch_areas"]):
-                    if touch_area.collidepoint(self.touch_pos):
-                        # print(f'You touched {objectData["button_list"][index]}.')
-                        if "cmd_" in objectData["button_list"][index]:
-                            self.command = objectData["button_list"][index]
-                            if objectData.get("button_value", False):
-                                self.command_data = objectData["button_value"][index]
-                            else:
-                                self.command_data = None
-                            self._command_handler()
-                        elif objectData["button_list"][index] == "menu_close":
-                            self.display_active = "dash"
-                            self.display_init = True
-                        elif ("menu_" in objectData["button_list"][index]) or (
-                            "input_" in objectData["button_list"][index]
-                        ):
-                            if self.display_active == "dash":
-                                self._capture_background()
-                                self._store_dash_objects()
-                            if ("input_" in objectData["button_list"][index]) and (
-                                "button_value" in list(objectData.keys())
-                            ):
-                                self.input_origin = objectData["button_value"][index]
-                            self.display_active = objectData["button_list"][index]
-                            self.display_init = True
-                        elif "button_" in objectData["button_list"][index]:
-                            objectData["data"]["input"] = objectData["button_list"][index].replace("button_", "")
-                            self.display_object_list[pointer].update_object_data(updated_objectData=objectData)
+            self._process_touch_areas()
 
         else:
             """
 			Wake the display & go to home/dash
 			"""
-            self._wake_display()
-            self.display_active = "home" if self.HOME_ENABLED else "dash"
-            self.display_init = True
-            self.display_timeout = time.time() + self.TIMEOUT
+            self._wake_and_activate_display()
