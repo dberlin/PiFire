@@ -30,19 +30,8 @@ from pygame import image as PyImage
 from PIL import ImageFilter
 from common.modes import Mode
 from display.base_flex import DisplayBase
+from display._flex_helpers import DummyBacklight  # noqa: F401  # re-exported for isinstance checks
 from pathlib import Path
-
-"""
-Dummy backlight class for prototyping 
-"""
-
-
-class DummyBacklight:
-    def __init__(self):
-        self.brightness = 100
-        self.power = True
-        self.fade_duration = 1
-
 
 """
 Display class definition

@@ -26,18 +26,7 @@ from pyky040 import pyky040
 from PIL import ImageFilter
 from common.modes import Mode
 from display.base_flex import DisplayBase
-
-"""
-Dummy backlight class for prototyping 
-"""
-
-
-class DummyBacklight:
-    def __init__(self):
-        self.brightness = 100
-        self.power = True
-        self.fade_duration = 1
-
+from display._flex_helpers import DummyBacklight  # noqa: F401  # unused here; kept for import-compat
 
 """
 Display class definition
