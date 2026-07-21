@@ -329,9 +329,36 @@ def _settings_controller_card(settings, control, controller, event):
     )
 
 
-def _settings_cycle(settings, control, controller, event):
-    response = request.form
+_OPTION_COERCERS = {
+    "float": float,
+    "int": int,
+    "bool": lambda value: value == "true",
+    "numlist": float,
+}
 
+
+def _coerce_option_value(option_type, value):
+    coercer = _OPTION_COERCERS.get(option_type)
+    return coercer(value) if coercer else value
+
+
+def _apply_controller_config(response, settings, controller):
+    # Select Controller Type
+    selected = response["selectController"]
+    settings["controller"]["selected"] = selected
+    settings["controller"]["config"][selected] = {}
+    # Save Controller Configuration
+    for item, value in response.items():
+        if item.startswith("controller_config_"):
+            option_name = item.replace("controller_config_", "")
+            for option in controller["metadata"][selected]["config"]:
+                if option_name == option["option_name"]:
+                    settings["controller"]["config"][selected][option_name] = _coerce_option_value(
+                        option["option_type"], value
+                    )
+
+
+def _apply_cycle_data_config(response, settings):
     if is_not_blank(response, "pmode"):
         settings["cycle_data"]["PMode"] = int(response["pmode"])
     if is_not_blank(response, "holdcycletime"):
@@ -358,6 +385,9 @@ def _settings_cycle(settings, control, controller, event):
         settings["cycle_data"]["FanPidEnabled"] = True
     else:
         settings["cycle_data"]["FanPidEnabled"] = False
+
+
+def _apply_smoke_plus_config(response, settings):
     if is_not_blank(response, "sp_on_time"):
         settings["smoke_plus"]["on_time"] = int(response["sp_on_time"])
     if is_not_blank(response, "sp_off_time"):
@@ -376,6 +406,9 @@ def _settings_cycle(settings, control, controller, event):
         settings["smoke_plus"]["enabled"] = True
     else:
         settings["smoke_plus"]["enabled"] = False
+
+
+def _apply_keep_warm_config(response, settings):
     if is_not_blank(response, "keep_warm_temp"):
         settings["keep_warm"]["temp"] = int(response["keep_warm_temp"])
     if is_checked(response, "keep_warm_s_plus"):
@@ -383,27 +416,16 @@ def _settings_cycle(settings, control, controller, event):
     else:
         settings["keep_warm"]["s_plus"] = False
 
+
+def _settings_cycle(settings, control, controller, event):
+    response = request.form
+
+    _apply_cycle_data_config(response, settings)
+    _apply_smoke_plus_config(response, settings)
+    _apply_keep_warm_config(response, settings)
+
     if is_not_blank(response, "selectController"):
-        # Select Controller Type
-        selected = response["selectController"]
-        settings["controller"]["selected"] = selected
-        settings["controller"]["config"][selected] = {}
-        # Save Controller Configuration
-        for item, value in response.items():
-            if item.startswith("controller_config_"):
-                option_name = item.replace("controller_config_", "")
-                for option in controller["metadata"][selected]["config"]:
-                    if option_name == option["option_name"]:
-                        if option["option_type"] == "float":
-                            settings["controller"]["config"][selected][option_name] = float(value)
-                        elif option["option_type"] == "int":
-                            settings["controller"]["config"][selected][option_name] = int(value)
-                        elif option["option_type"] == "bool":
-                            settings["controller"]["config"][selected][option_name] = True if value == "true" else False
-                        elif option["option_type"] == "numlist":
-                            settings["controller"]["config"][selected][option_name] = float(value)
-                        else:
-                            settings["controller"]["config"][selected][option_name] = value
+        _apply_controller_config(response, settings, controller)
         control["controller_update"] = True
         # print(f'Controller Settings: {settings["controller"]["config"]}')
 
