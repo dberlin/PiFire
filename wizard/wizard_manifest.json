@@ -4181,7 +4181,7 @@
         "friendly_name": "Raspberry Pi DSI Connected Display 800x480 w/Touch",
         "filename": "dsi_800x480t",
         "description": "Raspberry Pi DSI Connected Display such as the 7\" Raspberry Pi Touch Screen display. Several clones exist which should work perfectly well.",
-        "notes": "Raspberry Pi OS 12 Bookworm 64-Bit is not currently compatible with this module.  It has been tested successfully with 32-Bit Bookworm and Bullseye.  This module may take a very long time to install due to the OS dependencies that are required.  Please be aware that this may take more than 10 minutes to install depending on your system and internet connection.",
+        "notes": "This display module is resolution-agnostic and is the recommended choice for testing and development: it runs fine in a desktop window on non-DSI hardware, so no physical DSI display is required to preview or build dashboard layouts.",
         "default": false,
         "image": "dsi_touch.png",
         "py_dependencies": [
@@ -4701,17 +4701,28 @@
           }
         ]
       },
-      "protoflex": {
-        "friendly_name": "Prototype Flex w/Input",
-        "filename": "protoflex",
-        "description": "Prototype (Test) Flex Module for a with various input methods.",
-        "notes": "This module is used for development only and should not be used for production.",
+      "dsi_320x240t": {
+        "friendly_name": "DSI/Pygame Flex Display 320x240 w/Touch",
+        "filename": "dsi_320x240t",
+        "description": "A 320x240 compact touch display. Uses the same pygame display engine as the 800x480 DSI display, with a compact layout tuned for smaller resolution screens and support for button/encoder input in addition to touch.",
+        "notes": "",
         "default": false,
-        "image": "protoflex.png",
-        "py_dependencies": ["pillow==11.1.0", "pygame-ce>=2.5.7"],
-        "apt_dependencies": [],
-        "command_list": [],
-        "settings_dependencies": {},
+        "image": "dsi_320x240t.png",
+        "py_dependencies": [
+          "rpi-backlight==2.6.0",
+          "pillow==11.1.0",
+          "pygame-ce>=2.5.7"
+        ],
+        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
+        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
+        "settings_dependencies": {
+          "buttonslevel": {
+            "friendly_name": "Button Level",
+            "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
+            "options": { "HIGH": "Pullups", "LOW": "Pulldowns" },
+            "settings": ["platform", "buttonslevel"]
+          }
+        },
         "config": [
           {
             "option_name": "rotation",
@@ -4731,14 +4742,9 @@
           {
             "option_name": "display_data_filename",
             "option_friendly_name": "Display Data Filename",
-            "option_description": "Choose the screen resolution desired to select the corresponding JSON configuration file.",
-            "option_type": "list",
-            "list_values": [
-              "./display/protoflex_320x240.json",
-              "./display/protoflex_800x480.json"
-            ],
-            "list_labels": ["320x240", "800x480"],
-            "default": "./display/protoflex_320x240.json",
+            "option_description": "JSON file with all of the display data and information.",
+            "option_type": "string",
+            "default": "./display/dsi_320x240t.json",
             "hidden": false
           },
           {

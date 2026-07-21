@@ -2127,7 +2127,9 @@ class HopperStatus(FlexObject):
 
         color_index = int(self.objectData["data"]["level"] // (100 / len(self.objectData["color_levels"])))
         # print(f'color_index = {color_index-1} level={self.objectData["data"]["level"]}')
-        fg_color = self.objectData["color_levels"][max(color_index - 1, 0)]
+        fg_color = self.objectData["color_levels"][
+            min(max(color_index - 1, 0), len(self.objectData["color_levels"]) - 1)
+        ]
 
         # Create canvas & drawing object
         canvas = Image.new("RGBA", size)
@@ -2177,7 +2179,7 @@ class DutyPill(FlexObject):
     """A small labeled-value pill, e.g. P-MODE/SMOKE+ or AUGER/FAN DUTY.
 
     Presentational only - the label/value/highlight are computed upstream
-    (base_flex) and passed in via objectData['data'].
+    (_base_flex) and passed in via objectData['data'].
     """
 
     def __init__(self, objectType, objectData, background):
@@ -2275,9 +2277,9 @@ class CookTimeBar(FlexObject):
     ratio, so a wide/short bar downscales uniformly instead of distorting the way
     a fixed square-ish canvas (e.g. DutyPill) does when squished into a wide box.
 
-    Presentational only - base_flex feeds data={'label','value','highlight'} to
-    the 'cook_time' object by name (see base_flex._cook_time_data). When the lid
-    opens in Hold mode base_flex feeds label='Lid Pause' + a mm:ss countdown; the
+    Presentational only - _base_flex feeds data={'label','value','highlight'} to
+    the 'cook_time' object by name (see _base_flex._cook_time_data). When the lid
+    opens in Hold mode _base_flex feeds label='Lid Pause' + a mm:ss countdown; the
     bar recolors red to serve as the lid-open alert (the ember dashboards have no
     separate lid_alert overlay - one full-width bar handles both states)."""
 
@@ -2294,7 +2296,7 @@ class CookTimeBar(FlexObject):
         data = self.objectData.get("data", {})
         label = str(data.get("label") or "COOK TIME").upper()
         value = str(data.get("value", ""))
-        # base_flex._timer_seconds_and_label() uses the 'Lid Pause' label while the
+        # _base_flex._timer_seconds_and_label() uses the 'Lid Pause' label while the
         # lid is open - render the bar as a red alert in that state.
         lid_alert = "LID" in label
 
@@ -2612,7 +2614,7 @@ class ButtonRow(FlexObject):
     """Row of N equal-width mode-dependent control buttons at the bottom of
     the center column (e.g. Set Temp / Hold / Stop / Shutdown).
 
-    Presentational only - base_flex computes the button set for the current
+    Presentational only - _base_flex computes the button set for the current
     operating mode (button_type/button_list) and which one, if any, should
     be shown active (button_active); this widget renders the row and
     subdivides touch so each button maps to its own action.

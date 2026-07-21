@@ -111,9 +111,7 @@ class RTDDevice:
             resistance /= 32768
             resistance *= self.ref_resistor
         except:
-            self.logger.exception(
-                f"Exception occurred while reading probe port {self.device_info['ports'][0]}.  Trace dump: "
-            )
+            self.logger.exception(f"Exception occurred while reading RTD resistance on SPI CS {self.cs}.  Trace dump: ")
             resistance = 0
         return resistance
 

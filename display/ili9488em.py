@@ -18,7 +18,7 @@ PiFire Display Interface Library
 """
 import spidev
 from luma.lcd.device import ili9488
-from display.base_320x480 import DisplayBase
+from display._base_320x480 import DisplayBase
 from display._luma_panel import LumaPanelMixin
 from display._encoder_input import EncoderInputMixin
 

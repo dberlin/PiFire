@@ -3,13 +3,18 @@
 PiFire Display Interface Library
 *****************************************
 
- Description: This is a prototype library for the display device using the flex
-  configuration.  This library will take in a flex configuration file and configure
-  the display accordingly.
+ Description: This library supports using pygame
+ with a DSI attached touch display on the Raspberry Pi
+ like the official Raspberry Pi 7 inch DSI attached display.
 
- This version supports mouse for development, touch, and keyboard input.
+ This module is the resolution-agnostic DSI/pygame flex engine — it reads
+ all dimensions and layout from its JSON layout file (display_data_filename),
+ so a single Display class serves every DSI resolution. Per-resolution
+ modules (dsi_800x480t, dsi_1024x600t, dsi_1024x768t, dsi_1280x720t) are thin
+ stubs that re-export this module's Display and pair it with their own JSON
+ layout file.
 
- All display output is done through the Pygame library.
+ This version supports mouse for development.
 
 *****************************************
 """
@@ -24,19 +29,9 @@ from pygame import image as PyImage
 
 from PIL import ImageFilter
 from common.modes import Mode
-from display.base_flex import DisplayBase
-
-"""
-Dummy backlight class for prototyping 
-"""
-
-
-class DummyBacklight:
-    def __init__(self):
-        self.brightness = 100
-        self.power = True
-        self.fade_duration = 1
-
+from display._base_flex import DisplayBase
+from display._flex_helpers import DummyBacklight  # noqa: F401  # re-exported for isinstance checks
+from pathlib import Path
 
 """
 Display class definition
@@ -55,11 +50,21 @@ class Display(DisplayBase):
 
     def _init_display_device(self):
         """Init backlight"""
-        if self.real_hardware:
-            # Use the rpi-backlight module if running on the RasPi
-            from rpi_backlight import Backlight
+        backlight_hardware = False
+        # Use pathlib to check if /sys/class/backlight/rpi_backlight/ exists
+        if Path("/sys/class/backlight/").exists():
+            backlight_hardware = True
 
-            self.backlight = Backlight()
+        if self.real_hardware and backlight_hardware:
+            # Use the rpi-backlight module if running on the RasPi
+            try:
+                from rpi_backlight import Backlight
+
+                self.backlight = Backlight()
+            except:
+                self.eventLogger.error("Falling back to dummy backlight class. Backlight control will not work.")
+                self.real_hardware = False
+                self.backlight = DummyBacklight()
         else:
             # Else use a fake module class for backlight
             self.backlight = DummyBacklight()
@@ -171,7 +176,7 @@ class Display(DisplayBase):
                 if self.display_active == "home":
                     if self.display_init:
                         """ Initialize Home Screen """
-                        self._build_objects()
+                        self._build_objects(self.background)
                         self.display_init = False
                         self.display_updated = True
 
@@ -243,10 +248,16 @@ class Display(DisplayBase):
         pygame.display.update()
 
     def _canvas_to_surface(self):
+        if self.ROTATION in [90, 180, 270]:
+            # Rotate the canvas for 90, 180, or 270 degrees
+            self.transform_canvas = self.display_canvas.rotate(self.ROTATION, expand=True)
+        else:
+            # Use the canvas as is for landscape mode
+            self.transform_canvas = self.display_canvas.copy()
         # Convert temporary canvas to PyGame surface
-        strFormat = self.display_canvas.mode
-        size = self.display_canvas.size
-        raw_str = self.display_canvas.tobytes("raw", strFormat)
+        strFormat = self.transform_canvas.mode
+        size = self.transform_canvas.size
+        raw_str = self.transform_canvas.tobytes("raw", strFormat)
         self.display_surface.blit(PyImage.fromstring(raw_str, size, strFormat), (0, 0))
 
     def _display_background(self):
@@ -261,7 +272,7 @@ class Display(DisplayBase):
     def _init_dash(self):
         self._init_framework()
         self._configure_dash()
-        self._build_objects()
+        self._build_objects(None)
         self._build_dash_map()
         self._store_dash_objects()
 
@@ -400,6 +411,21 @@ class Display(DisplayBase):
             """
 			Loop through current displayed objects and check for touch collisions
 			"""
+            # Draw the touch position on the canvas for debugging where self.display_canvas is the PIL Image object
+            # self.display_canvas.paste((255,0,0,255), (self.touch_pos[0], self.touch_pos[1], self.touch_pos[0] + 10, self.touch_pos[1] + 10))
+            # self._display_canvas()
+
+            if self.ROTATION == 90:
+                self.touch_pos = (self.WIDTH - self.touch_pos[1], self.touch_pos[0])
+            elif self.ROTATION == 180:
+                self.touch_pos = (self.WIDTH - self.touch_pos[0], self.HEIGHT - self.touch_pos[1])
+            elif self.ROTATION == 270:
+                self.touch_pos = (self.touch_pos[1], self.HEIGHT - self.touch_pos[0])
+
+            # Draw the touch position on the canvas for debugging
+            # self.display_canvas.paste((255,255,0,255), (self.touch_pos[0], self.touch_pos[1], self.touch_pos[0] + 10, self.touch_pos[1] + 10))
+            # self._display_canvas()
+
             for pointer, object in enumerate(self.display_object_list):
                 objectData = object.get_object_data()
                 for index, touch_area in enumerate(objectData["touch_areas"]):

@@ -23,7 +23,7 @@ characterization net: it pins CURRENT behavior (quirks included, not
 
 Construction hazards, hardware stubs, and the `threading.Thread`/
 `os.system` neutralization mirror `test_fixed_base_drivers_load.py`
-exactly (same ordering hazard around pre-warming `display.base_fixed`
+exactly (same ordering hazard around pre-warming `display._base_fixed`
 before installing the hardware-stub overlay; same real-reboot-incident
 history behind blocking `os.system`). See that file's module docstring
 for the full rationale. This file adds one deviation: the `gpiozero.Button`
@@ -44,7 +44,7 @@ from unittest import mock
 
 import pytest
 
-import display.base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see test_fixed_base_drivers_load.py
+import display._base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see test_fixed_base_drivers_load.py
 
 FULL_DEV_PINS = {
     "display": {"dc": 24, "led": 5, "rst": 25},

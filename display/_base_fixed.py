@@ -32,7 +32,7 @@ Display base class definition
 """
 
 
-class DisplayBase:
+class _DisplayBase:
     # Nominal (landscape) panel size; subclass/shim sets this. Non-square panels
     # swap W/H for portrait rotations, exactly as the legacy bases did.
     _NOMINAL_WIDTH = 480

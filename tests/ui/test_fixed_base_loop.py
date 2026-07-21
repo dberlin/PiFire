@@ -7,7 +7,7 @@ own `time.sleep` call raise a sentinel exception on its first invocation,
 then asserts what that one iteration actually did.
 
 This is the "after" side of Phase B Task 5, which reconciled the two
-divergent loops into ONE: base_fixed now carries the richer (former
+divergent loops into ONE: _base_fixed now carries the richer (former
 240x240) loop for every resolution -- a `self.monitor_display` flag,
 distinct `self.loop_delay` / `self.clear_delay` sleeps, a `continue`
 after each state transition, and nulling `in_data`/`status_data` after
@@ -106,9 +106,9 @@ def _drive_one_iteration(base):
 # 0.1s for the two large panels (their former flat-loop cadence, so their
 # transition settle is effectively unchanged).
 LOOP_CASES = [
-    ("240x240", "display.base_240x240", 1.0),
-    ("240x320", "display.base_240x320", 0.1),
-    ("320x480", "display.base_320x480", 0.1),
+    ("240x240", "display._base_240x240", 1.0),
+    ("240x320", "display._base_240x320", 0.1),
+    ("320x480", "display._base_320x480", 0.1),
 ]
 
 
