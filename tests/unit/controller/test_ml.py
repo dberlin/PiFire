@@ -94,34 +94,45 @@ def test_update_converts_celsius_current_to_fahrenheit(monkeypatch):
     assert current == int(93 * (9 / 5) + 32)
 
 
-# --- LATENT BUG (pinned, NOT fixed -- out of scope for this task) ----------------
+# --- FIXED BUG (was pinned; now asserts corrected behavior) ----------------------
 
 
-def test_last_temp_never_updates_so_rate_of_change_stays_pinned_to_neg99(monkeypatch):
-    """PIN, not a fix: controller/ml.py has the exact same `self.last_temp ==
-    current` no-op-comparison typo as controller/fuzzy.py's first-run branch
-    (line ~57), but unlike fuzzy.py, ml.py's update() has no compensating
-    `self.last_temp = current` assignment anywhere else in the method. That
-    means `self.last_temp` is stuck at its __init__ sentinel of -99 forever:
-    every single call (not just the first) takes the `last_temp == -99`
-    branch, overrides cycle_time to the configured HoldCycleTime, and computes
-    rate_of_change as (current - (-99)) / HoldCycleTime rather than an actual
-    rate between consecutive readings.
+def test_last_temp_advances_after_first_call(monkeypatch):
+    """controller/ml.py's first-run branch used to have the same no-op
+    `self.last_temp == current` comparison typo as controller/fuzzy.py's
+    first-run branch, so `self.last_temp` stayed stuck at its __init__
+    sentinel of -99 forever: every call (not just the first) took the
+    `last_temp == -99` branch and computed a meaningless rate_of_change of
+    (current - (-99)) / HoldCycleTime.
 
-    This task's authorized fix is scoped to controller/fuzzy.py only (see
-    latent-bug rule), so this is documented/pinned here, not corrected. Filed
-    for a follow-up task.
+    Fixed: line 57 is now an assignment (`self.last_temp = current`),
+    mirroring the already-fixed controller/fuzzy.py. After the first
+    update() call, last_temp advances to the current reading, so the first
+    call's rate_of_change collapses to 0 (current - current) rather than a
+    huge spurious value. The second call then uses that real prior reading
+    (200) instead of -99, so rate_of_change reflects the actual delta
+    between consecutive readings.
     """
     model = FakeModel(ratio=0.5)
     c = _controller(monkeypatch, model=model, units="F", hold_cycle_time=20)
     c.set_target(225)
 
-    c.update(200)
-    c.update(205)  # a "second" call -- still hits the -99 branch every time
+    times = iter([100.0, 105.0])  # "now" for the two update() calls below
+    monkeypatch.setattr(ml.time, "time", lambda: next(times))
+    c.last_time = 100.0
+
+    ratio = c.update(200)
+
+    assert ratio == 0.5
+    assert c.last_temp == 200  # advances to current on first call, not stuck at -99
 
     first_rate = c.model.calls[0][0][2]
-    second_rate = c.model.calls[1][0][2]
+    assert first_rate == pytest.approx(0.0)  # (200 - 200) / HoldCycleTime, not (200 - (-99)) / 20
 
-    assert c.last_temp == -99  # never advances
-    assert first_rate == pytest.approx((200 - (-99)) / 20)
-    assert second_rate == pytest.approx((205 - (-99)) / 20)
+    c.update(205)  # second call: last_temp is 200 now, so the -99 branch no longer fires
+
+    second_rate = c.model.calls[1][0][2]
+    # cycle_time here is the measured 5s elapsed (105.0 - 100.0), and the
+    # delta is against the real prior reading (200), not the -99 sentinel.
+    assert second_rate == pytest.approx((205 - 200) / 5.0)
+    assert second_rate != pytest.approx((205 - (-99)) / 20)
