@@ -3,7 +3,7 @@
   pygame_64x128.py    -- standalone Display class (no base_fixed/base_flex
                           parent), tiny 128x64 debug panel.
   pygame_240x320.py,
-  pygame_240x320b.py  -- display.base_fixed.DisplayBase subclasses (via the
+  pygame_240x320b.py  -- display.base_fixed._DisplayBase subclasses (via the
                           base_240x320 shim), part of the same 16-driver
                           family exercised (construction-only) by
                           test_fixed_base_drivers_load.py. This file drives
@@ -154,7 +154,7 @@ def test_pygame_64x128_public_status_methods():
 
 
 # ---------------------------------------------------------------------------
-# pygame_240x320.py / pygame_240x320b.py -- display.base_fixed.DisplayBase
+# pygame_240x320.py / pygame_240x320b.py -- display.base_fixed._DisplayBase
 # subclasses (via the base_240x320 shim). Same construction pattern as
 # test_fixed_base_drivers_load.py's 16-driver harness (no hardware-stub
 # overlay needed: neither driver imports a hardware library).
