@@ -1119,8 +1119,15 @@ def _curses_stub():
 
 def _make_prototype():
     mod = _load_driver("display.prototype", _curses_stub())
-    with mock.patch("time.sleep"):  # display_splash() sleeps 1s for real otherwise
-        d = mod.Display(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
+    # prototype.py neither spawns a threading.Thread nor calls os.system, but
+    # the guards are applied here too so the invariant documented in the
+    # module docstring ("unconditionally for every driver") actually holds
+    # for all six drivers, not just five of them -- defense-in-depth, not a
+    # behavior change (see _no_bg_threads/_no_os_system docstrings above).
+    with _no_bg_threads() as mock_thread, _no_os_system("prototype"):
+        mock_thread.return_value.start = lambda: None
+        with mock.patch("time.sleep"):  # display_splash() sleeps 1s for real otherwise
+            d = mod.Display(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
     return mod, d
 
 
