@@ -65,20 +65,22 @@ rpi_backlight is not installed here (mirrors test_qtquick_parity.py's existing
 `display.base_flex.is_real_hardware` is therefore forced to False for both
 base_flex-derived drivers below.
 
-st7789p.py's `_display_text`/`_display_current` call the Pillow
+st7789p.py's `_display_text`/`_display_current` used to call the Pillow
 `ImageFont.getsize()` API, which Pillow removed in 10.0.0 (this environment
 runs Pillow 12.3.0; even the wizard manifest's pinned `pillow==11.1.0`
-postdates the removal) -- calling either method raises AttributeError. This
-is a genuine latent bug, independent of this dev sandbox lacking the
+postdates the removal) -- calling either method raised AttributeError. This
+was a genuine latent bug, independent of this dev sandbox lacking the
 `impact.ttf`/`trebuc.ttf` font files that ssd1306/ssd1306b/st7789p all
 `ImageFont.truetype()` by bare filename (those two are not vendored in the
 repo at all, on any driver -- presumably resolved via a system font path on
 real Raspberry Pi OS that is absent here). `ImageFont.truetype` is patched
 below to fall back to `ImageFont.load_default()` for missing files, isolating
-and pinning the real `getsize` bug via `pytest.raises(AttributeError)`
-rather than masking it behind an environment-only OSError. Production code
-is NOT modified; see test_st7789p_display_text_pinned_getsize_bug and
-test_st7789p_display_current_pinned_getsize_bug below.
+the render path from that environment-only OSError. Production code now
+measures text via `font.getbbox(...)`, matching the idiom already used by
+the sibling ssd1306/ssd1306b/pygame_64x128 drivers; see
+test_st7789p_display_text_completes_and_forwards_to_device and
+test_st7789p_display_current_completes_and_forwards_to_device below. Not
+validated on real ST7789 hardware.
 """
 
 import importlib
@@ -585,26 +587,36 @@ def test_st7789p_splash_and_clear_forward_to_device():
     d.device.set_backlight.assert_called_with(0)
 
 
-def test_st7789p_display_text_pinned_getsize_bug():
-    """PINS a latent bug: st7789p._display_text calls the removed Pillow
+def test_st7789p_display_text_completes_and_forwards_to_device():
+    """FIXED: st7789p._display_text used to call the removed Pillow
     ImageFont.getsize() API (removed in Pillow 10.0.0; this env runs Pillow
-    12.3.0). ImageFont.truetype is patched (fixture) to succeed even though
-    impact.ttf is not vendored in this repo, isolating the failure to the
-    real getsize() call so this test documents the actual production bug
-    rather than an environment font-availability gap. Not fixed here --
-    production code is unmodified."""
+    12.3.0), raising AttributeError on every render. Production code now
+    measures text via font.getbbox(...), matching the idiom already used by
+    the sibling ssd1306/ssd1306b/pygame_64x128 drivers (font_width =
+    bbox[2], font_height = bbox[3]). ImageFont.truetype is patched (fixture)
+    to succeed even though impact.ttf is not vendored in this repo, isolating
+    this test to the render path itself, not an environment font-availability
+    gap. Not validated on real ST7789 hardware."""
     mod, d = _make_st7789p()
+    d.device.display.reset_mock()
     d.display_data = "225"
-    with pytest.raises(AttributeError, match="getsize"):
-        d._display_text()
+
+    d._display_text()
+
+    assert d.device.display.called
 
 
-def test_st7789p_display_current_pinned_getsize_bug():
-    """See test_st7789p_display_text_pinned_getsize_bug -- _display_current
-    hits the same removed Pillow ImageFont.getsize() API."""
+def test_st7789p_display_current_completes_and_forwards_to_device():
+    """See test_st7789p_display_text_completes_and_forwards_to_device --
+    _display_current hits the same fixed getbbox text-measurement path, at
+    every callsite (grill temp, fan/igniter/auger icons, notification icon,
+    mode label). Not validated on real ST7789 hardware."""
     mod, d = _make_st7789p()
-    with pytest.raises(AttributeError, match="getsize"):
-        d._display_current(SAMPLE_IN_DATA, SAMPLE_STATUS_DATA)
+    d.device.display.reset_mock()
+
+    d._display_current(SAMPLE_IN_DATA, SAMPLE_STATUS_DATA)
+
+    assert d.device.display.called
 
 
 def test_st7789p_public_status_methods():

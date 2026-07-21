@@ -151,7 +151,9 @@ class Display:
         draw = ImageDraw.Draw(img)
 
         font = ImageFont.truetype("impact.ttf", 42)
-        (font_width, font_height) = font.getsize(self.display_data)
+        font_bbox = font.getbbox(self.display_data)  # Grab the bounding box of the text
+        font_width = font_bbox[2]
+        font_height = font_bbox[3]
         draw.text(
             (self.WIDTH // 2 - font_width // 2, self.HEIGHT // 2 - font_height // 2),
             self.display_data,
@@ -178,24 +180,32 @@ class Display:
             font = ImageFont.truetype("trebuc.ttf", 80)
         label = list(in_data["probe_history"]["primary"].keys())[0]
         text = str(in_data["probe_history"]["primary"][label])[:5]
-        (font_width, font_height) = font.getsize(text)
+        font_bbox = font.getbbox(text)  # Grab the bounding box of the text
+        font_width = font_bbox[2]
+        font_height = font_bbox[3]
         draw.text((self.WIDTH // 2 - font_width // 2, 0), text, font=font, fill=(255, 255, 255))
 
         # Active Outputs F = Fan (Left), I = Igniter(Center Left), A = Auger (Center Right)
         font = ImageFont.truetype("static/font/FA-Free-Solid.otf", 48)
         if status_data["outpins"]["fan"]:
             text = "\uf863"
-            (font_width, font_height) = font.getsize(text)
+            font_bbox = font.getbbox(text)  # Grab the bounding box of the text
+            font_width = font_bbox[2]
+            font_height = font_bbox[3]
             draw.text((((self.WIDTH // 8) * 1) - font_width // 2, self.HEIGHT - 96), text, font=font, fill=(0, 0, 255))
         if status_data["outpins"]["igniter"]:
             text = "\uf46a"
-            (font_width, font_height) = font.getsize(text)
+            font_bbox = font.getbbox(text)  # Grab the bounding box of the text
+            font_width = font_bbox[2]
+            font_height = font_bbox[3]
             draw.text(
                 (((self.WIDTH // 8) * 3) - font_width // 2, self.HEIGHT - 96), text, font=font, fill=(255, 200, 0)
             )
         if status_data["outpins"]["auger"]:
             text = "\uf101"
-            (font_width, font_height) = font.getsize(text)
+            font_bbox = font.getbbox(text)  # Grab the bounding box of the text
+            font_width = font_bbox[2]
+            font_height = font_bbox[3]
             draw.text((((self.WIDTH // 8) * 5) - font_width // 2, self.HEIGHT - 96), text, font=font, fill=(0, 255, 0))
 
         # Notification Indicator (Right)
@@ -204,13 +214,17 @@ class Display:
         for index, item in enumerate(status_data["notify_data"]):
             if item["req"] and item["type"] != "hopper":
                 text = "\uf0f3"
-        (font_width, font_height) = font.getsize(text)
+        font_bbox = font.getbbox(text)  # Grab the bounding box of the text
+        font_width = font_bbox[2]
+        font_height = font_bbox[3]
         draw.text((((self.WIDTH // 8) * 7) - font_width // 2, self.HEIGHT - 96), text, font=font, fill=(255, 255, 0))
 
         # Current Mode (Bottom Center)
         font = ImageFont.truetype("trebuc.ttf", 36)
         text = status_data["mode"]  # + ' Mode'
-        (font_width, font_height) = font.getsize(text)
+        font_bbox = font.getbbox(text)  # Grab the bounding box of the text
+        font_width = font_bbox[2]
+        font_height = font_bbox[3]
         draw.text(
             (self.WIDTH // 2 - font_width // 2, self.HEIGHT - font_height - 4), text, font=font, fill=(255, 255, 255)
         )
