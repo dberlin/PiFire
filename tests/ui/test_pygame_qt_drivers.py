@@ -841,6 +841,30 @@ def test_dsi_320x240t_layout_constructs_and_renders(monkeypatch):
         pygame.quit()
 
 
+def test_dsi_base_input_always_enabled_even_when_input_types_none(monkeypatch):
+    """Characterizes a real quirk of the shared dsi_base flex engine (now
+    behind dsi_800x480t/dsi_1024x600t/dsi_1024x768t/dsi_1280x720t/
+    dsi_320x240t): `base_flex.DisplayBase.__init__` sets `input_enabled =
+    False` up front and derives `input_button`/`input_encoder`/`input_touch`
+    from `config["input_types_supported"]`, but `dsi_base.Display._init_input`
+    then unconditionally sets `self.input_enabled = True` -- it never
+    consults `input_types_supported` at all, unlike `ili9341f`'s `_init_input`
+    which has a real "none" branch that leaves input disabled. So even a
+    config with an empty (or "none") `input_types_supported` list ends up
+    with `input_enabled is True` on every dsi_base-derived driver.
+
+    This behavior was previously pinned by the removed protoflex module's
+    `test_protoflex_no_input_types_disables_nothing_input_enabled_flag`; that
+    test was deleted along with the module, leaving this quirk -- now shared
+    by 5 modules instead of 1 -- with zero coverage. This test restores it
+    against the shared engine directly."""
+    d = _make_dsi(monkeypatch, input_types_supported=[])
+    assert d.input_button is False
+    assert d.input_encoder is False
+    assert d.input_touch is False
+    assert d.input_enabled is True
+
+
 # ---------------------------------------------------------------------------
 # qtapp.py -- Qt Quick display-process host. run_app() itself is NOT called
 # (it blocks forever in QGuiApplication.exec()); every other entry point is
