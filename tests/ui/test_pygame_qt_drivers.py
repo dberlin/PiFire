@@ -65,6 +65,7 @@ import display.pygame_64x128 as mod_64
 import display.qtapp as qtapp_mod
 from common.modes import Mode
 from display.qtbackend import PiFireBackend
+from tests.ui._menu_walk import build_dash_menu_input_touch_steps, run_menu_walk
 
 FULL_DEV_PINS = {
     "display": {"dc": 24, "led": 5, "rst": 25},
@@ -673,133 +674,16 @@ def test_dsi_800x480t_event_detect_and_menu_touch_branches(monkeypatch):
 
         monkeypatch.setattr(d, "_command_handler", lambda: None)
 
+        # The shared dash->menu_main->deep-menu/input->touch walk (event
+        # names, status-data shape, and this pygame.time.delay patch are the
+        # only things that differ from test_fixed_drivers_methods.py's
+        # ili9341f walk) -- see tests/ui/_menu_walk.py.
+        steps = build_dash_menu_input_touch_steps(
+            d, entry_event="ENTER", status_data_factory=_dsi_status_data, fake_flex_object_cls=_FakeFlexObject
+        )
+
         with mock.patch.object(pygame.time, "delay"):  # _debounce() inside every _process_button call
-            # _event_detect dispatch: unknown command, then ENTER (button).
-            d.input_event = "GARBAGE"
-            d._event_detect()
-            assert d.input_event is None
-
-            d.input_event = "ENTER"
-            d._event_detect()  # dash + ENTER, Stop mode -> _process_button -> menu_main
-            assert d.display_active == "menu_main"
-            assert d.input_event is None  # cleared after dispatch
-
-            # Every other dash->menu mode branch (Stop was just exercised above).
-            for mode, expected_active in [
-                (Mode.STARTUP, "menu_main_active_normal"),
-                (Mode.MONITOR, "menu_main_active_monitor"),
-                (Mode.RECIPE, "menu_main_active_recipe"),
-                (Mode.MANUAL, "menu_main"),  # falls through to the else branch
-            ]:
-                d.display_active = "dash"
-                d.status_data = _dsi_status_data(mode=mode)
-                d._process_button()
-                assert d.display_active == expected_active
-            d.status_data = _dsi_status_data()  # restore Stop for what follows
-
-            # Deep _process_button branches via a fully-controlled fake menu object.
-            obj = _FakeFlexObject(
-                ["menu_close", "menu_prime", "menu_startup", "cmd_monitor", "menu_system"], button_selected=1
-            )
-            d.display_active = "menu_main"
-            d.display_object_list = [obj]
-            d.input_event = "UP"  # button_selected <= 1 -> wraps to len(button_list) - 1
-            d._process_button()
-            assert obj.get_object_data()["data"]["button_selected"] == 4
-            d.input_event = "DOWN"
-            d._process_button()  # len-1(4) not > 4 -> resets to 1
-            assert obj.get_object_data()["data"]["button_selected"] == 1
-            d.input_event = "DOWN"
-            d._process_button()  # len-1(4) > 1 -> increments
-            assert obj.get_object_data()["data"]["button_selected"] == 2
-            d.input_event = "DOWN"
-            d._process_button()
-            assert obj.get_object_data()["data"]["button_selected"] == 3
-            d.input_event = "ENTER"
-            d._process_button()  # selects "cmd_monitor" -> self.command + _command_handler()
-            assert d.command == "cmd_monitor"
-
-            # ENTER on a cmd_ button that DOES carry button_value.
-            obj_bv = _FakeFlexObject(["cmd_a", "cmd_b"], button_selected=1, button_value=["va", "vb"])
-            d.display_active = "menu_main"
-            d.display_object_list = [obj_bv]
-            d.input_event = "ENTER"
-            d._process_button()
-            assert d.command == "cmd_b" and d.command_data == "vb"
-
-            # menu_close closes back to dash.
-            obj2 = _FakeFlexObject(["menu_close", "menu_prime"], button_selected=0)
-            d.display_active = "menu_main"
-            d.display_object_list = [obj2]
-            d.input_event = "ENTER"
-            d._process_button()
-            assert d.display_active == "dash"
-
-            # Nested menu_ selection from a non-dash menu.
-            obj3 = _FakeFlexObject(["menu_close", "menu_system"], button_selected=1)
-            d.display_active = "menu_main"
-            d.display_object_list = [obj3]
-            d.input_event = "ENTER"
-            d._process_button()
-            assert d.display_active == "menu_system"
-
-            # button_selected is None -> ENTER closes back to dash.
-            obj4 = _FakeFlexObject([], button_selected=None)
-            d.display_active = "menu_system"
-            d.display_object_list = [obj4]
-            d.input_event = "ENTER"
-            d._process_button()
-            assert d.display_active == "dash"
-
-            # "input_*" display_active branch: UP/DOWN edit, ENTER commits + closes.
-            obj5 = _FakeFlexObject([], button_selected=None, extra_data={"input": ""}, command="cmd_hold")
-            d.display_active = "input_hold"
-            d.display_object_list = [obj5]
-            d.input_event = "UP"
-            d._process_button()
-            assert obj5.get_object_data()["data"]["input"] == "up"
-            d.input_event = "DOWN"
-            d._process_button()
-            assert obj5.get_object_data()["data"]["input"] == "down"
-            d.input_event = "ENTER"
-            d._process_button()
-            assert d.command == "cmd_hold" and d.display_active == "dash"
-
-            # _process_touch: cmd_ dispatch, menu_close, nested menu_, then the
-            # "display currently inactive" wake branch.
-            rect = pygame.Rect(0, 0, 50, 50)
-            obj6 = _FakeFlexObject(["cmd_monitor"], touch_areas=[rect])
-            d.display_active = "menu_main"
-            d.display_object_list = [obj6]
-            d.touch_pos = (10, 10)
-            d._process_touch()
-            assert d.command == "cmd_monitor"
-
-            obj6b = _FakeFlexObject(["cmd_x"], touch_areas=[pygame.Rect(0, 0, 50, 50)], button_value=["vx"])
-            d.display_active = "menu_main"
-            d.display_object_list = [obj6b]
-            d.touch_pos = (10, 10)
-            d._process_touch()
-            assert d.command == "cmd_x" and d.command_data == "vx"
-
-            obj7 = _FakeFlexObject(["menu_close"], touch_areas=[pygame.Rect(0, 0, 50, 50)])
-            d.display_active = "menu_main"
-            d.display_object_list = [obj7]
-            d.touch_pos = (5, 5)
-            d._process_touch()
-            assert d.display_active == "dash"
-
-            obj8 = _FakeFlexObject(["menu_system"], touch_areas=[pygame.Rect(0, 0, 50, 50)])
-            d.display_active = "menu_main"
-            d.display_object_list = [obj8]
-            d.touch_pos = (5, 5)
-            d._process_touch()
-            assert d.display_active == "menu_system"
-
-            d.display_active = None
-            d.touch_pos = (0, 0)
-            d._process_touch()  # inactive -> _wake_display() + go to home/dash
-            assert d.display_active in ("home", "dash")
+            run_menu_walk(d, steps)
 
             # _base_dsi-specific: touch-coordinate rotation transforms
             # (90/180/270), not present in ili9341f's copy.

@@ -191,6 +191,36 @@ class FlexObject:
         # Create button rectangle / touch area and append to list
         self.objectData["touch_areas"] = [touch_area]
 
+    def _draw_letterspaced_text(self, text, font_name, font_size, color, spacing):
+        """Draws text with extra spacing between glyphs, bottom-aligned per glyph."""
+        space_width = max(4, round(font_size * 0.35))
+        parts = []
+        for char in text:
+            if char == " ":
+                parts.append(("space", space_width))
+            else:
+                parts.append(("glyph", self._draw_text(char, font_name, font_size, color)))
+
+        max_height = max((glyph.size[1] for kind, glyph in parts if kind == "glyph"), default=0)
+        total_width = sum((glyph.size[0] if kind == "glyph" else glyph) for kind, glyph in parts) + spacing * max(
+            0, len(parts) - 1
+        )
+
+        if total_width <= 0 or max_height <= 0:
+            return Image.new("RGBA", (1, 1))
+
+        canvas = Image.new("RGBA", (total_width, max_height))
+        x = 0
+        for index, (kind, glyph) in enumerate(parts):
+            if kind == "glyph":
+                canvas.paste(glyph, (x, max_height - glyph.size[1]), glyph)
+                x += glyph.size[0]
+            else:
+                x += glyph
+            if index < len(parts) - 1:
+                x += spacing
+        return canvas
+
     def _scale_touch_area(self, rectangle, screen_size_old, screen_size_new):
         """Scales a rectangle size and position according to the screen size change.
 
@@ -1431,7 +1461,34 @@ class MenuQRCode(FlexObject):
         return canvas
 
 
-class InputNumber(FlexObject):
+class _InputNumberBase(FlexObject):
+    """Shared drawing/input logic for the InputNumber menu variants.
+
+    Subclasses supply only the geometry that differs between them (entry box
+    position/size/font, up/down button position/size, enter button position)
+    and whether the on-screen numeric keypad is drawn.
+    """
+
+    # Number entry box
+    _NUMBER_ENTRY_POSITION = (0, 0)
+    _NUMBER_ENTRY_SIZE = (0, 0)
+    _NUMBER_ENTRY_FONT_SIZE = 80
+
+    # Up / Down buttons (same size used for both within a given variant)
+    _UP_BUTTON_POSITION = (0, 0)
+    _DOWN_BUTTON_POSITION = (0, 0)
+    _UPDOWN_BUTTON_SIZE = (0, 0)
+
+    # Enter button
+    _ENTER_BUTTON_POSITION = (0, 0)
+    _ENTER_BUTTON_SIZE = (240, 80)
+
+    # Numeric keypad (only drawn when _DRAW_NUMPAD is True)
+    _DRAW_NUMPAD = False
+    _NUMPAD_POSITION = (250, 75)
+    _NUMPAD_BUTTON_SIZE = (70, 70)
+    _NUMPAD_BUTTON_PADDING = 5
+
     def __init__(self, objectType, objectData, background):
         super().__init__(objectType, objectData, background)
 
@@ -1476,8 +1533,8 @@ class InputNumber(FlexObject):
         canvas.paste(title, (title_x, title_y))
 
         # Number Display
-        number_entry_position = (60, 75)
-        number_entry_size = (240, 100)
+        number_entry_position = self._NUMBER_ENTRY_POSITION
+        number_entry_size = self._NUMBER_ENTRY_SIZE
         number_entry_coords = number_entry_position + (
             number_entry_position[0] + number_entry_size[0],
             number_entry_position[1] + number_entry_size[1],
@@ -1487,7 +1544,7 @@ class InputNumber(FlexObject):
         number_digits = self._draw_text(
             self.objectData["data"]["value"],
             self.objectData["font"],
-            80,
+            self._NUMBER_ENTRY_FONT_SIZE,
             self.objectData["color"],
             bg_fill=number_entry_bg_color,
         )
@@ -1504,8 +1561,8 @@ class InputNumber(FlexObject):
         else:
             bg_fill = (0, 0, 0, 255)
             fg_fill = self.objectData["color"]
-        button_position = (60, 195)
-        button_size = (110, 70)
+        button_position = self._UP_BUTTON_POSITION
+        button_size = self._UPDOWN_BUTTON_SIZE
         button_coords = button_position + (button_position[0] + button_size[0], button_position[1] + button_size[1])
         draw.rounded_rectangle(button_coords, radius=8, outline=fg_fill, fill=bg_fill, width=3)
         button_icon = self._create_icon("\uf077", 35, fg_fill, bg_fill=bg_fill)
@@ -1528,8 +1585,8 @@ class InputNumber(FlexObject):
         else:
             bg_fill = (0, 0, 0, 255)
             fg_fill = self.objectData["color"]
-        button_position = (190, 195)
-        button_size = (110, 70)
+        button_position = self._DOWN_BUTTON_POSITION
+        button_size = self._UPDOWN_BUTTON_SIZE
         button_coords = button_position + (button_position[0] + button_size[0], button_position[1] + button_size[1])
         draw.rounded_rectangle(button_coords, radius=8, outline=fg_fill, fill=bg_fill, width=3)
         button_icon = self._create_icon("\uf078", 35, fg_fill, bg_fill=bg_fill)
@@ -1546,8 +1603,8 @@ class InputNumber(FlexObject):
         self.objectData["button_list"].append("button_down")
 
         # Enter Button
-        button_position = (60, 290)
-        button_size = (240, 80)
+        button_position = self._ENTER_BUTTON_POSITION
+        button_size = self._ENTER_BUTTON_SIZE
         button_coords = button_position + (button_position[0] + button_size[0], button_position[1] + button_size[1])
         draw.rounded_rectangle(button_coords, radius=8, outline=self.objectData["color"], width=3)
         button_text = self._draw_text("ENTER", self.objectData["font"], 60, self.objectData["color"], bg_fill=(0, 0, 0))
@@ -1563,51 +1620,52 @@ class InputNumber(FlexObject):
         self.objectData["touch_areas"].append(Rect(transform_touch_area))
         self.objectData["button_list"].append(self.objectData["command"])
 
-        # Draw Number Pad
-        pad_position = (250, 75)
-        button_size = (70, 70)
-        button_padding = 5
-        button_position = [
-            pad_position[0] - button_size[0] - button_padding,
-            pad_position[1] - button_size[0] - button_padding,
-        ]
+        if self._DRAW_NUMPAD:
+            # Draw Number Pad
+            pad_position = self._NUMPAD_POSITION
+            button_size = self._NUMPAD_BUTTON_SIZE
+            button_padding = self._NUMPAD_BUTTON_PADDING
+            button_position = [
+                pad_position[0] - button_size[0] - button_padding,
+                pad_position[1] - button_size[0] - button_padding,
+            ]
 
-        pad_button_list = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["DEL", "0", "."]]
-        for row in pad_button_list:
-            button_position[1] += button_size[1] + button_padding
-            button_position[0] = pad_position[0]
-            for col in row:
-                if button_pushed == col:
-                    bg_fill = (255, 255, 255, 255)
-                    fg_fill = (0, 0, 0, 255)
-                else:
-                    bg_fill = (0, 0, 0, 255)
-                    fg_fill = self.objectData["color"]
-                button_position[0] += button_size[0] + button_padding
-                if col == "DEL":
-                    button_text = self._create_icon("\uf55a", 35, fg_fill, bg_fill=bg_fill)
-                else:
-                    button_text = self._draw_text(
-                        col, self.objectData["font"], 35, fg_fill, rect=False, bg_fill=bg_fill
+            pad_button_list = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["DEL", "0", "."]]
+            for row in pad_button_list:
+                button_position[1] += button_size[1] + button_padding
+                button_position[0] = pad_position[0]
+                for col in row:
+                    if button_pushed == col:
+                        bg_fill = (255, 255, 255, 255)
+                        fg_fill = (0, 0, 0, 255)
+                    else:
+                        bg_fill = (0, 0, 0, 255)
+                        fg_fill = self.objectData["color"]
+                    button_position[0] += button_size[0] + button_padding
+                    if col == "DEL":
+                        button_text = self._create_icon("\uf55a", 35, fg_fill, bg_fill=bg_fill)
+                    else:
+                        button_text = self._draw_text(
+                            col, self.objectData["font"], 35, fg_fill, rect=False, bg_fill=bg_fill
+                        )
+                    # Draw Rectangle
+                    button_coords = tuple(button_position) + (
+                        button_position[0] + button_size[0],
+                        button_position[1] + button_size[1],
                     )
-                # Draw Rectangle
-                button_coords = tuple(button_position) + (
-                    button_position[0] + button_size[0],
-                    button_position[1] + button_size[1],
-                )
-                draw.rounded_rectangle(button_coords, radius=8, outline=fg_fill, fill=bg_fill, width=3)
-                text_position = (
-                    button_position[0] + (button_size[0] // 2) - (button_text.width // 2),
-                    button_position[1] + (button_size[1] // 2) - (button_text.height // 2),
-                )
-                canvas.paste(button_text, text_position)
-                button_touch_area = (
-                    button_position[0] + self.objectData["position"][0],
-                    button_position[1] + self.objectData["position"][1],
-                ) + button_size
-                scaled_touch_area = self._scale_touch_area(button_touch_area, size, self.objectData["size"])
-                self.objectData["touch_areas"].append(Rect(scaled_touch_area))
-                self.objectData["button_list"].append(f"button_{col}")
+                    draw.rounded_rectangle(button_coords, radius=8, outline=fg_fill, fill=bg_fill, width=3)
+                    text_position = (
+                        button_position[0] + (button_size[0] // 2) - (button_text.width // 2),
+                        button_position[1] + (button_size[1] // 2) - (button_text.height // 2),
+                    )
+                    canvas.paste(button_text, text_position)
+                    button_touch_area = (
+                        button_position[0] + self.objectData["position"][0],
+                        button_position[1] + self.objectData["position"][1],
+                    ) + button_size
+                    scaled_touch_area = self._scale_touch_area(button_touch_area, size, self.objectData["size"])
+                    self.objectData["touch_areas"].append(Rect(scaled_touch_area))
+                    self.objectData["button_list"].append(f"button_{col}")
 
         # Resize for output
         canvas = canvas.resize(self.objectData["size"])
@@ -1679,206 +1737,42 @@ class InputNumber(FlexObject):
         pass
 
 
-class InputNumberSimple(FlexObject):
-    def __init__(self, objectType, objectData, background):
-        super().__init__(objectType, objectData, background)
+class InputNumber(_InputNumberBase):
+    """Full input-number menu: entry box + up/down + enter + on-screen numeric keypad."""
 
-    def _draw_object(self):
-        size = (600, 400)  # Define working size
-        canvas = Image.new("RGBA", size)  # Create canvas output object
-        draw = ImageDraw.Draw(canvas)  # Create drawing object
-        button_pushed = self.objectState.get("animation_input", "")
-        self.objectData["touch_areas"] = []
-        self.objectData["button_list"] = []
+    _NUMBER_ENTRY_POSITION = (60, 75)
+    _NUMBER_ENTRY_SIZE = (240, 100)
+    _NUMBER_ENTRY_FONT_SIZE = 80
 
-        # Rounded rectangle that fills the canvas size
-        menu_padding = 10  # Define padding around outside of the menu rectangle
-        draw.rounded_rectangle(
-            (menu_padding, menu_padding, size[0] - menu_padding, size[1] - menu_padding),
-            radius=8,
-            outline=(0, 0, 0, 225),
-            fill=(0, 0, 0, 250),
-        )
+    _UP_BUTTON_POSITION = (60, 195)
+    _DOWN_BUTTON_POSITION = (190, 195)
+    _UPDOWN_BUTTON_SIZE = (110, 70)
 
-        # Close Icon Upper Right
-        close_icon = self._create_icon("\uf00d", 34, (255, 255, 255))
-        close_position = (size[0] - (menu_padding * 4), (menu_padding * 2))
-        canvas.paste(close_icon, close_position, close_icon)
-        close_touch_area = (close_position[0], close_position[1], close_icon.width, close_icon.height)
-        scaled_touch_area = self._scale_touch_area(close_touch_area, size, self.objectData["size"])
-        transformed_touch_area = self._transform_touch_area(scaled_touch_area, self.objectData["position"])
-        self.objectData["touch_areas"].append(Rect(transformed_touch_area))
-        self.objectData["button_list"].append("menu_close")
+    _ENTER_BUTTON_POSITION = (60, 290)
+    _ENTER_BUTTON_SIZE = (240, 80)
 
-        # Menu Title
-        title = self._draw_text(
-            self.objectData["title_text"],
-            self.objectData["font"],
-            35,
-            self.objectData["color"],
-            rect=False,
-            bg_fill=(0, 0, 0, 250),
-        )
-        title_x = (size[0] // 2) - (title.width // 2)
-        title_y = 15
-        canvas.paste(title, (title_x, title_y))
+    _DRAW_NUMPAD = True
+    _NUMPAD_POSITION = (250, 75)
+    _NUMPAD_BUTTON_SIZE = (70, 70)
+    _NUMPAD_BUTTON_PADDING = 5
 
-        # Number Display
-        number_entry_position = (40, 80)
-        number_entry_size = (340, 200)
-        number_entry_coords = number_entry_position + (
-            number_entry_position[0] + number_entry_size[0],
-            number_entry_position[1] + number_entry_size[1],
-        )
-        number_entry_bg_color = (50, 50, 50)
-        draw.rounded_rectangle(number_entry_coords, radius=8, fill=number_entry_bg_color)
-        number_digits = self._draw_text(
-            self.objectData["data"]["value"],
-            self.objectData["font"],
-            160,
-            self.objectData["color"],
-            bg_fill=number_entry_bg_color,
-        )
-        number_digits_position = (
-            number_entry_position[0] + ((number_entry_size[0] // 2) - (number_digits.width // 2)),
-            number_entry_position[1] + (number_entry_size[1] // 2) - (number_digits.height // 2),
-        )
-        canvas.paste(number_digits, number_digits_position)
 
-        # Up Arrow
-        if button_pushed == "up":
-            bg_fill = (255, 255, 255, 255)
-            fg_fill = (0, 0, 0, 255)
-        else:
-            bg_fill = (0, 0, 0, 255)
-            fg_fill = self.objectData["color"]
-        button_position = (420, 80)
-        button_size = (140, 80)
-        button_coords = button_position + (button_position[0] + button_size[0], button_position[1] + button_size[1])
-        draw.rounded_rectangle(button_coords, radius=8, outline=fg_fill, fill=bg_fill, width=3)
-        button_icon = self._create_icon("\uf077", 35, fg_fill, bg_fill=bg_fill)
-        button_icon_position = (
-            button_position[0] + ((button_size[0] // 2) - (button_icon.width // 2)),
-            button_position[1] + (button_size[1] // 2) - (button_icon.height // 2),
-        )
-        canvas.paste(button_icon, button_icon_position)
-        # Scale and Store Touch Area
-        button_touch_area = button_position + button_size
-        scaled_touch_area = self._scale_touch_area(button_touch_area, size, self.objectData["size"])
-        transform_touch_area = self._transform_touch_area(scaled_touch_area, self.objectData["position"])
-        self.objectData["touch_areas"].append(Rect(transform_touch_area))
-        self.objectData["button_list"].append("button_up")
+class InputNumberSimple(_InputNumberBase):
+    """Simplified input-number menu: larger entry box + up/down + enter, no keypad
+    (value is adjusted only via the up/down buttons, e.g. for step-only inputs)."""
 
-        # Down Arrow
-        if button_pushed == "down":
-            bg_fill = (255, 255, 255, 255)
-            fg_fill = (0, 0, 0, 255)
-        else:
-            bg_fill = (0, 0, 0, 255)
-            fg_fill = self.objectData["color"]
-        button_position = (420, 200)
-        button_size = (140, 80)
-        button_coords = button_position + (button_position[0] + button_size[0], button_position[1] + button_size[1])
-        draw.rounded_rectangle(button_coords, radius=8, outline=fg_fill, fill=bg_fill, width=3)
-        button_icon = self._create_icon("\uf078", 35, fg_fill, bg_fill=bg_fill)
-        button_icon_position = (
-            button_position[0] + ((button_size[0] // 2) - (button_icon.width // 2)),
-            button_position[1] + (button_size[1] // 2) - (button_icon.height // 2),
-        )
-        canvas.paste(button_icon, button_icon_position)
-        # Scale and Store Touch Area
-        button_touch_area = button_position + button_size
-        scaled_touch_area = self._scale_touch_area(button_touch_area, size, self.objectData["size"])
-        transform_touch_area = self._transform_touch_area(scaled_touch_area, self.objectData["position"])
-        self.objectData["touch_areas"].append(Rect(transform_touch_area))
-        self.objectData["button_list"].append("button_down")
+    _NUMBER_ENTRY_POSITION = (40, 80)
+    _NUMBER_ENTRY_SIZE = (340, 200)
+    _NUMBER_ENTRY_FONT_SIZE = 160
 
-        # Enter Button
-        button_position = (180, 300)
-        button_size = (240, 80)
-        button_coords = button_position + (button_position[0] + button_size[0], button_position[1] + button_size[1])
-        draw.rounded_rectangle(button_coords, radius=8, outline=self.objectData["color"], width=3)
-        button_text = self._draw_text("ENTER", self.objectData["font"], 60, self.objectData["color"], bg_fill=(0, 0, 0))
-        button_text_position = (
-            button_position[0] + ((button_size[0] // 2) - (button_text.width // 2)),
-            button_position[1] + (button_size[1] // 2) - (button_text.height // 2),
-        )
-        canvas.paste(button_text, button_text_position)
-        # Scale and Store Touch Area
-        button_touch_area = button_position + button_size
-        scaled_touch_area = self._scale_touch_area(button_touch_area, size, self.objectData["size"])
-        transform_touch_area = self._transform_touch_area(scaled_touch_area, self.objectData["position"])
-        self.objectData["touch_areas"].append(Rect(transform_touch_area))
-        self.objectData["button_list"].append(self.objectData["command"])
+    _UP_BUTTON_POSITION = (420, 80)
+    _DOWN_BUTTON_POSITION = (420, 200)
+    _UPDOWN_BUTTON_SIZE = (140, 80)
 
-        # Resize for output
-        canvas = canvas.resize(self.objectData["size"])
-        return canvas
+    _ENTER_BUTTON_POSITION = (180, 300)
+    _ENTER_BUTTON_SIZE = (240, 80)
 
-    def _animate_object(self):
-        if self.objectState["animation_start"]:
-            self.objectState["animation_start"] = False  # Run animation start only once
-            self.objectState["animation_counter"] = 0  # Setup a counter for number of frames to produce
-            self.objectState["animation_input"] = self.objectData["data"]["input"]  # Save input from user
-            self.objectData["data"]["input"] = ""  # Clear user input
-
-        if self.objectState["animation_counter"] > 1:
-            self.objectState["animation_active"] = False  # Disable animation after one frame
-            self.objectState["animation_input"] = ""
-
-        self.objectState["animation_counter"] += 1  # Increment the frame counter
-
-        return self._draw_object()
-
-    def _process_input(self):
-        if self.objectData["data"]["input"] != "":
-            """ Check first for up / down input """
-            if self.objectData["data"]["input"] == "up":
-                self.objectData["data"]["value"] += self.objectData["step"]
-
-            if self.objectData["data"]["input"] == "down":
-                self.objectData["data"]["value"] -= self.objectData["step"]
-                if self.objectData["data"]["value"] < 0:
-                    self.objectData["data"]["value"] = 0
-
-            """ Convert value to list of characters """
-            temp_string = str(self.objectData["data"]["value"])
-            self.objectState["value"] = [char for char in temp_string]
-
-            if self.objectData["data"]["input"] == "DEL":
-                if len(self.objectState["value"]) > 1:
-                    """ If a float, delete back to the decimal value """
-                    if "." in self.objectState["value"] and self.objectState["value"][-2] == ".":
-                        self.objectState["value"].pop()
-                        self.objectState["value"].pop()
-                    else:
-                        self.objectState["value"].pop()
-                else:
-                    self.objectState["value"] = ["0"]
-
-            if "." in self.objectState["value"] and self.objectData["data"]["input"] == ".":
-                pass
-            elif self.objectData["data"]["input"] in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "."]:
-                if len(self.objectState["value"]) > 5:
-                    pass
-                if "." in self.objectState["value"]:
-                    self.objectState["value"].pop()
-                    self.objectState["value"].append(self.objectData["data"]["input"])
-                elif len(self.objectState["value"]) == 3 and self.objectData["data"]["input"] == ".":
-                    self.objectState["value"].append(self.objectData["data"]["input"])
-                elif len(self.objectState["value"]) < 3:
-                    self.objectState["value"].append(self.objectData["data"]["input"])
-
-            """ Combine list of characters back to string and then back to a float or int """
-            temp_string = "".join([str(i) for i in self.objectState["value"]])
-
-            if "." in temp_string:
-                self.objectData["data"]["value"] = float(temp_string)
-            else:
-                self.objectData["data"]["value"] = int(temp_string)
-
-    def _define_touch_areas(self):
-        pass
+    _DRAW_NUMPAD = False
 
 
 class TimerStatus(FlexObject):
@@ -2185,36 +2079,6 @@ class DutyPill(FlexObject):
     def __init__(self, objectType, objectData, background):
         super().__init__(objectType, objectData, background)
 
-    def _draw_letterspaced_text(self, text, font_name, font_size, color, spacing):
-        """Draws text with extra spacing between glyphs, bottom-aligned per glyph."""
-        space_width = max(4, round(font_size * 0.35))
-        parts = []
-        for char in text:
-            if char == " ":
-                parts.append(("space", space_width))
-            else:
-                parts.append(("glyph", self._draw_text(char, font_name, font_size, color)))
-
-        max_height = max((glyph.size[1] for kind, glyph in parts if kind == "glyph"), default=0)
-        total_width = sum((glyph.size[0] if kind == "glyph" else glyph) for kind, glyph in parts) + spacing * max(
-            0, len(parts) - 1
-        )
-
-        if total_width <= 0 or max_height <= 0:
-            return Image.new("RGBA", (1, 1))
-
-        canvas = Image.new("RGBA", (total_width, max_height))
-        x = 0
-        for index, (kind, glyph) in enumerate(parts):
-            if kind == "glyph":
-                canvas.paste(glyph, (x, max_height - glyph.size[1]), glyph)
-                x += glyph.size[0]
-            else:
-                x += glyph
-            if index < len(parts) - 1:
-                x += spacing
-        return canvas
-
     def _draw_object(self):
         output_size = self.objectData["size"]
         size = (350, 160)  # Working Canvas Size
@@ -2346,36 +2210,6 @@ class HopperVertical(FlexObject):
     def __init__(self, objectType, objectData, background):
         super().__init__(objectType, objectData, background)
 
-    def _draw_letterspaced_text(self, text, font_name, font_size, color, spacing):
-        """Draws text with extra spacing between glyphs, bottom-aligned per glyph."""
-        space_width = max(4, round(font_size * 0.35))
-        parts = []
-        for char in text:
-            if char == " ":
-                parts.append(("space", space_width))
-            else:
-                parts.append(("glyph", self._draw_text(char, font_name, font_size, color)))
-
-        max_height = max((glyph.size[1] for kind, glyph in parts if kind == "glyph"), default=0)
-        total_width = sum((glyph.size[0] if kind == "glyph" else glyph) for kind, glyph in parts) + spacing * max(
-            0, len(parts) - 1
-        )
-
-        if total_width <= 0 or max_height <= 0:
-            return Image.new("RGBA", (1, 1))
-
-        canvas = Image.new("RGBA", (total_width, max_height))
-        x = 0
-        for index, (kind, glyph) in enumerate(parts):
-            if kind == "glyph":
-                canvas.paste(glyph, (x, max_height - glyph.size[1]), glyph)
-                x += glyph.size[0]
-            else:
-                x += glyph
-            if index < len(parts) - 1:
-                x += spacing
-        return canvas
-
     def _threshold(self, level):
         """Returns (color, status_label) for the given pellet level (0-100)."""
         if level < 15:
@@ -2466,36 +2300,6 @@ class HeaderBar(FlexObject):
 
     def __init__(self, objectType, objectData, background):
         super().__init__(objectType, objectData, background)
-
-    def _draw_letterspaced_text(self, text, font_name, font_size, color, spacing):
-        """Draws text with extra spacing between glyphs, bottom-aligned per glyph."""
-        space_width = max(4, round(font_size * 0.35))
-        parts = []
-        for char in text:
-            if char == " ":
-                parts.append(("space", space_width))
-            else:
-                parts.append(("glyph", self._draw_text(char, font_name, font_size, color)))
-
-        max_height = max((glyph.size[1] for kind, glyph in parts if kind == "glyph"), default=0)
-        total_width = sum((glyph.size[0] if kind == "glyph" else glyph) for kind, glyph in parts) + spacing * max(
-            0, len(parts) - 1
-        )
-
-        if total_width <= 0 or max_height <= 0:
-            return Image.new("RGBA", (1, 1))
-
-        canvas = Image.new("RGBA", (total_width, max_height))
-        x = 0
-        for index, (kind, glyph) in enumerate(parts):
-            if kind == "glyph":
-                canvas.paste(glyph, (x, max_height - glyph.size[1]), glyph)
-                x += glyph.size[0]
-            else:
-                x += glyph
-            if index < len(parts) - 1:
-                x += spacing
-        return canvas
 
     def _hamburger_rect_working(self):
         """Returns (left, top, width, height) of the hamburger button in working-canvas coords."""
