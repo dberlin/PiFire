@@ -194,7 +194,15 @@
             <div id="dashboardSettings">
                 <!-- Dashboard Config Placeholder -->
                 {% if selected == '' %}
-                    {{ render_dash_settings(settings['dashboard']['current'], settings) }}
+                    {% set current = settings['dashboard']['current'] %}
+                    {% if current not in settings['dashboard']['dashboards'] %}
+                        {# Guard against a stale/invalid dashboard.current -- fall back to the
+                           first known dashboard instead of indexing dashboards[current] and
+                           500ing the whole settings page. Mirrors the two-level fallback in
+                           _settings_dashboard_config (blueprints/settings/routes.py). #}
+                        {% set current = (settings['dashboard']['dashboards'].keys() | list | first) %}
+                    {% endif %}
+                    {{ render_dash_settings(current, settings) }}
                 {% else %}
                     {% for dashboard, dashinfo in settings['dashboard']['dashboards'].items() %}
                         {% if dashboard == selected %}

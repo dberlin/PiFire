@@ -70,7 +70,7 @@ class GrillPlatform(SystemCommandsMixin):
         active_high = True if config.get("triggerlevel", "HIGH") == "HIGH" else False
 
         if self.dc_fan:
-            self.current_fan_speed_percent = 100  # Hardware PWM library does not have a mechanism to retrieve the current duty cycle - initialize a variable to track this
+            self.current_fan_speed_percent = 0  # Hardware PWM library does not have a mechanism to retrieve the current duty cycle - initialize a variable to track this. Fan is not commanded on at init, so report 0% (matches fan_off() and the other platforms).
             self._ramp_thread = None
             self.fan = OutputDevice(self.out_pins["dc_fan"], active_high=active_high, initial_value=False)
             if self.out_pins["pwm"] in [13, 19]:

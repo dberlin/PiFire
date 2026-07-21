@@ -159,7 +159,7 @@ def _settings_notify(settings, control, controller, event):
 
     if "delete_device" in response:
         DeviceID = response["delete_device"]
-        settings["notify_services"]["onesignal"]["devices"].pop(DeviceID)
+        settings["notify_services"]["onesignal"]["devices"].pop(DeviceID, None)
 
     if "edit_device" in response:
         if response["edit_device"] != "":
@@ -458,7 +458,7 @@ def _settings_startup(settings, control, controller, event):
         prime_amount = int(response["prime_on_startup"])
         if prime_amount < 0 or prime_amount > 200:
             prime_amount = 0  # Validate input, set to disabled if exceeding limits.
-        settings["startup"]["prime_on_startup"] = int(response["prime_on_startup"])
+        settings["startup"]["prime_on_startup"] = prime_amount
 
     settings["startup"]["start_to_mode"]["after_startup_mode"] = response["after_startup_mode"]
     settings["startup"]["start_to_mode"]["primary_setpoint"] = int(response["startup_mode_setpoint"])
