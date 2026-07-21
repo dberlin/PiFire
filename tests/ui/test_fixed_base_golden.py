@@ -1,6 +1,6 @@
 """Frozen pixel-hash baseline for the three legacy fixed DisplayBase classes.
 
-This is the golden contract for the base_fixed merge (Phase B, Tasks 4-5):
+This is the golden contract for the _base_fixed merge (Phase B, Tasks 4-5):
 every case here must render to the exact same pixel hash on the merged base
 as it does today on the three separate, unmodified bases (with the sole,
 explicitly documented exception of the Task 5 240x240 re-baseline).
@@ -189,9 +189,9 @@ SAMPLE_IP = "192.168.1.42"
 
 # (short_name, module, rotations)
 MODULES = [
-    ("240x240", "display.base_240x240", [0]),
-    ("240x320", "display.base_240x320", [0, 90]),
-    ("320x480", "display.base_320x480", [0, 90]),
+    ("240x240", "display._base_240x240", [0]),
+    ("240x320", "display._base_240x320", [0, 90]),
+    ("320x480", "display._base_320x480", [0, 90]),
 ]
 
 # CASES: list of (case_name, module, rotation, units, method, args_factory)

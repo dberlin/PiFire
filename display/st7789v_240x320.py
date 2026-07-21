@@ -20,7 +20,7 @@ PiFire Display Interface Library
 """
 import threading
 import ST7789 as ST7789
-from display.base_240x320 import DisplayBase
+from display._base_240x320 import DisplayBase
 from PIL import Image
 
 """

@@ -3,12 +3,13 @@
 PiFire Display Interface Library
 *****************************************
 
- Description: 1024x768 pygame display.
+ Description: 320x240 pygame display.
 
  The 800x480 DSI/pygame display class is fully resolution-agnostic — it reads
  all dimensions and layout from its JSON layout file (display_data_filename).
- This module reuses that class unchanged; the 1024x768 behavior comes entirely
- from display/dsi_1024x768t.json, which the wizard pairs with this module.
+ This module reuses that class unchanged; the compact 320x240 behavior comes
+ entirely from display/dsi_320x240t.json, which the wizard pairs with this
+ module.
 
 *****************************************
 """

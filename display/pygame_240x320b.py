@@ -22,7 +22,7 @@ import time
 import threading
 import socket
 import pygame
-from display.base_240x320 import DisplayBase
+from display._base_240x320 import DisplayBase
 
 """
 Display class definition

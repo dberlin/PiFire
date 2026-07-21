@@ -54,7 +54,7 @@ class Controller(ControllerBase):
         self.last_time = now
 
         if self.last_temp == -99:
-            self.last_temp == current
+            self.last_temp = current
             cycle_time = self.cycle_time
 
         rate_of_change = (current - self.last_temp) / cycle_time  # Rate of Change

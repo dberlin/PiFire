@@ -45,7 +45,7 @@ def _min_dist_to(canvas, target):
 
 
 def test_cook_time_bar_lid_pause_alert_renders_red():
-    # base_flex feeds label='Lid Pause' + a mm:ss countdown while the lid is open;
+    # _base_flex feeds label='Lid Pause' + a mm:ss countdown while the lid is open;
     # the bar recolors to a red alert (border #ff5a4d). Discriminate that red from
     # the normal bar's ember orange via color distance.
     red = (255, 90, 77)

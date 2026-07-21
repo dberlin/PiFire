@@ -19,7 +19,7 @@ PiFire Display Interface Library
 import threading
 from luma.core.interface.serial import spi
 from luma.lcd.device import st7789
-from display.base_240x240 import DisplayBase
+from display._base_240x240 import DisplayBase
 from PIL import Image
 from display._encoder_input import EncoderInputMixin
 

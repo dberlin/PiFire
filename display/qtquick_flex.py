@@ -21,7 +21,7 @@ import multiprocessing
 import os
 import threading
 
-from display.base_flex import DisplayBase
+from display._base_flex import DisplayBase
 from common.common import WriteKind
 from common.datastore_accessors import read_control, read_status, write_control
 from common.system import is_real_hardware

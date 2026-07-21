@@ -65,8 +65,8 @@ def _dispatch_probe(monkeypatch):
     monkeypatch.setattr(qmod, "read_status", lambda: {"s_plus": False})
     monkeypatch.setattr(qmod, "read_control", lambda: {"notify_data": [], "recipe": {"step_data": {}}})
     monkeypatch.setattr(qmod, "is_real_hardware", lambda: False)
-    # _command_handler (inherited) uses names in base_flex's namespace.
-    import display.base_flex as bf
+    # _command_handler (inherited) uses names in _base_flex's namespace.
+    import display._base_flex as bf
 
     monkeypatch.setattr(
         bf, "write_control", lambda data, kind=None, origin=None: effects.append(("write_control", data))
