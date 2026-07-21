@@ -26,7 +26,6 @@ from pyky040 import pyky040
 from PIL import ImageFilter
 from common.modes import Mode
 from display.base_flex import DisplayBase
-from display._flex_helpers import DummyBacklight  # noqa: F401  # unused here; kept for import-compat
 
 """
 Display class definition
