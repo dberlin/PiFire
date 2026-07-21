@@ -676,6 +676,18 @@ def read_probe_status(probe_info):
             section = "F"
         elif probe["type"] == "Aux":
             section = "AUX"
+        else:
+            # Unknown/unexpected probe type: there is no valid bucket for it
+            # (downstream only consumes the fixed P/F/AUX sections). Skip it
+            # rather than raising UnboundLocalError on the first probe or --
+            # worse -- silently misfiling it into whichever section a prior
+            # probe happened to set. Log so the bad config surfaces.
+            logging.getLogger("control").warning(
+                "read_probe_status: skipping probe %r with unexpected type %r (expected Primary/Food/Aux).",
+                probe.get("label"),
+                probe.get("type"),
+            )
+            continue
         probe_device = probe["device"]
 
         # Find matching device status and combine with probe configuration
