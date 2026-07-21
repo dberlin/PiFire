@@ -1,10 +1,15 @@
-"""Task 7: cover the six standalone/legacy display drivers that are not part
+"""Task 7: cover the five standalone/legacy display drivers that are not part
 of the base_fixed shim family exercised by test_fixed_base_drivers_load.py:
 
   ssd1306b.py, ssd1306.py, st7789p.py, prototype.py   -- fully standalone
       Display classes (no display.base_fixed / display.base_flex parent).
-  ili9341f.py, protoflex.py                            -- subclass
+  ili9341f.py                                          -- subclasses
       display.base_flex.DisplayBase.
+
+(A second base_flex subclass formerly covered here was removed as a ~95%
+duplicate of display/dsi_base.py's engine; its coverage is now redundant
+with test_pygame_qt_drivers.py's dsi_base tests, and its unique 320x240
+layout lives on as display/dsi_320x240t.json, exercised there too.)
 
 None of these import display.base_fixed, so the ordering hazard documented
 in test_fixed_base_drivers_load.py (PIL.Image.UnidentifiedImageError from
@@ -17,16 +22,9 @@ safeguard (it is the officially documented mitigation and these drivers
 share the same PIL/qrcode import machinery).
 
 Every driver here that reaches `_init_display_device` starts a background
-worker:
-  - ssd1306b / ssd1306 / st7789p / ili9341f: `threading.Thread(target=...)`.
-  - protoflex: `multiprocessing.Process(target=self._display_loop)` --
-    NOT threading. Patching `threading.Thread` alone (as the base_fixed
-    16-driver harness does) is not sufficient for protoflex; a real
-    `multiprocessing.Process(...).start()` would fork a worker that pulls in
-    the whole pygame/display loop with a real `while True` + real
-    `pygame.event.get()`/clock.tick loop, hanging the test process on exit
-    exactly like the threading hazard already documented. `multiprocessing.Process`
-    is therefore also patched to a no-op here, in addition to `threading.Thread`.
+worker via `threading.Thread(target=...)` (ssd1306b / ssd1306 / st7789p /
+ili9341f); `threading.Thread` is therefore patched to a no-op for every
+construction below, matching the base_fixed 16-driver harness.
 
 `mock.patch.dict(sys.modules, overlay)` (used by `_load_driver` below, mirroring
 test_fixed_base_drivers_load.py) does not merely remove the overlay's own keys
@@ -36,20 +34,11 @@ EVERY key added during the `with` block, not just the overlay's. This was
 empirically invisible for the 16 base_fixed drivers (their transitive imports
 -- luma/gpiozero/pyky040/threading/PIL/qrcode/common -- were all either part
 of the overlay itself, already pre-warmed, or already imported by pytest/its
-plugins by the time any driver loaded). protoflex.py is the first module here
-to `import multiprocessing`, and if that is the first import of `multiprocessing`
-in the whole test session, `_load_driver`'s exit wipes it from `sys.modules`
--- `display.protoflex`'s own `multiprocessing` name keeps pointing at the
-(now-orphaned) module object, while a later `mock.patch.object(__import__(
-"multiprocessing"), "Process")` re-imports a *fresh, distinct* module object
-and patches that one instead, leaving protoflex's own reference un-mocked so
-`_init_display_device` spawns a real `multiprocessing.Process` (observed
-failing with a pickling error when it tried to fork/spawn). Pre-warming
-`import multiprocessing` for real at module scope (matching the existing
-`display.base_fixed` pre-warm) avoids it the same way.
+plugins by the time any driver loaded), and remains so for the drivers left
+in this file.
 
 `os.system` is neutralized the same way as the base_fixed harness: only
-`display/base_flex.py` (ili9341f, protoflex's parent) and `display/base_fixed.py`
+`display/base_flex.py` (ili9341f's parent) and `display/base_fixed.py`
 actually call `os.system("... sudo reboot ...")`, but the patch is applied
 unconditionally for every driver as a blanket safety measure, matching the
 brief's "for EVERY driver" instruction.
@@ -57,13 +46,13 @@ brief's "for EVERY driver" instruction.
 `display.base_flex.DisplayBase.__init__` reads `common.system.is_real_hardware()`
 (-> `settings.json["platform"]["real_hw"]`) to set `self.real_hardware`. This
 repo's checked-in settings.json ships with `real_hw: true` -- NOT a hardware
-probe, just a config value read verbatim. If left unpatched, protoflex's
+probe, just a config value read verbatim. If left unpatched, ili9341f's
 `_init_display_device` (`if self.real_hardware: from rpi_backlight import
 Backlight`) raises ModuleNotFoundError in this dev/CI environment, since
 rpi_backlight is not installed here (mirrors test_qtquick_parity.py's existing
 `monkeypatch.setattr(qmod, "is_real_hardware", lambda: False)` precedent).
-`display.base_flex.is_real_hardware` is therefore forced to False for both
-base_flex-derived drivers below.
+`display.base_flex.is_real_hardware` is therefore forced to False for the
+base_flex-derived driver below.
 
 st7789p.py's `_display_text`/`_display_current` used to call the Pillow
 `ImageFont.getsize()` API, which Pillow removed in 10.0.0 (this environment
@@ -91,8 +80,6 @@ from unittest import mock
 
 import pytest
 from PIL import Image, ImageFont
-
-import multiprocessing  # noqa: F401  pre-warm; see module docstring (protoflex._load_driver hazard)
 
 import display.base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see module docstring
 
@@ -228,14 +215,6 @@ def _no_bg_threads():
 
 def _no_os_system(name):
     return mock.patch("os.system", side_effect=AssertionError(f"os.system blocked for {name}"))
-
-
-def _no_multiprocessing():
-    """protoflex._init_display_device spawns `multiprocessing.Process(target=
-    self._display_loop)`, not threading.Thread -- see module docstring. A
-    real .start() here would fork a worker running the full pygame loop and
-    hang the test process on exit, mirroring the threading.Thread hazard."""
-    return mock.patch.object(__import__("multiprocessing"), "Process")
 
 
 _real_truetype = ImageFont.truetype
@@ -643,10 +622,10 @@ def test_st7789p_device_geometry_overridden_by_hardware():
 
 
 # ---------------------------------------------------------------------------
-# ili9341f.py / protoflex.py -- display.base_flex.DisplayBase subclasses.
+# ili9341f.py -- display.base_flex.DisplayBase subclass.
 # ---------------------------------------------------------------------------
 
-# Shared by both drivers' _configure_dash() (reads config["probe_info"]),
+# Used by ili9341f's _configure_dash() (reads config["probe_info"]),
 # mirroring test_base_flex_dash_update.py's _config().
 _PROBE_INFO = {
     "primary": {"name": "Grill"},
@@ -709,9 +688,11 @@ class _FakeFlexObject:
 
 
 def _drive_flex_input_and_menu_coverage(d, monkeypatch):
-    """Exercises _event_detect/_process_button/_process_touch's branches,
-    shared verbatim between ili9341f.py and protoflex.py (both copy the same
-    base_flex-era input dispatch code into their own module). Real dash
+    """Exercises _event_detect/_process_button/_process_touch's branches for
+    ili9341f.py. The same base_flex-era input dispatch code is duplicated
+    into display/dsi_base.py and is covered directly there by
+    test_pygame_qt_drivers.py, using dsi_800x480t.json's layout instead of
+    reconstructing exact ili9341f layout-JSON button lists. Real dash
     construction (_init_dash -> real FlexObject instances, already covered
     by test_base_flex_dash_update.py for the base class) drives the
     dash->menu transition; a fully-controlled _FakeFlexObject drives the
@@ -970,111 +951,6 @@ def test_ili9341f_no_input_types_disables_input(monkeypatch):
 
 def test_ili9341f_event_detect_and_menu_touch_branches(monkeypatch):
     _mod, d = _make_ili9341f(monkeypatch)
-    _drive_flex_input_and_menu_coverage(d, monkeypatch)
-
-
-# --- protoflex.py -----------------------------------------------------------
-
-
-def _protoflex_config(**overrides):
-    config = {
-        "display_data_filename": "./display/protoflex_320x240.json",
-        "input_types_supported": ["button", "encoder", "touch"],
-        "buttonslevel": "HIGH",
-        "rotation": 0,
-        "probe_info": _PROBE_INFO,
-    }
-    config.update(overrides)
-    return config
-
-
-def _make_protoflex(monkeypatch, **config_overrides):
-    import display.base_flex as base_flex_mod
-
-    monkeypatch.setattr(base_flex_mod, "is_real_hardware", lambda: False)
-    mod = _load_driver("display.protoflex", {})
-    monkeypatch.setattr(mod, "is_real_hardware", lambda: False, raising=False)
-    config = _protoflex_config(**config_overrides)
-    with (
-        _no_bg_threads() as mock_thread,
-        _no_multiprocessing() as mock_proc,
-        _no_os_system("protoflex"),
-    ):
-        mock_thread.return_value.start = lambda: None
-        mock_proc.return_value.start = lambda: None
-        d = mod.Display(
-            dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=config["rotation"], units="F", config=config
-        )
-    return mod, d
-
-
-def test_protoflex_constructs_with_dummy_backlight(monkeypatch):
-    mod, d = _make_protoflex(monkeypatch)
-    assert isinstance(d.backlight, mod.DummyBacklight)
-    assert d.backlight.power is True
-    assert d.background is not None and d.display_canvas is not None
-
-
-def test_protoflex_wake_sleep_toggle_backlight(monkeypatch):
-    import pygame
-
-    _mod, d = _make_protoflex(monkeypatch)
-    with mock.patch.object(pygame.time, "delay"):  # real delay(1000) would cost 1s wall-clock
-        d._sleep_display()
-    assert d.backlight.power is False
-    d._wake_display()
-    assert d.backlight.power is True and d.backlight.brightness == 100
-
-
-def test_protoflex_display_background_and_menu_background(monkeypatch):
-    _mod, d = _make_protoflex(monkeypatch)
-    d._display_background()
-    d._capture_background()
-    assert d.menu_background is not None
-    d._display_menu_background()
-
-
-def test_protoflex_display_canvas_blits_to_real_pygame_surface(monkeypatch):
-    import pygame
-
-    _mod, d = _make_protoflex(monkeypatch)
-    pygame.init()
-    try:
-        d.display_surface = pygame.display.set_mode(size=(d.WIDTH, d.HEIGHT), flags=pygame.SHOWN)
-        d._display_canvas()  # real _canvas_to_surface() blit + pygame.display.update()
-        with mock.patch.object(pygame.time, "delay"):  # _display_clear -> _sleep_display's real delay(1000)
-            d._display_clear()
-    finally:
-        pygame.quit()
-
-
-def test_protoflex_rotation_180_uses_profile_2(monkeypatch):
-    # Only rotation in [0, 180] selects "profile_1"; anything else (90, 270)
-    # falls through to "profile_2" (line 53's else branch).
-    _mod, d = _make_protoflex(monkeypatch, rotation=90)
-    assert d.display_profile == "profile_2"
-
-
-def test_protoflex_button_callbacks_are_inherited_noops(monkeypatch):
-    # protoflex does not override _up_callback/_down_callback/_enter_callback
-    # (unlike ili9341f); DisplayBase's are no-ops. Calling them still proves
-    # the driver constructs input_event plumbing consistently.
-    _mod, d = _make_protoflex(monkeypatch)
-    d._enter_callback()
-    d._up_callback()
-    d._down_callback()
-
-
-def test_protoflex_no_input_types_disables_nothing_input_enabled_flag(monkeypatch):
-    # protoflex's own _init_input always sets input_enabled = True (unlike
-    # ili9341f's, which has a "none" branch); this documents that the two
-    # drivers' _init_input overrides genuinely differ.
-    mod, d = _make_protoflex(monkeypatch, input_types_supported=["none"])
-    assert d.input_enabled is True
-
-
-def test_protoflex_event_detect_and_menu_touch_branches(monkeypatch):
-    _mod, d = _make_protoflex(monkeypatch)
     _drive_flex_input_and_menu_coverage(d, monkeypatch)
 
 

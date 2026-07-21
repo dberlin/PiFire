@@ -12,14 +12,17 @@
   dsi_base.py         -- display.base_flex.DisplayBase subclass (a "flex"
                           driver over a real pygame framebuffer surface,
                           faked here exactly like test_fixed_drivers_methods
-                          .py's ili9341f/protoflex coverage: construct with
-                          the multiprocessing display worker and threading
+                          .py's ili9341f coverage: construct with the
+                          multiprocessing display worker and threading
                           menu timers patched to no-ops, then drive the
                           render/input methods directly rather than running
                           the real infinite _display_loop). This is the
                           resolution-agnostic engine behind the dsi_800x480t/
-                          dsi_1024x600t/dsi_1024x768t/dsi_1280x720t stubs;
-                          this file exercises it via the 800x480 JSON layout.
+                          dsi_1024x600t/dsi_1024x768t/dsi_1280x720t/
+                          dsi_320x240t stubs (the last of these re-homes a
+                          removed sibling module's unique compact 320x240
+                          layout onto this engine); this file exercises it
+                          via both the 800x480 and 320x240 JSON layouts.
   qtapp.py            -- the Qt Quick display-process host: build_engine/
                           build_backend/_fetch/_make_backlight/DummyBacklight
                           /bind_backend_power, driven directly under
@@ -477,10 +480,10 @@ def test_pygame_240x320b_event_detect_opens_menu_and_renders_it(monkeypatch):
 
 # ---------------------------------------------------------------------------
 # dsi_base.py -- display.base_flex.DisplayBase subclass ("flex" driver).
-# Mirrors test_fixed_drivers_methods.py's ili9341f/protoflex coverage
-# pattern: construct with the multiprocessing display worker patched to a
-# no-op, then drive the render/input methods directly against a real pygame
-# offscreen surface rather than running the real _display_loop.
+# Mirrors test_fixed_drivers_methods.py's ili9341f coverage pattern:
+# construct with the multiprocessing display worker patched to a no-op, then
+# drive the render/input methods directly against a real pygame offscreen
+# surface rather than running the real _display_loop.
 # ---------------------------------------------------------------------------
 
 _DSI_PROBE_INFO = {
@@ -533,7 +536,7 @@ def _make_dsi(monkeypatch, **config_overrides):
     # This dev box's /sys/class/backlight/ may or may not exist; forcing
     # is_real_hardware() False makes _init_display_device's DummyBacklight
     # fallback deterministic regardless of environment (mirrors
-    # test_fixed_drivers_methods.py's ili9341f/protoflex precedent).
+    # test_fixed_drivers_methods.py's ili9341f precedent).
     monkeypatch.setattr(base_flex_mod, "is_real_hardware", lambda: False)
     config = _dsi_config(**config_overrides)
     with (
@@ -554,9 +557,8 @@ class _FakeFlexObject:
     control over button_list/button_selected/touch_areas/data, so
     _process_button/_process_touch's deeper branches can be driven directly
     (same technique as test_fixed_drivers_methods.py's helper of the same
-    shape, for protoflex/ili9341f -- dsi_800x480t's _process_button/
-    _process_touch bodies are the same base_flex-era code duplicated into
-    this module)."""
+    shape, for ili9341f -- dsi_800x480t's _process_button/_process_touch
+    bodies are the same base_flex-era code duplicated into this module)."""
 
     def __init__(
         self, button_list, button_selected=1, button_value=None, touch_areas=None, extra_data=None, command=None
@@ -799,14 +801,42 @@ def test_dsi_800x480t_event_detect_and_menu_touch_branches(monkeypatch):
             d._process_touch()  # inactive -> _wake_display() + go to home/dash
             assert d.display_active in ("home", "dash")
 
-            # dsi_800x480t-specific: touch-coordinate rotation transforms
-            # (90/180/270), not present in protoflex/ili9341f's copy.
+            # dsi_base-specific: touch-coordinate rotation transforms
+            # (90/180/270), not present in ili9341f's copy.
             d.display_object_list = []
             for rotation in (90, 180, 270):
                 d.ROTATION = rotation
                 d.display_active = "menu_main"
                 d.touch_pos = (10, 20)
                 d._process_touch()
+    finally:
+        pygame.quit()
+
+
+def test_dsi_320x240t_layout_constructs_and_renders(monkeypatch):
+    """display/dsi_320x240t.json is the compact 320x240 layout re-homed onto
+    this same resolution-agnostic engine from a since-removed sibling
+    module: max_food_probes=2, a 54-widget layout genuinely distinct from
+    the 800x480 JSON exercised above (gauge_compact food-probe widgets,
+    tighter menu/input geometry). This characterizes that the engine loads
+    and renders that layout correctly; the deep input/menu branch coverage
+    above already exercises the shared dispatch code independent of which
+    JSON layout is loaded, so it is not repeated here."""
+    d = _make_dsi(monkeypatch, display_data_filename="./display/dsi_320x240t.json")
+    assert (d.WIDTH, d.HEIGHT) == (320, 240)
+    assert isinstance(d.backlight, dsi_mod.DummyBacklight)
+    assert d.backlight.power is True
+    assert d.background is not None and d.display_canvas is not None
+    assert d.display_profile == "profile_1"
+
+    pygame.init()
+    try:
+        d.display_surface = pygame.display.set_mode(size=(d.WIDTH, d.HEIGHT), flags=pygame.SHOWN)
+        blank = pygame.image.tobytes(d.display_surface, "RGB")
+        with mock.patch.object(pygame.time, "delay"):
+            d._display_splash()  # base_flex generic splash -> our no-arg _display_canvas()
+        after_splash = pygame.image.tobytes(d.display_surface, "RGB")
+        assert after_splash != blank, "_display_splash did not draw anything onto the real surface"
     finally:
         pygame.quit()
 
