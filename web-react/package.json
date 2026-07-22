@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "demo": "VITE_DEMO=1 vite",
-    "build": "tsc -b && vite build",
+    "typecheck": "node node_modules/typescript7/bin/tsc -b",
+    "build": "node node_modules/typescript7/bin/tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
@@ -37,6 +38,7 @@
     "jsdom": "^29.1.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.65.0",
+    "typescript7": "npm:typescript@7.0.2",
     "vite": "^8.1.5",
     "vitest": "^4.1.10"
   }
