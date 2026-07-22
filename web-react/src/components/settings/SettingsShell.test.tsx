@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { SettingsShell } from "./SettingsShell";
 
@@ -7,7 +7,9 @@ import { SettingsShell } from "./SettingsShell";
 // (unlike a plain tab) it needs a real data router with a loader — the
 // shared `renderRoute` harness (which only wires up Outlet context) doesn't
 // supply that. Build a minimal one here with the /settings route's own
-// loader stubbed to return { settings, mode } synchronously.
+// loader stubbed to return { settings, mode } synchronously, plus a sibling
+// "/" route so the back-to-dashboard navigation (SettingsShell.tsx:21) can
+// be observed landing somewhere.
 function renderShell() {
   const router = createMemoryRouter(
     [
@@ -17,6 +19,7 @@ function renderShell() {
         loader: () => ({ settings: { globals: { units: "F" } }, mode: "Stop" }),
         children: [{ index: true, element: <div /> }],
       },
+      { path: "/", element: <div data-testid="dashboard-root">Dashboard</div> },
     ],
     { initialEntries: ["/settings"] },
   );
@@ -44,5 +47,14 @@ describe("SettingsShell", () => {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
     }
     expect(screen.getByRole("button", { name: /Dashboard/ })).toBeInTheDocument();
+  });
+
+  it("navigates back to the dashboard when the back button is clicked", async () => {
+    renderShell();
+    const backButton = await screen.findByRole("button", { name: /Dashboard/ });
+
+    fireEvent.click(backButton);
+
+    expect(await screen.findByTestId("dashboard-root")).toBeInTheDocument();
   });
 });
