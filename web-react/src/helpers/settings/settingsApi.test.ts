@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { applySettings, buildSettingsUrl, getMode, getSettings } from "./settingsApi";
+import {
+  applySettings,
+  buildSettingsUrl,
+  getControllerMetadata,
+  getMode,
+  getSettings,
+} from "./settingsApi";
 
 describe("buildSettingsUrl", () => {
   it("joins base + /api + path", () => {
@@ -59,6 +65,34 @@ describe("getMode", () => {
   it("fails open to empty string when fetch rejects", async () => {
     rs.stubGlobal("fetch", rs.fn().mockRejectedValue(new Error("down")));
     await expect(getMode("")).resolves.toBe("");
+  });
+});
+
+describe("getControllerMetadata", () => {
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  it("resolves the parsed metadata envelope on a 201", async () => {
+    const fixture = { metadata: { pid: { friendly_name: "PID Standard", config: [] } } };
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => ({ ok: true, status: 201, json: async () => fixture })),
+    );
+    await expect(getControllerMetadata("")).resolves.toEqual(fixture);
+  });
+
+  it("fails open to null when the HTTP response is not ok", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })),
+    );
+    await expect(getControllerMetadata("")).resolves.toBeNull();
+  });
+
+  it("fails open to null when fetch rejects", async () => {
+    rs.stubGlobal("fetch", rs.fn().mockRejectedValue(new Error("down")));
+    await expect(getControllerMetadata("")).resolves.toBeNull();
   });
 });
 

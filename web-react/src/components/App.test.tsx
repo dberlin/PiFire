@@ -10,9 +10,11 @@ rs.mock("../helpers/useDashData", () => ({
 
 const getSettingsMock = rs.fn();
 const getModeMock = rs.fn();
+const getControllerMetadataMock = rs.fn().mockResolvedValue(null);
 rs.mock("../helpers/settings/settingsApi", () => ({
   getSettings: (...args: unknown[]) => getSettingsMock(...args),
   getMode: (...args: unknown[]) => getModeMock(...args),
+  getControllerMetadata: (...args: unknown[]) => getControllerMetadataMock(...args),
   buildSettingsUrl: (baseUrl: string, path: string) => `${baseUrl}/api/${path}`,
 }));
 

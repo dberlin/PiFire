@@ -4,6 +4,7 @@ import { AppPrefsProvider } from "./AppPrefs";
 import { DashboardRoute } from "./DashboardRoute";
 import { SettingsError } from "./settings/SettingsError";
 import { SettingsShell } from "./settings/SettingsShell";
+import { ControllerTab } from "./settings/tabs/ControllerTab";
 import { GeneralTab } from "./settings/tabs/GeneralTab";
 import { HistoryTab } from "./settings/tabs/HistoryTab";
 import { PelletsTab } from "./settings/tabs/PelletsTab";
@@ -34,6 +35,7 @@ export const routes = [
       { index: true, element: <Navigate to="general" replace /> },
       { path: "general", element: <GeneralTab /> },
       { path: "work-mode", element: <WorkModeTab /> },
+      { path: "controller", element: <ControllerTab /> },
       { path: "pwm", element: <PwmTab /> },
       { path: "startup", element: <StartupTab /> },
       { path: "safety", element: <SafetyTab /> },

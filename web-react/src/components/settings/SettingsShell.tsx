@@ -1,9 +1,10 @@
 import { NavLink, Outlet, useLoaderData, useNavigate } from "react-router";
-import type { Settings } from "../../helpers/settings/settingsApi";
+import type { ControllerMetadata, Settings } from "../../helpers/settings/settingsApi";
 
 const SETTINGS_TABS = [
   { path: "general", label: "General" },
   { path: "work-mode", label: "Work Mode" },
+  { path: "controller", label: "Controller" },
   { path: "pwm", label: "PWM Fan" },
   { path: "startup", label: "Startup / Shutdown" },
   { path: "safety", label: "Safety" },
@@ -13,7 +14,11 @@ const SETTINGS_TABS = [
 ];
 
 export function SettingsShell() {
-  const { settings, mode } = useLoaderData() as { settings: Settings; mode: string };
+  const { settings, mode, controllerMeta } = useLoaderData() as {
+    settings: Settings;
+    mode: string;
+    controllerMeta: ControllerMetadata | null;
+  };
   const navigate = useNavigate();
   return (
     <div className="pf-settings">
@@ -33,7 +38,7 @@ export function SettingsShell() {
         ))}
       </aside>
       <main className="pf-settings-content">
-        <Outlet context={{ settings, mode }} />
+        <Outlet context={{ settings, mode, controllerMeta }} />
       </main>
     </div>
   );

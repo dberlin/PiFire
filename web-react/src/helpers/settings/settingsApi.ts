@@ -16,6 +16,32 @@ export async function getSettings(baseUrl: string): Promise<Settings> {
   return body.settings ?? (body as Settings); // GET /api/settings returns { settings: {...} }
 }
 
+export interface ControllerOption {
+  option_name: string;
+  option_friendly_name: string;
+  option_description: string;
+  option_type: "float" | "int" | "bool" | string;
+  option_default: number | boolean | null;
+  option_min: number | null;
+  option_max: number | null;
+}
+export interface ControllerMetadata {
+  metadata: Record<
+    string,
+    { friendly_name: string; description: string; config: ControllerOption[] }
+  >;
+}
+
+export async function getControllerMetadata(baseUrl: string): Promise<ControllerMetadata | null> {
+  try {
+    const res = await fetch(buildSettingsUrl(baseUrl, "controller_metadata"));
+    if (!res.ok) return null;
+    return (await res.json()) as ControllerMetadata;
+  } catch {
+    return null; // fail-open: Controller tab renders an "unavailable" state
+  }
+}
+
 export async function getMode(baseUrl: string): Promise<string> {
   try {
     const res = await fetch(buildSettingsUrl(baseUrl, "get/mode"));
