@@ -11,14 +11,18 @@ describe("ColorField", () => {
 
   it("input's value is the hex of the stored string", () => {
     const onChange = rs.fn();
-    const { container } = render(<ColorField label="Color" value="rgb(255, 138, 43, 1)" onChange={onChange} />);
+    const { container } = render(
+      <ColorField label="Color" value="rgb(255, 138, 43, 1)" onChange={onChange} />,
+    );
     const input = container.querySelector('input[type="color"]') as HTMLInputElement;
     expect(input.value).toBe("#ff8a2b");
   });
 
   it("onChange called with rgb string when input changes", () => {
     const onChange = rs.fn();
-    const { container } = render(<ColorField label="Color" value="rgb(0, 0, 0, 1)" onChange={onChange} />);
+    const { container } = render(
+      <ColorField label="Color" value="rgb(0, 0, 0, 1)" onChange={onChange} />,
+    );
     const input = container.querySelector('input[type="color"]') as HTMLInputElement;
     fireEvent.change(input, { target: { value: "#ff8a2b" } });
     expect(onChange).toHaveBeenCalledWith("rgb(255, 138, 43, 1)");

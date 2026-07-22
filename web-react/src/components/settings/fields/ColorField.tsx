@@ -14,6 +14,7 @@ export function ColorField({
       <span className="pf-field-label">{label}</span>
       <input
         type="color"
+        className="pf-input"
         value={rgbStringToHex(value)}
         onChange={(e) => onChange(hexToRgbString(e.target.value))}
       />
