@@ -737,7 +737,7 @@ git commit -m "feat(web-react): settings form primitives + delta helper"
 - [ ] **Step 1: Implement GeneralTab**
 
 ```tsx
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useOutletContext } from "react-router";
 import type { Settings } from "../settingsApi";
 import { useSaveSettings } from "../useSaveSettings";
@@ -755,14 +755,18 @@ export function GeneralTab() {
   const { settings } = useOutletContext<{ settings: Settings }>();
   const { save, saving } = useSaveSettings();
   const [name, setName] = useState<string>(settings.globals?.grill_name ?? "");
-  const [theme, setTheme] = useState<string>(settings.globals?.page_theme ?? "dark");
+  const [theme, setTheme] = useState<string>(settings.globals?.page_theme ?? "light");
   const [saved, setSaved] = useState(false);
 
-  // Re-sync when the loader revalidates (settings identity changes).
-  useEffect(() => {
+  // Re-sync from the loader on revalidation via render-phase adjustment — the
+  // repo house style (Task 1's Dashboard cook-timer). NOT a useEffect: the React
+  // Compiler lint rule `react-hooks/set-state-in-effect` rejects setState-in-effect.
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings !== prevSettings) {
+    setPrevSettings(settings);
     setName(settings.globals?.grill_name ?? "");
-    setTheme(settings.globals?.page_theme ?? "dark");
-  }, [settings]);
+    setTheme(settings.globals?.page_theme ?? "light");
+  }
 
   const onSave = async () => {
     let delta = setPath({}, "globals.grill_name", name);
@@ -807,7 +811,7 @@ git commit -m "feat(web-react): settings General tab (grill name + theme)"
 - [ ] **Step 1: Implement PwmTab**
 
 ```tsx
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useOutletContext } from "react-router";
 import type { Settings } from "../settingsApi";
 import { useSaveSettings } from "../useSaveSettings";
@@ -832,7 +836,13 @@ export function PwmTab() {
   const [pwm, setPwm] = useState<Pwm>(() => readPwm(settings));
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => { setPwm(readPwm(settings)); }, [settings]);
+  // Render-phase re-sync on revalidation (house style; NOT useEffect — the React
+  // Compiler lint rule rejects setState-in-effect).
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings !== prevSettings) {
+    setPrevSettings(settings);
+    setPwm(readPwm(settings));
+  }
 
   const set = <K extends keyof Pwm>(k: K, v: Pwm[K]) => setPwm((s) => ({ ...s, [k]: v }));
 
@@ -893,7 +903,7 @@ it("setUnits → /api/set/units/{F|C}", async () => {
 - [ ] **Step 3: Implement UnitsTab**
 
 ```tsx
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useOutletContext, useRevalidator } from "react-router";
 import type { Settings } from "../settingsApi";
 import { createCommand } from "../../command";
@@ -913,7 +923,12 @@ export function UnitsTab() {
   const [units, setUnits] = useState<"F" | "C">(settings.globals?.units === "C" ? "C" : "F");
   const [pending, setPending] = useState<"F" | "C" | null>(null);
 
-  useEffect(() => { setUnits(settings.globals?.units === "C" ? "C" : "F"); }, [settings]);
+  // Render-phase re-sync on revalidation (house style; NOT useEffect).
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings !== prevSettings) {
+    setPrevSettings(settings);
+    setUnits(settings.globals?.units === "C" ? "C" : "F");
+  }
 
   const onChange = (v: string) => {
     const next = v === "C" ? "C" : "F";
