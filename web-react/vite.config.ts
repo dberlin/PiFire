@@ -25,5 +25,9 @@ export default defineConfig({
     // Playwright owns tests/e2e (run via `bun run test:e2e`); vitest must
     // not try to import those specs — they use @playwright/test's `test`.
     exclude: [...configDefaults.exclude, "tests/e2e/**"],
+    // Component tests opt into jsdom per-file via a `// @vitest-environment
+    // jsdom` docblock (first line of the file) — keep the default `node`
+    // environment here so the existing pure-function tests stay fast.
+    setupFiles: ["./src/test-setup.ts"],
   },
 });
