@@ -101,6 +101,7 @@ listed for completeness.
 | Authoring 504 keys | typed classes, concise | verbose field decls | typed structs, concise | very painful |
 | Pi install | Rust wheel (heaviest) | **pure Python** | small C wheel | pure Python |
 | Python typing win | yes | no | yes | no |
+| Partial-delta validation (S2) | via `pydantic-partial` 0.11.1 (verify recursive derivation in spike) | **built-in** (`load(partial=True)`) | manual (`Optional` twins or convert with defaults) | jsonschema has no partial mode |
 | Maturity/longevity | highest | high (plugin: uncertain) | good, 0.x | n/a |
 
 **Recommendation:** pydantic v2, primarily for the first-class schema export
@@ -134,11 +135,31 @@ the fallback if both disappoint.
    Estimated: 6–8 SDD tasks.
 
 **S2 — Server-side enforcement**
-5. `POST /api/settings_update` validates the MERGED result before
-   `write_settings`; invalid → `{result: "error", message: <path + why>}`,
-   nothing written. This is the payoff: the generic endpoint stops trusting
-   clients, and future Flask-parity coercions become schema constraints
-   (min/max/enum) enforced in ONE place.
+5. `POST /api/settings_update` validation happens in TWO layers, because the
+   payload is a PARTIAL delta:
+   - **Delta layer:** validate the incoming partial against a
+     partial-variant of the model — every field optional, recursively, but
+     any field that IS present must satisfy its type/constraints. Rejects
+     garbage before any merge, with error paths pointing at the delta the
+     client actually sent.
+     - pydantic route: **`pydantic-partial` 0.11.1** (user-suggested; checked
+       PyPI 2026-07-22, actively maintained — 0.11.1 uploaded 2026-06)
+       derives the recursive all-optional twin via
+       `create_partial_model(SettingsModel, recursive=True)` instead of
+       hand-maintaining a duplicate Optional tree. Verify in the spike:
+       recursive derivation over the 21-section tree, and how it composes
+       with `dict[str, X]` dynamic zones.
+     - marshmallow route: **built-in** — `Schema().load(delta, partial=True)`
+       is native (a genuine point for marshmallow in the comparison table).
+   - **Merged layer:** `deep_update(current, delta)` then validate the FULL
+     merged tree before `write_settings` — required regardless of library,
+     because cross-field invariants (e.g. `smartstart.profiles.length ==
+     temp_range_list.length + 1`) are unverifiable on a partial that carries
+     only one side. Invalid → `{result: "error", message: <path + why>}`,
+     nothing written.
+   This is the payoff: the generic endpoint stops trusting clients, and
+   future Flask-parity coercions become schema constraints (min/max/enum)
+   enforced in ONE place.
 6. Move numeric clamps (prime_on_startup 0–200, pwm duty bounds…) into the
    schema as constraints; delete the duplicated React-side clamps once the
    server rejects/coerces authoritatively (UX still pre-validates for nice
