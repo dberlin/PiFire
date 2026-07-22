@@ -1,0 +1,109 @@
+/* PiFire Dashboard — keyframes + the few structural classes.
+   Most styling is inline (mirroring the design's inline-style authoring); this
+   file holds the @keyframes (which inline styles can't declare) plus the
+   fit-to-viewport stage, buttons, and header controls. */
+
+@keyframes pf-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pf-augerFeed {
+  to { transform: translateX(-16px); }
+}
+@keyframes pf-pellet {
+  0% { transform: translateY(-14px); opacity: 0; }
+  25% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(11px); opacity: 0; }
+}
+@keyframes pf-flicker {
+  0%, 100% { opacity: 1; }
+  40% { opacity: 0.62; }
+  55% { opacity: 0.92; }
+  72% { opacity: 0.55; }
+  85% { opacity: 0.85; }
+}
+@keyframes pf-heat {
+  0% { transform: translateY(2px) scaleX(1); opacity: 0; }
+  30% { opacity: 0.7; }
+  100% { transform: translateY(-16px) scaleX(1.3); opacity: 0; }
+}
+@keyframes pf-glow {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.62; transform: scale(1.06); }
+}
+@keyframes pf-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Fit-to-viewport stage: authored at 1280x720, scaled uniformly to fit. */
+.pf-fit {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #0c0a09;
+}
+.pf-stage {
+  width: 1280px;
+  height: 720px;
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 118%, #241a12 0%, #16110d 42%, #0d0b09 100%);
+  font-family: "Barlow", system-ui, sans-serif;
+  color: #f4ede2;
+  display: flex;
+  flex-direction: column;
+  transform-origin: center center;
+}
+/* Animate toggle: kill @keyframes animations, leave transitions intact. */
+.pf-stage[data-animate="false"] * {
+  animation: none !important;
+}
+
+/* Control-panel buttons */
+.pf-btn {
+  cursor: pointer;
+  border-style: solid;
+  border-width: 2px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 25px;
+  font-family: "Barlow";
+  letter-spacing: 0.5px;
+  transition: transform 90ms ease, background 120ms ease;
+}
+.pf-btn:active {
+  transform: scale(0.97);
+}
+
+/* Header controls */
+.pf-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.pf-swatch.sel {
+  border-color: #f4ede2;
+}
+.pf-toggle {
+  background: #1d1813;
+  color: #7d7264;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  font: 700 11px "Barlow";
+  letter-spacing: 1px;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+.pf-toggle.on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}

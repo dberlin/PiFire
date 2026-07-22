@@ -1,0 +1,62 @@
+/* Design tokens ported verbatim from display/qml/Theme.qml.
+   Accent is swappable (Ember/Ice/Crimson) via [data-accent] on :root. */
+:root {
+  --page: #0c0a09;
+  --card: #2c231a;
+  --inset: #1c1712;
+  --text: #f4ede2;
+  --text-dim: #a89a86;
+  --card-radius: 18px;
+  --pill-radius: 999px;
+  --anim-ms: 250ms;
+  --ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
+
+  /* Ember (default) */
+  --accent: #ff8a2b;
+  --accent-1: #ffd08a;
+  --accent-2: #ff5a1f;
+  --glow: rgba(255, 138, 43, 0.45);
+}
+:root[data-accent="ice"] {
+  --accent: #3cc7d0;
+  --accent-1: #a8ecf0;
+  --accent-2: #1f8fa0;
+  --glow: rgba(60, 199, 208, 0.45);
+}
+:root[data-accent="crimson"] {
+  --accent: #ff6a5a;
+  --accent-1: #ffb0a6;
+  --accent-2: #d83a2f;
+  --glow: rgba(255, 106, 90, 0.45);
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--page);
+  color: var(--text);
+  font-family: "Barlow", "Barlow Semi Condensed", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* App shell, gauge, and control-panel styling now live with the dashboard
+   (src/dashboard/*). The full 1280x720 UI is inline-styled + dashboard.css;
+   theme.css keeps the design tokens, the base reset, and the connection screen. */
+
+/* ---- connection status (dev, no live data) ---- */
+.conn {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 14px; text-align: center; padding: 24px;
+}
+.conn-dot { width: 16px; height: 16px; border-radius: 50%; }
+.conn-dot.wait { background: var(--accent); animation: header-pulse 1200ms ease-in-out infinite; }
+.conn-dot.err { background: #ff5a4a; box-shadow: 0 0 16px rgba(255,90,74,0.6); }
+.conn-title { margin: 0; font-size: 24px; font-weight: 700; }
+.conn-url { margin: 0; color: var(--text-dim); font-size: 15px; }
+.conn-hint { margin: 6px 0 0; color: var(--text-dim); font-size: 13px; line-height: 1.7; max-width: 560px; }
+.conn code {
+  background: var(--inset); color: var(--text); padding: 2px 7px;
+  border-radius: 6px; font-size: 0.9em;
+}
+
+@keyframes header-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
