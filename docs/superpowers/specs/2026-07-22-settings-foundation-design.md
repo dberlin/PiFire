@@ -82,9 +82,30 @@ body: { "settings": <partial settings dict>, "flags": ["settings_update", ...] }
 triggers: `settings_update`, `controller_update`, `distance_update`,
 `probe_profile_update`. The existing `POST /api/settings` is left unchanged.
 
+### Dev tooling & build config (prerequisite)
+
+- **Router mode = library, not framework.** Use `react-router` as a library
+  (`<BrowserRouter>` + `<Routes>`), because the app is served as **static files
+  by Flask/gunicorn**. Do NOT adopt `@react-router/dev` framework mode (its own
+  build/SSR server would conflict with static serving). Consequence: the React
+  Compiler needs **no** router-specific vite change — the existing
+  `@vitejs/plugin-react` + `@rolldown/plugin-babel` + `reactCompilerPreset()`
+  wiring in `vite.config.ts` already compiles router components (this is the
+  react.dev "Vite + Babel" path, which the repo already matches). The plan must
+  **confirm** this config still holds after adding the router; it should not
+  switch to `vite-plugin-babel`/framework mode.
+- **ESLint (new — the repo has no JS linting today).** Add a flat config
+  (`eslint.config.js`) with: `@eslint/js` recommended, `typescript-eslint`,
+  `eslint-plugin-react-hooks` **recommended-latest** (this includes both the
+  rules-of-hooks / exhaustive-deps rules AND the React Compiler rule
+  `react-hooks/react-compiler`, which validates the compiler's assumptions), and
+  `eslint-plugin-react-refresh`. Add `"lint": "eslint ."` to `package.json`
+  scripts. `bun run lint` must be clean and is part of the verification gate
+  going forward. Installed via **bun** (`bun add -d`), commit `bun.lock`.
+
 ### Frontend
 
-- **Router:** `react-router` (justified at full-replacement scope). Routes:
+- **Router:** `react-router` (library mode, per above). Routes:
   `/` → the existing `Dashboard`; `/settings` → settings shell with nested tab
   routes (`/settings/general`, `/settings/pwm`, `/settings/units`, …).
 - **App shell:** the design's header **menu** (hamburger) navigates to settings;
@@ -115,6 +136,9 @@ triggers: `settings_update`, `controller_update`, `distance_update`,
 - Modify `web-react/src/App.tsx` — introduce the router (`/` vs `/settings/*`).
 - Modify the dashboard header menu button → navigate to `/settings`.
 - Backend: `blueprints/api/routes.py` — add `_api_post_settings_update` + register.
+- Tooling: `web-react/eslint.config.js` (new flat config) + `package.json`
+  (`react-router` dep, eslint dev-deps, `lint` script); confirm `vite.config.ts`
+  compiler wiring unchanged.
 
 ## Data flow
 
@@ -153,7 +177,8 @@ triggers: `settings_update`, `controller_update`, `distance_update`,
 
 ## Rollout / verification
 
-`bunx tsc -b` clean · vitest green · the new pytest green under
+`bunx tsc -b` clean · **`bun run lint` clean** (react-hooks + react-compiler
+rules) · vitest green · the new pytest green under
 `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/...` ·
 `bun run build` green · e2e round-trips green against `control.py` + gunicorn.
 Dashboard route unaffected; demo mode still works.
