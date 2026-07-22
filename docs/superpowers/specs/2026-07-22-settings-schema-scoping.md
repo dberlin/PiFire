@@ -44,6 +44,50 @@ Python schema definition
 The library choice changes only the left box and what runtime validation
 looks like.
 
+## TS-side consumption: json-schema-to-typescript vs zod (user-requested)
+
+The Python side owns the schema; the question is what the frontend derives
+from it. (Versions checked 2026-07-22: zod 4.4.3, json-schema-to-typescript
+15.0.4, json-schema-to-zod 2.8.1.)
+
+**T1. `json-schema-to-typescript` — types only (S1 default).** Generates the
+`Settings` interface at build time. Mature, zero runtime cost, zero bundle
+weight, nothing to ship. No client-side runtime validation — which S1 doesn't
+need (the server enforces in S2; the UI's field primitives already constrain
+input).
+
+**T2. zod as the consumer — types + client-side runtime validation.** Zod 4
+made JSON Schema interop first-party, but DIRECTION MATTERS:
+- `z.toJSONSchema()` (zod → schema) is native and stable — irrelevant to us
+  unless we flip ownership (see T3).
+- **`z.fromJSONSchema()` (schema → zod, OUR direction) is explicitly
+  experimental** in zod 4.4 — not stable API, subject to change. And a
+  runtime-constructed schema doesn't yield static types (`z.infer` needs a
+  statically-known schema), so T2-runtime would STILL need
+  json-schema-to-typescript for the types. Worst of both; avoid until
+  fromJSONSchema stabilizes.
+- **T2b codegen route:** third-party `json-schema-to-zod` generates a static
+  `.ts` zod schema file in the same drift-checked generation step → one
+  artifact gives `z.infer` types AND runtime `.parse()`. Costs: zod in the
+  bundle (~10–15 kB gz; `zod/mini` reduces it), a third-party generator's
+  fidelity over patternProperties/dynamic zones, and a second generated file
+  to keep in sync.
+
+What client-side runtime validation would actually buy: pre-POST delta
+validation for nicer error UX (the server's S2 rejection already guarantees
+correctness), and a dev-mode guard on `GET /api/settings` responses that
+catches schema drift at runtime. Real but modest.
+
+**T3. zod-first (flip the ownership):** author the schema in TS with zod,
+`z.toJSONSchema()` → Python consumes. Rejected: the backend owns settings
+(defaults, migrations, the datastore); frontend-owned shape inverts that and
+forfeits the Python validation library's value.
+
+**Recommendation:** T1 for S1 (types only — smallest, mature). Revisit T2b at
+S2 if pre-POST validation UX proves wanted — it slots into the same codegen
+step without changing the source of truth. Skip T2-runtime until zod's
+fromJSONSchema is stable.
+
 ## Library options (versions checked on PyPI 2026-07-22)
 
 ### A. pydantic v2 (2.13.4)
