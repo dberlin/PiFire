@@ -18,7 +18,7 @@ function readPwm(settings: Settings): Pwm {
 }
 
 export function PwmTab() {
-  const { settings } = useOutletContext<{ settings: Settings }>();
+  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving } = useSaveSettings();
   const [pwm, setPwm] = useState<Pwm>(() => readPwm(settings));
   const [saved, setSaved] = useState(false);

@@ -13,6 +13,17 @@ export async function getSettings(baseUrl: string): Promise<Settings> {
   return body.settings ?? (body as Settings); // GET /api/settings returns { settings: {...} }
 }
 
+export async function getMode(baseUrl: string): Promise<string> {
+  try {
+    const res = await fetch(buildSettingsUrl(baseUrl, "get/mode"));
+    if (!res.ok) return "";
+    const body = (await res.json()) as { data?: { mode?: string } };
+    return body.data?.mode ?? "";
+  } catch {
+    return ""; // mode-gating fails open to "unknown"; History tab treats non-"Stop" as gated
+  }
+}
+
 export async function applySettings(
   baseUrl: string,
   delta: object,

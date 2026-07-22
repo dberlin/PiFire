@@ -13,10 +13,11 @@ const UNIT_OPTIONS = [
 ];
 
 export function UnitsTab() {
-  const { settings } = useOutletContext<{ settings: Settings }>();
+  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const revalidator = useRevalidator();
   const [units, setUnits] = useState<"F" | "C">(settings.globals?.units === "C" ? "C" : "F");
   const [pending, setPending] = useState<"F" | "C" | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Re-sync from the loader on revalidation via render-phase adjustment (house
   // style — NOT a useEffect; React Compiler rejects setState-in-effect. Do NOT suppress.)
@@ -34,9 +35,14 @@ export function UnitsTab() {
   const confirmChange = async () => {
     const next = pending!;
     setPending(null);
-    await createCommand(BASE_URL).setUnits(next);
-    setUnits(next);
-    revalidator.revalidate();
+    const r = await createCommand(BASE_URL).setUnits(next);
+    if (r.ok) {
+      setError(null);
+      setUnits(next);
+      revalidator.revalidate();
+    } else {
+      setError(r.message || "Failed to change units");
+    }
   };
 
   return (
@@ -44,6 +50,7 @@ export function UnitsTab() {
       <Section title="Units">
         <Select label="Temperature Units" value={units} options={UNIT_OPTIONS} onChange={onChange} />
         <p className="pf-settings-hint">Changing units converts all stored temperatures and <b>stops the grill</b>.</p>
+        {error && <p className="pf-settings-error-text">{error}</p>}
       </Section>
       <ConfirmAction open={pending !== null} title={`Switch to °${pending ?? ""}? This will stop the grill.`}
         onCancel={() => setPending(null)} onConfirm={confirmChange} />

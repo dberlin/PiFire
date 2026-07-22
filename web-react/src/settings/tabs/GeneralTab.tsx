@@ -13,7 +13,7 @@ const THEMES = [
 ];
 
 export function GeneralTab() {
-  const { settings } = useOutletContext<{ settings: Settings }>();
+  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving } = useSaveSettings();
   const [name, setName] = useState<string>(settings.globals?.grill_name ?? "");
   const [theme, setTheme] = useState<string>(settings.globals?.page_theme ?? "light");

@@ -25,3 +25,4 @@
 .pf-settings-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .pf-settings-saved { color: #8fe09a; font: 600 14px "Barlow"; }
 .pf-settings-hint { color: var(--text-dim); font: 500 13px "Barlow"; line-height: 1.6; }
+.pf-settings-error-text { color: #ff8b82; font: 600 14px "Barlow"; }
