@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useDashData } from "./useDashData";
 import { ConnectionStatus } from "./components/ConnectionStatus";
 import { Dashboard } from "./dashboard/Dashboard";
@@ -10,7 +10,9 @@ export default function App() {
   const [animate, setAnimate] = useState(true);
 
   // Drive the CSS token set (mirrors QML backend.accentTheme).
-  document.documentElement.setAttribute("data-accent", accent);
+  useEffect(() => {
+    document.documentElement.setAttribute("data-accent", accent);
+  }, [accent]);
 
   if (phase !== "live" && phase !== "demo") {
     return (

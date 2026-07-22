@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { clampSetpoint, SETPOINT_RANGE } from "./health";
 
 interface Props {
@@ -11,7 +11,16 @@ interface Props {
 
 export function SetpointEntry({ open, initial, units, onSubmit, onCancel }: Props) {
   const [temp, setTemp] = useState(initial);
-  useEffect(() => { if (open) setTemp(clampSetpoint(initial, units)); }, [open, initial, units]);
+  // Re-seed the slider from `initial` (clamped) whenever open/initial/units
+  // change, but only while open — adjusted synchronously during render
+  // (React's recommended pattern for deriving state from prop changes)
+  // rather than in an effect.
+  const seedKey = `${open}|${initial}|${units}`;
+  const [prevSeedKey, setPrevSeedKey] = useState(seedKey);
+  if (seedKey !== prevSeedKey) {
+    setPrevSeedKey(seedKey);
+    if (open) setTemp(clampSetpoint(initial, units));
+  }
   if (!open) return null;
   const step = units === "F" ? 5 : 3;
   const bump = (d: number) => setTemp((t) => clampSetpoint(t + d, units));

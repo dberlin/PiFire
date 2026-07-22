@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { AccentName, DashData } from "../types";
 import type { ConnectionPhase } from "../useDashData";
 import type { CommandClient } from "../command";
@@ -34,12 +34,15 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
   const scale = useFitScale(1280, 720);
 
   // Cook-time counter: seconds since the current cook began (reset when the
-  // controller leaves an active cooking mode).
+  // controller leaves an active cooking mode). Adjusted synchronously during
+  // render on the cooking-state transition edge (React's recommended pattern
+  // for deriving state from a prop change), rather than in an effect.
   const [cookStart, setCookStart] = useState<number | null>(null);
-  useEffect(() => {
-    if (view.cooking) setCookStart((s) => (s == null ? Date.now() : s));
-    else setCookStart(null);
-  }, [view.cooking]);
+  const [prevCooking, setPrevCooking] = useState(view.cooking);
+  if (view.cooking !== prevCooking) {
+    setPrevCooking(view.cooking);
+    setCookStart(view.cooking ? now.getTime() : null);
+  }
   const cookTime = fmtDuration(cookStart != null ? (now.getTime() - cookStart) / 1000 : 0);
   const clock = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
