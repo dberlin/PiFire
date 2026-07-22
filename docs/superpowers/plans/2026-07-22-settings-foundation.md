@@ -2,20 +2,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Stand up the React settings foundation — app shell + routing, a settings read/write data layer, one small JSON write endpoint, a styled form-primitive kit, and three working tabs (Grill Name/Theme, PWM, Units) that exercise all three settings write paths — plus ESLint (react-hooks + React Compiler rules).
+**Goal:** Stand up the React settings foundation — a data-router app shell, settings loaded via a route **loader**, one small JSON write endpoint, a styled form-primitive kit, and three working tabs (Grill Name/Theme, PWM, Units) that exercise all three settings write paths — plus ESLint (react-hooks + React Compiler rules).
 
-**Architecture:** Reads via `GET /api/settings`; writes via a new `POST /api/settings_update` that mirrors `save_settings_and_flag_update` (deep_update + write_settings + caller-named control flags + write_control); Units via the existing `/api/set/units` command. `react-router` in **library mode** (static-served by Flask). No new architecture beyond the one backend endpoint.
+**Architecture:** Hybrid data model, each transport used for what it's good at. The **dashboard** stays on the live SocketIO stream (unchanged from phase 1 — continuous ~1 Hz push). **Settings** are load-on-navigation, so they use React Router's **data router** (`createBrowserRouter`) with a route **loader** (`GET /api/settings`) and read via `useLoaderData`/`useOutletContext`. Writes go through a new `POST /api/settings_update` (deep_update + `save_settings_and_flag_update` with caller-named control flags), with `useRevalidator` re-running the loader after a save; Units uses the existing `/api/set/units` command. App-level UI prefs (accent/animate) live in a small context. `react-router` in **library mode** (static-served by Flask). The only backend change is the one endpoint.
 
-**Tech Stack:** React 19 (+ React Compiler already wired), react-router (library mode), Vite 8/rolldown, Vitest 4, ESLint flat config, Playwright, Flask/pytest. Package manager **bun**.
+**Tech Stack:** React 19 (+ React Compiler already wired), react-router (library mode, `createBrowserRouter`), Vite 8/rolldown, Vitest 4, ESLint flat config, Playwright, Flask/pytest. Package manager **bun**.
 
 ## Global Constraints
 
 - Package manager is **bun**, never bare npm: `bun add`, `bun run …`. Commit `bun.lock`.
 - TypeScript strict, `noUnusedLocals` + `noUnusedParameters`. Typecheck `bunx tsc -b`.
 - **`bun run lint` (ESLint, react-hooks + `react-hooks/react-compiler` rules) must be clean** — a verification gate for every task from Task 1 on.
-- Reads = `GET /api/settings`; writes = `POST /api/settings_update` (flags-bearing) or the existing `/api/set/units` command. The only backend change is the one new endpoint; touch no other Python behavior.
-- New endpoint envelope matches the existing settings family: `{ "result": "success", "message": …, "data": … }` (NOT the command grammar's `"OK"`). The React settings client keys off `result === "success"`.
-- `react-router` is used in **library mode** (`<BrowserRouter>`); do NOT add `@react-router/dev`/framework mode. Keep the existing `vite.config.ts` compiler wiring (`@vitejs/plugin-react` + `@rolldown/plugin-babel` + `reactCompilerPreset()`) — confirm, don't replace.
+- **Data transports:** dashboard = live SocketIO (unchanged); settings = `GET /api/settings` via a route **loader**; settings writes = `POST /api/settings_update` (flags-bearing) with `useRevalidator` after save; Units = the existing `/api/set/units` command. The only backend change is the one new endpoint; touch no other Python behavior.
+- `react-router` in **library mode** via `createBrowserRouter` + `RouterProvider` (the data router — used for loaders). Do NOT add `@react-router/dev`/framework mode. Keep the existing `vite.config.ts` compiler wiring (`@vitejs/plugin-react` + `@rolldown/plugin-babel` + `reactCompilerPreset()`) — confirm, don't replace.
+- New endpoint envelope matches the existing settings family: `{ "result": "success", "message": …, "data": … }` (NOT the command grammar's `"OK"`). The settings client keys off `result === "success"`.
 - Backend handler is a module-level `_`-prefixed function in `blueprints/api/routes.py` registered in `_API_POST_ACTIONS` (repo convention — no `services.py`).
 - Python tests run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/... -q`.
 - Dashboard route (`/`) and demo mode must remain unaffected.
@@ -27,16 +27,20 @@
 
 - `web-react/eslint.config.js` — new flat ESLint config (create).
 - `web-react/package.json` — react-router dep, eslint dev-deps, `lint` script (modify).
-- `web-react/src/settings/settingsApi.ts` — `buildSettingsUrl`, `getSettings`, `applySettings` (create).
+- `web-react/src/AppPrefs.tsx` — accent/animate context provider (create).
+- `web-react/src/DashboardRoute.tsx` — dashboard route element (socket hook + prefs → `Dashboard`) (create).
+- `web-react/src/App.tsx` — `createBrowserRouter` + `RouterProvider` under `AppPrefsProvider` (modify).
+- `web-react/src/settings/settingsApi.ts` — `buildSettingsUrl`, `getSettings`, `applySettings` (pure, tested) (create).
 - `web-react/src/settings/settingsApi.test.ts` — URL + body-shape tests (create).
-- `web-react/src/settings/useSettings.ts` — load/save React hook (create).
-- `web-react/src/settings/delta.ts` — pure `setPath`/delta helpers + tab delta-builders (create).
-- `web-react/src/settings/delta.test.ts` — delta-builder tests (create).
-- `web-react/src/settings/SettingsShell.tsx` — responsive nav rail + `<Outlet/>` (create).
+- `web-react/src/settings/settingsRoutes.ts` — `settingsLoader` (route loader) (create).
+- `web-react/src/settings/useSaveSettings.ts` — save helper (`applySettings` + `useRevalidator`) (create).
+- `web-react/src/settings/delta.ts` + `delta.test.ts` — pure `setPath` delta helper (create).
+- `web-react/src/settings/SettingsShell.tsx` — nav rail + `<Outlet context={{settings}}/>`, responsive (create).
+- `web-react/src/settings/SettingsError.tsx` — route `errorElement` for load failure (create).
 - `web-react/src/settings/fields/{Toggle,Select,NumberField,TextField,Section}.tsx` (create).
 - `web-react/src/settings/tabs/{GeneralTab,PwmTab,UnitsTab}.tsx` (create).
-- `web-react/src/settings/settings.css` — settings layout + field styles (create).
-- `web-react/src/App.tsx` — `<BrowserRouter>` with `/` and `/settings/*` (modify).
+- `web-react/src/settings/settings.css` — responsive settings layout + field styles (create).
+- `web-react/src/main.tsx` — import `settings.css` (modify).
 - `web-react/src/dashboard/Dashboard.tsx` — header menu button → `navigate("/settings")` (modify).
 - `web-react/src/command.ts` — add `setUnits(units)` to the command client (modify).
 - `web-react/tests/e2e/settings.spec.ts` — settings round-trip e2e (create).
@@ -54,16 +58,20 @@
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: a passing `bun run lint`; `react-router` available as a dependency for later tasks.
+- Produces: a passing `bun run lint`; `react-router` available for later tasks.
 
-- [ ] **Step 1: Install deps (bun)**
+> Note: `eslint-plugin-react-hooks` was already added to `package.json`/`bun.lock` by the user. This task adds the rest and the config; do not remove the existing entry.
+
+- [ ] **Step 1: Install remaining deps (bun)**
 
 Run (in `web-react/`):
 
 ```bash
 bun add react-router
-bun add -d eslint @eslint/js typescript-eslint eslint-plugin-react-hooks eslint-plugin-react-refresh globals
+bun add -d eslint @eslint/js typescript-eslint eslint-plugin-react-refresh globals
 ```
+
+(`eslint-plugin-react-hooks` is already present — leave it.)
 
 - [ ] **Step 2: Write `eslint.config.js`**
 
@@ -79,14 +87,8 @@ export default tseslint.config(
   {
     files: ["**/*.{ts,tsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    languageOptions: {
-      ecmaVersion: 2022,
-      globals: globals.browser,
-    },
-    plugins: {
-      "react-hooks": reactHooks,
-      "react-refresh": reactRefresh,
-    },
+    languageOptions: { ecmaVersion: 2022, globals: globals.browser },
+    plugins: { "react-hooks": reactHooks, "react-refresh": reactRefresh },
     rules: {
       ...reactHooks.configs["recommended-latest"].rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
@@ -99,29 +101,27 @@ export default tseslint.config(
 
 In `web-react/package.json` `scripts`, add: `"lint": "eslint ."`.
 
-- [ ] **Step 4: Verify the React Compiler rule is actually active**
+- [ ] **Step 4: Verify the React Compiler rule is active**
 
 Run: `bunx eslint --print-config src/App.tsx | grep -i "react-compiler"`
-Expected: a line showing `react-hooks/react-compiler` is enabled. If it is NOT present, the installed `eslint-plugin-react-hooks` is too old — run `bun add -d eslint-plugin-react-hooks@latest` and re-check. Do not proceed until the rule is present.
+Expected: a line showing `react-hooks/react-compiler` enabled. If absent, `bun add -d eslint-plugin-react-hooks@latest` and re-check. Do not proceed until present.
 
 - [ ] **Step 5: Run lint and fix all violations to clean**
 
-Run: `bun run lint`
-Fix every reported error/warning in `web-react/src/**`. Likely candidates in the existing phase-1 code:
-- `src/App.tsx`: `document.documentElement.setAttribute("data-accent", accent)` runs during render (a side effect in the component body) — move it into `useEffect(() => { … }, [accent])`. The React Compiler rule flags render-phase side effects.
-- Any `useEffect` missing deps (exhaustive-deps) in `src/useDashData.ts`, `src/dashboard/hooks.ts`, `src/dashboard/Dashboard.tsx`, `src/dashboard/ControlButtons.tsx` — add the missing deps or, where a one-time mount effect is intended, keep `[]` and leave a brief comment.
-Re-run until `bun run lint` reports zero problems. Do NOT disable rules wholesale to pass; fix the code (a targeted `// eslint-disable-next-line` with a reason is acceptable only for a deliberate, documented exception).
+Run: `bun run lint`. Fix every reported problem in `web-react/src/**`. Likely candidates in the existing phase-1 code:
+- `src/App.tsx`: `document.documentElement.setAttribute("data-accent", accent)` runs during render (render-phase side effect) — this moves into the new `AppPrefs` provider's `useEffect` in Task 4, but if Task 1 runs first, wrap it in `useEffect(() => {...}, [accent])` now.
+- `useEffect` exhaustive-deps in `src/useDashData.ts`, `src/dashboard/hooks.ts`, `src/dashboard/Dashboard.tsx`, `src/dashboard/ControlButtons.tsx` — add missing deps, or keep a deliberate mount-only `[]` with a one-line comment.
+Re-run until zero problems. Do NOT blanket-disable rules; fix the code (a single targeted `// eslint-disable-next-line` with a reason is acceptable only for a deliberate exception).
 
-- [ ] **Step 6: Confirm nothing else regressed**
+- [ ] **Step 6: Confirm nothing regressed**
 
-Run (in `web-react/`): `bunx tsc -b && bun run test && bun run build`
-Expected: all exit 0; tests still pass.
+Run (in `web-react/`): `bunx tsc -b && bun run test && bun run build` → all exit 0.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 cd web-react && git add eslint.config.js package.json bun.lock src
-git commit -m "chore(web-react): eslint (react-hooks + react-compiler) + react-router dep; lint-clean baseline"
+git commit -m "chore(web-react): eslint (react-hooks + react-compiler) + react-router; lint-clean baseline"
 ```
 
 ---
@@ -133,16 +133,17 @@ git commit -m "chore(web-react): eslint (react-hooks + react-compiler) + react-r
 - Test: `tests/web/test_api_settings_update.py`
 
 **Interfaces:**
-- Consumes: `deep_update` (already imported), `read_control`/`write_settings` (already imported), `read_settings`; `save_settings_and_flag_update` from `common.app`.
+- Consumes: `deep_update`, `read_control`, `write_settings` (already imported), `read_settings`; `save_settings_and_flag_update` from `common.app`.
 - Produces: `POST /api/settings_update` accepting `{"settings": <delta>, "flags": [<flag>...]}` → `{"result": "success"|"error", "message": str, "data": settings}`.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/web/test_api_settings_update.py` (mirror the harness style of the existing `tests/web/` API tests — use the module's `client` fixture and the datastore accessors to read back control):
+Create `tests/web/test_api_settings_update.py` (match the client fixture used by a neighboring `tests/web/test_*api*.py` — read one first):
 
 ```python
 import json
-from common.datastore_accessors import read_control, read_settings
+from common.datastore_accessors import read_control, read_settings, write_control
+from common.common import WriteKind
 
 
 def test_settings_update_persists_delta_and_sets_flag(client):
@@ -155,10 +156,7 @@ def test_settings_update_persists_delta_and_sets_flag(client):
 
 
 def test_settings_update_empty_flags_sets_none(client):
-    # Reset the flag first.
     ctrl = read_control(); ctrl["settings_update"] = False
-    from common.datastore_accessors import write_control
-    from common.common import WriteKind
     write_control(ctrl, WriteKind.OVERWRITE, origin="test")
     body = {"settings": {"globals": {"grill_name": "Smokey"}}, "flags": []}
     resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
@@ -167,16 +165,14 @@ def test_settings_update_empty_flags_sets_none(client):
     assert read_control()["settings_update"] is False
 ```
 
-(If the existing `tests/web/` fixtures name the client differently, match that module's convention; read one neighboring `tests/web/test_*api*.py` first to copy the exact fixture usage.)
-
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/test_api_settings_update.py -q`
-Expected: FAIL (404 — endpoint not registered).
+Expected: FAIL (404).
 
 - [ ] **Step 3: Add the handler + registration**
 
-In `blueprints/api/routes.py`, add `save_settings_and_flag_update` to the `from common.app import (...)` line. Add the handler near `_api_post_settings`:
+In `blueprints/api/routes.py`, add `save_settings_and_flag_update` to the `from common.app import (...)` line. Add near `_api_post_settings`:
 
 ```python
 def _api_post_settings_update(settings, request_json):
@@ -196,7 +192,7 @@ def _api_post_settings_update(settings, request_json):
         return jsonify({"result": "error", "message": f"Settings update failed: {e}", "data": {}}), 200
 ```
 
-Register it in `_API_POST_ACTIONS`:
+Register in `_API_POST_ACTIONS`:
 
 ```python
 _API_POST_ACTIONS = {
@@ -210,10 +206,9 @@ _API_POST_ACTIONS = {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/test_api_settings_update.py -q`
-Expected: 2 passed.
+Run: `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/test_api_settings_update.py -q` → 2 passed.
 
-- [ ] **Step 5: ruff format the changed Python**
+- [ ] **Step 5: ruff format**
 
 Run: `uvx ruff format blueprints/api/routes.py tests/web/test_api_settings_update.py`
 
@@ -226,24 +221,25 @@ git commit -m "feat(api): POST /api/settings_update — settings delta + control
 
 ---
 
-## Task 3: Settings API layer + hook
+## Task 3: Settings API + loader + save helper
 
 **Files:**
 - Create: `web-react/src/settings/settingsApi.ts`
 - Create: `web-react/src/settings/settingsApi.test.ts`
-- Create: `web-react/src/settings/useSettings.ts`
+- Create: `web-react/src/settings/settingsRoutes.ts`
+- Create: `web-react/src/settings/useSaveSettings.ts`
 
 **Interfaces:**
-- Consumes: the backend endpoints (Task 2); `DashData`-adjacent `Settings` shape (typed loosely — see below).
+- Consumes: the backend endpoints (Task 2); `react-router` `useRevalidator`.
 - Produces:
-  - `type Settings = Record<string, any>` (the full settings dict; loosely typed with helpers reading known paths).
-  - `type SettingsFlag = "settings_update" | "controller_update" | "distance_update" | "probe_profile_update"`
+  - `type Settings = Record<string, any>`; `type SettingsFlag = "settings_update" | "controller_update" | "distance_update" | "probe_profile_update"`
   - `function buildSettingsUrl(baseUrl: string, path: string): string`
   - `async function getSettings(baseUrl: string): Promise<Settings>`
-  - `async function applySettings(baseUrl: string, delta: object, flags: SettingsFlag[]): Promise<{ ok: boolean; message: string; data?: Settings }>`
-  - `function useSettings(): { settings: Settings | null; phase: "loading"|"ready"|"error"; reload(): void; save(delta: object, flags: SettingsFlag[]): Promise<boolean>; baseUrl: string }`
+  - `async function applySettings(baseUrl, delta: object, flags: SettingsFlag[]): Promise<{ ok: boolean; message: string; data?: Settings }>`
+  - `async function settingsLoader(): Promise<{ settings: Settings }>` (the route loader)
+  - `function useSaveSettings(): { save(delta: object, flags: SettingsFlag[]): Promise<boolean>; saving: boolean; baseUrl: string }`
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing tests (pure API)**
 
 Create `web-react/src/settings/settingsApi.test.ts`:
 
@@ -277,16 +273,14 @@ describe("applySettings", () => {
 
   it("maps a non-success envelope to ok:false", async () => {
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ result: "error", message: "bad" }) });
-    const r = await applySettings("", {}, []);
-    expect(r).toMatchObject({ ok: false, message: "bad" });
+    expect(await applySettings("", {}, [])).toMatchObject({ ok: false, message: "bad" });
   });
 });
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `bun run test src/settings/settingsApi.test.ts`
-Expected: FAIL (module not found).
+Run: `bun run test src/settings/settingsApi.test.ts` → FAIL.
 
 - [ ] **Step 3: Implement `settingsApi.ts`**
 
@@ -302,8 +296,7 @@ export async function getSettings(baseUrl: string): Promise<Settings> {
   const res = await fetch(buildSettingsUrl(baseUrl, "settings"));
   if (!res.ok) throw new Error(`GET /api/settings failed: HTTP ${res.status}`);
   const body = (await res.json()) as { settings?: Settings };
-  // GET /api/settings returns { settings: {...} }.
-  return body.settings ?? (body as Settings);
+  return body.settings ?? (body as Settings); // GET /api/settings returns { settings: {...} }
 }
 
 export async function applySettings(
@@ -326,84 +319,109 @@ export async function applySettings(
 }
 ```
 
-- [ ] **Step 4: Implement `useSettings.ts`**
+- [ ] **Step 4: Implement `settingsRoutes.ts` (the loader)**
 
 ```ts
-import { useCallback, useEffect, useState } from "react";
-import { applySettings, getSettings, type Settings, type SettingsFlag } from "./settingsApi";
+import { getSettings, type Settings } from "./settingsApi";
 
 const BASE_URL = import.meta.env.VITE_PIFIRE_URL || "";
 
-export function useSettings() {
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
-
-  const reload = useCallback(() => {
-    setPhase("loading");
-    getSettings(BASE_URL)
-      .then((s) => { setSettings(s); setPhase("ready"); })
-      .catch(() => setPhase("error"));
-  }, []);
-
-  useEffect(() => { reload(); }, [reload]);
-
-  const save = useCallback(async (delta: object, flags: SettingsFlag[]): Promise<boolean> => {
-    const r = await applySettings(BASE_URL, delta, flags);
-    if (r.ok) reload();
-    return r.ok;
-  }, [reload]);
-
-  return { settings, phase, reload, save, baseUrl: BASE_URL };
+// React Router route loader — runs on navigation into /settings. Throws on
+// failure so the route's errorElement renders.
+export async function settingsLoader(): Promise<{ settings: Settings }> {
+  return { settings: await getSettings(BASE_URL) };
 }
 ```
 
-- [ ] **Step 5: Run tests + typecheck + lint**
+- [ ] **Step 5: Implement `useSaveSettings.ts`**
 
-Run: `bun run test src/settings/settingsApi.test.ts && bunx tsc -b && bun run lint`
-Expected: tests pass, tsc 0, lint clean.
+```ts
+import { useCallback, useState } from "react";
+import { useRevalidator } from "react-router";
+import { applySettings, type SettingsFlag } from "./settingsApi";
 
-- [ ] **Step 6: Commit**
+const BASE_URL = import.meta.env.VITE_PIFIRE_URL || "";
+
+export function useSaveSettings() {
+  const revalidator = useRevalidator();
+  const [saving, setSaving] = useState(false);
+  const save = useCallback(async (delta: object, flags: SettingsFlag[]): Promise<boolean> => {
+    setSaving(true);
+    const r = await applySettings(BASE_URL, delta, flags);
+    setSaving(false);
+    if (r.ok) revalidator.revalidate(); // re-run the loader → fresh settings
+    return r.ok;
+  }, [revalidator]);
+  return { save, saving, baseUrl: BASE_URL };
+}
+```
+
+- [ ] **Step 6: Run tests + typecheck + lint**
+
+Run: `bun run test src/settings/settingsApi.test.ts && bunx tsc -b && bun run lint` → tests pass, tsc 0, lint clean.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-cd web-react && git add src/settings/settingsApi.ts src/settings/settingsApi.test.ts src/settings/useSettings.ts
-git commit -m "feat(web-react): settings API layer + useSettings hook"
+cd web-react && git add src/settings/settingsApi.ts src/settings/settingsApi.test.ts src/settings/settingsRoutes.ts src/settings/useSaveSettings.ts
+git commit -m "feat(web-react): settings API + route loader + save helper"
 ```
 
 ---
 
-## Task 4: App shell + router + settings shell
+## Task 4: Data router + app-prefs context + settings shell
 
 **Files:**
+- Create: `web-react/src/AppPrefs.tsx`
+- Create: `web-react/src/DashboardRoute.tsx`
 - Modify: `web-react/src/App.tsx`
 - Create: `web-react/src/settings/SettingsShell.tsx`
+- Create: `web-react/src/settings/SettingsError.tsx`
 - Create: `web-react/src/settings/settings.css`
-- Modify: `web-react/src/dashboard/Dashboard.tsx` (header menu → navigate)
 - Modify: `web-react/src/main.tsx` (import `settings.css`)
+- Modify: `web-react/src/dashboard/Dashboard.tsx` (header → navigate to `/settings`)
 
 **Interfaces:**
-- Consumes: `react-router` (Task 1), `Dashboard`, `useDashData`, `useSettings` (Task 3).
-- Produces: routes `/` (dashboard) and `/settings` (shell) with nested tab routes rendered via `<Outlet/>`; a `SETTINGS_TABS` list for the nav.
+- Consumes: `react-router` (`createBrowserRouter`, `RouterProvider`, `Outlet`, `NavLink`, `Navigate`, `useLoaderData`, `useOutletContext`, `useNavigate`); `settingsLoader` (Task 3); `Dashboard`/`useDashData` (phase 1); the three tabs (Tasks 6–8).
+- Produces: `AppPrefsProvider` + `useAppPrefs()`; routes `/` (dashboard) and `/settings` (loader + nested tabs); `SettingsShell` provides `{ settings }` via `Outlet` context (`useOutletContext<{ settings: Settings }>()`).
 
-- [ ] **Step 1: Add the router to `App.tsx`**
-
-`App.tsx` currently owns `useDashData` + accent/animate state and renders `Dashboard`. Wrap in a router. Keep the dashboard exactly as-is on `/`; add `/settings/*`:
+- [ ] **Step 1: `AppPrefs.tsx` — accent/animate context**
 
 ```tsx
-import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import type { AccentName } from "./types";
+
+interface AppPrefs {
+  accent: AccentName; setAccent: (a: AccentName) => void;
+  animate: boolean; setAnimate: (v: boolean) => void;
+}
+const Ctx = createContext<AppPrefs | null>(null);
+
+export function AppPrefsProvider({ children }: { children: ReactNode }) {
+  const [accent, setAccent] = useState<AccentName>("ember");
+  const [animate, setAnimate] = useState(true);
+  useEffect(() => { document.documentElement.setAttribute("data-accent", accent); }, [accent]);
+  return <Ctx.Provider value={{ accent, setAccent, animate, setAnimate }}>{children}</Ctx.Provider>;
+}
+
+export function useAppPrefs(): AppPrefs {
+  const c = useContext(Ctx);
+  if (!c) throw new Error("useAppPrefs must be used within AppPrefsProvider");
+  return c;
+}
+```
+
+- [ ] **Step 2: `DashboardRoute.tsx` — the `/` element (socket + prefs → Dashboard)**
+
+```tsx
 import { useDashData } from "./useDashData";
 import { ConnectionStatus } from "./components/ConnectionStatus";
 import { Dashboard } from "./dashboard/Dashboard";
-import { SettingsShell } from "./settings/SettingsShell";
-import { GeneralTab } from "./settings/tabs/GeneralTab";
-import { PwmTab } from "./settings/tabs/PwmTab";
-import { UnitsTab } from "./settings/tabs/UnitsTab";
-import type { AccentName } from "./types";
+import { useAppPrefs } from "./AppPrefs";
 
-function DashboardRoute({ accent, setAccent, animate, setAnimate }: {
-  accent: AccentName; setAccent: (a: AccentName) => void; animate: boolean; setAnimate: (v: boolean) => void;
-}) {
+export function DashboardRoute() {
   const { dash, phase, controlAlive, targetUrl, command } = useDashData();
+  const { accent, setAccent, animate, setAnimate } = useAppPrefs();
   if (phase !== "live" && phase !== "demo") {
     return <div className="pf-fit"><ConnectionStatus phase={phase} targetUrl={targetUrl} /></div>;
   }
@@ -412,42 +430,60 @@ function DashboardRoute({ accent, setAccent, animate, setAnimate }: {
       accent={accent} setAccent={setAccent} animate={animate} setAnimate={setAnimate} />
   );
 }
+```
+
+- [ ] **Step 3: `App.tsx` — the data router**
+
+```tsx
+import { createBrowserRouter, RouterProvider, Navigate } from "react-router";
+import { AppPrefsProvider } from "./AppPrefs";
+import { DashboardRoute } from "./DashboardRoute";
+import { SettingsShell } from "./settings/SettingsShell";
+import { SettingsError } from "./settings/SettingsError";
+import { settingsLoader } from "./settings/settingsRoutes";
+import { GeneralTab } from "./settings/tabs/GeneralTab";
+import { PwmTab } from "./settings/tabs/PwmTab";
+import { UnitsTab } from "./settings/tabs/UnitsTab";
+
+const router = createBrowserRouter([
+  { path: "/", element: <DashboardRoute /> },
+  {
+    path: "/settings",
+    element: <SettingsShell />,
+    loader: settingsLoader,
+    errorElement: <SettingsError />,
+    children: [
+      { index: true, element: <Navigate to="general" replace /> },
+      { path: "general", element: <GeneralTab /> },
+      { path: "pwm", element: <PwmTab /> },
+      { path: "units", element: <UnitsTab /> },
+    ],
+  },
+]);
 
 export default function App() {
-  const [accent, setAccent] = useState<AccentName>("ember");
-  const [animate, setAnimate] = useState(true);
-  useEffect(() => { document.documentElement.setAttribute("data-accent", accent); }, [accent]);
-
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<DashboardRoute accent={accent} setAccent={setAccent} animate={animate} setAnimate={setAnimate} />} />
-        <Route path="/settings" element={<SettingsShell />}>
-          <Route index element={<Navigate to="general" replace />} />
-          <Route path="general" element={<GeneralTab />} />
-          <Route path="pwm" element={<PwmTab />} />
-          <Route path="units" element={<UnitsTab />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <AppPrefsProvider>
+      <RouterProvider router={router} />
+    </AppPrefsProvider>
   );
 }
 ```
 
-Note: the `useDashData` call moved into `DashboardRoute` so the socket only connects on the dashboard route. (This resolves the lint side-effect fix from Task 1 by moving the accent attribute into `useEffect`.)
-
-- [ ] **Step 2: Implement `SettingsShell.tsx`**
+- [ ] **Step 4: `SettingsShell.tsx` — nav rail + Outlet(context=settings)**
 
 ```tsx
-import { NavLink, Outlet, useNavigate } from "react-router";
+import { NavLink, Outlet, useLoaderData, useNavigate } from "react-router";
+import type { Settings } from "./settingsApi";
 
-const SETTINGS_TABS: { path: string; label: string }[] = [
+const SETTINGS_TABS = [
   { path: "general", label: "General" },
   { path: "pwm", label: "PWM Fan" },
   { path: "units", label: "Units" },
 ];
 
 export function SettingsShell() {
+  const { settings } = useLoaderData() as { settings: Settings };
   const navigate = useNavigate();
   return (
     <div className="pf-settings">
@@ -461,14 +497,33 @@ export function SettingsShell() {
         ))}
       </aside>
       <main className="pf-settings-content">
-        <Outlet />
+        <Outlet context={{ settings }} />
       </main>
     </div>
   );
 }
 ```
 
-- [ ] **Step 3: Add `settings.css` (responsive) and import it**
+- [ ] **Step 5: `SettingsError.tsx` — the route errorElement**
+
+```tsx
+import { useNavigate } from "react-router";
+
+export function SettingsError() {
+  const navigate = useNavigate();
+  return (
+    <div className="pf-fit">
+      <div className="pf-settings-error">
+        Couldn't load settings.
+        <button className="pf-modal-btn" onClick={() => navigate(0)}>Retry</button>
+        <button className="pf-modal-btn" onClick={() => navigate("/")}>Dashboard</button>
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 6: `settings.css` (responsive) + import**
 
 Create `web-react/src/settings/settings.css`:
 
@@ -480,6 +535,7 @@ Create `web-react/src/settings/settings.css`:
 .pf-settings-link { color: var(--text-dim); text-decoration: none; padding: 10px 12px; border-radius: 10px; font: 600 15px "Barlow"; }
 .pf-settings-link.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
 .pf-settings-content { flex: 1; padding: 28px 32px; max-width: 720px; overflow-y: auto; }
+.pf-settings-error { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--text-dim); font: 600 16px "Barlow"; }
 @media (max-width: 640px) {
   .pf-settings { flex-direction: column; }
   .pf-settings-nav { flex-basis: auto; flex-direction: row; flex-wrap: wrap; }
@@ -488,39 +544,35 @@ Create `web-react/src/settings/settings.css`:
 
 Add `import "./settings/settings.css";` to `web-react/src/main.tsx`.
 
-- [ ] **Step 4: Wire the dashboard header menu → settings**
+- [ ] **Step 7: Dashboard header → settings nav**
 
-In `web-react/src/dashboard/Dashboard.tsx`, import `useNavigate` from `react-router`, call `const navigate = useNavigate();`, and make the header menu control (the `ANIM`-cluster area) include a settings button, or make the existing hamburger/menu affordance call `navigate("/settings")`. Minimal: add a small gear button next to the accent swatches: `<button className="pf-toggle" onClick={() => navigate("/settings")}>⚙</button>`.
+In `web-react/src/dashboard/Dashboard.tsx`, import `useNavigate` from `react-router`, add `const navigate = useNavigate();`, and add a gear button next to the accent swatches / ANIM toggle: `<button className="pf-toggle" onClick={() => navigate("/settings")} aria-label="settings">⚙</button>`.
 
-- [ ] **Step 5: Typecheck + lint + build**
+- [ ] **Step 8: Typecheck + lint + build**
 
 Run: `bunx tsc -b && bun run lint && bun run build`
-Expected: exit 0. (Tabs referenced in the router exist as stubs after Tasks 6–8; to keep this task self-contained, create minimal placeholder tab components returning `<div/>` now IF Tasks 6–8 aren't done yet — but in sequential execution Tasks 6–8 follow, so create the three tab files as one-line stubs here and flesh them out in their tasks. Note stubs in your report.)
+Expected: exit 0. The three tab imports must resolve — in sequential execution Tasks 6–8 create them; to keep this task self-contained, create the three tab files as minimal stubs now (`export function GeneralTab() { return null; }`, etc.) and flesh them out in their tasks. Note the stubs in your report.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-cd web-react && git add src/App.tsx src/main.tsx src/settings/SettingsShell.tsx src/settings/settings.css src/dashboard/Dashboard.tsx src/settings/tabs
-git commit -m "feat(web-react): router + settings shell + header nav"
+cd web-react && git add src/App.tsx src/AppPrefs.tsx src/DashboardRoute.tsx src/main.tsx src/dashboard/Dashboard.tsx src/settings/SettingsShell.tsx src/settings/SettingsError.tsx src/settings/settings.css src/settings/tabs
+git commit -m "feat(web-react): data router + app-prefs context + settings shell"
 ```
 
 ---
 
-## Task 5: Form primitives + delta helpers
+## Task 5: Form primitives + delta helper
 
 **Files:**
-- Create: `web-react/src/settings/delta.ts`
-- Create: `web-react/src/settings/delta.test.ts`
+- Create: `web-react/src/settings/delta.ts` + `delta.test.ts`
 - Create: `web-react/src/settings/fields/{Toggle,Select,NumberField,TextField,Section}.tsx`
 - Modify: `web-react/src/settings/settings.css` (field styles)
 
 **Interfaces:**
-- Consumes: nothing.
-- Produces:
-  - `function setPath(obj: object, path: string, value: unknown): object` — returns a NEW nested object with `path` (dot-notation) set (for building deltas).
-  - Field components: `Toggle({label, checked, onChange})`, `Select({label, value, options, onChange})`, `NumberField({label, value, onChange, min?, max?, step?, suffix?})`, `TextField({label, value, onChange})`, `Section({title, children})`.
+- Produces: `function setPath(obj: object, path: string, value: unknown): object` (immutable nested set); field components `Toggle`/`Select`/`NumberField`/`TextField`/`Section`.
 
-- [ ] **Step 1: Write the failing test for `setPath`**
+- [ ] **Step 1: Failing test for `setPath`**
 
 Create `web-react/src/settings/delta.test.ts`:
 
@@ -537,14 +589,12 @@ describe("setPath", () => {
     const base = { pwm: { update_time: 7 } };
     const out = setPath(base, "pwm.frequency", 100);
     expect(out).toEqual({ pwm: { update_time: 7, frequency: 100 } });
-    expect(base).toEqual({ pwm: { update_time: 7 } }); // unmutated
+    expect(base).toEqual({ pwm: { update_time: 7 } });
   });
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
-
-Run: `bun run test src/settings/delta.test.ts` → FAIL.
+- [ ] **Step 2: Run to verify failure** — `bun run test src/settings/delta.test.ts` → FAIL.
 
 - [ ] **Step 3: Implement `delta.ts`**
 
@@ -563,18 +613,15 @@ export function setPath(obj: object, path: string, value: unknown): object {
 }
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [ ] **Step 4: Run to verify pass** — `bun run test src/settings/delta.test.ts` → PASS.
 
-Run: `bun run test src/settings/delta.test.ts` → PASS.
+- [ ] **Step 5: Field components** (create under `web-react/src/settings/fields/`)
 
-- [ ] **Step 5: Implement the field components**
-
-Create each file under `web-react/src/settings/fields/`. Example `NumberField.tsx`:
+`NumberField.tsx`:
 
 ```tsx
 export function NumberField({ label, value, onChange, min, max, step, suffix }: {
-  label: string; value: number; onChange: (v: number) => void;
-  min?: number; max?: number; step?: number; suffix?: string;
+  label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; suffix?: string;
 }) {
   return (
     <label className="pf-field">
@@ -648,7 +695,7 @@ export function Section({ title, children }: { title: string; children: ReactNod
 }
 ```
 
-- [ ] **Step 6: Add field styles to `settings.css`**
+- [ ] **Step 6: Field styles → `settings.css`**
 
 ```css
 .pf-section { margin-bottom: 28px; }
@@ -663,12 +710,12 @@ export function Section({ title, children }: { title: string; children: ReactNod
 .pf-switch.on { background: var(--accent); }
 .pf-switch-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #f4ede2; transition: transform 120ms ease; }
 .pf-switch.on .pf-switch-knob { transform: translateX(20px); }
+.pf-settings-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.pf-settings-saved { color: #8fe09a; font: 600 14px "Barlow"; }
+.pf-settings-hint { color: var(--text-dim); font: 500 13px "Barlow"; line-height: 1.6; }
 ```
 
-- [ ] **Step 7: Typecheck + lint + test**
-
-Run: `bunx tsc -b && bun run lint && bun run test`
-Expected: exit 0; delta tests pass.
+- [ ] **Step 7: Typecheck + lint + test** — `bunx tsc -b && bun run lint && bun run test` → exit 0.
 
 - [ ] **Step 8: Commit**
 
@@ -679,20 +726,21 @@ git commit -m "feat(web-react): settings form primitives + delta helper"
 
 ---
 
-## Task 6: GeneralTab (Grill Name + Theme) — plain settings write
+## Task 6: GeneralTab (Grill Name + Theme) — plain write
 
-**Files:**
-- Create/replace: `web-react/src/settings/tabs/GeneralTab.tsx`
+**Files:** Create/replace `web-react/src/settings/tabs/GeneralTab.tsx`
 
 **Interfaces:**
-- Consumes: `useSettings` (Task 3), `Section`/`TextField`/`Select` (Task 5), `setPath` (Task 5).
-- Produces: a working General tab that saves `globals.grill_name` and `globals.page_theme` via `save(delta, [])` (no flags).
+- Consumes: `useOutletContext<{ settings: Settings }>` (Task 4), `useSaveSettings` (Task 3), `setPath` (Task 5), `Section`/`TextField`/`Select`.
+- Produces: a General tab saving `globals.grill_name` + `globals.page_theme` via `save(delta, [])` (no flags).
 
 - [ ] **Step 1: Implement GeneralTab**
 
 ```tsx
 import { useEffect, useState } from "react";
-import { useSettings } from "../useSettings";
+import { useOutletContext } from "react-router";
+import type { Settings } from "../settingsApi";
+import { useSaveSettings } from "../useSaveSettings";
 import { setPath } from "../delta";
 import { Section } from "../fields/Section";
 import { TextField } from "../fields/TextField";
@@ -704,29 +752,22 @@ const THEMES = [
 ];
 
 export function GeneralTab() {
-  const { settings, phase, save } = useSettings();
-  const [name, setName] = useState("");
-  const [theme, setTheme] = useState("dark");
-  const [saving, setSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState(false);
+  const { settings } = useOutletContext<{ settings: Settings }>();
+  const { save, saving } = useSaveSettings();
+  const [name, setName] = useState<string>(settings.globals?.grill_name ?? "");
+  const [theme, setTheme] = useState<string>(settings.globals?.page_theme ?? "dark");
+  const [saved, setSaved] = useState(false);
 
+  // Re-sync when the loader revalidates (settings identity changes).
   useEffect(() => {
-    if (settings) {
-      setName(settings.globals?.grill_name ?? "");
-      setTheme(settings.globals?.page_theme ?? "dark");
-    }
+    setName(settings.globals?.grill_name ?? "");
+    setTheme(settings.globals?.page_theme ?? "dark");
   }, [settings]);
 
-  if (phase === "loading") return <div className="pf-settings-loading">Loading…</div>;
-  if (phase === "error") return <div className="pf-settings-error">Couldn't load settings.</div>;
-
   const onSave = async () => {
-    setSaving(true);
     let delta = setPath({}, "globals.grill_name", name);
     delta = setPath(delta, "globals.page_theme", theme);
-    const ok = await save(delta, []); // display-only: no control flag
-    setSaving(false);
-    setSavedAt(ok);
+    setSaved(await save(delta, [])); // display-only: no control flag
   };
 
   return (
@@ -735,34 +776,23 @@ export function GeneralTab() {
       <Select label="Theme" value={theme} options={THEMES} onChange={setTheme} />
       <div className="pf-settings-actions">
         <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>{saving ? "Saving…" : "Save"}</button>
-        {savedAt && <span className="pf-settings-saved">Saved ✓</span>}
+        {saved && <span className="pf-settings-saved">Saved ✓</span>}
       </div>
     </Section>
   );
 }
 ```
 
-Add to `settings.css`:
+> Verify `globals.page_theme`'s real value domain against `common/defaults.py`; adjust `THEMES` option values if they differ from `light`/`dark`.
 
-```css
-.pf-settings-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
-.pf-settings-saved { color: #8fe09a; font: 600 14px "Barlow"; }
-.pf-settings-loading, .pf-settings-error { color: var(--text-dim); font: 600 16px "Barlow"; }
-```
+- [ ] **Step 2: Typecheck + lint + build** — `bunx tsc -b && bun run lint && bun run build` → exit 0.
 
-- [ ] **Step 2: Typecheck + lint + build**
-
-Run: `bunx tsc -b && bun run lint && bun run build`
-Expected: exit 0.
-
-- [ ] **Step 3: Manual smoke (backend running)**
-
-With `control.py` + gunicorn on :5000 and `bun run dev`: open `/settings/general`, change the grill name, Save → "Saved ✓"; reload the page → the new name persists; the dashboard header (`/`) shows the new `grillName` after its next socket frame.
+- [ ] **Step 3: Manual smoke** (backend running + `bun run dev`): `/settings/general` → change grill name → Save → "Saved ✓"; the value persists on reload (loader revalidated); dashboard header shows the new `grillName` on its next socket frame.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd web-react && git add src/settings/tabs/GeneralTab.tsx src/settings/settings.css
+cd web-react && git add src/settings/tabs/GeneralTab.tsx
 git commit -m "feat(web-react): settings General tab (grill name + theme)"
 ```
 
@@ -770,53 +800,46 @@ git commit -m "feat(web-react): settings General tab (grill name + theme)"
 
 ## Task 7: PwmTab — flags-bearing write (`settings_update`)
 
-**Files:**
-- Create/replace: `web-react/src/settings/tabs/PwmTab.tsx`
+**Files:** Create/replace `web-react/src/settings/tabs/PwmTab.tsx`
 
-**Interfaces:**
-- Consumes: `useSettings`, form primitives, `setPath`.
-- Produces: a PWM tab saving scalar `pwm.*` fields with `save(delta, ["settings_update"])`.
+**Interfaces:** Consumes `useOutletContext`, `useSaveSettings`, `setPath`, form primitives. Produces a PWM tab saving scalar `pwm.*` fields with `save(delta, ["settings_update"])`.
 
 - [ ] **Step 1: Implement PwmTab**
 
 ```tsx
 import { useEffect, useState } from "react";
-import { useSettings } from "../useSettings";
+import { useOutletContext } from "react-router";
+import type { Settings } from "../settingsApi";
+import { useSaveSettings } from "../useSaveSettings";
 import { setPath } from "../delta";
 import { Section } from "../fields/Section";
 import { Toggle } from "../fields/Toggle";
 import { NumberField } from "../fields/NumberField";
 
+type Pwm = { pwm_control: boolean; update_time: number; min_duty_cycle: number; max_duty_cycle: number; frequency: number };
+
+function readPwm(settings: Settings): Pwm {
+  const p = settings.pwm ?? {};
+  return {
+    pwm_control: !!p.pwm_control, update_time: p.update_time ?? 10,
+    min_duty_cycle: p.min_duty_cycle ?? 20, max_duty_cycle: p.max_duty_cycle ?? 100, frequency: p.frequency ?? 100,
+  };
+}
+
 export function PwmTab() {
-  const { settings, phase, save } = useSettings();
-  const [pwm, setPwm] = useState<{ pwm_control: boolean; update_time: number; min_duty_cycle: number; max_duty_cycle: number; frequency: number }>({
-    pwm_control: false, update_time: 10, min_duty_cycle: 20, max_duty_cycle: 100, frequency: 100,
-  });
-  const [saving, setSaving] = useState(false);
+  const { settings } = useOutletContext<{ settings: Settings }>();
+  const { save, saving } = useSaveSettings();
+  const [pwm, setPwm] = useState<Pwm>(() => readPwm(settings));
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    if (settings?.pwm) {
-      const p = settings.pwm;
-      setPwm({
-        pwm_control: !!p.pwm_control, update_time: p.update_time ?? 10,
-        min_duty_cycle: p.min_duty_cycle ?? 20, max_duty_cycle: p.max_duty_cycle ?? 100, frequency: p.frequency ?? 100,
-      });
-    }
-  }, [settings]);
+  useEffect(() => { setPwm(readPwm(settings)); }, [settings]);
 
-  if (phase === "loading") return <div className="pf-settings-loading">Loading…</div>;
-  if (phase === "error") return <div className="pf-settings-error">Couldn't load settings.</div>;
-
-  const set = <K extends keyof typeof pwm>(k: K, v: (typeof pwm)[K]) => setPwm((s) => ({ ...s, [k]: v }));
+  const set = <K extends keyof Pwm>(k: K, v: Pwm[K]) => setPwm((s) => ({ ...s, [k]: v }));
 
   const onSave = async () => {
-    setSaving(true);
     let d: object = {};
     for (const [k, v] of Object.entries(pwm)) d = setPath(d, `pwm.${k}`, v);
-    const ok = await save(d, ["settings_update"]); // control loop must re-read pwm
-    setSaving(false);
-    setSaved(ok);
+    setSaved(await save(d, ["settings_update"])); // control loop must re-read pwm
   };
 
   return (
@@ -835,13 +858,9 @@ export function PwmTab() {
 }
 ```
 
-- [ ] **Step 2: Typecheck + lint + build**
+- [ ] **Step 2: Typecheck + lint + build** — exit 0.
 
-Run: `bunx tsc -b && bun run lint && bun run build` → exit 0.
-
-- [ ] **Step 3: Manual smoke**
-
-`/settings/pwm`: change Update Time, Save → "Saved ✓"; reload → persists; `curl -s localhost:5000/api/settings | python3 -c "import sys,json;print(json.load(sys.stdin)['settings']['pwm']['update_time'])"` shows the new value; `curl -s localhost:5000/api/control`-equivalent shows `settings_update` was set (it self-clears once the loop reads it).
+- [ ] **Step 3: Manual smoke** — `/settings/pwm`: change Update Time → Save → "Saved ✓"; reload persists; `curl -s localhost:5000/api/settings | python3 -c "import sys,json;print(json.load(sys.stdin)['settings']['pwm']['update_time'])"` shows the new value.
 
 - [ ] **Step 4: Commit**
 
@@ -854,26 +873,13 @@ git commit -m "feat(web-react): settings PWM tab (settings_update flag path)"
 
 ## Task 8: UnitsTab — command path + confirm gate
 
-**Files:**
-- Create/replace: `web-react/src/settings/tabs/UnitsTab.tsx`
-- Modify: `web-react/src/command.ts` (add `setUnits`)
+**Files:** Create/replace `web-react/src/settings/tabs/UnitsTab.tsx`; modify `web-react/src/command.ts`
 
-**Interfaces:**
-- Consumes: `useSettings`, `createCommand`/`CommandClient` (phase 1), `ConfirmAction` (phase 1, `src/dashboard/ConfirmAction.tsx`).
-- Produces: `CommandClient.setUnits(units: "F" | "C"): Promise<CommandResult>` (`/api/set/units/{F|C}`); a Units tab that confirms (grill will STOP) then calls it and reloads.
+**Interfaces:** Consumes `useOutletContext`, `useRevalidator`, `createCommand`/`CommandClient` (phase 1), `ConfirmAction` (phase 1). Produces `CommandClient.setUnits(units: "F"|"C")` (`/api/set/units/{F|C}`); a Units tab that confirms (grill will STOP) then calls it and revalidates.
 
-- [ ] **Step 1: Add `setUnits` to the command client**
+- [ ] **Step 1: Add `setUnits` to `command.ts`**
 
-In `web-react/src/command.ts`, extend `CommandClient` and `createCommand`:
-
-```ts
-// in interface CommandClient:
-  setUnits(units: "F" | "C"): Promise<CommandResult>;
-// in createCommand return:
-  setUnits: (units) => post(baseUrl, ["set", "units", units]),
-```
-
-Add a test case to `src/command.test.ts`:
+In `interface CommandClient` add `setUnits(units: "F" | "C"): Promise<CommandResult>;`; in `createCommand`'s returned object add `setUnits: (units) => post(baseUrl, ["set", "units", units]),`. Add a case to `src/command.test.ts`:
 
 ```ts
 it("setUnits → /api/set/units/{F|C}", async () => {
@@ -882,48 +888,44 @@ it("setUnits → /api/set/units/{F|C}", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the command test**
-
-Run: `bun run test src/command.test.ts` → PASS (existing 8 + new = 9).
+- [ ] **Step 2: Run the command test** — `bun run test src/command.test.ts` → PASS (9 cases).
 
 - [ ] **Step 3: Implement UnitsTab**
 
 ```tsx
 import { useEffect, useState } from "react";
-import { useSettings } from "../useSettings";
+import { useOutletContext, useRevalidator } from "react-router";
+import type { Settings } from "../settingsApi";
 import { createCommand } from "../../command";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";
 
+const BASE_URL = import.meta.env.VITE_PIFIRE_URL || "";
 const UNIT_OPTIONS = [
   { value: "F", label: "Fahrenheit (°F)" },
   { value: "C", label: "Celsius (°C)" },
 ];
 
 export function UnitsTab() {
-  const { settings, phase, baseUrl, reload } = useSettings();
-  const [units, setUnits] = useState<"F" | "C">("F");
+  const { settings } = useOutletContext<{ settings: Settings }>();
+  const revalidator = useRevalidator();
+  const [units, setUnits] = useState<"F" | "C">(settings.globals?.units === "C" ? "C" : "F");
   const [pending, setPending] = useState<"F" | "C" | null>(null);
 
-  useEffect(() => {
-    if (settings) setUnits(settings.globals?.units === "C" ? "C" : "F");
-  }, [settings]);
-
-  if (phase === "loading") return <div className="pf-settings-loading">Loading…</div>;
-  if (phase === "error") return <div className="pf-settings-error">Couldn't load settings.</div>;
+  useEffect(() => { setUnits(settings.globals?.units === "C" ? "C" : "F"); }, [settings]);
 
   const onChange = (v: string) => {
     const next = v === "C" ? "C" : "F";
-    if (next !== units) setPending(next); // gate: changing units stops the grill
+    if (next !== units) setPending(next); // changing units stops the grill
   };
 
   const confirmChange = async () => {
     const next = pending!;
     setPending(null);
-    await createCommand(baseUrl).setUnits(next);
+    await createCommand(BASE_URL).setUnits(next);
     setUnits(next);
-    reload();
+    revalidator.revalidate();
   };
 
   return (
@@ -932,27 +934,19 @@ export function UnitsTab() {
         <Select label="Temperature Units" value={units} options={UNIT_OPTIONS} onChange={onChange} />
         <p className="pf-settings-hint">Changing units converts all stored temperatures and <b>stops the grill</b>.</p>
       </Section>
-      <ConfirmAction
-        open={pending !== null}
-        title={`Switch to °${pending ?? ""}? This will stop the grill.`}
-        onCancel={() => setPending(null)}
-        onConfirm={confirmChange}
-      />
+      <ConfirmAction open={pending !== null} title={`Switch to °${pending ?? ""}? This will stop the grill.`}
+        onCancel={() => setPending(null)} onConfirm={confirmChange} />
     </>
   );
 }
 ```
 
-Add to `settings.css`: `.pf-settings-hint { color: var(--text-dim); font: 500 13px "Barlow"; line-height: 1.6; }`
-
-- [ ] **Step 4: Typecheck + lint + build + test**
-
-Run: `bunx tsc -b && bun run lint && bun run test && bun run build` → exit 0.
+- [ ] **Step 4: Typecheck + lint + test + build** — `bunx tsc -b && bun run lint && bun run test && bun run build` → exit 0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd web-react && git add src/command.ts src/command.test.ts src/settings/tabs/UnitsTab.tsx src/settings/settings.css
+cd web-react && git add src/command.ts src/command.test.ts src/settings/tabs/UnitsTab.tsx
 git commit -m "feat(web-react): settings Units tab (command path + confirm gate)"
 ```
 
@@ -960,12 +954,9 @@ git commit -m "feat(web-react): settings Units tab (command path + confirm gate)
 
 ## Task 9: Settings round-trip e2e
 
-**Files:**
-- Create: `web-react/tests/e2e/settings.spec.ts`
+**Files:** Create `web-react/tests/e2e/settings.spec.ts`
 
-**Interfaces:**
-- Consumes: the running prototype backend + `bun run dev` (phase-1 `playwright.config.ts`).
-- Produces: an e2e proving the three write paths round-trip.
+**Interfaces:** Consumes the running prototype backend + `bun run dev` (phase-1 `playwright.config.ts`). Produces an e2e proving the three write paths round-trip.
 
 - [ ] **Step 1: Write the e2e**
 
@@ -976,14 +967,11 @@ import { test, expect } from "@playwright/test";
 test("grill name saves and round-trips to the dashboard header", async ({ page }) => {
   await page.goto("/settings/general");
   const name = "E2E Grill " + Date.now().toString().slice(-4);
-  const input = page.getByLabel("Grill Name");
-  await input.fill(name);
+  await page.getByLabel("Grill Name").fill(name);
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
-  // Reload settings page → value persisted.
   await page.reload();
   await expect(page.getByLabel("Grill Name")).toHaveValue(name);
-  // Dashboard header reflects it (via the socket frame).
   await page.goto("/");
   await expect(page.getByText(name)).toBeVisible({ timeout: 15000 });
 });
@@ -1004,7 +992,7 @@ test("units change is gated by a confirm and applies", async ({ page }) => {
   await page.getByRole("button", { name: "Confirm" }).click();
   await page.reload();
   await expect(page.getByLabel("Temperature Units")).toHaveValue("C");
-  // reset back to F for idempotency of reruns
+  // reset to F for rerun idempotency
   await page.getByLabel("Temperature Units").selectOption("F");
   await page.getByRole("button", { name: "Confirm" }).click();
 });
@@ -1012,13 +1000,9 @@ test("units change is gated by a confirm and applies", async ({ page }) => {
 
 - [ ] **Step 2: Run the e2e (backend up)**
 
-Run (in `web-react/`): `bun run test:e2e tests/e2e/settings.spec.ts`
-Expected: 3 passed. If the grill-name dashboard assertion flakes on socket timing, raise only that timeout (do not weaken the assertion). A genuine failure to round-trip is a real finding — report it with the network evidence.
+Run (in `web-react/`): `bun run test:e2e tests/e2e/settings.spec.ts` → 3 passed. If the grill-name→dashboard assertion flakes on socket timing, raise only that timeout (do not weaken the assertion). A genuine failure to round-trip is a real finding — report it with the network evidence.
 
-- [ ] **Step 3: Full gate**
-
-Run: `bunx tsc -b && bun run lint && bun run test && bun run build`
-Expected: all exit 0.
+- [ ] **Step 3: Full gate** — `bunx tsc -b && bun run lint && bun run test && bun run build` → all exit 0.
 
 - [ ] **Step 4: Commit**
 
@@ -1031,8 +1015,10 @@ git commit -m "test(web-react): settings round-trip e2e (name/pwm/units)"
 
 ## Self-Review notes (already reconciled)
 
-- **Spec coverage:** router shell + responsive settings (T4), settings data layer (T3), the one backend endpoint (T2), form primitives (T5), the three tabs proving all three write paths — plain (T6), flags (T7), command+confirm (T8) — ESLint react-hooks+compiler (T1), tests incl. backend pytest (T2) + e2e (T9). PWM profiles table + other tabs are Non-Goals (2b).
-- **Type consistency:** `Settings`/`SettingsFlag`/`applySettings`/`getSettings` (T3) used in T6–T8; `setPath` (T5) used in T6–T8; `useSettings` return shape (T3) consumed by every tab; `CommandClient.setUnits` (T8) matches phase-1 `command.ts` patterns; `ConfirmAction` reused from phase 1 with its existing prop shape.
-- **Backend envelope:** `_api_post_settings_update` returns `{result:"success"}` (settings family), and `applySettings` checks `result === "success"` — consistent.
-- **Router side-effect:** the accent `setAttribute` moves into `useEffect` in `App.tsx` (T4), resolving the render-phase side effect the React Compiler lint rule (T1) would flag.
+- **Hybrid transports:** dashboard stays on the socket (Task 4 `DashboardRoute` renders the unchanged phase-1 `Dashboard`); settings load via a route **loader** (T3 `settingsLoader`, T4 wiring) and read via `useOutletContext` (T6–T8); saves go through `applySettings` + `useRevalidator` (T3 `useSaveSettings`). This is the "routes for load-on-nav, socket for stream" split.
+- **Spec coverage:** data-router shell + responsive settings + loader/errorElement (T4), settings API + loader + save (T3), the one backend endpoint (T2), form primitives (T5), three tabs proving all three write paths — plain (T6), flags (T7), command+confirm (T8) — ESLint react-hooks+compiler (T1), backend pytest (T2) + e2e (T9). PWM profiles table + other tabs are Non-Goals (2b).
+- **Type consistency:** `Settings`/`SettingsFlag`/`applySettings`/`getSettings` (T3) used in T4/T6–T8; `settingsLoader` return `{ settings }` (T3) matches `SettingsShell` `useLoaderData` + `Outlet context` and the tabs' `useOutletContext<{ settings: Settings }>` (T4/T6–T8); `useSaveSettings` (T3) consumed by T6/T7; `CommandClient.setUnits` (T8) matches phase-1 `command.ts` patterns; `ConfirmAction` reused with its phase-1 prop shape; `useAppPrefs` (T4) consumed by `DashboardRoute`.
+- **Backend envelope:** `_api_post_settings_update` returns `{result:"success"}`; `applySettings` checks `result === "success"` — consistent.
+- **Render side-effect:** the accent `setAttribute` lives in `AppPrefs`'s `useEffect` (T4), satisfying the React Compiler lint rule (T1).
+- **Deferred (not this slice):** production Flask must serve `index.html` for `/settings/*` deep links (SPA catch-all) — belongs to the later app-into-Flask integration, not phase 2a (dev/e2e run against the vite dev server which handles it).
 ```

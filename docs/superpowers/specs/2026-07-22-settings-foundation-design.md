@@ -105,17 +105,26 @@ triggers: `settings_update`, `controller_update`, `distance_update`,
 
 ### Frontend
 
-- **Router:** `react-router` (library mode, per above). Routes:
-  `/` → the existing `Dashboard`; `/settings` → settings shell with nested tab
-  routes (`/settings/general`, `/settings/pwm`, `/settings/units`, …).
-- **App shell:** the design's header **menu** (hamburger) navigates to settings;
-  a settings shell renders a nav rail (tab list) + the active tab's content in a
-  responsive, scrolling layout (NOT the scaled 1280×720 canvas — real reflow).
-- **Settings data layer** (`src/settings/useSettings.ts`): `GET /api/settings`
-  into typed state; a `saveSettings(delta, flags)` that POSTs to
-  `/api/settings_update`; a `setUnits(F|C)` that calls the existing command
-  client. Optimistic-free: reload settings after a successful save (mirrors the
-  dashboard's server-driven model).
+- **Router:** `react-router` **data router** (`createBrowserRouter` +
+  `RouterProvider`), library mode (per above). Routes: `/` → the existing
+  `Dashboard` (socket, unchanged); `/settings` → a shell route with a **loader**
+  (`GET /api/settings`) + nested tab routes (`/settings/general`, `/pwm`,
+  `/units`, …) + an `errorElement` for load failure. This is the idiomatic split:
+  a route **loader** for load-on-navigation settings data, the live **socket**
+  for the streaming dashboard. App-level UI prefs (accent/animate) move into a
+  small React **context** (`AppPrefs`) since the data router uses a static route
+  config.
+- **App shell:** the design's header **menu** (a gear button) navigates to
+  settings; the settings shell renders a nav rail (tab list) + the active tab's
+  content in a responsive, scrolling layout (NOT the scaled 1280×720 canvas —
+  real reflow). It reads the loader data and passes it to tabs via `Outlet`
+  context.
+- **Settings data layer:** `settingsApi.ts` (pure, tested) with `getSettings` /
+  `applySettings`; a route **loader** (`settingsLoader`) calls `getSettings`;
+  tabs read via `useLoaderData`/`useOutletContext`; a `useSaveSettings` helper
+  wraps `applySettings` + `useRevalidator` (re-runs the loader after a save —
+  server-driven, no optimistic state). Units uses the existing `/api/set/units`
+  command + `useRevalidator`.
 - **Form primitives** (`src/settings/fields/`): `Toggle`, `Select`,
   `NumberField`, `TextField`, `Section` — controlled components styled with the
   existing tokens (`theme.css`), each emitting `(path, value)` changes a tab
@@ -127,9 +136,11 @@ triggers: `settings_update`, `controller_update`, `distance_update`,
 
 ## Components / files (new)
 
-- `web-react/src/settings/useSettings.ts` — load/save hook + types slice.
-- `web-react/src/settings/settingsApi.ts` — `getSettings()`, `applySettings(delta, flags)`; pure `buildSettingsUrl` for testability.
-- `web-react/src/settings/SettingsShell.tsx` — nav rail + `<Outlet/>`, responsive.
+- `web-react/src/settings/settingsApi.ts` — `getSettings()`, `applySettings(delta, flags)`, pure `buildSettingsUrl` (testable).
+- `web-react/src/settings/settingsRoutes.ts` — `settingsLoader` (route loader).
+- `web-react/src/settings/useSaveSettings.ts` — `applySettings` + `useRevalidator` save helper.
+- `web-react/src/AppPrefs.tsx` — accent/animate context; `web-react/src/DashboardRoute.tsx` — `/` element.
+- `web-react/src/settings/SettingsShell.tsx` — nav rail + `<Outlet context={{settings}}/>`, responsive; `SettingsError.tsx` — errorElement.
 - `web-react/src/settings/fields/{Toggle,Select,NumberField,TextField,Section}.tsx`.
 - `web-react/src/settings/tabs/{GeneralTab,PwmTab,UnitsTab}.tsx`.
 - `web-react/src/settings/settings.css` — responsive settings layout + field styles.
