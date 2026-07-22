@@ -16,8 +16,8 @@ interface DashState {
   command: CommandClient;
 }
 
-const FORCE_DEMO = import.meta.env.VITE_DEMO === "1" || import.meta.env.VITE_DEMO === "true";
-const TARGET_URL = import.meta.env.VITE_PIFIRE_URL || "";
+const FORCE_DEMO = import.meta.env.PUBLIC_DEMO === "1" || import.meta.env.PUBLIC_DEMO === "true";
+const TARGET_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 export function useDashData(): DashState {
   const [dash, setDash] = useState<DashData>(FIXTURE_DASH);

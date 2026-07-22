@@ -6,7 +6,7 @@ import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";
 import type { Settings } from "../settingsApi";
 
-const BASE_URL = import.meta.env.VITE_PIFIRE_URL || "";
+const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 const UNIT_OPTIONS = [
   { value: "F", label: "Fahrenheit (°F)" },
   { value: "C", label: "Celsius (°C)" },

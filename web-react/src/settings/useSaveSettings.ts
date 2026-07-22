@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { useRevalidator } from "react-router";
 import { applySettings, type SettingsFlag } from "./settingsApi";
 
-const BASE_URL = import.meta.env.VITE_PIFIRE_URL || "";
+const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 export function useSaveSettings() {
   const revalidator = useRevalidator();

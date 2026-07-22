@@ -22,7 +22,8 @@ export function ConnectionStatus({
       {unreachable && (
         <p className="conn-hint">
           Start PiFire (its web app must be up), or point the dev server at it with{" "}
-          <code>VITE_PIFIRE_URL=http://&lt;host&gt;:5000 bun run dev</code>. Retrying automatically…
+          <code>PUBLIC_PIFIRE_URL=http://&lt;host&gt;:5000 bun run dev</code>. Retrying
+          automatically…
           <br />
           No hardware? Run the offline demo: <code>bun run demo</code>.
         </p>
