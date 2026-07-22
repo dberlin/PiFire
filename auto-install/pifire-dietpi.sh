@@ -138,11 +138,11 @@ cd /usr/local/bin
 if [ "$1" = "-dev" ]; then
     echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log
     # Replace the below command to fetch development branch
-    $SUDO git clone --depth 1 --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a ~/logs/pifire_install.log
+    $SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a ~/logs/pifire_install.log
 else
     echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log 2>&1 | tee -a ~/logs/pifire_install.log
     # Use a shallow clone to reduce download size
-    $SUDO git clone --depth 1 --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire
+    $SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire
 fi
 
 # Setup Python VENV & Install Python dependencies

@@ -52,6 +52,9 @@ def get_available_branches():
         input_list = branches.stdout.split("\n")
         for line in input_list:
             line = line.strip(" *")
+            if "->" in line:
+                # Skip symbolic-ref lines like "remotes/origin/HEAD -> origin/<branch>"
+                continue
             if "origin/main" in line:
                 # Skip this line
                 pass
@@ -233,7 +236,7 @@ def get_remote_version():
                 # Get the latest tag from the list
                 result = version_list[-1]
             else:
-                result = "No tags found on current branch"
+                result = "No release tag on this branch"
         else:
             result = "ERROR Getting Remote Version."
             error_msg = versions.stderr.replace("\n", " | ")
@@ -247,12 +250,15 @@ def get_remote_version():
 
 def get_current_tag():
     error_msg = ""
-    command = ["git", "describe", "--tags"]
+    # --always falls back to an abbreviated commit hash when no tag is reachable
+    # (e.g. development branches with no version tags in their history), so this
+    # succeeds instead of erroring out on the version display.
+    command = ["git", "describe", "--tags", "--always"]
     tag = subprocess.run(command, capture_output=True, text=True)
     if tag.returncode == 0:
         result = tag.stdout.replace("\n", "")
     else:
-        result = "ERROR Getting Log."
+        result = "ERROR Getting Current Tag."
         error_msg = tag.stderr.replace("\n", "<br>")
     return (result, error_msg)
 

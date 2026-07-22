@@ -203,3 +203,54 @@ def test_read_events_records_caps_at_60(ds, monkeypatch):
 
 def test_read_events_records_flush_clears_and_returns_empty(ds):
     assert read_events_records(flush=True) == []
+
+
+def test_read_probe_status_skips_unknown_type_without_raising(ds):
+    # Regression: an unexpected probe['type'] used to leave `section` unbound,
+    # raising UnboundLocalError when it was the first probe. Now such probes are
+    # skipped, not misfiled. The known Primary probe must still be reported.
+    c.write_generic_key(
+        "probe_device_info",
+        [
+            {"device": "dev_unknown", "status": {"s": 1}, "config": {}},
+            {"device": "dev_primary", "status": {"s": 2}, "config": {}},
+        ],
+    )
+    probe_info = [
+        {"type": "Bogus", "label": "Weird", "device": "dev_unknown"},
+        {"type": "Primary", "label": "Grill", "device": "dev_primary"},
+    ]
+
+    result = c.read_probe_status(probe_info)  # must not raise UnboundLocalError
+
+    # Known probe still filed correctly...
+    assert result["P"]["Grill"]["status"] == {"s": 2}
+    # ...and the unknown-type probe is not misfiled into any section.
+    assert "Weird" not in result["P"]
+    assert "Weird" not in result["F"]
+    assert "Weird" not in result["AUX"]
+
+
+def test_read_probe_status_unknown_type_not_misfiled_after_prior_probe(ds):
+    # Regression: with no else-branch, a probe with an unexpected type retained
+    # the PREVIOUS probe's `section`, silently misfiling its data into the wrong
+    # bucket. Here the unknown-type probe follows a Primary probe; it must not
+    # land in the "P" bucket.
+    c.write_generic_key(
+        "probe_device_info",
+        [
+            {"device": "dev_primary", "status": {"s": 1}, "config": {}},
+            {"device": "dev_unknown", "status": {"s": 9}, "config": {}},
+        ],
+    )
+    probe_info = [
+        {"type": "Primary", "label": "Grill", "device": "dev_primary"},
+        {"type": "Bogus", "label": "Weird", "device": "dev_unknown"},
+    ]
+
+    result = c.read_probe_status(probe_info)
+
+    assert result["P"]["Grill"]["status"] == {"s": 1}
+    assert "Weird" not in result["P"]  # not misfiled into the prior probe's bucket
+    assert "Weird" not in result["F"]
+    assert "Weird" not in result["AUX"]

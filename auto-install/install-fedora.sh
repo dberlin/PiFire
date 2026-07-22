@@ -155,10 +155,10 @@ if [[ -d /usr/local/bin/pifire ]]; then
     log " ! /usr/local/bin/pifire already exists; leaving it in place."
 elif [[ "$DEV_REPO" == "true" ]]; then
     log " + Cloning massive-reworks-and-new-ui branch..."
-    $SUDO git clone --depth 1 --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a "$LOG"
+    $SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a "$LOG"
 else
     log " + Cloning massive-reworks-and-new-ui branch..."
-    $SUDO git clone --depth 1 --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a "$LOG"
+    $SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a "$LOG"
 fi
 
 # --- pifire group / ownership / sudoers -----------------------------------

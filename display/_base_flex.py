@@ -607,370 +607,410 @@ class DisplayBase:
             # print(f' - Index: {index}, Maps to: {objectData["name"]}')
 
     def _update_dash_objects(self):
-
         if self.in_data is not None and self.status_data is not None:
-            """ Update Mode Bar and Control Panel """
-            if (self.status_data["mode"] != self.last_status_data.get("mode", "None")) or (
-                self.status_data["recipe_paused"] != self.last_status_data.get("recipe_paused", "None")
-            ):
-                """ Disable Screen Timeout When not in Stop Mode """
-                if self.status_data["mode"] not in [Mode.STOP]:
-                    self.display_timeout = None
-                else:
-                    self.display_timeout = time.time() + self.TIMEOUT
-
-                """ Mode Bar Update """
-                if "mode_bar" in self.dash_map.keys():
-                    object_data = self.display_object_list[self.dash_map["mode_bar"]].get_object_data()
-
-                    if self.status_data["recipe"] and self.status_data["mode"] != Mode.SHUTDOWN:
-                        object_data["text"] = "Recipe: " + self.status_data["mode"]
-                    else:
-                        object_data["text"] = self.status_data["mode"]
-                    self.display_object_list[self.dash_map["mode_bar"]].update_object_data(object_data)
-                """ Control Panel Update """
-                if "control_panel" in self.dash_map.keys():
-                    object_data = self.display_object_list[self.dash_map["control_panel"]].get_object_data()
-                    object_data["button_active"] = self.status_data["mode"]
-                    if self.status_data["recipe"]:
-                        """ Recipe Mode """
-                        list_item = "cmd_none"
-                        type_item = "Error"
-                        if self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
-                            type_item = "Startup"
-                        elif self.status_data["mode"] == Mode.SMOKE:
-                            type_item = "Smoke"
-                        elif self.status_data["mode"] == Mode.HOLD:
-                            type_item = "Hold"
-                        elif self.status_data["mode"] == Mode.SHUTDOWN:
-                            type_item = "None"
-                        object_data["button_list"] = ["cmd_next_step", list_item, "cmd_stop", "cmd_shutdown"]
-                        object_data["button_type"] = ["Next", type_item, "Stop", "Shutdown"]
-                        if self.status_data["recipe_paused"]:
-                            object_data["button_active"] = "Next"
-                    elif self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
-                        """ Startup Mode """
-                        object_data["button_list"] = ["cmd_startup", "cmd_smoke", "input_hold", "cmd_stop"]
-                        object_data["button_type"] = ["Startup", "Smoke", "Hold", "Stop"]
-                    elif self.status_data["mode"] in [Mode.SMOKE, Mode.HOLD, Mode.SHUTDOWN]:
-                        """ Smoke, Hold or Shutdown Modes """
-                        object_data["button_list"] = ["cmd_smoke", "input_hold", "cmd_stop", "cmd_shutdown"]
-                        object_data["button_type"] = ["Smoke", "Hold", "Stop", "Shutdown"]
-                    else:
-                        """ Stopped, Prime, Monitor Modes """
-                        object_data["button_list"] = ["menu_prime", "menu_startup", "cmd_monitor", "cmd_stop"]
-                        object_data["button_type"] = ["Prime", "Startup", "Monitor", "Stop"]
-
-                    self.display_object_list[self.dash_map["control_panel"]].update_object_data(object_data)
-                """ Button Row Update (ember dash) """
-                if "button_row" in self.dash_map.keys():
-                    object_data = self.display_object_list[self.dash_map["button_row"]].get_object_data()
-                    button_type, button_list, button_active = self._button_row_for_mode(
-                        self.status_data["mode"], self.status_data["recipe"], self.status_data["recipe_paused"]
-                    )
-                    object_data["button_type"] = button_type
-                    object_data["button_list"] = button_list
-                    object_data["button_active"] = button_active
-                    self.display_object_list[self.dash_map["button_row"]].update_object_data(object_data)
-                """ Primary Gauge Mode Label Update (ember dash - gauge_ember) """
-                if "primary_gauge" in self.dash_map.keys():
-                    object_data = self.display_object_list[self.dash_map["primary_gauge"]].get_object_data()
-                    object_data.setdefault("data", {})
-                    object_data["data"]["mode_label"] = self.status_data["mode"].upper()
-                    self.display_object_list[self.dash_map["primary_gauge"]].update_object_data(object_data)
-                """ Lid Open Button Update """
-                if "lid_open_button" in self.dash_map.keys() and self.status_data["mode"] == Mode.HOLD:
-                    object_data = self.display_object_list[self.dash_map["lid_open_button"]].get_object_data()
-                    if self.status_data.get("lid_open_detected", False):
-                        object_data["active"] = True
-                    else:
-                        object_data["active"] = False
-                    self.display_object_list[self.dash_map["lid_open_button"]].update_object_data(object_data)
-
-            """ Header Bar Update (ember dash) - clock/IP/live-cooking-dot, independent of mode change """
-            if "header_bar" in self.dash_map.keys():
-                object_data = self.display_object_list[self.dash_map["header_bar"]].get_object_data()
-                object_data.setdefault("data", {})
-                new_clock = time.strftime("%H:%M")
-                new_cooking = self.status_data["mode"] in (
-                    Mode.STARTUP,
-                    Mode.REIGNITE,
-                    Mode.SMOKE,
-                    Mode.HOLD,
-                    Mode.RECIPE,
-                )
-                if (
-                    object_data["data"].get("clock") != new_clock
-                    or object_data["data"].get("ip") != self.ip_address
-                    or object_data["data"].get("cooking") != new_cooking
-                ):
-                    object_data["data"]["ip"] = self.ip_address
-                    object_data["data"]["clock"] = new_clock
-                    object_data["data"]["cooking"] = new_cooking
-                    self.display_object_list[self.dash_map["header_bar"]].update_object_data(object_data)
-
-            if self.last_in_data != {}:
-                """ Update Primary Gauge Values """
-                primary_key = list(self.in_data["P"].keys())[0]  # Get the key for the primary gauge
-                if (
-                    (self.in_data["P"] != self.last_in_data["P"])
-                    or (self.in_data["PSP"] != self.last_in_data["PSP"])
-                    or (self.in_data["NT"][primary_key] != self.last_in_data["NT"].get(primary_key))
-                ):
-                    """ Update the Primary Gauge """
-                    object_data = self.display_object_list[self.dash_map["primary_gauge"]].get_object_data()
-                    object_data["temps"][0] = (
-                        self.in_data["P"][primary_key] if self.in_data["P"][primary_key] is not None else 0
-                    )
-                    object_data["temps"][1] = self.in_data["NT"][primary_key]
-                    object_data["temps"][2] = self.in_data["PSP"]
-                    object_data["units"] = self.units
-                    # object_data['label'] = primary_key
-                    self.display_object_list[self.dash_map["primary_gauge"]].update_object_data(object_data)
-
-                """ Update Food Probe Gauges and Values """
-                food_gauge_keys = list(self.food_probe_label_map.keys())
-                for gauge in food_gauge_keys:
-                    if gauge not in self.dash_map.keys():
-                        # Layouts built entirely around probe_card_N (ember dash) have no
-                        # food_probe_gauge_N objects at all - nothing to update here.
-                        continue
-                    key = self.food_probe_label_map[gauge]
-                    if (
-                        self.last_in_data["F"][key] != self.in_data["F"][key]
-                        or self.last_in_data["NT"][key] != self.in_data["NT"][key]
-                    ):
-                        """ Update this food gauge """
-                        object_data = self.display_object_list[self.dash_map[gauge]].get_object_data()
-                        object_data["temps"][0] = self.in_data["F"][key] if self.in_data["F"][key] is not None else 0
-                        object_data["temps"][1] = self.in_data["NT"][key]
-                        object_data["temps"][2] = 0  # There is no set temp for food probes
-                        object_data["units"] = self.units
-                        self.display_object_list[self.dash_map[gauge]].update_object_data(object_data)
-
-                """ Update Probe Cards (ember dash) """
-                probe_card_keys = list(self.probe_card_label_map.keys())
-                for card in probe_card_keys:
-                    if card not in self.dash_map.keys():
-                        continue
-                    key = self.probe_card_label_map[card]
-                    if (
-                        self.last_in_data["F"][key] != self.in_data["F"][key]
-                        or self.last_in_data["NT"][key] != self.in_data["NT"][key]
-                    ):
-                        """ Update this probe card """
-                        object_data = self.display_object_list[self.dash_map[card]].get_object_data()
-                        object_data.setdefault("data", {})
-                        object_data["data"]["name"] = self.probe_card_name_map[card]
-                        object_data["data"]["temp"] = (
-                            self.in_data["F"][key] if self.in_data["F"][key] is not None else 0
-                        )
-                        object_data["data"]["target"] = (
-                            self.in_data["NT"][key] if self.in_data["NT"][key] is not None else 0
-                        )
-                        object_data["units"] = self.units
-                        self.display_object_list[self.dash_map[card]].update_object_data(object_data)
-
-            """ Update Output Status Icons """
-            if self.last_status_data.get("outpins") is None:
-                self.last_status_data["outpins"] = self.status_data["outpins"].copy()
-                for output in self.last_status_data["outpins"]:
-                    self.last_status_data["outpins"][output] = (
-                        True if self.status_data["outpins"][output] == False else False
-                    )
-            for output in self.status_data["outpins"]:
-                if self.status_data["outpins"][output] != self.last_status_data["outpins"].get(output):
-                    if output == "auger" and "auger_status" in self.dash_map.keys():
-                        object_data = self.display_object_list[self.dash_map["auger_status"]].get_object_data()
-                        object_data["animation_enabled"] = True if self.status_data["outpins"][output] else False
-                        object_data["active"] = True if self.status_data["outpins"][output] else False
-                        self.display_object_list[self.dash_map["auger_status"]].update_object_data(object_data)
-                    if output == "fan" and "fan_status" in self.dash_map.keys():
-                        object_data = self.display_object_list[self.dash_map["fan_status"]].get_object_data()
-                        object_data["animation_enabled"] = True if self.status_data["outpins"][output] else False
-                        object_data["active"] = True if self.status_data["outpins"][output] else False
-                        self.display_object_list[self.dash_map["fan_status"]].update_object_data(object_data)
-                    if output == "igniter" and "igniter_status" in self.dash_map.keys():
-                        object_data = self.display_object_list[self.dash_map["igniter_status"]].get_object_data()
-                        object_data["animation_enabled"] = True if self.status_data["outpins"][output] else False
-                        object_data["active"] = True if self.status_data["outpins"][output] else False
-                        self.display_object_list[self.dash_map["igniter_status"]].update_object_data(object_data)
-
-            """ Update System Card (ember dash - fan/auger/igniter combined) """
-            if "system_card" in self.dash_map.keys() and self.status_data["outpins"] != self.last_status_data.get(
-                "outpins"
-            ):
-                object_data = self.display_object_list[self.dash_map["system_card"]].get_object_data()
-                object_data["data"] = {
-                    "fan": bool(self.status_data["outpins"].get("fan", False)),
-                    "auger": bool(self.status_data["outpins"].get("auger", False)),
-                    "igniter": bool(self.status_data["outpins"].get("igniter", False)),
-                }
-                self.display_object_list[self.dash_map["system_card"]].update_object_data(object_data)
-
-            """ Update Timer Output """
-            if self.status_data["mode"] in [Mode.PRIME, Mode.STARTUP, Mode.REIGNITE, Mode.SHUTDOWN]:
-                if self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
-                    duration = self.status_data["start_duration"]
-                elif self.status_data["mode"] in [Mode.PRIME]:
-                    duration = self.status_data["prime_duration"]
-                else:
-                    duration = self.status_data["shutdown_duration"]
-
-                countdown = (
-                    int(duration - (time.time() - self.status_data["start_time"]))
-                    if int(duration - (time.time() - self.status_data["start_time"])) > 0
-                    else 0
-                )
-                if "timer" in self.dash_map.keys():
-                    object_data = self.display_object_list[self.dash_map["timer"]].get_object_data()
-
-                    if countdown != object_data["data"]["seconds"]:
-                        object_data["data"]["seconds"] = countdown
-                        object_data["label"] = "Timer"
-                        self.display_object_list[self.dash_map["timer"]].update_object_data(object_data)
-
-            elif self.status_data["mode"] in [Mode.HOLD] and self.status_data["lid_open_detected"]:
-                """ In Hold Mode, use timer for lid open detection """
-                countdown = (
-                    int(self.status_data["lid_open_endtime"] - time.time())
-                    if int(self.status_data["lid_open_endtime"] - time.time()) > 0
-                    else 0
-                )
-                if "timer" in self.dash_map.keys():
-                    object_data = self.display_object_list[self.dash_map["timer"]].get_object_data()
-                    if countdown != object_data["data"]["seconds"]:
-                        object_data["data"]["seconds"] = countdown
-                        object_data["label"] = "Lid Pause"
-                        self.display_object_list[self.dash_map["timer"]].update_object_data(object_data)
-
-            else:
-                """ Clear the timer in other modes. """
-                if "timer" in self.dash_map.keys():
-                    object_data = self.display_object_list[self.dash_map["timer"]].get_object_data()
-                    if object_data["data"]["seconds"] != 0:
-                        object_data["data"]["seconds"] = 0
-                        self.display_object_list[self.dash_map["timer"]].update_object_data(object_data)
-
-            """ Update Cook Time (ember dash, D2) - active countdown, else elapsed cook time """
-            if "cook_time" in self.dash_map.keys():
-                object_data = self.display_object_list[self.dash_map["cook_time"]].get_object_data()
-                new_data = self._cook_time_data(self.status_data, time.time())
-                if object_data.get("data") != new_data:
-                    object_data.setdefault("data", {})
-                    object_data["data"]["label"] = new_data["label"]
-                    object_data["data"]["value"] = new_data["value"]
-                    object_data["label"] = new_data["label"]  # top-level fallback if type is 'timer'-like
-                    self.display_object_list[self.dash_map["cook_time"]].update_object_data(object_data)
-
-            """ In Hold Mode, Check Lid Indicator """
-            if (
-                self.status_data["mode"] in [Mode.HOLD]
-                and self.last_status_data["lid_open_detected"] != self.status_data["lid_open_detected"]
-                and "lid_indicator" in self.dash_map.keys()
-            ):
-                object_data = self.display_object_list[self.dash_map["lid_indicator"]].get_object_data()
-                if self.status_data["lid_open_detected"]:
-                    object_data["active"] = True
-                else:
-                    object_data["active"] = False
-                self.display_object_list[self.dash_map["lid_indicator"]].update_object_data(object_data)
-
-            """ Lid Alert Update (ember dash) - active only while lid_open_detected, mirrors lid_indicator """
-            if "lid_alert" in self.dash_map.keys():
-                object_data = self.display_object_list[self.dash_map["lid_alert"]].get_object_data()
-                new_active = bool(self.status_data.get("lid_open_detected", False))
-                if object_data.get("active") != new_active:
-                    object_data["active"] = new_active
-                    self.display_object_list[self.dash_map["lid_alert"]].update_object_data(object_data)
-
-            """ In Hold Mode, Show Lid Indicator Button (when lid_open_detected is False)"""
-            if (
-                self.status_data["mode"] in [Mode.HOLD]
-                and self.last_status_data["lid_open_detected"] != self.status_data["lid_open_detected"]
-                and "lid_open_button" in self.dash_map.keys()
-            ):
-                object_data = self.display_object_list[self.dash_map["lid_open_button"]].get_object_data()
-                if self.status_data["lid_open_detected"]:
-                    object_data["active"] = True
-                else:
-                    object_data["active"] = False
-                self.display_object_list[self.dash_map["lid_open_button"]].update_object_data(object_data)
-
-            """ Update PMode """
-            if (
-                self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE, Mode.SMOKE]
-                and (
-                    (self.status_data["mode"] != self.last_status_data.get("mode", "None"))
-                    or (self.status_data["p_mode"] != self.last_status_data.get("p_mode", "None"))
-                )
-                and "p_mode" in self.dash_map.keys()
-            ):
-                object_data = self.display_object_list[self.dash_map["p_mode"]].get_object_data()
-                object_data["active"] = True
-                object_data["data"]["pmode"] = self.status_data["p_mode"]
-                self.display_object_list[self.dash_map["p_mode"]].update_object_data(object_data)
-
-            elif (
-                self.status_data["mode"] != self.last_status_data.get("mode", "None")
-                and "p_mode" in self.dash_map.keys()
-            ):
-                object_data = self.display_object_list[self.dash_map["p_mode"]].get_object_data()
-                object_data["active"] = False
-                self.display_object_list[self.dash_map["p_mode"]].update_object_data(object_data)
-
-            """ Update Smoke Plus """
-            if (
-                self.status_data["s_plus"] != self.last_status_data.get("s_plus", None)
-                and "smoke_plus" in self.dash_map.keys()
-            ):
-                object_data = self.display_object_list[self.dash_map["smoke_plus"]].get_object_data()
-
-                object_data["active"] = self.status_data["s_plus"]
-                object_data["button_value"][0] = "off" if self.status_data["s_plus"] else "on"
-
-                self.display_object_list[self.dash_map["smoke_plus"]].update_object_data(object_data)
-
-            """ Update Hopper Info """
-            if (
-                self.status_data["hopper_level"] != self.last_status_data.get("hopper_level", None)
-                and "hopper" in self.dash_map.keys()
-            ):
-                object_data = self.display_object_list[self.dash_map["hopper"]].get_object_data()
-                object_data["data"]["level"] = max(self.status_data["hopper_level"], 0)
-                object_data["data"]["level"] = min(object_data["data"]["level"], 100)
-
-                self.display_object_list[self.dash_map["hopper"]].update_object_data(object_data)
-
-            """ Update Hopper Vertical (ember dash) - D1: object is absent from dash_map entirely
-			when hopper_level_enabled is False (see _build_objects), so this naturally no-ops then. """
-            if (
-                self.status_data["hopper_level"] != self.last_status_data.get("hopper_level", None)
-                and "hopper_vertical" in self.dash_map.keys()
-            ):
-                object_data = self.display_object_list[self.dash_map["hopper_vertical"]].get_object_data()
-                object_data.setdefault("data", {})
-                object_data["data"]["level"] = max(min(self.status_data["hopper_level"], 100), 0)
-                object_data["data"]["enabled"] = self.status_data.get("hopper_level_enabled", False)
-                self.display_object_list[self.dash_map["hopper_vertical"]].update_object_data(object_data)
-
-            """ Update Duty Pills (ember dash) - AUGER/FAN DUTY in Hold, else P-MODE/SMOKE+ """
-            if "duty_pill_left" in self.dash_map.keys() or "duty_pill_right" in self.dash_map.keys():
-                left_data, right_data = self._duty_pills(self.status_data)
-                if "duty_pill_left" in self.dash_map.keys():
-                    object_data = self.display_object_list[self.dash_map["duty_pill_left"]].get_object_data()
-                    if object_data.get("data") != left_data:
-                        object_data["data"] = left_data
-                        self.display_object_list[self.dash_map["duty_pill_left"]].update_object_data(object_data)
-                if "duty_pill_right" in self.dash_map.keys():
-                    object_data = self.display_object_list[self.dash_map["duty_pill_right"]].get_object_data()
-                    if object_data.get("data") != right_data:
-                        object_data["data"] = right_data
-                        self.display_object_list[self.dash_map["duty_pill_right"]].update_object_data(object_data)
+            self._update_mode_change_group()
+            self._update_header_bar()
+            self._update_gauges_and_cards()
+            self._update_output_icons()
+            self._update_system_card()
+            self._update_timer()
+            self._update_cook_time()
+            self._update_lid_indicator()
+            self._update_lid_alert()
+            self._update_lid_open_button()
+            self._update_p_mode()
+            self._update_smoke_plus()
+            self._update_hopper()
+            self._update_hopper_vertical()
+            self._update_duty_pills()
 
             """ After all the updates, update the last states/data """
             self.last_in_data = self.in_data.copy()
             self.last_status_data = self.status_data.copy()
+
+    def _update_mode_change_group(self):
+        """Update Mode Bar and Control Panel (only on mode / recipe_paused transitions)"""
+        if not (
+            (self.status_data["mode"] != self.last_status_data.get("mode", "None"))
+            or (self.status_data["recipe_paused"] != self.last_status_data.get("recipe_paused", "None"))
+        ):
+            return
+
+        """ Disable Screen Timeout When not in Stop Mode """
+        if self.status_data["mode"] not in [Mode.STOP]:
+            self.display_timeout = None
+        else:
+            self.display_timeout = time.time() + self.TIMEOUT
+
+        self._update_mode_bar()
+        self._update_control_panel()
+        self._update_button_row()
+        self._update_primary_gauge_mode_label()
+        self._update_lid_open_button_mode()
+
+    def _update_mode_bar(self):
+        """Mode Bar Update"""
+        if "mode_bar" in self.dash_map.keys():
+            object_data = self.display_object_list[self.dash_map["mode_bar"]].get_object_data()
+
+            if self.status_data["recipe"] and self.status_data["mode"] != Mode.SHUTDOWN:
+                object_data["text"] = "Recipe: " + self.status_data["mode"]
+            else:
+                object_data["text"] = self.status_data["mode"]
+            self.display_object_list[self.dash_map["mode_bar"]].update_object_data(object_data)
+
+    def _update_control_panel(self):
+        """Control Panel Update"""
+        if "control_panel" in self.dash_map.keys():
+            object_data = self.display_object_list[self.dash_map["control_panel"]].get_object_data()
+            object_data["button_active"] = self.status_data["mode"]
+            if self.status_data["recipe"]:
+                """ Recipe Mode """
+                list_item = "cmd_none"
+                type_item = "Error"
+                if self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
+                    type_item = "Startup"
+                elif self.status_data["mode"] == Mode.SMOKE:
+                    type_item = "Smoke"
+                elif self.status_data["mode"] == Mode.HOLD:
+                    type_item = "Hold"
+                elif self.status_data["mode"] == Mode.SHUTDOWN:
+                    type_item = "None"
+                object_data["button_list"] = ["cmd_next_step", list_item, "cmd_stop", "cmd_shutdown"]
+                object_data["button_type"] = ["Next", type_item, "Stop", "Shutdown"]
+                if self.status_data["recipe_paused"]:
+                    object_data["button_active"] = "Next"
+            elif self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
+                """ Startup Mode """
+                object_data["button_list"] = ["cmd_startup", "cmd_smoke", "input_hold", "cmd_stop"]
+                object_data["button_type"] = ["Startup", "Smoke", "Hold", "Stop"]
+            elif self.status_data["mode"] in [Mode.SMOKE, Mode.HOLD, Mode.SHUTDOWN]:
+                """ Smoke, Hold or Shutdown Modes """
+                object_data["button_list"] = ["cmd_smoke", "input_hold", "cmd_stop", "cmd_shutdown"]
+                object_data["button_type"] = ["Smoke", "Hold", "Stop", "Shutdown"]
+            else:
+                """ Stopped, Prime, Monitor Modes """
+                object_data["button_list"] = ["menu_prime", "menu_startup", "cmd_monitor", "cmd_stop"]
+                object_data["button_type"] = ["Prime", "Startup", "Monitor", "Stop"]
+
+            self.display_object_list[self.dash_map["control_panel"]].update_object_data(object_data)
+
+    def _update_button_row(self):
+        """Button Row Update (ember dash)"""
+        if "button_row" in self.dash_map.keys():
+            object_data = self.display_object_list[self.dash_map["button_row"]].get_object_data()
+            button_type, button_list, button_active = self._button_row_for_mode(
+                self.status_data["mode"], self.status_data["recipe"], self.status_data["recipe_paused"]
+            )
+            object_data["button_type"] = button_type
+            object_data["button_list"] = button_list
+            object_data["button_active"] = button_active
+            self.display_object_list[self.dash_map["button_row"]].update_object_data(object_data)
+
+    def _update_primary_gauge_mode_label(self):
+        """Primary Gauge Mode Label Update (ember dash - gauge_ember)"""
+        if "primary_gauge" in self.dash_map.keys():
+            object_data = self.display_object_list[self.dash_map["primary_gauge"]].get_object_data()
+            object_data.setdefault("data", {})
+            object_data["data"]["mode_label"] = self.status_data["mode"].upper()
+            self.display_object_list[self.dash_map["primary_gauge"]].update_object_data(object_data)
+
+    def _update_lid_open_button_mode(self):
+        """Lid Open Button Update"""
+        if "lid_open_button" in self.dash_map.keys() and self.status_data["mode"] == Mode.HOLD:
+            object_data = self.display_object_list[self.dash_map["lid_open_button"]].get_object_data()
+            if self.status_data.get("lid_open_detected", False):
+                object_data["active"] = True
+            else:
+                object_data["active"] = False
+            self.display_object_list[self.dash_map["lid_open_button"]].update_object_data(object_data)
+
+    def _update_header_bar(self):
+        """Header Bar Update (ember dash) - clock/IP/live-cooking-dot, independent of mode change"""
+        if "header_bar" in self.dash_map.keys():
+            object_data = self.display_object_list[self.dash_map["header_bar"]].get_object_data()
+            object_data.setdefault("data", {})
+            new_clock = time.strftime("%H:%M")
+            new_cooking = self.status_data["mode"] in (
+                Mode.STARTUP,
+                Mode.REIGNITE,
+                Mode.SMOKE,
+                Mode.HOLD,
+                Mode.RECIPE,
+            )
+            if (
+                object_data["data"].get("clock") != new_clock
+                or object_data["data"].get("ip") != self.ip_address
+                or object_data["data"].get("cooking") != new_cooking
+            ):
+                object_data["data"]["ip"] = self.ip_address
+                object_data["data"]["clock"] = new_clock
+                object_data["data"]["cooking"] = new_cooking
+                self.display_object_list[self.dash_map["header_bar"]].update_object_data(object_data)
+
+    def _update_gauges_and_cards(self):
+        if self.last_in_data == {}:
+            return
+        self._update_primary_gauge_values()
+        self._update_food_gauges()
+        self._update_probe_cards()
+
+    def _update_primary_gauge_values(self):
+        """Update Primary Gauge Values"""
+        primary_key = list(self.in_data["P"].keys())[0]  # Get the key for the primary gauge
+        if (
+            (self.in_data["P"] != self.last_in_data["P"])
+            or (self.in_data["PSP"] != self.last_in_data["PSP"])
+            or (self.in_data["NT"][primary_key] != self.last_in_data["NT"].get(primary_key))
+        ):
+            """ Update the Primary Gauge """
+            object_data = self.display_object_list[self.dash_map["primary_gauge"]].get_object_data()
+            object_data["temps"][0] = (
+                self.in_data["P"][primary_key] if self.in_data["P"][primary_key] is not None else 0
+            )
+            object_data["temps"][1] = self.in_data["NT"][primary_key]
+            object_data["temps"][2] = self.in_data["PSP"]
+            object_data["units"] = self.units
+            # object_data['label'] = primary_key
+            self.display_object_list[self.dash_map["primary_gauge"]].update_object_data(object_data)
+
+    def _update_food_gauges(self):
+        """Update Food Probe Gauges and Values"""
+        food_gauge_keys = list(self.food_probe_label_map.keys())
+        for gauge in food_gauge_keys:
+            if gauge not in self.dash_map.keys():
+                # Layouts built entirely around probe_card_N (ember dash) have no
+                # food_probe_gauge_N objects at all - nothing to update here.
+                continue
+            key = self.food_probe_label_map[gauge]
+            if (
+                self.last_in_data["F"][key] != self.in_data["F"][key]
+                or self.last_in_data["NT"][key] != self.in_data["NT"][key]
+            ):
+                """ Update this food gauge """
+                object_data = self.display_object_list[self.dash_map[gauge]].get_object_data()
+                object_data["temps"][0] = self.in_data["F"][key] if self.in_data["F"][key] is not None else 0
+                object_data["temps"][1] = self.in_data["NT"][key]
+                object_data["temps"][2] = 0  # There is no set temp for food probes
+                object_data["units"] = self.units
+                self.display_object_list[self.dash_map[gauge]].update_object_data(object_data)
+
+    def _update_probe_cards(self):
+        """Update Probe Cards (ember dash)"""
+        probe_card_keys = list(self.probe_card_label_map.keys())
+        for card in probe_card_keys:
+            if card not in self.dash_map.keys():
+                continue
+            key = self.probe_card_label_map[card]
+            if (
+                self.last_in_data["F"][key] != self.in_data["F"][key]
+                or self.last_in_data["NT"][key] != self.in_data["NT"][key]
+            ):
+                """ Update this probe card """
+                object_data = self.display_object_list[self.dash_map[card]].get_object_data()
+                object_data.setdefault("data", {})
+                object_data["data"]["name"] = self.probe_card_name_map[card]
+                object_data["data"]["temp"] = self.in_data["F"][key] if self.in_data["F"][key] is not None else 0
+                object_data["data"]["target"] = self.in_data["NT"][key] if self.in_data["NT"][key] is not None else 0
+                object_data["units"] = self.units
+                self.display_object_list[self.dash_map[card]].update_object_data(object_data)
+
+    def _update_output_icons(self):
+        """Update Output Status Icons"""
+        if self.last_status_data.get("outpins") is None:
+            self.last_status_data["outpins"] = self.status_data["outpins"].copy()
+            for output in self.last_status_data["outpins"]:
+                self.last_status_data["outpins"][output] = (
+                    True if self.status_data["outpins"][output] == False else False
+                )
+        for output in self.status_data["outpins"]:
+            if self.status_data["outpins"][output] != self.last_status_data["outpins"].get(output):
+                if output == "auger" and "auger_status" in self.dash_map.keys():
+                    self._update_output_icon("auger_status", output)
+                if output == "fan" and "fan_status" in self.dash_map.keys():
+                    self._update_output_icon("fan_status", output)
+                if output == "igniter" and "igniter_status" in self.dash_map.keys():
+                    self._update_output_icon("igniter_status", output)
+
+    def _update_output_icon(self, dash_key, output):
+        object_data = self.display_object_list[self.dash_map[dash_key]].get_object_data()
+        object_data["animation_enabled"] = True if self.status_data["outpins"][output] else False
+        object_data["active"] = True if self.status_data["outpins"][output] else False
+        self.display_object_list[self.dash_map[dash_key]].update_object_data(object_data)
+
+    def _update_system_card(self):
+        """Update System Card (ember dash - fan/auger/igniter combined)"""
+        if "system_card" in self.dash_map.keys() and self.status_data["outpins"] != self.last_status_data.get(
+            "outpins"
+        ):
+            object_data = self.display_object_list[self.dash_map["system_card"]].get_object_data()
+            object_data["data"] = {
+                "fan": bool(self.status_data["outpins"].get("fan", False)),
+                "auger": bool(self.status_data["outpins"].get("auger", False)),
+                "igniter": bool(self.status_data["outpins"].get("igniter", False)),
+            }
+            self.display_object_list[self.dash_map["system_card"]].update_object_data(object_data)
+
+    def _update_timer(self):
+        """Update Timer Output"""
+        if self.status_data["mode"] in [Mode.PRIME, Mode.STARTUP, Mode.REIGNITE, Mode.SHUTDOWN]:
+            if self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
+                duration = self.status_data["start_duration"]
+            elif self.status_data["mode"] in [Mode.PRIME]:
+                duration = self.status_data["prime_duration"]
+            else:
+                duration = self.status_data["shutdown_duration"]
+
+            countdown = (
+                int(duration - (time.time() - self.status_data["start_time"]))
+                if int(duration - (time.time() - self.status_data["start_time"])) > 0
+                else 0
+            )
+            self._set_timer_object(countdown, "Timer")
+
+        elif self.status_data["mode"] in [Mode.HOLD] and self.status_data["lid_open_detected"]:
+            """ In Hold Mode, use timer for lid open detection """
+            countdown = (
+                int(self.status_data["lid_open_endtime"] - time.time())
+                if int(self.status_data["lid_open_endtime"] - time.time()) > 0
+                else 0
+            )
+            self._set_timer_object(countdown, "Lid Pause")
+
+        else:
+            """ Clear the timer in other modes. """
+            self._set_timer_object(0, None)
+
+    def _set_timer_object(self, countdown, label):
+        if "timer" in self.dash_map.keys():
+            object_data = self.display_object_list[self.dash_map["timer"]].get_object_data()
+            if countdown != object_data["data"]["seconds"]:
+                object_data["data"]["seconds"] = countdown
+                if label is not None:
+                    object_data["label"] = label
+                self.display_object_list[self.dash_map["timer"]].update_object_data(object_data)
+
+    def _update_cook_time(self):
+        """Update Cook Time (ember dash, D2) - active countdown, else elapsed cook time"""
+        if "cook_time" in self.dash_map.keys():
+            object_data = self.display_object_list[self.dash_map["cook_time"]].get_object_data()
+            new_data = self._cook_time_data(self.status_data, time.time())
+            if object_data.get("data") != new_data:
+                object_data.setdefault("data", {})
+                object_data["data"]["label"] = new_data["label"]
+                object_data["data"]["value"] = new_data["value"]
+                object_data["label"] = new_data["label"]  # top-level fallback if type is 'timer'-like
+                self.display_object_list[self.dash_map["cook_time"]].update_object_data(object_data)
+
+    def _update_lid_indicator(self):
+        """In Hold Mode, Check Lid Indicator"""
+        if (
+            self.status_data["mode"] in [Mode.HOLD]
+            and self.last_status_data["lid_open_detected"] != self.status_data["lid_open_detected"]
+            and "lid_indicator" in self.dash_map.keys()
+        ):
+            object_data = self.display_object_list[self.dash_map["lid_indicator"]].get_object_data()
+            if self.status_data["lid_open_detected"]:
+                object_data["active"] = True
+            else:
+                object_data["active"] = False
+            self.display_object_list[self.dash_map["lid_indicator"]].update_object_data(object_data)
+
+    def _update_lid_alert(self):
+        """Lid Alert Update (ember dash) - active only while lid_open_detected, mirrors lid_indicator"""
+        if "lid_alert" in self.dash_map.keys():
+            object_data = self.display_object_list[self.dash_map["lid_alert"]].get_object_data()
+            new_active = bool(self.status_data.get("lid_open_detected", False))
+            if object_data.get("active") != new_active:
+                object_data["active"] = new_active
+                self.display_object_list[self.dash_map["lid_alert"]].update_object_data(object_data)
+
+    def _update_lid_open_button(self):
+        """In Hold Mode, Show Lid Indicator Button (when lid_open_detected is False)"""
+        if (
+            self.status_data["mode"] in [Mode.HOLD]
+            and self.last_status_data["lid_open_detected"] != self.status_data["lid_open_detected"]
+            and "lid_open_button" in self.dash_map.keys()
+        ):
+            object_data = self.display_object_list[self.dash_map["lid_open_button"]].get_object_data()
+            if self.status_data["lid_open_detected"]:
+                object_data["active"] = True
+            else:
+                object_data["active"] = False
+            self.display_object_list[self.dash_map["lid_open_button"]].update_object_data(object_data)
+
+    def _update_p_mode(self):
+        """Update PMode"""
+        if (
+            self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE, Mode.SMOKE]
+            and (
+                (self.status_data["mode"] != self.last_status_data.get("mode", "None"))
+                or (self.status_data["p_mode"] != self.last_status_data.get("p_mode", "None"))
+            )
+            and "p_mode" in self.dash_map.keys()
+        ):
+            object_data = self.display_object_list[self.dash_map["p_mode"]].get_object_data()
+            object_data["active"] = True
+            object_data["data"]["pmode"] = self.status_data["p_mode"]
+            self.display_object_list[self.dash_map["p_mode"]].update_object_data(object_data)
+
+        elif self.status_data["mode"] != self.last_status_data.get("mode", "None") and "p_mode" in self.dash_map.keys():
+            object_data = self.display_object_list[self.dash_map["p_mode"]].get_object_data()
+            object_data["active"] = False
+            self.display_object_list[self.dash_map["p_mode"]].update_object_data(object_data)
+
+    def _update_smoke_plus(self):
+        """Update Smoke Plus"""
+        if (
+            self.status_data["s_plus"] != self.last_status_data.get("s_plus", None)
+            and "smoke_plus" in self.dash_map.keys()
+        ):
+            object_data = self.display_object_list[self.dash_map["smoke_plus"]].get_object_data()
+
+            object_data["active"] = self.status_data["s_plus"]
+            object_data["button_value"][0] = "off" if self.status_data["s_plus"] else "on"
+
+            self.display_object_list[self.dash_map["smoke_plus"]].update_object_data(object_data)
+
+    def _update_hopper(self):
+        """Update Hopper Info"""
+        if (
+            self.status_data["hopper_level"] != self.last_status_data.get("hopper_level", None)
+            and "hopper" in self.dash_map.keys()
+        ):
+            object_data = self.display_object_list[self.dash_map["hopper"]].get_object_data()
+            object_data["data"]["level"] = max(self.status_data["hopper_level"], 0)
+            object_data["data"]["level"] = min(object_data["data"]["level"], 100)
+
+            self.display_object_list[self.dash_map["hopper"]].update_object_data(object_data)
+
+    def _update_hopper_vertical(self):
+        """Update Hopper Vertical (ember dash) - D1: object is absent from dash_map entirely
+        when hopper_level_enabled is False (see _build_objects), so this naturally no-ops then."""
+        if (
+            self.status_data["hopper_level"] != self.last_status_data.get("hopper_level", None)
+            and "hopper_vertical" in self.dash_map.keys()
+        ):
+            object_data = self.display_object_list[self.dash_map["hopper_vertical"]].get_object_data()
+            object_data.setdefault("data", {})
+            object_data["data"]["level"] = max(min(self.status_data["hopper_level"], 100), 0)
+            object_data["data"]["enabled"] = self.status_data.get("hopper_level_enabled", False)
+            self.display_object_list[self.dash_map["hopper_vertical"]].update_object_data(object_data)
+
+    def _update_duty_pills(self):
+        """Update Duty Pills (ember dash) - AUGER/FAN DUTY in Hold, else P-MODE/SMOKE+"""
+        if "duty_pill_left" in self.dash_map.keys() or "duty_pill_right" in self.dash_map.keys():
+            left_data, right_data = self._duty_pills(self.status_data)
+            if "duty_pill_left" in self.dash_map.keys():
+                object_data = self.display_object_list[self.dash_map["duty_pill_left"]].get_object_data()
+                if object_data.get("data") != left_data:
+                    object_data["data"] = left_data
+                    self.display_object_list[self.dash_map["duty_pill_left"]].update_object_data(object_data)
+            if "duty_pill_right" in self.dash_map.keys():
+                object_data = self.display_object_list[self.dash_map["duty_pill_right"]].get_object_data()
+                if object_data.get("data") != right_data:
+                    object_data["data"] = right_data
+                    self.display_object_list[self.dash_map["duty_pill_right"]].update_object_data(object_data)
 
     def _draw_objects(self):
         for object in self.display_object_list:
@@ -988,6 +1028,70 @@ class DisplayBase:
                 object_image_glow = object_image_glow.filter(ImageFilter.GaussianBlur(radius=3))
                 self.display_canvas.paste(object_image, objectData["position"], object_image_glow)
             self.display_canvas.paste(object_image, objectData["position"], object_image)
+
+    def _display_loop_render_step(self):
+        """
+        Shared per-tick display state machine, hoisted from the (previously
+        byte-identical) inner block of the pygame/DSI and ili9341f flex
+        drivers' `_display_loop`. Advances display_timeout, initializes or
+        updates the active screen (home/dash/menu/input), draws all objects,
+        and pushes the canvas when updated; otherwise clears the display and
+        falls through to the dash screen when idle.
+
+        Each flex driver's `_display_loop` retains its own device-specific
+        wrapper (event polling, frame pacing, thread/process setup) and
+        simply calls this once per iteration.
+        """
+        if self.display_active != None:
+            if self.display_timeout:
+                if time.time() > self.display_timeout:
+                    self.display_timeout = None
+                    self.display_active = None
+                    self.display_init = True
+
+            if self.display_active == "home":
+                if self.display_init:
+                    """ Initialize Home Screen """
+                    self._build_objects(self.background)
+                    self.display_init = False
+                    self.display_updated = True
+
+            elif self.display_active == "dash":
+                if self.display_init:
+                    """ Initialize Dash Screen """
+                    if self.dash_object_list == []:
+                        self._init_dash()
+                    self._restore_dash_objects()
+                    self._update_dash_objects()
+                    self.display_init = False
+                    self.display_updated = True
+                else:
+                    self._update_dash_objects()
+                self._display_background()
+
+            elif self.display_active is not None:
+                if (("menu_" in self.display_active) or ("input_" in self.display_active)) and self.display_init:
+                    """ Initialize Menu / Input Dialog """
+                    self._display_menu_background()
+                    self._build_objects(self.menu_background)
+                    self.display_init = False
+                    self.display_updated = True
+
+            """ Draw all objects. Perform any animations that need to be displayed. """
+            self._draw_objects()
+
+            if self.display_updated:
+                self._display_canvas()
+                self.display_update = False
+
+        else:
+            if self.display_init:
+                self._display_clear()
+                self.display_init = False
+                if not self.HOME_ENABLED:
+                    self.display_active = "dash"
+                    self._init_dash()
+                    self.display_active = None
 
     """
         ====================== Input/Event Handling ========================
@@ -1017,9 +1121,181 @@ class DisplayBase:
     def _event_detect(self):
         """
         Called to detect input events from buttons, encoder, touch, etc.
-        This function should be overridden by the inheriting class.
+
+        Hoisted from the flex drivers (_base_dsi.py, ili9341f.py), where this
+        was byte-identical.
         """
-        pass
+        user_input = self.input_event  # Save to variable to prevent spurious changes
+        self.command = None
+        if user_input:
+            if self.display_timeout is not None:
+                self.display_timeout = time.time() + self.TIMEOUT
+            if user_input not in ["UP", "DOWN", "ENTER", "TOUCH"]:
+                self.input_event = None
+                self.touch_pos = (0, 0)
+                return
+            elif user_input == "TOUCH" and self.input_touch:
+                self._process_touch()
+            elif user_input in ["UP", "DOWN", "ENTER"] and (self.input_button or self.input_encoder):
+                self._process_button()
+
+            # Clear the input event and touch_pos
+            self.input_event = None
+            self.touch_pos = (0, 0)
+
+    def _wake_and_activate_display(self):
+        """
+        Wake the display & go to home/dash.
+
+        Shared by `_process_button` (below) and by each flex driver's
+        `_process_touch` override, for the case where the display was off.
+        """
+        self._wake_display()
+        self.display_active = "home" if self.HOME_ENABLED else "dash"
+        self.display_init = True
+        self.display_timeout = time.time() + self.TIMEOUT
+
+    def _process_button(self):
+        """
+        Hoisted from the flex drivers (_base_dsi.py, ili9341f.py), where this
+        was byte-identical.
+        """
+        self._debounce()
+        if self.display_active:
+            if "dash" in self.display_active:
+                """
+				Process dash button events
+				"""
+                self._capture_background()
+                self._store_dash_objects()
+                if self.status_data["mode"] == Mode.STOP:
+                    self.display_active = "menu_main"
+                elif self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE, Mode.SMOKE, Mode.HOLD, Mode.SHUTDOWN]:
+                    self.display_active = "menu_main_active_normal"
+                elif self.status_data["mode"] == Mode.MONITOR:
+                    self.display_active = "menu_main_active_monitor"
+                elif self.status_data["mode"] == Mode.RECIPE:
+                    self.display_active = "menu_main_active_recipe"
+                else:
+                    self.display_active = "menu_main"
+                self.display_init = True
+            elif "menu_" in self.display_active:
+                """
+				Process menu button events
+				"""
+                objectData = self.display_object_list[0].get_object_data()
+                button_selected = objectData["data"].get("button_selected", None)
+                button_list = objectData.get("button_list", [])
+
+                if button_selected is not None and button_list != []:
+                    if self.input_event == "UP":
+                        if button_selected <= 1:
+                            objectData["data"]["button_selected"] = (
+                                len(button_list) - 1
+                            )  # Note: button_list has extra close_menu entry at index 0
+                        else:
+                            objectData["data"]["button_selected"] -= 1
+                        self.display_object_list[0].update_object_data(updated_objectData=objectData)
+                    elif self.input_event == "DOWN":
+                        if len(button_list) - 1 > button_selected:
+                            objectData["data"]["button_selected"] += 1
+                        else:
+                            objectData["data"]["button_selected"] = 1
+                        self.display_object_list[0].update_object_data(updated_objectData=objectData)
+                    elif self.input_event == "ENTER":
+                        if "cmd_" in objectData["button_list"][button_selected]:
+                            self.command = objectData["button_list"][button_selected]
+                            if objectData.get("button_value", False):
+                                self.command_data = objectData["button_value"][button_selected]
+                            else:
+                                self.command_data = None
+                            self._command_handler()
+                        elif objectData["button_list"][button_selected] == "menu_close":
+                            self.display_active = "dash"
+                            self.display_init = True
+                        elif ("menu_" in objectData["button_list"][button_selected]) or (
+                            "input_" in objectData["button_list"][button_selected]
+                        ):
+                            if self.display_active == "dash":
+                                self._capture_background()
+                                self._store_dash_objects()
+                            if (
+                                ("input_" in self.display_active)
+                                and ("input_" in objectData["button_list"][button_selected])
+                                and ("button_value" in list(objectData.keys()))
+                            ):
+                                self.input_origin = objectData["button_value"][button_selected]
+                            self.display_active = objectData["button_list"][button_selected]
+                            self.display_init = True
+                        elif "button_" in button_selected:
+                            objectData["data"]["input"] = objectData["button_list"][button_selected].replace(
+                                "button_", ""
+                            )
+                            self.display_object_list[0].update_object_data(updated_objectData=objectData)
+                elif self.input_event == "ENTER" and button_selected == None:
+                    self.display_active = "dash"
+                    self.display_init = True
+            elif "input_" in self.display_active:
+                """
+				Process input button events
+				"""
+                objectData = self.display_object_list[0].get_object_data()
+                if self.input_event == "UP":
+                    objectData["data"]["input"] = "up"
+                    self.display_object_list[0].update_object_data(updated_objectData=objectData)
+                if self.input_event == "DOWN":
+                    objectData["data"]["input"] = "down"
+                    self.display_object_list[0].update_object_data(updated_objectData=objectData)
+                if self.input_event == "ENTER":
+                    self.command = objectData["command"]
+                    self._command_handler()
+                    self.display_active = "dash"
+                    self.display_init = True
+        else:
+            """
+			Wake the display & go to home/dash
+			"""
+            self._wake_and_activate_display()
+
+    def _process_touch_areas(self):
+        """
+        Loop through current displayed objects and check for touch collisions.
+
+        Hoisted from the flex drivers (_base_dsi.py, ili9341f.py), where this
+        loop body was byte-identical; `_process_touch` itself stays per-driver
+        since _base_dsi.py additionally rotates self.touch_pos beforehand
+        (real touchscreen coordinates need it) while ili9341f.py does not.
+        """
+        for pointer, object in enumerate(self.display_object_list):
+            objectData = object.get_object_data()
+            for index, touch_area in enumerate(objectData["touch_areas"]):
+                if touch_area.collidepoint(self.touch_pos):
+                    # print(f'You touched {objectData["button_list"][index]}.')
+                    if "cmd_" in objectData["button_list"][index]:
+                        self.command = objectData["button_list"][index]
+                        if objectData.get("button_value", False):
+                            self.command_data = objectData["button_value"][index]
+                        else:
+                            self.command_data = None
+                        self._command_handler()
+                    elif objectData["button_list"][index] == "menu_close":
+                        self.display_active = "dash"
+                        self.display_init = True
+                    elif ("menu_" in objectData["button_list"][index]) or (
+                        "input_" in objectData["button_list"][index]
+                    ):
+                        if self.display_active == "dash":
+                            self._capture_background()
+                            self._store_dash_objects()
+                        if ("input_" in objectData["button_list"][index]) and (
+                            "button_value" in list(objectData.keys())
+                        ):
+                            self.input_origin = objectData["button_value"][index]
+                        self.display_active = objectData["button_list"][index]
+                        self.display_init = True
+                    elif "button_" in objectData["button_list"][index]:
+                        objectData["data"]["input"] = objectData["button_list"][index].replace("button_", "")
+                        self.display_object_list[pointer].update_object_data(updated_objectData=objectData)
 
     def _command_handler(self):
         """

@@ -497,97 +497,54 @@ class _DisplayBase:
 
         return canvas
 
-    def _draw_ignitor_icon(self, canvas, position):
+    def _draw_status_icon(self, canvas, position, icon_char, icon_color, icon_size, icon_offset):
+        """
+        Shared drawing routine for the small status-icon badges (rounded-rect
+        border + black fill + centered FontAwesome glyph). The four
+        `_draw_*_icon` wrappers below supply the glyph/color/size/offset that
+        differ between icons; everything else here is identical for all of them.
+        """
         # Create a drawing object
         draw = ImageDraw.Draw(canvas)
 
+        # Draw Rounded Rectangle Border
+        self._rounded_rectangle(draw, (position[0], position[1], position[0] + 42, position[1] + 42), 5, icon_color)
+
+        # Fill Rectangle with Black
+        self._rounded_rectangle(
+            draw, (position[0] + 2, position[1] + 2, position[0] + 40, position[1] + 40), 5, (0, 0, 0)
+        )
+
+        # Create Icon Image
+        icon = self._create_icon(icon_char, icon_size, icon_color)
+        icon_position = (position[0] + icon_offset[0], position[1] + icon_offset[1])
+        canvas = self._paste_icon(icon, canvas, icon_position, 0)
+
+        return canvas
+
+    def _draw_ignitor_icon(self, canvas, position):
         # I = Ignitor  (Center Right)
         icon_char = "\uf46a"
         icon_color = (255, self.icon_color, 0)
-
-        # Draw Rounded Rectangle Border
-        self._rounded_rectangle(draw, (position[0], position[1], position[0] + 42, position[1] + 42), 5, icon_color)
-
-        # Fill Rectangle with Black
-        self._rounded_rectangle(
-            draw, (position[0] + 2, position[1] + 2, position[0] + 40, position[1] + 40), 5, (0, 0, 0)
-        )
-
-        # Create Icon Image
-        icon = self._create_icon(icon_char, 36, icon_color)
-        icon_position = (position[0] + 8, position[1] + 4)
-        canvas = self._paste_icon(icon, canvas, icon_position, 0)
-
-        return canvas
+        return self._draw_status_icon(canvas, position, icon_char, icon_color, 36, (8, 4))
 
     def _draw_notify_icon(self, canvas, position):
-        # Create a drawing object
-        draw = ImageDraw.Draw(canvas)
-
         # Notification Bell
         icon_char = "\uf0f3"
         icon_color = (255, 255, 0)
-
-        # Draw Rounded Rectangle Border
-        self._rounded_rectangle(draw, (position[0], position[1], position[0] + 42, position[1] + 42), 5, icon_color)
-
-        # Fill Rectangle with Black
-        self._rounded_rectangle(
-            draw, (position[0] + 2, position[1] + 2, position[0] + 40, position[1] + 40), 5, (0, 0, 0)
-        )
-
-        # Create Icon Image
-        icon = self._create_icon(icon_char, 36, icon_color)
-        icon_position = (position[0] + 6, position[1] + 3)
-        canvas = self._paste_icon(icon, canvas, icon_position, 0)
-
-        return canvas
+        return self._draw_status_icon(canvas, position, icon_char, icon_color, 36, (6, 3))
 
     def _draw_recipe_icon(self, canvas, position):
-        # Create a drawing object
-        draw = ImageDraw.Draw(canvas)
-
         # Recipe Icon
         icon_char = "\uf46d"
         icon_color = (255, 255, 0)
-
-        # Draw Rounded Rectangle Border
-        self._rounded_rectangle(draw, (position[0], position[1], position[0] + 42, position[1] + 42), 5, icon_color)
-
-        # Fill Rectangle with Black
-        self._rounded_rectangle(
-            draw, (position[0] + 2, position[1] + 2, position[0] + 40, position[1] + 40), 5, (0, 0, 0)
-        )
-
-        # Create Icon Image
-        icon = self._create_icon(icon_char, 32, icon_color)
-        icon_position = (position[0] + 9, position[1] + 5)
-        canvas = self._paste_icon(icon, canvas, icon_position, 0)
-
-        return canvas
+        return self._draw_status_icon(canvas, position, icon_char, icon_color, 32, (9, 5))
 
     def _draw_pause_icon(self, canvas, position):
-        # Create a drawing object
-        draw = ImageDraw.Draw(canvas)
-
         # Recipe Pause Icon
         icon_char = "\uf04c"
         icon_color = (255, self.icon_color, 0)
-
-        # Draw Rounded Rectangle Border
-        self._rounded_rectangle(draw, (position[0], position[1], position[0] + 42, position[1] + 42), 5, icon_color)
-
-        # Fill Rectangle with Black
-        self._rounded_rectangle(
-            draw, (position[0] + 2, position[1] + 2, position[0] + 40, position[1] + 40), 5, (0, 0, 0)
-        )
-
-        # Create Icon Image
-        icon = self._create_icon(icon_char, 28, icon_color)
-        icon_position = (position[0] + 9, position[1] + 9)
-        canvas = self._paste_icon(icon, canvas, icon_position, 0)
-
-        return canvas
+        return self._draw_status_icon(canvas, position, icon_char, icon_color, 28, (9, 9))
 
     def _draw_splus_icon(self, canvas, position):
         # Create a drawing object
@@ -755,6 +712,49 @@ class _DisplayBase:
 
         self._display_canvas(img)
 
+    def _draw_food_probe_gauge(self, img, in_data, position, index):
+        """
+        Shared body for the food-probe gauges drawn in `_display_current`.
+        The only differences between the "Probe1" and "Probe2" call sites are
+        the gauge `position` and which food-probe `index` supplies the label.
+        """
+        size = (100, 100)
+        bg_color = (50, 50, 50)  # Grey
+        fg_color = (3, 161, 252)  # Blue
+
+        label = list(in_data["probe_history"]["food"].keys())[index]
+
+        # temp, percents = [current temperature, setpoint1, setpoint2]
+        temps = [0, 0, 0]
+        percents = [0, 0, 0]
+
+        temps[0] = in_data["probe_history"]["food"][label]
+        if temps[0] == None:
+            temps[0] = 0
+        if temps[0] == None or temps[0] <= 0:
+            percents[0] = 0
+        elif self.units == "F":
+            percents[0] = round((temps[0] / 300) * 100)  # F Temp Range [0 - 300F] for probe
+        else:
+            percents[0] = round((temps[0] / 150) * 100)  # C Temp Range [0 - 150C] for probe
+
+        temps[1] = in_data["notify_targets"][label]
+        if temps[1] <= 0:
+            percents[1] = 0
+        elif self.units == "F":
+            percents[1] = round((temps[1] / 300) * 100)  # F Temp Range [0 - 300F] for probe
+        elif self.units == "C":
+            percents[1] = round((temps[1] / 150) * 100)  # C Temp Range [0 - 150C] for probe
+
+        # No SetPoint2 on Probes
+        temps[2] = 0
+        percents[2] = 0
+
+        # Draw the Probe Gauge w/Labels - Use Yellow as the SetPoint Color
+        return self._draw_gauge(
+            img, position, size, fg_color, bg_color, percents, temps, label, sp1_color=(255, 255, 0)
+        )
+
     def _display_current(self, in_data, status_data):
         # Create canvas
         img = Image.new("RGBA", (self.WIDTH, self.HEIGHT), color=(0, 0, 0))
@@ -810,82 +810,12 @@ class _DisplayBase:
         if len(list(in_data["probe_history"]["food"].keys())) > 0:
             # ======== Probe1 Temp Circle Gauge ========
             position = (10, self.HEIGHT - 110)
-            size = (100, 100)
-            bg_color = (50, 50, 50)  # Grey
-            fg_color = (3, 161, 252)  # Blue
-
-            label = list(in_data["probe_history"]["food"].keys())[0]
-
-            # temp, percents = [current temperature, setpoint1, setpoint2]
-            temps = [0, 0, 0]
-            percents = [0, 0, 0]
-
-            temps[0] = in_data["probe_history"]["food"][label]
-            if temps[0] == None:
-                temps[0] = 0
-            if temps[0] == None or temps[0] <= 0:
-                percents[0] = 0
-            elif self.units == "F":
-                percents[0] = round((temps[0] / 300) * 100)  # F Temp Range [0 - 300F] for probe
-            else:
-                percents[0] = round((temps[0] / 150) * 100)  # C Temp Range [0 - 150C] for probe
-
-            temps[1] = in_data["notify_targets"][label]
-            if temps[1] <= 0:
-                percents[1] = 0
-            elif self.units == "F":
-                percents[1] = round((temps[1] / 300) * 100)  # F Temp Range [0 - 300F] for probe
-            elif self.units == "C":
-                percents[1] = round((temps[1] / 150) * 100)  # C Temp Range [0 - 150C] for probe
-
-            # No SetPoint2 on Probes
-            temps[2] = 0
-            percents[2] = 0
-
-            # Draw the Probe1 Gauge w/Labels - Use Yellow as the SetPoint Color
-            img = self._draw_gauge(
-                img, position, size, fg_color, bg_color, percents, temps, label, sp1_color=(255, 255, 0)
-            )
+            img = self._draw_food_probe_gauge(img, in_data, position, 0)
 
         if len(list(in_data["probe_history"]["food"].keys())) > 1:
             # ======== Probe2 Temp Circle Gauge ========
             position = (self.WIDTH - 110, self.HEIGHT - 110)
-            size = (100, 100)
-            bg_color = (50, 50, 50)  # Grey
-            fg_color = (3, 161, 252)  # Blue
-
-            label = list(in_data["probe_history"]["food"].keys())[1]
-
-            # temp, percents = [current temperature, setpoint1, setpoint2]
-            temps = [0, 0, 0]
-            percents = [0, 0, 0]
-
-            temps[0] = in_data["probe_history"]["food"][label]
-            if temps[0] == None:
-                temps[0] = 0
-            if temps[0] == None or temps[0] <= 0:
-                percents[0] = 0
-            elif self.units == "F":
-                percents[0] = round((temps[0] / 300) * 100)  # F Temp Range [0 - 300F] for probe
-            else:
-                percents[0] = round((temps[0] / 150) * 100)  # C Temp Range [0 - 150C] for probe
-
-            temps[1] = in_data["notify_targets"][label]
-            if temps[1] <= 0:
-                percents[1] = 0
-            elif self.units == "F":
-                percents[1] = round((temps[1] / 300) * 100)  # F Temp Range [0 - 300F] for probe
-            elif self.units == "C":
-                percents[1] = round((temps[1] / 150) * 100)  # C Temp Range [0 - 150C] for probe
-
-            # No SetPoint2 on Probes
-            temps[2] = 0
-            percents[2] = 0
-
-            # Draw the Probe1 Gauge w/Labels - Use Yellow as the SetPoint Color
-            img = self._draw_gauge(
-                img, position, size, fg_color, bg_color, percents, temps, label, sp1_color=(255, 255, 0)
-            )
+            img = self._draw_food_probe_gauge(img, in_data, position, 1)
 
         # Display Icons for Active Outputs
 
