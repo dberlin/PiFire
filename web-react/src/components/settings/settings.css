@@ -145,3 +145,41 @@
   color: #ff8b82;
   font: 600 14px "Barlow";
 }
+
+/* HistoryTab: Chart Colors section (per-probe color/flag cards) */
+.pf-probe-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--inset);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pf-probe-card + .pf-probe-card {
+  margin-top: 14px;
+}
+.pf-probe-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pf-probe-card-header .pf-field {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+.pf-probe-card-name {
+  font: 700 15px "Barlow";
+  color: var(--text);
+  margin-right: auto;
+}
+.pf-probe-chip {
+  font: 600 12px "Barlow";
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-radius: 999px;
+  padding: 2px 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
