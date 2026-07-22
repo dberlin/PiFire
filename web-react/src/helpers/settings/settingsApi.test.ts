@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { applySettings, buildSettingsUrl } from "./settingsApi";
+import { applySettings, buildSettingsUrl, getMode, getSettings } from "./settingsApi";
 
 describe("buildSettingsUrl", () => {
   it("joins base + /api + path", () => {
@@ -7,6 +7,58 @@ describe("buildSettingsUrl", () => {
     expect(buildSettingsUrl("http://pi:5000", "settings_update")).toBe(
       "http://pi:5000/api/settings_update",
     );
+  });
+});
+
+describe("getSettings", () => {
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  it("resolves the parsed settings object from a {settings:{...}} envelope", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => ({
+        ok: true,
+        json: async () => ({ settings: { globals: { grill_name: "Y" } } }),
+      })),
+    );
+    await expect(getSettings("")).resolves.toEqual({ globals: { grill_name: "Y" } });
+  });
+
+  it("throws when the HTTP response is not ok", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })),
+    );
+    await expect(getSettings("")).rejects.toThrow("GET /api/settings failed: HTTP 500");
+  });
+});
+
+describe("getMode", () => {
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  it("returns the mode string from a {data:{mode}} envelope", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => ({ ok: true, json: async () => ({ data: { mode: "Hold" } }) })),
+    );
+    await expect(getMode("")).resolves.toBe("Hold");
+  });
+
+  it("returns empty string when the HTTP response is not ok", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+    await expect(getMode("")).resolves.toBe("");
+  });
+
+  it("fails open to empty string when fetch rejects", async () => {
+    rs.stubGlobal("fetch", rs.fn().mockRejectedValue(new Error("down")));
+    await expect(getMode("")).resolves.toBe("");
   });
 });
 
@@ -41,5 +93,18 @@ describe("applySettings", () => {
       json: async () => ({ result: "error", message: "bad" }),
     });
     expect(await applySettings("", {}, [])).toMatchObject({ ok: false, message: "bad" });
+  });
+
+  it("maps a non-ok HTTP response to ok:false with the status code", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 503 });
+    expect(await applySettings("", {}, [])).toMatchObject({ ok: false, message: "HTTP 503" });
+  });
+
+  it("maps a rejected fetch to ok:false with the error message", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+    expect(await applySettings("", {}, [])).toMatchObject({
+      ok: false,
+      message: "network down",
+    });
   });
 });
