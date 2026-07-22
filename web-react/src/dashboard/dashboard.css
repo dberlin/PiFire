@@ -107,3 +107,16 @@
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
+
+.pf-modal-scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.6); display: grid; place-items: center; z-index: 10; }
+.pf-modal { background: #2c231a; border: 1px solid rgba(255,255,255,0.14); border-radius: 18px; padding: 22px; min-width: 320px; display: flex; flex-direction: column; gap: 16px; }
+.pf-modal-title { font: 700 20px "Barlow"; color: #f4ede2; text-align: center; }
+.pf-setpoint-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.pf-setpoint-val { font: 800 56px "Barlow Semi Condensed"; color: #f8f2e8; font-variant-numeric: tabular-nums; }
+.pf-setpoint-val span { font-size: 24px; color: #8a7f70; margin-left: 2px; }
+.pf-step { width: 56px; height: 56px; border-radius: 14px; border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: #f4ede2; font: 700 28px "Barlow"; cursor: pointer; }
+.pf-setpoint-slider { width: 100%; accent-color: var(--accent); }
+.pf-modal-actions { display: flex; gap: 12px; }
+.pf-modal-btn { flex: 1; border-radius: 12px; border: 1px solid rgba(255,255,255,0.14); background: #1d1813; color: #e8dfd1; font: 700 16px "Barlow"; padding: 12px; cursor: pointer; }
+.pf-modal-btn.accent { background: var(--accent); color: #1a0f04; border-color: transparent; }
+.pf-modal-btn.danger { background: rgba(255,90,77,0.14); border-color: #ff5a4d; color: #ff8b82; }
