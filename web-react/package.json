@@ -11,6 +11,7 @@
     "build": "bun run typecheck && rsbuild build",
     "preview": "rsbuild preview",
     "test": "rstest run",
+    "test:coverage": "rstest run --coverage",
     "test:e2e": "playwright test",
     "lint": "biome check . && eslint .",
     "format": "biome format --write ."

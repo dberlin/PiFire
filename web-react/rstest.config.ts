@@ -16,6 +16,18 @@ const shared = {
 };
 
 export default defineConfig({
+  coverage: {
+    provider: "istanbul",
+    all: true,
+    include: ["src/**/*.{ts,tsx}"],
+    exclude: [
+      "src/**/*.test.*",
+      "src/main.tsx",
+      "src/**/*.d.ts",
+      "src/test-setup.ts",
+      "src/test-utils.tsx",
+    ],
+  },
   projects: [
     { ...shared, name: "unit-node", include: ["src/**/*.test.ts"], testEnvironment: "node" },
     { ...shared, name: "unit-jsdom", include: ["src/**/*.test.tsx"], testEnvironment: "jsdom" },
