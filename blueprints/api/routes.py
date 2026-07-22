@@ -11,7 +11,7 @@ from common.datastore_accessors import (
     read_probe_status,
 )
 from common.api_commands import process_command
-from common.app import get_system_command_output, create_ui_hash
+from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update
 from common.server_status import get_server_status
 from . import api_bp
 
@@ -132,6 +132,23 @@ def _api_post_settings(settings, request_json):
         ), 201
 
 
+def _api_post_settings_update(settings, request_json):
+    """
+    JSON settings write that ALSO sets control-update flags so the running
+    control loop re-reads. Mirrors save_settings_and_flag_update.
+    body: { "settings": <partial settings dict>, "flags": ["settings_update", ...] }
+    """
+    try:
+        delta = request_json.get("settings", {})
+        flags = request_json.get("flags", []) or []
+        settings = deep_update(settings, delta)
+        control = read_control()
+        save_settings_and_flag_update(settings, control, *flags, origin="api")
+        return jsonify({"result": "success", "message": "Settings updated.", "data": settings}), 200
+    except Exception as e:
+        return jsonify({"result": "error", "message": f"Settings update failed: {e}", "data": {}}), 200
+
+
 def _api_post_control(settings, request_json):
     """
     Updating of control input data is now done in common.py > execute_commands()
@@ -210,6 +227,7 @@ def _api_post_wled_test_profile(settings, request_json):
 
 _API_POST_ACTIONS = {
     "settings": _api_post_settings,
+    "settings_update": _api_post_settings_update,
     "control": _api_post_control,
     "wled_push_profiles": _api_post_wled_push_profiles,
     "wled_test_profile": _api_post_wled_test_profile,
