@@ -164,15 +164,38 @@ Each tab's Save replaces its two arrays wholesale in the delta (bare `[]`).
   immediately (values re-derived from config/defaults); nothing is written
   until Save.
 
-### Coverage gate
+### Coverage: tooling + existing-file backfill (user-expanded scope)
 
-- `rstest` coverage enabled via CLI/config (`--coverage`, provider per rstest
-  0.11 support — exact wiring verified at plan time; the config d.ts exposes
-  `coverage: boolean | {provider: 'istanbul'|'v8', …}`).
-- New script `"test:coverage": "rstest run --coverage"` (or config-flag
-  equivalent). The per-task gate for THIS phase runs it and checks the report:
-  **every new file ≥75% lines; `colorFormat.ts` and any other new pure helper
-  100%**. Not applied retroactively to pre-existing files.
+Provider: `@rstest/coverage-istanbul` (installed; verified working). Config in
+`rstest.config.ts`:
+- `all: true` with `include: src/**` and `exclude`: `main.tsx` (entry),
+  `*.d.ts`, `test-setup.ts`, `test-utils.tsx`, `structure.test.ts` and all
+  `*.test.*` — so files no test imports count as 0% instead of vanishing.
+- `thresholds: { lines: 75 }` (per-file if rstest supports istanbul's per-file
+  thresholds — verified at plan time; else global thresholds + a small
+  report-parsing check script for the per-file rule) so the gate FAILS on
+  regression permanently, not just during this phase.
+- Script `"test:coverage": "rstest run --coverage"`; the phase gate runs it.
+
+**Measured baseline (2026-07-22, istanbul, imported-files-only):** suite 80.1%
+lines. Below 75%: `WorkModeTab.tsx` 51.2, `SafetyTab.tsx` 65.2,
+`buttonsForMode.ts` 66.7, `settingsApi.ts` 35.3 (+ `ControlButtons.tsx` and
+`Dashboard.tsx` sitting exactly at 75.0). **Invisible to the report (zero test
+imports, i.e. 0%):** `App.tsx`, `AppPrefs.tsx`, `DashboardRoute.tsx`,
+`ConnectionStatus.tsx`, `SettingsError.tsx`, tabs `GeneralTab`/`PwmTab`/
+`UnitsTab`, helpers `useDashData.ts`, `settingsRoutes.ts`, `useSaveSettings.ts`.
+
+**Backfill requirement:** bring every existing non-excluded src file to ≥75%
+lines as part of this phase — RTL tests for the uncovered components (General/
+Pwm/Units tabs, AppPrefs, App routing smoke, DashboardRoute, ConnectionStatus,
+SettingsError) and node/RTL tests for the uncovered helpers (useDashData's
+socket lifecycle via a mocked socket.io-client, settingsRoutes loader,
+useSaveSettings, settingsApi error paths, buttonsForMode mode matrix), plus
+top-ups for WorkModeTab/SafetyTab. Tests assert real behavior (house style:
+exact deltas/flags, rendered DOM) — no coverage-farming assertion-free renders.
+
+**New-file rule:** every file new in this phase ≥75% lines; new pure helpers
+(`colorFormat.ts`) 100%.
 
 ## Testing
 
