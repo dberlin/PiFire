@@ -9,9 +9,9 @@ This spike is the highest-signal slice — it de-risks the two hard problems:
 1. **The data/command contract** — it binds to PiFire's *existing* API (no backend
    change) with a read/write split: `listen_app_data` → `socket_dash_data` (SocketIO)
    for live data, and the REST command grammar `POST /api/set|cmd/…` → `process_command`
-   → `write_control` for commands. See `src/useDashData.ts`, `src/command.ts`,
+   → `write_control` for commands. See `src/helpers/useDashData.ts`, `src/helpers/command.ts`,
    `blueprints/mobile/socket_io.py`, and `common/api_commands.py`.
-2. **Animation fidelity** — the signature **270° gauge** (`src/dashboard/GrillGauge.tsx`)
+2. **Animation fidelity** — the signature **270° gauge** (`src/components/dashboard/GrillGauge.tsx`)
    with value-arc easing (250 ms OutCubic), pulsing glow, and setpoint marker,
    plus the accent-theme token system (`src/theme.css`, ported from
    `display/qml/Theme.qml`; Ember/Ice/Crimson switchable live).
@@ -22,6 +22,14 @@ splash/sleep, responsive breakpoints — see the plan.
 
 ## Module naming convention
 
+- **Two trees, one direction.** `src/components/` holds React component
+  modules (`.tsx`); `src/helpers/` holds non-component logic (pure functions,
+  API clients, hooks). Feature grouping (`dashboard/`, `settings/`, …) is
+  preserved inside each tree, e.g. `components/dashboard/GrillGauge.tsx` next
+  to `helpers/dashboard/deriveView.ts`. **`helpers/` must never import from
+  `components/`** — `components/` → `helpers/` is the only allowed direction.
+  Root-level infra (`main.tsx` and friends) may import from either tree.
+  Tests stay co-located with what they test, in whichever tree that is.
 - **`PascalCase.tsx`** — React components only, one exported component per file,
   named export matching the filename (`ControlButtons.tsx` → `ControlButtons`).
 - **`camelCase.ts`** — non-component logic (pure functions, API clients, hooks
@@ -35,9 +43,10 @@ splash/sleep, responsive breakpoints — see the plan.
   exports (`buttonsForMode.ts`), never a case-variant of the component.
 - Tests: `*.test.tsx` = component tests (jsdom project), `*.test.ts` = pure
   tests (node project) — the rstest env split keys off exactly this.
-- Enforced by `src/fsCasing.test.ts`, which fails on any case-folded module
-  collision — the only tripwire that fires on Linux, where the filesystem
-  never surfaces the problem.
+- Enforced by `src/structure.test.ts`, which fails on (a) any case-folded
+  module collision — the only tripwire that fires on Linux, where the
+  filesystem never surfaces the problem — and (b) any `helpers/` module that
+  imports from `components/`, enforcing the one-way layering rule above.
 
 ## Run
 
@@ -53,7 +62,7 @@ bun run build      # type-check + production build
 ```
 
 **Try it with no hardware:** `bun run demo` runs a live simulator
-(`src/demoData.ts`) — a "Hold at 225°F" cook where the primary eases up to
+(`src/helpers/demoData.ts`) — a "Hold at 225°F" cook where the primary eases up to
 setpoint and wobbles, the food probe climbs toward its target, and the auger
 pulses. You'll see the gauge sweep, glow pulse, and header dot pulse. The status
 badge reads `DEMO`. Commands are logged to the console instead of sent.
@@ -99,6 +108,6 @@ With the backend running, `http://localhost:5173/api/current` (and
 backend serves directly. `bun run demo` remains the fully offline path (no
 backend required) for UI-only iteration.
 
-`src/fixture.ts`'s `FIXTURE_DASH` is a real `socket_dash_data` payload
+`src/helpers/fixture.ts`'s `FIXTURE_DASH` is a real `socket_dash_data` payload
 captured from this prototype backend via a one-shot python-socketio client
 (see git history of that file for the exact capture snippet).
