@@ -120,3 +120,10 @@
 .pf-modal-btn { flex: 1; border-radius: 12px; border: 1px solid rgba(255,255,255,0.14); background: #1d1813; color: #e8dfd1; font: 700 16px "Barlow"; padding: 12px; cursor: pointer; }
 .pf-modal-btn.accent { background: var(--accent); color: #1a0f04; border-color: transparent; }
 .pf-modal-btn.danger { background: rgba(255,90,77,0.14); border-color: #ff5a4d; color: #ff8b82; }
+
+/* Error/warning banners */
+.pf-banners { position: absolute; top: 62px; left: 18px; right: 18px; z-index: 5; display: flex; flex-direction: column; gap: 6px; }
+.pf-banner { border-radius: 10px; padding: 8px 14px; font: 600 13px "Barlow"; }
+.pf-banner--warning { background: rgba(255,176,32,0.14); border: 1px solid #ffb020; color: #ffce6a; }
+.pf-banner--error { background: rgba(255,90,77,0.14); border: 1px solid #ff5a4d; color: #ff8b82; }
+.pf-banner--critical { background: rgba(255,90,77,0.24); border: 1px solid #ff5a4d; color: #ffd0cb; font-weight: 700; }

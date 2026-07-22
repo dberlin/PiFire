@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { AccentName, DashData, SendCommand } from "../types";
+import type { AccentName, DashData } from "../types";
 import type { ConnectionPhase } from "../useDashData";
+import type { CommandClient } from "../command";
 import { deriveView, fmtDuration, type PillView } from "./deriveView";
 import { useClock, useFitScale } from "./hooks";
 import { GrillGauge } from "./GrillGauge";
@@ -8,14 +9,16 @@ import { ProbeCard } from "./ProbeCard";
 import { SystemStatus } from "./SystemStatus";
 import { HopperGauge } from "./HopperGauge";
 import { ControlButtons } from "./ControlButtons";
+import { Banners } from "./Banners";
 
 const ACCENTS: AccentName[] = ["ember", "ice", "crimson"];
 const SWATCH: Record<AccentName, string> = { ember: "#ff8a2b", ice: "#3cc7d0", crimson: "#ff6a5a" };
 
 interface DashboardProps {
   dash: DashData;
-  send: SendCommand;
+  command: CommandClient;
   phase: ConnectionPhase;
+  controlAlive: boolean;
   accent: AccentName;
   setAccent: (a: AccentName) => void;
   animate: boolean;
@@ -25,7 +28,7 @@ interface DashboardProps {
 // The full 1280x720 PiFire controller dashboard (port of PiFire Dashboard.dc.html),
 // driven by the live socket_dash_data contract. Scaled to fit the browser
 // viewport; on-device it renders 1:1 on the touchscreen.
-export function Dashboard({ dash, send, phase, accent, setAccent, animate, setAnimate }: DashboardProps) {
+export function Dashboard({ dash, command, phase, controlAlive, accent, setAccent, animate, setAnimate }: DashboardProps) {
   const view = deriveView(dash);
   const now = useClock();
   const scale = useFitScale(1280, 720);
@@ -58,6 +61,8 @@ export function Dashboard({ dash, send, phase, accent, setAccent, animate, setAn
             pointerEvents: "none",
           }}
         />
+
+        <Banners errors={dash.errors ?? []} warnings={dash.warnings ?? []} criticalError={dash.criticalError} />
 
         {/* Header */}
         <div
@@ -102,8 +107,14 @@ export function Dashboard({ dash, send, phase, accent, setAccent, animate, setAn
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-            <span style={{ font: "600 13px 'Barlow'", letterSpacing: 1, color: phase === "demo" ? "#7d7264" : "#8fe09a" }}>
-              {phase === "demo" ? "DEMO" : "LIVE"}
+            <span
+              style={{
+                font: "600 13px 'Barlow'",
+                letterSpacing: 1,
+                color: phase === "demo" ? "#7d7264" : controlAlive ? "#8fe09a" : "#ff8b82",
+              }}
+            >
+              {phase === "demo" ? "DEMO" : controlAlive ? "LIVE" : "CTRL OFFLINE"}
             </span>
             <span style={{ font: "600 22px 'Barlow Semi Condensed'", color: "#cfc6b8", fontVariantNumeric: "tabular-nums" }}>{clock}</span>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -188,7 +199,7 @@ export function Dashboard({ dash, send, phase, accent, setAccent, animate, setAn
               )}
             </div>
 
-            <ControlButtons dash={dash} send={send} />
+            <ControlButtons dash={dash} command={command} disabled={!controlAlive} />
           </div>
 
           {/* Right: system + pills + hopper */}

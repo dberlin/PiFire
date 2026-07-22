@@ -5,15 +5,14 @@ import { Dashboard } from "./dashboard/Dashboard";
 import type { AccentName } from "./types";
 
 export default function App() {
-  const { dash, phase, targetUrl, send } = useDashData();
+  const { dash, phase, controlAlive, targetUrl, command } = useDashData();
   const [accent, setAccent] = useState<AccentName>("ember");
   const [animate, setAnimate] = useState(true);
 
   // Drive the CSS token set (mirrors QML backend.accentTheme).
   document.documentElement.setAttribute("data-accent", accent);
 
-  const hasData = phase === "live" || phase === "demo";
-  if (!hasData) {
+  if (phase !== "live" && phase !== "demo") {
     return (
       <div className="pf-fit">
         <ConnectionStatus phase={phase} targetUrl={targetUrl} />
@@ -24,8 +23,9 @@ export default function App() {
   return (
     <Dashboard
       dash={dash}
-      send={send}
+      command={command}
       phase={phase}
+      controlAlive={controlAlive}
       accent={accent}
       setAccent={setAccent}
       animate={animate}

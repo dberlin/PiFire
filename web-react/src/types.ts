@@ -76,10 +76,3 @@ export interface DashData {
 }
 
 export type AccentName = "ember" | "ice" | "crimson";
-
-// The command contract: post_app_data(action, type, json_data) -> write_control.
-// See socket_io.py `post_app_data` (line ~135) and qtbackend.py:229-324 for the
-// QML equivalents the full port will map 1:1.
-// NOTE: still consumed by useDashData/ControlButtons/Dashboard/App — those
-// migrate to the REST-write contract in Tasks 7-8. Do not remove until then.
-export type SendCommand = (action: string, type: string | null, jsonData?: unknown) => void;
