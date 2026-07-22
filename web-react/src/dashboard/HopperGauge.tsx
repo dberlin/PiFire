@@ -18,7 +18,16 @@ export function HopperGauge({ h }: { h: HopperView }) {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ font: "600 13px 'Barlow'", letterSpacing: 2.5, color: "#7d7264", textTransform: "uppercase" }}>Hopper</span>
+        <span
+          style={{
+            font: "600 13px 'Barlow'",
+            letterSpacing: 2.5,
+            color: "#7d7264",
+            textTransform: "uppercase",
+          }}
+        >
+          Hopper
+        </span>
         <span
           style={{
             font: "800 34px 'Barlow Semi Condensed'",
@@ -60,13 +69,23 @@ export function HopperGauge({ h }: { h: HopperView }) {
             bottom: 0,
             height: `${h.pct}%`,
             transition: "height .9s ease",
-            backgroundImage: "radial-gradient(circle at 3px 3px, rgba(0,0,0,0.16) 1.6px, transparent 1.8px)",
+            backgroundImage:
+              "radial-gradient(circle at 3px 3px, rgba(0,0,0,0.16) 1.6px, transparent 1.8px)",
             backgroundSize: "11px 11px",
             opacity: 0.55,
           }}
         />
       </div>
-      <div style={{ font: "600 12px 'Barlow'", letterSpacing: 2, color: h.labelColor, textTransform: "uppercase" }}>{h.label}</div>
+      <div
+        style={{
+          font: "600 12px 'Barlow'",
+          letterSpacing: 2,
+          color: h.labelColor,
+          textTransform: "uppercase",
+        }}
+      >
+        {h.label}
+      </div>
     </div>
   );
 }

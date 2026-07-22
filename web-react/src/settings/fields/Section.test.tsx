@@ -8,7 +8,7 @@ describe("Section", () => {
     render(
       <Section title="Settings">
         <p>Child content</p>
-      </Section>
+      </Section>,
     );
     expect(screen.getByText("Settings")).toBeInTheDocument();
     expect(screen.getByText("Child content")).toBeInTheDocument();
@@ -18,7 +18,7 @@ describe("Section", () => {
     render(
       <Section title="My Section">
         <div>Content</div>
-      </Section>
+      </Section>,
     );
     const heading = screen.getByRole("heading", { level: 2 });
     expect(heading).toHaveTextContent("My Section");
@@ -30,7 +30,7 @@ describe("Section", () => {
         <div>First</div>
         <div>Second</div>
         <div>Third</div>
-      </Section>
+      </Section>,
     );
     expect(screen.getByText("First")).toBeInTheDocument();
     expect(screen.getByText("Second")).toBeInTheDocument();
@@ -44,7 +44,7 @@ describe("Section", () => {
           <input type="text" placeholder="test" />
           <button>Submit</button>
         </form>
-      </Section>
+      </Section>,
     );
     expect(screen.getByPlaceholderText("test")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Submit" })).toBeInTheDocument();

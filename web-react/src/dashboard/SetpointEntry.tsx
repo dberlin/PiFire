@@ -31,18 +31,33 @@ export function SetpointEntry({ open, initial, units, onSubmit, onCancel }: Prop
       <div className="pf-modal" onClick={(e) => e.stopPropagation()}>
         <div className="pf-modal-title">Set Hold Temperature</div>
         <div className="pf-setpoint-row">
-          <button className="pf-step" onClick={() => bump(-step)} aria-label="decrease">−</button>
-          <div className="pf-setpoint-val">{temp}<span>°{units}</span></div>
-          <button className="pf-step" onClick={() => bump(step)} aria-label="increase">+</button>
+          <button className="pf-step" onClick={() => bump(-step)} aria-label="decrease">
+            −
+          </button>
+          <div className="pf-setpoint-val">
+            {temp}
+            <span>°{units}</span>
+          </div>
+          <button className="pf-step" onClick={() => bump(step)} aria-label="increase">
+            +
+          </button>
         </div>
         <input
           className="pf-setpoint-slider"
-          type="range" min={min} max={max} step={step} value={temp}
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={temp}
           onChange={(e) => setTemp(clampSetpoint(Number(e.target.value), units))}
         />
         <div className="pf-modal-actions">
-          <button className="pf-modal-btn" onClick={onCancel}>Cancel</button>
-          <button className="pf-modal-btn accent" onClick={() => onSubmit(temp)}>Set Hold</button>
+          <button className="pf-modal-btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="pf-modal-btn accent" onClick={() => onSubmit(temp)}>
+            Set Hold
+          </button>
         </div>
       </div>
     </div>

@@ -69,7 +69,13 @@ export interface DashData {
   allowManualOutputs: boolean;
   timer: { start: number; paused: number; end: number; keepWarm: boolean; shutdown: boolean };
   outputs: { fan: boolean; auger: boolean; igniter: boolean };
-  recipeStatus: { recipeMode: boolean; filename: string; mode: string; paused: boolean; step: number };
+  recipeStatus: {
+    recipeMode: boolean;
+    filename: string;
+    mode: string;
+    paused: boolean;
+    step: number;
+  };
   primaryProbe: ProbeData;
   foodProbes: ProbeData[];
   [k: string]: unknown;

@@ -29,7 +29,16 @@ interface DashboardProps {
 // The full 1280x720 PiFire controller dashboard (port of PiFire Dashboard.dc.html),
 // driven by the live socket_dash_data contract. Scaled to fit the browser
 // viewport; on-device it renders 1:1 on the touchscreen.
-export function Dashboard({ dash, command, phase, controlAlive, accent, setAccent, animate, setAnimate }: DashboardProps) {
+export function Dashboard({
+  dash,
+  command,
+  phase,
+  controlAlive,
+  accent,
+  setAccent,
+  animate,
+  setAnimate,
+}: DashboardProps) {
   const view = deriveView(dash);
   const navigate = useNavigate();
   const now = useClock();
@@ -39,7 +48,9 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
   // controller leaves an active cooking mode). Adjusted synchronously during
   // render on the cooking-state transition edge (React's recommended pattern
   // for deriving state from a prop change), rather than in an effect.
-  const [cookStart, setCookStart] = useState<number | null>(() => (view.cooking ? now.getTime() : null));
+  const [cookStart, setCookStart] = useState<number | null>(() =>
+    view.cooking ? now.getTime() : null,
+  );
   const [prevCooking, setPrevCooking] = useState(view.cooking);
   if (view.cooking !== prevCooking) {
     setPrevCooking(view.cooking);
@@ -50,7 +61,11 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
 
   return (
     <div className="pf-fit">
-      <div className="pf-stage" data-animate={animate ? "true" : "false"} style={{ transform: `translate(-50%, -50%) scale(${scale})` }}>
+      <div
+        className="pf-stage"
+        data-animate={animate ? "true" : "false"}
+        style={{ transform: `translate(-50%, -50%) scale(${scale})` }}
+      >
         <div
           style={{
             position: "absolute",
@@ -67,7 +82,11 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
           }}
         />
 
-        <Banners errors={dash.errors ?? []} warnings={dash.warnings ?? []} criticalError={dash.criticalError} />
+        <Banners
+          errors={dash.errors ?? []}
+          warnings={dash.warnings ?? []}
+          criticalError={dash.criticalError}
+        />
 
         {/* Header */}
         <div
@@ -121,7 +140,15 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
             >
               {phase === "demo" ? "DEMO" : controlAlive ? "LIVE" : "CTRL OFFLINE"}
             </span>
-            <span style={{ font: "600 22px 'Barlow Semi Condensed'", color: "#cfc6b8", fontVariantNumeric: "tabular-nums" }}>{clock}</span>
+            <span
+              style={{
+                font: "600 22px 'Barlow Semi Condensed'",
+                color: "#cfc6b8",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {clock}
+            </span>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {ACCENTS.map((a) => (
                 <button
@@ -132,10 +159,17 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
                   aria-label={a}
                 />
               ))}
-              <button className={`pf-toggle ${animate ? "on" : ""}`} onClick={() => setAnimate(!animate)}>
+              <button
+                className={`pf-toggle ${animate ? "on" : ""}`}
+                onClick={() => setAnimate(!animate)}
+              >
                 ANIM
               </button>
-              <button className="pf-toggle" onClick={() => navigate("/settings")} aria-label="settings">
+              <button
+                className="pf-toggle"
+                onClick={() => navigate("/settings")}
+                aria-label="settings"
+              >
                 ⚙
               </button>
             </div>
@@ -143,11 +177,38 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
         </div>
 
         {/* Body */}
-        <div style={{ flex: 1, display: "flex", gap: 16, padding: "16px 18px 18px", position: "relative", zIndex: 1, minHeight: 0 }}>
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            gap: 16,
+            padding: "16px 18px 18px",
+            position: "relative",
+            zIndex: 1,
+            minHeight: 0,
+          }}
+        >
           {/* Left: food probes */}
           {view.hasProbes && (
-            <div style={{ width: 298, flex: "0 0 298px", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
-              <div style={{ font: "600 13px 'Barlow'", letterSpacing: 2.5, color: "#7d7264", textTransform: "uppercase", paddingLeft: 4 }}>
+            <div
+              style={{
+                width: 298,
+                flex: "0 0 298px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                minHeight: 0,
+              }}
+            >
+              <div
+                style={{
+                  font: "600 13px 'Barlow'",
+                  letterSpacing: 2.5,
+                  color: "#7d7264",
+                  textTransform: "uppercase",
+                  paddingLeft: 4,
+                }}
+              >
                 Food Probes
               </div>
               {view.probes.map((p, i) => (
@@ -183,8 +244,25 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
                   padding: "0 20px",
                 }}
               >
-                <span style={{ font: "600 12px 'Barlow'", letterSpacing: 2, color: "#7d7264", textTransform: "uppercase" }}>Cook Time</span>
-                <span style={{ font: "700 26px 'Barlow Semi Condensed'", fontVariantNumeric: "tabular-nums", color: "#cfc6b8" }}>{cookTime}</span>
+                <span
+                  style={{
+                    font: "600 12px 'Barlow'",
+                    letterSpacing: 2,
+                    color: "#7d7264",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Cook Time
+                </span>
+                <span
+                  style={{
+                    font: "700 26px 'Barlow Semi Condensed'",
+                    fontVariantNumeric: "tabular-nums",
+                    color: "#cfc6b8",
+                  }}
+                >
+                  {cookTime}
+                </span>
               </div>
               {view.lidOpen && (
                 <div
@@ -211,8 +289,22 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
           </div>
 
           {/* Right: system + pills + hopper */}
-          <div style={{ width: 300, flex: "0 0 300px", display: "flex", flexDirection: "column", gap: 14, minHeight: 0 }}>
-            <SystemStatus fan={view.fan} auger={view.auger} igniter={view.igniter} animate={animate} />
+          <div
+            style={{
+              width: 300,
+              flex: "0 0 300px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+              minHeight: 0,
+            }}
+          >
+            <SystemStatus
+              fan={view.fan}
+              auger={view.auger}
+              igniter={view.igniter}
+              animate={animate}
+            />
             <div style={{ display: "flex", gap: 14, height: 64, flex: "0 0 64px" }}>
               <Pill p={view.pillL} />
               <Pill p={view.pillR} />
@@ -240,8 +332,26 @@ function Pill({ p }: { p: PillView }) {
         border: `1.5px solid ${p.border}`,
       }}
     >
-      <span style={{ font: "600 10px 'Barlow'", letterSpacing: 1.5, color: p.labelColor, whiteSpace: "nowrap" }}>{p.label}</span>
-      <span style={{ font: "800 24px 'Barlow Semi Condensed'", color: p.valColor, whiteSpace: "nowrap", lineHeight: 1 }}>{p.value}</span>
+      <span
+        style={{
+          font: "600 10px 'Barlow'",
+          letterSpacing: 1.5,
+          color: p.labelColor,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {p.label}
+      </span>
+      <span
+        style={{
+          font: "800 24px 'Barlow Semi Condensed'",
+          color: p.valColor,
+          whiteSpace: "nowrap",
+          lineHeight: 1,
+        }}
+      >
+        {p.value}
+      </span>
     </div>
   );
 }

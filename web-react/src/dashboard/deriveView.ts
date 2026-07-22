@@ -138,7 +138,14 @@ export function deriveView(dash: DashData): DashView {
     labelColor: DIM,
   };
   const pillR: PillView = smokeOn
-    ? { label: "SMOKE+", value: "ON", valColor: OK2, bg: "color-mix(in srgb, #5ec96f 14%, transparent)", border: OK, labelColor: OK2 }
+    ? {
+        label: "SMOKE+",
+        value: "ON",
+        valColor: OK2,
+        bg: "color-mix(in srgb, #5ec96f 14%, transparent)",
+        border: OK,
+        labelColor: OK2,
+      }
     : { label: "SMOKE+", value: "OFF", valColor: DIM, bg: SURFACE, border: EDGE, labelColor: DIM };
 
   const igniter = outputView(dash.outputs.igniter, "#ff7a1a", "HOT");

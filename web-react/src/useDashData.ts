@@ -32,13 +32,26 @@ export function useDashData(): DashState {
       const id = window.setInterval(tick, 1000);
       return () => window.clearInterval(id);
     }
-    const socket = io(TARGET_URL || undefined, { path: "/socket.io", reconnection: true, timeout: 4000 });
+    const socket = io(TARGET_URL || undefined, {
+      path: "/socket.io",
+      reconnection: true,
+      timeout: 4000,
+    });
     socketRef.current = socket;
-    socket.on("connect", () => { setPhase("live"); socket.emit("listen_app_data"); });
+    socket.on("connect", () => {
+      setPhase("live");
+      socket.emit("listen_app_data");
+    });
     socket.on("connect_error", () => setPhase((p) => (p === "live" ? p : "unreachable")));
     socket.on("disconnect", () => setPhase("unreachable"));
-    socket.on("socket_dash_data", (data: DashData) => { setPhase("live"); setDash(data); });
-    return () => { socket.close(); socketRef.current = null; };
+    socket.on("socket_dash_data", (data: DashData) => {
+      setPhase("live");
+      setDash(data);
+    });
+    return () => {
+      socket.close();
+      socketRef.current = null;
+    };
   }, []);
 
   const command = useMemo(() => createCommand(TARGET_URL), []);

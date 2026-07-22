@@ -60,7 +60,10 @@ describe("StartupTab", () => {
 
     // Check Shutdown fields
     expect(screen.getByDisplayValue("90")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Auto Power Off" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Auto Power Off" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
 
     // Check Startup fields
     expect(screen.getByDisplayValue("60")).toBeInTheDocument();
@@ -76,7 +79,10 @@ describe("StartupTab", () => {
     const select = screen.getByRole("combobox") as HTMLSelectElement;
     expect(select.value).toBe("Hold");
     expect(screen.getByDisplayValue("250")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start to Hold Prompt" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Start to Hold Prompt" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("clamps prime_on_startup to 0 when set to out-of-range value 999", async () => {
@@ -122,7 +128,7 @@ describe("StartupTab", () => {
     fireEvent.click(saveButton);
 
     // Wait for async save to complete
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     // Assert that the saved delta has prime_on_startup clamped to 0
     expect(saveMock).toHaveBeenCalledWith(
@@ -131,7 +137,7 @@ describe("StartupTab", () => {
           prime_on_startup: 0,
         }),
       }),
-      ["settings_update"]
+      ["settings_update"],
     );
   });
 
@@ -176,7 +182,7 @@ describe("StartupTab", () => {
     fireEvent.click(saveButton);
 
     // Wait for async save to complete
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     // Assert that the saved delta includes the mode change and has settings_update flag
     expect(saveMock).toHaveBeenCalledWith(
@@ -187,7 +193,7 @@ describe("StartupTab", () => {
           }),
         }),
       }),
-      ["settings_update"]
+      ["settings_update"],
     );
   });
 
@@ -233,7 +239,7 @@ describe("StartupTab", () => {
     fireEvent.click(saveButton);
 
     // Wait for async save to complete
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     // Assert that the saved delta has pwm_duty_cycle clamped to max 100
     expect(saveMock).toHaveBeenCalledWith(
@@ -242,7 +248,7 @@ describe("StartupTab", () => {
           pwm_duty_cycle: 100,
         }),
       }),
-      ["settings_update"]
+      ["settings_update"],
     );
   });
 });

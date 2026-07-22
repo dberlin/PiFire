@@ -8,10 +8,21 @@ import type { DashData } from "../types";
 // Mode-driven control row, styled to the design's button grid. Each press
 // dispatches a `ButtonAction` (command / setpoint / confirm) against the REST
 // `CommandClient` (see controlButtons.ts / command.ts).
-export function ControlButtons({ dash, command, disabled }: { dash: DashData; command: CommandClient; disabled: boolean }) {
+export function ControlButtons({
+  dash,
+  command,
+  disabled,
+}: {
+  dash: DashData;
+  command: CommandClient;
+  disabled: boolean;
+}) {
   const buttons = buttonsForMode(dash);
   const [setpointOpen, setSetpointOpen] = useState(false);
-  const [confirm, setConfirm] = useState<{ title: string; run(c: CommandClient): Promise<CommandResult> } | null>(null);
+  const [confirm, setConfirm] = useState<{
+    title: string;
+    run(c: CommandClient): Promise<CommandResult>;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const fire = async (run: (c: CommandClient) => Promise<CommandResult>) => {
@@ -30,7 +41,16 @@ export function ControlButtons({ dash, command, disabled }: { dash: DashData; co
   };
 
   return (
-    <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "1fr", gap: 12, height: 82, flex: "0 0 82px" }}>
+    <div
+      style={{
+        display: "grid",
+        gridAutoFlow: "column",
+        gridAutoColumns: "1fr",
+        gap: 12,
+        height: 82,
+        flex: "0 0 82px",
+      }}
+    >
       {buttons.map((b) => {
         const danger = b.variant === "danger";
         const accent = b.variant === "accent";
@@ -46,7 +66,12 @@ export function ControlButtons({ dash, command, disabled }: { dash: DashData; co
             key={b.label}
             className="pf-btn"
             disabled={disabled || busy}
-            style={{ borderColor: border, background: bg, color, opacity: disabled || busy ? 0.5 : 1 }}
+            style={{
+              borderColor: border,
+              background: bg,
+              color,
+              opacity: disabled || busy ? 0.5 : 1,
+            }}
             onClick={() => onClick(b.action)}
           >
             {b.label}

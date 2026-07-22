@@ -24,16 +24,7 @@ describe("NumberField", () => {
 
   it("respects min/max/step props", () => {
     const onChange = vi.fn();
-    render(
-      <NumberField
-        label="Temp"
-        value={50}
-        onChange={onChange}
-        min={0}
-        max={100}
-        step={5}
-      />
-    );
+    render(<NumberField label="Temp" value={50} onChange={onChange} min={0} max={100} step={5} />);
     const input = screen.getByRole("spinbutton") as HTMLInputElement;
     expect(input.min).toBe("0");
     expect(input.max).toBe("100");

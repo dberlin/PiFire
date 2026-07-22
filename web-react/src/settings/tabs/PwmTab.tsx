@@ -7,13 +7,22 @@ import { Section } from "../fields/Section";
 import { Toggle } from "../fields/Toggle";
 import { NumberField } from "../fields/NumberField";
 
-type Pwm = { pwm_control: boolean; update_time: number; min_duty_cycle: number; max_duty_cycle: number; frequency: number };
+type Pwm = {
+  pwm_control: boolean;
+  update_time: number;
+  min_duty_cycle: number;
+  max_duty_cycle: number;
+  frequency: number;
+};
 
 function readPwm(settings: Settings): Pwm {
   const p = settings.pwm ?? {};
   return {
-    pwm_control: !!p.pwm_control, update_time: p.update_time ?? 10,
-    min_duty_cycle: p.min_duty_cycle ?? 20, max_duty_cycle: p.max_duty_cycle ?? 100, frequency: p.frequency ?? 100,
+    pwm_control: !!p.pwm_control,
+    update_time: p.update_time ?? 10,
+    min_duty_cycle: p.min_duty_cycle ?? 20,
+    max_duty_cycle: p.max_duty_cycle ?? 100,
+    frequency: p.frequency ?? 100,
   };
 }
 
@@ -43,13 +52,45 @@ export function PwmTab() {
 
   return (
     <Section title="PWM Fan">
-      <Toggle label="PWM Control" checked={pwm.pwm_control} onChange={(v) => set("pwm_control", v)} />
-      <NumberField label="Update Time" value={pwm.update_time} onChange={(v) => set("update_time", v)} min={1} suffix="s" />
-      <NumberField label="Min Duty Cycle" value={pwm.min_duty_cycle} onChange={(v) => set("min_duty_cycle", v)} min={0} max={100} suffix="%" />
-      <NumberField label="Max Duty Cycle" value={pwm.max_duty_cycle} onChange={(v) => set("max_duty_cycle", v)} min={0} max={100} suffix="%" />
-      <NumberField label="Frequency" value={pwm.frequency} onChange={(v) => set("frequency", v)} min={1} suffix="Hz" />
+      <Toggle
+        label="PWM Control"
+        checked={pwm.pwm_control}
+        onChange={(v) => set("pwm_control", v)}
+      />
+      <NumberField
+        label="Update Time"
+        value={pwm.update_time}
+        onChange={(v) => set("update_time", v)}
+        min={1}
+        suffix="s"
+      />
+      <NumberField
+        label="Min Duty Cycle"
+        value={pwm.min_duty_cycle}
+        onChange={(v) => set("min_duty_cycle", v)}
+        min={0}
+        max={100}
+        suffix="%"
+      />
+      <NumberField
+        label="Max Duty Cycle"
+        value={pwm.max_duty_cycle}
+        onChange={(v) => set("max_duty_cycle", v)}
+        min={0}
+        max={100}
+        suffix="%"
+      />
+      <NumberField
+        label="Frequency"
+        value={pwm.frequency}
+        onChange={(v) => set("frequency", v)}
+        min={1}
+        suffix="Hz"
+      />
       <div className="pf-settings-actions">
-        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>{saving ? "Saving…" : "Save"}</button>
+        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
+          {saving ? "Saving…" : "Save"}
+        </button>
         {saved && <span className="pf-settings-saved">Saved ✓</span>}
       </div>
     </Section>

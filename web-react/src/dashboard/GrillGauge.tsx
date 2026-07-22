@@ -15,7 +15,17 @@ interface GrillGaugeProps {
 // Center piece: 270° ember arc (reusing the POC gauge geometry in gaugeMath),
 // a setpoint tick, an animated glow, and the big grill temperature + mode badge
 // overlay — the heart of the design's dashboard.
-export function GrillGauge({ temp, setpoint, maxTemp, frac, hasSetpoint, modeLabel, units, cooking, animate }: GrillGaugeProps) {
+export function GrillGauge({
+  temp,
+  setpoint,
+  maxTemp,
+  frac,
+  hasSetpoint,
+  modeLabel,
+  units,
+  cooking,
+  animate,
+}: GrillGaugeProps) {
   const CX = 110;
   const CY = 110;
   const R = 90;
@@ -76,11 +86,36 @@ export function GrillGauge({ temp, setpoint, maxTemp, frac, hasSetpoint, modeLab
           }}
         />
         {hasSetpoint && (
-          <line x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke="#6cc8ff" strokeWidth={4} strokeLinecap="round" />
+          <line
+            x1={inner.x}
+            y1={inner.y}
+            x2={outer.x}
+            y2={outer.y}
+            stroke="#6cc8ff"
+            strokeWidth={4}
+            strokeLinecap="round"
+          />
         )}
       </svg>
-      <div style={{ position: "absolute", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-        <div style={{ font: "600 14px 'Barlow'", letterSpacing: 4, color: "#7d7264", textTransform: "uppercase" }}>Grill</div>
+      <div
+        style={{
+          position: "absolute",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 2,
+        }}
+      >
+        <div
+          style={{
+            font: "600 14px 'Barlow'",
+            letterSpacing: 4,
+            color: "#7d7264",
+            textTransform: "uppercase",
+          }}
+        >
+          Grill
+        </div>
         <div
           style={{
             display: "flex",
@@ -90,11 +125,23 @@ export function GrillGauge({ temp, setpoint, maxTemp, frac, hasSetpoint, modeLab
             lineHeight: 0.9,
           }}
         >
-          <span style={{ fontSize: 112, fontWeight: 800, color: "#f8f2e8" }}>{Math.round(temp)}</span>
-          <span style={{ fontSize: 40, fontWeight: 600, color: "#8a7f70", marginLeft: 4 }}>°{units}</span>
+          <span style={{ fontSize: 112, fontWeight: 800, color: "#f8f2e8" }}>
+            {Math.round(temp)}
+          </span>
+          <span style={{ fontSize: 40, fontWeight: 600, color: "#8a7f70", marginLeft: 4 }}>
+            °{units}
+          </span>
         </div>
         {hasSetpoint && (
-          <div style={{ font: "600 20px 'Barlow'", letterSpacing: 1, color: "#6cc8ff", marginTop: 2, whiteSpace: "nowrap" }}>
+          <div
+            style={{
+              font: "600 20px 'Barlow'",
+              letterSpacing: 1,
+              color: "#6cc8ff",
+              marginTop: 2,
+              whiteSpace: "nowrap",
+            }}
+          >
             SET {Math.round(setpoint)}°
           </div>
         )}

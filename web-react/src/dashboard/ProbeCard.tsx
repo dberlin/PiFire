@@ -20,7 +20,16 @@ export function ProbeCard({ p }: { p: ProbeCardView }) {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ font: "600 15px 'Barlow'", letterSpacing: 1.5, color: "#b7ac9c", textTransform: "uppercase" }}>{p.name}</span>
+        <span
+          style={{
+            font: "600 15px 'Barlow'",
+            letterSpacing: 1.5,
+            color: "#b7ac9c",
+            textTransform: "uppercase",
+          }}
+        >
+          {p.name}
+        </span>
         <span style={{ font: "600 15px 'Barlow'", color: p.tgtColor }}>{p.targetStr}</span>
       </div>
       <div
@@ -33,10 +42,28 @@ export function ProbeCard({ p }: { p: ProbeCardView }) {
         }}
       >
         <span style={{ fontSize: 66, fontWeight: 800, color: "#f4ede2" }}>{p.tempInt}</span>
-        <span style={{ fontSize: 26, fontWeight: 600, color: "#8a7f70", marginLeft: 2 }}>°{p.unit}</span>
+        <span style={{ fontSize: 26, fontWeight: 600, color: "#8a7f70", marginLeft: 2 }}>
+          °{p.unit}
+        </span>
       </div>
-      <div style={{ height: 6, borderRadius: 6, background: "rgba(255,255,255,0.11)", marginTop: 8, overflow: "hidden" }}>
-        <div style={{ height: "100%", borderRadius: 6, width: `${p.barPct}%`, background: p.barColor, transition: "width .9s ease" }} />
+      <div
+        style={{
+          height: 6,
+          borderRadius: 6,
+          background: "rgba(255,255,255,0.11)",
+          marginTop: 8,
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            borderRadius: 6,
+            width: `${p.barPct}%`,
+            background: p.barColor,
+            transition: "width .9s ease",
+          }}
+        />
       </div>
     </div>
   );

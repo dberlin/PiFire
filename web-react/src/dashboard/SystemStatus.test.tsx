@@ -17,7 +17,10 @@ describe("SystemStatus", () => {
   });
 
   it("shows IDLE/IDLE/IDLE when outputs are off", () => {
-    const v = deriveView({ ...FIXTURE_DASH, outputs: { fan: false, auger: false, igniter: false } });
+    const v = deriveView({
+      ...FIXTURE_DASH,
+      outputs: { fan: false, auger: false, igniter: false },
+    });
     render(<SystemStatus fan={v.fan} auger={v.auger} igniter={v.igniter} animate={false} />);
     expect(screen.getAllByText("IDLE")).toHaveLength(3);
   });
@@ -30,7 +33,10 @@ describe("SystemStatus", () => {
   });
 
   it("uses the idle color when an output is off", () => {
-    const v = deriveView({ ...FIXTURE_DASH, outputs: { fan: false, auger: false, igniter: false } });
+    const v = deriveView({
+      ...FIXTURE_DASH,
+      outputs: { fan: false, auger: false, igniter: false },
+    });
     render(<SystemStatus fan={v.fan} auger={v.auger} igniter={v.igniter} animate={false} />);
     expect(screen.getAllByText("IDLE")[0]).toHaveStyle({ color: "#57514a" });
   });

@@ -48,7 +48,8 @@ export function createCommand(baseUrl: string): CommandClient {
     hold: (tempF) => post(baseUrl, ["set", "psp", Math.round(tempF)]),
     setSmokePlus: (on) => post(baseUrl, ["set", "splus", on ? "true" : "false"]),
     setPMode: (n) => post(baseUrl, ["set", "pmode", n]),
-    prime: (grams, next) => post(baseUrl, next ? ["set", "mode", "prime", grams, next] : ["set", "mode", "prime", grams]),
+    prime: (grams, next) =>
+      post(baseUrl, next ? ["set", "mode", "prime", grams, next] : ["set", "mode", "prime", grams]),
     timerStart: (seconds) => post(baseUrl, ["set", "timer", "start", seconds]),
     timerPause: () => post(baseUrl, ["set", "timer", "pause"]),
     timerStop: () => post(baseUrl, ["set", "timer", "stop"]),

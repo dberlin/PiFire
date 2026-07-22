@@ -49,8 +49,14 @@ describe("PelletsTab", () => {
     expect(screen.getByDisplayValue("5")).toBeInTheDocument();
     expect(screen.getByDisplayValue("90")).toBeInTheDocument();
     expect(screen.getByDisplayValue("15.5")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Warning Enabled" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Prime Ignition" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Warning Enabled" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Prime Ignition" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("saves with settings_update flag when warning_time changes (no distance_update)", async () => {
@@ -82,14 +88,14 @@ describe("PelletsTab", () => {
     fireEvent.click(saveButton);
 
     // Wait for async save to complete and assert spy was called with correct flags
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({
         pelletlevel: expect.objectContaining({
           warning_time: 20,
         }),
       }),
-      ["settings_update"]
+      ["settings_update"],
     );
   });
 
@@ -122,14 +128,14 @@ describe("PelletsTab", () => {
     fireEvent.click(saveButton);
 
     // Wait for async save to complete and assert spy was called with correct flags
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({
         pelletlevel: expect.objectContaining({
           empty: 10,
         }),
       }),
-      ["settings_update", "distance_update"]
+      ["settings_update", "distance_update"],
     );
   });
 
@@ -162,14 +168,14 @@ describe("PelletsTab", () => {
     fireEvent.click(saveButton);
 
     // Wait for async save to complete and assert spy was called with correct flags
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({
         pelletlevel: expect.objectContaining({
           full: 85,
         }),
       }),
-      ["settings_update", "distance_update"]
+      ["settings_update", "distance_update"],
     );
   });
 });

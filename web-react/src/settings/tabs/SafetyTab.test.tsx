@@ -47,8 +47,14 @@ describe("SafetyTab", () => {
     expect(screen.getByDisplayValue("550")).toBeInTheDocument();
     expect(screen.getByDisplayValue("2")).toBeInTheDocument();
     expect(screen.getByDisplayValue("45")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Startup Check" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Allow Manual Output Changes" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Startup Check" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Allow Manual Output Changes" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("saves settings with empty flags when Save is clicked", async () => {
@@ -78,14 +84,14 @@ describe("SafetyTab", () => {
     fireEvent.click(saveButton);
 
     // Wait for async save to complete and assert spy was called with correct delta and empty flags
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({
         safety: expect.objectContaining({
           maxtemp: 600,
         }),
       }),
-      []
+      [],
     );
   });
 });

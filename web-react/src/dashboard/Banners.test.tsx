@@ -5,7 +5,13 @@ import { Banners } from "./Banners";
 
 describe("Banners", () => {
   it("renders one banner per error and warning", () => {
-    render(<Banners errors={["control down"]} warnings={["lid open", "low hopper"]} criticalError={false} />);
+    render(
+      <Banners
+        errors={["control down"]}
+        warnings={["lid open", "low hopper"]}
+        criticalError={false}
+      />,
+    );
     expect(screen.getByText("control down")).toBeInTheDocument();
     expect(screen.getByText("lid open")).toBeInTheDocument();
     expect(screen.getByText("low hopper")).toBeInTheDocument();

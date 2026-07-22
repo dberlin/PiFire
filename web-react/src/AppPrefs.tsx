@@ -2,15 +2,19 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { AccentName } from "./types";
 
 interface AppPrefs {
-  accent: AccentName; setAccent: (a: AccentName) => void;
-  animate: boolean; setAnimate: (v: boolean) => void;
+  accent: AccentName;
+  setAccent: (a: AccentName) => void;
+  animate: boolean;
+  setAnimate: (v: boolean) => void;
 }
 const Ctx = createContext<AppPrefs | null>(null);
 
 export function AppPrefsProvider({ children }: { children: ReactNode }) {
   const [accent, setAccent] = useState<AccentName>("ember");
   const [animate, setAnimate] = useState(true);
-  useEffect(() => { document.documentElement.setAttribute("data-accent", accent); }, [accent]);
+  useEffect(() => {
+    document.documentElement.setAttribute("data-accent", accent);
+  }, [accent]);
   return <Ctx.Provider value={{ accent, setAccent, animate, setAnimate }}>{children}</Ctx.Provider>;
 }
 

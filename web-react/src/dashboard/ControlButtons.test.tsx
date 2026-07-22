@@ -8,7 +8,11 @@ import type { DashData } from "../types";
 import type { CommandClient, CommandResult } from "../command";
 
 const OK: CommandResult = { ok: true, message: "" };
-const at = (mode: string, over: Partial<DashData> = {}): DashData => ({ ...FIXTURE_DASH, currentMode: mode, ...over });
+const at = (mode: string, over: Partial<DashData> = {}): DashData => ({
+  ...FIXTURE_DASH,
+  currentMode: mode,
+  ...over,
+});
 
 function stubCommand(): CommandClient {
   return {
@@ -49,7 +53,7 @@ describe("ControlButtons", () => {
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
   });
 
-  it("clicking Smoke calls command.setMode(\"smoke\")", async () => {
+  it('clicking Smoke calls command.setMode("smoke")', async () => {
     const user = userEvent.setup();
     const command = stubCommand();
     render(<ControlButtons dash={at("Hold")} command={command} disabled={false} />);

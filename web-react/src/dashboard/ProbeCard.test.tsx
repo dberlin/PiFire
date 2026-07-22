@@ -52,7 +52,9 @@ describe("ProbeCard", () => {
   it("shows the probe name and temperature unit", () => {
     const v = deriveView({
       ...FIXTURE_DASH,
-      foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], title: "Brisket", temp: 145, target: 0, targetReq: false }],
+      foodProbes: [
+        { ...FIXTURE_DASH.foodProbes[0], title: "Brisket", temp: 145, target: 0, targetReq: false },
+      ],
     });
     render(<ProbeCard p={v.probes[0]} />);
     expect(screen.getByText("Brisket")).toBeInTheDocument();

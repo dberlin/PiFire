@@ -66,15 +66,24 @@ describe("WorkModeTab", () => {
     expect(screen.getByDisplayValue("95.5")).toBeInTheDocument();
     expect(screen.getByDisplayValue("35")).toBeInTheDocument();
     expect(screen.getByDisplayValue("75")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Lid Open Detect Enabled" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Fan PID Enabled" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Lid Open Detect Enabled" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Fan PID Enabled" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
 
     // Check Smoke Plus section
     expect(screen.getByRole("button", { name: "Enabled" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByDisplayValue("160")).toBeInTheDocument();
     expect(screen.getByDisplayValue("280")).toBeInTheDocument();
     expect(screen.getByDisplayValue("55")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Fan Ramp" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Fan Ramp" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
 
     // Check Keep Warm section
     expect(screen.getByDisplayValue("170")).toBeInTheDocument();
@@ -129,7 +138,7 @@ describe("WorkModeTab", () => {
     fireEvent.click(saveButton);
 
     // Wait for async save to complete
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     // Assert spy was called with delta touching both cycle_data and smoke_plus with settings_update flag
     expect(saveMock).toHaveBeenCalledWith(
@@ -141,7 +150,7 @@ describe("WorkModeTab", () => {
           enabled: true,
         }),
       }),
-      ["settings_update"]
+      ["settings_update"],
     );
   });
 });

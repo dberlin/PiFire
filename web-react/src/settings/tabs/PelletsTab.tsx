@@ -71,15 +71,55 @@ export function PelletsTab() {
 
   return (
     <Section title="Pellets">
-      <Toggle label="Warning Enabled" checked={v.warning_enabled} onChange={(b) => set("warning_enabled", b)} />
-      <NumberField label="Warning Time" value={v.warning_time} onChange={(n) => set("warning_time", n)} min={0} suffix="min" />
-      <NumberField label="Warning Level" value={v.warning_level} onChange={(n) => set("warning_level", n)} min={0} max={100} suffix="%" />
-      <NumberField label="Empty" value={v.empty} onChange={(n) => set("empty", n)} min={0} suffix="cm" />
-      <NumberField label="Full" value={v.full} onChange={(n) => set("full", n)} min={0} suffix="cm" />
-      <NumberField label="Auger Rate" value={v.augerrate} onChange={(n) => set("augerrate", n)} step={0.1} />
-      <Toggle label="Prime Ignition" checked={v.prime_ignition} onChange={(b) => set("prime_ignition", b)} />
+      <Toggle
+        label="Warning Enabled"
+        checked={v.warning_enabled}
+        onChange={(b) => set("warning_enabled", b)}
+      />
+      <NumberField
+        label="Warning Time"
+        value={v.warning_time}
+        onChange={(n) => set("warning_time", n)}
+        min={0}
+        suffix="min"
+      />
+      <NumberField
+        label="Warning Level"
+        value={v.warning_level}
+        onChange={(n) => set("warning_level", n)}
+        min={0}
+        max={100}
+        suffix="%"
+      />
+      <NumberField
+        label="Empty"
+        value={v.empty}
+        onChange={(n) => set("empty", n)}
+        min={0}
+        suffix="cm"
+      />
+      <NumberField
+        label="Full"
+        value={v.full}
+        onChange={(n) => set("full", n)}
+        min={0}
+        suffix="cm"
+      />
+      <NumberField
+        label="Auger Rate"
+        value={v.augerrate}
+        onChange={(n) => set("augerrate", n)}
+        step={0.1}
+      />
+      <Toggle
+        label="Prime Ignition"
+        checked={v.prime_ignition}
+        onChange={(b) => set("prime_ignition", b)}
+      />
       <div className="pf-settings-actions">
-        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>{saving ? "Saving…" : "Save"}</button>
+        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
+          {saving ? "Saving…" : "Save"}
+        </button>
         {saved && <span className="pf-settings-saved">Saved ✓</span>}
       </div>
     </Section>

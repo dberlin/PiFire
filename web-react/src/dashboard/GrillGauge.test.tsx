@@ -9,7 +9,11 @@ afterEach(cleanup);
 
 describe("GrillGauge", () => {
   it("shows the rounded temp and setpoint when a setpoint is set, with an uppercased mode label", () => {
-    const dash = { ...FIXTURE_DASH, currentMode: "Hold", primaryProbe: { ...FIXTURE_DASH.primaryProbe, temp: 300, setTemp: 225, maxTemp: 600 } };
+    const dash = {
+      ...FIXTURE_DASH,
+      currentMode: "Hold",
+      primaryProbe: { ...FIXTURE_DASH.primaryProbe, temp: 300, setTemp: 225, maxTemp: 600 },
+    };
     const v = deriveView(dash);
     render(
       <GrillGauge
@@ -30,7 +34,11 @@ describe("GrillGauge", () => {
   });
 
   it("hides the SET tag when there is no setpoint", () => {
-    const dash = { ...FIXTURE_DASH, currentMode: "Stop", primaryProbe: { ...FIXTURE_DASH.primaryProbe, temp: 9999, setTemp: 0, maxTemp: 600 } };
+    const dash = {
+      ...FIXTURE_DASH,
+      currentMode: "Stop",
+      primaryProbe: { ...FIXTURE_DASH.primaryProbe, temp: 9999, setTemp: 0, maxTemp: 600 },
+    };
     const v = deriveView(dash);
     render(
       <GrillGauge

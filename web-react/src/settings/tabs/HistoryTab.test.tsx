@@ -44,9 +44,18 @@ describe("HistoryTab", () => {
     // Check that fields display the loaded values
     expect(screen.getByDisplayValue("120")).toBeInTheDocument();
     expect(screen.getByDisplayValue("50")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear History on Start" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Auto Refresh" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Extended Data Logging" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Clear History on Start" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Auto Refresh" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Extended Data Logging" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("ext_data toggle is enabled when mode is Stop and saving includes globals.ext_data", async () => {
@@ -75,14 +84,14 @@ describe("HistoryTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({
         globals: expect.objectContaining({
           ext_data: true,
         }),
       }),
-      []
+      [],
     );
   });
 
@@ -133,14 +142,14 @@ describe("HistoryTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({
         history_page: expect.objectContaining({
           autorefresh: "on",
         }),
       }),
-      []
+      [],
     );
   });
 });

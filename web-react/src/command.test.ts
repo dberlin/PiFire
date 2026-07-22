@@ -4,14 +4,19 @@ import { buildCommandUrl, createCommand } from "./command";
 describe("buildCommandUrl", () => {
   it("joins base + /api + segments", () => {
     expect(buildCommandUrl("", ["set", "psp", 225])).toBe("/api/set/psp/225");
-    expect(buildCommandUrl("http://pi:5000", ["set", "mode", "smoke"])).toBe("http://pi:5000/api/set/mode/smoke");
+    expect(buildCommandUrl("http://pi:5000", ["set", "mode", "smoke"])).toBe(
+      "http://pi:5000/api/set/mode/smoke",
+    );
   });
 });
 
 describe("createCommand issues the right URLs", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
-    fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ result: "OK", message: "", data: {} }) }));
+    fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ result: "OK", message: "", data: {} }),
+    }));
     vi.stubGlobal("fetch", fetchMock);
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -49,7 +54,10 @@ describe("createCommand issues the right URLs", () => {
     expect(url()).toBe("/api/set/units/C");
   });
   it("maps a non-OK envelope to ok:false", async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ result: "ERROR", message: "bad", data: {} }) });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ result: "ERROR", message: "bad", data: {} }),
+    });
     const r = await createCommand("").setMode("stop");
     expect(r).toEqual({ ok: false, message: "bad", data: {} });
   });

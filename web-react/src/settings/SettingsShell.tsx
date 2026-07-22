@@ -18,10 +18,16 @@ export function SettingsShell() {
   return (
     <div className="pf-settings">
       <aside className="pf-settings-nav">
-        <button className="pf-settings-back" onClick={() => navigate("/")}>← Dashboard</button>
+        <button className="pf-settings-back" onClick={() => navigate("/")}>
+          ← Dashboard
+        </button>
         <div className="pf-settings-title">Settings</div>
         {SETTINGS_TABS.map((t) => (
-          <NavLink key={t.path} to={t.path} className={({ isActive }) => `pf-settings-link ${isActive ? "active" : ""}`}>
+          <NavLink
+            key={t.path}
+            to={t.path}
+            className={({ isActive }) => `pf-settings-link ${isActive ? "active" : ""}`}
+          >
             {t.label}
           </NavLink>
         ))}

@@ -33,7 +33,10 @@ export function HistoryTab() {
   const [v, setV] = useState<History>(() => readHistory(settings));
   const [prev, setPrev] = useState(settings);
   const [saved, setSaved] = useState(false);
-  if (settings !== prev) { setPrev(settings); setV(readHistory(settings)); }
+  if (settings !== prev) {
+    setPrev(settings);
+    setV(readHistory(settings));
+  }
   const set = <K extends keyof History>(k: K, val: History[K]) => setV((s) => ({ ...s, [k]: val }));
 
   const onSave = async () => {
@@ -51,9 +54,22 @@ export function HistoryTab() {
   return (
     <Section title="History">
       <NumberField label="Minutes" value={v.minutes} onChange={(n) => set("minutes", n)} min={0} />
-      <NumberField label="Data Points" value={v.datapoints} onChange={(n) => set("datapoints", n)} min={0} />
-      <Toggle label="Clear History on Start" checked={v.clearhistoryonstart} onChange={(b) => set("clearhistoryonstart", b)} />
-      <Toggle label="Auto Refresh" checked={v.autorefresh} onChange={(b) => set("autorefresh", b)} />
+      <NumberField
+        label="Data Points"
+        value={v.datapoints}
+        onChange={(n) => set("datapoints", n)}
+        min={0}
+      />
+      <Toggle
+        label="Clear History on Start"
+        checked={v.clearhistoryonstart}
+        onChange={(b) => set("clearhistoryonstart", b)}
+      />
+      <Toggle
+        label="Auto Refresh"
+        checked={v.autorefresh}
+        onChange={(b) => set("autorefresh", b)}
+      />
       <div style={{ position: "relative" }}>
         <Toggle
           label="Extended Data Logging"
@@ -61,10 +77,14 @@ export function HistoryTab() {
           onChange={(b) => set("ext_data", b)}
           disabled={ext_data_disabled}
         />
-        {ext_data_disabled && <span className="pf-settings-hint">Stop the grill to change extended-data logging</span>}
+        {ext_data_disabled && (
+          <span className="pf-settings-hint">Stop the grill to change extended-data logging</span>
+        )}
       </div>
       <div className="pf-settings-actions">
-        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>{saving ? "Saving…" : "Save"}</button>
+        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
+          {saving ? "Saving…" : "Save"}
+        </button>
         {saved && <span className="pf-settings-saved">Saved ✓</span>}
       </div>
     </Section>

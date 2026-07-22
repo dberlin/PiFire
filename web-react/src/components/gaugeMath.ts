@@ -22,7 +22,13 @@ export function polarToCartesian(cx: number, cy: number, r: number, angleDeg: nu
 }
 
 // SVG path for an arc from startAngle to endAngle (clockwise), 0° = top.
-export function describeArc(cx: number, cy: number, r: number, startAngle: number, endAngle: number): string {
+export function describeArc(
+  cx: number,
+  cy: number,
+  r: number,
+  startAngle: number,
+  endAngle: number,
+): string {
   const start = polarToCartesian(cx, cy, r, startAngle);
   const end = polarToCartesian(cx, cy, r, endAngle);
   const largeArc = endAngle - startAngle > 180 ? 1 : 0;
@@ -31,5 +37,5 @@ export function describeArc(cx: number, cy: number, r: number, startAngle: numbe
 
 // Circumference of the full 270° track — used for the stroke-dashoffset fill.
 export function arcLength(r: number): number {
-  return r * (GAUGE_SWEEP * Math.PI) / 180;
+  return (r * (GAUGE_SWEEP * Math.PI)) / 180;
 }

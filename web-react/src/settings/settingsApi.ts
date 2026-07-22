@@ -1,6 +1,10 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Settings = Record<string, any>;
-export type SettingsFlag = "settings_update" | "controller_update" | "distance_update" | "probe_profile_update";
+export type SettingsFlag =
+  | "settings_update"
+  | "controller_update"
+  | "distance_update"
+  | "probe_profile_update";
 
 export function buildSettingsUrl(baseUrl: string, path: string): string {
   return `${baseUrl}/api/${path}`;

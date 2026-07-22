@@ -12,11 +12,25 @@ export interface ControlButton {
   action: ButtonAction;
 }
 
-const cmd = (run: (c: CommandClient) => Promise<CommandResult>): ButtonAction => ({ type: "command", run });
-const confirm = (title: string, run: (c: CommandClient) => Promise<CommandResult>): ButtonAction => ({ type: "confirm", title, run });
+const cmd = (run: (c: CommandClient) => Promise<CommandResult>): ButtonAction => ({
+  type: "command",
+  run,
+});
+const confirm = (
+  title: string,
+  run: (c: CommandClient) => Promise<CommandResult>,
+): ButtonAction => ({ type: "confirm", title, run });
 
-const STOP: ControlButton = { label: "Stop", variant: "danger", action: confirm("Stop the cook?", (c) => c.setMode("stop")) };
-const STARTUP: ControlButton = { label: "Startup", variant: "accent", action: cmd((c) => c.setMode("startup")) };
+const STOP: ControlButton = {
+  label: "Stop",
+  variant: "danger",
+  action: confirm("Stop the cook?", (c) => c.setMode("stop")),
+};
+const STARTUP: ControlButton = {
+  label: "Startup",
+  variant: "accent",
+  action: cmd((c) => c.setMode("startup")),
+};
 
 export function buttonsForMode(dash: DashData): ControlButton[] {
   const mode = dash.currentMode;
@@ -37,7 +51,11 @@ export function buttonsForMode(dash: DashData): ControlButton[] {
   return [
     { label: "Smoke", action: cmd((c) => c.setMode("smoke")) },
     { label: "Hold", variant: "accent", action: { type: "setpoint" } },
-    { label: "Smoke+", variant: dash.smokePlus ? "accent" : undefined, action: cmd((c) => c.setSmokePlus(!dash.smokePlus)) },
+    {
+      label: "Smoke+",
+      variant: dash.smokePlus ? "accent" : undefined,
+      action: cmd((c) => c.setSmokePlus(!dash.smokePlus)),
+    },
     { label: "Shutdown", action: confirm("Shut down the grill?", (c) => c.setMode("shutdown")) },
     STOP,
   ];

@@ -48,12 +48,23 @@ export function UnitsTab() {
   return (
     <>
       <Section title="Units">
-        <Select label="Temperature Units" value={units} options={UNIT_OPTIONS} onChange={onChange} />
-        <p className="pf-settings-hint">Changing units converts all stored temperatures and <b>stops the grill</b>.</p>
+        <Select
+          label="Temperature Units"
+          value={units}
+          options={UNIT_OPTIONS}
+          onChange={onChange}
+        />
+        <p className="pf-settings-hint">
+          Changing units converts all stored temperatures and <b>stops the grill</b>.
+        </p>
         {error && <p className="pf-settings-error-text">{error}</p>}
       </Section>
-      <ConfirmAction open={pending !== null} title={`Switch to °${pending ?? ""}? This will stop the grill.`}
-        onCancel={() => setPending(null)} onConfirm={confirmChange} />
+      <ConfirmAction
+        open={pending !== null}
+        title={`Switch to °${pending ?? ""}? This will stop the grill.`}
+        onCancel={() => setPending(null)}
+        onConfirm={confirmChange}
+      />
     </>
   );
 }

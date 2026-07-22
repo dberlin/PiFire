@@ -4,36 +4,81 @@
    fit-to-viewport stage, buttons, and header controls. */
 
 @keyframes pf-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 @keyframes pf-augerFeed {
-  to { transform: translateX(-16px); }
+  to {
+    transform: translateX(-16px);
+  }
 }
 @keyframes pf-pellet {
-  0% { transform: translateY(-14px); opacity: 0; }
-  25% { opacity: 1; }
-  80% { opacity: 1; }
-  100% { transform: translateY(11px); opacity: 0; }
+  0% {
+    transform: translateY(-14px);
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(11px);
+    opacity: 0;
+  }
 }
 @keyframes pf-flicker {
-  0%, 100% { opacity: 1; }
-  40% { opacity: 0.62; }
-  55% { opacity: 0.92; }
-  72% { opacity: 0.55; }
-  85% { opacity: 0.85; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  40% {
+    opacity: 0.62;
+  }
+  55% {
+    opacity: 0.92;
+  }
+  72% {
+    opacity: 0.55;
+  }
+  85% {
+    opacity: 0.85;
+  }
 }
 @keyframes pf-heat {
-  0% { transform: translateY(2px) scaleX(1); opacity: 0; }
-  30% { opacity: 0.7; }
-  100% { transform: translateY(-16px) scaleX(1.3); opacity: 0; }
+  0% {
+    transform: translateY(2px) scaleX(1);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.7;
+  }
+  100% {
+    transform: translateY(-16px) scaleX(1.3);
+    opacity: 0;
+  }
 }
 @keyframes pf-glow {
-  0%, 100% { opacity: 0.3; transform: scale(1); }
-  50% { opacity: 0.62; transform: scale(1.06); }
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.62;
+    transform: scale(1.06);
+  }
 }
 @keyframes pf-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 /* Fit-to-viewport stage: authored at 1280x720, scaled uniformly to fit. */
@@ -82,7 +127,9 @@
   font-size: 25px;
   font-family: "Barlow";
   letter-spacing: 0.5px;
-  transition: transform 90ms ease, background 120ms ease;
+  transition:
+    transform 90ms ease,
+    background 120ms ease;
 }
 .pf-btn:active {
   transform: scale(0.97);
@@ -115,22 +162,113 @@
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-.pf-modal-scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.6); display: grid; place-items: center; z-index: 10; }
-.pf-modal { background: #2c231a; border: 1px solid rgba(255,255,255,0.14); border-radius: 18px; padding: 22px; min-width: 320px; display: flex; flex-direction: column; gap: 16px; }
-.pf-modal-title { font: 700 20px "Barlow"; color: #f4ede2; text-align: center; }
-.pf-setpoint-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.pf-setpoint-val { font: 800 56px "Barlow Semi Condensed"; color: #f8f2e8; font-variant-numeric: tabular-nums; }
-.pf-setpoint-val span { font-size: 24px; color: #8a7f70; margin-left: 2px; }
-.pf-step { width: 56px; height: 56px; border-radius: 14px; border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: #f4ede2; font: 700 28px "Barlow"; cursor: pointer; }
-.pf-setpoint-slider { width: 100%; accent-color: var(--accent); }
-.pf-modal-actions { display: flex; gap: 12px; }
-.pf-modal-btn { flex: 1; border-radius: 12px; border: 1px solid rgba(255,255,255,0.14); background: #1d1813; color: #e8dfd1; font: 700 16px "Barlow"; padding: 12px; cursor: pointer; }
-.pf-modal-btn.accent { background: var(--accent); color: #1a0f04; border-color: transparent; }
-.pf-modal-btn.danger { background: rgba(255,90,77,0.14); border-color: #ff5a4d; color: #ff8b82; }
+.pf-modal-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: grid;
+  place-items: center;
+  z-index: 10;
+}
+.pf-modal {
+  background: #2c231a;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  padding: 22px;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pf-modal-title {
+  font: 700 20px "Barlow";
+  color: #f4ede2;
+  text-align: center;
+}
+.pf-setpoint-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.pf-setpoint-val {
+  font: 800 56px "Barlow Semi Condensed";
+  color: #f8f2e8;
+  font-variant-numeric: tabular-nums;
+}
+.pf-setpoint-val span {
+  font-size: 24px;
+  color: #8a7f70;
+  margin-left: 2px;
+}
+.pf-step {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: #f4ede2;
+  font: 700 28px "Barlow";
+  cursor: pointer;
+}
+.pf-setpoint-slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.pf-modal-actions {
+  display: flex;
+  gap: 12px;
+}
+.pf-modal-btn {
+  flex: 1;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #1d1813;
+  color: #e8dfd1;
+  font: 700 16px "Barlow";
+  padding: 12px;
+  cursor: pointer;
+}
+.pf-modal-btn.accent {
+  background: var(--accent);
+  color: #1a0f04;
+  border-color: transparent;
+}
+.pf-modal-btn.danger {
+  background: rgba(255, 90, 77, 0.14);
+  border-color: #ff5a4d;
+  color: #ff8b82;
+}
 
 /* Error/warning banners */
-.pf-banners { position: absolute; top: 62px; left: 18px; right: 18px; z-index: 5; display: flex; flex-direction: column; gap: 6px; }
-.pf-banner { border-radius: 10px; padding: 8px 14px; font: 600 13px "Barlow"; }
-.pf-banner--warning { background: rgba(255,176,32,0.14); border: 1px solid #ffb020; color: #ffce6a; }
-.pf-banner--error { background: rgba(255,90,77,0.14); border: 1px solid #ff5a4d; color: #ff8b82; }
-.pf-banner--critical { background: rgba(255,90,77,0.24); border: 1px solid #ff5a4d; color: #ffd0cb; font-weight: 700; }
+.pf-banners {
+  position: absolute;
+  top: 62px;
+  left: 18px;
+  right: 18px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pf-banner {
+  border-radius: 10px;
+  padding: 8px 14px;
+  font: 600 13px "Barlow";
+}
+.pf-banner--warning {
+  background: rgba(255, 176, 32, 0.14);
+  border: 1px solid #ffb020;
+  color: #ffce6a;
+}
+.pf-banner--error {
+  background: rgba(255, 90, 77, 0.14);
+  border: 1px solid #ff5a4d;
+  color: #ff8b82;
+}
+.pf-banner--critical {
+  background: rgba(255, 90, 77, 0.24);
+  border: 1px solid #ff5a4d;
+  color: #ffd0cb;
+  font-weight: 700;
+}

@@ -2,12 +2,20 @@ import type { ConnectionPhase } from "../useDashData";
 
 // Shown instead of the dashboard while we have no live data in `dev` mode.
 // Names the URL being contacted and whether it's reachable — never fakes data.
-export function ConnectionStatus({ phase, targetUrl }: { phase: ConnectionPhase; targetUrl: string }) {
+export function ConnectionStatus({
+  phase,
+  targetUrl,
+}: {
+  phase: ConnectionPhase;
+  targetUrl: string;
+}) {
   const unreachable = phase === "unreachable";
   return (
     <div className="conn">
       <div className={`conn-dot ${unreachable ? "err" : "wait"}`} />
-      <h1 className="conn-title">{unreachable ? "PiFire not reachable" : "Connecting to PiFire…"}</h1>
+      <h1 className="conn-title">
+        {unreachable ? "PiFire not reachable" : "Connecting to PiFire…"}
+      </h1>
       <p className="conn-url">
         {unreachable ? "Tried" : "Contacting"} <code>{targetUrl}</code>
       </p>

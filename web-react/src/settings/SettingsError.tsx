@@ -6,8 +6,12 @@ export function SettingsError() {
     <div className="pf-fit">
       <div className="pf-settings-error">
         Couldn't load settings.
-        <button className="pf-modal-btn" onClick={() => navigate(0)}>Retry</button>
-        <button className="pf-modal-btn" onClick={() => navigate("/")}>Dashboard</button>
+        <button className="pf-modal-btn" onClick={() => navigate(0)}>
+          Retry
+        </button>
+        <button className="pf-modal-btn" onClick={() => navigate("/")}>
+          Dashboard
+        </button>
       </div>
     </div>
   );

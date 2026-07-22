@@ -3,7 +3,9 @@ import { setPath } from "./delta";
 
 describe("setPath", () => {
   it("builds a nested delta from a dot path", () => {
-    expect(setPath({}, "globals.grill_name", "Smokey")).toEqual({ globals: { grill_name: "Smokey" } });
+    expect(setPath({}, "globals.grill_name", "Smokey")).toEqual({
+      globals: { grill_name: "Smokey" },
+    });
     expect(setPath({}, "pwm.update_time", 7)).toEqual({ pwm: { update_time: 7 } });
   });
   it("merges into an existing partial without mutating input", () => {

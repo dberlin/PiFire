@@ -37,7 +37,9 @@ export function GeneralTab() {
       <TextField label="Grill Name" value={name} onChange={setName} />
       <Select label="Theme" value={theme} options={THEMES} onChange={setTheme} />
       <div className="pf-settings-actions">
-        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>{saving ? "Saving…" : "Save"}</button>
+        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
+          {saving ? "Saving…" : "Save"}
+        </button>
         {saved && <span className="pf-settings-saved">Saved ✓</span>}
       </div>
     </Section>

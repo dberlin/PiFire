@@ -48,7 +48,10 @@ export function StartupTab() {
   const [v, setV] = useState<Startup>(() => readStartup(settings));
   const [prev, setPrev] = useState(settings);
   const [saved, setSaved] = useState(false);
-  if (settings !== prev) { setPrev(settings); setV(readStartup(settings)); }
+  if (settings !== prev) {
+    setPrev(settings);
+    setV(readStartup(settings));
+  }
 
   const set = <K extends keyof Startup>(k: K, val: Startup[K]) => setV((s) => ({ ...s, [k]: val }));
 
@@ -97,28 +100,89 @@ export function StartupTab() {
   return (
     <>
       <Section title="Shutdown">
-        <NumberField label="Shutdown Duration" value={v.shutdown_duration} onChange={(n) => set("shutdown_duration", n)} min={0} suffix="s" />
-        <Toggle label="Auto Power Off" checked={v.auto_power_off} onChange={(b) => set("auto_power_off", b)} />
+        <NumberField
+          label="Shutdown Duration"
+          value={v.shutdown_duration}
+          onChange={(n) => set("shutdown_duration", n)}
+          min={0}
+          suffix="s"
+        />
+        <Toggle
+          label="Auto Power Off"
+          checked={v.auto_power_off}
+          onChange={(b) => set("auto_power_off", b)}
+        />
       </Section>
 
       <Section title="Startup">
-        <NumberField label="Duration" value={v.duration} onChange={(n) => set("duration", n)} min={0} suffix="s" />
-        <NumberField label="Startup Exit Temp" value={v.startup_exit_temp} onChange={(n) => set("startup_exit_temp", n)} min={0} suffix="°" />
-        <NumberField label="Prime on Startup" value={v.prime_on_startup} onChange={(n) => set("prime_on_startup", n)} min={0} />
-        <NumberField label="PWM Duty Cycle" value={v.pwm_duty_cycle} onChange={(n) => set("pwm_duty_cycle", n)} min={0} max={100} suffix="%" />
+        <NumberField
+          label="Duration"
+          value={v.duration}
+          onChange={(n) => set("duration", n)}
+          min={0}
+          suffix="s"
+        />
+        <NumberField
+          label="Startup Exit Temp"
+          value={v.startup_exit_temp}
+          onChange={(n) => set("startup_exit_temp", n)}
+          min={0}
+          suffix="°"
+        />
+        <NumberField
+          label="Prime on Startup"
+          value={v.prime_on_startup}
+          onChange={(n) => set("prime_on_startup", n)}
+          min={0}
+        />
+        <NumberField
+          label="PWM Duty Cycle"
+          value={v.pwm_duty_cycle}
+          onChange={(n) => set("pwm_duty_cycle", n)}
+          min={0}
+          max={100}
+          suffix="%"
+        />
       </Section>
 
       <Section title="SmartStart">
-        <Toggle label="Enabled" checked={v.smartstart_enabled} onChange={(b) => set("smartstart_enabled", b)} />
-        <NumberField label="Exit Temp" value={v.smartstart_exit_temp} onChange={(n) => set("smartstart_exit_temp", n)} min={0} suffix="°" />
+        <Toggle
+          label="Enabled"
+          checked={v.smartstart_enabled}
+          onChange={(b) => set("smartstart_enabled", b)}
+        />
+        <NumberField
+          label="Exit Temp"
+          value={v.smartstart_exit_temp}
+          onChange={(n) => set("smartstart_exit_temp", n)}
+          min={0}
+          suffix="°"
+        />
       </Section>
 
       <Section title="Start to Mode">
-        <Select label="After Startup Mode" value={v.after_startup_mode} options={modeOptions} onChange={(v) => set("after_startup_mode", v)} />
-        <NumberField label="Primary Setpoint" value={v.primary_setpoint} onChange={(n) => set("primary_setpoint", n)} min={0} suffix="°" />
-        <Toggle label="Start to Hold Prompt" checked={v.start_to_hold_prompt} onChange={(b) => set("start_to_hold_prompt", b)} />
+        <Select
+          label="After Startup Mode"
+          value={v.after_startup_mode}
+          options={modeOptions}
+          onChange={(v) => set("after_startup_mode", v)}
+        />
+        <NumberField
+          label="Primary Setpoint"
+          value={v.primary_setpoint}
+          onChange={(n) => set("primary_setpoint", n)}
+          min={0}
+          suffix="°"
+        />
+        <Toggle
+          label="Start to Hold Prompt"
+          checked={v.start_to_hold_prompt}
+          onChange={(b) => set("start_to_hold_prompt", b)}
+        />
         <div className="pf-settings-actions">
-          <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>{saving ? "Saving…" : "Save"}</button>
+          <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
+            {saving ? "Saving…" : "Save"}
+          </button>
           {saved && <span className="pf-settings-saved">Saved ✓</span>}
         </div>
       </Section>

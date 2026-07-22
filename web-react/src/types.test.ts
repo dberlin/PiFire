@@ -4,11 +4,29 @@ import { FIXTURE_DASH } from "./fixture";
 describe("DashData fixture shape", () => {
   it("has the real top-level keys", () => {
     for (const k of [
-      "uuid", "errors", "warnings", "criticalError", "grillName", "currentMode",
-      "nextMode", "displayMode", "smokePlus", "pwmControl", "pMode", "hopperLevel",
-      "lidOpenDetectEnabled", "lidOpenDetected", "tempUnits", "hasDcFan",
-      "hasDistanceSensor", "allowManualOutputs", "timer", "outputs",
-      "recipeStatus", "foodProbes", "primaryProbe",
+      "uuid",
+      "errors",
+      "warnings",
+      "criticalError",
+      "grillName",
+      "currentMode",
+      "nextMode",
+      "displayMode",
+      "smokePlus",
+      "pwmControl",
+      "pMode",
+      "hopperLevel",
+      "lidOpenDetectEnabled",
+      "lidOpenDetected",
+      "tempUnits",
+      "hasDcFan",
+      "hasDistanceSensor",
+      "allowManualOutputs",
+      "timer",
+      "outputs",
+      "recipeStatus",
+      "foodProbes",
+      "primaryProbe",
     ]) {
       expect(FIXTURE_DASH).toHaveProperty(k);
     }

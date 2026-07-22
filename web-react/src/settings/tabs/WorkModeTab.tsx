@@ -74,14 +74,23 @@ export function WorkModeTab() {
   const [v, setV] = useState<WorkMode>(() => readWorkMode(settings));
   const [prev, setPrev] = useState(settings);
   const [saved, setSaved] = useState(false);
-  if (settings !== prev) { setPrev(settings); setV(readWorkMode(settings)); }
+  if (settings !== prev) {
+    setPrev(settings);
+    setV(readWorkMode(settings));
+  }
 
-  const setCycleData = <K extends keyof WorkMode['cycle_data']>(k: K, val: WorkMode['cycle_data'][K]) =>
-    setV((s) => ({ ...s, cycle_data: { ...s.cycle_data, [k]: val } }));
-  const setSmokePlus = <K extends keyof WorkMode['smoke_plus']>(k: K, val: WorkMode['smoke_plus'][K]) =>
-    setV((s) => ({ ...s, smoke_plus: { ...s.smoke_plus, [k]: val } }));
-  const setKeepWarm = <K extends keyof WorkMode['keep_warm']>(k: K, val: WorkMode['keep_warm'][K]) =>
-    setV((s) => ({ ...s, keep_warm: { ...s.keep_warm, [k]: val } }));
+  const setCycleData = <K extends keyof WorkMode["cycle_data"]>(
+    k: K,
+    val: WorkMode["cycle_data"][K],
+  ) => setV((s) => ({ ...s, cycle_data: { ...s.cycle_data, [k]: val } }));
+  const setSmokePlus = <K extends keyof WorkMode["smoke_plus"]>(
+    k: K,
+    val: WorkMode["smoke_plus"][K],
+  ) => setV((s) => ({ ...s, smoke_plus: { ...s.smoke_plus, [k]: val } }));
+  const setKeepWarm = <K extends keyof WorkMode["keep_warm"]>(
+    k: K,
+    val: WorkMode["keep_warm"][K],
+  ) => setV((s) => ({ ...s, keep_warm: { ...s.keep_warm, [k]: val } }));
 
   const onSave = async () => {
     let d: object = {};
@@ -94,33 +103,136 @@ export function WorkModeTab() {
   return (
     <>
       <Section title="Cycle Data">
-        <NumberField label="Hold Cycle Time" value={v.cycle_data.HoldCycleTime} onChange={(n) => setCycleData("HoldCycleTime", n)} min={0} suffix="s" />
-        <NumberField label="Smoke On Cycle Time" value={v.cycle_data.SmokeOnCycleTime} onChange={(n) => setCycleData("SmokeOnCycleTime", n)} min={0} suffix="s" />
-        <NumberField label="Smoke Off Cycle Time" value={v.cycle_data.SmokeOffCycleTime} onChange={(n) => setCycleData("SmokeOffCycleTime", n)} min={0} suffix="s" />
-        <NumberField label="PMode" value={v.cycle_data.PMode} onChange={(n) => setCycleData("PMode", n)} min={0} />
-        <NumberField label="U Min" value={v.cycle_data.u_min} onChange={(n) => setCycleData("u_min", n)} step={0.1} />
-        <NumberField label="U Max" value={v.cycle_data.u_max} onChange={(n) => setCycleData("u_max", n)} step={0.1} />
-        <Toggle label="Lid Open Detect Enabled" checked={v.cycle_data.LidOpenDetectEnabled} onChange={(b) => setCycleData("LidOpenDetectEnabled", b)} />
-        <NumberField label="Lid Open Threshold" value={v.cycle_data.LidOpenThreshold} onChange={(n) => setCycleData("LidOpenThreshold", n)} min={0} />
-        <NumberField label="Lid Open Pause Time" value={v.cycle_data.LidOpenPauseTime} onChange={(n) => setCycleData("LidOpenPauseTime", n)} min={0} suffix="s" />
-        <Toggle label="Fan PID Enabled" checked={v.cycle_data.FanPidEnabled} onChange={(b) => setCycleData("FanPidEnabled", b)} />
+        <NumberField
+          label="Hold Cycle Time"
+          value={v.cycle_data.HoldCycleTime}
+          onChange={(n) => setCycleData("HoldCycleTime", n)}
+          min={0}
+          suffix="s"
+        />
+        <NumberField
+          label="Smoke On Cycle Time"
+          value={v.cycle_data.SmokeOnCycleTime}
+          onChange={(n) => setCycleData("SmokeOnCycleTime", n)}
+          min={0}
+          suffix="s"
+        />
+        <NumberField
+          label="Smoke Off Cycle Time"
+          value={v.cycle_data.SmokeOffCycleTime}
+          onChange={(n) => setCycleData("SmokeOffCycleTime", n)}
+          min={0}
+          suffix="s"
+        />
+        <NumberField
+          label="PMode"
+          value={v.cycle_data.PMode}
+          onChange={(n) => setCycleData("PMode", n)}
+          min={0}
+        />
+        <NumberField
+          label="U Min"
+          value={v.cycle_data.u_min}
+          onChange={(n) => setCycleData("u_min", n)}
+          step={0.1}
+        />
+        <NumberField
+          label="U Max"
+          value={v.cycle_data.u_max}
+          onChange={(n) => setCycleData("u_max", n)}
+          step={0.1}
+        />
+        <Toggle
+          label="Lid Open Detect Enabled"
+          checked={v.cycle_data.LidOpenDetectEnabled}
+          onChange={(b) => setCycleData("LidOpenDetectEnabled", b)}
+        />
+        <NumberField
+          label="Lid Open Threshold"
+          value={v.cycle_data.LidOpenThreshold}
+          onChange={(n) => setCycleData("LidOpenThreshold", n)}
+          min={0}
+        />
+        <NumberField
+          label="Lid Open Pause Time"
+          value={v.cycle_data.LidOpenPauseTime}
+          onChange={(n) => setCycleData("LidOpenPauseTime", n)}
+          min={0}
+          suffix="s"
+        />
+        <Toggle
+          label="Fan PID Enabled"
+          checked={v.cycle_data.FanPidEnabled}
+          onChange={(b) => setCycleData("FanPidEnabled", b)}
+        />
       </Section>
 
       <Section title="Smoke Plus">
-        <Toggle label="Enabled" checked={v.smoke_plus.enabled} onChange={(b) => setSmokePlus("enabled", b)} />
-        <NumberField label="Min Temp" value={v.smoke_plus.min_temp} onChange={(n) => setSmokePlus("min_temp", n)} min={0} suffix="°" />
-        <NumberField label="Max Temp" value={v.smoke_plus.max_temp} onChange={(n) => setSmokePlus("max_temp", n)} min={0} suffix="°" />
-        <NumberField label="On Time" value={v.smoke_plus.on_time} onChange={(n) => setSmokePlus("on_time", n)} min={0} suffix="s" />
-        <NumberField label="Off Time" value={v.smoke_plus.off_time} onChange={(n) => setSmokePlus("off_time", n)} min={0} suffix="s" />
-        <NumberField label="Duty Cycle" value={v.smoke_plus.duty_cycle} onChange={(n) => setSmokePlus("duty_cycle", n)} min={20} max={100} suffix="%" />
-        <Toggle label="Fan Ramp" checked={v.smoke_plus.fan_ramp} onChange={(b) => setSmokePlus("fan_ramp", b)} />
+        <Toggle
+          label="Enabled"
+          checked={v.smoke_plus.enabled}
+          onChange={(b) => setSmokePlus("enabled", b)}
+        />
+        <NumberField
+          label="Min Temp"
+          value={v.smoke_plus.min_temp}
+          onChange={(n) => setSmokePlus("min_temp", n)}
+          min={0}
+          suffix="°"
+        />
+        <NumberField
+          label="Max Temp"
+          value={v.smoke_plus.max_temp}
+          onChange={(n) => setSmokePlus("max_temp", n)}
+          min={0}
+          suffix="°"
+        />
+        <NumberField
+          label="On Time"
+          value={v.smoke_plus.on_time}
+          onChange={(n) => setSmokePlus("on_time", n)}
+          min={0}
+          suffix="s"
+        />
+        <NumberField
+          label="Off Time"
+          value={v.smoke_plus.off_time}
+          onChange={(n) => setSmokePlus("off_time", n)}
+          min={0}
+          suffix="s"
+        />
+        <NumberField
+          label="Duty Cycle"
+          value={v.smoke_plus.duty_cycle}
+          onChange={(n) => setSmokePlus("duty_cycle", n)}
+          min={20}
+          max={100}
+          suffix="%"
+        />
+        <Toggle
+          label="Fan Ramp"
+          checked={v.smoke_plus.fan_ramp}
+          onChange={(b) => setSmokePlus("fan_ramp", b)}
+        />
       </Section>
 
       <Section title="Keep Warm">
-        <NumberField label="Temp" value={v.keep_warm.temp} onChange={(n) => setKeepWarm("temp", n)} min={0} suffix="°" />
-        <Toggle label="S Plus" checked={v.keep_warm.s_plus} onChange={(b) => setKeepWarm("s_plus", b)} />
+        <NumberField
+          label="Temp"
+          value={v.keep_warm.temp}
+          onChange={(n) => setKeepWarm("temp", n)}
+          min={0}
+          suffix="°"
+        />
+        <Toggle
+          label="S Plus"
+          checked={v.keep_warm.s_plus}
+          onChange={(b) => setKeepWarm("s_plus", b)}
+        />
         <div className="pf-settings-actions">
-          <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>{saving ? "Saving…" : "Save"}</button>
+          <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
+            {saving ? "Saving…" : "Save"}
+          </button>
           {saved && <span className="pf-settings-saved">Saved ✓</span>}
         </div>
       </Section>
