@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 // The React POC talks to a running PiFire instance over its existing
@@ -19,5 +20,10 @@ export default defineConfig({
       "/socket.io": { target, ws: true, changeOrigin: true },
       "/api": { target, changeOrigin: true },
     },
+  },
+  test: {
+    // Playwright owns tests/e2e (run via `bun run test:e2e`); vitest must
+    // not try to import those specs — they use @playwright/test's `test`.
+    exclude: [...configDefaults.exclude, "tests/e2e/**"],
   },
 });
