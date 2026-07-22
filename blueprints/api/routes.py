@@ -132,15 +132,31 @@ def _api_post_settings(settings, request_json):
         ), 201
 
 
+_SETTINGS_UPDATE_ALLOWED_FLAGS = {
+    "settings_update",
+    "controller_update",
+    "distance_update",
+    "probe_profile_update",
+}
+
+
 def _api_post_settings_update(settings, request_json):
     """
     JSON settings write that ALSO sets control-update flags so the running
     control loop re-reads. Mirrors save_settings_and_flag_update.
     body: { "settings": <partial settings dict>, "flags": ["settings_update", ...] }
+
+    `flags` is restricted to _SETTINGS_UPDATE_ALLOWED_FLAGS -- an unknown flag
+    (e.g. a typo'd "mode") would otherwise be set as control[flag] = True,
+    clobbering unrelated control keys, so requests with any unknown flag are
+    rejected outright without writing settings or control.
     """
     try:
         delta = request_json.get("settings", {})
         flags = request_json.get("flags", []) or []
+        for flag in flags:
+            if flag not in _SETTINGS_UPDATE_ALLOWED_FLAGS:
+                return jsonify({"result": "error", "message": f"Unknown flag: {flag}", "data": {}}), 200
         settings = deep_update(settings, delta)
         control = read_control()
         save_settings_and_flag_update(settings, control, *flags, origin="api")

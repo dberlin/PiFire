@@ -53,3 +53,18 @@ def test_settings_update_empty_flags_sets_none(client):
 
     execute_control_writes()
     assert read_control()["settings_update"] is False
+
+
+def test_settings_update_rejects_unknown_flag(client):
+    original_grill_name = read_settings()["globals"]["grill_name"]
+
+    body = {"settings": {"globals": {"grill_name": "ShouldNotPersist"}}, "flags": ["mode"]}
+    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+    assert resp.get_json()["result"] == "error"
+
+    # Settings delta must NOT have been applied.
+    assert read_settings()["globals"]["grill_name"] == original_grill_name
+
+    # Control must NOT have gained a bogus "mode" flag.
+    execute_control_writes()
+    assert read_control().get("mode") is not True
