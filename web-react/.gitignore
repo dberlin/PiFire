@@ -6,3 +6,6 @@ dist/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# TS incremental build cache
+*.tsbuildinfo
