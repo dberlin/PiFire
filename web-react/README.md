@@ -11,7 +11,7 @@ This spike is the highest-signal slice — it de-risks the two hard problems:
    for live data, and the REST command grammar `POST /api/set|cmd/…` → `process_command`
    → `write_control` for commands. See `src/useDashData.ts`, `src/command.ts`,
    `blueprints/mobile/socket_io.py`, and `common/api_commands.py`.
-2. **Animation fidelity** — the signature **270° gauge** (`src/components/Gauge.tsx`)
+2. **Animation fidelity** — the signature **270° gauge** (`src/dashboard/GrillGauge.tsx`)
    with value-arc easing (250 ms OutCubic), pulsing glow, and setpoint marker,
    plus the accent-theme token system (`src/theme.css`, ported from
    `display/qml/Theme.qml`; Ember/Ice/Crimson switchable live).
@@ -19,6 +19,25 @@ This spike is the highest-signal slice — it de-risks the two hard problems:
 Scope of the spike: DashScreen **center column only** (gauge + control panel +
 one food-probe line). Deferred: food-probe column, right column, menus, keypads,
 splash/sleep, responsive breakpoints — see the plan.
+
+## Module naming convention
+
+- **`PascalCase.tsx`** — React components only, one exported component per file,
+  named export matching the filename (`ControlButtons.tsx` → `ControlButtons`).
+- **`camelCase.ts`** — non-component logic (pure functions, API clients, hooks
+  in `useX.ts`).
+- **A module must NOT share a case-folded name with any sibling module** — e.g.
+  `controlButtons.ts` next to `ControlButtons.tsx` is forbidden. On
+  case-insensitive filesystems (macOS/Windows) both match `./ControlButtons`,
+  and TypeScript's extension priority (`.ts` before `.tsx`) silently resolves
+  the import to the *logic* file — so the code builds on Linux and breaks on a
+  Mac. When a component's logic wants its own module, name it after what it
+  exports (`buttonsForMode.ts`), never a case-variant of the component.
+- Tests: `*.test.tsx` = component tests (jsdom project), `*.test.ts` = pure
+  tests (node project) — the rstest env split keys off exactly this.
+- Enforced by `src/fsCasing.test.ts`, which fails on any case-folded module
+  collision — the only tripwire that fires on Linux, where the filesystem
+  never surfaces the problem.
 
 ## Run
 
