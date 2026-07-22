@@ -62,3 +62,101 @@ test("history ext_data toggle disabled state matches the live grill mode", async
     await expect(page.getByText(/stop the grill to change/i)).toBeVisible();
   }
 });
+
+test("chart color saves and round-trips on the history tab", async ({ page }) => {
+  await page.goto("/settings/history");
+  // First color input in the Chart Colors section (the first probe's Line Color).
+  const colorInput = page.locator('input[type="color"]').first();
+  await expect(colorInput).toBeVisible();
+  const original = await colorInput.inputValue();
+  const next = original.toLowerCase() === "#336699" ? "#996633" : "#336699";
+
+  await colorInput.fill(next);
+  await expect(colorInput).toHaveValue(next);
+
+  // The Chart Colors Save button sits at the end of that section, after the
+  // per-probe cards; it's the only "Save" button on this tab.
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
+
+  await page.reload();
+  await expect(page.locator('input[type="color"]').first()).toHaveValue(next);
+
+  // Restore the original value so the backend is left as found.
+  await page.locator('input[type="color"]').first().fill(original);
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
+});
+
+test("smartstart table startup-time saves and round-trips on the startup tab", async ({ page }) => {
+  await page.goto("/settings/startup");
+  const firstRowStartupTime = page.getByLabel("Startup time row 1");
+  await expect(firstRowStartupTime).toBeVisible();
+  const original = await firstRowStartupTime.inputValue();
+
+  await firstRowStartupTime.fill("361");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
+
+  await page.reload();
+  await expect(page.getByLabel("Startup time row 1")).toHaveValue("361");
+
+  // Restore the original value so the backend is left as found.
+  await page.getByLabel("Startup time row 1").fill(original);
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
+});
+
+test("controller tab shows the live controller and PB round-trips, cross-checked via /api/settings", async ({
+  page,
+}) => {
+  const settingsRes = await page.request.get("/api/settings");
+  expect(settingsRes.ok()).toBeTruthy();
+  const settingsBody = (await settingsRes.json()) as {
+    settings?: {
+      controller?: { selected?: string; config?: Record<string, Record<string, unknown>> };
+    };
+  };
+  const selectedKey = settingsBody.settings?.controller?.selected ?? "";
+  expect(selectedKey).not.toBe("");
+
+  const metaRes = await page.request.get("/api/controller_metadata");
+  expect(metaRes.ok()).toBeTruthy();
+  const metaBody = (await metaRes.json()) as {
+    metadata: Record<string, { friendly_name: string }>;
+  };
+  const expectedLabel = metaBody.metadata[selectedKey]?.friendly_name;
+  expect(expectedLabel).toBeTruthy();
+
+  await page.goto("/settings/controller");
+  const select = page.getByLabel("Controller");
+  await expect(select).toBeVisible();
+  await expect(select).toHaveValue(selectedKey);
+  const selectedOptionText = await select.locator("option:checked").textContent();
+  expect(selectedOptionText).toBe(expectedLabel);
+
+  const pbField = page.getByLabel("Proportional Band(PB)");
+  await expect(pbField).toBeVisible();
+  const originalPb = await pbField.inputValue();
+  const nextPb = Number(originalPb) === 61 ? 62 : 61;
+
+  await pbField.fill(String(nextPb));
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
+
+  await page.reload();
+  await expect(page.getByLabel("Proportional Band(PB)")).toHaveValue(String(nextPb));
+
+  const crossCheckRes = await page.request.get("/api/settings");
+  expect(crossCheckRes.ok()).toBeTruthy();
+  const crossCheckBody = (await crossCheckRes.json()) as {
+    settings?: { controller?: { config?: Record<string, Record<string, unknown>> } };
+  };
+  const pbValue = crossCheckBody.settings?.controller?.config?.[selectedKey]?.PB;
+  expect(Number(pbValue)).toBe(nextPb);
+
+  // Restore the original value so the backend is left as found.
+  await page.getByLabel("Proportional Band(PB)").fill(originalPb);
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
+});
