@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes } from "react-router";
 import type { CommandClient, CommandResult } from "../../helpers/command";
 import { FIXTURE_DASH } from "../../helpers/fixture";
 import type { DashData } from "../../helpers/types";
@@ -95,5 +97,91 @@ describe("Dashboard", () => {
     renderDashboard({ ...FIXTURE_DASH, currentMode: "Shutdown" });
     expect(screen.getByText("SHUTDOWN")).toBeInTheDocument();
     expect(screen.getByText("00:00")).toBeInTheDocument();
+  });
+
+  it("resets the cook-time counter across cooking <-> non-cooking transitions on the same instance", () => {
+    const { rerender } = renderDashboard({ ...FIXTURE_DASH, currentMode: "Hold" });
+    expect(screen.getByText("HOLD")).toBeInTheDocument();
+    expect(screen.getByText("00:00")).toBeInTheDocument();
+
+    // Hold (cooking) -> Stop (not cooking): prevCooking edge fires, cookStart clears.
+    rerender(
+      <MemoryRouter>
+        <Dashboard
+          dash={{ ...FIXTURE_DASH, currentMode: "Stop" }}
+          command={makeCommand()}
+          phase="live"
+          controlAlive={true}
+          accent="ember"
+          setAccent={rs.fn()}
+          animate={false}
+          setAnimate={rs.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("STOP")).toBeInTheDocument();
+    expect(screen.getByText("00:00")).toBeInTheDocument();
+
+    // Stop (not cooking) -> Smoke (cooking): prevCooking edge fires again, cookStart re-seeds.
+    rerender(
+      <MemoryRouter>
+        <Dashboard
+          dash={{ ...FIXTURE_DASH, currentMode: "Smoke" }}
+          command={makeCommand()}
+          phase="live"
+          controlAlive={true}
+          accent="ember"
+          setAccent={rs.fn()}
+          animate={false}
+          setAnimate={rs.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("SMOKE")).toBeInTheDocument();
+    expect(screen.getByText("00:00")).toBeInTheDocument();
+  });
+
+  it("clicking an accent swatch calls setAccent with that accent", async () => {
+    const user = userEvent.setup();
+    const setAccent = rs.fn();
+    renderDashboard(FIXTURE_DASH, { setAccent });
+    await user.click(screen.getByRole("button", { name: "ice" }));
+    expect(setAccent).toHaveBeenCalledWith("ice");
+  });
+
+  it("clicking the ANIM toggle calls setAnimate with the flipped value", async () => {
+    const user = userEvent.setup();
+    const setAnimate = rs.fn();
+    renderDashboard(FIXTURE_DASH, { animate: false, setAnimate });
+    await user.click(screen.getByText("ANIM"));
+    expect(setAnimate).toHaveBeenCalledWith(true);
+  });
+
+  it("clicking the settings gear navigates to /settings", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <Dashboard
+                dash={FIXTURE_DASH}
+                command={makeCommand()}
+                phase="live"
+                controlAlive={true}
+                accent="ember"
+                setAccent={rs.fn()}
+                animate={false}
+                setAnimate={rs.fn()}
+              />
+            }
+          />
+          <Route path="/settings" element={<div data-testid="settings-route" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("button", { name: "settings" }));
+    expect(screen.getByTestId("settings-route")).toBeInTheDocument();
   });
 });

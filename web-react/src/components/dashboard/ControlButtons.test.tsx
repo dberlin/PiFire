@@ -73,4 +73,44 @@ describe("ControlButtons", () => {
     await user.click(screen.getByRole("button", { name: "Stop" }));
     expect(screen.getByText("Stop the cook?")).toBeInTheDocument();
   });
+
+  it("cancelling the Stop confirm modal closes it without running the command", async () => {
+    const user = userEvent.setup();
+    const command = stubCommand();
+    render(<ControlButtons dash={at("Hold")} command={command} disabled={false} />);
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Stop the cook?")).not.toBeInTheDocument();
+    expect(command.setMode).not.toHaveBeenCalled();
+  });
+
+  it('confirming the Stop confirm modal closes it and runs setMode("stop")', async () => {
+    const user = userEvent.setup();
+    const command = stubCommand();
+    render(<ControlButtons dash={at("Hold")} command={command} disabled={false} />);
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(screen.queryByText("Stop the cook?")).not.toBeInTheDocument();
+    expect(command.setMode).toHaveBeenCalledWith("stop");
+  });
+
+  it("cancelling the Hold setpoint modal closes it without calling hold", async () => {
+    const user = userEvent.setup();
+    const command = stubCommand();
+    render(<ControlButtons dash={at("Hold")} command={command} disabled={false} />);
+    await user.click(screen.getByRole("button", { name: "Hold" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Set Hold Temperature")).not.toBeInTheDocument();
+    expect(command.hold).not.toHaveBeenCalled();
+  });
+
+  it("submitting the Hold setpoint modal closes it and calls hold with the chosen temp", async () => {
+    const user = userEvent.setup();
+    const command = stubCommand();
+    render(<ControlButtons dash={at("Hold")} command={command} disabled={false} />);
+    await user.click(screen.getByRole("button", { name: "Hold" }));
+    await user.click(screen.getByRole("button", { name: "Set Hold" }));
+    expect(screen.queryByText("Set Hold Temperature")).not.toBeInTheDocument();
+    expect(command.hold).toHaveBeenCalledWith(expect.any(Number));
+  });
 });

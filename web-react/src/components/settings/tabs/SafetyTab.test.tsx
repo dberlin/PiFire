@@ -92,4 +92,49 @@ describe("SafetyTab", () => {
       [],
     );
   });
+
+  it("saves the exact full delta after editing every numeric field and both toggles", async () => {
+    const context = {
+      settings: {
+        safety: {
+          minstartuptemp: 80,
+          maxstartuptemp: 110,
+          maxtemp: 550,
+          reigniteretries: 2,
+          startup_check: false,
+          allow_manual_changes: false,
+          manual_override_time: 45,
+        },
+      },
+      mode: "Stop",
+    };
+
+    renderRoute(<SafetyTab />, context);
+
+    fireEvent.change(screen.getByDisplayValue("80"), { target: { value: "85" } });
+    fireEvent.change(screen.getByDisplayValue("110"), { target: { value: "115" } });
+    fireEvent.change(screen.getByDisplayValue("550"), { target: { value: "560" } });
+    fireEvent.change(screen.getByDisplayValue("2"), { target: { value: "3" } });
+    fireEvent.change(screen.getByDisplayValue("45"), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Startup Check" }));
+    fireEvent.click(screen.getByRole("button", { name: "Allow Manual Output Changes" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(saveMock).toHaveBeenCalledWith(
+      {
+        safety: {
+          minstartuptemp: 85,
+          maxstartuptemp: 115,
+          maxtemp: 560,
+          reigniteretries: 3,
+          startup_check: true,
+          allow_manual_changes: true,
+          manual_override_time: 50,
+        },
+      },
+      [],
+    );
+  });
 });

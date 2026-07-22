@@ -19,7 +19,10 @@ export function HydrateFallback() {
   return <div className="pf-fit" />;
 }
 
-const router = createBrowserRouter([
+// Exported (not just used to build `router` below) so App.test.tsx can drive
+// the same route tree through `createMemoryRouter` without a real browser
+// history — structure-preserving, no behavior change.
+export const routes = [
   { path: "/", element: <DashboardRoute /> },
   {
     path: "/settings",
@@ -39,7 +42,9 @@ const router = createBrowserRouter([
       { path: "units", element: <UnitsTab /> },
     ],
   },
-]);
+];
+
+const router = createBrowserRouter(routes);
 
 export default function App() {
   return (
