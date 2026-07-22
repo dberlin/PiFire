@@ -69,7 +69,7 @@ Add a JSON endpoint in `blueprints/api/routes.py`, as a module-level
 established convention — no `services.py`). Proposed contract:
 
 ```
-POST /api/settings/update
+POST /api/settings_update
 body: { "settings": <partial settings dict>, "flags": ["settings_update", ...] }
 → settings = read_settings()
   settings = deep_update(settings, body["settings"])
@@ -113,7 +113,7 @@ triggers: `settings_update`, `controller_update`, `distance_update`,
   responsive, scrolling layout (NOT the scaled 1280×720 canvas — real reflow).
 - **Settings data layer** (`src/settings/useSettings.ts`): `GET /api/settings`
   into typed state; a `saveSettings(delta, flags)` that POSTs to
-  `/api/settings/update`; a `setUnits(F|C)` that calls the existing command
+  `/api/settings_update`; a `setUnits(F|C)` that calls the existing command
   client. Optimistic-free: reload settings after a successful save (mirrors the
   dashboard's server-driven model).
 - **Form primitives** (`src/settings/fields/`): `Toggle`, `Select`,
@@ -145,7 +145,7 @@ triggers: `settings_update`, `controller_update`, `distance_update`,
 1. Enter `/settings/*` → `useSettings` fetches `GET /api/settings` once → typed state.
 2. User edits fields → tab accumulates a delta (changed subtree only).
 3. Save:
-   - General/Theme → `applySettings(delta, [])` → `POST /api/settings/update`.
+   - General/Theme → `applySettings(delta, [])` → `POST /api/settings_update`.
    - PWM → `applySettings(delta, ["settings_update"])`.
    - Units → `command.setUnits(...)` (existing `/api/set/units/{F|C}`), then re-fetch.
 4. On success → re-fetch settings (server-driven truth); show a saved indicator.
@@ -165,7 +165,7 @@ triggers: `settings_update`, `controller_update`, `distance_update`,
 - **Unit (vitest):** `buildSettingsUrl` + `applySettings` body shape (delta +
   flags); a pure delta-builder for each tab (given form state → correct partial
   settings dict + flag set); units confirm-gate logic.
-- **Backend (pytest):** the new `/api/settings/update` endpoint — a settings
+- **Backend (pytest):** the new `/api/settings_update` endpoint — a settings
   delta persists AND the named flags land in `control` (assert via
   `read_control`), using the existing web test harness
   (`tests/web/conftest.py`); empty-flags case sets none.
