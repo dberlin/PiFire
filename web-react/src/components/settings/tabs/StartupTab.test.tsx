@@ -34,6 +34,10 @@ describe("StartupTab", () => {
           smartstart: {
             enabled: true,
             exit_temp: 160,
+            // Distinct from the other scalar values asserted below (90, 60,
+            // 150, 50, 75, 250) so the RangeProfileTable's boundary inputs
+            // don't collide with the singular getByDisplayValue queries.
+            temp_range_list: [65, 82, 97],
           },
           start_to_mode: {
             after_startup_mode: "Hold",
@@ -249,5 +253,103 @@ describe("StartupTab", () => {
       }),
       ["settings_update"],
     );
+  });
+
+  const smartstartFixture = () => ({
+    settings: {
+      shutdown: {
+        shutdown_duration: 60,
+        auto_power_off: false,
+      },
+      startup: {
+        duration: 60,
+        startup_exit_temp: 150,
+        prime_on_startup: 0,
+        pwm_duty_cycle: 50,
+        smartstart: {
+          enabled: true,
+          exit_temp: 150,
+          temp_range_list: [60, 80, 90],
+          profiles: [
+            { startuptime: 360, augerontime: 15, p_mode: 0 },
+            { startuptime: 360, augerontime: 15, p_mode: 1 },
+            { startuptime: 240, augerontime: 15, p_mode: 3 },
+            { startuptime: 240, augerontime: 15, p_mode: 5 },
+          ],
+        },
+        start_to_mode: {
+          after_startup_mode: "Smoke",
+          primary_setpoint: 225,
+          start_to_hold_prompt: false,
+        },
+      },
+      pwm: {
+        min_duty_cycle: 20,
+        max_duty_cycle: 100,
+      },
+    },
+    mode: "Stop",
+  });
+
+  it("renders 4 SmartStart profile rows with derived range labels", () => {
+    renderRoute(<StartupTab />, smartstartFixture());
+
+    expect(screen.getByText("< 60°")).toBeInTheDocument();
+    expect(screen.getByText("60 – 79°")).toBeInTheDocument();
+    expect(screen.getByText("80 – 89°")).toBeInTheDocument();
+    expect(screen.getByText("≥ 90°")).toBeInTheDocument();
+
+    expect(screen.getByLabelText("Startup time row 1")).toHaveValue(360);
+    expect(screen.getByLabelText("Auger on row 1")).toHaveValue(15);
+    expect(screen.getByLabelText("P-Mode row 1")).toHaveValue(0);
+    expect(screen.getByLabelText("P-Mode row 2")).toHaveValue(1);
+    expect(screen.getByLabelText("P-Mode row 3")).toHaveValue(3);
+    expect(screen.getByLabelText("P-Mode row 4")).toHaveValue(5);
+  });
+
+  it("edits a SmartStart profile cell and saves the full profiles array with temp_range_list unchanged", async () => {
+    renderRoute(<StartupTab />, smartstartFixture());
+
+    const input = screen.getByLabelText("Startup time row 2");
+    fireEvent.change(input, { target: { value: "300" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(saveMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startup: expect.objectContaining({
+          smartstart: expect.objectContaining({
+            temp_range_list: [60, 80, 90],
+            profiles: [
+              { startuptime: 360, augerontime: 15, p_mode: 0 },
+              { startuptime: 300, augerontime: 15, p_mode: 1 },
+              { startuptime: 240, augerontime: 15, p_mode: 3 },
+              { startuptime: 240, augerontime: 15, p_mode: 5 },
+            ],
+          }),
+        }),
+      }),
+      ["settings_update"],
+    );
+  });
+
+  it("adds a SmartStart range and saves with both arrays grown by one", async () => {
+    renderRoute(<StartupTab />, smartstartFixture());
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(saveMock).toHaveBeenCalledTimes(1);
+    const [delta, flags] = saveMock.mock.calls[0];
+    expect(delta.startup.smartstart.temp_range_list).toEqual([60, 80, 90, 100]);
+    expect(delta.startup.smartstart.profiles).toHaveLength(5);
+    expect(delta.startup.smartstart.profiles[4]).toEqual({
+      startuptime: 240,
+      augerontime: 15,
+      p_mode: 5,
+    });
+    expect(flags).toEqual(["settings_update"]);
   });
 });

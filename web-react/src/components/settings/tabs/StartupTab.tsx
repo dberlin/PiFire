@@ -7,6 +7,21 @@ import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";
 import { Toggle } from "../fields/Toggle";
+import { type RangeProfileColumn, RangeProfileTable } from "../RangeProfileTable";
+
+const SMARTSTART_COLUMNS: RangeProfileColumn[] = [
+  { key: "startuptime", label: "Startup time", suffix: "s", min: 30, max: 1200 },
+  { key: "augerontime", label: "Auger on", suffix: "s", min: 1, max: 60 },
+  { key: "p_mode", label: "P-Mode", min: 0, max: 9 },
+];
+
+const DEFAULT_SMARTSTART_TEMPS = [60, 80, 90];
+const DEFAULT_SMARTSTART_PROFILES: Record<string, number>[] = [
+  { startuptime: 360, augerontime: 15, p_mode: 0 },
+  { startuptime: 360, augerontime: 15, p_mode: 1 },
+  { startuptime: 240, augerontime: 15, p_mode: 3 },
+  { startuptime: 240, augerontime: 15, p_mode: 5 },
+];
 
 type Startup = {
   shutdown_duration: number;
@@ -17,6 +32,8 @@ type Startup = {
   pwm_duty_cycle: number;
   smartstart_enabled: boolean;
   smartstart_exit_temp: number;
+  smartstartTemps: number[];
+  smartstartProfiles: Record<string, number>[];
   after_startup_mode: string;
   primary_setpoint: number;
   start_to_hold_prompt: boolean;
@@ -36,6 +53,13 @@ function readStartup(s: Settings): Startup {
     pwm_duty_cycle: st.pwm_duty_cycle ?? 50,
     smartstart_enabled: !!ss.enabled,
     smartstart_exit_temp: ss.exit_temp ?? 150,
+    // Cloned (never aliased into the widget's onChange arrays) — the widget
+    // emits fresh arrays on edit, but our local state must not share
+    // references with `settings`.
+    smartstartTemps: structuredClone((ss.temp_range_list ?? DEFAULT_SMARTSTART_TEMPS) as number[]),
+    smartstartProfiles: structuredClone(
+      (ss.profiles ?? DEFAULT_SMARTSTART_PROFILES) as Record<string, number>[],
+    ),
     after_startup_mode: stm.after_startup_mode ?? "Smoke",
     primary_setpoint: stm.primary_setpoint ?? 225,
     start_to_hold_prompt: !!stm.start_to_hold_prompt,
@@ -54,6 +78,7 @@ export function StartupTab() {
   }
 
   const set = <K extends keyof Startup>(k: K, val: Startup[K]) => setV((s) => ({ ...s, [k]: val }));
+  const units = settings.globals?.units === "C" ? "°C" : "°F";
 
   const onSave = async () => {
     let d: object = {};
@@ -83,6 +108,10 @@ export function StartupTab() {
     // Build delta for smartstart fields
     d = setPath(d, "startup.smartstart.enabled", v.smartstart_enabled);
     d = setPath(d, "startup.smartstart.exit_temp", v.smartstart_exit_temp);
+    // Table-driven arrays ride the same delta wholesale (plan ruling: single
+    // Save per tab, existing ["settings_update"] flag kept).
+    d = setPath(d, "startup.smartstart.temp_range_list", v.smartstartTemps);
+    d = setPath(d, "startup.smartstart.profiles", v.smartstartProfiles);
 
     // Build delta for start_to_mode fields
     d = setPath(d, "startup.start_to_mode.after_startup_mode", v.after_startup_mode);
@@ -157,6 +186,16 @@ export function StartupTab() {
           onChange={(n) => set("smartstart_exit_temp", n)}
           min={0}
           suffix="°"
+        />
+        <RangeProfileTable
+          boundaries={v.smartstartTemps}
+          profiles={v.smartstartProfiles}
+          columns={SMARTSTART_COLUMNS}
+          rangeHeader="Range"
+          unit={units}
+          onChange={(boundaries, profiles) =>
+            setV((s) => ({ ...s, smartstartTemps: boundaries, smartstartProfiles: profiles }))
+          }
         />
       </Section>
 
