@@ -1,5 +1,5 @@
 from flask import request, jsonify, abort
-from common.common import WriteKind, write_log, deep_update
+from common.common import WriteKind, write_log, deep_update, read_generic_json
 from common.datastore_accessors import (
     read_settings,
     write_settings,
@@ -101,6 +101,10 @@ def _api_get_wled_discover(settings, server_status):
         return jsonify({"result": "error", "message": f"WLED discovery failed: {str(e)}", "devices": []}), 500
 
 
+def _api_get_controller_metadata(settings, server_status):
+    return jsonify(read_generic_json("./controller/controllers.json")), 201
+
+
 _API_GET_ACTIONS = {
     "settings": _api_get_settings,
     "server": _api_get_server,
@@ -108,6 +112,7 @@ _API_GET_ACTIONS = {
     "current": _api_get_current,
     "hopper": _api_get_hopper,
     "wled_discover": _api_get_wled_discover,
+    "controller_metadata": _api_get_controller_metadata,
 }
 
 

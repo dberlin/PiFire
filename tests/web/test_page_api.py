@@ -85,6 +85,16 @@ def test_get_hopper(live_server, page):
     assert body["hopper_pellets"] == "Generic Alder"
 
 
+def test_api_controller_metadata(live_server, page):
+    resp = page.request.get(f"{live_server}/api/controller_metadata")
+    assert resp.status == 201
+    body = resp.json()
+    assert "metadata" in body
+    assert "pid" in body["metadata"]
+    cfg = body["metadata"]["pid"]["config"]
+    assert cfg and cfg[0]["option_name"]
+
+
 def test_get_unknown_action_returns_404(live_server, page):
     resp = page.request.get(f"{live_server}/api/not_a_real_action")
     assert resp.status == 404
