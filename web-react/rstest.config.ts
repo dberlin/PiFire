@@ -27,6 +27,9 @@ export default defineConfig({
       "src/test-setup.ts",
       "src/test-utils.tsx",
     ],
+    thresholds: {
+      "src/**/*.{ts,tsx}": { lines: 75, perFile: true },
+    },
   },
   projects: [
     { ...shared, name: "unit-node", include: ["src/**/*.test.ts"], testEnvironment: "node" },
