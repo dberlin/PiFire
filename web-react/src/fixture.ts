@@ -1,47 +1,167 @@
 import type { DashData } from "./types";
 
-// Recorded-shape fallback so the POC renders with no running Pi. Values are a
-// representative "Hold at 225°F, primary climbing" snapshot matching the exact
-// key layout of socket_io.py `_get_dash_data`. Swap for a real captured payload
-// by copying one emitted `socket_dash_data` object here verbatim.
+// Real `socket_dash_data` payload captured 2026-07-21 from the running
+// prototype backend (control.py + gunicorn on localhost:5000), via a
+// one-shot python-socketio client emitting `listen_app_data` and recording
+// the first `socket_dash_data` event. The prototype grill platform was idle
+// (currentMode/displayMode "Stop", status "inactive") at capture time, so
+// temps/outputs read as zero/false — this is a genuine backend snapshot, not
+// a hand-authored "nice" cook state. See `.superpowers/sdd/task-dash1-report.md`
+// for the capture procedure.
 export const FIXTURE_DASH: DashData = {
-  uuid: "fixture",
-  grillName: "PiFire",
-  currentMode: "Hold",
-  displayMode: "Hold",
-  nextMode: "Hold",
-  smokePlus: true,
-  pMode: 2,
-  hopperLevel: 68,
-  tempUnits: "F",
-  lidOpenDetected: false,
-  outputs: { fan: 1, auger: 1, igniter: 0 },
-  timer: { start: 0, paused: 0, end: 0, keepWarm: false, shutdown: false },
-  recipeStatus: { recipeMode: false, filename: "", mode: "", paused: false, step: 0 },
-  primaryProbe: {
-    title: "Grill",
-    label: "Grill",
-    temp: 198,
-    setTemp: 225,
-    maxTemp: 600,
-    target: 0,
-    targetReq: false,
-    hasNotifications: false,
-    status: {},
+  "uuid": "91a66346-7e6a-11f1-b29c-84470959a251",
+  "errors": [],
+  "warnings": [],
+  "status": "inactive",
+  "criticalError": false,
+  "grillName": "BOOT_PATH_SENTINEL_GRILL",
+  "currentMode": "Stop",
+  "nextMode": "Stop",
+  "displayMode": "Stop",
+  "smokePlus": false,
+  "pwmControl": false,
+  "pMode": 2,
+  "hopperLevel": 100,
+  "startupTimestamp": 0,
+  "modeStartTime": 0,
+  "lidOpenDetectEnabled": false,
+  "lidOpenDetected": false,
+  "lidOpenEndTime": 0,
+  "startDuration": 0,
+  "shutdownDuration": 0,
+  "primeDuration": 0,
+  "primeAmount": 0,
+  "tempUnits": "F",
+  "hasDcFan": false,
+  "hasDistanceSensor": false,
+  "startupCheck": true,
+  "startToHoldPrompt": false,
+  "startupGotoTemp": 165,
+  "startupGotoMode": "Smoke",
+  "allowManualOutputs": false,
+  "timer": {
+    "start": 0,
+    "paused": 0,
+    "end": 0,
+    "keepWarm": false,
+    "shutdown": false
   },
-  foodProbes: [
+  "outputs": {
+    "fan": false,
+    "auger": false,
+    "igniter": false
+  },
+  "recipeStatus": {
+    "recipeMode": false,
+    "filename": "",
+    "mode": "Stop",
+    "paused": false,
+    "step": 0
+  },
+  "foodProbes": [
     {
-      title: "Probe 1",
-      label: "Probe1",
-      temp: 142,
-      setTemp: 0,
-      maxTemp: 300,
-      target: 203,
-      targetReq: true,
-      hasNotifications: true,
-      status: {},
+      "title": "Probe-1",
+      "label": "Probe1",
+      "eta": null,
+      "temp": 0,
+      "setTemp": 0,
+      "maxTemp": 300,
+      "target": 0,
+      "lowLimitTemp": 0,
+      "highLimitTemp": 0,
+      "targetReq": false,
+      "hasNotifications": false,
+      "lowLimitReq": false,
+      "highLimitReq": false,
+      "highLimitShutdown": false,
+      "highLimitTriggered": false,
+      "lowLimitShutdown": false,
+      "lowLimitReignite": false,
+      "lowLimitTriggered": false,
+      "targetShutdown": false,
+      "targetKeepWarm": false,
+      "status": {
+        "error": null
+      },
+      "device": "proto_adc"
     },
+    {
+      "title": "Probe-2",
+      "label": "Probe2",
+      "eta": null,
+      "temp": 0,
+      "setTemp": 0,
+      "maxTemp": 300,
+      "target": 0,
+      "lowLimitTemp": 0,
+      "highLimitTemp": 0,
+      "targetReq": false,
+      "hasNotifications": false,
+      "lowLimitReq": false,
+      "highLimitReq": false,
+      "highLimitShutdown": false,
+      "highLimitTriggered": false,
+      "lowLimitShutdown": false,
+      "lowLimitReignite": false,
+      "lowLimitTriggered": false,
+      "targetShutdown": false,
+      "targetKeepWarm": false,
+      "status": {
+        "error": null
+      },
+      "device": "proto_adc"
+    },
+    {
+      "title": "Probe-3",
+      "label": "Probe3",
+      "eta": null,
+      "temp": 0,
+      "setTemp": 0,
+      "maxTemp": 300,
+      "target": 0,
+      "lowLimitTemp": 0,
+      "highLimitTemp": 0,
+      "targetReq": false,
+      "hasNotifications": false,
+      "lowLimitReq": false,
+      "highLimitReq": false,
+      "highLimitShutdown": false,
+      "highLimitTriggered": false,
+      "lowLimitShutdown": false,
+      "lowLimitReignite": false,
+      "lowLimitTriggered": false,
+      "targetShutdown": false,
+      "targetKeepWarm": false,
+      "status": {
+        "error": null
+      },
+      "device": "proto_adc"
+    }
   ],
-  errors: [],
-  warnings: [],
+  "primaryProbe": {
+    "title": "Grill",
+    "label": "Grill",
+    "eta": null,
+    "temp": 0,
+    "setTemp": 0,
+    "maxTemp": 600,
+    "target": 0,
+    "lowLimitTemp": 0,
+    "highLimitTemp": 0,
+    "targetReq": false,
+    "hasNotifications": false,
+    "lowLimitReq": false,
+    "highLimitReq": false,
+    "highLimitShutdown": false,
+    "highLimitTriggered": false,
+    "lowLimitShutdown": false,
+    "lowLimitReignite": false,
+    "lowLimitTriggered": false,
+    "targetShutdown": false,
+    "targetKeepWarm": false,
+    "status": {
+      "error": null
+    },
+    "device": "proto_adc"
+  }
 };

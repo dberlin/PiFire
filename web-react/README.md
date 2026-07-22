@@ -43,3 +43,42 @@ badge reads `DEMO`. Commands are logged to the console instead of sent.
 the badge reads `LIVE` once connected. If PiFire is **not reachable**, `dev` shows
 an explicit "PiFire not reachable — tried `<URL>`" screen and keeps retrying — it
 does **not** fake data. (For test data with no Pi, use `bun run demo`.)
+
+## Running against the real backend (prototype)
+
+The dev server proxies both `/socket.io` (reads) and `/api` (REST command
+writes) to `VITE_PIFIRE_URL` (default `http://localhost:5000`), so the app can
+talk to a running PiFire instance without CORS.
+
+From the repo root (`/home/dannyb/sources/PiFire`), in two terminals, start the
+prototype backend:
+
+```bash
+uv run python control.py                                              # control loop, prototype grill platform → datastore
+uv run gunicorn -k gthread --threads 25 -b 0.0.0.0:5000 -w 1 app:app  # web app (Flask+SocketIO)
+```
+
+`gunicorn` is how production runs the web app (`auto-install/supervisor/webapp.conf`);
+`python app.py` trips Werkzeug's production guard, so don't use it here.
+
+Verify the backend is up:
+
+```bash
+curl -s http://localhost:5000/api/current | head -c 200
+```
+
+This should return JSON with a `current` object. Leave both processes running,
+then from `web-react/`:
+
+```bash
+bun run dev   # http://localhost:5173, proxied to :5000
+```
+
+With the backend running, `http://localhost:5173/api/current` (and
+`/socket.io`) resolve through the Vite proxy to the same JSON/events the
+backend serves directly. `bun run demo` remains the fully offline path (no
+backend required) for UI-only iteration.
+
+`src/fixture.ts`'s `FIXTURE_DASH` is a real `socket_dash_data` payload
+captured from this prototype backend via a one-shot python-socketio client
+(see git history of that file for the exact capture snippet).
