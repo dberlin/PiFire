@@ -48,7 +48,14 @@
 .pf-stage {
   width: 1280px;
   height: 720px;
-  position: relative;
+  /* Center-and-scale independent of viewport size: absolute + translate(-50%,-50%)
+     centers the element's own 1280x720 box, then scale() (set inline) sizes it to
+     fit. Grid place-items:center on .pf-fit does NOT reliably center a child whose
+     layout box is wider than the viewport (it pins to start and clips right on
+     sub-1280px screens like the 800x480 touchscreen); this idiom fits at any size. */
+  position: absolute;
+  top: 50%;
+  left: 50%;
   overflow: hidden;
   background: radial-gradient(120% 90% at 50% 118%, #241a12 0%, #16110d 42%, #0d0b09 100%);
   font-family: "Barlow", system-ui, sans-serif;

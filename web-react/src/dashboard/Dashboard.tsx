@@ -45,7 +45,7 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
 
   return (
     <div className="pf-fit">
-      <div className="pf-stage" data-animate={animate ? "true" : "false"} style={{ transform: `scale(${scale})` }}>
+      <div className="pf-stage" data-animate={animate ? "true" : "false"} style={{ transform: `translate(-50%, -50%) scale(${scale})` }}>
         <div
           style={{
             position: "absolute",
