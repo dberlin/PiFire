@@ -72,4 +72,29 @@ describe("Dashboard", () => {
     renderDashboard({ ...FIXTURE_DASH, foodProbes: [] });
     expect(screen.queryByText("Food Probes")).not.toBeInTheDocument();
   });
+
+  it("shows the P-mode and an ON smoke+ pill when smokePlus is set", () => {
+    renderDashboard({ ...FIXTURE_DASH, pMode: 2, smokePlus: true });
+    expect(screen.getByText("P-MODE")).toBeInTheDocument();
+    expect(screen.getByText("P-2")).toBeInTheDocument();
+    expect(screen.getByText("SMOKE+")).toBeInTheDocument();
+    expect(screen.getByText("ON")).toBeInTheDocument();
+  });
+
+  it("shows an OFF smoke+ pill when smokePlus is unset", () => {
+    renderDashboard({ ...FIXTURE_DASH, smokePlus: false });
+    expect(screen.getByText("OFF")).toBeInTheDocument();
+  });
+
+  it("shows the MONITOR mode badge and a zeroed cook-time counter (non-cooking)", () => {
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Monitor" });
+    expect(screen.getByText("MONITOR")).toBeInTheDocument();
+    expect(screen.getByText("00:00")).toBeInTheDocument();
+  });
+
+  it("shows the SHUTDOWN mode badge and a zeroed cook-time counter (non-cooking)", () => {
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Shutdown" });
+    expect(screen.getByText("SHUTDOWN")).toBeInTheDocument();
+    expect(screen.getByText("00:00")).toBeInTheDocument();
+  });
 });
