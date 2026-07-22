@@ -10,7 +10,7 @@ interface Props {
 }
 
 export function SetpointEntry({ open, initial, units, onSubmit, onCancel }: Props) {
-  const [temp, setTemp] = useState(initial);
+  const [temp, setTemp] = useState(() => (open ? clampSetpoint(initial, units) : initial));
   // Re-seed the slider from `initial` (clamped) whenever open/initial/units
   // change, but only while open — adjusted synchronously during render
   // (React's recommended pattern for deriving state from prop changes)

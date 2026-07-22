@@ -37,7 +37,7 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
   // controller leaves an active cooking mode). Adjusted synchronously during
   // render on the cooking-state transition edge (React's recommended pattern
   // for deriving state from a prop change), rather than in an effect.
-  const [cookStart, setCookStart] = useState<number | null>(null);
+  const [cookStart, setCookStart] = useState<number | null>(() => (view.cooking ? now.getTime() : null));
   const [prevCooking, setPrevCooking] = useState(view.cooking);
   if (view.cooking !== prevCooking) {
     setPrevCooking(view.cooking);
