@@ -83,10 +83,10 @@ catches schema drift at runtime. Real but modest.
 (defaults, migrations, the datastore); frontend-owned shape inverts that and
 forfeits the Python validation library's value.
 
-**Recommendation:** T1 for S1 (types only — smallest, mature). Revisit T2b at
-S2 if pre-POST validation UX proves wanted — it slots into the same codegen
-step without changing the source of truth. Skip T2-runtime until zod's
-fromJSONSchema is stable.
+**DECIDED (user, 2026-07-22): zod is out.** TS side is
+`json-schema-to-typescript` types only (T1) — no zod dependency in any phase.
+Client-side pre-POST validation, if ever wanted, would be revisited as a new
+decision; S2's server-side enforcement is the correctness guarantee.
 
 ## Library options (versions checked on PyPI 2026-07-22)
 
