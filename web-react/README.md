@@ -29,7 +29,7 @@ cd web-react
 bun install
 bun run demo       # http://localhost:5173  — LIVE test data, no Pi needed
 bun run dev        # connects to a real PiFire (see PUBLIC_PIFIRE_URL)
-bun run test       # unit tests (vitest)
+bun run test       # unit tests (rstest)
 bun run build      # type-check + production build
 ```
 

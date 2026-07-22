@@ -8,7 +8,7 @@
     "dev": "rsbuild dev",
     "demo": "PUBLIC_DEMO=1 rsbuild dev",
     "typecheck": "node node_modules/typescript7/bin/tsc -b",
-    "build": "node node_modules/typescript7/bin/tsc -b && rsbuild build",
+    "build": "bun run typecheck && rsbuild build",
     "preview": "rsbuild preview",
     "test": "rstest run",
     "test:e2e": "playwright test",

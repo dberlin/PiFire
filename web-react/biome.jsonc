@@ -1,0 +1,82 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": [
+      "src/**",
+      "tests/**",
+      "*.json",
+      "*.ts",
+      "*.js",
+      "index.html",
+      "!dist",
+      "!node_modules"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "a11y": {
+        // All findings are on existing modal/gauge widgets (click-to-dismiss
+        // scrims, SVG gauge, buttons without an explicit type). Per house
+        // rules, a11y widget restructuring is out of scope here — scheduled
+        // as a separate follow-up.
+        "useButtonType": "off",
+        "useGenericFontNames": "off",
+        "useKeyWithClickEvents": "off",
+        "noSvgWithoutTitle": "off",
+        "noStaticElementInteractions": "off"
+      },
+      "style": {
+        // 6 pre-existing `!` assertions (DOM root lookup in main.tsx,
+        // confirm-modal state narrowed by a JSX guard, and test
+        // `querySelector(...)!` calls already preceded by a
+        // `.not.toBeNull()` check). Removing them needs real null-narrowing
+        // refactors per call site; deferred.
+        "noNonNullAssertion": "off"
+      },
+      "suspicious": {
+        // 2 pre-existing React `key={i}` uses in Banners/Dashboard list
+        // rendering over arrays regenerated in stable order from live
+        // socket data each render — not a correctness bug, deferred rather
+        // than restructured.
+        "noArrayIndexKey": "off"
+      },
+      "complexity": {
+        // The single `animation: none !important` in dashboard.css is a
+        // deliberate override to force-kill @keyframes animations when the
+        // "reduce motion" toggle is off; removing !important would break
+        // that feature.
+        "noImportantStyles": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["src/settings/settingsApi.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            // `Settings = Record<string, any>` models an arbitrary backend
+            // JSON settings blob; already carried a matching eslint-disable
+            // comment before this task.
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ]
+}
