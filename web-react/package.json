@@ -10,7 +10,7 @@
     "typecheck": "node node_modules/typescript7/bin/tsc -b",
     "build": "node node_modules/typescript7/bin/tsc -b && rsbuild build",
     "preview": "rsbuild preview",
-    "test": "vitest run",
+    "test": "rstest run",
     "test:e2e": "playwright test",
     "lint": "biome check . && eslint .",
     "format": "biome format --write ."
@@ -26,6 +26,7 @@
     "@playwright/test": "^1.61.1",
     "@rsbuild/core": "2.1.7",
     "@rsbuild/plugin-react": "2.1.0",
+    "@rstest/core": "0.11.3",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -37,7 +38,6 @@
     "eslint-plugin-react-refresh": "^0.5.3",
     "jsdom": "^29.1.1",
     "typescript": "^5.9.3",
-    "typescript7": "npm:typescript@7.0.2",
-    "vitest": "^4.1.10"
+    "typescript7": "npm:typescript@7.0.2"
   }
 }

@@ -1,7 +1,5 @@
-// @vitest-environment jsdom
-
+import { describe, expect, it } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
 import { Section } from "./Section";
 
 describe("Section", () => {

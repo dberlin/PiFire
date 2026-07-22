@@ -1,12 +1,10 @@
-// @vitest-environment jsdom
-
+import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
 import { Toggle } from "./Toggle";
 
 describe("Toggle", () => {
   it("reflects checked state via aria-pressed and calls onChange on click", () => {
-    const onChange = vi.fn();
+    const onChange = rs.fn();
     render(<Toggle label="Enable" checked={true} onChange={onChange} />);
     const button = screen.getByRole("button");
     expect(button).toHaveAttribute("aria-pressed", "true");
@@ -15,7 +13,7 @@ describe("Toggle", () => {
   });
 
   it("toggles aria-pressed when checked is false", () => {
-    const onChange = vi.fn();
+    const onChange = rs.fn();
     render(<Toggle label="Disabled" checked={false} onChange={onChange} />);
     const button = screen.getByRole("button");
     expect(button).toHaveAttribute("aria-pressed", "false");
@@ -24,13 +22,13 @@ describe("Toggle", () => {
   });
 
   it("renders label", () => {
-    const onChange = vi.fn();
+    const onChange = rs.fn();
     render(<Toggle label="My Toggle" checked={false} onChange={onChange} />);
     expect(screen.getByText("My Toggle")).toBeInTheDocument();
   });
 
   it("inverts the checked prop on click", () => {
-    const onChange = vi.fn();
+    const onChange = rs.fn();
     const { rerender } = render(<Toggle label="Test" checked={true} onChange={onChange} />);
     let button = screen.getByRole("button");
     fireEvent.click(button);

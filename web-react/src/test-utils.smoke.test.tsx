@@ -1,8 +1,6 @@
-// @vitest-environment jsdom
-
+import { describe, expect, it } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
 import { useOutletContext } from "react-router";
-import { describe, expect, it } from "vitest";
 import { renderRoute } from "./test-utils";
 
 describe("rtl harness", () => {

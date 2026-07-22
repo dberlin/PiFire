@@ -1,12 +1,10 @@
-// @vitest-environment jsdom
-
+import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
 import { TextField } from "./TextField";
 
 describe("TextField", () => {
   it("renders value and calls onChange on typing", () => {
-    const onChange = vi.fn();
+    const onChange = rs.fn();
     render(<TextField label="Name" value="John" onChange={onChange} />);
     const input = screen.getByRole("textbox");
     expect(input).toHaveValue("John");
@@ -15,20 +13,20 @@ describe("TextField", () => {
   });
 
   it("renders empty string value", () => {
-    const onChange = vi.fn();
+    const onChange = rs.fn();
     render(<TextField label="Empty" value="" onChange={onChange} />);
     const input = screen.getByRole("textbox");
     expect(input).toHaveValue("");
   });
 
   it("renders label", () => {
-    const onChange = vi.fn();
+    const onChange = rs.fn();
     render(<TextField label="My Label" value="test" onChange={onChange} />);
     expect(screen.getByText("My Label")).toBeInTheDocument();
   });
 
   it("calls onChange with string value", () => {
-    const onChange = vi.fn();
+    const onChange = rs.fn();
     render(<TextField label="Input" value="" onChange={onChange} />);
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "hello" } });
@@ -38,7 +36,7 @@ describe("TextField", () => {
   });
 
   it("handles special characters and spaces", () => {
-    const onChange = vi.fn();
+    const onChange = rs.fn();
     render(<TextField label="Text" value="" onChange={onChange} />);
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "Hello World! #123" } });

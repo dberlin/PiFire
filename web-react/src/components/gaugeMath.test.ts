@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { arcLength, clampFraction, GAUGE_START, GAUGE_SWEEP, valueAngle } from "./gaugeMath";
 
 describe("gauge math", () => {

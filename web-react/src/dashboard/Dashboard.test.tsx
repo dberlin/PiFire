@@ -1,7 +1,5 @@
-// @vitest-environment jsdom
-
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CommandClient, CommandResult } from "../command";
 import { FIXTURE_DASH } from "../fixture";
 import { renderRoute } from "../test-utils";
@@ -14,16 +12,16 @@ const OK: CommandResult = { ok: true, message: "" };
 
 function makeCommand(): CommandClient {
   return {
-    setMode: vi.fn(async () => OK),
-    hold: vi.fn(async () => OK),
-    setSmokePlus: vi.fn(async () => OK),
-    setPMode: vi.fn(async () => OK),
-    prime: vi.fn(async () => OK),
-    timerStart: vi.fn(async () => OK),
-    timerPause: vi.fn(async () => OK),
-    timerStop: vi.fn(async () => OK),
-    system: vi.fn(async () => OK),
-    setUnits: vi.fn(async () => OK),
+    setMode: rs.fn(async () => OK),
+    hold: rs.fn(async () => OK),
+    setSmokePlus: rs.fn(async () => OK),
+    setPMode: rs.fn(async () => OK),
+    prime: rs.fn(async () => OK),
+    timerStart: rs.fn(async () => OK),
+    timerPause: rs.fn(async () => OK),
+    timerStop: rs.fn(async () => OK),
+    system: rs.fn(async () => OK),
+    setUnits: rs.fn(async () => OK),
   };
 }
 
@@ -35,9 +33,9 @@ function renderDashboard(dash: DashData, overrides: Partial<Parameters<typeof Da
       phase="live"
       controlAlive={true}
       accent="ember"
-      setAccent={vi.fn()}
+      setAccent={rs.fn()}
       animate={false}
-      setAnimate={vi.fn()}
+      setAnimate={rs.fn()}
       {...overrides}
     />,
     undefined,

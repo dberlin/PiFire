@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { buildCommandUrl, createCommand } from "./command";
 
 describe("buildCommandUrl", () => {
@@ -11,15 +11,17 @@ describe("buildCommandUrl", () => {
 });
 
 describe("createCommand issues the right URLs", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof rs.fn>;
   beforeEach(() => {
-    fetchMock = vi.fn(async () => ({
+    fetchMock = rs.fn(async () => ({
       ok: true,
       json: async () => ({ result: "OK", message: "", data: {} }),
     }));
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
 
   const url = () => fetchMock.mock.calls[0][0];
   const opts = () => fetchMock.mock.calls[0][1];

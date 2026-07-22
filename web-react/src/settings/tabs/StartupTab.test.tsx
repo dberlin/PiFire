@@ -1,14 +1,12 @@
-// @vitest-environment jsdom
-
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test-utils";
 import { StartupTab } from "./StartupTab";
 
-const saveMock = vi.fn().mockResolvedValue(true);
+const saveMock = rs.fn().mockResolvedValue(true);
 
 // Mock the useSaveSettings module
-vi.mock("../useSaveSettings", () => ({
+rs.mock("../useSaveSettings", () => ({
   useSaveSettings: () => ({
     save: saveMock,
     saving: false,

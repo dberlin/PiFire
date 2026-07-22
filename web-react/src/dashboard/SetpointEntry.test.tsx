@@ -1,14 +1,12 @@
-// @vitest-environment jsdom
-
+import { describe, expect, it, rs } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
 import { SetpointEntry } from "./SetpointEntry";
 
 describe("SetpointEntry", () => {
   it("renders the initial value clamped into range", () => {
     const { container } = render(
-      <SetpointEntry open initial={1000} units="F" onSubmit={vi.fn()} onCancel={vi.fn()} />,
+      <SetpointEntry open initial={1000} units="F" onSubmit={rs.fn()} onCancel={rs.fn()} />,
     );
     expect(container.querySelector(".pf-setpoint-val")).toHaveTextContent("500°F");
   });
@@ -16,7 +14,7 @@ describe("SetpointEntry", () => {
   it("steps the value up/down by the unit step, clamped at the range bounds", async () => {
     const user = userEvent.setup();
     const { container } = render(
-      <SetpointEntry open initial={498} units="F" onSubmit={vi.fn()} onCancel={vi.fn()} />,
+      <SetpointEntry open initial={498} units="F" onSubmit={rs.fn()} onCancel={rs.fn()} />,
     );
     const val = () => container.querySelector(".pf-setpoint-val")?.textContent;
     expect(val()).toBe("498°F");
@@ -32,17 +30,17 @@ describe("SetpointEntry", () => {
 
   it("submits the current value via onSubmit", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn();
-    render(<SetpointEntry open initial={225} units="F" onSubmit={onSubmit} onCancel={vi.fn()} />);
+    const onSubmit = rs.fn();
+    render(<SetpointEntry open initial={225} units="F" onSubmit={onSubmit} onCancel={rs.fn()} />);
     await user.click(screen.getByRole("button", { name: "Set Hold" }));
     expect(onSubmit).toHaveBeenCalledWith(225);
   });
 
   it("calls onCancel when the scrim is clicked", async () => {
     const user = userEvent.setup();
-    const onCancel = vi.fn();
+    const onCancel = rs.fn();
     const { container } = render(
-      <SetpointEntry open initial={225} units="F" onSubmit={vi.fn()} onCancel={onCancel} />,
+      <SetpointEntry open initial={225} units="F" onSubmit={rs.fn()} onCancel={onCancel} />,
     );
     await user.click(container.querySelector(".pf-modal-scrim")!);
     expect(onCancel).toHaveBeenCalled();

@@ -1,8 +1,6 @@
-// @vitest-environment jsdom
-
+import { describe, expect, it, rs } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
 import type { CommandClient, CommandResult } from "../command";
 import { FIXTURE_DASH } from "../fixture";
 import type { DashData } from "../types";
@@ -17,16 +15,16 @@ const at = (mode: string, over: Partial<DashData> = {}): DashData => ({
 
 function stubCommand(): CommandClient {
   return {
-    setMode: vi.fn(async () => OK),
-    hold: vi.fn(async () => OK),
-    setSmokePlus: vi.fn(async () => OK),
-    setPMode: vi.fn(async () => OK),
-    prime: vi.fn(async () => OK),
-    timerStart: vi.fn(async () => OK),
-    timerPause: vi.fn(async () => OK),
-    timerStop: vi.fn(async () => OK),
-    system: vi.fn(async () => OK),
-    setUnits: vi.fn(async () => OK),
+    setMode: rs.fn(async () => OK),
+    hold: rs.fn(async () => OK),
+    setSmokePlus: rs.fn(async () => OK),
+    setPMode: rs.fn(async () => OK),
+    prime: rs.fn(async () => OK),
+    timerStart: rs.fn(async () => OK),
+    timerPause: rs.fn(async () => OK),
+    timerStop: rs.fn(async () => OK),
+    system: rs.fn(async () => OK),
+    setUnits: rs.fn(async () => OK),
   };
 }
 

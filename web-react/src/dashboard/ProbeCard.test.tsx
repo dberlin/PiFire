@@ -1,7 +1,5 @@
-// @vitest-environment jsdom
-
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
 import { FIXTURE_DASH } from "../fixture";
 import { deriveView } from "./deriveView";
 import { ProbeCard } from "./ProbeCard";

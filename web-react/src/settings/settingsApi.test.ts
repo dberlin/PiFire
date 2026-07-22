@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { applySettings, buildSettingsUrl } from "./settingsApi";
 
 describe("buildSettingsUrl", () => {
@@ -11,15 +11,17 @@ describe("buildSettingsUrl", () => {
 });
 
 describe("applySettings", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof rs.fn>;
   beforeEach(() => {
-    fetchMock = vi.fn(async () => ({
+    fetchMock = rs.fn(async () => ({
       ok: true,
       json: async () => ({ result: "success", message: "", data: {} }),
     }));
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
 
   it("POSTs {settings, flags} to /api/settings_update and maps success", async () => {
     const r = await applySettings("", { globals: { grill_name: "X" } }, ["settings_update"]);
