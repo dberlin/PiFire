@@ -21,6 +21,7 @@
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.5",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.1",
     "@rolldown/plugin-babel": "^0.2.3",
