@@ -1,39 +1,77 @@
-// Mirrors the payload emitted by PiFire's existing Flask-SocketIO
-// `socket_dash_data` event — see blueprints/mobile/socket_io.py `_get_dash_data`
-// (dict at lines ~210-263) and `_get_probe_structure` (~813-836).
-// Only the fields the POC consumes are typed strictly; the rest are optional.
+// Mirrors blueprints/mobile/socket_io.py _get_dash_data / _get_probe_structure.
+// Kept in sync with the real socket_dash_data payload; index signatures allow
+// forward-compat with backend fields not modeled here.
+
+export interface ProbeStatus {
+  batteryCharging?: boolean;
+  batteryPercentage?: number;
+  batteryVoltage?: number;
+  connected?: boolean;
+  error?: boolean | null; // real capture emits `null` when no error is present
+  [k: string]: unknown;
+}
 
 export interface ProbeData {
   title: string;
   label: string;
+  eta: number | string | null; // real capture emits `null` when no ETA applies
   temp: number;
-  setTemp: number; // primary only: current setpoint (PSP)
+  setTemp: number;
   maxTemp: number;
   target: number;
+  lowLimitTemp: number;
+  highLimitTemp: number;
   targetReq: boolean;
   hasNotifications: boolean;
-  status: Record<string, unknown>;
+  lowLimitReq: boolean;
+  highLimitReq: boolean;
+  highLimitShutdown: boolean;
+  highLimitTriggered: boolean;
+  lowLimitShutdown: boolean;
+  lowLimitReignite: boolean;
+  lowLimitTriggered: boolean;
+  targetShutdown: boolean;
+  targetKeepWarm: boolean;
+  device?: string;
+  status: ProbeStatus;
   [k: string]: unknown;
 }
 
 export interface DashData {
   uuid: string;
+  errors: string[];
+  warnings: string[];
+  criticalError: boolean;
   grillName: string;
   currentMode: string;
-  displayMode: string;
   nextMode: string;
+  displayMode: string;
   smokePlus: boolean;
+  pwmControl: boolean;
   pMode: number;
   hopperLevel: number;
-  tempUnits: "F" | "C";
+  startupTimestamp: number;
+  modeStartTime: number;
+  lidOpenDetectEnabled: boolean;
   lidOpenDetected: boolean;
-  outputs: { fan: number; auger: number; igniter: number };
+  lidOpenEndTime: number;
+  startDuration: number;
+  shutdownDuration: number;
+  primeDuration: number;
+  primeAmount: number;
+  tempUnits: "F" | "C";
+  hasDcFan: boolean;
+  hasDistanceSensor: boolean;
+  startupCheck: boolean;
+  startToHoldPrompt: boolean;
+  startupGotoTemp: number;
+  startupGotoMode: string;
+  allowManualOutputs: boolean;
   timer: { start: number; paused: number; end: number; keepWarm: boolean; shutdown: boolean };
+  outputs: { fan: boolean; auger: boolean; igniter: boolean };
   recipeStatus: { recipeMode: boolean; filename: string; mode: string; paused: boolean; step: number };
   primaryProbe: ProbeData;
   foodProbes: ProbeData[];
-  errors: string[];
-  warnings: string[];
   [k: string]: unknown;
 }
 
@@ -42,4 +80,6 @@ export type AccentName = "ember" | "ice" | "crimson";
 // The command contract: post_app_data(action, type, json_data) -> write_control.
 // See socket_io.py `post_app_data` (line ~135) and qtbackend.py:229-324 for the
 // QML equivalents the full port will map 1:1.
+// NOTE: still consumed by useDashData/ControlButtons/Dashboard/App — those
+// migrate to the REST-write contract in Tasks 7-8. Do not remove until then.
 export type SendCommand = (action: string, type: string | null, jsonData?: unknown) => void;

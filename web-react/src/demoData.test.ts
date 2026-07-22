@@ -23,7 +23,7 @@ describe("demo simulator", () => {
   });
 
   it("auger pulses on and off over its cycle", () => {
-    expect(demoDashAt(5).outputs.auger).toBe(1);
-    expect(demoDashAt(18).outputs.auger).toBe(0);
+    expect(demoDashAt(5).outputs.auger).toBe(true);
+    expect(demoDashAt(18).outputs.auger).toBe(false);
   });
 });

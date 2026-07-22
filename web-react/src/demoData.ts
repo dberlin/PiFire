@@ -15,7 +15,7 @@ export function demoDashAt(elapsedSec: number): DashData {
   const foodTemp = Math.round(Math.min(205, 120 + t * 0.55));
 
   // Auger pulses on for 15s of each 20s cycle; fan steady; igniter off in Hold.
-  const augerOn = t % 20 < 15 ? 1 : 0;
+  const augerOn = t % 20 < 15;
 
   // Hopper slowly drains from 70%.
   const hopperLevel = Math.max(12, Math.round(70 - t / 30));
@@ -25,7 +25,7 @@ export function demoDashAt(elapsedSec: number): DashData {
     currentMode: "Hold",
     displayMode: "Hold",
     hopperLevel,
-    outputs: { fan: 1, auger: augerOn, igniter: 0 },
+    outputs: { fan: true, auger: augerOn, igniter: false },
     primaryProbe: { ...FIXTURE_DASH.primaryProbe, temp: primaryTemp, setTemp: 225 },
     foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], temp: foodTemp, target: 203, targetReq: true }],
   };

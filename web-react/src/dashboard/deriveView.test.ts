@@ -68,14 +68,14 @@ describe("deriveView — probes", () => {
 
 describe("deriveView — outputs", () => {
   it("maps fan/auger/igniter on-states to status + accent color", () => {
-    const v = deriveView(make({ outputs: { fan: 1, auger: 1, igniter: 1 } }));
+    const v = deriveView(make({ outputs: { fan: true, auger: true, igniter: true } }));
     expect(v.fan).toMatchObject({ on: true, status: "RUNNING", color: "var(--accent)" });
     expect(v.auger).toMatchObject({ on: true, status: "FEEDING" });
     expect(v.igniter).toMatchObject({ on: true, status: "HOT", dot: "#ff7a1a" });
   });
 
   it("maps off-states to IDLE/OFF with the idle color", () => {
-    const v = deriveView(make({ outputs: { fan: 0, auger: 0, igniter: 0 } }));
+    const v = deriveView(make({ outputs: { fan: false, auger: false, igniter: false } }));
     expect(v.fan.status).toBe("IDLE");
     expect(v.igniter.status).toBe("IDLE");
     expect(v.fan.color).toBe("#57514a");
