@@ -1,9 +1,9 @@
-import { test, expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 // Requires the prototype backend running (control.py + gunicorn on :5000).
 test("grill name saves and round-trips to the dashboard header", async ({ page }) => {
   await page.goto("/settings/general");
-  const name = "E2E Grill " + Date.now().toString().slice(-4);
+  const name = `E2E Grill ${Date.now().toString().slice(-4)}`;
   await page.getByLabel("Grill Name").fill(name);
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });

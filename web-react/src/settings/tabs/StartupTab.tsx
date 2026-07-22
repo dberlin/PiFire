@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router";
+import { setPath } from "../delta";
+import { NumberField } from "../fields/NumberField";
+import { Section } from "../fields/Section";
+import { Select } from "../fields/Select";
+import { Toggle } from "../fields/Toggle";
 import type { Settings } from "../settingsApi";
 import { useSaveSettings } from "../useSaveSettings";
-import { setPath } from "../delta";
-import { Section } from "../fields/Section";
-import { Toggle } from "../fields/Toggle";
-import { NumberField } from "../fields/NumberField";
-import { Select } from "../fields/Select";
 
 type Startup = {
   shutdown_duration: number;

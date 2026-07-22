@@ -1,9 +1,9 @@
 import { useState } from "react";
 import type { CommandClient, CommandResult } from "../command";
-import { buttonsForMode, type ButtonAction } from "./controlButtons";
-import { SetpointEntry } from "./SetpointEntry";
-import { ConfirmAction } from "./ConfirmAction";
 import type { DashData } from "../types";
+import { ConfirmAction } from "./ConfirmAction";
+import { type ButtonAction, buttonsForMode } from "./controlButtons";
+import { SetpointEntry } from "./SetpointEntry";
 
 // Mode-driven control row, styled to the design's button grid. Each press
 // dispatches a `ButtonAction` (command / setpoint / confirm) against the REST

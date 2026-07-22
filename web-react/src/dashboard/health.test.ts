@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { clampSetpoint, deriveControlAlive } from "./health";
+import { describe, expect, it } from "vitest";
 import { FIXTURE_DASH } from "../fixture";
+import { clampSetpoint, deriveControlAlive } from "./health";
 
 const CONTROL_DOWN = "The control process did not respond to a request and may be stopped.";
 

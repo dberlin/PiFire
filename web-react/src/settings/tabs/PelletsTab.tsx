@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router";
-import type { Settings, SettingsFlag } from "../settingsApi";
-import { useSaveSettings } from "../useSaveSettings";
 import { setPath } from "../delta";
+import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { Toggle } from "../fields/Toggle";
-import { NumberField } from "../fields/NumberField";
+import type { Settings, SettingsFlag } from "../settingsApi";
+import { useSaveSettings } from "../useSaveSettings";
 
 type Pellets = {
   warning_enabled: boolean;

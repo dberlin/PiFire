@@ -1,16 +1,16 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
+import type { CommandClient } from "../command";
 import type { AccentName, DashData } from "../types";
 import type { ConnectionPhase } from "../useDashData";
-import type { CommandClient } from "../command";
+import { Banners } from "./Banners";
+import { ControlButtons } from "./ControlButtons";
 import { deriveView, fmtDuration, type PillView } from "./deriveView";
-import { useClock, useFitScale } from "./hooks";
 import { GrillGauge } from "./GrillGauge";
+import { HopperGauge } from "./HopperGauge";
+import { useClock, useFitScale } from "./hooks";
 import { ProbeCard } from "./ProbeCard";
 import { SystemStatus } from "./SystemStatus";
-import { HopperGauge } from "./HopperGauge";
-import { ControlButtons } from "./ControlButtons";
-import { Banners } from "./Banners";
 
 const ACCENTS: AccentName[] = ["ember", "ice", "crimson"];
 const SWATCH: Record<AccentName, string> = { ember: "#ff8a2b", ice: "#3cc7d0", crimson: "#ff6a5a" };

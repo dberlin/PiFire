@@ -15,10 +15,10 @@ export function useClock(): Date {
 export function useFitScale(w: number, h: number): number {
   const [scale, setScale] = useState(1);
   useLayoutEffect(() => {
-    const fit = () => setScale(Math.min(window.innerWidth / w, window.innerHeight / h));
-    fit();
-    window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
+    const updateScale = () => setScale(Math.min(window.innerWidth / w, window.innerHeight / h));
+    updateScale();
+    window.addEventListener("resize", updateScale);
+    return () => window.removeEventListener("resize", updateScale);
   }, [w, h]);
   return scale;
 }

@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
+
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ControlButtons } from "./ControlButtons";
+import { describe, expect, it, vi } from "vitest";
+import type { CommandClient, CommandResult } from "../command";
 import { FIXTURE_DASH } from "../fixture";
 import type { DashData } from "../types";
-import type { CommandClient, CommandResult } from "../command";
+import { ControlButtons } from "./ControlButtons";
 
 const OK: CommandResult = { ok: true, message: "" };
 const at = (mode: string, over: Partial<DashData> = {}): DashData => ({

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
+
 import { render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
+import { describe, expect, it } from "vitest";
 import { SettingsShell } from "./SettingsShell";
 
 // SettingsShell reads its data via `useLoaderData()`, not outlet context, so

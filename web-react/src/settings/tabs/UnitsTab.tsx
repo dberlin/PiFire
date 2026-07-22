@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useOutletContext, useRevalidator } from "react-router";
-import type { Settings } from "../settingsApi";
 import { createCommand } from "../../command";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";
+import type { Settings } from "../settingsApi";
 
 const BASE_URL = import.meta.env.VITE_PIFIRE_URL || "";
 const UNIT_OPTIONS = [

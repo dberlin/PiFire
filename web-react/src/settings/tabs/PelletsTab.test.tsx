@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
-import { cleanup } from "@testing-library/react";
-import { PelletsTab } from "./PelletsTab";
+
+import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test-utils";
+import { PelletsTab } from "./PelletsTab";
 
 const saveMock = vi.fn().mockResolvedValue(true);
 

@@ -1,5 +1,5 @@
-import type { DashData } from "../types";
 import type { CommandClient, CommandResult } from "../command";
+import type { DashData } from "../types";
 
 export type ButtonAction =
   | { type: "command"; run(c: CommandClient): Promise<CommandResult> }

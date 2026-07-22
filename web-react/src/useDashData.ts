@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import type { DashData } from "./types";
-import { FIXTURE_DASH } from "./fixture";
-import { demoDashAt } from "./demoData";
-import { createCommand, type CommandClient } from "./command";
+import { type CommandClient, createCommand } from "./command";
 import { deriveControlAlive } from "./dashboard/health";
+import { demoDashAt } from "./demoData";
+import { FIXTURE_DASH } from "./fixture";
+import type { DashData } from "./types";
 
 export type ConnectionPhase = "connecting" | "live" | "unreachable" | "demo";
 

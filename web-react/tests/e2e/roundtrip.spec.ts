@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 // Requires the prototype backend running: `uv run python control.py` + `uv run python app.py`.
 test("startup then hold round-trips through the live socket", async ({ page }) => {

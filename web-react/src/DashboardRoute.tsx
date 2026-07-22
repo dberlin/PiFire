@@ -1,7 +1,7 @@
-import { useDashData } from "./useDashData";
+import { useAppPrefs } from "./AppPrefs";
 import { ConnectionStatus } from "./components/ConnectionStatus";
 import { Dashboard } from "./dashboard/Dashboard";
-import { useAppPrefs } from "./AppPrefs";
+import { useDashData } from "./useDashData";
 
 export function DashboardRoute() {
   const { dash, phase, controlAlive, targetUrl, command } = useDashData();

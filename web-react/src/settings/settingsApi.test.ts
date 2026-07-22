@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buildSettingsUrl, applySettings } from "./settingsApi";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { applySettings, buildSettingsUrl } from "./settingsApi";
 
 describe("buildSettingsUrl", () => {
   it("joins base + /api + path", () => {

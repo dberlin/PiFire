@@ -1,7 +1,8 @@
+import babel from "@rolldown/plugin-babel";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { configDefaults } from "vitest/config";
-import react, { reactCompilerPreset } from "@vitejs/plugin-react";
-import babel from "@rolldown/plugin-babel";
+
 // The React POC talks to a running PiFire instance over its existing
 // Flask-SocketIO endpoint. Point VITE_PIFIRE_URL at that host (default
 // http://localhost:5000). In dev we proxy /socket.io so the browser can

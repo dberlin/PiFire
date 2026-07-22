@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
-import { SystemStatus } from "./SystemStatus";
-import { deriveView } from "./deriveView";
+
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { FIXTURE_DASH } from "../fixture";
+import { deriveView } from "./deriveView";
+import { SystemStatus } from "./SystemStatus";
 
 afterEach(cleanup);
 

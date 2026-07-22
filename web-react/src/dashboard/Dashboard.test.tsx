@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen, cleanup } from "@testing-library/react";
-import { renderRoute } from "../test-utils";
-import { Dashboard } from "./Dashboard";
-import { FIXTURE_DASH } from "../fixture";
+
+import { cleanup, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CommandClient, CommandResult } from "../command";
+import { FIXTURE_DASH } from "../fixture";
+import { renderRoute } from "../test-utils";
 import type { DashData } from "../types";
+import { Dashboard } from "./Dashboard";
 
 afterEach(cleanup);
 

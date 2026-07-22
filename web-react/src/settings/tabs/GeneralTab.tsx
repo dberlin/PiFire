@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router";
-import type { Settings } from "../settingsApi";
-import { useSaveSettings } from "../useSaveSettings";
 import { setPath } from "../delta";
 import { Section } from "../fields/Section";
-import { TextField } from "../fields/TextField";
 import { Select } from "../fields/Select";
+import { TextField } from "../fields/TextField";
+import type { Settings } from "../settingsApi";
+import { useSaveSettings } from "../useSaveSettings";
 
 const THEMES = [
   { value: "light", label: "Light" },

@@ -1,17 +1,17 @@
-import { createBrowserRouter, RouterProvider, Navigate } from "react-router";
+import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { AppPrefsProvider } from "./AppPrefs";
 import { DashboardRoute } from "./DashboardRoute";
-import { SettingsShell } from "./settings/SettingsShell";
 import { SettingsError } from "./settings/SettingsError";
+import { SettingsShell } from "./settings/SettingsShell";
 import { settingsLoader } from "./settings/settingsRoutes";
 import { GeneralTab } from "./settings/tabs/GeneralTab";
-import { WorkModeTab } from "./settings/tabs/WorkModeTab";
-import { PwmTab } from "./settings/tabs/PwmTab";
-import { StartupTab } from "./settings/tabs/StartupTab";
-import { SafetyTab } from "./settings/tabs/SafetyTab";
-import { PelletsTab } from "./settings/tabs/PelletsTab";
 import { HistoryTab } from "./settings/tabs/HistoryTab";
+import { PelletsTab } from "./settings/tabs/PelletsTab";
+import { PwmTab } from "./settings/tabs/PwmTab";
+import { SafetyTab } from "./settings/tabs/SafetyTab";
+import { StartupTab } from "./settings/tabs/StartupTab";
 import { UnitsTab } from "./settings/tabs/UnitsTab";
+import { WorkModeTab } from "./settings/tabs/WorkModeTab";
 
 // Rendered while the /settings route's loader runs on initial hydration —
 // keeps react-router from warning "No HydrateFallback element provided".

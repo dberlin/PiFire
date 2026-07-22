@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { clampFraction, valueAngle, GAUGE_START, GAUGE_SWEEP, arcLength } from "./gaugeMath";
+import { describe, expect, it } from "vitest";
+import { arcLength, clampFraction, GAUGE_START, GAUGE_SWEEP, valueAngle } from "./gaugeMath";
 
 describe("gauge math", () => {
   it("clamps fraction to [0,1]", () => {

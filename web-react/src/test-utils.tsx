@@ -1,6 +1,6 @@
+import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
-import { render } from "@testing-library/react";
 
 // Settings tabs (and other routed components) read their data via
 // `useOutletContext()`. To exercise them in isolation we build a tiny memory
