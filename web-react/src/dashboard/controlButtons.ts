@@ -1,39 +1,44 @@
 import type { DashData } from "../types";
+import type { CommandClient, CommandResult } from "../command";
 
-// Mode-driven control-button set. Each press maps to post_app_data ->
-// write_control, exactly like the Qt bridge's typed slots (qtbackend.py) and
-// the current web dashboard. Wiring is unchanged from the original POC
-// ControlPanel; only the presentation (ControlButtons.tsx) was restyled to the
-// design's button grid.
+export type ButtonAction =
+  | { type: "command"; run(c: CommandClient): Promise<CommandResult> }
+  | { type: "setpoint" }
+  | { type: "confirm"; title: string; run(c: CommandClient): Promise<CommandResult> };
+
 export interface ControlButton {
   label: string;
-  action: string;
-  type: string | null;
-  data?: unknown;
   variant?: "accent" | "danger";
+  action: ButtonAction;
 }
+
+const cmd = (run: (c: CommandClient) => Promise<CommandResult>): ButtonAction => ({ type: "command", run });
+const confirm = (title: string, run: (c: CommandClient) => Promise<CommandResult>): ButtonAction => ({ type: "confirm", title, run });
+
+const STOP: ControlButton = { label: "Stop", variant: "danger", action: confirm("Stop the cook?", (c) => c.setMode("stop")) };
+const STARTUP: ControlButton = { label: "Startup", variant: "accent", action: cmd((c) => c.setMode("startup")) };
 
 export function buttonsForMode(dash: DashData): ControlButton[] {
   const mode = dash.currentMode;
+
   if (mode === "Stop" || mode === "Error" || mode === "") {
     return [
-      { label: "Startup", action: "update", type: "control", data: { updated: true, mode: "Startup" }, variant: "accent" },
-      { label: "Prime", action: "update", type: "control", data: { updated: true, mode: "Prime" } },
-      { label: "Monitor", action: "update", type: "control", data: { updated: true, mode: "Monitor" } },
+      STARTUP,
+      { label: "Prime", action: cmd((c) => c.prime(dash.primeAmount || 10, "startup")) },
+      { label: "Monitor", action: cmd((c) => c.setMode("monitor")) },
     ];
   }
+
   if (mode === "Monitor") {
-    return [
-      { label: "Startup", action: "update", type: "control", data: { updated: true, mode: "Startup" }, variant: "accent" },
-      { label: "Stop", action: "update", type: "control", data: { updated: true, mode: "Stop" }, variant: "danger" },
-    ];
+    return [STARTUP, STOP];
   }
-  // Any active cook mode (Startup / Smoke / Hold / Prime / Reheat / Shutdown).
+
+  // Active cook modes (Startup / Smoke / Hold / Prime / Reignite / Shutdown).
   return [
-    { label: "Hold", action: "update", type: "control", data: { updated: true, mode: "Hold" }, variant: "accent" },
-    { label: "Smoke", action: "update", type: "control", data: { updated: true, mode: "Smoke" } },
-    { label: dash.smokePlus ? "Smoke+ On" : "Smoke+ Off", action: "update", type: "control", data: { s_plus: !dash.smokePlus } },
-    { label: "Shutdown", action: "update", type: "control", data: { updated: true, mode: "Shutdown" } },
-    { label: "Stop", action: "update", type: "control", data: { updated: true, mode: "Stop" }, variant: "danger" },
+    { label: "Smoke", action: cmd((c) => c.setMode("smoke")) },
+    { label: "Hold", variant: "accent", action: { type: "setpoint" } },
+    { label: "Smoke+", variant: dash.smokePlus ? "accent" : undefined, action: cmd((c) => c.setSmokePlus(!dash.smokePlus)) },
+    { label: "Shutdown", action: confirm("Shut down the grill?", (c) => c.setMode("shutdown")) },
+    STOP,
   ];
 }
