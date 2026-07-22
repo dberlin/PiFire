@@ -44,6 +44,10 @@ describe("createCommand issues the right URLs", () => {
     await createCommand("").system("reboot");
     expect(url()).toBe("/api/cmd/reboot");
   });
+  it("setUnits → /api/set/units/{F|C}", async () => {
+    await createCommand("").setUnits("C");
+    expect(url()).toBe("/api/set/units/C");
+  });
   it("maps a non-OK envelope to ok:false", async () => {
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ result: "ERROR", message: "bad", data: {} }) });
     const r = await createCommand("").setMode("stop");

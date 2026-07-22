@@ -21,6 +21,7 @@ export interface CommandClient {
   timerPause(): Promise<CommandResult>;
   timerStop(): Promise<CommandResult>;
   system(cmd: SystemCmd): Promise<CommandResult>;
+  setUnits(units: "F" | "C"): Promise<CommandResult>;
 }
 
 export function buildCommandUrl(baseUrl: string, segments: (string | number)[]): string {
@@ -52,5 +53,6 @@ export function createCommand(baseUrl: string): CommandClient {
     timerPause: () => post(baseUrl, ["set", "timer", "pause"]),
     timerStop: () => post(baseUrl, ["set", "timer", "stop"]),
     system: (cmd) => post(baseUrl, ["cmd", cmd]),
+    setUnits: (units) => post(baseUrl, ["set", "units", units]),
   };
 }

@@ -1,4 +1,52 @@
-// Stub — fleshed out in Task 8.
+import { useState } from "react";
+import { useOutletContext, useRevalidator } from "react-router";
+import type { Settings } from "../settingsApi";
+import { createCommand } from "../../command";
+import { ConfirmAction } from "../../dashboard/ConfirmAction";
+import { Section } from "../fields/Section";
+import { Select } from "../fields/Select";
+
+const BASE_URL = import.meta.env.VITE_PIFIRE_URL || "";
+const UNIT_OPTIONS = [
+  { value: "F", label: "Fahrenheit (°F)" },
+  { value: "C", label: "Celsius (°C)" },
+];
+
 export function UnitsTab() {
-  return null;
+  const { settings } = useOutletContext<{ settings: Settings }>();
+  const revalidator = useRevalidator();
+  const [units, setUnits] = useState<"F" | "C">(settings.globals?.units === "C" ? "C" : "F");
+  const [pending, setPending] = useState<"F" | "C" | null>(null);
+
+  // Re-sync from the loader on revalidation via render-phase adjustment (house
+  // style — NOT a useEffect; React Compiler rejects setState-in-effect. Do NOT suppress.)
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings !== prevSettings) {
+    setPrevSettings(settings);
+    setUnits(settings.globals?.units === "C" ? "C" : "F");
+  }
+
+  const onChange = (v: string) => {
+    const next = v === "C" ? "C" : "F";
+    if (next !== units) setPending(next); // changing units stops the grill
+  };
+
+  const confirmChange = async () => {
+    const next = pending!;
+    setPending(null);
+    await createCommand(BASE_URL).setUnits(next);
+    setUnits(next);
+    revalidator.revalidate();
+  };
+
+  return (
+    <>
+      <Section title="Units">
+        <Select label="Temperature Units" value={units} options={UNIT_OPTIONS} onChange={onChange} />
+        <p className="pf-settings-hint">Changing units converts all stored temperatures and <b>stops the grill</b>.</p>
+      </Section>
+      <ConfirmAction open={pending !== null} title={`Switch to °${pending ?? ""}? This will stop the grill.`}
+        onCancel={() => setPending(null)} onConfirm={confirmChange} />
+    </>
+  );
 }
