@@ -1,0 +1,12 @@
+.pf-settings { display: flex; min-height: 100vh; background: var(--page); color: var(--text); }
+.pf-settings-nav { flex: 0 0 220px; background: #1c1712; border-right: 1px solid rgba(255,255,255,0.08); padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.pf-settings-back { background: none; border: none; color: var(--text-dim); font: 600 13px "Barlow"; text-align: left; cursor: pointer; padding: 6px 8px; }
+.pf-settings-title { font: 700 18px "Barlow"; margin: 8px 8px 12px; }
+.pf-settings-link { color: var(--text-dim); text-decoration: none; padding: 10px 12px; border-radius: 10px; font: 600 15px "Barlow"; }
+.pf-settings-link.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
+.pf-settings-content { flex: 1; padding: 28px 32px; max-width: 720px; overflow-y: auto; }
+.pf-settings-error { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--text-dim); font: 600 16px "Barlow"; }
+@media (max-width: 640px) {
+  .pf-settings { flex-direction: column; }
+  .pf-settings-nav { flex-basis: auto; flex-direction: row; flex-wrap: wrap; }
+}

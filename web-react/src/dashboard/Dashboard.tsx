@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import type { AccentName, DashData } from "../types";
 import type { ConnectionPhase } from "../useDashData";
 import type { CommandClient } from "../command";
@@ -30,6 +31,7 @@ interface DashboardProps {
 // viewport; on-device it renders 1:1 on the touchscreen.
 export function Dashboard({ dash, command, phase, controlAlive, accent, setAccent, animate, setAnimate }: DashboardProps) {
   const view = deriveView(dash);
+  const navigate = useNavigate();
   const now = useClock();
   const scale = useFitScale(1280, 720);
 
@@ -132,6 +134,9 @@ export function Dashboard({ dash, command, phase, controlAlive, accent, setAccen
               ))}
               <button className={`pf-toggle ${animate ? "on" : ""}`} onClick={() => setAnimate(!animate)}>
                 ANIM
+              </button>
+              <button className="pf-toggle" onClick={() => navigate("/settings")} aria-label="settings">
+                ⚙
               </button>
             </div>
           </div>
