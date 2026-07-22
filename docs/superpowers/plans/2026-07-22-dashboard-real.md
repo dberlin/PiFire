@@ -15,7 +15,7 @@
 - Tests run under Vitest node env (no jsdom/RTL): `bun run test`. Only pure functions get unit tests; component behavior is covered by the Playwright round-trip.
 - **Reads = socket, writes = REST command grammar.** No new/changed Python.
 - Mode strings sent to the backend are **lowercase**; **Hold requires a temperature** (`/api/set/psp/{temp}`).
-- Prototype backend launch (two processes, from repo root): `uv run python control.py` and `uv run python app.py` (serves `0.0.0.0:5000`). Both idempotently call `datastore.init()`.
+- Prototype backend launch (two processes, from repo root): `uv run python control.py` (control loop) and `uv run gunicorn -k gthread --threads 25 -b 0.0.0.0:5000 -w 1 app:app` (web app — gunicorn is the production launch; `python app.py` trips Werkzeug's production guard). Both idempotently call `datastore.init()`.
 - Vite dev proxies `/socket.io` **and** `/api` to `VITE_PIFIRE_URL || http://localhost:5000`.
 - Demo mode (`VITE_DEMO=1`) must keep working as the offline path.
 - All new frontend files live under `web-react/src/`. Work from `web-react/` for bun commands.
@@ -83,11 +83,11 @@ export default defineConfig({
 From the repo root (`/home/dannyb/sources/PiFire`), in two terminals:
 
 ```bash
-uv run python control.py    # control loop, prototype grill platform → datastore
-uv run python app.py        # Flask+SocketIO on 0.0.0.0:5000
+uv run python control.py                                              # control loop, prototype grill platform → datastore
+uv run gunicorn -k gthread --threads 25 -b 0.0.0.0:5000 -w 1 app:app  # web app (Flask+SocketIO)
 ```
 
-Verify: `curl -s http://localhost:5000/api/current | head -c 200` returns JSON with a `current`/`status` object. Leave both running.
+`gunicorn` is how production runs the web app (`auto-install/supervisor/webapp.conf`); `python app.py` trips Werkzeug's production guard. Verify: `curl -s http://localhost:5000/api/current | head -c 200` returns JSON with a `current` object. Leave both running.
 
 - [ ] **Step 3: Capture a real `socket_dash_data` payload**
 
