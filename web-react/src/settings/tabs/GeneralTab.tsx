@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useOutletContext } from "react-router";
 import type { Settings } from "../settingsApi";
 import { useSaveSettings } from "../useSaveSettings";
@@ -16,15 +16,15 @@ export function GeneralTab() {
   const { settings } = useOutletContext<{ settings: Settings }>();
   const { save, saving } = useSaveSettings();
   const [name, setName] = useState<string>(settings.globals?.grill_name ?? "");
-  const [theme, setTheme] = useState<string>(settings.globals?.page_theme ?? "dark");
+  const [theme, setTheme] = useState<string>(settings.globals?.page_theme ?? "light");
   const [saved, setSaved] = useState(false);
 
-  // Re-sync when the loader revalidates (settings identity changes).
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings !== prevSettings) {
+    setPrevSettings(settings);
     setName(settings.globals?.grill_name ?? "");
-    setTheme(settings.globals?.page_theme ?? "dark");
-  }, [settings]);
+    setTheme(settings.globals?.page_theme ?? "light");
+  }
 
   const onSave = async () => {
     let delta = setPath({}, "globals.grill_name", name);
