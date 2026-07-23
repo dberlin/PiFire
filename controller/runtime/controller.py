@@ -383,6 +383,17 @@ class Controller:
                             create_cookfile()
                         except Exception as e:
                             self.eventLogger.error(f"Failed to create cookfile: {e}")
+                            # A failed cookfile write is potential cook-data loss;
+                            # give it the same active surfacing other runtime
+                            # problems get (build_devices()/build_display() use
+                            # the same errors-list idiom on hardware-load
+                            # failure) instead of leaving it visible only on the
+                            # passive Logs page. This list is what dash_data's
+                            # "errors" key -- and the dashboard's error banners --
+                            # read.
+                            errors = store.read_errors()
+                            errors.append("Cook file could not be created — see Logs")
+                            store.write_errors(errors)
 
                 self.status["p_mode"] = 0
                 self.status["mode"] = Mode.STOP

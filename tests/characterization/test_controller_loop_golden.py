@@ -268,7 +268,15 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     `create_cookfile()` call in try/except, logs via `self.eventLogger.error`,
     and continues -- every OTHER Stop-cleanup step (outputs off, status/
     control reset, display clear) still runs unconditionally, same as
-    `test_tick_stop_mode_cleanup` above."""
+    `test_tick_stop_mode_cleanup` above.
+
+    Item 3 of the metrics-safety fix wave: a failed cookfile write is
+    potential cook-data loss and previously was only visible on the passive
+    Logs page (self.eventLogger.error above). It now ALSO gets surfaced
+    through the same active mechanism the dashboard error banners already
+    read -- store.read_errors()/write_errors() (the same "errors" list
+    build_devices()/build_display() append to on hardware-load failure),
+    which flows to the web UI via dash_data's "errors" key."""
     settings = base_settings()
     control_data = base_control(mode="Stop")
     control_data["updated"] = True
@@ -296,6 +304,11 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
         c.tick()  # must NOT raise/propagate RuntimeError("disk full")
 
     assert any("disk full" in rec.message for rec in caplog.records)  # logged loudly
+
+    # ALSO surfaced actively via the errors list the dashboard banners read
+    # (store.read_errors()), not just the passive Logs page.
+    errors = store.read_errors()
+    assert any("Cook file could not be created" in e for e in errors)
 
     # Every other Stop-cleanup step still ran despite the cookfile failure.
     names = [name for name, _ in grill.calls]
