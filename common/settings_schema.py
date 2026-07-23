@@ -19,6 +19,7 @@ import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic_core import ErrorDetails
 from pydantic_partial import create_partial_model
 
 
@@ -570,7 +571,7 @@ class SettingsValidationError(ValueError):
         super().__init__("; ".join(errors))
 
 
-def _format_errors(errs: list[dict]) -> list[str]:
+def _format_errors(errs: list[ErrorDetails]) -> list[str]:
     return [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in errs]
 
 
