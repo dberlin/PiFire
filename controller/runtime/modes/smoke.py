@@ -87,16 +87,11 @@ class SmokeMode(ControlMode):
         return "Active"
 
     def on_settings_reload(self):
-        _ct = smoke_cycle_times(self.settings["cycle_data"])
-        self.state.cycle.on_time = _ct.on_time
-        self.state.cycle.off_time = _ct.off_time
-        self.state.cycle.cycle_time = _ct.cycle_time
-        self.state.cycle.ratio = _ct.cycle_ratio
-        self.state.cycle.raw_ratio = _ct.cycle_ratio
-        # Write Metrics (note these will overwrite the previous value)
-        self.state.metrics["p_mode"] = self.settings["cycle_data"]["PMode"]
-        self.state.metrics["auger_cycle_time"] = self.settings["cycle_data"]["SmokeOnCycleTime"]
-        self.ctx.store.write_metrics(self.state.metrics)
+        # Shared with Startup/Reignite: re-derive from the already-selected
+        # SmartStart profile when enabled, instead of unconditionally
+        # overwriting with generic cycle_data timing. See
+        # ControlMode._reload_smoke_cycle_from_settings for the full contract.
+        self._reload_smoke_cycle_from_settings()
 
     def on_tick(self, now, ptemp, current_output_status):
         self._auger_cycle_tick(now, current_output_status)

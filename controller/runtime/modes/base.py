@@ -16,8 +16,10 @@ import logging
 from common.common import WriteKind
 from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
+from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
+from controller.runtime.logic.smartstart import profile_cycle
 from controller.runtime.system_commands import process_system_commands
 from controller.runtime.transitions import request_transition, evaluate_phase, TransitionKind
 
@@ -226,6 +228,75 @@ class ControlMode:
             self.ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
             grill_platform.set_duty_cycle(control["duty_cycle"])
             _control.eventLogger.debug("Temp Fan Control: Set to OFF, Fan Returned to Max Duty Cycle")
+
+    def _reload_smoke_cycle_from_settings(self):
+        """Shared `on_settings_reload()` body for Startup/Reignite/Smoke
+        (identical in all three today). A settings save mid-mode (any save
+        that flips `control['settings_update']`, e.g. editing an unrelated
+        field from the web UI) must not clobber SmartStart-derived cycle
+        timing chosen at mode entry. When SmartStart is enabled, re-derive
+        `self.state.cycle.*` from the ALREADY-selected profile
+        (`control['smartstart']['profile_selected']` -- selection is a
+        mode-entry decision keyed on ambient temp at ignition, made once in
+        `setup_safety()`/`select_profile()`, and is never re-selected here)
+        via the same `profile_cycle()` setup uses, instead of unconditionally
+        overwriting with `smoke_cycle_times(cycle_data)`. If the profiles
+        list was shortened by the very settings save being reloaded
+        (`profile_selected` now out of range), clamp to the last valid
+        index, persist the clamp back to control (should_exit()/a future
+        setup_safety() read it back -- an unpersisted clamp would just
+        IndexError on the next tick) and log a warning the same way the rest
+        of this module does. SmartStart disabled (or no profiles configured
+        at all): falls back to the pre-fix `smoke_cycle_times()` path,
+        unchanged."""
+        import control as _control
+
+        settings = self.settings
+        control = self.control
+
+        if settings["startup"]["smartstart"]["enabled"]:
+            profiles = settings["startup"]["smartstart"]["profiles"]
+            profile_selected = control["smartstart"].get("profile_selected", 0)
+
+            if not profiles:
+                _control.eventLogger.warning(
+                    "SmartStart enabled but no profiles configured on settings reload; "
+                    "falling back to cycle_data timing."
+                )
+            else:
+                if not (0 <= profile_selected < len(profiles)):
+                    clamped = len(profiles) - 1
+                    _control.eventLogger.warning(
+                        f"SmartStart profile_selected ({profile_selected}) is out of range "
+                        f"for {len(profiles)} profile(s) on settings reload; clamping to {clamped}."
+                    )
+                    profile_selected = clamped
+                    control["smartstart"]["profile_selected"] = profile_selected
+                    self.ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+
+                profile = profiles[profile_selected]
+                _ct, startup_timer, _mbits = profile_cycle(profile, settings["cycle_data"])
+                self.state.cycle.on_time = _ct.on_time
+                self.state.cycle.off_time = _ct.off_time
+                self.state.cycle.cycle_time = _ct.cycle_time
+                self.state.cycle.ratio = _ct.cycle_ratio
+                self.state.cycle.raw_ratio = _ct.cycle_ratio
+                self.state.startup.timer = startup_timer
+                # Write Metrics (note these will overwrite the previous value)
+                self.state.metrics.update(_mbits)
+                self.ctx.store.write_metrics(self.state.metrics)
+                return
+
+        _ct = smoke_cycle_times(settings["cycle_data"])
+        self.state.cycle.on_time = _ct.on_time
+        self.state.cycle.off_time = _ct.off_time
+        self.state.cycle.cycle_time = _ct.cycle_time
+        self.state.cycle.ratio = _ct.cycle_ratio
+        self.state.cycle.raw_ratio = _ct.cycle_ratio
+        # Write Metrics (note these will overwrite the previous value)
+        self.state.metrics["p_mode"] = settings["cycle_data"]["PMode"]
+        self.state.metrics["auger_cycle_time"] = settings["cycle_data"]["SmokeOnCycleTime"]
+        self.ctx.store.write_metrics(self.state.metrics)
 
     def _setup_recipe_triggers(self, control):
         """Pre-loop recipe trigger setup (extracted from run()). Mutates control
