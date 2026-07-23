@@ -15,6 +15,73 @@ def test_replace_last_matches_oracle(ds, oracle):
     assert len(c.read_metrics(all=True)) == exp["all_len"] == 1
 
 
+def test_replace_last_partial_dict_preserves_other_columns(ds):
+    # Root hazard (partial-dict blast): write_metrics(metrics, new_metric=False)
+    # with a dict that only sets a FEW keys must not null out every column the
+    # caller didn't mention -- it should update only the keys present and leave
+    # the rest of the last row untouched.
+    m = defaults.default_metrics()
+    m["mode"] = "Startup"
+    m["primary_setpoint"] = 225
+    m["pellet_brand_type"] = "Generic-Alder"
+    c.write_metrics(m, new_metric=True)
+
+    c.write_metrics({"mode": "Hold"}, new_metric=False)
+
+    result = c.read_metrics()
+    assert result["mode"] == "Hold"  # the key that was actually provided
+    # Everything else must survive untouched, not get nulled to None/0/"".
+    assert result["primary_setpoint"] == 225
+    assert result["pellet_brand_type"] == "Generic-Alder"
+
+
+def test_replace_last_full_dict_still_replaces_everything(ds):
+    # A full dict (every METRIC_COLUMNS key present) must behave exactly as
+    # before: every column gets set from the dict.
+    m = defaults.default_metrics()
+    m["mode"] = "Startup"
+    m["primary_setpoint"] = 225
+    c.write_metrics(m, new_metric=True)
+
+    m2 = defaults.default_metrics()
+    m2["mode"] = "Hold"
+    m2["primary_setpoint"] = 0  # explicit reset, present in the full dict
+    c.write_metrics(m2, new_metric=False)
+
+    result = c.read_metrics()
+    assert result["mode"] == "Hold"
+    assert result["primary_setpoint"] == 0
+
+
+def test_replace_last_explicit_none_nulls_the_column(ds):
+    # Presence, not truthiness, decides: a caller that explicitly wants to
+    # clear a column passes {"col": None} and it takes effect.
+    m = defaults.default_metrics()
+    m["mode"] = "Startup"
+    m["pellet_brand_type"] = "Generic-Alder"
+    c.write_metrics(m, new_metric=True)
+
+    c.write_metrics({"pellet_brand_type": None}, new_metric=False)
+
+    result = c.read_metrics()
+    assert result["pellet_brand_type"] is None
+    assert result["mode"] == "Startup"  # untouched
+
+
+def test_replace_last_unknown_keys_ignored(ds):
+    # Unknown keys in a partial dict are ignored (same as today's full-dict
+    # behavior filtering through METRIC_COLUMNS).
+    m = defaults.default_metrics()
+    m["mode"] = "Startup"
+    c.write_metrics(m, new_metric=True)
+
+    c.write_metrics({"mode": "Hold", "not_a_real_column": "whatever"}, new_metric=False)
+
+    result = c.read_metrics()
+    assert result["mode"] == "Hold"
+    assert "not_a_real_column" not in result
+
+
 def test_new_metric_without_existing_does_not_crash(ds):
     c.write_metrics(new_metric=True)  # regression: no metrics yet
     assert "starttime" in c.read_metrics()

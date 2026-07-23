@@ -212,15 +212,24 @@ def write_metrics(metrics=None, flush=False, new_metric=False):
         datastore.execute_write(f"INSERT INTO metrics({cols_sql}) VALUES({placeholders})", values)
         return
 
-    # Replace the last record (or insert if the table is empty)
-    values = [metrics.get(k) for k in METRIC_COLUMNS]
+    # Replace the last record (or insert if the table is empty).
     with datastore.transaction() as conn:
         row = conn.execute("SELECT seq FROM metrics ORDER BY seq DESC LIMIT 1").fetchone()
         if row is None:
+            values = [metrics.get(k) for k in METRIC_COLUMNS]
             conn.execute(f"INSERT INTO metrics({cols_sql}) VALUES({placeholders})", values)
         else:
-            set_sql = ", ".join([f"{k}=?" for k in METRIC_COLUMNS])
-            conn.execute(f"UPDATE metrics SET {set_sql} WHERE seq=?", values + [row[0]])
+            # Only touch the keys the caller actually provided -- presence, not
+            # truthiness, decides. A partial dict (e.g. {"mode": "Hold"}) must
+            # update just that column and leave the rest of the last row alone;
+            # blasting every METRIC_COLUMNS value nulls out columns the caller
+            # never mentioned. A caller that genuinely wants to null a column
+            # passes it explicitly (e.g. {"col": None}).
+            present_keys = [k for k in METRIC_COLUMNS if k in metrics]
+            if present_keys:
+                set_sql = ", ".join([f"{k}=?" for k in present_keys])
+                values = [metrics[k] for k in present_keys]
+                conn.execute(f"UPDATE metrics SET {set_sql} WHERE seq=?", values + [row[0]])
 
 
 def read_settings(filename="settings.json", init=False, retry_count=0):
