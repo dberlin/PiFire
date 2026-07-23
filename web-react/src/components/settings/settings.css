@@ -79,6 +79,10 @@
   justify-content: space-between;
   gap: 16px;
 }
+.pf-field-column {
+  flex-direction: column;
+  align-items: stretch;
+}
 .pf-field-label {
   font: 600 15px "Barlow";
   color: var(--text-dim);
@@ -100,6 +104,43 @@
 .pf-field-suffix {
   color: var(--text-dim);
   font: 600 14px "Barlow";
+}
+.pf-stringlist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pf-stringlist-row .pf-input {
+  flex: 1;
+  min-width: 0;
+}
+.pf-stringlist-row button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: 700 15px "Barlow";
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.pf-stringlist-row button:hover {
+  color: #ff8b82;
+  background: rgba(255, 139, 130, 0.12);
+}
+.pf-field-column > button {
+  align-self: flex-start;
+  background: var(--inset);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font: 600 14px "Barlow";
+  cursor: pointer;
+  margin-top: 8px;
+}
+.pf-field-column > button:hover {
+  border-color: var(--accent);
 }
 .pf-switch {
   width: 46px;
