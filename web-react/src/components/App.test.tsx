@@ -18,6 +18,15 @@ rs.mock("../helpers/settings/settingsApi", () => ({
   buildSettingsUrl: (baseUrl: string, path: string) => `${baseUrl}/api/${path}`,
 }));
 
+const getWizardStateMock = rs.fn();
+rs.mock("../helpers/wizard/wizardApi", () => ({
+  getWizardState: (...args: unknown[]) => getWizardStateMock(...args),
+  saveDraft: rs.fn().mockResolvedValue(true),
+  finishWizard: rs.fn(),
+  getInstallStatus: rs.fn(),
+  scan: rs.fn().mockResolvedValue({ groups: [], error: null }),
+}));
+
 const { AppPrefsProvider } = await import("./AppPrefs");
 const { default: App, routes } = await import("./App");
 
@@ -74,6 +83,30 @@ describe("App routing", () => {
     expect(screen.getByDisplayValue("Backyard Smoker")).toBeInTheDocument();
     expect(getSettingsMock).toHaveBeenCalled();
     expect(getModeMock).toHaveBeenCalled();
+  });
+
+  it("renders the wizard shell at /wizard", async () => {
+    getWizardStateMock.mockResolvedValue({
+      modules_metadata: { grillplatform: {}, probes: {}, distance: {}, display: {} },
+      selections: { grillplatform: null, probes: null, distance: null, display: null },
+      settings_dep_values: { grillplatform: {}, probes: {}, distance: {}, display: {} },
+      display_config: {},
+      control_mode: "Stop",
+      first_time_setup: false,
+      has_draft: false,
+    });
+
+    renderApp("/wizard");
+
+    expect(await screen.findByRole("heading", { name: "Welcome" })).toBeInTheDocument();
+    expect(screen.getByText("Setup Wizard")).toBeInTheDocument();
+    expect(getWizardStateMock).toHaveBeenCalled();
+  });
+
+  it("also exposes the /wizard route object directly on the exported routes array", () => {
+    const wizardRoute = routes.find((r) => r.path === "/wizard");
+    expect(wizardRoute).toBeDefined();
+    expect(wizardRoute?.loader).toBeDefined();
   });
 
   it("the default export mounts its own AppPrefsProvider + browser router and renders the dashboard at /", () => {
