@@ -107,6 +107,30 @@ test("smartstart table startup-time saves and round-trips on the startup tab", a
   await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
 });
 
+test("invalid settings_update delta is rejected atomically with a dotted-path error", async ({
+  page,
+}) => {
+  const beforeRes = await page.request.get("/api/settings");
+  expect(beforeRes.ok()).toBeTruthy();
+  const beforeBody = (await beforeRes.json()) as { settings?: { safety?: { maxtemp?: number } } };
+  const originalMaxtemp = beforeBody.settings?.safety?.maxtemp;
+  expect(originalMaxtemp).not.toBeUndefined();
+
+  const updateRes = await page.request.post("/api/settings_update", {
+    data: { settings: { safety: { maxtemp: "nope" } } },
+  });
+  expect(updateRes.ok()).toBeTruthy();
+  const updateBody = (await updateRes.json()) as { result?: string; message?: string };
+  expect(updateBody.result).toBe("error");
+  expect(updateBody.message).toContain("safety.maxtemp");
+
+  // Nothing was written -- no restore needed, just confirm the read-back is unchanged.
+  const afterRes = await page.request.get("/api/settings");
+  expect(afterRes.ok()).toBeTruthy();
+  const afterBody = (await afterRes.json()) as { settings?: { safety?: { maxtemp?: number } } };
+  expect(afterBody.settings?.safety?.maxtemp).toBe(originalMaxtemp);
+});
+
 test("controller tab shows the live controller and PB round-trips, cross-checked via /api/settings", async ({
   page,
 }) => {
