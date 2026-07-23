@@ -1,7 +1,7 @@
 {
   "$defs": {
     "AppriseService": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "enabled": {
           "default": false,
@@ -21,7 +21,7 @@
       "type": "object"
     },
     "ControllerSettings": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "config": {
           "additionalProperties": {
@@ -57,7 +57,7 @@
       "type": "object"
     },
     "CycleData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "FanPidEnabled": {
           "default": false,
@@ -114,7 +114,7 @@
       "type": "object"
     },
     "Dashboard": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "current": {
           "default": "Default",
@@ -135,7 +135,7 @@
       "type": "object"
     },
     "DisplaySettings": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "config": {
           "additionalProperties": {
@@ -162,7 +162,7 @@
       "type": "object"
     },
     "GlobalSettings": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "augerrate": {
           "default": 0.3,
@@ -248,7 +248,7 @@
       "type": "object"
     },
     "HistoryPage": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "autorefresh": {
           "default": "on",
@@ -287,7 +287,7 @@
       "type": "object"
     },
     "IftttService": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "APIKey": {
           "default": "",
@@ -304,7 +304,7 @@
       "type": "object"
     },
     "InfluxdbService": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "bucket": {
           "default": "",
@@ -336,7 +336,7 @@
       "type": "object"
     },
     "KeepWarm": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "s_plus": {
           "default": false,
@@ -353,7 +353,7 @@
       "type": "object"
     },
     "LastUpdated": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "time": {
           "title": "Time",
@@ -367,7 +367,7 @@
       "type": "object"
     },
     "Modules": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "display": {
           "default": "none",
@@ -389,7 +389,7 @@
       "type": "object"
     },
     "MqttService": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "broker": {
           "default": "homeassistant.local",
@@ -436,7 +436,7 @@
       "type": "object"
     },
     "NotifyServices": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "apprise": {
           "$ref": "#/$defs/AppriseService",
@@ -552,7 +552,7 @@
       "type": "object"
     },
     "OneSignalService": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "app_id": {
           "default": "",
@@ -582,7 +582,7 @@
       "type": "object"
     },
     "PelletLevel": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "empty": {
           "default": 22,
@@ -614,7 +614,7 @@
       "type": "object"
     },
     "Platform": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "buttonslevel": {
           "default": "HIGH",
@@ -729,7 +729,7 @@
       "type": "object"
     },
     "ProbeChartConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "bg_color": {
           "title": "Bg Color",
@@ -807,7 +807,7 @@
       "type": "object"
     },
     "ProbeMap": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "probe_devices": {
           "default": [],
@@ -832,7 +832,7 @@
       "type": "object"
     },
     "ProbeSettings": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "probe_map": {
           "$ref": "#/$defs/ProbeMap",
@@ -855,7 +855,7 @@
       "type": "object"
     },
     "PushbulletService": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "APIKey": {
           "default": "",
@@ -877,7 +877,7 @@
       "type": "object"
     },
     "PushoverService": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "APIKey": {
           "default": "",
@@ -904,7 +904,7 @@
       "type": "object"
     },
     "PwmProfile": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "duty_cycle": {
           "title": "Duty Cycle",
@@ -918,7 +918,7 @@
       "type": "object"
     },
     "PwmSettings": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "frequency": {
           "default": 25000,
@@ -987,7 +987,7 @@
       "type": "object"
     },
     "Recipe": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "probe_map": {
           "$ref": "#/$defs/RecipeProbeMap",
@@ -1001,7 +1001,7 @@
       "type": "object"
     },
     "RecipeProbeMap": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "food": {
           "default": [],
@@ -1021,7 +1021,7 @@
       "type": "object"
     },
     "SafetySettings": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "allow_manual_changes": {
           "default": false,
@@ -1063,7 +1063,7 @@
       "type": "object"
     },
     "ServerInfo": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "uuid": {
           "title": "Uuid",
@@ -1077,7 +1077,7 @@
       "type": "object"
     },
     "ShutdownSettings": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "auto_power_off": {
           "default": false,
@@ -1094,7 +1094,7 @@
       "type": "object"
     },
     "SmartStart": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "enabled": {
           "default": false,
@@ -1152,7 +1152,7 @@
       "type": "object"
     },
     "SmartStartProfile": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "augerontime": {
           "maximum": 60,
@@ -1182,7 +1182,7 @@
       "type": "object"
     },
     "SmokePlus": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "duty_cycle": {
           "default": 75,
@@ -1224,7 +1224,7 @@
       "type": "object"
     },
     "StartToMode": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "after_startup_mode": {
           "default": "Smoke",
@@ -1250,7 +1250,7 @@
       "type": "object"
     },
     "StartupSettings": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "duration": {
           "default": 240,
@@ -1321,7 +1321,7 @@
       "type": "object"
     },
     "Versions": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "build": {
           "title": "Build",
@@ -1350,7 +1350,7 @@
       "type": "object"
     },
     "WledEventPresets": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "Grill_Error": {
           "default": 1,
@@ -1382,7 +1382,7 @@
       "type": "object"
     },
     "WledModePresets": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "Hold": {
           "default": 1,
@@ -1424,7 +1424,7 @@
       "type": "object"
     },
     "WledProfileNumbers": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "booting": {
           "default": 201,
@@ -1515,7 +1515,7 @@
       "type": "object"
     },
     "WledService": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "device_address": {
           "default": "wled.local",
@@ -1596,7 +1596,7 @@
       "type": "object"
     },
     "WledSuggestedConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "cooking_color": {
           "default": "blue",
@@ -1627,7 +1627,7 @@
       "type": "object"
     },
     "_DevicesConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "display": {
           "$ref": "#/$defs/_DisplayDeviceConfig",
@@ -1661,7 +1661,7 @@
       "type": "object"
     },
     "_DisplayDeviceConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "dc": {
           "default": 24,
@@ -1683,7 +1683,7 @@
       "type": "object"
     },
     "_DistanceDeviceConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "address": {
           "anyOf": [
@@ -1727,7 +1727,7 @@
       "type": "object"
     },
     "_FT232hConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "url": {
           "default": "1",
@@ -1739,7 +1739,7 @@
       "type": "object"
     },
     "_FanControllerConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "address": {
           "default": "0x4c",
@@ -1766,7 +1766,7 @@
       "type": "object"
     },
     "_InputDeviceConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "down_dt": {
           "default": 20,
@@ -1788,7 +1788,7 @@
       "type": "object"
     },
     "_InputsConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "selector": {
           "default": 17,
@@ -1805,7 +1805,7 @@
       "type": "object"
     },
     "_NumatoConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "baudrate": {
           "default": 921600,
@@ -1822,7 +1822,7 @@
       "type": "object"
     },
     "_OutputsConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "auger": {
           "default": 14,
@@ -1859,7 +1859,7 @@
       "type": "object"
     },
     "_SPI0Config": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "CE0": {
           "default": 8,
@@ -1876,7 +1876,7 @@
       "type": "object"
     },
     "_SystemConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "1WIRE": {
           "anyOf": [
@@ -1902,7 +1902,7 @@
       "type": "object"
     }
   },
-  "additionalProperties": true,
+  "additionalProperties": false,
   "properties": {
     "controller": {
       "$ref": "#/$defs/ControllerSettings",

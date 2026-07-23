@@ -1,8 +1,13 @@
 """Parity: the pydantic shadow models must round-trip default_settings() exactly.
 
-extra="allow" means sections not yet modeled pass through untouched, so this
-test is meaningful from the first section onward and total as of Task 2 (all
-21 top-level sections are now modeled).
+Phase 2 Task 2b flipped `_Section.model_config` from `extra="allow"` to
+`extra="forbid"`: raw `SettingsSchema.model_validate()` now REJECTS any
+unmodeled key outright (see test_extra_keys_rejected_by_raw_model_validate).
+The write-time gate, `validate_settings_tree()`, wraps that with a
+self-healing repair pass -- see the "Phase 2 Task 2b: self-healing repair
+wrapper" section near the bottom of this file -- so a stray/legacy/future key
+never permanently blocks a settings save; it's stripped, logged, and the
+write proceeds.
 """
 
 import copy
@@ -10,7 +15,7 @@ import json
 import os
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from common import datastore, datastore_accessors
 from common.defaults import default_settings
@@ -36,11 +41,21 @@ def test_default_settings_round_trips():
     assert_parity(default_settings())
 
 
-def test_extra_keys_survive():
+def test_extra_keys_rejected_by_raw_model_validate():
+    """Phase 2 Task 2b: `_Section` flipped `extra="allow"` -> `extra="forbid"`.
+    Raw `SettingsSchema.model_validate()` (i.e. NOT going through the
+    write_settings() gate's repair wrapper) now rejects unknown keys outright
+    -- self-healing lives ONLY in validate_settings_tree(), see the Task 2b
+    repair-wrapper tests near the bottom of this file."""
     s = default_settings()
     s["safety"]["future_knob"] = 42
-    s["totally_new_section"] = {"a": 1}
-    assert_parity(s)
+    with pytest.raises(ValidationError):
+        SettingsSchema.model_validate(s, strict=True)
+
+    s2 = default_settings()
+    s2["totally_new_section"] = {"a": 1}
+    with pytest.raises(ValidationError):
+        SettingsSchema.model_validate(s2, strict=True)
 
 
 def test_all_sections_are_modeled():
@@ -195,24 +210,30 @@ def _collect_extras(value, path: str = "") -> set[tuple[str, str]]:
 
 
 def test_documented_extras_allowlist():
-    """The only extras anywhere in the validated default tree are the 3
-    deliberate, documented ones -- no more, no fewer."""
+    """No extras anywhere in the validated default tree -- DOCUMENTED_EXTRAS
+    is empty (Phase 2 Task 2a promoted the last live extras to real fields;
+    Task 2b's extra="forbid" flip means a model with any undeclared key can
+    no longer even construct, so __pydantic_extra__ is always empty for any
+    successfully-validated model -- this walk is now a belt-and-suspenders
+    check, not the primary enforcement)."""
     model = SettingsSchema.model_validate(default_settings())
-    assert _collect_extras(model) == DOCUMENTED_EXTRAS
+    assert _collect_extras(model) == DOCUMENTED_EXTRAS == set()
 
 
-def test_extras_walker_flags_unmodeled_key():
-    """Negative proof for test_documented_extras_allowlist: the walker must
-    catch a brand-new unmodeled key. Inject a synthetic extra into a COPY of
-    the input (defaults.py itself is untouched) and show it shows up in the
-    collected set and is NOT part of the documented allowlist."""
+def test_unmodeled_key_now_rejected_at_construction_not_walked_as_extra():
+    """Negative proof for test_documented_extras_allowlist, updated for Phase
+    2 Task 2b: under extra="allow" (pre-Task-2b), an unmodeled key silently
+    became a walkable __pydantic_extra__ entry the walker could catch after
+    the fact -- see test_extra_keys_rejected_by_raw_model_validate's history.
+    Under extra="forbid", SettingsSchema.model_validate() itself rejects the
+    key at construction time, before any walk could ever run: the walker's
+    drift-catching job is now subsumed by strict construction rejecting the
+    key outright, which is the stronger guarantee."""
     s = copy.deepcopy(default_settings())
     s["safety"]["totally_unmodeled_future_knob"] = "surprise"
-    model = SettingsSchema.model_validate(s)
-    found = _collect_extras(model)
-    assert ("safety", "totally_unmodeled_future_knob") in found
-    assert found - DOCUMENTED_EXTRAS == {("safety", "totally_unmodeled_future_knob")}
-    assert found != DOCUMENTED_EXTRAS
+    with pytest.raises(ValidationError) as ei:
+        SettingsSchema.model_validate(s)
+    assert "totally_unmodeled_future_knob" in str(ei.value)
 
 
 def test_documented_extras_allowlist_migrated_ancient(_migration_env):
@@ -382,7 +403,10 @@ def test_strict_bool_for_int_rejects():
         validate_settings_tree(s)
 
 
-def test_unknown_keys_still_allowed_under_strict():
+def test_unknown_keys_repaired_not_rejected_under_strict():
+    # Phase 2 Task 2b: under extra="forbid", this no longer "passes through"
+    # -- it's stripped by validate_settings_tree()'s repair wrapper (see the
+    # dedicated Task 2b section below), but the call still must not raise.
     s = default_settings()
     s["safety"]["future_knob"] = 42
     validate_settings_tree(s)
@@ -576,3 +600,124 @@ def test_partial_schema_accepts_one_wire_by_alias_strict():
     # never been exercised with a Field(alias=...) before -- confirm it still
     # populates correctly by alias under strict=True.
     PartialSettingsSchema.model_validate({"platform": {"system": {"1WIRE": 4}}}, strict=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 Task 2b: base flip to extra="forbid" + self-healing repair wrapper.
+#
+# _Section.model_config is now ConfigDict(extra="forbid") -- raw
+# model_validate() rejects any unmodeled key (see
+# test_extra_keys_rejected_by_raw_model_validate above). But validate_settings_tree()
+# (the S2 write_settings() gate, common/datastore_accessors.py:262) wraps that
+# with a repair pass: if EVERY error a failed validation produces is
+# "extra_forbidden", it strips exactly those dotted paths from a COPY of the
+# input, logs each stripped path via common.common.write_log, and retries
+# ONCE. Any OTHER error type (bad value, missing required field, cross-field
+# model_validator failure) -- alone or mixed in with an extra key -- must
+# still raise SettingsValidationError exactly as before; repair only ever
+# masks the "stray/legacy/future key" failure mode, never a real bug.
+# ---------------------------------------------------------------------------
+
+import common.settings_schema as settings_schema_module
+
+
+@pytest.fixture
+def _captured_write_log(monkeypatch):
+    calls = []
+    monkeypatch.setattr(settings_schema_module, "write_log", lambda event, *a, **k: calls.append(event))
+    return calls
+
+
+def test_repair_valid_tree_validates_unchanged_no_log(_captured_write_log):
+    s = default_settings()
+    out = validate_settings_tree(s)
+    assert out == s
+    assert _captured_write_log == []
+
+
+def test_repair_strips_single_extra_key_logs_dotted_path_no_mutation(_captured_write_log):
+    s = default_settings()
+    original = copy.deepcopy(s)
+    s["safety"]["future_knob"] = 42
+
+    out = validate_settings_tree(s)
+
+    assert "future_knob" not in out["safety"]
+    assert len(_captured_write_log) == 1
+    assert "safety.future_knob" in _captured_write_log[0]
+    # The caller's dict must NOT be mutated by the repair pass -- it's a
+    # deepcopy that gets stripped, not the original.
+    assert s["safety"]["future_knob"] == 42
+    assert s["safety"] == {**original["safety"], "future_knob": 42}
+
+
+def test_repair_strips_multiple_extra_keys_at_different_paths_each_logged(_captured_write_log):
+    s = default_settings()
+    s["safety"]["future_knob"] = 42
+    s["pwm"]["another_future_knob"] = "x"
+
+    out = validate_settings_tree(s)
+
+    assert "future_knob" not in out["safety"]
+    assert "another_future_knob" not in out["pwm"]
+    assert len(_captured_write_log) == 2
+    joined = " ".join(_captured_write_log)
+    assert "safety.future_knob" in joined
+    assert "pwm.another_future_knob" in joined
+
+
+def test_repair_leaves_real_type_error_alone_raises_no_log(_captured_write_log):
+    s = default_settings()
+    s["safety"]["maxtemp"] = "not-an-int"
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("safety.maxtemp" in m for m in ei.value.errors)
+    assert _captured_write_log == []
+
+
+def test_repair_leaves_missing_required_field_alone_raises_no_log(_captured_write_log):
+    s = default_settings()
+    del s["server_info"]
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("server_info" in m for m in ei.value.errors)
+    assert _captured_write_log == []
+
+
+def test_repair_leaves_cross_field_validator_failure_alone_raises_no_log(_captured_write_log):
+    # Clamp source: blueprints/settings/routes.py:493-497 (cross-SECTION:
+    # startup.pwm_duty_cycle vs. pwm.min_duty_cycle/max_duty_cycle) -- same
+    # invariant as test_pwm_duty_cycle_must_be_within_min_max above, repeated
+    # here to pin that a real model_validator failure is untouched by repair.
+    s = default_settings()
+    s["startup"]["pwm_duty_cycle"] = 10  # below min_duty_cycle=20
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("startup.pwm_duty_cycle must be within" in m for m in ei.value.errors)
+    assert _captured_write_log == []
+
+
+def test_repair_does_not_mask_real_error_when_extra_key_in_same_section(_captured_write_log):
+    # One extra key AND one real (type) error, same section: must still
+    # raise -- the real error must not be silently stripped-and-passed.
+    s = default_settings()
+    s["safety"]["future_knob"] = 42  # extra
+    s["safety"]["maxtemp"] = "not-an-int"  # real error
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("safety.maxtemp" in m for m in ei.value.errors)
+    assert _captured_write_log == []
+
+
+def test_repair_does_not_mask_real_error_when_extra_key_in_different_section(_captured_write_log):
+    # One extra key in one section, a real cross-field-validator error in an
+    # unrelated section: must still raise as a whole (the extra key alone
+    # would have been repairable, but a co-occurring real error anywhere in
+    # the tree must veto the whole repair-and-retry).
+    s = default_settings()
+    s["safety"]["future_knob"] = 42  # extra, elsewhere
+    s["startup"]["pwm_duty_cycle"] = 10  # real cross-field error, below min_duty_cycle=20
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("startup.pwm_duty_cycle must be within" in m for m in ei.value.errors)
+    assert _captured_write_log == []

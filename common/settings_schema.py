@@ -3,8 +3,20 @@
 common/defaults.py remains the defaults AUTHORITY — these models mirror it,
 and tests/unit/common/test_settings_schema.py fails on any divergence.
 Do not change a default here without changing defaults.py (parity will fail).
-Unknown keys are allowed everywhere: legacy stores and future upgrades
-must always validate.
+
+Phase 2 Task 2b: unknown keys are now REJECTED (`extra="forbid"` on
+`_Section`), not silently allowed through. This is real typo-catching, but a
+stray/legacy/future key must never be able to permanently block a settings
+save -- so the write-time gate, `validate_settings_tree()`, wraps strict
+validation with a self-healing repair pass: if every failure a validation
+attempt produces is an unmodeled key (`extra_forbidden`), those keys are
+stripped from a copy of the input, each stripped dotted path is logged via
+`common.common.write_log`, and validation is retried once. Any OTHER error
+(bad value, missing required field, cross-field model_validator failure)
+still raises `SettingsValidationError` exactly as before -- repair never
+masks a real bug. See `validate_settings_tree()` below for the mechanism,
+and `tests/unit/common/test_settings_schema.py`'s "Phase 2 Task 2b" section
+for the full behavior matrix.
 
 S2 (Task 2) migrated every clamp/invariant enforced today by
 blueprints/settings/routes.py and the web-react settings tabs into schema
@@ -15,6 +27,7 @@ below). Only constraints traced to an actual source-code clamp were added --
 no new limits were invented. Any NEW constraint must trace the same way.
 """
 
+import copy
 import json
 from typing import Any, Literal
 
@@ -22,9 +35,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_serial
 from pydantic_core import ErrorDetails
 from pydantic_partial import create_partial_model
 
+from common.common import write_log
+
 
 class _Section(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
 
 class SafetySettings(_Section):
@@ -138,7 +153,11 @@ class _SPI0Config(_Section):
 
 
 class _SystemConfig(_Section):
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    # populate_by_name=True must be restated (assigning model_config here
+    # replaces, rather than merges with, _Section's) -- extra now inherits
+    # _Section's "forbid" implicitly via the same override, since "1WIRE" is
+    # a real aliased field (below), not an extra pass-through, as of Task 2.
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     SPI0: _SPI0Config = _SPI0Config()
     # "1WIRE" (defaults.py:99) isn't a valid Python identifier, hence the
@@ -482,8 +501,10 @@ class WledService(_Section):
 class NotifyServices(_Section):
     # Mirrors defaults.py default_notify_services() — transcribed 2026-07-22.
     # Every current service has a static, stable shape, so each gets its own
-    # model (see the per-service verdicts in the Task 2 report); extra="allow"
-    # on _Section still lets a brand-new/unmodeled service key pass through.
+    # model. _Section is extra="forbid", so a brand-new/unmodeled top-level
+    # service key is NOT silently passed through: the write-gate repair wrapper
+    # strips it and logs a warning (rather than hard-blocking the save). Adding
+    # a real new service means adding its model here.
     apprise: AppriseService = AppriseService()
     ifttt: IftttService = IftttService()
     pushbullet: PushbulletService = PushbulletService()
@@ -637,17 +658,68 @@ def validate_partial_settings(delta: dict) -> list[str]:
     return []
 
 
+def _strip_error_locs(tree: dict, errors: list[ErrorDetails]) -> None:
+    """Delete each error's `loc` path from `tree` in place.
+
+    Every `extra_forbidden` error's `loc` is a tuple of dict keys ending at
+    the offending unmodeled key -- pydantic's `extra` policy only ever fires
+    on a dict-like (object) level, never inside a list, so the final segment
+    is always a plain string key in a dict reachable by walking `loc[:-1]`
+    through `tree`. Caller is responsible for passing a COPY of the real
+    input (see validate_settings_tree) -- this mutates `tree` directly.
+    """
+    for err in errors:
+        loc = err["loc"]
+        cur = tree
+        for part in loc[:-1]:
+            cur = cur[part]
+        del cur[loc[-1]]
+
+
 def validate_settings_tree(settings: dict) -> dict:
     """Strict-validate a full settings tree; return the normalized dump.
 
     This is S2's single enforcement entry -- write_settings() calls it before
     persisting (Task 5). Raises SettingsValidationError with dotted-path
     messages on failure.
+
+    Phase 2 Task 2b: `_Section` is now `extra="forbid"`, so an unmodeled key
+    anywhere in the tree fails validation. Rather than let that permanently
+    block every subsequent save (the tree-wide blast-radius risk of a naive
+    forbid flip -- see the investigation doc), this is a self-healing repair
+    gate: if EVERY error the first validation attempt produces is
+    "extra_forbidden" (i.e. nothing else is wrong), those keys are stripped
+    from a deepcopy of `settings` -- the caller's dict is never mutated --
+    and validation is retried exactly once. Only once that retry SUCCEEDS is
+    each stripped dotted path logged via write_log() -- logging is deferred
+    until repair is known to have actually rescued the write, so a tree that
+    still fails after stripping (a real error was hiding behind/alongside
+    the extra key, e.g. a cross-field model_validator that only runs once
+    every field validates) never logs a misleading "stripped" line for a
+    write that didn't happen. Any error that ISN'T "extra_forbidden" (bad
+    value, missing required field, cross-field model_validator failure),
+    whether alone or mixed in alongside extra keys on the first attempt, or
+    surfacing only on the retry, still raises SettingsValidationError, same
+    as before this task -- repair never masks a real bug.
     """
     try:
         model = SettingsSchema.model_validate(settings, strict=True)
     except ValidationError as exc:
-        raise SettingsValidationError(format_validation_errors(exc)) from exc
+        errors = exc.errors()
+        if not errors or any(err["type"] != "extra_forbidden" for err in errors):
+            raise SettingsValidationError(format_validation_errors(exc)) from exc
+
+        repaired = copy.deepcopy(settings)
+        _strip_error_locs(repaired, errors)
+
+        try:
+            model = SettingsSchema.model_validate(repaired, strict=True)
+        except ValidationError as retry_exc:
+            raise SettingsValidationError(format_validation_errors(retry_exc)) from retry_exc
+
+        for err in errors:
+            dotted = ".".join(str(part) for part in err["loc"])
+            write_log(f"settings: stripped unmodeled key '{dotted}' during write-time repair (was: {err['msg']})")
     # by_alias=True: platform.system.one_wire must dump back out as "1WIRE"
     # (its defaults.py/on-disk key) -- see the alias comment on _SystemConfig.
     # No other field in the tree carries an alias, so this is a no-op for the
