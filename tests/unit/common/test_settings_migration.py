@@ -122,6 +122,9 @@ def test_upgrade_settings_v1_4_cascade_migrates_notify_probe_and_platform():
     # Notification settings moved from top-level keys into notify_services.
     for key in d["notify_services"].keys():
         assert result["notify_services"][key] == {"legacy_marker": key}
+        # ...and the legacy top-level copy is popped, not left behind as a
+        # stray extra key (common/settings_migration.py:135-138).
+        assert key not in result
 
     # Old probe_settings/modules fields removed.
     assert "probe_options" not in result["probe_settings"]

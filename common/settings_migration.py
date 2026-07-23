@@ -136,6 +136,7 @@ def upgrade_settings(prev_ver, settings, settings_default):
         settings["notify_services"] = {}
         for key in settings_default["notify_services"].keys():
             settings["notify_services"][key] = settings[key]
+            settings.pop(key, None)
         settings["probe_settings"].pop("probe_options")
         settings["probe_settings"].pop("probe_sources")
         settings["probe_settings"].pop("probes_enabled")
