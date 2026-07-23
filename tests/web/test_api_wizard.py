@@ -61,8 +61,9 @@ def test_state_existing_stale_module_returns_empty_selection(ds, client):
     `selected`, which would KeyError before we ever reach the
     profile_selected shape issue.
 
-    _build_state()'s clean always-list extraction (`pf[0] if pf else ""`)
-    turns that empty list into an empty-string selection."""
+    _build_state()'s clean always-list extraction (`pf[0] if pf else None`)
+    turns that empty list into a None selection (JSON null), never an empty
+    string -- "no selection" is null, not a "" sentinel."""
     settings = read_settings()
     settings["globals"]["first_time_setup"] = False
     settings["modules"]["dist"] = "totally_bogus_distance_module"
@@ -71,7 +72,7 @@ def test_state_existing_stale_module_returns_empty_selection(ds, client):
     resp = client.get("/api/wizard/state")
     assert resp.status_code == 200
     body = resp.get_json()
-    assert body["selections"]["distance"] == ""
+    assert body["selections"]["distance"] is None
 
 
 def test_scan_extended_i2c_returns_groups(ds, client, monkeypatch):
@@ -172,7 +173,7 @@ def test_finish_rejects_empty_selection(ds, client, monkeypatch):
         "/api/wizard/finish",
         data=json.dumps(
             {
-                "selections": {"grillplatform": "", "display": "ili9341b", "distance": "hcsr04"},
+                "selections": {"grillplatform": None, "display": "ili9341b", "distance": "hcsr04"},
                 "settings_dep_values": {},
                 "display_config": {},
             }

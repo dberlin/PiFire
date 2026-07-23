@@ -76,7 +76,11 @@ def _build_state(settings, control):
             if section not in modules:
                 continue
             pf = info["modules"].get(section, {}).get("profile_selected", [])
-            selections[section] = pf[0] if pf else ""
+            # No selection is represented as None (JSON null), never an empty
+            # string -- a "" sentinel is type-indistinguishable from a real
+            # module name. profile_selected stays a list ([] when empty); this
+            # derived per-section value is a single module name or None.
+            selections[section] = pf[0] if pf else None
 
         settings_dep_values = {}
         for section in _SECTIONS:
@@ -217,8 +221,8 @@ def _wizard_install_info_from_payload(payload, existing):
     blueprint's direct reads/writes of wizardInstallInfo["probe_map"], or by
     a prior full wizard run) rather than rebuilt from the payload -- the
     React draft shape has no per-probe-device fields (just a single flat
-    `selections["probes"]` string, per _build_state's `pf[0] if pf else ""`
-    extraction), so the persisted probe_map is the only source of truth for
+    `selections["probes"]` module name or None, per _build_state's
+    `pf[0] if pf else None` extraction), so the persisted probe_map is the only source of truth for
     the per-device i2c_bus_kind configuration that wizard_bus_kinds() needs
     to catch a real basic+USB-HID conflict.
     """

@@ -27,7 +27,7 @@ export interface WizardModuleData {
 }
 export interface WizardState {
   modules_metadata: Record<WizardSection, Record<string, WizardModuleData>>;
-  selections: Record<WizardSection, string>;
+  selections: Record<WizardSection, string | null>;
   settings_dep_values: Record<WizardSection, Record<string, string | null>>;
   display_config: Record<string, Record<string, unknown>>;
   control_mode: string;
@@ -49,7 +49,7 @@ export interface InstallStatus {
 }
 // Client working state (mutable subset submitted at draft/finish):
 export interface WizardWorking {
-  selections: Record<WizardSection, string>;
+  selections: Record<WizardSection, string | null>;
   settings_dep_values: Record<WizardSection, Record<string, string | null>>;
   display_config: Record<string, Record<string, unknown>>;
 }
