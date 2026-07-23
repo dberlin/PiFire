@@ -20,10 +20,12 @@ export interface ControllerOption {
   option_name: string;
   option_friendly_name: string;
   option_description: string;
-  option_type: "float" | "int" | "bool" | string;
-  option_default: number | boolean | null;
+  option_type: "float" | "int" | "bool" | "list" | "string" | string;
+  option_default: number | boolean | string | null;
   option_min: number | null;
   option_max: number | null;
+  list_values?: (string | number)[];
+  list_labels?: string[];
 }
 export interface ControllerMetadata {
   metadata: Record<

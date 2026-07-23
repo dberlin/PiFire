@@ -6,9 +6,10 @@ import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";
+import { TextField } from "../fields/TextField";
 import { Toggle } from "../fields/Toggle";
 
-type ControllerValues = Record<string, number | boolean>;
+type ControllerValues = Record<string, number | boolean | string>;
 
 function firstControllerKey(meta: ControllerMetadata | null): string {
   if (!meta) return "";
@@ -37,6 +38,14 @@ function deriveValues(
       const v = saved[opt.option_name];
       out[opt.option_name] =
         typeof v === "number" ? v : typeof opt.option_default === "number" ? opt.option_default : 0;
+    } else if (opt.option_type === "list" || opt.option_type === "string") {
+      const v = saved[opt.option_name];
+      out[opt.option_name] =
+        v !== undefined && v !== null
+          ? String(v)
+          : opt.option_default !== undefined && opt.option_default !== null
+            ? String(opt.option_default)
+            : "";
     }
     // unknown option_type values are skipped — not rendered, not included in the save delta
   }
@@ -74,7 +83,8 @@ export function ControllerTab() {
   }
 
   const entry = controllerMeta.metadata[selected];
-  const set = (name: string, val: number | boolean) => setValues((v) => ({ ...v, [name]: val }));
+  const set = (name: string, val: number | boolean | string) =>
+    setValues((v) => ({ ...v, [name]: val }));
 
   const onSave = async () => {
     let d: object = {};
@@ -85,6 +95,15 @@ export function ControllerTab() {
       if (opt.option_type === "bool") rebuilt[opt.option_name] = !!v;
       else if (opt.option_type === "int") rebuilt[opt.option_name] = Math.round(Number(v));
       else if (opt.option_type === "float") rebuilt[opt.option_name] = Number(v);
+      else if (opt.option_type === "list") {
+        // Flask leaves "list" uncoerced (raw HTML form string); we mirror that by
+        // saving the string as-listed, but recover the original metadata value
+        // type (e.g. a numeric list_values entry) when one matches.
+        const strVal = String(v ?? "");
+        const values_ = opt.list_values ?? [];
+        const idx = values_.findIndex((lv) => String(lv) === strVal);
+        rebuilt[opt.option_name] = idx >= 0 ? values_[idx] : strVal;
+      } else if (opt.option_type === "string") rebuilt[opt.option_name] = String(v ?? "");
     }
     d = setPath(d, `controller.config.${selected}`, rebuilt);
     setSaved(await save(d, ["controller_update"]));
@@ -125,6 +144,32 @@ export function ControllerTab() {
               onChange={(n) => set(opt.option_name, n)}
               min={opt.option_min ?? undefined}
               max={opt.option_max ?? undefined}
+            />
+          );
+        }
+        if (opt.option_type === "list") {
+          const listValues = opt.list_values ?? [];
+          const listLabels = opt.list_labels ?? [];
+          return (
+            <Select
+              key={opt.option_name}
+              label={opt.option_friendly_name}
+              value={String(values[opt.option_name] ?? "")}
+              options={listValues.map((lv, i) => ({
+                value: String(lv),
+                label: listLabels[i] ?? String(lv),
+              }))}
+              onChange={(v) => set(opt.option_name, v)}
+            />
+          );
+        }
+        if (opt.option_type === "string") {
+          return (
+            <TextField
+              key={opt.option_name}
+              label={opt.option_friendly_name}
+              value={String(values[opt.option_name] ?? "")}
+              onChange={(v) => set(opt.option_name, v)}
             />
           );
         }

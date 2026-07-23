@@ -85,6 +85,41 @@ const controllerMeta: ControllerMetadata = {
         },
       ],
     },
+    mpc: {
+      friendly_name: "Model Predictive Control (MPC)",
+      description: "Experimental MPC controller.",
+      config: [
+        {
+          option_name: "n_horizon",
+          option_friendly_name: "Prediction Horizon (steps)",
+          option_description: "Number of prediction steps.",
+          option_type: "int",
+          option_default: 24,
+          option_min: 5,
+          option_max: 60,
+        },
+        {
+          option_name: "estimator",
+          option_friendly_name: "State Estimator",
+          option_description: "Disturbance/state estimator.",
+          option_type: "list",
+          option_default: "ekf",
+          option_min: null,
+          option_max: null,
+          list_values: ["ekf", "mhe", "kf"],
+          list_labels: ["EKF (nonlinear, fast)", "MHE (nonlinear)", "Kalman (linear)"],
+        },
+        {
+          option_name: "policy_net_path",
+          option_friendly_name: "Policy Net Path",
+          option_description: "Path to the trained neural-net policy artifact.",
+          option_type: "string",
+          option_default: "./controller/mpc_policy_net.npz",
+          option_min: null,
+          option_max: null,
+        },
+      ],
+    },
   },
 };
 
@@ -148,6 +183,99 @@ describe("ControllerTab", () => {
       },
       ["controller_update"],
     );
+  });
+
+  it("renders a Select for list options and a TextField for string options with default values", () => {
+    renderRoute(<ControllerTab />, makeContext());
+
+    fireEvent.change(screen.getByLabelText("Controller"), { target: { value: "mpc" } });
+
+    const estimatorSelect = screen.getByLabelText("State Estimator");
+    expect(estimatorSelect.tagName).toBe("SELECT");
+    expect(estimatorSelect).toHaveValue("ekf");
+    expect(screen.getByText("EKF (nonlinear, fast)")).toBeInTheDocument();
+    expect(screen.getByText("Kalman (linear)")).toBeInTheDocument();
+
+    const policyPathField = screen.getByLabelText("Policy Net Path");
+    expect(policyPathField.tagName).toBe("INPUT");
+    expect(policyPathField).toHaveValue("./controller/mpc_policy_net.npz");
+  });
+
+  it("saves list (mapped back to the original metadata value), string, and Math.round-coerced int values for mpc", async () => {
+    renderRoute(<ControllerTab />, makeContext());
+
+    fireEvent.change(screen.getByLabelText("Controller"), { target: { value: "mpc" } });
+    fireEvent.change(screen.getByLabelText("State Estimator"), { target: { value: "kf" } });
+    fireEvent.change(screen.getByLabelText("Policy Net Path"), {
+      target: { value: "./custom/net.npz" },
+    });
+    fireEvent.change(screen.getByLabelText("Prediction Horizon (steps)"), {
+      target: { value: "7.6" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(saveMock).toHaveBeenCalledWith(
+      {
+        controller: {
+          selected: "mpc",
+          config: {
+            mpc: {
+              n_horizon: 8,
+              estimator: "kf",
+              policy_net_path: "./custom/net.npz",
+            },
+          },
+        },
+      },
+      ["controller_update"],
+    );
+  });
+
+  it("preserves the original numeric type for list options whose list_values are numbers", async () => {
+    const numericListMeta: ControllerMetadata = {
+      metadata: {
+        dummy: {
+          friendly_name: "Dummy",
+          description: "",
+          config: [
+            {
+              option_name: "level",
+              option_friendly_name: "Level",
+              option_description: "",
+              option_type: "list",
+              option_default: 1,
+              option_min: null,
+              option_max: null,
+              list_values: [1, 2, 3],
+              list_labels: ["Low", "Medium", "High"],
+            },
+          ],
+        },
+      },
+    };
+
+    renderRoute(<ControllerTab />, {
+      settings: { controller: { selected: "dummy", config: { dummy: {} } } },
+      mode: "Stop",
+      controllerMeta: numericListMeta,
+    });
+
+    fireEvent.change(screen.getByLabelText("Level"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(saveMock).toHaveBeenCalledWith(
+      { controller: { selected: "dummy", config: { dummy: { level: 3 } } } },
+      ["controller_update"],
+    );
+    // Assert the numeric type is preserved, not just its loose-equal string form.
+    const delta = saveMock.mock.calls[0]![0] as {
+      controller: { config: { dummy: { level: unknown } } };
+    };
+    expect(delta.controller.config.dummy.level).toBe(3);
+    expect(typeof delta.controller.config.dummy.level).toBe("number");
   });
 
   it("shows an error state and no Select when controllerMeta is null", () => {

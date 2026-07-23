@@ -213,14 +213,33 @@ describe("HistoryTab — Chart Colors", () => {
     // Setpoint fields exist only for Grill (Primary).
     expect(screen.getAllByLabelText("Grill Line Color (Setpoint)")).toHaveLength(1);
     expect(screen.getAllByLabelText("Grill Background Color (Setpoint)")).toHaveLength(1);
-    expect(screen.queryByLabelText("Probe1 Line Color (Setpoint)")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Probe1 Background Color (Setpoint)")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Probe-1 Line Color (Setpoint)")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Probe-1 Background Color (Setpoint)")).not.toBeInTheDocument();
 
-    // Both probes have the always-present line/bg/target color fields.
+    // Both probes have the always-present line/bg/target color fields, labeled
+    // with the probe's display name (entry.name), not the probeConfig dict key.
     expect(screen.getByLabelText("Grill Line Color")).toBeInTheDocument();
-    expect(screen.getByLabelText("Probe1 Line Color")).toBeInTheDocument();
+    expect(screen.getByLabelText("Probe-1 Line Color")).toBeInTheDocument();
     expect(screen.getByLabelText("Grill Line Color (Target)")).toBeInTheDocument();
-    expect(screen.getByLabelText("Probe1 Line Color (Target)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Probe-1 Line Color (Target)")).toBeInTheDocument();
+    // The dict key is no longer used as the label prefix when a unique name exists.
+    expect(screen.queryByLabelText("Probe1 Line Color")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the dict key as the label prefix when name is missing or duplicated", () => {
+    const duplicateNameConfig = {
+      ProbeA: { ...PROBE_CONFIG.Probe1, name: "Same Name" },
+      ProbeB: { ...PROBE_CONFIG.Probe1, name: "Same Name" },
+      ProbeC: { ...PROBE_CONFIG.Probe1, name: "" },
+    };
+
+    renderRoute(<HistoryTab />, contextWithProbeConfig(duplicateNameConfig));
+
+    // Duplicate names fall back to the dict key for both entries sharing it.
+    expect(screen.getByLabelText("ProbeA Line Color")).toBeInTheDocument();
+    expect(screen.getByLabelText("ProbeB Line Color")).toBeInTheDocument();
+    // A falsy name also falls back to the dict key.
+    expect(screen.getByLabelText("ProbeC Line Color")).toBeInTheDocument();
   });
 
   it("changing Grill's line color and saving includes the new color plus the untouched Probe1 subtree, flags []", async () => {

@@ -52,6 +52,21 @@ type History = {
   probeConfig: ProbeConfig;
 };
 
+// Prefer the probe's display name (matches the card header) over the dict key
+// as the label prefix, falling back to the key when the name is missing or
+// shared by more than one probe (ambiguous as a label prefix).
+function computeLabelPrefixes(probeConfig: ProbeConfig): Record<string, string> {
+  const nameCounts = new Map<string, number>();
+  for (const entry of Object.values(probeConfig)) {
+    if (entry.name) nameCounts.set(entry.name, (nameCounts.get(entry.name) ?? 0) + 1);
+  }
+  const prefixes: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(probeConfig)) {
+    prefixes[key] = entry.name && nameCounts.get(entry.name) === 1 ? entry.name : key;
+  }
+  return prefixes;
+}
+
 function readHistory(s: Settings): History {
   const hp = s.history_page ?? {};
   const g = s.globals ?? {};
@@ -99,6 +114,7 @@ export function HistoryTab() {
 
   const ext_data_disabled = mode !== "Stop";
   const probeLabels = Object.keys(v.probeConfig);
+  const labelPrefixes = computeLabelPrefixes(v.probeConfig);
 
   return (
     <>
@@ -144,13 +160,14 @@ export function HistoryTab() {
         ) : (
           probeLabels.map((probeKey) => {
             const entry = v.probeConfig[probeKey];
+            const labelPrefix = labelPrefixes[probeKey];
             return (
               <div className="pf-probe-card" key={probeKey}>
                 <div className="pf-probe-card-header">
                   <span className="pf-probe-card-name">{entry.name}</span>
                   <span className="pf-probe-chip">{entry.type}</span>
                   <Toggle
-                    label={`${probeKey} Enabled`}
+                    label={`${labelPrefix} Enabled`}
                     checked={entry.enabled}
                     onChange={(b) => setProbe(probeKey, "enabled", b)}
                   />
@@ -158,18 +175,18 @@ export function HistoryTab() {
                 {COLOR_FIELD_SPECS.filter((f) => entry[f.key] !== undefined).map((f) => (
                   <ColorField
                     key={f.key}
-                    label={`${probeKey} ${f.label}`}
+                    label={`${labelPrefix} ${f.label}`}
                     value={entry[f.key] as string}
                     onChange={(c) => setProbe(probeKey, f.key, c)}
                   />
                 ))}
                 <Toggle
-                  label={`${probeKey} Dash Setpoint`}
+                  label={`${labelPrefix} Dash Setpoint`}
                   checked={entry.dash_setpoint}
                   onChange={(b) => setProbe(probeKey, "dash_setpoint", b)}
                 />
                 <Toggle
-                  label={`${probeKey} Fill`}
+                  label={`${labelPrefix} Fill`}
                   checked={entry.fill}
                   onChange={(b) => setProbe(probeKey, "fill", b)}
                 />
