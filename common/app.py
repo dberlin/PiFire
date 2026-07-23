@@ -2,7 +2,7 @@
 Common PiFire WebApp Functions Shared Between Blueprints
 """
 
-from common.common import seconds_to_string, WriteKind, epoch_to_time
+from common.common import seconds_to_string, WriteKind, epoch_to_time, guard_none_metric_field
 from common.modes import Mode
 from common.datastore_accessors import read_settings, read_metrics, read_history, write_settings, write_control
 from common.defaults import metrics_items
@@ -102,8 +102,13 @@ def prepare_annotations(displayed_starttime, metrics_data=[]):
     annotation_json = {}
     # Process Additional Metrics Information for Display
     for index in range(0, len(metrics_data)):
+        # Guard against a poisoned row (None starttime) the same way
+        # process_metrics does -- write_metrics' "replace last record" path can
+        # leave a row with a None starttime, which crashes the `>` comparison
+        # below (TypeError: unsupported between NoneType and int/float).
+        starttime = guard_none_metric_field(metrics_data, index, "starttime", "prepare_annotations")
         # Check if metric falls in the displayed time window
-        if metrics_data[index]["starttime"] > displayed_starttime:
+        if starttime > displayed_starttime:
             # Convert Start Time
             # starttime = epoch_to_time(metrics_data[index]['starttime']/1000)
             mode = metrics_data[index]["mode"]

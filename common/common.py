@@ -448,33 +448,42 @@ def read_updater_manifest(filename="updater/updater_manifest.json"):
     return _load_json_file(filename, {"dependencies": {}})
 
 
+def guard_none_metric_field(metrics_data, index, field, caller, default=0):
+    """Read metrics_data[index][field], substituting (and writing back) `default`
+    if it's None, and warn-logging that substitution.
+
+    Shared None-guard for metrics rows that can be poisoned by write_metrics'
+    "replace last record" path when handed a partial dict missing `field` --
+    the row keeps whatever value that column already held; if it was never
+    populated (or was itself nulled), a consumer that does arithmetic/ordering
+    on the field would otherwise crash. Reused by every metrics consumer that
+    dereferences these fields (process_metrics, prepare_annotations).
+
+    :param metrics_data: list of metrics row dicts (mutated in place)
+    :param index: row index into metrics_data
+    :param field: column name to guard
+    :param caller: name of the calling function, for the log message
+    :param default: safe substitute when the field is None
+    :return: the field's value (or `default` if it was None)
+    """
+    value = metrics_data[index][field]
+    if value is None:
+        write_log(
+            f"WARNING: {caller} found a metrics row (index {index}) with a None {field}; using {default!r} as a safe default."
+        )
+        value = default
+        metrics_data[index][field] = value
+    return value
+
+
 def process_metrics(metrics_data, augerrate=0.3):
     # Process Additional Metrics Information for Display
     for index in range(0, len(metrics_data)):
         # Convert Start Time
-        starttime = metrics_data[index]["starttime"]
-        if starttime is None:
-            # Defensive guard: a metrics row can end up with a None starttime
-            # if it was ever written through the "replace last record" path
-            # with a dict missing the 'starttime' key (see mode setup() calls
-            # that write self.state.metrics before it has been stamped by
-            # write_metrics(new_metric=True)). Treat it like the other
-            # optional/zeroed fields instead of crashing on `None / 1000`.
-            write_log(
-                f"WARNING: process_metrics found a metrics row (index {index}) with a None starttime; using 0 as a safe default."
-            )
-            starttime = 0
-            metrics_data[index]["starttime"] = starttime
+        starttime = guard_none_metric_field(metrics_data, index, "starttime", "process_metrics")
         metrics_data[index]["starttime_c"] = epoch_to_time(starttime / 1000)
         # Convert End Time
-        endtime = metrics_data[index]["endtime"]
-        if endtime is None:
-            # Symmetric guard for endtime -- same hazard, same fix.
-            write_log(
-                f"WARNING: process_metrics found a metrics row (index {index}) with a None endtime; using 0 as a safe default."
-            )
-            endtime = 0
-            metrics_data[index]["endtime"] = endtime
+        endtime = guard_none_metric_field(metrics_data, index, "endtime", "process_metrics")
         if endtime == 0:
             endtime_c = 0
         else:
@@ -493,18 +502,7 @@ def process_metrics(metrics_data, augerrate=0.3):
                 timeinmode = f"{seconds} s"
         metrics_data[index]["timeinmode"] = timeinmode
         # Convert Auger On Time
-        augerontime = metrics_data[index]["augerontime"]
-        if augerontime is None:
-            # Same hazard as starttime/endtime above: a row written through the
-            # "replace last record" path with a dict missing 'augerontime' (the
-            # LIVE poisoned row found in the datastore during this fix nulled
-            # every column, not just starttime/endtime) would otherwise crash
-            # here on `int(None)`/`None * augerrate`.
-            write_log(
-                f"WARNING: process_metrics found a metrics row (index {index}) with a None augerontime; using 0 as a safe default."
-            )
-            augerontime = 0
-            metrics_data[index]["augerontime"] = augerontime
+        augerontime = guard_none_metric_field(metrics_data, index, "augerontime", "process_metrics")
         metrics_data[index]["augerontime_c"] = str(int(augerontime)) + " s"
         # Estimated Pellet Usage
         grams = int(augerontime * augerrate)
