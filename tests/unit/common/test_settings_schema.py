@@ -85,14 +85,12 @@ def _migration_env(tmp_path, monkeypatch):
     datastore._reset_for_tests(None)
 
 
-def test_migrated_ancient_settings_round_trip(_migration_env):
-    """A v1.4.x-or-earlier settings.json, migrated by the real
-    read_settings_file() pipeline, still validates through SettingsSchema
-    and round-trips exactly -- the same v1.4 cascade shape exercised by
-    test_settings_migration.py's test_upgrade_settings_v1_4_cascade_* tests,
-    but with realistic per-service notify dicts (rather than that test
-    suite's synthetic {"legacy_marker": ...} placeholders) so the migrated
-    notify_services shape is complete, matching a real upgrade.
+def _migrate_ancient_settings(migration_env):
+    """Build a v1.4.x-or-earlier settings.json fixture and carry it through
+    the real read_settings_file() migration pipeline, returning the
+    resulting dict. Shared by the round-trip test below and the
+    extras-drift walk (test_documented_extras_allowlist_migrated_ancient)
+    so both exercise an identical migrated-tree shape.
     """
     d = default_settings()
     datastore_accessors.write_settings_store(d)
@@ -110,10 +108,22 @@ def test_migrated_ancient_settings_round_trip(_migration_env):
     old["modules"]["adc"] = "mcp3008"
     old["cycle_data"] = {"SmokeCycleTime": 30, "HoldCycleTime": 25}
 
-    p = _migration_env / "settings.json"
+    p = migration_env / "settings.json"
     p.write_text(json.dumps(old))
 
-    migrated = read_settings_file(filename=str(p), init=True)
+    return read_settings_file(filename=str(p), init=True)
+
+
+def test_migrated_ancient_settings_round_trip(_migration_env):
+    """A v1.4.x-or-earlier settings.json, migrated by the real
+    read_settings_file() pipeline, still validates through SettingsSchema
+    and round-trips exactly -- the same v1.4 cascade shape exercised by
+    test_settings_migration.py's test_upgrade_settings_v1_4_cascade_* tests,
+    but with realistic per-service notify dicts (rather than that test
+    suite's synthetic {"legacy_marker": ...} placeholders) so the migrated
+    notify_services shape is complete, matching a real upgrade.
+    """
+    migrated = _migrate_ancient_settings(_migration_env)
 
     assert_parity(migrated)
 
@@ -206,6 +216,30 @@ def test_extras_walker_flags_unmodeled_key():
     assert ("safety", "totally_unmodeled_future_knob") in found
     assert found - DOCUMENTED_EXTRAS == {("safety", "totally_unmodeled_future_knob")}
     assert found != DOCUMENTED_EXTRAS
+
+
+def test_documented_extras_allowlist_migrated_ancient(_migration_env):
+    """Widen the extras-drift guard to a migration-fixture tree, not just
+    default_settings(): a v1.4.x-or-earlier install migrated by the real
+    read_settings_file() pipeline must leave behind ONLY the documented
+    ProbeChartConfig extras -- no more, no fewer -- the same walker and
+    allowlist as test_documented_extras_allowlist, just aimed at
+    _migrate_ancient_settings()'s output instead of the static default tree.
+
+    This is the regression guard for the stray top-level notify-service-key
+    migration bug (common/settings_migration.py's v1.4 cascade copied each
+    service's dict into notify_services.<service> but historically never
+    popped the old top-level key, so it rode through extra="allow"
+    indefinitely -- see
+    test_settings_migration.py::test_upgrade_settings_v1_4_cascade_migrates_notify_probe_and_platform).
+    Had that pop regressed, this test would fail with 8 additional
+    ("", "<service>") entries (apprise/ifttt/pushbullet/pushover/onesignal/
+    influxdb/mqtt/wled) -- one per notify_services key -- on top of
+    DOCUMENTED_EXTRAS.
+    """
+    migrated = _migrate_ancient_settings(_migration_env)
+    model = SettingsSchema.model_validate(migrated)
+    assert _collect_extras(model) == DOCUMENTED_EXTRAS
 
 
 # ---------------------------------------------------------------------------
