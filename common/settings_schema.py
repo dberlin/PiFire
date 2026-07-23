@@ -8,6 +8,7 @@ Unknown keys are allowed everywhere: legacy stores and future upgrades
 must always validate.
 """
 
+import json
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
@@ -481,3 +482,11 @@ class SettingsSchema(_Section):
     notify_services: NotifyServices = NotifyServices()
     history_page: HistoryPage = HistoryPage()
     recipe: Recipe = Recipe()
+
+
+def export_schema() -> dict:
+    return SettingsSchema.model_json_schema()
+
+
+if __name__ == "__main__":
+    print(json.dumps(export_schema(), indent=2, sort_keys=True))

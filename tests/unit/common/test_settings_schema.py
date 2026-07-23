@@ -115,3 +115,23 @@ def test_migrated_ancient_settings_round_trip(_migration_env):
     migrated = read_settings_file(filename=str(p), init=True)
 
     assert_parity(migrated)
+
+
+# ---------------------------------------------------------------------------
+# Drift test (Task 3): schema committed to web-react/schema/settings.schema.json
+# must match export_schema() at all times. Flags unintended schema drift.
+# ---------------------------------------------------------------------------
+
+
+from pathlib import Path
+
+from common.settings_schema import export_schema
+
+SCHEMA_PATH = Path(__file__).resolve().parents[3] / "web-react" / "schema" / "settings.schema.json"
+
+
+def test_committed_schema_is_current():
+    """Fails when models changed but web-react/schema/settings.schema.json
+    wasn't regenerated (uv run python -m common.settings_schema > ...)."""
+    committed = json.loads(SCHEMA_PATH.read_text())
+    assert committed == export_schema()
