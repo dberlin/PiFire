@@ -202,9 +202,7 @@ test("IFTTT enabled + APIKey save and round-trip on the notifications tab", asyn
 
   const nextApiKey = `e2e-key-${Date.now().toString().slice(-6)}`;
   const nextEnabled = !originalEnabled;
-  if (nextEnabled !== originalEnabled) {
-    await toggle.click();
-  }
+  await toggle.click();
   await apiKeyField.fill(nextApiKey);
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });

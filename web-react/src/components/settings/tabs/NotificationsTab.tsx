@@ -188,26 +188,43 @@ export function NotificationsTab() {
             mobile app.
           </p>
         ) : (
-          <div className="pf-devices-table">
-            {onesignalDevices.map(([deviceId, device]) => (
-              <div className="pf-device-row" key={deviceId}>
-                <TextField
-                  label={`Friendly Name (${deviceStr(device, "device_name")})`}
-                  value={deviceStr(device, "friendly_name")}
-                  onChange={(val) => setDeviceField(deviceId, "friendly_name", val)}
-                />
-                <span className="pf-device-meta">{deviceStr(device, "device_name")}</span>
-                <span className="pf-device-meta">{deviceStr(device, "app_version")}</span>
-                <button
-                  type="button"
-                  aria-label={`Delete ${deviceStr(device, "device_name")}`}
-                  onClick={() => deleteDevice(deviceId)}
-                >
-                  Delete
-                </button>
-              </div>
-            ))}
-          </div>
+          <table className="pf-devices-table">
+            <thead>
+              <tr>
+                <th>Friendly Name</th>
+                <th>Device</th>
+                <th>App Version</th>
+                <th className="pf-devices-delete-col" />
+              </tr>
+            </thead>
+            <tbody>
+              {onesignalDevices.map(([deviceId, device]) => (
+                // deviceId (the OneSignal player-id) is the row's stable, guaranteed-unique
+                // identity -- unlike device_name, which two physical devices of the same
+                // model can share, so it's safe to use for a11y label uniqueness.
+                <tr key={deviceId}>
+                  <td>
+                    <TextField
+                      label={`Friendly Name (${deviceId})`}
+                      value={deviceStr(device, "friendly_name")}
+                      onChange={(val) => setDeviceField(deviceId, "friendly_name", val)}
+                    />
+                  </td>
+                  <td className="pf-device-meta">{deviceStr(device, "device_name")}</td>
+                  <td className="pf-device-meta">{deviceStr(device, "app_version")}</td>
+                  <td className="pf-devices-delete-col">
+                    <button
+                      type="button"
+                      aria-label={`Delete ${deviceId}`}
+                      onClick={() => deleteDevice(deviceId)}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </Section>
 

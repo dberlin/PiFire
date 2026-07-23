@@ -299,3 +299,30 @@
 .pf-rpt-add:hover {
   border-color: var(--accent);
 }
+
+/* OneSignal devices manager (Notifications tab) */
+.pf-devices-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.pf-devices-table th {
+  text-align: left;
+  font: 600 13px "Barlow";
+  color: var(--text-dim);
+  padding: 0 10px 8px;
+}
+.pf-devices-table td {
+  padding: 6px 10px 6px 0;
+  vertical-align: middle;
+}
+.pf-devices-table tbody tr {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pf-device-meta {
+  font: 500 14px "Barlow";
+  color: var(--text-dim);
+}
+.pf-devices-delete-col {
+  width: 72px;
+  text-align: right;
+}

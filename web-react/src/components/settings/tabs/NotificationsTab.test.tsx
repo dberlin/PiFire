@@ -312,8 +312,16 @@ describe("NotificationsTab", () => {
   });
 
   describe("OneSignal devices manager", () => {
-    it("renders a row per device showing friendly_name + device_name + app_version", () => {
+    it("renders a real table with one row per device showing friendly_name + device_name + app_version", () => {
       renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES_WITH_DEVICES));
+
+      const table = screen.getByRole("table");
+      expect(table).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: "Friendly Name" })).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: "Device" })).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: "App Version" })).toBeInTheDocument();
+      // Two device rows, each a <tr> in <tbody>.
+      expect(screen.getAllByRole("row")).toHaveLength(3); // header + 2 devices
 
       expect(screen.getByDisplayValue("Danny iPhone")).toBeInTheDocument();
       expect(screen.getByDisplayValue("Kitchen Tablet")).toBeInTheDocument();
@@ -323,10 +331,40 @@ describe("NotificationsTab", () => {
       expect(screen.getByText("1.1.0")).toBeInTheDocument();
     });
 
+    it("does not render onesignal.uuid or app_id anywhere in the DOM (siblings of devices, intentionally hidden)", () => {
+      renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES_WITH_DEVICES));
+
+      expect(screen.queryByText(NOTIFY_SERVICES.onesignal.uuid)).not.toBeInTheDocument();
+      expect(screen.queryByText(NOTIFY_SERVICES.onesignal.app_id)).not.toBeInTheDocument();
+      expect(screen.queryByDisplayValue(NOTIFY_SERVICES.onesignal.uuid)).not.toBeInTheDocument();
+      expect(screen.queryByDisplayValue(NOTIFY_SERVICES.onesignal.app_id)).not.toBeInTheDocument();
+    });
+
+    it("uses the row's player-id (not device_name) for friendly-name-field and delete-button a11y identity, so two devices sharing a device_name can't collide", () => {
+      const SAME_MODEL_DEVICES = {
+        "player-1": { friendly_name: "", device_name: "iPhone15", app_version: "1.0" },
+        "player-2": { friendly_name: "", device_name: "iPhone15", app_version: "1.0" },
+      };
+      renderRoute(
+        <NotificationsTab />,
+        contextWithNotifyServices({
+          ...NOTIFY_SERVICES,
+          onesignal: { ...NOTIFY_SERVICES.onesignal, devices: SAME_MODEL_DEVICES },
+        }),
+      );
+
+      // Both rows resolve to distinct, stable labels/aria-labels despite an
+      // identical device_name -- no "multiple elements found" collision.
+      expect(screen.getByLabelText("Friendly Name (player-1)")).toBeInTheDocument();
+      expect(screen.getByLabelText("Friendly Name (player-2)")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Delete player-1" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Delete player-2" })).toBeInTheDocument();
+    });
+
     it("editing a device's friendly_name and saving updates only that device, leaving device_name/app_version and the other device untouched", async () => {
       renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES_WITH_DEVICES));
 
-      fireEvent.change(screen.getByLabelText("Friendly Name (iPhone15)"), {
+      fireEvent.change(screen.getByLabelText("Friendly Name (player-abc)"), {
         target: { value: "Danny's Phone" },
       });
 
@@ -350,7 +388,7 @@ describe("NotificationsTab", () => {
     it("deleting a device removes it from the saved devices map", async () => {
       renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES_WITH_DEVICES));
 
-      fireEvent.click(screen.getByRole("button", { name: "Delete SM-T500" }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete player-xyz" }));
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -373,6 +411,7 @@ describe("NotificationsTab", () => {
           "No devices registered. Devices register automatically when you sign in on the PiFire mobile app.",
         ),
       ).toBeInTheDocument();
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
       expect(screen.queryByLabelText(/Friendly Name/)).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Delete/ })).not.toBeInTheDocument();
     });
