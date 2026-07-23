@@ -26,6 +26,7 @@ from controller.runtime.controller import Controller
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
+from common.defaults import default_metrics
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.probes import FakeProbes
@@ -252,6 +253,57 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     # Stop persists status='inactive' (bug fix): the assignment now runs AFTER the
     # `control = read_control(flush=True)` reset, mirroring the Error branch, instead
     # of before it where it was a dead write discarded by the reset (had persisted '').
+    assert control["status"] == "inactive"
+    assert control["updated"] is False
+    assert control["next_mode"] == "Stop"
+
+
+def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
+    """DESIGN CALL (flagged for human review -- see task report): a failed
+    create_cookfile() must not crash the control loop. On a real grill an
+    uncaught exception here kills the whole `control.py` process and
+    crash-loops the controller at every cook's end -- see the LIVE crash this
+    commit also fixes (common/common.py process_metrics raising TypeError on
+    a None starttime). tick()'s Stop/Error cleanup block wraps ONLY the
+    `create_cookfile()` call in try/except, logs via `self.eventLogger.error`,
+    and continues -- every OTHER Stop-cleanup step (outputs off, status/
+    control reset, display clear) still runs unconditionally, same as
+    `test_tick_stop_mode_cleanup` above."""
+    settings = base_settings()
+    control_data = base_control(mode="Stop")
+    control_data["updated"] = True
+    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    # A non-empty metrics list with a non-Prime last mode is what makes tick()
+    # reach the create_cookfile() call at all (controller.py's `if len(
+    # metrics_list) != 0: ... if metrics_list[-1]["mode"] != Mode.PRIME:`).
+    store.write_metrics(dict(default_metrics(), mode="Smoke"), new_metric=True)
+
+    # Neutralize check_notify/send_notifications/os.system as usual, but let
+    # create_cookfile raise instead of the no-op spy.
+    sent = []
+    monkeypatch.setattr(controller_mod, "check_notify", lambda *a, **k: sent.append(("check_notify", k)))
+    monkeypatch.setattr(controller_mod, "send_notifications", lambda *a, **k: sent.append(("send_notifications", a, k)))
+
+    def _boom(*a, **k):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(controller_mod, "create_cookfile", _boom)
+    monkeypatch.setattr(controller_mod, "os", _FakeOs(sent))
+
+    _spy_dispatch(c)
+    c.setup()
+    with caplog.at_level(logging.ERROR, logger="characterization"):
+        c.tick()  # must NOT raise/propagate RuntimeError("disk full")
+
+    assert any("disk full" in rec.message for rec in caplog.records)  # logged loudly
+
+    # Every other Stop-cleanup step still ran despite the cookfile failure.
+    names = [name for name, _ in grill.calls]
+    assert "auger_off" in names and "igniter_off" in names and "fan_off" in names
+    assert "power_off" in names
+    assert ("clear", None) in store.display_commands().list()
+    assert store.read_status()["mode"] == "Stop"
+    control = store.read_control()
     assert control["status"] == "inactive"
     assert control["updated"] is False
     assert control["next_mode"] == "Stop"

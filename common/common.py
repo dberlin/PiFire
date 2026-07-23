@@ -453,29 +453,61 @@ def process_metrics(metrics_data, augerrate=0.3):
     for index in range(0, len(metrics_data)):
         # Convert Start Time
         starttime = metrics_data[index]["starttime"]
+        if starttime is None:
+            # Defensive guard: a metrics row can end up with a None starttime
+            # if it was ever written through the "replace last record" path
+            # with a dict missing the 'starttime' key (see mode setup() calls
+            # that write self.state.metrics before it has been stamped by
+            # write_metrics(new_metric=True)). Treat it like the other
+            # optional/zeroed fields instead of crashing on `None / 1000`.
+            write_log(
+                f"WARNING: process_metrics found a metrics row (index {index}) with a None starttime; using 0 as a safe default."
+            )
+            starttime = 0
+            metrics_data[index]["starttime"] = starttime
         metrics_data[index]["starttime_c"] = epoch_to_time(starttime / 1000)
         # Convert End Time
-        if metrics_data[index]["endtime"] == 0:
+        endtime = metrics_data[index]["endtime"]
+        if endtime is None:
+            # Symmetric guard for endtime -- same hazard, same fix.
+            write_log(
+                f"WARNING: process_metrics found a metrics row (index {index}) with a None endtime; using 0 as a safe default."
+            )
             endtime = 0
+            metrics_data[index]["endtime"] = endtime
+        if endtime == 0:
+            endtime_c = 0
         else:
-            endtime = epoch_to_time(metrics_data[index]["endtime"] / 1000)
-        metrics_data[index]["endtime_c"] = endtime
+            endtime_c = epoch_to_time(endtime / 1000)
+        metrics_data[index]["endtime_c"] = endtime_c
         # Time in Mode
         if metrics_data[index]["mode"] == Mode.STOP:
             timeinmode = "NA"
-        elif metrics_data[index]["endtime"] == 0:
+        elif endtime == 0:
             timeinmode = "Active"
         else:
-            seconds = int((metrics_data[index]["endtime"] / 1000) - (metrics_data[index]["starttime"] / 1000))
+            seconds = int((endtime / 1000) - (starttime / 1000))
             if seconds > 60:
                 timeinmode = f"{int(seconds / 60)} m {seconds % 60} s"
             else:
                 timeinmode = f"{seconds} s"
         metrics_data[index]["timeinmode"] = timeinmode
         # Convert Auger On Time
-        metrics_data[index]["augerontime_c"] = str(int(metrics_data[index]["augerontime"])) + " s"
+        augerontime = metrics_data[index]["augerontime"]
+        if augerontime is None:
+            # Same hazard as starttime/endtime above: a row written through the
+            # "replace last record" path with a dict missing 'augerontime' (the
+            # LIVE poisoned row found in the datastore during this fix nulled
+            # every column, not just starttime/endtime) would otherwise crash
+            # here on `int(None)`/`None * augerrate`.
+            write_log(
+                f"WARNING: process_metrics found a metrics row (index {index}) with a None augerontime; using 0 as a safe default."
+            )
+            augerontime = 0
+            metrics_data[index]["augerontime"] = augerontime
+        metrics_data[index]["augerontime_c"] = str(int(augerontime)) + " s"
         # Estimated Pellet Usage
-        grams = int(metrics_data[index]["augerontime"] * augerrate)
+        grams = int(augerontime * augerrate)
         pounds = round(grams * 0.00220462, 2)
         ounces = round(grams * 0.03527392, 2)
         metrics_data[index]["estusage_m"] = f"{grams} grams"

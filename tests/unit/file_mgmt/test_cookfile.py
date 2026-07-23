@@ -49,6 +49,7 @@ import zipfile
 import pytest
 
 import file_mgmt.cookfile as cookfile_mod
+from common.common import epoch_to_time, process_metrics
 from common.datastore_accessors import read_history, read_metrics, write_history, write_metrics
 from common.defaults import default_metrics
 from file_mgmt.cookfile import create_cookfile, prepare_chartdata, read_cookfile, upgrade_cookfile
@@ -781,6 +782,118 @@ def test_create_cookfile_writes_pifire_archive_with_seeded_history_and_metrics(d
     # Datastore purged after the cook file is written.
     assert read_history() == []
     assert read_metrics(all=True) == []
+
+
+# ---------------------------------------------------------------------------
+# process_metrics: None starttime/endtime guard (LIVE crash regression)
+#
+# Real crash (control.py, verbatim):
+#   File "common/common.py", line 456, in process_metrics
+#       metrics_data[index]["starttime_c"] = epoch_to_time(starttime / 1000)
+#   TypeError: unsupported operand type(s) for /: 'NoneType' and 'int'
+#
+# Root cause (fixed at the source in this same commit): SmokeMode.setup()/
+# StartupMode.setup() (controller/runtime/modes/smoke.py & startup.py,
+# `_init_smoke_cycle`) called `ctx.store.write_metrics(self.state.metrics)`
+# while `self.state.metrics` was still the freshly-constructed WorkCycleState
+# default `{}` (setup() runs BEFORE ControlMode.run() stamps a fresh metrics
+# row -- see base.py's `self.setup()` at line ~573 vs. the
+# `write_metrics(new_metric=True)` stamp two lines later). write_metrics()'s
+# "replace last record" path builds `[metrics.get(k) for k in METRIC_COLUMNS]`,
+# so a dict missing 'starttime' silently NULLs that column (and every other
+# column not in the small dict) on the PREVIOUS mode's already-stamped row.
+# These tests pin `process_metrics` (and `create_cookfile`, which calls it) as
+# a second, independent line of defense for any row that reaches it with a
+# None starttime/endtime -- regardless of how it got that way.
+# ---------------------------------------------------------------------------
+
+
+def test_process_metrics_none_starttime_uses_safe_default():
+    poisoned = dict(default_metrics(), id=0, mode="Smoke", starttime=None, endtime=0)
+    healthy = dict(default_metrics(), id=1, mode="Stop", starttime=100000, endtime=200000)
+
+    result = process_metrics([poisoned, healthy])
+
+    assert result[0]["starttime"] == 0  # safe default substituted
+    assert result[0]["starttime_c"] == epoch_to_time(0)
+    assert result[0]["timeinmode"] == "Active"  # endtime == 0 branch, unaffected
+    # The healthy row is processed normally and unaffected by the poisoned one.
+    assert result[1]["starttime_c"] == epoch_to_time(100000 / 1000)
+    assert result[1]["endtime_c"] == epoch_to_time(200000 / 1000)
+
+
+def test_process_metrics_none_endtime_uses_safe_default():
+    poisoned = dict(default_metrics(), id=0, mode="Smoke", starttime=100000, endtime=None)
+
+    result = process_metrics([poisoned])
+
+    assert result[0]["endtime"] == 0  # safe default substituted
+    assert result[0]["endtime_c"] == 0
+    assert result[0]["timeinmode"] == "Active"  # endtime == 0 branch after the guard
+    assert result[0]["starttime_c"] == epoch_to_time(100000 / 1000)  # untouched by the endtime guard
+
+
+def test_process_metrics_none_augerontime_uses_safe_default():
+    poisoned = dict(default_metrics(), id=0, mode="Smoke", starttime=100000, endtime=200000, augerontime=None)
+
+    result = process_metrics([poisoned])
+
+    assert result[0]["augerontime"] == 0  # safe default substituted
+    assert result[0]["augerontime_c"] == "0 s"
+    assert result[0]["estusage_m"] == "0 grams"
+
+
+def test_process_metrics_survives_fully_nulled_live_datastore_row():
+    """Reproduces the EXACT shape found in the live datastore during this
+    fix's inspection (`.superpowers/sdd/task-cookfile-crash-report.md`): the
+    real "replace last record" corruption nulls EVERY column not present in
+    the small dict the caller passed (SmokeMode/StartupMode.setup() only ever
+    set 'p_mode'/'auger_cycle_time'), not just starttime/endtime -- 'id',
+    'mode', and 'augerontime' come back None too. starttime/endtime/
+    augerontime are the only fields process_metrics does arithmetic on, so
+    they're the only ones that need guarding for this function to survive the
+    row; the rest (mode, id, ...) are read/compared, not computed on, so a
+    None passes through harmlessly (e.g. `None == Mode.STOP` is just False)."""
+    live_shaped_row = dict.fromkeys(default_metrics().keys())  # every column None, like seq=11 in pifire.db
+    live_shaped_row["seq"] = 11
+
+    result = process_metrics([live_shaped_row])  # pre-fix: crashed on starttime, then (post starttime/endtime-only
+    # fix) crashed again on `int(augerontime)` -- this is why the guard covers augerontime too.
+
+    assert result[0]["starttime"] == 0
+    assert result[0]["endtime"] == 0
+    assert result[0]["augerontime"] == 0
+    assert result[0]["mode"] is None  # untouched: not part of the crash, no guard needed
+
+
+def test_create_cookfile_survives_poisoned_none_starttime_row(ds, isolated_history_folder):
+    """End-to-end reproduction of the LIVE crash via `create_cookfile()` ->
+    `process_metrics()`, using a metrics row with a None starttime (the
+    observable shape of the corruption described above)."""
+    settings = cookfile_mod.read_settings()
+    primary_label, food_labels = _default_probe_labels(settings)
+    _seed_history_row(primary_label, food_labels, 100, 90)
+
+    write_metrics(dict(default_metrics(), id=0, mode="Smoke", augerontime=120), new_metric=True)
+    # write_metrics(..., new_metric=True) always force-stamps 'starttime' (see
+    # common/datastore_accessors.py), so a None starttime can only reach the DB
+    # via the "replace last record" path (new_metric=False) -- exactly how the
+    # real corruption happens (a dict missing/None on 'starttime' overwrites the
+    # last row wholesale). Poison the row just written the same way.
+    write_metrics(dict(default_metrics(), id=0, mode="Smoke", augerontime=120, starttime=None), new_metric=False)
+    write_metrics(dict(default_metrics(), id=1, mode="Stop", augerontime=30), new_metric=True)
+
+    assert read_metrics(all=True)[0]["starttime"] is None  # sanity: poisoned as expected
+
+    create_cookfile()  # pre-fix: TypeError: unsupported operand type(s) for /: 'NoneType' and 'int'
+
+    pifire_files = list(pathlib.Path(isolated_history_folder).glob("*.pifire"))
+    assert len(pifire_files) == 1
+    with zipfile.ZipFile(pifire_files[0]) as archive:
+        events = json.loads(archive.read("events.json"))
+    assert events[0]["starttime"] == 0  # safe default applied, row still produced
+    assert events[0]["starttime_c"] == epoch_to_time(0)
+    assert events[1]["mode"] == "Stop"  # the healthy row is unaffected
 
 
 def test_create_cookfile_title_collision_appends_numeric_suffix(ds, isolated_history_folder, monkeypatch):

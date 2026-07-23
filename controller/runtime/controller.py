@@ -370,7 +370,19 @@ class Controller:
                     metrics["mode"] = Mode.STOP
                     store.write_metrics(metrics)
                     if metrics_list[-1]["mode"] != Mode.PRIME:
-                        create_cookfile()
+                        # A failed cookfile write must not take down grill control --
+                        # on a real grill an uncaught exception here kills the whole
+                        # control loop and crash-loops the controller at every
+                        # cook's end (the poisoned metrics rows that triggered this
+                        # persist in the datastore, so a naive restart re-crashes on
+                        # the very next stop transition too). Keep this wrap NARROW
+                        # -- just the create_cookfile() call -- so every other tick
+                        # behavior (status/control resets, display clear, etc. below)
+                        # still runs unconditionally.
+                        try:
+                            create_cookfile()
+                        except Exception as e:
+                            self.eventLogger.error(f"Failed to create cookfile: {e}")
 
                 self.status["p_mode"] = 0
                 self.status["mode"] = Mode.STOP
