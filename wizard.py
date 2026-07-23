@@ -133,7 +133,9 @@ def wizardInstallInfoExisting(settings, wizardData):
                 settings["platform"]["current"] = selected
             else:
                 selected = "none"
-            wizardInstallInfo["modules"][module]["profile_selected"] = selected
+            # profile_selected is ALWAYS a list, never a bare string -- an
+            # invalid/stale saved module means "no selection".
+            wizardInstallInfo["modules"][module]["profile_selected"] = []
 
         for setting in wizardData["modules"][module][selected]["settings_dependencies"]:
             settingsLocation = wizardData["modules"][module][selected]["settings_dependencies"][setting]["settings"]

@@ -50,25 +50,19 @@ def _build_state(settings, control):
         else:
             info = wizardInstallInfoExisting(wizard_data, settings)
 
-        # Usual shape (verified against wizardInstallInfoDefaults/Existing and
-        # prepare_wizard_data in blueprints/wizard/wizard.py): profile_selected
-        # is a list -- for grillplatform/display/distance it holds exactly one
-        # module name (matches Task 1's single-default manifest); for probes
-        # it may hold several device modules.
-        #
-        # Legacy quirk: wizardInstallInfoExisting()'s stale-module recovery
-        # path (a settings-referenced module no longer in the manifest)
-        # overwrites profile_selected with a BARE STRING instead (e.g.
-        # "none") -- see wizardInstallInfoExisting in blueprints/wizard/
-        # wizard.py. Handle both shapes here rather than assuming a list, so
-        # that quirk doesn't silently truncate the selection to one
-        # character (e.g. "none"[0] == "n").
+        # profile_selected is ALWAYS a list (verified against
+        # wizardInstallInfoDefaults/Existing and prepare_wizard_data in
+        # blueprints/wizard/wizard.py) -- for grillplatform/display/distance
+        # it holds exactly one module name (matches Task 1's single-default
+        # manifest), or is empty when there's no selection (e.g.
+        # wizardInstallInfoExisting()'s stale-module recovery path); for
+        # probes it may hold several device modules.
         selections = {}
         for section in _SECTIONS:
             if section not in modules:
                 continue
             pf = info["modules"].get(section, {}).get("profile_selected", [])
-            selections[section] = pf[0] if isinstance(pf, list) and pf else (pf if isinstance(pf, str) else "")
+            selections[section] = pf[0] if pf else ""
 
         settings_dep_values = {}
         for section in _SECTIONS:

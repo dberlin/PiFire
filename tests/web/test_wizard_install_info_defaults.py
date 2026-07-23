@@ -68,3 +68,28 @@ def test_real_manifest_defaults_do_not_crash_on_fresh_setup():
     settings["globals"]["first_time_setup"] = True
     info = wizardInstallInfoDefaults(wizard_data, settings)  # must not KeyError
     assert info["modules"]["display"]["profile_selected"] == ["ili9341b"]
+
+
+def test_real_manifest_existing_stale_module_yields_empty_list_not_string():
+    """profile_selected is ALWAYS a list, everywhere. wizardInstallInfoExisting()'s
+    stale/invalid-module recovery path (a settings-referenced module no longer in
+    the wizard manifest) used to overwrite profile_selected with a BARE STRING
+    (e.g. "none"/"custom") instead of the usual single-item list -- a mixed-type
+    footgun that made a naive `profile_selected[0]` silently return one CHARACTER
+    of the string instead of a module name. Drive the real stale-module path
+    (settings["modules"]["dist"] names a module absent from the real manifest)
+    and assert the recovered profile_selected is an EMPTY LIST (no selection),
+    not a string."""
+    from blueprints.wizard.wizard import wizardInstallInfoExisting
+    from common.common import read_wizard
+    from common.defaults import default_settings
+
+    wizard_data = read_wizard()
+    settings = default_settings()
+    settings["globals"]["first_time_setup"] = False
+    settings["modules"]["dist"] = "totally_bogus_distance_module"
+
+    info = wizardInstallInfoExisting(wizard_data, settings)
+
+    assert info["modules"]["distance"]["profile_selected"] == []
+    assert isinstance(info["modules"]["distance"]["profile_selected"], list)

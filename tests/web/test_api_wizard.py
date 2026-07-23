@@ -41,28 +41,27 @@ def test_draft_persists_and_state_resumes(ds, client):
     assert body["display_config"]["ili9341b"]["rotation"] == 90
 
 
-def test_state_existing_stale_module_returns_full_string_not_single_char(ds, client):
-    """Characterizes a real bug path in wizardInstallInfoExisting()
-    (blueprints/wizard/wizard.py): when settings["modules"]["dist"] names a
-    module that is no longer in the wizard manifest (e.g. a distance sensor
-    that was removed/renamed), the "stale module" recovery branch does:
+def test_state_existing_stale_module_returns_empty_selection(ds, client):
+    """Characterizes the (now-fixed) stale-module recovery path in
+    wizardInstallInfoExisting() (blueprints/wizard/wizard.py): when
+    settings["modules"]["dist"] names a module that is no longer in the
+    wizard manifest (e.g. a distance sensor that was removed/renamed), the
+    "stale module" recovery branch sets:
 
-        selected = "none"
-        wizardInstallInfo["modules"]["distance"]["profile_selected"] = selected
+        wizardInstallInfo["modules"]["distance"]["profile_selected"] = []
 
-    -- overwriting profile_selected with a BARE STRING ("none") instead of
-    the usual single-item list. We deliberately use the "distance" section
-    (not "display") to isolate this from a *second*, unrelated bug: the
-    display branch of the same function indexes
+    profile_selected is ALWAYS a list -- an invalid/stale saved module now
+    means "no selection" ([]), not a bare string echoing the recovered
+    fallback name. We deliberately use the "distance" section (not
+    "display") to isolate this from a *second*, unrelated bug: the display
+    branch of the same function indexes
     settings["display"]["config"][settings["modules"]["display"]] using the
     ORIGINAL (still-stale) settings value rather than the recovered
     `selected`, which would KeyError before we ever reach the
     profile_selected shape issue.
 
-    _build_state() must not assume profile_selected is always a list --
-    naively doing `profile_selected[0]` on the bare string "none" silently
-    corrupts the selection to "n" (a single character) instead of surfacing
-    the full stale module name/fallback."""
+    _build_state()'s clean always-list extraction (`pf[0] if pf else ""`)
+    turns that empty list into an empty-string selection."""
     settings = read_settings()
     settings["globals"]["first_time_setup"] = False
     settings["modules"]["dist"] = "totally_bogus_distance_module"
@@ -71,4 +70,4 @@ def test_state_existing_stale_module_returns_full_string_not_single_char(ds, cli
     resp = client.get("/api/wizard/state")
     assert resp.status_code == 200
     body = resp.get_json()
-    assert body["selections"]["distance"] == "none"
+    assert body["selections"]["distance"] == ""
