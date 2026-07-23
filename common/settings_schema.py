@@ -9,7 +9,7 @@ must always validate.
 """
 
 import json
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -93,7 +93,7 @@ class _DistanceDeviceConfig(_Section):
     trig: int = 23
     i2c_bus_kind: str = "basic"
     i2c_bus_num: str = "CP2112"
-    address: Optional[int] = None
+    address: int | None = None
     device: str = "/dev/ttyACM0"
 
 

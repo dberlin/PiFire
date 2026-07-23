@@ -10,11 +10,19 @@ import json
 import os
 
 import pytest
+from pydantic import BaseModel
 
 from common import datastore, datastore_accessors
 from common.defaults import default_settings
 from common.settings_migration import read_settings_file
-from common.settings_schema import SettingsSchema
+from common.settings_schema import (
+    LastUpdated,
+    NotifyServices,
+    OneSignalService,
+    ServerInfo,
+    SettingsSchema,
+    Versions,
+)
 
 
 def assert_parity(settings: dict) -> None:
@@ -135,3 +143,182 @@ def test_committed_schema_is_current():
     wasn't regenerated (uv run python -m common.settings_schema > ...)."""
     committed = json.loads(SCHEMA_PATH.read_text())
     assert committed == export_schema()
+
+
+# ---------------------------------------------------------------------------
+# Final-review Finding 1a: extras allowlist. extra="allow" means any unmodeled
+# key in defaults.py silently rides through every nested model's
+# __pydantic_extra__ -- this closes that mesh by walking the FULL validated
+# tree and asserting the only extras captured are the 3 deliberate,
+# comment-documented ones (settings_schema.py:133-134, :431-432):
+#   - platform.system carries "1WIRE" (defaults.py:99) -- "1WIRE" can't be a
+#     Python identifier, so S1 deliberately left it unmodeled.
+#   - history_page.probe_config.<label> carries bg_color_setpoint/
+#     line_color_setpoint (defaults.py:329-331) on Primary probes only.
+# A NEW unmodeled key anywhere in defaults.py must fail this test; that claim
+# is proven (not just asserted) by test_extras_walker_flags_unmodeled_key
+# below, which injects a synthetic extra into a COPY of the input and shows
+# the walker catches it.
+# ---------------------------------------------------------------------------
+
+# Dynamic dict keys (probe labels, controller names, etc.) are normalized to
+# "*" in the collected path so the assertion is stable regardless of which
+# probes/labels happen to exist in defaults.py.
+DOCUMENTED_EXTRAS = {
+    ("platform.system", "1WIRE"),
+    ("history_page.probe_config.*", "bg_color_setpoint"),
+    ("history_page.probe_config.*", "line_color_setpoint"),
+}
+
+
+def _collect_extras(value, path: str = "") -> set[tuple[str, str]]:
+    """Recursively walk a validated pydantic model (or plain list/dict
+    container reachable from one), collecting {(dotted_path, key)} for every
+    key captured by a nested model's extra="allow" fallthrough.
+    """
+    found: set[tuple[str, str]] = set()
+    if isinstance(value, BaseModel):
+        extra = value.__pydantic_extra__ or {}
+        for key in extra:
+            found.add((path, key))
+        for field_name in type(value).model_fields:
+            child_path = f"{path}.{field_name}" if path else field_name
+            found |= _collect_extras(getattr(value, field_name), child_path)
+    elif isinstance(value, dict):
+        for v in value.values():
+            found |= _collect_extras(v, f"{path}.*" if path else "*")
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            found |= _collect_extras(v, f"{path}[]")
+    return found
+
+
+def test_documented_extras_allowlist():
+    """The only extras anywhere in the validated default tree are the 3
+    deliberate, documented ones -- no more, no fewer."""
+    model = SettingsSchema.model_validate(default_settings())
+    assert _collect_extras(model) == DOCUMENTED_EXTRAS
+
+
+def test_extras_walker_flags_unmodeled_key():
+    """Negative proof for test_documented_extras_allowlist: the walker must
+    catch a brand-new unmodeled key. Inject a synthetic extra into a COPY of
+    the input (defaults.py itself is untouched) and show it shows up in the
+    collected set and is NOT part of the documented allowlist."""
+    s = copy.deepcopy(default_settings())
+    s["safety"]["totally_unmodeled_future_knob"] = "surprise"
+    model = SettingsSchema.model_validate(s)
+    found = _collect_extras(model)
+    assert ("safety", "totally_unmodeled_future_knob") in found
+    assert found - DOCUMENTED_EXTRAS == {("safety", "totally_unmodeled_future_knob")}
+    assert found != DOCUMENTED_EXTRAS
+
+
+# ---------------------------------------------------------------------------
+# Final-review Finding 1b: defaults-instantiation parity. Closes the other
+# open mesh -- a model field could carry a default that has silently drifted
+# from defaults.py's static value while both test_default_settings_round_trips
+# (validates FROM defaults.py, so an inline model default is never
+# exercised -- input always supplies the value) and the JSON-schema drift
+# test (schema-shape only, doesn't care about default *values*) stay green.
+#
+# Construct SettingsSchema supplying ONLY the fields that have no default
+# anywhere in the model tree (versions.*, server_info.uuid, lastupdated.time,
+# notify_services.onesignal.uuid), dump it, and deep-compare against
+# default_settings() with the dynamic/generated zones masked out on BOTH
+# sides. Every remaining field in the comparison is therefore populated by an
+# inline pydantic default, making each one load-bearing.
+# ---------------------------------------------------------------------------
+
+# (dotted path to delete, one-line reason it can't be part of a static-default
+# comparison)
+MASKED_PATHS = [
+    (
+        "versions",
+        "dummy required values supplied for construction; real values are read "
+        "live from updater/updater_manifest.json on every default_settings() "
+        "call, not a static per-model default",
+    ),
+    (
+        "server_info.uuid",
+        "dummy required value supplied; real uuid is generated fresh per-install by generate_uuid()",
+    ),
+    (
+        "lastupdated.time",
+        "dummy required value supplied; real value is a live timestamp (math.trunc(time.time())) set at build time",
+    ),
+    (
+        "notify_services.onesignal.uuid",
+        "dummy required value supplied; real uuid is generated fresh by generate_uuid() in default_notify_services()",
+    ),
+    (
+        "platform.system.1WIRE",
+        "deliberately unmodeled extra (not a valid Python identifier, S1); the "
+        "model has no default that can reproduce it without it being supplied "
+        "on input -- see the extras-allowlist tests above",
+    ),
+    (
+        "controller.config",
+        "dynamic: populated per-controller from controller/controllers.json "
+        "manifest option defaults, not a static per-model default",
+    ),
+    (
+        "dashboard.dashboards",
+        "dynamic: built from dashboard/*.json metadata files by _default_dashboard()",
+    ),
+    (
+        "display.config",
+        "dynamic: built from wizard/wizard_manifest.json display metadata per module",
+    ),
+    (
+        "history_page.probe_config",
+        "dynamic: generated per discovered probe by default_probe_config(), driven by probe_settings.probe_map",
+    ),
+    (
+        "probe_settings.probe_map",
+        "dynamic: hardware/profile-derived probe discovery (probe_devices / probe_info)",
+    ),
+    (
+        "probe_settings.probe_profiles",
+        "dynamic: loaded from probes/probes.json plus any user-added profiles",
+    ),
+    (
+        "recipe.probe_map",
+        "dynamic: derived from probe_settings.probe_map by _default_recipe_probe_map()",
+    ),
+]
+
+
+def _delete_path(d: dict, dotted: str) -> None:
+    parts = dotted.split(".")
+    cur = d
+    for p in parts[:-1]:
+        cur = cur[p]
+    cur.pop(parts[-1], None)
+
+
+def _masked_defaults_instantiation_diff():
+    """Builds SettingsSchema from only its required-no-default fields, dumps
+    it, and returns (actual, expected) with every path in MASKED_PATHS
+    deleted from both. Shared by the passing test and its mutation proof."""
+    model = SettingsSchema(
+        versions=Versions(server="dummy", cookfile="dummy", recipe="dummy", build=0),
+        server_info=ServerInfo(uuid="dummy-uuid"),
+        lastupdated=LastUpdated(time=0),
+        notify_services=NotifyServices(onesignal=OneSignalService(uuid="dummy-onesignal-uuid")),
+    )
+    actual = model.model_dump(mode="json")
+    expected = default_settings()
+    for path, _reason in MASKED_PATHS:
+        _delete_path(actual, path)
+        _delete_path(expected, path)
+    return actual, expected
+
+
+def test_defaults_instantiation_parity():
+    """Makes every inline model default in the SettingsSchema tree
+    load-bearing: proven by manually flipping SafetySettings.maxtemp from 550
+    to 555, confirming this test fails, then reverting (see final-review fix
+    report for the paste of both runs)."""
+    actual, expected = _masked_defaults_instantiation_diff()
+    assert actual == expected

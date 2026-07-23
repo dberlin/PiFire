@@ -15,6 +15,7 @@ export default [
   {
     ignores: [
       "dist",
+      "coverage",
       "tests/e2e",
       "*.config.js",
       "*.config.ts",
