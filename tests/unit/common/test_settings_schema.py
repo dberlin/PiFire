@@ -152,14 +152,14 @@ def test_committed_schema_is_current():
 # Final-review Finding 1a: extras allowlist. extra="allow" means any unmodeled
 # key in defaults.py silently rides through every nested model's
 # __pydantic_extra__ -- this closes that mesh by walking the FULL validated
-# tree and asserting the only extras captured are the 2 deliberate,
-# comment-documented Primary-only setpoint colors (settings_schema.py: the
-# ProbeChartConfig comment above):
-#   - history_page.probe_config.<label> carries bg_color_setpoint/
-#     line_color_setpoint (defaults.py:329-331) on Primary probes only.
+# tree and asserting no undocumented extras exist anywhere.
 # (Task 2 promoted platform.system's "1WIRE" to a real aliased field --
 # one_wire = Field(alias="1WIRE") on _SystemConfig -- so it no longer rides
-# through extra="allow" and has left this list.)
+# through extra="allow" and has left this list. Phase 2 Task 2a promoted
+# ProbeChartConfig's Primary-only setpoint colors -- bg_color_setpoint/
+# line_color_setpoint (defaults.py:329-331) -- to real optional fields for
+# the same reason, leaving the allowlist EMPTY: the default tree now has
+# zero live extras.)
 # A NEW unmodeled key anywhere in defaults.py must fail this test; that claim
 # is proven (not just asserted) by test_extras_walker_flags_unmodeled_key
 # below, which injects a synthetic extra into a COPY of the input and shows
@@ -169,10 +169,7 @@ def test_committed_schema_is_current():
 # Dynamic dict keys (probe labels, controller names, etc.) are normalized to
 # "*" in the collected path so the assertion is stable regardless of which
 # probes/labels happen to exist in defaults.py.
-DOCUMENTED_EXTRAS = {
-    ("history_page.probe_config.*", "bg_color_setpoint"),
-    ("history_page.probe_config.*", "line_color_setpoint"),
-}
+DOCUMENTED_EXTRAS: set[tuple[str, str]] = set()
 
 
 def _collect_extras(value, path: str = "") -> set[tuple[str, str]]:

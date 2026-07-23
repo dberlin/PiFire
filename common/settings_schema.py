@@ -18,7 +18,7 @@ no new limits were invented. Any NEW constraint must trace the same way.
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_serializer, model_validator
 from pydantic_core import ErrorDetails
 from pydantic_partial import create_partial_model
 
@@ -498,7 +498,9 @@ class ProbeChartConfig(_Section):
     # Mirrors the always-present shape default_probe_config() (defaults.py
     # :307-336) writes for EVERY probe (Primary and Food) — transcribed
     # 2026-07-22. Primary-only setpoint-color fields (bg_color_setpoint/
-    # line_color_setpoint) are not modeled; they ride through extra="allow".
+    # line_color_setpoint, defaults.py:329-331) are real optional fields
+    # (promoted off extra="allow" 2026-07-23, Phase 2 Task 2a) -- absent on
+    # Food-probe entries, always plain color strings on Primary entries.
     name: str
     type: str
     enabled: bool
@@ -508,6 +510,18 @@ class ProbeChartConfig(_Section):
     bg_color: str
     bg_color_target: str
     fill: bool
+    bg_color_setpoint: str | None = None
+    line_color_setpoint: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_setpoint_colors(self, handler):
+        # Food-probe entries never carry these keys at all (defaults.py only
+        # sets them for Primary, :329-331) -- dump must omit rather than emit
+        # `null`, or parity (assert_parity/validate_settings_tree round-trip)
+        # breaks against the original dict, which simply lacks the key. No
+        # other field on this model is ever legitimately None, so a blanket
+        # None-filter is safe here.
+        return {k: v for k, v in handler(self).items() if v is not None}
 
 
 class HistoryPage(_Section):

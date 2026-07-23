@@ -735,6 +735,18 @@
           "title": "Bg Color",
           "type": "string"
         },
+        "bg_color_setpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bg Color Setpoint"
+        },
         "bg_color_target": {
           "title": "Bg Color Target",
           "type": "string"
@@ -754,6 +766,18 @@
         "line_color": {
           "title": "Line Color",
           "type": "string"
+        },
+        "line_color_setpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Color Setpoint"
         },
         "line_color_target": {
           "title": "Line Color Target",
