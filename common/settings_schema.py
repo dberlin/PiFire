@@ -570,14 +570,56 @@ class SettingsValidationError(ValueError):
         super().__init__("; ".join(errors))
 
 
-def format_validation_errors(exc: ValidationError) -> list[str]:
-    """Dotted-path `"section.field: reason"` strings for a pydantic ValidationError.
+def _format_errors(errs: list[dict]) -> list[str]:
+    return [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in errs]
 
-    Public (Task 5): the API endpoint's delta-layer (PartialSettingsSchema)
-    validation reuses this to build its early-rejection envelope, same format
-    as SettingsValidationError.errors below.
+
+def format_validation_errors(exc: ValidationError) -> list[str]:
+    """Dotted-path `"section.field: reason"` strings for a pydantic ValidationError."""
+    return _format_errors(exc.errors())
+
+
+def validate_partial_settings(delta: dict) -> list[str]:
+    """FIELD-level strict-validate a sparse settings delta; dotted-path error
+    strings, empty if the delta type-checks (Task 5's Layer 1).
+
+    PartialSettingsSchema (below) recursively makes every field optional so a
+    sparse delta -- e.g. a single settings-tab PATCH -- validates without
+    requiring the rest of the tree. But its inherited
+    `model_validator(mode="after")` cross-field/cross-section rules
+    (PwmSettings._check_profiles, SmartStart._check_profile_count,
+    SettingsSchema._check_startup_pwm_duty_cycle) still run on every section
+    absent from the delta -- against that section's STATIC DEFAULT, not the
+    store's actual current value. A field the store has legitimately moved
+    away from its default (e.g. pwm.min_duty_cycle lowered via PwmTab) can
+    then make an unrelated, otherwise-valid delta (e.g. StartupTab's sparse
+    `{"startup": {"pwm_duty_cycle": ...}}`) fail here even though it's fine
+    against the real merged tree.
+
+    Cross-field validation is Layer 2's job alone
+    (validate_settings_tree() on the merged tree, which has real values
+    everywhere, called by write_settings() -- see
+    blueprints/api/routes.py:_api_post_settings_update). This filters those
+    errors out of Layer 1's report and returns only genuine per-field
+    type/shape violations, each traceable to a field actually present in the
+    delta.
+
+    Discriminator (empirically verified against a live ValidationError; see
+    tests/unit/common/test_settings_schema.py): every `model_validator` here
+    raises a bare `ValueError`, which pydantic reports with
+    `err["type"] == "value_error"`. No field-level failure in this schema --
+    strict-mode type mismatches ("int_type", "string_type", ...), Field
+    ge/le/pattern violations ("less_than_equal", "greater_than_equal", ...),
+    Literal mismatches ("literal_error"), etc. -- ever produces that generic
+    type; those are all pydantic's own specific error codes. So dropping
+    "value_error" entries leaves exactly the field-level errors.
     """
-    return [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors()]
+    try:
+        PartialSettingsSchema.model_validate(delta, strict=True)
+    except ValidationError as exc:
+        field_errors = [err for err in exc.errors() if err["type"] != "value_error"]
+        return _format_errors(field_errors)
+    return []
 
 
 def validate_settings_tree(settings: dict) -> dict:

@@ -1,5 +1,4 @@
 from flask import request, jsonify, abort
-from pydantic import ValidationError
 from common.common import WriteKind, write_log, deep_update, read_generic_json
 from common.datastore_accessors import (
     read_settings,
@@ -14,7 +13,7 @@ from common.datastore_accessors import (
 from common.api_commands import process_command
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update
 from common.server_status import get_server_status
-from common.settings_schema import PartialSettingsSchema, SettingsValidationError, format_validation_errors
+from common.settings_schema import SettingsValidationError, validate_partial_settings
 from . import api_bp
 
 
@@ -159,18 +158,25 @@ def _api_post_settings_update(settings, request_json):
     rejected outright without writing settings or control.
 
     Two-layer rejection (S2 Task 5):
-      1. The DELTA itself is strict-validated against PartialSettingsSchema
-         before anything is touched -- catches a structurally-bad delta (e.g.
-         a section replaced with a scalar, or a field of the wrong type)
-         with a precise dotted-path message, same format as
-         SettingsValidationError.errors.
+      1. The DELTA itself is FIELD-level strict-validated against
+         PartialSettingsSchema before anything is touched -- catches a
+         structurally-bad delta (e.g. a section replaced with a scalar, or a
+         field of the wrong type) with a precise dotted-path message, same
+         format as SettingsValidationError.errors. This layer deliberately
+         does NOT enforce cross-field/cross-section model_validator rules
+         (e.g. startup.pwm_duty_cycle vs. pwm.min/max_duty_cycle) -- on a
+         sparse delta those would run against sections' STATIC DEFAULTS
+         rather than the store's real values and could falsely reject a
+         valid delta (see validate_partial_settings()'s docstring in
+         common/settings_schema.py for the full rationale + discriminator).
       2. The delta is merged onto the current tree and handed to
          save_settings_and_flag_update() -> write_settings(), which
          strict-validates the FULL merged tree (Task 5's gate) and raises
-         SettingsValidationError on any violation (including cross-field
-         constraints the sparse delta alone couldn't evaluate). Caught here
-         and turned into the same error envelope; the store is left
-         untouched (write_settings() validates before persisting).
+         SettingsValidationError on any violation -- including the
+         cross-field constraints Layer 1 skips, now checked against real
+         values everywhere. Caught here and turned into the same error
+         envelope; the store is left untouched (write_settings() validates
+         before persisting). This layer is authoritative.
     """
     delta = request_json.get("settings", {})
     flags = request_json.get("flags", []) or []
@@ -178,10 +184,9 @@ def _api_post_settings_update(settings, request_json):
         if flag not in _SETTINGS_UPDATE_ALLOWED_FLAGS:
             return jsonify({"result": "error", "message": f"Unknown flag: {flag}", "data": {}}), 200
 
-    try:
-        PartialSettingsSchema.model_validate(delta, strict=True)
-    except ValidationError as exc:
-        message = "; ".join(format_validation_errors(exc))
+    layer1_errors = validate_partial_settings(delta)
+    if layer1_errors:
+        message = "; ".join(layer1_errors)
         return jsonify({"result": "error", "message": f"Settings update failed: {message}", "data": {}}), 200
 
     try:

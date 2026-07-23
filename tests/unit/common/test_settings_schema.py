@@ -325,6 +325,7 @@ def test_defaults_instantiation_parity():
 from common.settings_schema import (
     PartialSettingsSchema,
     SettingsValidationError,
+    validate_partial_settings,
     validate_settings_tree,
 )
 
@@ -366,6 +367,50 @@ def test_partial_model_accepts_sparse_delta_and_rejects_bad_field():
     PartialSettingsSchema.model_validate({"safety": {"maxtemp": 500}}, strict=True)
     with pytest.raises(Exception):  # pydantic ValidationError from the partial
         PartialSettingsSchema.model_validate({"safety": {"maxtemp": "500"}}, strict=True)
+
+
+# ---------------------------------------------------------------------------
+# Final-review fix: Layer 1 (validate_partial_settings, used by the API's
+# _api_post_settings_update) must report precise FIELD-level errors but must
+# NOT enforce cross-field/cross-section model_validator rules -- those run
+# against absent sections' STATIC DEFAULTS on a sparse delta and can falsely
+# reject a delta that's valid against the store's real merged tree (e.g.
+# pwm.min_duty_cycle lowered via PwmTab, then a bare startup.pwm_duty_cycle
+# delta checked against the *default* min_duty_cycle=20 instead). Layer 2
+# (validate_settings_tree() on the merged tree, see
+# tests/web/test_api_settings_update.py) remains the sole authority for
+# cross-field rules.
+# ---------------------------------------------------------------------------
+
+
+def test_partial_validate_settings_ignores_cross_field_rule_on_absent_section():
+    # pwm's default min_duty_cycle is 20 -- SettingsSchema.
+    # _check_startup_pwm_duty_cycle would reject 15 if it ran here against
+    # that default, even though the store may have pwm.min_duty_cycle
+    # legitimately lowered (e.g. to 10) making 15 valid on the real tree.
+    assert validate_partial_settings({"startup": {"pwm_duty_cycle": 15}}) == []
+
+
+def test_partial_validate_settings_still_reports_field_level_errors():
+    errors = validate_partial_settings({"safety": {"maxtemp": "nope"}})
+    assert any("safety.maxtemp" in e for e in errors)
+
+
+def test_partial_validate_settings_mixed_delta_keeps_field_error_drops_cross_field_error():
+    # One delta tripping both a genuine field-level error (safety.maxtemp,
+    # wrong type) and what would have been a cross-field error on an absent
+    # section's default (startup.pwm_duty_cycle) -- only the field-level
+    # error should survive filtering.
+    errors = validate_partial_settings({"safety": {"maxtemp": "nope"}, "startup": {"pwm_duty_cycle": 15}})
+    assert len(errors) == 1
+    assert "safety.maxtemp" in errors[0]
+
+
+def test_partial_validate_settings_rejects_structurally_bad_section():
+    # A section replaced with a scalar is a genuine (non-cross-field) shape
+    # error and must still be reported.
+    errors = validate_partial_settings({"safety": 5})
+    assert any("safety" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
