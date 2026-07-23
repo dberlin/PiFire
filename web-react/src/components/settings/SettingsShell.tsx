@@ -10,6 +10,7 @@ const SETTINGS_TABS = [
   { path: "safety", label: "Safety" },
   { path: "pellets", label: "Pellet Levels" },
   { path: "history", label: "History" },
+  { path: "notifications", label: "Notifications" },
   { path: "units", label: "Units" },
 ];
 

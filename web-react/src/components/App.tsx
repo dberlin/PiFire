@@ -7,6 +7,7 @@ import { SettingsShell } from "./settings/SettingsShell";
 import { ControllerTab } from "./settings/tabs/ControllerTab";
 import { GeneralTab } from "./settings/tabs/GeneralTab";
 import { HistoryTab } from "./settings/tabs/HistoryTab";
+import { NotificationsTab } from "./settings/tabs/NotificationsTab";
 import { PelletsTab } from "./settings/tabs/PelletsTab";
 import { PwmTab } from "./settings/tabs/PwmTab";
 import { SafetyTab } from "./settings/tabs/SafetyTab";
@@ -41,6 +42,7 @@ export const routes = [
       { path: "safety", element: <SafetyTab /> },
       { path: "pellets", element: <PelletsTab /> },
       { path: "history", element: <HistoryTab /> },
+      { path: "notifications", element: <NotificationsTab /> },
       { path: "units", element: <UnitsTab /> },
     ],
   },
