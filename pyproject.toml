@@ -22,6 +22,7 @@ dependencies = [
     "pillow>=12.2.0",
     "psutil>=7.2.2",
     "pydantic>=2.13",
+    "pydantic-partial>=0.11",
     "ratelimitingfilter>=1.5",
     "scikit-fuzzy>=0.5.0",
     "scikit-learn>=1.9.0",

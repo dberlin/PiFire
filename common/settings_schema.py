@@ -11,7 +11,8 @@ must always validate.
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic_partial import create_partial_model
 
 
 class _Section(BaseModel):
@@ -482,6 +483,40 @@ class SettingsSchema(_Section):
     notify_services: NotifyServices = NotifyServices()
     history_page: HistoryPage = HistoryPage()
     recipe: Recipe = Recipe()
+
+
+class SettingsValidationError(ValueError):
+    """A settings tree (or delta) failed strict schema validation."""
+
+    def __init__(self, errors: list[str]):
+        self.errors = errors
+        super().__init__("; ".join(errors))
+
+
+def _format_errors(exc: ValidationError) -> list[str]:
+    return [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors()]
+
+
+def validate_settings_tree(settings: dict) -> dict:
+    """Strict-validate a full settings tree; return the normalized dump.
+
+    This is S2's single enforcement entry -- write_settings() calls it before
+    persisting (Task 5). Raises SettingsValidationError with dotted-path
+    messages on failure.
+    """
+    try:
+        model = SettingsSchema.model_validate(settings, strict=True)
+    except ValidationError as exc:
+        raise SettingsValidationError(_format_errors(exc)) from exc
+    return model.model_dump(mode="json")
+
+
+# Recursive all-optional twin of SettingsSchema, for validating sparse deltas
+# (e.g. a single-tab PATCH from the settings API) without requiring every
+# required field (versions.*, server_info.uuid, lastupdated.time,
+# notify_services.onesignal.uuid) to be present. ERROR-QUALITY nicety, not
+# the enforcement mechanism -- validate_settings_tree() above is that.
+PartialSettingsSchema = create_partial_model(SettingsSchema, recursive=True)
 
 
 def export_schema() -> dict:

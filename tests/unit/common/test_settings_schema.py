@@ -41,15 +41,6 @@ def test_extra_keys_survive():
     assert_parity(s)
 
 
-def test_lax_coercion_is_pinned():
-    # S1 documents pydantic lax-mode behavior rather than fighting it:
-    # numeric strings coerce. This pin makes S2's strictness decision explicit.
-    s = default_settings()
-    s["safety"]["maxtemp"] = "550"
-    dumped = SettingsSchema.model_validate(s).model_dump(mode="json")
-    assert dumped["safety"]["maxtemp"] == 550
-
-
 def test_all_sections_are_modeled():
     # No top-level section may be passing through extra="allow" anymore.
     modeled = set(SettingsSchema.model_fields.keys())
@@ -322,3 +313,57 @@ def test_defaults_instantiation_parity():
     report for the paste of both runs)."""
     actual, expected = _masked_defaults_instantiation_diff()
     assert actual == expected
+
+
+# ---------------------------------------------------------------------------
+# Task S2.1: strict validator entry point + partial model. Enforcement itself
+# is a LATER task -- these pin the OBSERVED strict-mode semantics of
+# validate_settings_tree() / SettingsSchema.model_validate(strict=True) so a
+# pydantic upgrade that changes behavior is caught here, not silently at the
+# (future) enforcement call site.
+# ---------------------------------------------------------------------------
+
+from common.settings_schema import (
+    PartialSettingsSchema,
+    SettingsValidationError,
+    validate_settings_tree,
+)
+
+
+def test_strict_string_for_int_rejects():
+    s = default_settings()
+    s["safety"]["maxtemp"] = "550"
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("safety.maxtemp" in msg for msg in ei.value.errors)
+
+
+def test_strict_int_widens_to_float():
+    s = default_settings()
+    s["cycle_data"]["u_min"] = 0  # int into a float field — pydantic strict allows widening
+    validate_settings_tree(s)  # must not raise
+
+
+def test_strict_bool_for_int_rejects():
+    s = default_settings()
+    s["safety"]["reigniteretries"] = True
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(s)
+
+
+def test_unknown_keys_still_allowed_under_strict():
+    s = default_settings()
+    s["safety"]["future_knob"] = 42
+    validate_settings_tree(s)
+
+
+def test_validate_returns_normalized_dump():
+    s = default_settings()
+    out = validate_settings_tree(s)
+    assert out == s  # parity holds through the strict path on a clean tree
+
+
+def test_partial_model_accepts_sparse_delta_and_rejects_bad_field():
+    PartialSettingsSchema.model_validate({"safety": {"maxtemp": 500}}, strict=True)
+    with pytest.raises(Exception):  # pydantic ValidationError from the partial
+        PartialSettingsSchema.model_validate({"safety": {"maxtemp": "500"}}, strict=True)
