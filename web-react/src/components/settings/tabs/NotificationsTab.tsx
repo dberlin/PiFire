@@ -34,6 +34,18 @@ function num(o: NotifyService, key: string, fallback: number): number {
   return typeof v === "number" ? v : fallback;
 }
 
+// OneSignal devices self-register from the mobile app; only friendly_name is
+// editable here. uuid/app_id (siblings of `devices` on the onesignal service)
+// are intentionally not rendered by this tab.
+type OneSignalDevice = { friendly_name?: string; device_name?: string; app_version?: string };
+function deviceStr(d: OneSignalDevice, key: keyof OneSignalDevice): string {
+  const v = d[key];
+  return typeof v === "string" ? v : "";
+}
+function devicesOf(o: NotifyService): Record<string, OneSignalDevice> {
+  return (o.devices as Record<string, OneSignalDevice> | undefined) ?? {};
+}
+
 export function NotificationsTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving } = useSaveSettings();
@@ -57,11 +69,40 @@ export function NotificationsTab() {
     setSaved(await save({ notify_services: v.ns }, ["settings_update"]));
   };
 
+  const setDeviceField = (deviceId: string, key: keyof OneSignalDevice, val: string) =>
+    setV((s) => {
+      const onesignalSvc = (s.ns.onesignal ?? {}) as NotifyService;
+      const devices = devicesOf(onesignalSvc);
+      return {
+        ns: {
+          ...s.ns,
+          onesignal: {
+            ...onesignalSvc,
+            devices: {
+              ...devices,
+              [deviceId]: { ...devices[deviceId], [key]: val },
+            },
+          },
+        },
+      };
+    });
+
+  const deleteDevice = (deviceId: string) =>
+    setV((s) => {
+      const onesignalSvc = (s.ns.onesignal ?? {}) as NotifyService;
+      const devices = { ...devicesOf(onesignalSvc) };
+      delete devices[deviceId];
+      return {
+        ns: { ...s.ns, onesignal: { ...onesignalSvc, devices } },
+      };
+    });
+
   const apprise = svc("apprise");
   const ifttt = svc("ifttt");
   const pushbullet = svc("pushbullet");
   const pushover = svc("pushover");
   const onesignal = svc("onesignal");
+  const onesignalDevices = Object.entries(devicesOf(onesignal));
   const influxdb = svc("influxdb");
   const mqtt = svc("mqtt");
   const wled = svc("wled");
@@ -141,7 +182,33 @@ export function NotificationsTab() {
           checked={bool(onesignal, "enabled")}
           onChange={(b) => setField("onesignal", "enabled", b)}
         />
-        {/* devices manager — Task 3 */}
+        {onesignalDevices.length === 0 ? (
+          <p className="pf-settings-hint">
+            No devices registered. Devices register automatically when you sign in on the PiFire
+            mobile app.
+          </p>
+        ) : (
+          <div className="pf-devices-table">
+            {onesignalDevices.map(([deviceId, device]) => (
+              <div className="pf-device-row" key={deviceId}>
+                <TextField
+                  label={`Friendly Name (${deviceStr(device, "device_name")})`}
+                  value={deviceStr(device, "friendly_name")}
+                  onChange={(val) => setDeviceField(deviceId, "friendly_name", val)}
+                />
+                <span className="pf-device-meta">{deviceStr(device, "device_name")}</span>
+                <span className="pf-device-meta">{deviceStr(device, "app_version")}</span>
+                <button
+                  type="button"
+                  aria-label={`Delete ${deviceStr(device, "device_name")}`}
+                  onClick={() => deleteDevice(deviceId)}
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </Section>
 
       <Section title="InfluxDB">

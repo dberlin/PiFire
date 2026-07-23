@@ -80,6 +80,24 @@ const NOTIFY_SERVICES = {
   },
 };
 
+// player-id keyed devices, mirroring onesignal.devices as populated by the
+// mobile app's self-registration flow (uuid/app_id are siblings, not rendered
+// here).
+const DEVICES = {
+  "player-abc": { friendly_name: "Danny iPhone", device_name: "iPhone15", app_version: "1.2.0" },
+  "player-xyz": { friendly_name: "Kitchen Tablet", device_name: "SM-T500", app_version: "1.1.0" },
+};
+
+const NOTIFY_SERVICES_WITH_DEVICES = {
+  ...NOTIFY_SERVICES,
+  onesignal: { ...NOTIFY_SERVICES.onesignal, devices: DEVICES },
+};
+
+const NOTIFY_SERVICES_NO_DEVICES = {
+  ...NOTIFY_SERVICES,
+  onesignal: { ...NOTIFY_SERVICES.onesignal, devices: {} },
+};
+
 function contextWithNotifyServices(notify_services: unknown, mode = "Stop") {
   return {
     settings: { notify_services },
@@ -88,7 +106,7 @@ function contextWithNotifyServices(notify_services: unknown, mode = "Stop") {
 }
 
 describe("NotificationsTab", () => {
-  it("renders a Section for each of the six simple services + Apprise + OneSignal placeholder", () => {
+  it("renders a Section for each of the six simple services + Apprise + OneSignal", () => {
     renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES));
 
     expect(screen.getByText("Apprise")).toBeInTheDocument();
@@ -291,5 +309,72 @@ describe("NotificationsTab", () => {
 
     expect(screen.getByText("Apprise")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+
+  describe("OneSignal devices manager", () => {
+    it("renders a row per device showing friendly_name + device_name + app_version", () => {
+      renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES_WITH_DEVICES));
+
+      expect(screen.getByDisplayValue("Danny iPhone")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("Kitchen Tablet")).toBeInTheDocument();
+      expect(screen.getByText("iPhone15")).toBeInTheDocument();
+      expect(screen.getByText("SM-T500")).toBeInTheDocument();
+      expect(screen.getByText("1.2.0")).toBeInTheDocument();
+      expect(screen.getByText("1.1.0")).toBeInTheDocument();
+    });
+
+    it("editing a device's friendly_name and saving updates only that device, leaving device_name/app_version and the other device untouched", async () => {
+      renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES_WITH_DEVICES));
+
+      fireEvent.change(screen.getByLabelText("Friendly Name (iPhone15)"), {
+        target: { value: "Danny's Phone" },
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const calledDelta = saveMock.mock.calls[0][0] as {
+        notify_services: {
+          onesignal: { devices: Record<string, Record<string, unknown>> };
+        };
+      };
+      const savedDevices = calledDelta.notify_services.onesignal.devices;
+      expect(savedDevices["player-abc"]).toEqual({
+        friendly_name: "Danny's Phone",
+        device_name: "iPhone15",
+        app_version: "1.2.0",
+      });
+      expect(savedDevices["player-xyz"]).toEqual(DEVICES["player-xyz"]);
+    });
+
+    it("deleting a device removes it from the saved devices map", async () => {
+      renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES_WITH_DEVICES));
+
+      fireEvent.click(screen.getByRole("button", { name: "Delete SM-T500" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const calledDelta = saveMock.mock.calls[0][0] as {
+        notify_services: {
+          onesignal: { devices: Record<string, Record<string, unknown>> };
+        };
+      };
+      const savedDevices = calledDelta.notify_services.onesignal.devices;
+      expect(savedDevices["player-xyz"]).toBeUndefined();
+      expect(savedDevices["player-abc"]).toEqual(DEVICES["player-abc"]);
+    });
+
+    it("renders the empty-state hint and no rows when there are no devices, without crashing", () => {
+      renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES_NO_DEVICES));
+
+      expect(
+        screen.getByText(
+          "No devices registered. Devices register automatically when you sign in on the PiFire mobile app.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByLabelText(/Friendly Name/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Delete/ })).not.toBeInTheDocument();
+    });
   });
 });
