@@ -68,3 +68,45 @@ def test_settings_update_rejects_unknown_flag(client):
     # Control must NOT have gained a bogus "mode" flag.
     execute_control_writes()
     assert read_control().get("mode") is not True
+
+
+# ---------------------------------------------------------------------------
+# S2 Task 5: two-layer rejection. Layer 1 (PartialSettingsSchema, on the raw
+# delta) catches a structurally- or type-bad delta before anything is
+# touched. Layer 2 (write_settings()'s now-strict gate, on the merged tree)
+# catches anything the sparse delta alone couldn't evaluate. Both layers
+# leave the store untouched and return the same {"result": "error", ...}
+# envelope shape as every other failure path in this action -- no 500.
+# ---------------------------------------------------------------------------
+
+
+def test_settings_update_rejects_bad_field_type_layer2_full_tree(client):
+    """Brief's canonical pin: a bad scalar nested two levels deep. Also
+    layer-1-catchable (maxtemp is typed on PartialSettingsSchema too), but
+    pinned here as the full round-trip: envelope + untouched store."""
+    before = read_settings()
+
+    body = {"settings": {"safety": {"maxtemp": "nope"}}, "flags": []}
+    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["result"] == "error"
+    assert "safety.maxtemp" in payload["message"]
+
+    assert read_settings() == before
+
+
+def test_settings_update_rejects_structurally_bad_delta_layer1(client):
+    """A section replaced with a scalar (not even the right shape) is caught
+    by the delta-layer (PartialSettingsSchema) before deep_update ever runs --
+    distinct from the full-tree gate in the test above."""
+    before = read_settings()
+
+    body = {"settings": {"safety": 5}, "flags": []}
+    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["result"] == "error"
+    assert "safety" in payload["message"]
+
+    assert read_settings() == before

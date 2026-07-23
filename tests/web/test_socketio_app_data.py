@@ -271,6 +271,20 @@ def test_post_update_settings_unknown_key(sio):
     assert resp["message"] == "Error: Key not found in settings"
 
 
+def test_post_update_settings_invalid_tree_rejected_no_crash(sio):
+    """S2 Task 5 boundary catch: _post_app_data() wraps every handler
+    dispatch, so write_settings()'s now-strict gate rejecting an invalid
+    delta comes back as this module's normal {"result": "Error", ...}
+    envelope -- not an unhandled SettingsValidationError crashing the
+    socket.io event."""
+    before = read_settings()
+    payload = json.dumps({"safety": {"maxtemp": "nope"}})
+    resp = sio.mod._post_app_data("update_action", "settings", payload)
+    assert resp["result"] == "Error"
+    assert "safety.maxtemp" in resp["message"]
+    assert read_settings() == before
+
+
 def test_post_update_control_valid_key(sio):
     payload = json.dumps({"mode": "Stop"})
     resp = sio.mod._post_app_data("update_action", "control", payload)

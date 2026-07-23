@@ -570,7 +570,13 @@ class SettingsValidationError(ValueError):
         super().__init__("; ".join(errors))
 
 
-def _format_errors(exc: ValidationError) -> list[str]:
+def format_validation_errors(exc: ValidationError) -> list[str]:
+    """Dotted-path `"section.field: reason"` strings for a pydantic ValidationError.
+
+    Public (Task 5): the API endpoint's delta-layer (PartialSettingsSchema)
+    validation reuses this to build its early-rejection envelope, same format
+    as SettingsValidationError.errors below.
+    """
     return [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors()]
 
 
@@ -584,7 +590,7 @@ def validate_settings_tree(settings: dict) -> dict:
     try:
         model = SettingsSchema.model_validate(settings, strict=True)
     except ValidationError as exc:
-        raise SettingsValidationError(_format_errors(exc)) from exc
+        raise SettingsValidationError(format_validation_errors(exc)) from exc
     # by_alias=True: platform.system.one_wire must dump back out as "1WIRE"
     # (its defaults.py/on-disk key) -- see the alias comment on _SystemConfig.
     # No other field in the tree carries an alias, so this is a no-op for the

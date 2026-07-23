@@ -436,8 +436,9 @@ def test_smartstart_profile_count_invariant():
     # Clamp source: RangeProfileTable's boundaries+1 construction invariant.
     s = default_settings()
     s["startup"]["smartstart"]["profiles"] = s["startup"]["smartstart"]["profiles"][:-1]
-    with pytest.raises(SettingsValidationError):
+    with pytest.raises(SettingsValidationError) as ei:
         validate_settings_tree(s)
+    assert any("profiles must have exactly one more entry than temp_range_list" in m for m in ei.value.errors)
 
 
 def test_smartstart_profile_field_bounds_reject():
@@ -455,8 +456,9 @@ def test_pwm_profile_count_invariant():
     # (PwmTab.tsx).
     s = default_settings()
     s["pwm"]["profiles"] = s["pwm"]["profiles"][:-1]
-    with pytest.raises(SettingsValidationError):
+    with pytest.raises(SettingsValidationError) as ei:
         validate_settings_tree(s)
+    assert any("profiles must have exactly one more entry than temp_range_list" in m for m in ei.value.errors)
 
 
 def test_pwm_profile_duty_cycle_must_be_within_min_max():
@@ -464,8 +466,9 @@ def test_pwm_profile_duty_cycle_must_be_within_min_max():
     # min_duty_cycle/max_duty_cycle (cross-field within PwmSettings).
     s = default_settings()
     s["pwm"]["profiles"][0]["duty_cycle"] = s["pwm"]["min_duty_cycle"] - 1
-    with pytest.raises(SettingsValidationError):
+    with pytest.raises(SettingsValidationError) as ei:
         validate_settings_tree(s)
+    assert any("profiles[0].duty_cycle must be within" in m for m in ei.value.errors)
 
 
 def test_pwm_duty_cycle_must_be_within_min_max():
@@ -473,8 +476,9 @@ def test_pwm_duty_cycle_must_be_within_min_max():
     # startup.pwm_duty_cycle vs. pwm.min_duty_cycle/max_duty_cycle).
     s = default_settings()
     s["startup"]["pwm_duty_cycle"] = 10  # below min_duty_cycle=20
-    with pytest.raises(SettingsValidationError):
+    with pytest.raises(SettingsValidationError) as ei:
         validate_settings_tree(s)
+    assert any("startup.pwm_duty_cycle must be within" in m for m in ei.value.errors)
 
 
 # ---------------------------------------------------------------------------

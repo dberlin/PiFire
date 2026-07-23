@@ -20,6 +20,7 @@ from common.system import reboot_system, shutdown_system, restart_scripts, gathe
 from common.defaults import default_settings, default_control
 from common.app import allowed_file
 from common.server_status import set_server_status, get_server_status
+from common.settings_schema import SettingsValidationError
 from . import admin_bp
 
 
@@ -345,7 +346,19 @@ def admin_page(action=None):
 
     handler = _ADMIN_DISPATCH.get(action)
     if handler is not None:
-        result = handler(ctx)
+        try:
+            result = handler(ctx)
+        except SettingsValidationError as exc:
+            # Single choke point for every write_settings() call this
+            # blueprint makes (S2 Task 5): the settings tree failed strict
+            # validation and was NOT persisted. Route to this blueprint's
+            # existing error-list style (ctx.errors, rendered on
+            # admin/index.html) instead of a 500 -- realistically only
+            # reachable via restoresettings (an uploaded/local backup file
+            # with bad data); the other write_settings sites here write
+            # fixed-shape values that can't fail strict validation.
+            ctx.errors.append("Settings update rejected: " + "; ".join(exc.errors))
+            result = None
         if result is not None:
             return result
 

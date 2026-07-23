@@ -213,6 +213,30 @@ def test_admin_restoresettings_uploaded_file_upgrades_and_writes_strict(admin_cl
     _assert_strict()
 
 
+def test_admin_restoresettings_invalid_backup_rejected_no_crash(admin_client):
+    """S2 Task 5 boundary catch: admin_page()'s dispatch wraps every handler
+    call, so write_settings()'s now-strict gate rejecting a bad uploaded
+    backup comes back as this blueprint's existing ctx.errors/index.html
+    render -- not an unhandled SettingsValidationError/500. The store is
+    left untouched (the pre-restore tree, not the bad upload)."""
+    before = read_settings()
+    bad_backup = default_settings()
+    bad_backup["safety"]["maxtemp"] = "nope"
+
+    resp = admin_client.client.post(
+        "/admin/setting",
+        data={
+            "restoresettings": "true",
+            "localfile": "none",
+            "uploadfile": (io.BytesIO(json.dumps(bad_backup).encode()), "bad_upload.json"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    assert b"safety.maxtemp" in resp.data
+    assert read_settings() == before
+
+
 # =====================================================================
 # blueprints/mobile/socket_io.py -- 5 write sites reachable without real
 # hardware: update_action/settings, admin_action/factory_defaults,

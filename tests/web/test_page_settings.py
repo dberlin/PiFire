@@ -1201,7 +1201,21 @@ def test_startup_pwm_duty_cycle_clamped_to_pwm_settings_range(live_server, page)
     """routes.py:471-475 -- `startup.pwm_duty_cycle` IS correctly
     double-clamped (min() then max()) against the current pwm settings'
     min/max_duty_cycle, unlike prime_on_startup above."""
-    apply_settings(lambda s: s["pwm"].update(min_duty_cycle=20, max_duty_cycle=80))
+
+    def _seed(s):
+        s["pwm"]["min_duty_cycle"] = 20
+        s["pwm"]["max_duty_cycle"] = 80
+        # S2 Task 5: write_settings() strict-validates the FULL tree, so this
+        # precondition (bypassing it via apply_settings) must itself already
+        # satisfy the schema -- a real /settings/pwm submission narrowing
+        # min/max this far now re-clamps both of these the same way (see
+        # _settings_pwm's clamp), so a valid tree can only ever reach this
+        # min/max with them already inside it.
+        for profile in s["pwm"]["profiles"]:
+            profile["duty_cycle"] = max(20, min(80, profile["duty_cycle"]))
+        s["startup"]["pwm_duty_cycle"] = max(20, min(80, s["startup"]["pwm_duty_cycle"]))
+
+    apply_settings(_seed)
 
     over_resp = page.request.post(
         f"{live_server}/settings/startup",

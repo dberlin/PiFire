@@ -3,6 +3,7 @@ from common.common import WriteKind, read_generic_json, generate_uuid
 from common.modes import Mode
 from common.datastore_accessors import read_settings, read_control, write_settings, write_control
 from common.app import is_not_blank, is_checked, update_probe_config, save_settings_and_flag_update
+from common.settings_schema import SettingsValidationError
 
 from . import settings_bp
 
@@ -451,6 +452,25 @@ def _settings_pwm(settings, control, controller, event):
     if is_not_blank(response, "frequency"):
         settings["pwm"]["frequency"] = int(response["frequency"])
 
+    # Keep everything that's cross-validated against pwm.min_duty_cycle/
+    # max_duty_cycle -- but edited on a DIFFERENT tab/endpoint, so untouched
+    # by this handler -- consistent with a min/max change made here. Without
+    # this, narrowing min/max alone can leave either of these outside the
+    # new bounds, which the schema now rejects at write_settings() (S2 Task
+    # 5's gate): real regressions this closes, found running the full suite
+    # post-flip (see the S2 Task 5 report).
+    min_dc = settings["pwm"]["min_duty_cycle"]
+    max_dc = settings["pwm"]["max_duty_cycle"]
+    # 1. pwm.profiles (PwmSettings._check_profiles, S2 Task 2) -- the duty-
+    #    cycle profile table, edited on /settings/pwm_duty_cycle.
+    for profile in settings["pwm"]["profiles"]:
+        profile["duty_cycle"] = max(min_dc, min(max_dc, profile["duty_cycle"]))
+    # 2. startup.pwm_duty_cycle (SettingsSchema._check_startup_pwm_duty_cycle,
+    #    cross-SECTION) -- same double-clamp _settings_startup already
+    #    applies from the other direction when min/max are the untouched
+    #    side there.
+    settings["startup"]["pwm_duty_cycle"] = max(min_dc, min(max_dc, settings["startup"]["pwm_duty_cycle"]))
+
     event["type"] = "updated"
     event["text"] = "Successfully updated PWM settings."
 
@@ -677,7 +697,25 @@ def settings_page(action=None):
 
     handler = _SETTINGS_DISPATCH.get((request.method, action))
     if handler is not None:
-        result = handler(settings, control, controller, event)
+        try:
+            result = handler(settings, control, controller, event)
+        except SettingsValidationError as exc:
+            # Single choke point for every write_settings()/
+            # save_settings_and_flag_update() call this blueprint makes (S2
+            # Task 5): the settings tree failed strict validation and was
+            # NOT persisted. Route to whichever of this blueprint's two
+            # existing error styles the failing handler itself uses --
+            # JSON-body handlers (probe_config_save/smartstart/
+            # pwm_duty_cycle, all POSTed via $.ajax with a JSON contentType)
+            # get the same {"result": ...} envelope they already return on
+            # success; the form-POST handlers get the page's existing
+            # alert/event flash instead of a 500.
+            message = "; ".join(exc.errors)
+            if request.is_json:
+                return jsonify({"result": "error", "message": f"Settings update rejected: {message}"})
+            event["type"] = "error"
+            event["text"] = f"Settings update rejected: {message}"
+            result = None
         if result is not None:
             return result
 

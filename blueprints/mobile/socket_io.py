@@ -60,6 +60,7 @@ from common.system import (
 from common.api_commands import process_command
 from common.modes import Mode
 from common.app import update_probe_config, save_settings_and_flag_update, api_response
+from common.settings_schema import SettingsValidationError
 from flask import request
 from app import socketio
 from config import Config
@@ -773,7 +774,16 @@ def _post_app_data(action=None, type=None, json_data=None):
     else:
         request = {}
 
-    return handler(settings, type, request)
+    try:
+        return handler(settings, type, request)
+    except SettingsValidationError as exc:
+        # Single choke point for every _write_settings()/
+        # save_settings_and_flag_update() call reachable from this dispatcher
+        # (S2 Task 5): the settings tree failed strict validation and was NOT
+        # persisted. Same {"result": "Error", "message": ...} envelope every
+        # other failure path in this module already returns -- no crash back
+        # to the socket.io client.
+        return _response(result="Error", message="Error: Settings update rejected: " + "; ".join(exc.errors))
 
 
 def _get_probe_data(probe_type, settings, current, probe_device_info, notify_data):

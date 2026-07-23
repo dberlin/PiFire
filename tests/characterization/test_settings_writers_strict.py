@@ -394,3 +394,51 @@ def test_settings_pwm_duty_cycle_post_writes_strict(client_and_store):
     assert resp.get_json()["result"] == "success"
     assert read_settings()["pwm"]["temp_range_list"] == [3, 7, 10, 15]
     _assert_store_strict(read_settings)
+
+
+# --- Boundary error handling (S2 Task 5) ----------------------------------
+#
+# write_settings() is now hard-strict (raises SettingsValidationError instead
+# of silently persisting). settings_page()'s dispatch wraps every handler
+# call in a single try/except: JSON-body handlers (below: smartstart,
+# pwm_duty_cycle) get the same {"result": ...} envelope they already return
+# on success; form-POST handlers get the page's existing alert/event flash
+# (see test_page_settings.py's chromium-gated UI tests for that path). Both
+# must come back as a normal response -- never a 500 -- and leave the store
+# untouched.
+
+
+def test_settings_smartstart_post_rejects_invalid_profile_count_no_crash(client_and_store):
+    client, read_settings = client_and_store
+    before = read_settings()
+    payload = {
+        "temps_list": [60, 80, 90],
+        "profiles": [{"startuptime": 360, "augerontime": 15, "p_mode": 0}],  # too few for 3 boundaries
+    }
+    resp = client.post("/settings/smartstart", json=payload)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["result"] == "error"
+    assert "profiles" in body["message"]
+    assert read_settings() == before
+
+
+def test_settings_pwm_duty_cycle_post_rejects_out_of_range_duty_cycle_no_crash(client_and_store):
+    client, read_settings = client_and_store
+    before = read_settings()
+    payload = {
+        "dc_temps_list": [3, 7, 10, 15],
+        "dc_profiles": [
+            {"duty_cycle": 20},
+            {"duty_cycle": 35},
+            {"duty_cycle": 50},
+            {"duty_cycle": 75},
+            {"duty_cycle": 999},  # out of [min_duty_cycle, max_duty_cycle]
+        ],
+    }
+    resp = client.post("/settings/pwm_duty_cycle", json=payload)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["result"] == "error"
+    assert "duty_cycle" in body["message"]
+    assert read_settings() == before

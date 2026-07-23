@@ -27,6 +27,7 @@ from common.defaults import (
     default_pellets,
     default_settings,
 )
+from common.settings_schema import validate_settings_tree
 from common.sqlite_queue import SqliteMembershipList, SqliteQueue
 
 
@@ -247,8 +248,18 @@ def write_settings(settings):
     """
     Write all settings to SQLite DB (source of truth at runtime).
 
+    Strict-validates the tree first (S2 Task 5): validate_settings_tree()
+    raises SettingsValidationError on any schema violation, BEFORE
+    lastupdated.time is stamped or anything is persisted -- a rejected write
+    leaves the store untouched (atomic). The normalized dump it returns
+    (not the caller's raw dict) is what actually gets persisted, so callers
+    relying on type coercion/aliasing (e.g. platform.system's "1WIRE") get it
+    too. No bypass parameter -- every write_settings() call goes through
+    this gate.
+
     :param settings: Settings
     """
+    settings = validate_settings_tree(settings)
     settings["lastupdated"]["time"] = math.trunc(time.time())
 
     write_settings_store(settings)

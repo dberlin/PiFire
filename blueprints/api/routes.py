@@ -1,4 +1,5 @@
 from flask import request, jsonify, abort
+from pydantic import ValidationError
 from common.common import WriteKind, write_log, deep_update, read_generic_json
 from common.datastore_accessors import (
     read_settings,
@@ -13,6 +14,7 @@ from common.datastore_accessors import (
 from common.api_commands import process_command
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update
 from common.server_status import get_server_status
+from common.settings_schema import PartialSettingsSchema, SettingsValidationError, format_validation_errors
 from . import api_bp
 
 
@@ -155,17 +157,41 @@ def _api_post_settings_update(settings, request_json):
     (e.g. a typo'd "mode") would otherwise be set as control[flag] = True,
     clobbering unrelated control keys, so requests with any unknown flag are
     rejected outright without writing settings or control.
+
+    Two-layer rejection (S2 Task 5):
+      1. The DELTA itself is strict-validated against PartialSettingsSchema
+         before anything is touched -- catches a structurally-bad delta (e.g.
+         a section replaced with a scalar, or a field of the wrong type)
+         with a precise dotted-path message, same format as
+         SettingsValidationError.errors.
+      2. The delta is merged onto the current tree and handed to
+         save_settings_and_flag_update() -> write_settings(), which
+         strict-validates the FULL merged tree (Task 5's gate) and raises
+         SettingsValidationError on any violation (including cross-field
+         constraints the sparse delta alone couldn't evaluate). Caught here
+         and turned into the same error envelope; the store is left
+         untouched (write_settings() validates before persisting).
     """
+    delta = request_json.get("settings", {})
+    flags = request_json.get("flags", []) or []
+    for flag in flags:
+        if flag not in _SETTINGS_UPDATE_ALLOWED_FLAGS:
+            return jsonify({"result": "error", "message": f"Unknown flag: {flag}", "data": {}}), 200
+
     try:
-        delta = request_json.get("settings", {})
-        flags = request_json.get("flags", []) or []
-        for flag in flags:
-            if flag not in _SETTINGS_UPDATE_ALLOWED_FLAGS:
-                return jsonify({"result": "error", "message": f"Unknown flag: {flag}", "data": {}}), 200
+        PartialSettingsSchema.model_validate(delta, strict=True)
+    except ValidationError as exc:
+        message = "; ".join(format_validation_errors(exc))
+        return jsonify({"result": "error", "message": f"Settings update failed: {message}", "data": {}}), 200
+
+    try:
         settings = deep_update(settings, delta)
         control = read_control()
         save_settings_and_flag_update(settings, control, *flags, origin="api")
         return jsonify({"result": "success", "message": "Settings updated.", "data": settings}), 200
+    except SettingsValidationError as exc:
+        message = "; ".join(exc.errors)
+        return jsonify({"result": "error", "message": f"Settings update failed: {message}", "data": {}}), 200
     except Exception as e:
         return jsonify({"result": "error", "message": f"Settings update failed: {e}", "data": {}}), 200
 
