@@ -1,0 +1,216 @@
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { WizardModuleData } from "../../helpers/wizard/wizardTypes";
+import { ModuleCard } from "./ModuleCard";
+
+rs.mock("../../helpers/wizard/wizardApi", () => ({
+  scan: rs.fn().mockResolvedValue({ groups: [], error: null }),
+}));
+
+afterEach(cleanup);
+
+const basicModule: WizardModuleData = {
+  friendly_name: "Basic PWM Fan",
+  description: "A basic PWM controlled fan.",
+  notes: "Requires a spare GPIO pin.",
+  settings_dependencies: {
+    gpio_pin: {
+      friendly_name: "GPIO Pin",
+      options: { "17": "GPIO 17", "27": "GPIO 27" },
+      settings: ["gpio_pin"],
+    },
+  },
+};
+
+const moduleWithHiddenDep: WizardModuleData = {
+  friendly_name: "Hidden Dep Module",
+  settings_dependencies: {
+    secret: {
+      friendly_name: "Secret",
+      hidden: true,
+      settings: ["secret"],
+    },
+  },
+};
+
+const moduleWithI2c: WizardModuleData = {
+  friendly_name: "I2C Module",
+  settings_dependencies: {
+    i2c_bus_num: {
+      friendly_name: "I2C Bus",
+      type: "i2c_bus_num",
+      options: { "1": "Bus 1" },
+      settings: ["i2c_bus_num"],
+    },
+  },
+};
+
+const moduleWithUsbSerial: WizardModuleData = {
+  friendly_name: "USB Serial Module",
+  settings_dependencies: {
+    usb_device: {
+      friendly_name: "USB Device",
+      type: "usb_serial_device",
+      options: { "/dev/ttyUSB0": "ttyUSB0" },
+      settings: ["usb_device"],
+    },
+  },
+};
+
+const moduleWithConfig: WizardModuleData = {
+  friendly_name: "Configurable Module",
+  settings_dependencies: {},
+  config: [
+    {
+      option_name: "units",
+      option_friendly_name: "Units",
+      option_type: "list",
+      list_values: ["F", "C"],
+      list_labels: ["Fahrenheit", "Celsius"],
+      default: "F",
+    },
+  ],
+};
+
+const modules: Record<string, WizardModuleData> = {
+  basic: basicModule,
+  hidden_dep: moduleWithHiddenDep,
+  i2c: moduleWithI2c,
+  usb_serial: moduleWithUsbSerial,
+  configurable: moduleWithConfig,
+};
+
+function baseProps() {
+  return {
+    section: "distance" as const,
+    modules,
+    selectedModule: null as string | null,
+    depValues: {} as Record<string, string | null>,
+    configValues: {} as Record<string, unknown>,
+    configSource: "none" as const,
+    onSelectModule: rs.fn(),
+    onDepChange: rs.fn(),
+    onConfigChange: rs.fn(),
+    baseUrl: "",
+  };
+}
+
+describe("ModuleCard", () => {
+  it("renders the placeholder and no crash when selectedModule is null", () => {
+    render(<ModuleCard {...baseProps()} />);
+    expect(screen.getByRole("combobox", { name: "Module" })).toHaveValue("");
+    expect(screen.getByText("— select —")).toBeInTheDocument();
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+  });
+
+  it("renders module options from modules and calls onSelectModule on change with no fetch", () => {
+    const onSelectModule = rs.fn();
+    render(<ModuleCard {...baseProps()} onSelectModule={onSelectModule} />);
+
+    const select = screen.getByRole("combobox", { name: "Module" });
+    expect(screen.getByText("Basic PWM Fan")).toBeInTheDocument();
+    expect(screen.getByText("I2C Module")).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "basic" } });
+
+    expect(onSelectModule).toHaveBeenCalledWith("basic");
+    expect(onSelectModule).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the selected module's identity details", () => {
+    render(<ModuleCard {...baseProps()} selectedModule="basic" />);
+    expect(screen.getByRole("heading", { name: "Basic PWM Fan" })).toBeInTheDocument();
+    expect(screen.getByText("A basic PWM controlled fan.")).toBeInTheDocument();
+    expect(screen.getByText("Requires a spare GPIO pin.")).toBeInTheDocument();
+  });
+
+  it("renders a SelectField for a non-hidden settings dependency and wires onDepChange", () => {
+    const onDepChange = rs.fn();
+    render(
+      <ModuleCard
+        {...baseProps()}
+        selectedModule="basic"
+        depValues={{ gpio_pin: "17" }}
+        onDepChange={onDepChange}
+      />,
+    );
+    const field = screen.getByRole("combobox", { name: "GPIO Pin" });
+    expect(field).toHaveValue("17");
+
+    fireEvent.change(field, { target: { value: "27" } });
+    expect(onDepChange).toHaveBeenCalledWith("gpio_pin", "27");
+  });
+
+  it("renders nothing for a hidden settings dependency", () => {
+    render(<ModuleCard {...baseProps()} selectedModule="hidden_dep" />);
+    expect(screen.queryByText("Secret")).not.toBeInTheDocument();
+  });
+
+  it("renders the I2cBusPicker (with Discover button) for an i2c_bus_num dependency", async () => {
+    const { scan } = await import("../../helpers/wizard/wizardApi");
+    // The paired i2c_bus_kind field's value is what the Discover scan uses as
+    // its kind -- assert the real kind is forwarded, not the literal field type.
+    render(
+      <ModuleCard
+        {...baseProps()}
+        baseUrl="http://localhost"
+        selectedModule="i2c"
+        depValues={{ i2c_bus_kind: "extended" }}
+      />,
+    );
+    expect(screen.getByText("I2C Bus")).toBeInTheDocument();
+    const discoverButton = screen.getByRole("button", { name: /discover/i });
+    expect(discoverButton).toBeInTheDocument();
+
+    fireEvent.click(discoverButton);
+    expect(scan).toHaveBeenCalledWith("http://localhost", { kind: "extended" });
+  });
+
+  it("renders the UsbSerialPicker (with Discover button) for a usb_serial_device dependency", async () => {
+    const { scan } = await import("../../helpers/wizard/wizardApi");
+    render(<ModuleCard {...baseProps()} selectedModule="usb_serial" />);
+    expect(screen.getByText("USB Device")).toBeInTheDocument();
+    const discoverButton = screen.getByRole("button", { name: /discover/i });
+    expect(discoverButton).toBeInTheDocument();
+
+    fireEvent.click(discoverButton);
+    expect(scan).toHaveBeenCalledWith("", { kind: "usb_serial" });
+  });
+
+  it("renders no config table when configSource is none, even if the module has config", () => {
+    render(<ModuleCard {...baseProps()} selectedModule="configurable" configSource="none" />);
+    expect(screen.queryByText("Units")).not.toBeInTheDocument();
+  });
+
+  it("renders ConfigOptionFields when configSource is settings-by-module and config values are present", () => {
+    const onConfigChange = rs.fn();
+    render(
+      <ModuleCard
+        {...baseProps()}
+        selectedModule="configurable"
+        configSource="settings-by-module"
+        configValues={{ units: "C" }}
+        onConfigChange={onConfigChange}
+      />,
+    );
+    const field = screen.getByRole("combobox", { name: "Units" });
+    expect(field).toHaveValue("C");
+
+    fireEvent.change(field, { target: { value: "F" } });
+    expect(onConfigChange).toHaveBeenCalledWith("units", "F");
+  });
+
+  it("renders the config table using option defaults without throwing when configValues is {}", () => {
+    expect(() =>
+      render(
+        <ModuleCard
+          {...baseProps()}
+          selectedModule="configurable"
+          configSource="settings-by-module"
+          configValues={{}}
+        />,
+      ),
+    ).not.toThrow();
+    expect(screen.getByText("Units")).toBeInTheDocument();
+  });
+});
