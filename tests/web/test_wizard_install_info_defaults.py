@@ -32,3 +32,39 @@ def test_wizard_install_info_defaults_handles_options_free_field():
     assert info["modules"]["grillplatform"]["settings"]["i2c_bus_kind"] == "basic"
     # 'type: i2c_bus_num' dependency (no 'options') seeds its explicit 'default'.
     assert info["modules"]["grillplatform"]["settings"]["i2c_bus_num"] == "CP2112"
+
+
+def test_display_has_single_default_module():
+    """Regression: the manifest must mark exactly one display module default
+    (was two — ili9341b and ili9488b — causing dropdown/config disagreement)."""
+    from common.common import read_wizard
+
+    display = read_wizard()["modules"]["display"]
+    defaults = [name for name, entry in display.items() if isinstance(entry, dict) and entry.get("default") is True]
+    assert defaults == ["ili9341b"], f"expected single default ili9341b, got {defaults}"
+
+
+def test_every_display_module_has_default_key():
+    """wizardInstallInfoDefaults reads module['default'] UNGUARDED
+    (blueprints/wizard/wizard.py:53), so EVERY display module must carry the
+    key (true or false) — dropping it (not setting false) crashes fresh setup.
+    Regression for the KeyError introduced by removing ili9488b's key."""
+    from common.common import read_wizard
+
+    display = read_wizard()["modules"]["display"]
+    missing = [name for name, entry in display.items() if isinstance(entry, dict) and "default" not in entry]
+    assert missing == [], f"display modules missing 'default' key: {missing}"
+
+
+def test_real_manifest_defaults_do_not_crash_on_fresh_setup():
+    """End-to-end guard against the synthetic-fixture blind spot: run the REAL
+    manifest through wizardInstallInfoDefaults on a first-time-setup and assert
+    it neither crashes nor mis-resolves the display default."""
+    from common.common import read_wizard
+    from common.defaults import default_settings
+
+    wizard_data = read_wizard()
+    settings = default_settings()
+    settings["globals"]["first_time_setup"] = True
+    info = wizardInstallInfoDefaults(wizard_data, settings)  # must not KeyError
+    assert info["modules"]["display"]["profile_selected"] == ["ili9341b"]
