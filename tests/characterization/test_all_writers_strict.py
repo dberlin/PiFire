@@ -1,0 +1,800 @@
+"""Every writer OUTSIDE the settings blueprint must produce a strictly-valid
+settings tree.
+
+Pre-enforcement matrix (S2 Task 4): write_settings() does not yet validate;
+these tests call validate_settings_tree() on the store's tree (or on the
+value about to be persisted) after each writer runs, so handler bugs surface
+BEFORE the Task-5 gate flips validation on for real. validate_settings_tree()
+is used purely as a test oracle -- enforcement is NOT flipped here.
+
+Scope: blueprints/admin/routes.py, blueprints/mobile/socket_io.py,
+common/api_commands.py, blueprints/history/routes.py, blueprints/dash/routes.py,
+blueprints/wizard/routes.py, blueprints/api/routes.py, common/app.py,
+notify/notifications.py, display/_base_flex.py, updater.py, wizard.py, plus
+the settings-migration matrix (common/settings_migration.py).
+
+Harness: reuses Task 3's `ds` (tests/conftest.py, function-scoped temp-SQLite
+datastore) + plain `flask_app.test_client()` pattern for every HTTP-routed
+writer (proven by tests/characterization/test_settings_writers_strict.py and
+tests/web/test_api_settings_update.py) -- real Flask app, real routes.py
+dispatch, real write_settings()/SQLite round-trip, no Playwright/Chromium
+(agent envs skip [chromium] tests, per project convention). Socket.IO
+handlers are driven directly as plain functions (they are not HTTP routes),
+mirroring tests/web/test_socketio_app_data.py's `sio` fixture. `ds`'s "fresh"
+datastore is seeded from cwd `./settings.json` (untracked/gitignored,
+developer-machine-specific) -- see that module's docstring. Sections that
+only assert "still strict after this write" tolerate that seeding as-is
+(matches Task 3); sections that assert exact round-tripped VALUES (units
+conversion, migration matrix) explicitly reseed a canonical
+`default_settings()` first, so they never depend on the local machine's file.
+
+SAFETY (grepped before writing a single test in this file -- see the report
+for the full grep transcript):
+  - blueprints/admin/routes.py: os.system() at 4 sites (clearevents,
+    clearpelletdb x2 in factorydefaults, delete_logs) + reboot_system()/
+    shutdown_system()/restart_scripts(). The `admin_client` fixture below
+    patches blueprints.admin.routes.{reboot_system,shutdown_system,
+    restart_scripts} and the global os.system, mirroring
+    tests/web/test_page_admin.py's `hazard_guard`. Nothing destructive runs.
+  - blueprints/mobile/socket_io.py: os.system() (clear_events/clear_pelletdb/
+    factory_defaults/recipe_delete) + reboot_system()/shutdown_system()/
+    restart_control()/restart_webapp()/restart_scripts(). The `sio` fixture
+    below patches the same module-level names, mirroring
+    tests/web/test_socketio_app_data.py's `sio` fixture. Nothing destructive
+    runs.
+  - blueprints/wizard/routes.py: os.system(f"{python_exec} wizard.py &") only
+    on the `finish` action, which this file never exercises (only `cancel`,
+    a pure settings write with no os.system on its path).
+  - wizard.py / updater.py: real subprocess.Popen/subprocess.run calls behind
+    `is_real_hardware()` guards. `is_real_hardware` is monkeypatched to
+    `False` (wizard.py, via the same `no_install` fixture
+    tests/unit/wizard/test_wizard_run_no_probes.py already uses) or simply
+    never reached (updater.py's `-v`/`-l` flags do not call subprocess at
+    all -- confirmed by reading the source before writing the runpy test).
+  - common/api_commands.py, blueprints/history/routes.py,
+    blueprints/dash/routes.py, blueprints/api/routes.py, common/app.py,
+    notify/notifications.py, display/_base_flex.py: no os.system/subprocess
+    on any write path exercised here (grepped; confirmed clean).
+"""
+
+import copy
+import io
+import json
+import os
+import tempfile
+import types
+from unittest import mock
+
+import pytest
+
+from common.common import WriteKind
+from common.datastore_accessors import read_settings, write_settings_store
+from common.defaults import default_control, default_settings
+from common.settings_schema import validate_settings_tree
+
+
+def _assert_strict(settings=None):
+    """validate_settings_tree() on the current store (or an explicit dict);
+    raises SettingsValidationError on any handler bug."""
+    validate_settings_tree(settings if settings is not None else read_settings())
+
+
+@pytest.fixture
+def client_and_store(ds):
+    """Same fixture as tests/characterization/test_settings_writers_strict.py
+    (Task 3) -- duplicated here (rather than imported) so ruff doesn't flag a
+    cross-module fixture-as-parameter import as an unused redefinition."""
+    from app import app as flask_app
+
+    flask_app.config.update(TESTING=True)
+    client = flask_app.test_client()
+    return client, read_settings
+
+
+# =====================================================================
+# blueprints/admin/routes.py -- 6 write_settings sites (debugenabled x2
+# branches, factorydefaults, restoresettings x2 branches, boot).
+# =====================================================================
+
+
+@pytest.fixture
+def admin_client(ds, tmp_path):
+    from app import app as flask_app
+    import blueprints.admin.routes as admin_routes
+
+    flask_app.config.update(TESTING=True)
+    backup_dir = str(tmp_path / "backups") + os.sep
+    os.makedirs(backup_dir, exist_ok=True)
+    flask_app.config["BACKUP_PATH"] = backup_dir
+    flask_app.config["UPLOAD_FOLDER"] = backup_dir
+
+    calls = []
+
+    def _rec(name):
+        def _inner(*a, **k):
+            calls.append((name, a, k))
+
+        return _inner
+
+    def _rec_os(cmd):
+        calls.append(("os.system", cmd))
+        return 0
+
+    with (
+        mock.patch("os.system", side_effect=_rec_os),
+        mock.patch.object(admin_routes, "reboot_system", side_effect=_rec("reboot_system")),
+        mock.patch.object(admin_routes, "shutdown_system", side_effect=_rec("shutdown_system")),
+        mock.patch.object(admin_routes, "restart_scripts", side_effect=_rec("restart_scripts")),
+    ):
+        yield types.SimpleNamespace(client=flask_app.test_client(), calls=calls, backup_dir=backup_dir)
+
+
+def test_admin_debugenabled_disable_writes_strict(admin_client):
+    resp = admin_client.client.post("/admin/setting", data={"debugenabled": "disabled"})
+    assert resp.status_code == 200
+    assert read_settings()["globals"]["debug_mode"] is False
+    _assert_strict()
+
+
+def test_admin_debugenabled_enable_writes_strict(admin_client):
+    resp = admin_client.client.post("/admin/setting", data={"debugenabled": "enabled"})
+    assert resp.status_code == 200
+    assert read_settings()["globals"]["debug_mode"] is True
+    _assert_strict()
+
+
+def test_admin_boot_writes_strict(admin_client):
+    resp = admin_client.client.post("/admin/boot", data={"boot_to_monitor": "on"})
+    assert resp.status_code == 200
+    assert read_settings()["globals"]["boot_to_monitor"] is True
+    _assert_strict()
+
+
+def test_admin_boot_unchecked_writes_strict(admin_client):
+    resp = admin_client.client.post("/admin/boot", data={})
+    assert resp.status_code == 200
+    assert read_settings()["globals"]["boot_to_monitor"] is False
+    _assert_strict()
+
+
+def test_admin_factorydefaults_writes_strict(admin_client):
+    resp = admin_client.client.post("/admin/setting", data={"factorydefaults": "true"})
+    assert resp.status_code == 200
+    assert ("os.system", "rm settings.json") in admin_client.calls
+    assert ("restart_scripts", (), {}) in admin_client.calls
+    _assert_strict()
+
+
+def test_admin_restoresettings_local_file_upgrades_and_writes_strict(admin_client):
+    """FIXED (blueprints/admin/routes.py): restoresettings previously called
+    read_settings_file() WITHOUT init=True, so restoring an older-format
+    backup (missing fields a later release added) wrote an incomplete tree
+    straight to disk instead of migrating it forward. This backup
+    deliberately omits versions.cookfile/versions.recipe (fields that did
+    not exist in older PiFire releases) to prove the restore now migrates."""
+    legacy_backup = default_settings()
+    legacy_backup["globals"]["grill_name"] = "Restored Legacy"
+    del legacy_backup["versions"]["cookfile"]
+    del legacy_backup["versions"]["recipe"]
+    backup_filename = "PiFire_legacy_test.json"
+    with open(admin_client.backup_dir + backup_filename, "w") as f:
+        json.dump(legacy_backup, f)
+
+    resp = admin_client.client.post(
+        "/admin/setting",
+        data={
+            "restoresettings": "true",
+            "localfile": backup_filename,
+            "uploadfile": (io.BytesIO(b""), ""),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    assert read_settings()["globals"]["grill_name"] == "Restored Legacy"
+    _assert_strict()
+
+
+def test_admin_restoresettings_uploaded_file_upgrades_and_writes_strict(admin_client):
+    legacy_backup = default_settings()
+    legacy_backup["globals"]["grill_name"] = "Restored Upload"
+    del legacy_backup["versions"]["cookfile"]
+
+    resp = admin_client.client.post(
+        "/admin/setting",
+        data={
+            "restoresettings": "true",
+            "localfile": "none",
+            "uploadfile": (io.BytesIO(json.dumps(legacy_backup).encode()), "upload.json"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    assert read_settings()["globals"]["grill_name"] == "Restored Upload"
+    _assert_strict()
+
+
+# =====================================================================
+# blueprints/mobile/socket_io.py -- 5 write sites reachable without real
+# hardware: update_action/settings, admin_action/factory_defaults,
+# units_action/f_units+c_units, probes_action/probe_update.
+# =====================================================================
+
+
+@pytest.fixture
+def sio(ds):
+    write_settings_store(default_settings())
+    from common.datastore_accessors import write_control, write_pellet_db, write_status, read_status
+    from common.defaults import default_pellets
+
+    write_control(default_control(), WriteKind.OVERWRITE, origin="test-writer-matrix")
+    write_pellet_db(default_pellets())
+    write_status(read_status(init=True))
+
+    import blueprints.mobile.socket_io as socket_io
+
+    calls = []
+
+    def _rec(name):
+        def _inner(*a, **k):
+            calls.append((name, a, k))
+
+        return _inner
+
+    def _rec_os(cmd):
+        calls.append(("os.system", cmd))
+        return 0
+
+    with (
+        mock.patch("os.system", side_effect=_rec_os),
+        mock.patch.object(socket_io, "reboot_system", side_effect=_rec("reboot_system")),
+        mock.patch.object(socket_io, "shutdown_system", side_effect=_rec("shutdown_system")),
+        mock.patch.object(socket_io, "restart_control", side_effect=_rec("restart_control")),
+        mock.patch.object(socket_io, "restart_webapp", side_effect=_rec("restart_webapp")),
+        mock.patch.object(socket_io, "restart_scripts", side_effect=_rec("restart_scripts")),
+    ):
+        yield types.SimpleNamespace(mod=socket_io, calls=calls)
+
+
+def test_socketio_update_settings_writes_strict(sio):
+    payload = json.dumps({"globals": {"grill_name": "Strict Socket"}})
+    resp = sio.mod._post_app_data("update_action", "settings", payload)
+    assert resp["result"] == "OK"
+    assert read_settings()["globals"]["grill_name"] == "Strict Socket"
+    _assert_strict()
+
+
+def test_socketio_admin_factory_defaults_writes_strict(sio):
+    resp = sio.mod._post_app_data("admin_action", "factory_defaults")
+    assert resp["result"] == "OK"
+    assert ("os.system", "rm settings.json") in sio.calls
+    _assert_strict()
+
+
+def test_socketio_units_f_writes_strict(sio):
+    settings = read_settings()
+    settings["globals"]["units"] = "C"
+    write_settings_store(settings)
+    resp = sio.mod._post_app_data("units_action", "f_units")
+    assert resp["result"] == "OK"
+    assert read_settings()["globals"]["units"] == "F"
+    _assert_strict()
+
+
+def test_socketio_units_c_writes_strict(sio):
+    resp = sio.mod._post_app_data("units_action", "c_units")
+    assert resp["result"] == "OK"
+    assert read_settings()["globals"]["units"] == "C"
+    _assert_strict()
+
+
+def test_socketio_probe_update_writes_strict(sio):
+    payload = json.dumps({"probes_action": {"label": "Grill", "name": "Strict Grill"}})
+    resp = sio.mod._post_app_data("probes_action", "probe_update", payload)
+    assert resp["result"] == "OK"
+    assert read_settings()["probe_settings"]["probe_map"]["probe_info"][0]["name"] == "Strict Grill"
+    _assert_strict()
+
+
+# =====================================================================
+# common/api_commands.py -- units F<->C conversion (both directions,
+# round-trip sanity) and pmode.
+# =====================================================================
+
+
+def test_api_commands_set_units_round_trip_strict_and_sane(ds):
+    from common.api_commands import process_command
+
+    write_settings_store(default_settings())
+    starting = read_settings()
+    assert starting["globals"]["units"] == "F"
+    starting_pwm_bands = list(starting["pwm"]["temp_range_list"])
+
+    process_command(action="set", arglist=["units", "C"], origin="test")
+    after_c = read_settings()
+    assert after_c["globals"]["units"] == "C"
+    _assert_strict(after_c)
+    # pwm.temp_range_list is a DELTA ("degrees below setpoint"), not an
+    # absolute reading -- FIXED (common/common.py convert_settings_units):
+    # it was never converted at all before. Confirm it actually moved.
+    assert after_c["pwm"]["temp_range_list"] != starting_pwm_bands
+    # Absolute-reading fields round-trip via the existing convert_temp path.
+    assert after_c["safety"]["maxtemp"] == 287  # 550F -> C truncated
+
+    process_command(action="set", arglist=["units", "F"], origin="test")
+    after_f = read_settings()
+    assert after_f["globals"]["units"] == "F"
+    _assert_strict(after_f)
+    # Round-trip sanity: int-truncation drift is expected (same as every
+    # other pre-existing convert_temp field), but must stay small.
+    for before, after in zip(starting_pwm_bands, after_f["pwm"]["temp_range_list"]):
+        assert abs(before - after) <= 2
+    assert abs(starting["safety"]["maxtemp"] - after_f["safety"]["maxtemp"]) <= 2
+
+
+def test_api_commands_set_units_noop_when_same_units_stays_strict(ds):
+    from common.api_commands import process_command
+
+    write_settings_store(default_settings())
+    process_command(action="set", arglist=["units", "F"], origin="test")  # already F: no-op branch
+    _assert_strict()
+
+
+def test_api_commands_set_pmode_writes_strict(ds):
+    from common.api_commands import process_command
+
+    write_settings_store(default_settings())
+    process_command(action="set", arglist=["pmode", "7"], origin="test")
+    assert read_settings()["cycle_data"]["PMode"] == 7
+    _assert_strict()
+
+
+# =====================================================================
+# blueprints/history/routes.py -- 2 write sites (refresh/num_mins, setmins).
+# =====================================================================
+
+
+def test_history_refresh_num_mins_writes_strict(client_and_store):
+    client, read_settings_fn = client_and_store
+    resp = client.post("/history/refresh", json={"num_mins": 22})
+    assert resp.status_code == 200
+    assert read_settings_fn()["history_page"]["minutes"] == 22
+    _assert_strict()
+
+
+def test_history_setmins_writes_strict(client_and_store):
+    client, read_settings_fn = client_and_store
+    resp = client.post("/history/setmins", data={"minutes": "17"})
+    assert resp.status_code == 200
+    assert read_settings_fn()["history_page"]["minutes"] == 17
+    _assert_strict()
+
+
+# =====================================================================
+# blueprints/dash/routes.py -- 1 write site (dash config POST).
+# =====================================================================
+
+
+def test_dash_config_post_writes_strict(client_and_store):
+    client, read_settings_fn = client_and_store
+    settings = read_settings_fn()
+    current = settings["dashboard"]["current"]
+    resp = client.post("/dash/config", data={"dashConfig_sentinel_key": "sentinel_value"})
+    assert resp.status_code in (200, 302)
+    written = read_settings_fn()
+    assert written["dashboard"]["dashboards"][current]["config"]["sentinel_key"] == "sentinel_value"
+    _assert_strict()
+
+
+# =====================================================================
+# blueprints/wizard/routes.py -- 1 reachable write site (cancel). `finish`
+# is the only handler with an os.system() call and is deliberately not
+# exercised here.
+# =====================================================================
+
+
+def test_wizard_cancel_writes_strict(client_and_store):
+    client, read_settings_fn = client_and_store
+    resp = client.post("/wizard/cancel")
+    assert resp.status_code in (200, 302)
+    assert read_settings_fn()["globals"]["first_time_setup"] is False
+    _assert_strict()
+
+
+# =====================================================================
+# blueprints/api/routes.py -- settings + settings_update actions (the
+# latter also exercises common/app.py's save_settings_and_flag_update).
+# =====================================================================
+
+
+def test_api_post_settings_valid_delta_writes_strict(client_and_store):
+    client, read_settings_fn = client_and_store
+    resp = client.post("/api/settings", json={"globals": {"grill_name": "API Delta"}})
+    assert resp.status_code == 201
+    body = resp.get_json()
+    assert body["result"] == "success"
+    assert read_settings_fn()["globals"]["grill_name"] == "API Delta"
+    _assert_strict()
+
+
+def test_api_post_settings_update_valid_delta_writes_strict(client_and_store):
+    client, read_settings_fn = client_and_store
+    resp = client.post(
+        "/api/settings_update",
+        json={"settings": {"globals": {"grill_name": "API Update Delta"}}, "flags": ["settings_update"]},
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["result"] == "success"
+    assert read_settings_fn()["globals"]["grill_name"] == "API Update Delta"
+    _assert_strict()
+
+
+# =====================================================================
+# common/app.py -- save_settings_and_flag_update, direct unit test (in
+# addition to the api/routes.py + socket_io coverage above, both of which
+# call through it).
+# =====================================================================
+
+
+def test_save_settings_and_flag_update_writes_strict(ds):
+    from common.app import save_settings_and_flag_update
+    from common.datastore_accessors import execute_control_writes, read_control
+
+    write_settings_store(default_settings())
+    settings = read_settings()
+    settings["globals"]["grill_name"] = "Direct App Helper"
+    control = default_control()
+
+    save_settings_and_flag_update(settings, control, "settings_update", origin="test")
+    execute_control_writes()  # write_control queues a MERGE partial; drain it to read back.
+
+    assert read_settings()["globals"]["grill_name"] == "Direct App Helper"
+    assert read_control()["settings_update"] is True
+    _assert_strict()
+
+
+# =====================================================================
+# notify/notifications.py -- _send_onesignal_notification's invalid-player-
+# id device cleanup (the only write_settings site in this module).
+# =====================================================================
+
+
+def test_onesignal_invalid_player_id_cleanup_writes_strict(ds):
+    import notify.notifications as N
+
+    write_settings_store(default_settings())
+    settings = read_settings()
+    settings["notify_services"]["onesignal"]["devices"] = {"bad-device": {"device_name": "Old Phone"}}
+    write_settings_store(settings)
+
+    fake_response = mock.Mock()
+    fake_response.status_code = 200
+    fake_response.text = "ok"
+    fake_response.json.return_value = {"errors": {"invalid_player_ids": ["bad-device"]}}
+
+    with mock.patch.object(N.requests, "post", return_value=fake_response):
+        N._send_onesignal_notification(read_settings(), "Title", "Body", "chan")
+
+    assert "bad-device" not in read_settings()["notify_services"]["onesignal"]["devices"]
+    _assert_strict()
+
+
+# =====================================================================
+# display/_base_flex.py -- the pmode command write (the only write_settings
+# site in this module). Hardware neutralized via a minimal in-memory
+# layout, mirroring tests/ui/test_base_flex_dash_update.py's harness.
+# =====================================================================
+
+
+@pytest.fixture
+def flex_display(ds, tmp_path):
+    write_settings_store(default_settings())
+    from common.datastore_accessors import write_control
+    from common.defaults import default_control as _default_control
+
+    write_control(_default_control(), WriteKind.OVERWRITE, origin="test-writer-matrix")
+
+    from display._base_flex import DisplayBase
+
+    class _DummyDisplay(DisplayBase):
+        def __init__(self, config):
+            self.display_profile = "profile_1"
+            super().__init__(dev_pins={}, config=config)
+
+    layout = {
+        "metadata": {
+            "name": "writer_matrix_test",
+            "screen_width": 800,
+            "screen_height": 480,
+            "splash_delay": 10,
+            "framerate": 30,
+            "max_food_probes": 5,
+            "dash_background": "./static/img/display/background_ember_1280x720.png",
+            "splash_image": "./static/img/display/splash_800x480.png",
+        },
+        "profile_1": {"home": [], "dash": [], "menus": {"qrcode": {}}, "input": {}},
+    }
+    layout_path = tmp_path / "layout.json"
+    layout_path.write_text(json.dumps(layout))
+
+    config = {
+        "display_data_filename": str(layout_path),
+        "default_profile": "profile_1",
+        "input_types_supported": [],
+        "buttonslevel": "HIGH",
+    }
+    return _DummyDisplay(config)
+
+
+def test_display_pmode_command_writes_strict(flex_display):
+    flex_display.command = "pmode"
+    flex_display.command_data = 6
+    flex_display._command_handler()
+    assert read_settings()["cycle_data"]["PMode"] == 6
+    _assert_strict()
+
+
+# =====================================================================
+# updater.py -- the two write_settings sites live in the `if __name__ ==
+# "__main__":` script body (module scope, not a function), reached via
+# `-v`/`-l`. Neither flag's branch calls subprocess/os.system (confirmed by
+# reading the source: only -u/-b/-i trigger install_dependencies(), which
+# this test never selects), so this is safe to drive with runpy + a
+# monkeypatched sys.argv, no mocking required.
+# =====================================================================
+
+
+def test_updater_main_uv_flag_writes_strict(ds):
+    import runpy
+    import sys
+
+    write_settings_store(default_settings())
+    old_argv = sys.argv
+    sys.argv = ["updater.py", "-v"]
+    try:
+        runpy.run_path(os.path.join(os.path.dirname(__file__), "..", "..", "updater.py"), run_name="__main__")
+    finally:
+        sys.argv = old_argv
+
+    written = read_settings()
+    assert written["globals"]["uv"] is True
+    assert written["globals"]["venv"] is True
+    assert written["globals"]["python_exec"] == ".venv/bin/python"
+    _assert_strict()
+
+
+def test_updater_main_legacyvenv_flag_writes_strict(ds):
+    import runpy
+    import sys
+
+    write_settings_store(default_settings())
+    old_argv = sys.argv
+    sys.argv = ["updater.py", "-l"]
+    try:
+        runpy.run_path(os.path.join(os.path.dirname(__file__), "..", "..", "updater.py"), run_name="__main__")
+    finally:
+        sys.argv = old_argv
+
+    written = read_settings()
+    assert written["globals"]["uv"] is False
+    assert written["globals"]["venv"] is True
+    assert written["globals"]["python_exec"] == "bin/python"
+    _assert_strict()
+
+
+# =====================================================================
+# wizard.py -- run_wizard()'s two write_settings sites (module-level
+# function, unlike updater.py). Reuses the exact `no_install` neutralization
+# pattern from tests/unit/wizard/test_wizard_run_no_probes.py.
+# =====================================================================
+
+
+@pytest.fixture
+def no_install(monkeypatch):
+    import logging
+
+    import wizard
+
+    monkeypatch.setattr(wizard, "logger", logging.getLogger("wizard_writer_matrix_test"), raising=False)
+    monkeypatch.setattr(wizard, "is_real_hardware", lambda *a, **k: False)
+    monkeypatch.setattr(wizard.time, "sleep", lambda *a, **k: None)
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(wizard.subprocess, "run", lambda *a, **k: _Result())
+
+
+def test_run_wizard_writes_strict(ds, no_install):
+    import wizard
+    from common import datastore_accessors
+    from common.common import read_wizard
+
+    settings = default_settings()
+    settings["probe_settings"]["probe_map"]["probe_devices"] = []
+    datastore_accessors.write_settings_store(settings)
+
+    wizard_data = read_wizard()
+    install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
+
+    wizard.run_wizard(settings, wizard_data, install_info)
+
+    _assert_strict()
+
+
+# =====================================================================
+# Migration matrix -- for every starting-version fixture the settings-
+# migration tests already use (tests/unit/common/test_settings_migration.py),
+# run the REAL production migration entry point and assert the result is
+# strictly valid.
+#
+# NOTE on why this drives read_settings_file(init=True) rather than a bare
+# upgrade_settings() call: upgrade_settings() is one stage of a 3-stage
+# pipeline (see common/settings_migration.py:read_settings_file) --
+# (1) upgrade_settings() runs the versioned transform blocks, (2)
+# settings["versions"] is unconditionally replaced with the current
+# defaults, (3) `deep_update(settings_default, settings)` overlays the
+# result on top of a FULL default tree, backfilling any field a legacy
+# fixture's block(s) didn't touch (e.g. notify_services.onesignal.uuid,
+# versions.cookfile/recipe on a fixture built from an old `versions` shape).
+# common/datastore.py's real startup path (_first_boot_import) calls
+# read_settings_file(init=True) directly and persists ITS result -- so
+# read_settings_file(init=True) is the actual reachable "writer" the S2
+# gate will eventually validate, not the bare intermediate helper. (Calling
+# upgrade_settings() alone on these fixtures does NOT pass validate_settings_tree
+# for several of them -- by design, not a bug: see the report.)
+# =====================================================================
+
+
+@pytest.fixture
+def migration_env(tmp_path, monkeypatch):
+    from common import datastore
+
+    monkeypatch.setenv("PIFIRE_DB_PATH", str(tmp_path / "t.db"))
+    datastore._reset_for_tests(str(tmp_path / "t.db"))
+    datastore.init()
+
+    backups_path = str(tmp_path / "backups") + os.sep
+    os.makedirs(backups_path, exist_ok=True)
+    monkeypatch.setattr("common.settings_migration.BACKUP_PATH", backups_path)
+    monkeypatch.setattr("common.backups.BACKUP_PATH", backups_path)
+
+    yield tmp_path
+    datastore._reset_for_tests(None)
+
+
+def _migrate_and_check(tmp_path, name, old_settings):
+    from common.settings_migration import read_settings_file
+
+    p = tmp_path / f"{name}.json"
+    p.write_text(json.dumps(old_settings))
+    result = read_settings_file(filename=str(p), init=True)
+    _assert_strict(result)
+    return result
+
+
+def test_migration_v1_4_cascade_full_migrates_strict(migration_env):
+    d = default_settings()
+    old = copy.deepcopy(d)
+    old["versions"] = {"server": "1.4.0", "build": 0}
+    old["startup"] = {"start_to_mode": {}}
+    old["start_to_mode"] = {"grill1_setpoint": 225}
+    old["dashboard"] = {"sentinel_old_dash": True}
+    for key in d["notify_services"].keys():
+        old[key] = {"legacy_marker": key}
+    del old["notify_services"]
+    old["probe_settings"]["probe_options"] = {"x": 1}
+    old["probe_settings"]["probe_sources"] = {"x": 1}
+    old["probe_settings"]["probes_enabled"] = {"x": 1}
+    old["modules"]["adc"] = "mcp3008"
+    old["modules"]["grillplat"] = "some_real_platform"
+    prof_key = next(iter(old["probe_settings"]["probe_profiles"].keys()))
+    old["probe_settings"]["probe_profiles"][prof_key].pop("id", None)
+    old["cycle_data"] = {"SmokeCycleTime": 30, "HoldCycleTime": 25}
+    old["globals"]["startup_timer"] = 999
+    old["globals"]["startup_exit_temp"] = 111
+    old["globals"]["shutdown_timer"] = 222
+    old["globals"]["auto_power_off"] = True
+    old["globals"]["buttonslevel"] = "LOW"
+    old["dev_pins"] = {"display": {"dc": 42}}
+
+    _migrate_and_check(migration_env, "v1_4_full", old)
+
+
+def test_migration_v1_4_cascade_preserves_start_to_mode_strict(migration_env):
+    d = default_settings()
+    old = copy.deepcopy(d)
+    old["versions"] = {"server": "1.4.0", "build": 0}
+    old["startup"] = {"start_to_mode": {}}
+    old["start_to_mode"] = {"grill1_setpoint": 225}
+    for key in d["notify_services"].keys():
+        old[key] = {}
+    del old["notify_services"]
+    old["probe_settings"]["probe_options"] = {}
+    old["probe_settings"]["probe_sources"] = {}
+    old["probe_settings"]["probes_enabled"] = {}
+    old["modules"]["adc"] = "mcp3008"
+    old["cycle_data"] = {"SmokeCycleTime": 30, "HoldCycleTime": 25}
+
+    result = _migrate_and_check(migration_env, "v1_4_preserve", old)
+    assert result["startup"]["start_to_mode"]["primary_setpoint"] == 225
+
+
+def test_migration_block4_platform_prototype_strict(migration_env):
+    d = default_settings()
+    old = copy.deepcopy(d)
+    old["versions"] = {"server": "1.7.0", "build": 100}
+    old["modules"]["grillplat"] = "prototype"
+    old["globals"]["dc_fan"] = True
+    old["globals"]["real_hw"] = False
+    old["globals"]["standalone"] = False
+    old["globals"]["triggerlevel"] = "LOW"
+    old["inpins"] = {"selector": 55}
+    old["outpins"] = {"auger": 77}
+
+    _migrate_and_check(migration_env, "block4", old)
+
+
+@pytest.mark.parametrize("build", [7, 8])
+def test_migration_dashboard_build7_boundary_strict(migration_env, build):
+    d = default_settings()
+    old = copy.deepcopy(d)
+    old["versions"] = {"server": "1.7.0", "build": build}
+    old["dashboard"] = {"sentinel": True}
+
+    _migrate_and_check(migration_env, f"dash_build{build}", old)
+
+
+@pytest.mark.parametrize("build", [32, 33])
+def test_migration_bt_meater_rename_boundary_strict(migration_env, build):
+    d = default_settings()
+    old = copy.deepcopy(d)
+    old["versions"] = {"server": "1.9.0", "build": build}
+    old["probe_settings"]["probe_map"]["probe_devices"] = [
+        {"device": "d1", "module": "bt_meater_alt", "module_filename": "x"},
+        {"device": "d2", "module": "bt_meater", "module_filename": "x"},
+        {"device": "d3", "module": "prototype", "module_filename": "x"},
+    ]
+
+    _migrate_and_check(migration_env, f"bt_meater{build}", old)
+
+
+@pytest.mark.parametrize("venv", [True, False])
+def test_migration_python_exec_venv_strict(migration_env, venv):
+    d = default_settings()
+    old = copy.deepcopy(d)
+    old["versions"] = {"server": "1.10.0", "build": 0}
+    old["globals"]["venv"] = venv
+
+    _migrate_and_check(migration_env, f"pyexec_{venv}", old)
+
+
+@pytest.mark.parametrize("build", [51, 52])
+def test_migration_module_filename_boundary_strict(migration_env, build):
+    d = default_settings()
+    old = copy.deepcopy(d)
+    old["versions"] = {"server": "1.10.0", "build": build}
+    old["probe_settings"]["probe_map"]["probe_devices"] = [{"device": "d1", "module": "prototype"}]
+
+    _migrate_and_check(migration_env, f"modfile{build}", old)
+
+
+def test_migration_current_version_noop_strict(migration_env):
+    d = default_settings()
+    old = copy.deepcopy(d)
+    old["versions"] = dict(d["versions"])
+    old["globals"]["updated_message"] = False
+    removed_key = next(iter(old["probe_settings"]["probe_profiles"].keys()))
+    old["probe_settings"]["probe_profiles"].pop(removed_key)
+
+    _migrate_and_check(migration_env, "current_noop", old)
+
+
+def test_migration_downgrade_no_backup_resets_to_defaults_strict(migration_env):
+    d = default_settings()
+    old = copy.deepcopy(d)
+    old["versions"]["server"] = "99.99.99"  # newer than current code -> downgrade path
+
+    _migrate_and_check(migration_env, "downgrade", old)

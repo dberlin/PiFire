@@ -16,6 +16,16 @@ and this constant, in a diff a reviewer cannot miss. If you are refactoring
 process_command and a case fails: that is a behavior change. Fix the refactor,
 not the fixture.
 
+DELIBERATE RE-BASELINE (S2 Task 4, settings-writer strict matrix): fixed
+common/common.py's `convert_settings_units` to also convert
+`settings["pwm"]["temp_range_list"]` (a "degrees below setpoint" DELTA list
+that was never converted at all -- a real, pre-existing bug found while
+auditing common/api_commands.py's set/units writer for schema strictness).
+The `set_units_c`/`set_units_f` golden entries and GOLDEN_SHA256 were
+hand-updated to include the now-correct `pwm.temp_range_list` diff. This is
+the one sanctioned exception to "never regenerate the fixture": a proven bug
+fix, not refactor drift.
+
 WHAT IS OBSERVED (per case, see `_run_case`):
   * the returned dict (result/message/data)
   * `arglist` AFTER the call -- process_command mutates its caller's list
@@ -107,7 +117,7 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_g
 
 # SHA-256 of the golden fixture. Pinned so the contract cannot be regenerated
 # without an obvious, reviewable edit to this line. See module docstring.
-GOLDEN_SHA256 = "49e31076dc4ceee7d3a2075d51ebc6e22664ff5e0bb8617fc189f459c4eb0bc7"
+GOLDEN_SHA256 = "20d1c03b3c0df4244099ac9e4c27e247e59d8240ff6042c32ca149270cd4523f"
 
 # Frozen wall clock. The set/timer branches stamp time.time() into control.
 FIXED_NOW = 1700000000.0

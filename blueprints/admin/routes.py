@@ -186,7 +186,12 @@ def _admin_setting_restoresettings(ctx):
     local_file = request.form["localfile"]
 
     if local_file != "none":
-        new_settings = read_settings_file(filename=ctx.backup_path + local_file)
+        # init=True runs the same version-overlay/upgrade_settings() pipeline
+        # a live startup read applies (see common/settings_migration.py) --
+        # without it, restoring an older-format backup (missing fields added
+        # by a later release) writes an incomplete settings tree straight to
+        # disk instead of migrating it forward.
+        new_settings = read_settings_file(filename=ctx.backup_path + local_file, init=True)
         write_settings(new_settings)
         set_server_status("restarting")
         restart_scripts()
@@ -201,7 +206,7 @@ def _admin_setting_restoresettings(ctx):
             filename = secure_filename(remote_file.filename)
             remote_file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], filename))
             ctx.success.append("Successfully restored settings.")
-            new_settings = read_settings_file(filename=ctx.backup_path + filename)
+            new_settings = read_settings_file(filename=ctx.backup_path + filename, init=True)
             write_settings(new_settings)
             set_server_status("restarting")
             restart_scripts()

@@ -398,6 +398,23 @@ def convert_temp(units, temp):
     return temp_out
 
 
+def convert_temp_delta(units, delta):
+    """
+    Convert a temperature DELTA (a difference between two readings, e.g.
+    "degrees below setpoint") between C and F -- scale only, no +32 offset.
+    `convert_temp` is for absolute readings and would corrupt a delta (a
+    3-degree-C band would become "38", not "5.4", if run through it).
+
+    :param units: target units, C or F
+    :param delta: delta to convert, in the OTHER unit
+    :return: converted delta
+    """
+    if units == "F":
+        return int(delta * (9 / 5))
+    else:
+        return int(delta * (5 / 9))
+
+
 def convert_settings_units(units, settings):
     """
     Convert Settings Units
@@ -425,6 +442,17 @@ def convert_settings_units(units, settings):
         settings["startup"]["smartstart"]["exit_temp"] = convert_temp(
             units, settings["startup"]["smartstart"]["exit_temp"]
         )
+        # pwm.temp_range_list is a set of "degrees below setpoint" duty-cycle
+        # band thresholds (controller/runtime/logic/pwm.py compares
+        # (setpoint - ptemp) against these), NOT absolute readings -- was
+        # never converted at all here (a longstanding omission; smartstart's
+        # temp_range_list above, an absolute-reading list, was). A delta
+        # needs scale-only conversion (convert_temp_delta), never convert_temp's
+        # +32 offset.
+        for temp in range(0, len(settings["pwm"]["temp_range_list"])):
+            settings["pwm"]["temp_range_list"][temp] = convert_temp_delta(
+                units, settings["pwm"]["temp_range_list"][temp]
+            )
     return settings
 
 
