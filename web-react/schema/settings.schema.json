@@ -153,6 +153,7 @@
         },
         "sleep_timeout": {
           "default": 300,
+          "minimum": 0,
           "title": "Sleep Timeout",
           "type": "integer"
         }
@@ -706,6 +707,7 @@
         "system": {
           "$ref": "#/$defs/_SystemConfig",
           "default": {
+            "1WIRE": null,
             "SPI0": {
               "CE0": 8,
               "CE1": 7
@@ -1129,14 +1131,20 @@
       "additionalProperties": true,
       "properties": {
         "augerontime": {
+          "maximum": 60,
+          "minimum": 1,
           "title": "Augerontime",
           "type": "integer"
         },
         "p_mode": {
+          "maximum": 9,
+          "minimum": 0,
           "title": "P Mode",
           "type": "integer"
         },
         "startuptime": {
+          "maximum": 1200,
+          "minimum": 30,
           "title": "Startuptime",
           "type": "integer"
         }
@@ -1227,6 +1235,8 @@
         },
         "prime_on_startup": {
           "default": 0,
+          "maximum": 200,
+          "minimum": 0,
           "title": "Prime On Startup",
           "type": "integer"
         },
@@ -1315,6 +1325,171 @@
       "title": "Versions",
       "type": "object"
     },
+    "WledEventPresets": {
+      "additionalProperties": true,
+      "properties": {
+        "Grill_Error": {
+          "default": 1,
+          "title": "Grill Error",
+          "type": "integer"
+        },
+        "Pellet_Level_Low": {
+          "default": 1,
+          "title": "Pellet Level Low",
+          "type": "integer"
+        },
+        "Recipe_Next": {
+          "default": 1,
+          "title": "Recipe Next",
+          "type": "integer"
+        },
+        "Temp_Achieved": {
+          "default": 1,
+          "title": "Temp Achieved",
+          "type": "integer"
+        },
+        "Timer_Expired": {
+          "default": 1,
+          "title": "Timer Expired",
+          "type": "integer"
+        }
+      },
+      "title": "WledEventPresets",
+      "type": "object"
+    },
+    "WledModePresets": {
+      "additionalProperties": true,
+      "properties": {
+        "Hold": {
+          "default": 1,
+          "title": "Hold",
+          "type": "integer"
+        },
+        "Prime": {
+          "default": 1,
+          "title": "Prime",
+          "type": "integer"
+        },
+        "Reignite": {
+          "default": 1,
+          "title": "Reignite",
+          "type": "integer"
+        },
+        "Shutdown": {
+          "default": 1,
+          "title": "Shutdown",
+          "type": "integer"
+        },
+        "Smoke": {
+          "default": 1,
+          "title": "Smoke",
+          "type": "integer"
+        },
+        "Startup": {
+          "default": 1,
+          "title": "Startup",
+          "type": "integer"
+        },
+        "Stop": {
+          "default": 1,
+          "title": "Stop",
+          "type": "integer"
+        }
+      },
+      "title": "WledModePresets",
+      "type": "object"
+    },
+    "WledProfileNumbers": {
+      "additionalProperties": true,
+      "properties": {
+        "booting": {
+          "default": 201,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Booting",
+          "type": "integer"
+        },
+        "cooking": {
+          "default": 203,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Cooking",
+          "type": "integer"
+        },
+        "cooldown": {
+          "default": 204,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Cooldown",
+          "type": "integer"
+        },
+        "error_fault": {
+          "default": 210,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Error Fault",
+          "type": "integer"
+        },
+        "idle": {
+          "default": 200,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Idle",
+          "type": "integer"
+        },
+        "low_pellets": {
+          "default": 208,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Low Pellets",
+          "type": "integer"
+        },
+        "night_mode": {
+          "default": 211,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Night Mode",
+          "type": "integer"
+        },
+        "overshoot_alarm": {
+          "default": 206,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Overshoot Alarm",
+          "type": "integer"
+        },
+        "preheat": {
+          "default": 202,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Preheat",
+          "type": "integer"
+        },
+        "probe_alarm": {
+          "default": 207,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Probe Alarm",
+          "type": "integer"
+        },
+        "target_reached": {
+          "default": 205,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Target Reached",
+          "type": "integer"
+        },
+        "timer_done": {
+          "default": 209,
+          "maximum": 250,
+          "minimum": 1,
+          "title": "Timer Done",
+          "type": "integer"
+        }
+      },
+      "title": "WledProfileNumbers",
+      "type": "object"
+    },
     "WledService": {
       "additionalProperties": true,
       "properties": {
@@ -1329,23 +1504,17 @@
           "type": "boolean"
         },
         "event_presets": {
-          "additionalProperties": {
-            "type": "integer"
-          },
+          "$ref": "#/$defs/WledEventPresets",
           "default": {
             "Grill_Error": 1,
             "Pellet_Level_Low": 1,
             "Recipe_Next": 1,
             "Temp_Achieved": 1,
             "Timer_Expired": 1
-          },
-          "title": "Event Presets",
-          "type": "object"
+          }
         },
         "mode_presets": {
-          "additionalProperties": {
-            "type": "integer"
-          },
+          "$ref": "#/$defs/WledModePresets",
           "default": {
             "Hold": 1,
             "Prime": 1,
@@ -1354,19 +1523,16 @@
             "Smoke": 1,
             "Startup": 1,
             "Stop": 1
-          },
-          "title": "Mode Presets",
-          "type": "object"
+          }
         },
         "notify_duration": {
           "default": 120,
+          "minimum": 0,
           "title": "Notify Duration",
           "type": "integer"
         },
         "profile_numbers": {
-          "additionalProperties": {
-            "type": "integer"
-          },
+          "$ref": "#/$defs/WledProfileNumbers",
           "default": {
             "booting": 201,
             "cooking": 203,
@@ -1380,9 +1546,7 @@
             "probe_alarm": 207,
             "target_reached": 205,
             "timer_done": 209
-          },
-          "title": "Profile Numbers",
-          "type": "object"
+          }
         },
         "suggested_config": {
           "$ref": "#/$defs/WledSuggestedConfig",
@@ -1417,11 +1581,15 @@
         },
         "idle_brightness": {
           "default": 20,
+          "maximum": 100,
+          "minimum": 1,
           "title": "Idle Brightness",
           "type": "integer"
         },
         "led_count": {
           "default": 6,
+          "maximum": 1000,
+          "minimum": 1,
           "title": "Led Count",
           "type": "integer"
         },
@@ -1686,6 +1854,18 @@
     "_SystemConfig": {
       "additionalProperties": true,
       "properties": {
+        "1WIRE": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "1Wire"
+        },
         "SPI0": {
           "$ref": "#/$defs/_SPI0Config",
           "default": {
@@ -1939,6 +2119,7 @@
         "real_hw": true,
         "standalone": true,
         "system": {
+          "1WIRE": null,
           "SPI0": {
             "CE0": 8,
             "CE1": 7

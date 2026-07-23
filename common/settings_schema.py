@@ -1,17 +1,24 @@
-"""Pydantic shadow models for the PiFire settings tree (S1: shape only).
+"""Pydantic shadow models for the PiFire settings tree.
 
 common/defaults.py remains the defaults AUTHORITY — these models mirror it,
 and tests/unit/common/test_settings_schema.py fails on any divergence.
-Do not add validation constraints here in S1 (that is S2's job); do not
-change a default here without changing defaults.py (parity will fail).
+Do not change a default here without changing defaults.py (parity will fail).
 Unknown keys are allowed everywhere: legacy stores and future upgrades
 must always validate.
+
+S2 (Task 2) migrated every clamp/invariant enforced today by
+blueprints/settings/routes.py and the web-react settings tabs into schema
+constraints: `Field(ge=..., le=...)` for scalar bounds, and
+`model_validator(mode="after")` for cross-field/cross-section rules (see
+PwmSettings, SmartStart, and SettingsSchema._check_startup_pwm_duty_cycle
+below). Only constraints traced to an actual source-code clamp were added --
+no new limits were invented. Any NEW constraint must trace the same way.
 """
 
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic_partial import create_partial_model
 
 
@@ -130,9 +137,14 @@ class _SPI0Config(_Section):
 
 
 class _SystemConfig(_Section):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
     SPI0: _SPI0Config = _SPI0Config()
-    # Note: 1WIRE is None in defaults, represented as Optional[None] = None
-    # Will pass through via extra="allow" if present
+    # "1WIRE" (defaults.py:99) isn't a valid Python identifier, hence the
+    # alias; populate_by_name=True also accepts "one_wire" on input.
+    # validate_settings_tree()/assert_parity() dump with by_alias=True so the
+    # normalized output still round-trips the "1WIRE" key exactly.
+    one_wire: int | None = Field(default=None, alias="1WIRE")
 
 
 class _NumatoConfig(_Section):
@@ -243,7 +255,8 @@ class DisplaySettings(_Section):
     # wizard/wizard_manifest.json); each display's option set is
     # driver-specific and stays loose.
     selected: str = "none"
-    sleep_timeout: int = 300
+    # Clamp source: blueprints/settings/routes.py:15 -- max(0, int(raw)).
+    sleep_timeout: int = Field(default=300, ge=0)
     config: dict[str, dict] = {}
 
 
@@ -267,11 +280,28 @@ class PwmSettings(_Section):
         PwmProfile(duty_cycle=100),
     ]
 
+    @model_validator(mode="after")
+    def _check_profiles(self) -> "PwmSettings":
+        # Clamp source: React RangeProfileTable's construction invariant
+        # (web-react/src/components/settings/RangeProfileTable.tsx handleAdd/
+        # handleRemove keep profiles == boundaries + 1); PwmTab.tsx wires
+        # temp_range_list as the boundaries.
+        if len(self.profiles) != len(self.temp_range_list) + 1:
+            raise ValueError("profiles must have exactly one more entry than temp_range_list")
+        # Clamp source: web-react/src/components/settings/tabs/PwmTab.tsx:72-73
+        # (RangeProfileTable column min/max = pwm.min_duty_cycle/max_duty_cycle).
+        for i, profile in enumerate(self.profiles):
+            if not (self.min_duty_cycle <= profile.duty_cycle <= self.max_duty_cycle):
+                raise ValueError(f"profiles[{i}].duty_cycle must be within [min_duty_cycle, max_duty_cycle]")
+        return self
+
 
 class SmartStartProfile(_Section):
-    startuptime: int
-    augerontime: int
-    p_mode: int
+    # Clamp source: web-react/src/components/settings/tabs/StartupTab.tsx:13-15
+    # (RangeProfileTable column min/max for the smartstart profile table).
+    startuptime: int = Field(ge=30, le=1200)
+    augerontime: int = Field(ge=1, le=60)
+    p_mode: int = Field(ge=0, le=9)
 
 
 class SmartStart(_Section):
@@ -286,6 +316,14 @@ class SmartStart(_Section):
         SmartStartProfile(startuptime=240, augerontime=15, p_mode=5),
     ]
 
+    @model_validator(mode="after")
+    def _check_profile_count(self) -> "SmartStart":
+        # Clamp source: RangeProfileTable's construction invariant (see
+        # PwmSettings._check_profiles above) as wired by StartupTab.tsx.
+        if len(self.profiles) != len(self.temp_range_list) + 1:
+            raise ValueError("profiles must have exactly one more entry than temp_range_list")
+        return self
+
 
 class StartToMode(_Section):
     # Mirrors defaults.py settings["startup"]["start_to_mode"] — transcribed 2026-07-22.
@@ -297,10 +335,17 @@ class StartToMode(_Section):
 class StartupSettings(_Section):
     # Mirrors defaults.py settings["startup"] — transcribed 2026-07-22.
     duration: int = 240
-    prime_on_startup: int = 0
+    # Clamp source: blueprints/settings/routes.py:479-483 -- out of [0, 200]
+    # is silently zeroed by the legacy route; S2 rejects instead (see
+    # test_prime_on_startup_range_rejects).
+    prime_on_startup: int = Field(default=0, ge=0, le=200)
     startup_exit_temp: int = 0
     start_to_mode: StartToMode = StartToMode()
     smartstart: SmartStart = SmartStart()
+    # pwm_duty_cycle's [pwm.min_duty_cycle, pwm.max_duty_cycle] bound (clamp
+    # source: blueprints/settings/routes.py:493-497) is cross-SECTION (against
+    # a sibling of `startup`, not a field on this model) -- enforced by
+    # SettingsSchema._check_startup_pwm_duty_cycle below.
     pwm_duty_cycle: int = 100
 
 
@@ -367,9 +412,57 @@ class MqttService(_Section):
 
 class WledSuggestedConfig(_Section):
     cooking_color: str = "blue"
-    idle_brightness: int = 20
+    # Clamp source: blueprints/settings/routes.py:191-194 -- max(1, min(100, ...)).
+    idle_brightness: int = Field(default=20, ge=1, le=100)
     night_mode: bool = False
-    led_count: int = 6
+    # Clamp source: blueprints/settings/routes.py:195-198 -- max(1, min(1000, ...)).
+    led_count: int = Field(default=6, ge=1, le=1000)
+
+
+class WledProfileNumbers(_Section):
+    # Mirrors defaults.py default_notify_services()["wled"]["profile_numbers"]
+    # (defaults.py:385-399) -- a stable, named key set (one PiFire state per
+    # key). Clamp source: blueprints/settings/routes.py:212-216 -- the POST
+    # loop applies max(1, min(250, ...)) to every key uniformly.
+    idle: int = Field(default=200, ge=1, le=250)
+    booting: int = Field(default=201, ge=1, le=250)
+    preheat: int = Field(default=202, ge=1, le=250)
+    cooking: int = Field(default=203, ge=1, le=250)
+    cooldown: int = Field(default=204, ge=1, le=250)
+    target_reached: int = Field(default=205, ge=1, le=250)
+    overshoot_alarm: int = Field(default=206, ge=1, le=250)
+    probe_alarm: int = Field(default=207, ge=1, le=250)
+    low_pellets: int = Field(default=208, ge=1, le=250)
+    timer_done: int = Field(default=209, ge=1, le=250)
+    error_fault: int = Field(default=210, ge=1, le=250)
+    night_mode: int = Field(default=211, ge=1, le=250)
+
+
+class WledModePresets(_Section):
+    # Mirrors defaults.py default_notify_services()["wled"]["mode_presets"]
+    # (defaults.py:400-409) -- legacy per-Mode preset numbers, read by
+    # notify/wled_handler.py:494-498. No numeric clamp found anywhere these
+    # are written (not settable via blueprints/settings/routes.py), so no
+    # ge/le -- shape only.
+    Stop: int = 1
+    Startup: int = 1
+    Reignite: int = 1
+    Smoke: int = 1
+    Hold: int = 1
+    Shutdown: int = 1
+    Prime: int = 1
+
+
+class WledEventPresets(_Section):
+    # Mirrors defaults.py default_notify_services()["wled"]["event_presets"]
+    # (defaults.py:410-417) -- legacy per-event preset numbers, read by
+    # notify/wled_handler.py:502-520. No numeric clamp found (not settable via
+    # blueprints/settings/routes.py) -- shape only.
+    Temp_Achieved: int = 1
+    Recipe_Next: int = 1
+    Grill_Error: int = 1
+    Pellet_Level_Low: int = 1
+    Timer_Expired: int = 1
 
 
 class WledService(_Section):
@@ -377,38 +470,12 @@ class WledService(_Section):
     device_address: str = "wled.local"
     use_profiles: bool = True
     use_suggested_presets: bool = False
-    profile_numbers: dict[str, int] = {
-        "idle": 200,
-        "booting": 201,
-        "preheat": 202,
-        "cooking": 203,
-        "cooldown": 204,
-        "target_reached": 205,
-        "overshoot_alarm": 206,
-        "probe_alarm": 207,
-        "low_pellets": 208,
-        "timer_done": 209,
-        "error_fault": 210,
-        "night_mode": 211,
-    }
-    mode_presets: dict[str, int] = {
-        "Stop": 1,
-        "Startup": 1,
-        "Reignite": 1,
-        "Smoke": 1,
-        "Hold": 1,
-        "Shutdown": 1,
-        "Prime": 1,
-    }
-    event_presets: dict[str, int] = {
-        "Temp_Achieved": 1,
-        "Recipe_Next": 1,
-        "Grill_Error": 1,
-        "Pellet_Level_Low": 1,
-        "Timer_Expired": 1,
-    }
+    profile_numbers: WledProfileNumbers = WledProfileNumbers()
+    mode_presets: WledModePresets = WledModePresets()
+    event_presets: WledEventPresets = WledEventPresets()
     suggested_config: WledSuggestedConfig = WledSuggestedConfig()
-    notify_duration: int = 120
+    # Clamp source: blueprints/settings/routes.py:179-180 -- max(int(...), 0).
+    notify_duration: int = Field(default=120, ge=0)
 
 
 class NotifyServices(_Section):
@@ -484,6 +551,16 @@ class SettingsSchema(_Section):
     history_page: HistoryPage = HistoryPage()
     recipe: Recipe = Recipe()
 
+    @model_validator(mode="after")
+    def _check_startup_pwm_duty_cycle(self) -> "SettingsSchema":
+        # Clamp source: blueprints/settings/routes.py:493-497 -- chained
+        # min()/max() against the sibling `pwm` section's min_duty_cycle/
+        # max_duty_cycle. Cross-SECTION (startup vs. pwm are siblings here),
+        # so it lives on the top-level model rather than on StartupSettings.
+        if not (self.pwm.min_duty_cycle <= self.startup.pwm_duty_cycle <= self.pwm.max_duty_cycle):
+            raise ValueError("startup.pwm_duty_cycle must be within [pwm.min_duty_cycle, pwm.max_duty_cycle]")
+        return self
+
 
 class SettingsValidationError(ValueError):
     """A settings tree (or delta) failed strict schema validation."""
@@ -508,7 +585,11 @@ def validate_settings_tree(settings: dict) -> dict:
         model = SettingsSchema.model_validate(settings, strict=True)
     except ValidationError as exc:
         raise SettingsValidationError(_format_errors(exc)) from exc
-    return model.model_dump(mode="json")
+    # by_alias=True: platform.system.one_wire must dump back out as "1WIRE"
+    # (its defaults.py/on-disk key) -- see the alias comment on _SystemConfig.
+    # No other field in the tree carries an alias, so this is a no-op for the
+    # rest of the dump (mechanism verified by the parity tests staying green).
+    return model.model_dump(mode="json", by_alias=True)
 
 
 # Recursive all-optional twin of SettingsSchema, for validating sparse deltas

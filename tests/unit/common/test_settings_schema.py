@@ -26,7 +26,9 @@ from common.settings_schema import (
 
 
 def assert_parity(settings: dict) -> None:
-    dumped = SettingsSchema.model_validate(settings).model_dump(mode="json")
+    # by_alias=True: platform.system.one_wire must dump back out as "1WIRE"
+    # (its on-disk/defaults.py key) -- mirrors validate_settings_tree()'s dump.
+    dumped = SettingsSchema.model_validate(settings).model_dump(mode="json", by_alias=True)
     assert dumped == settings
 
 
@@ -140,12 +142,14 @@ def test_committed_schema_is_current():
 # Final-review Finding 1a: extras allowlist. extra="allow" means any unmodeled
 # key in defaults.py silently rides through every nested model's
 # __pydantic_extra__ -- this closes that mesh by walking the FULL validated
-# tree and asserting the only extras captured are the 3 deliberate,
-# comment-documented ones (settings_schema.py:133-134, :431-432):
-#   - platform.system carries "1WIRE" (defaults.py:99) -- "1WIRE" can't be a
-#     Python identifier, so S1 deliberately left it unmodeled.
+# tree and asserting the only extras captured are the 2 deliberate,
+# comment-documented Primary-only setpoint colors (settings_schema.py: the
+# ProbeChartConfig comment above):
 #   - history_page.probe_config.<label> carries bg_color_setpoint/
 #     line_color_setpoint (defaults.py:329-331) on Primary probes only.
+# (Task 2 promoted platform.system's "1WIRE" to a real aliased field --
+# one_wire = Field(alias="1WIRE") on _SystemConfig -- so it no longer rides
+# through extra="allow" and has left this list.)
 # A NEW unmodeled key anywhere in defaults.py must fail this test; that claim
 # is proven (not just asserted) by test_extras_walker_flags_unmodeled_key
 # below, which injects a synthetic extra into a COPY of the input and shows
@@ -156,7 +160,6 @@ def test_committed_schema_is_current():
 # "*" in the collected path so the assertion is stable regardless of which
 # probes/labels happen to exist in defaults.py.
 DOCUMENTED_EXTRAS = {
-    ("platform.system", "1WIRE"),
     ("history_page.probe_config.*", "bg_color_setpoint"),
     ("history_page.probe_config.*", "line_color_setpoint"),
 }
@@ -243,12 +246,6 @@ MASKED_PATHS = [
         "dummy required value supplied; real uuid is generated fresh by generate_uuid() in default_notify_services()",
     ),
     (
-        "platform.system.1WIRE",
-        "deliberately unmodeled extra (not a valid Python identifier, S1); the "
-        "model has no default that can reproduce it without it being supplied "
-        "on input -- see the extras-allowlist tests above",
-    ),
-    (
         "controller.config",
         "dynamic: populated per-controller from controller/controllers.json "
         "manifest option defaults, not a static per-model default",
@@ -298,7 +295,9 @@ def _masked_defaults_instantiation_diff():
         lastupdated=LastUpdated(time=0),
         notify_services=NotifyServices(onesignal=OneSignalService(uuid="dummy-onesignal-uuid")),
     )
-    actual = model.model_dump(mode="json")
+    # by_alias=True: platform.system.one_wire must dump as "1WIRE" so it
+    # matches default_settings()'s on-disk key (see assert_parity's comment).
+    actual = model.model_dump(mode="json", by_alias=True)
     expected = default_settings()
     for path, _reason in MASKED_PATHS:
         _delete_path(actual, path)
@@ -367,3 +366,133 @@ def test_partial_model_accepts_sparse_delta_and_rejects_bad_field():
     PartialSettingsSchema.model_validate({"safety": {"maxtemp": 500}}, strict=True)
     with pytest.raises(Exception):  # pydantic ValidationError from the partial
         PartialSettingsSchema.model_validate({"safety": {"maxtemp": "500"}}, strict=True)
+
+
+# ---------------------------------------------------------------------------
+# Task S2.2: legacy clamps migrated to schema constraints (Field ge/le and
+# cross-field model_validators), one representative pin per constraint found
+# in Step 1's enumeration (see the Task 2 report for the full source-line
+# list). Every constraint here traces to an actual clamp/invariant found in
+# blueprints/settings/routes.py or the React settings tabs -- no new limits
+# invented.
+# ---------------------------------------------------------------------------
+
+
+def test_prime_on_startup_range_rejects():
+    # Clamp source: blueprints/settings/routes.py:479-483.
+    s = default_settings()
+    s["startup"]["prime_on_startup"] = 999
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("prime_on_startup" in m for m in ei.value.errors)
+
+
+def test_sleep_timeout_rejects_negative():
+    # Clamp source: blueprints/settings/routes.py:15.
+    s = default_settings()
+    s["display"]["sleep_timeout"] = -1
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("sleep_timeout" in m for m in ei.value.errors)
+
+
+def test_wled_notify_duration_rejects_negative():
+    # Clamp source: blueprints/settings/routes.py:179-180.
+    s = default_settings()
+    s["notify_services"]["wled"]["notify_duration"] = -1
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("notify_duration" in m for m in ei.value.errors)
+
+
+def test_wled_idle_brightness_rejects_out_of_range():
+    # Clamp source: blueprints/settings/routes.py:191-194.
+    s = default_settings()
+    s["notify_services"]["wled"]["suggested_config"]["idle_brightness"] = 0
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("idle_brightness" in m for m in ei.value.errors)
+
+
+def test_wled_led_count_rejects_out_of_range():
+    # Clamp source: blueprints/settings/routes.py:195-198.
+    s = default_settings()
+    s["notify_services"]["wled"]["suggested_config"]["led_count"] = 1001
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("led_count" in m for m in ei.value.errors)
+
+
+def test_wled_profile_number_rejects_out_of_range():
+    # Clamp source: blueprints/settings/routes.py:212-216.
+    s = default_settings()
+    s["notify_services"]["wled"]["profile_numbers"]["idle"] = 251
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("profile_numbers" in m and "idle" in m for m in ei.value.errors)
+
+
+def test_smartstart_profile_count_invariant():
+    # Clamp source: RangeProfileTable's boundaries+1 construction invariant.
+    s = default_settings()
+    s["startup"]["smartstart"]["profiles"] = s["startup"]["smartstart"]["profiles"][:-1]
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(s)
+
+
+def test_smartstart_profile_field_bounds_reject():
+    # Clamp source: web-react StartupTab.tsx RangeProfileTable columns
+    # (startuptime 30-1200 / augerontime 1-60 / p_mode 0-9).
+    s = default_settings()
+    s["startup"]["smartstart"]["profiles"][0]["startuptime"] = 29
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("startuptime" in m for m in ei.value.errors)
+
+
+def test_pwm_profile_count_invariant():
+    # Clamp source: RangeProfileTable's boundaries+1 construction invariant
+    # (PwmTab.tsx).
+    s = default_settings()
+    s["pwm"]["profiles"] = s["pwm"]["profiles"][:-1]
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(s)
+
+
+def test_pwm_profile_duty_cycle_must_be_within_min_max():
+    # Clamp source: PwmTab.tsx RangeProfileTable column min/max = pwm's own
+    # min_duty_cycle/max_duty_cycle (cross-field within PwmSettings).
+    s = default_settings()
+    s["pwm"]["profiles"][0]["duty_cycle"] = s["pwm"]["min_duty_cycle"] - 1
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(s)
+
+
+def test_pwm_duty_cycle_must_be_within_min_max():
+    # Clamp source: blueprints/settings/routes.py:493-497 (cross-SECTION:
+    # startup.pwm_duty_cycle vs. pwm.min_duty_cycle/max_duty_cycle).
+    s = default_settings()
+    s["startup"]["pwm_duty_cycle"] = 10  # below min_duty_cycle=20
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(s)
+
+
+# ---------------------------------------------------------------------------
+# Task S2.2: 1WIRE promotion. platform.system's "1WIRE" is now a real,
+# aliased field (one_wire = Field(alias="1WIRE"), populate_by_name=True on
+# _SystemConfig) instead of an extra="allow" pass-through.
+# ---------------------------------------------------------------------------
+
+
+def test_one_wire_key_is_now_a_real_field():
+    s = default_settings()
+    validate_settings_tree(s)  # 1WIRE arrives via alias, no longer an extra
+    model = SettingsSchema.model_validate(s)
+    assert ("platform.system", "1WIRE") not in _collect_extras(model)
+
+
+def test_partial_schema_accepts_one_wire_by_alias_strict():
+    # CRITICAL re-verify (Task 2 brief): the recursive partial model has
+    # never been exercised with a Field(alias=...) before -- confirm it still
+    # populates correctly by alias under strict=True.
+    PartialSettingsSchema.model_validate({"platform": {"system": {"1WIRE": 4}}}, strict=True)

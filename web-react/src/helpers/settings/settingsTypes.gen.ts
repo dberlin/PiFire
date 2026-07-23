@@ -78,11 +78,35 @@ export type Userkeys = string;
 export type Enabled7 = boolean;
 export type DeviceAddress = string;
 export type Enabled8 = boolean;
+export type GrillError = number;
+export type PelletLevelLow = number;
+export type RecipeNext = number;
+export type TempAchieved = number;
+export type TimerExpired = number;
+export type Hold = number;
+export type Prime = number;
+export type Reignite = number;
+export type Shutdown = number;
+export type Smoke = number;
+export type Startup = number;
+export type Stop = number;
 export type NotifyDuration = number;
+export type Booting = number;
+export type Cooking = number;
+export type Cooldown = number;
+export type ErrorFault = number;
+export type Idle = number;
+export type LowPellets = number;
+export type NightMode = number;
+export type OvershootAlarm = number;
+export type Preheat = number;
+export type ProbeAlarm = number;
+export type TargetReached = number;
+export type TimerDone = number;
 export type CookingColor = string;
 export type IdleBrightness = number;
 export type LedCount = number;
-export type NightMode = boolean;
+export type NightMode1 = boolean;
 export type UseProfiles = boolean;
 export type UseSuggestedPresets = boolean;
 export type Empty = number;
@@ -111,7 +135,7 @@ export type I2CBusKind1 = string;
 export type I2CBusNum1 = string;
 export type Url1 = string;
 export type Selector = number;
-export type Shutdown = number;
+export type Shutdown1 = number;
 export type Baudrate = number;
 export type Device1 = string;
 export type Auger = number;
@@ -122,6 +146,7 @@ export type Power = number;
 export type Pwm = number;
 export type RealHw = boolean;
 export type Standalone = boolean;
+export type Wire = number | null;
 export type Ce0 = number;
 export type Ce1 = number;
 export type SystemType = string;
@@ -368,29 +393,53 @@ export interface PushoverService {
 export interface WledService {
   device_address?: DeviceAddress;
   enabled?: Enabled8;
-  event_presets?: EventPresets;
-  mode_presets?: ModePresets;
+  event_presets?: WledEventPresets;
+  mode_presets?: WledModePresets;
   notify_duration?: NotifyDuration;
-  profile_numbers?: ProfileNumbers;
+  profile_numbers?: WledProfileNumbers;
   suggested_config?: WledSuggestedConfig;
   use_profiles?: UseProfiles;
   use_suggested_presets?: UseSuggestedPresets;
   [k: string]: unknown;
 }
-export interface EventPresets {
-  [k: string]: number;
+export interface WledEventPresets {
+  Grill_Error?: GrillError;
+  Pellet_Level_Low?: PelletLevelLow;
+  Recipe_Next?: RecipeNext;
+  Temp_Achieved?: TempAchieved;
+  Timer_Expired?: TimerExpired;
+  [k: string]: unknown;
 }
-export interface ModePresets {
-  [k: string]: number;
+export interface WledModePresets {
+  Hold?: Hold;
+  Prime?: Prime;
+  Reignite?: Reignite;
+  Shutdown?: Shutdown;
+  Smoke?: Smoke;
+  Startup?: Startup;
+  Stop?: Stop;
+  [k: string]: unknown;
 }
-export interface ProfileNumbers {
-  [k: string]: number;
+export interface WledProfileNumbers {
+  booting?: Booting;
+  cooking?: Cooking;
+  cooldown?: Cooldown;
+  error_fault?: ErrorFault;
+  idle?: Idle;
+  low_pellets?: LowPellets;
+  night_mode?: NightMode;
+  overshoot_alarm?: OvershootAlarm;
+  preheat?: Preheat;
+  probe_alarm?: ProbeAlarm;
+  target_reached?: TargetReached;
+  timer_done?: TimerDone;
+  [k: string]: unknown;
 }
 export interface WledSuggestedConfig {
   cooking_color?: CookingColor;
   idle_brightness?: IdleBrightness;
   led_count?: LedCount;
-  night_mode?: NightMode;
+  night_mode?: NightMode1;
   [k: string]: unknown;
 }
 export interface PelletLevel {
@@ -458,7 +507,7 @@ export interface _FT232HConfig {
 }
 export interface _InputsConfig {
   selector?: Selector;
-  shutdown?: Shutdown;
+  shutdown?: Shutdown1;
   [k: string]: unknown;
 }
 export interface _NumatoConfig {
@@ -476,6 +525,7 @@ export interface _OutputsConfig {
   [k: string]: unknown;
 }
 export interface _SystemConfig {
+  "1WIRE"?: Wire;
   SPI0?: _SPI0Config;
   [k: string]: unknown;
 }
