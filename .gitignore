@@ -136,3 +136,6 @@ coverage.xml
 htmlcov/
 .coverage
 .coverage.*
+
+# Claude Code session scratch
+.claude/
