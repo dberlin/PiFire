@@ -71,3 +71,36 @@ def test_state_existing_stale_module_returns_empty_selection(ds, client):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["selections"]["distance"] == ""
+
+
+def test_scan_extended_i2c_returns_groups(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    monkeypatch.setattr(
+        wr,
+        "discover_extended_i2c_buses",
+        lambda *a, **k: [{"bus_num": 1, "name": "i2c-1", "serial": "ABC"}],
+    )
+    resp = client.post(
+        "/api/wizard/scan",
+        data=json.dumps({"kind": "extended"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["error"] is None
+    assert isinstance(body["groups"], list) and body["groups"]
+    assert body["groups"][0]["items"][0]["value"]
+
+
+def test_scan_no_results_returns_friendly_error(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    monkeypatch.setattr(wr, "discover_extended_i2c_buses", lambda *a, **k: [])
+    resp = client.post(
+        "/api/wizard/scan",
+        data=json.dumps({"kind": "extended"}),
+        content_type="application/json",
+    )
+    body = resp.get_json()
+    assert body["error"] == "No devices found."

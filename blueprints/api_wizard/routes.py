@@ -12,6 +12,12 @@ from common.datastore_accessors import (
     read_settings,
     store_wizard_install_info,
 )
+from common.i2c_bus import (
+    discover_extended_i2c_buses,
+    discover_ft232h_devices,
+    discover_mcp2221_devices,
+)
+from common.usb_serial import discover_usb_serial_devices
 
 from . import api_wizard_bp
 
@@ -103,3 +109,82 @@ def wizard_draft():
     info["display_config"] = payload.get("display_config", {})
     store_wizard_install_info(info)
     return jsonify({"result": "success"}), 200
+
+
+@api_wizard_bp.route("/scan", methods=["POST"])
+def wizard_scan():
+    """Hardware discovery delegation for the wizard's probe-config module
+    forms. Mirrors blueprints/wizard/routes.py's _wizard_i2c_bus_scan /
+    _wizard_usb_serial_scan grouping logic, but returns JSON
+    ({groups: [{title, items: [{value, label}]}], error}) instead of a
+    rendered HTML fragment, for the React client.
+
+    Discovery-function return shapes (reconciled against the real
+    implementations, not guessed):
+      - discover_extended_i2c_buses() -> [{'bus_num': int, 'name': str,
+        'serial': str | None}, ...]                    (common/i2c_bus.py)
+      - discover_mcp2221_devices() -> [{'serial': str, 'path': ...}, ...]
+        ('serial' is only ever a truthy string -- the function filters out
+        entries with no serial_number)                 (grillplat/mcp2221.py)
+      - discover_ft232h_devices() -> [{'url': str, 'serial': str | None,
+        'description': str | None}, ...]               (grillplat/ft232h.py)
+      - discover_usb_serial_devices(vid, pid) -> [{'device': str,
+        'description': str, ...}, ...] ('description' defaults to '', so a
+        falsy check -- not a `.get(..., default)` missing-key check -- is
+        needed for the label fallback)                 (common/usb_serial.py)
+    """
+    payload = request.get_json(silent=True) or {}
+    kind = payload.get("kind")
+    groups = []
+    error = None
+    try:
+        if kind == "extended":
+            adapters = discover_extended_i2c_buses()
+            groups = [
+                {
+                    "title": "By Bus Number",
+                    "items": [
+                        {"value": str(a["bus_num"]), "label": f"{a['name']} (bus {a['bus_num']})"} for a in adapters
+                    ],
+                },
+                {
+                    "title": "By Serial",
+                    "items": [
+                        {"value": a["serial"], "label": f"{a['name']} [{a['serial']}]"}
+                        for a in adapters
+                        if a.get("serial")
+                    ],
+                },
+            ]
+        elif kind == "mcp2221":
+            devs = discover_mcp2221_devices()
+            groups = [
+                {
+                    "title": "MCP2221 Devices",
+                    "items": [{"value": d["serial"], "label": d["serial"]} for d in devs],
+                }
+            ]
+        elif kind == "ft232h":
+            devs = discover_ft232h_devices()
+            groups = [
+                {
+                    "title": "FT232H Devices",
+                    "items": [{"value": d["url"], "label": d.get("description") or d["url"]} for d in devs],
+                }
+            ]
+        elif kind == "usb_serial":
+            devs = discover_usb_serial_devices(payload.get("vid"), payload.get("pid"))
+            groups = [
+                {
+                    "title": "USB Serial Devices",
+                    "items": [{"value": d["device"], "label": d.get("description") or d["device"]} for d in devs],
+                }
+            ]
+        else:
+            error = f"Unknown scan kind: {kind}"
+        if not error and not any(g["items"] for g in groups):
+            error = "No devices found."
+    except Exception as e:  # discovery hits hardware libs; surface failures as a friendly error
+        error = f"Scan failed: {e}"
+        groups = []
+    return jsonify({"groups": groups, "error": error}), 200
