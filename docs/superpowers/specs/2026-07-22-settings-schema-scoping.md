@@ -148,15 +148,12 @@ listed for completeness.
 | Partial-delta validation (S2) | via `pydantic-partial` 0.11.1 (verify recursive derivation in spike) | **built-in** (`load(partial=True)`) | manual (`Optional` twins or convert with defaults) | jsonschema has no partial mode |
 | Maturity/longevity | highest | high (plugin: uncertain) | good, 0.x | n/a |
 
-**Recommendation:** pydantic v2, primarily for the first-class schema export
-(the whole point of the exercise) and longevity — accepting the dump-at-boundary
-clunk. **marshmallow is the right choice instead IF the spike confirms
-`marshmallow-jsonschema` 0.16 works cleanly with marshmallow 4 and emits
-schema the TS generator handles well** — its dict-native model is genuinely
-the better fit for how PiFire's code passes settings around. Decision gate:
-run a half-day spike building ONE section (e.g. `safety` + `startup` incl.
-smartstart) in both candidates, generate TS from each, compare. msgspec is
-the fallback if both disappoint.
+**DECIDED (user, 2026-07-23): pydantic v2 wins — no spike needed.** Stack:
+pydantic 2.13.x models (source of truth) + `pydantic-partial` 0.11.1 (delta
+layer) + built-in `model_json_schema()` → committed schema →
+`json-schema-to-typescript` (zod is out, decided earlier). Dump-at-boundary
+(`model_validate(d).model_dump()`) keeps the dict world intact. Next step:
+full S1 spec + plan.
 
 ## Phasing (library-agnostic)
 
