@@ -139,3 +139,7 @@ htmlcov/
 
 # Claude Code session scratch
 .claude/
+
+# Local tool state
+.lsp.json
+.pi/
