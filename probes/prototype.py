@@ -80,9 +80,20 @@ class ProtoDevice:
     def read_voltage(self, port):
         seed = random.randint(0, 9)
         if port == self.primary_port:
-            if seed > 7 and self.port_value[port] < self.maxPrimaryVoltage:
+            # Mean-revert toward the mid-range nominal voltage instead of always
+            # favoring "up": below nominal keep the original odds (more likely to
+            # step up), but above nominal mirror them (more likely to step down).
+            # This lets the probe wander realistically without long uptime
+            # drifting it to a rail and tripping the maxtemp safety guard.
+            nominal_primary_voltage = (self.minPrimaryVoltage + self.maxPrimaryVoltage) / 2
+            if self.port_value[port] < nominal_primary_voltage:
+                up_seed, down_seed = 7, 1
+            else:
+                up_seed, down_seed = 8, 2
+
+            if seed > up_seed and self.port_value[port] < self.maxPrimaryVoltage:
                 self.port_value[port] += self.primaryChangeFactor
-            elif seed < 1 and self.port_value[port] > self.minPrimaryVoltage:
+            elif seed < down_seed and self.port_value[port] > self.minPrimaryVoltage:
                 self.port_value[port] -= self.primaryChangeFactor
         else:
             if self.transient:
