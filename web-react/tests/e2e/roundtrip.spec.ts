@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { ensureStopped } from "./helpers";
 
 // Requires the prototype backend running: `uv run python control.py` + `uv run python app.py`.
-test("startup then hold round-trips through the live socket", async ({ page }) => {
+test("startup then hold round-trips through the live socket", async ({ page, request }) => {
+  // Ensure grill is stopped before test to avoid Hold-mode race condition.
+  await ensureStopped(request);
+
   await page.goto("/");
 
   // Live data renders: the grill gauge shows a numeric temperature.
