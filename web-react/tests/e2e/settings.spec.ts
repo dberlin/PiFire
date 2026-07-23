@@ -184,3 +184,54 @@ test("controller tab shows the live controller and PB round-trips, cross-checked
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
 });
+
+test("IFTTT enabled + APIKey save and round-trip on the notifications tab", async ({ page }) => {
+  const beforeRes = await page.request.get("/api/settings");
+  expect(beforeRes.ok()).toBeTruthy();
+  const beforeBody = (await beforeRes.json()) as {
+    settings?: { notify_services?: { ifttt?: { enabled?: boolean; APIKey?: string } } };
+  };
+  const originalEnabled = beforeBody.settings?.notify_services?.ifttt?.enabled ?? false;
+  const originalApiKey = beforeBody.settings?.notify_services?.ifttt?.APIKey ?? "";
+
+  await page.goto("/settings/notifications");
+  const toggle = page.getByRole("button", { name: "IFTTT Enabled" });
+  const apiKeyField = page.getByLabel("IFTTT API Key");
+  await expect(toggle).toBeVisible();
+  await expect(apiKeyField).toHaveValue(originalApiKey);
+
+  const nextApiKey = `e2e-key-${Date.now().toString().slice(-6)}`;
+  const nextEnabled = !originalEnabled;
+  if (nextEnabled !== originalEnabled) {
+    await toggle.click();
+  }
+  await apiKeyField.fill(nextApiKey);
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
+
+  await page.reload();
+  await expect(page.getByLabel("IFTTT API Key")).toHaveValue(nextApiKey);
+  await expect(page.getByRole("button", { name: "IFTTT Enabled" })).toHaveAttribute(
+    "aria-pressed",
+    String(nextEnabled),
+  );
+
+  // Restore the original enabled/APIKey so the backend is left as found.
+  const restoreToggle = page.getByRole("button", { name: "IFTTT Enabled" });
+  const restoreApiKeyField = page.getByLabel("IFTTT API Key");
+  const currentPressed = await restoreToggle.getAttribute("aria-pressed");
+  if (currentPressed !== String(originalEnabled)) {
+    await restoreToggle.click();
+  }
+  await restoreApiKeyField.fill(originalApiKey);
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
+
+  const afterRes = await page.request.get("/api/settings");
+  expect(afterRes.ok()).toBeTruthy();
+  const afterBody = (await afterRes.json()) as {
+    settings?: { notify_services?: { ifttt?: { enabled?: boolean; APIKey?: string } } };
+  };
+  expect(afterBody.settings?.notify_services?.ifttt?.enabled).toBe(originalEnabled);
+  expect(afterBody.settings?.notify_services?.ifttt?.APIKey).toBe(originalApiKey);
+});
