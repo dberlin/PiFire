@@ -9,7 +9,8 @@
       "*.js",
       "index.html",
       "!dist",
-      "!node_modules"
+      "!node_modules",
+      "!src/helpers/settings/settingsTypes.gen.ts"
     ]
   },
   "formatter": {

@@ -14,7 +14,9 @@
     "test:coverage": "rstest run --coverage",
     "test:e2e": "playwright test",
     "lint": "biome check . && eslint .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "gen:types": "bun scripts/gen-types.ts",
+    "gen:types:check": "bun scripts/gen-types.ts --check"
   },
   "dependencies": {
     "react": "^19.2.8",
@@ -40,6 +42,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "jsdom": "^29.1.1",
+    "json-schema-to-typescript": "^15.0.4",
     "typescript": "^5.9.3",
     "typescript7": "npm:typescript@7.0.2"
   }

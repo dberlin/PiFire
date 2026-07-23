@@ -12,7 +12,15 @@ import reactRefresh from "eslint-plugin-react-refresh";
 // invoked via `node node_modules/typescript7/bin/tsc -b` (`bun run typecheck`) — do
 // not "clean up" the 5.9 dep.
 export default [
-  { ignores: ["dist", "tests/e2e", "*.config.js", "*.config.ts"] },
+  {
+    ignores: [
+      "dist",
+      "tests/e2e",
+      "*.config.js",
+      "*.config.ts",
+      "src/helpers/settings/settingsTypes.gen.ts",
+    ],
+  },
   {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
