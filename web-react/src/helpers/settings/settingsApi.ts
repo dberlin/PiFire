@@ -1,4 +1,6 @@
-export type Settings = Record<string, any>;
+import type { SettingsSchema } from "./settingsTypes.gen";
+
+export type Settings = SettingsSchema;
 export type SettingsFlag =
   | "settings_update"
   | "controller_update"

@@ -64,20 +64,5 @@
         "noImportantStyles": "off"
       }
     }
-  },
-  "overrides": [
-    {
-      "includes": ["src/settings/settingsApi.ts"],
-      "linter": {
-        "rules": {
-          "suspicious": {
-            // `Settings = Record<string, any>` models an arbitrary backend
-            // JSON settings blob; already carried a matching eslint-disable
-            // comment before this task.
-            "noExplicitAny": "off"
-          }
-        }
-      }
-    }
-  ]
+  }
 }
