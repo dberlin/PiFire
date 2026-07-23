@@ -3,6 +3,7 @@ import json
 import pytest
 
 from app import app as flask_app
+from common.common import WriteKind
 from common.datastore_accessors import read_settings, write_settings_store
 
 
@@ -104,3 +105,116 @@ def test_scan_no_results_returns_friendly_error(ds, client, monkeypatch):
     )
     body = resp.get_json()
     assert body["error"] == "No devices found."
+
+
+def test_finish_blocked_when_not_stopped(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    fired = []
+    monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))  # neutralize installer
+    from common.datastore_accessors import read_control, write_control
+
+    ctrl = read_control()
+    ctrl["mode"] = "Hold"
+    write_control(ctrl, WriteKind.OVERWRITE, origin="test")
+    resp = client.post(
+        "/api/wizard/finish",
+        data=json.dumps({"selections": {}, "settings_dep_values": {}, "display_config": {}}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 409
+    assert resp.get_json()["message"] == "system_active"
+    assert fired == []  # installer must NOT fire
+
+
+def test_finish_fires_installer_when_stopped(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    fired = []
+    monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))
+    monkeypatch.setattr(wr, "wizard_bus_kinds", lambda *a, **k: {})
+    monkeypatch.setattr(wr, "validate_bus_kinds", lambda *a, **k: None)
+    # control defaults to Stop in a fresh ds
+    resp = client.post(
+        "/api/wizard/finish",
+        data=json.dumps(
+            {
+                "selections": {"grillplatform": "custom", "display": "ili9341b", "distance": "hcsr04"},
+                "settings_dep_values": {},
+                "display_config": {},
+            }
+        ),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200 and resp.get_json()["result"] == "success"
+    assert fired and "wizard.py" in fired[0]
+
+    st = client.get("/api/wizard/installstatus").get_json()
+    assert st["percent"] == 0 and "Starting Install" in st["status"]
+
+
+def test_finish_rejects_empty_selection(ds, client, monkeypatch):
+    """The detached installer (wizard.py's run_wizard()) unconditionally
+    indexes WizardInstallInfo["modules"]["grillplatform"|"display"|"distance"]
+    ["profile_selected"][0] -- an empty selection (reachable when a
+    stale-module draft is resumed and /finish is POSTed without
+    re-selecting) would raise an unhandled IndexError in the detached
+    process, silently sticking the install at "Starting Install..." forever.
+    /finish is the last safety net before an irreversible real-hardware
+    install, so it must reject this instead of firing."""
+    import blueprints.api_wizard.routes as wr
+
+    fired = []
+    monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))
+    monkeypatch.setattr(wr, "wizard_bus_kinds", lambda *a, **k: {})
+    monkeypatch.setattr(wr, "validate_bus_kinds", lambda *a, **k: None)
+    resp = client.post(
+        "/api/wizard/finish",
+        data=json.dumps(
+            {
+                "selections": {"grillplatform": "", "display": "ili9341b", "distance": "hcsr04"},
+                "settings_dep_values": {},
+                "display_config": {},
+            }
+        ),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    body = resp.get_json()
+    assert body["result"] == "error"
+    assert body["message"] == "missing_selection"
+    assert "grillplatform" in body.get("sections", [])
+    assert fired == []  # installer must NOT fire
+
+
+def test_finish_bus_conflict_returns_422(ds, client, monkeypatch):
+    """Characterizes the existing bus_conflict (422) branch of wizard_finish():
+    when validate_bus_kinds() raises I2CBusConfigError (e.g. a real
+    basic+USB-HID conflict), /finish must surface a 422 without firing the
+    installer."""
+    import blueprints.api_wizard.routes as wr
+    from common.i2c_bus import I2CBusConfigError
+
+    fired = []
+    monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))
+
+    def _raise_conflict(*a, **k):
+        raise I2CBusConfigError("'basic' I2C can't share a process with a USB-HID bus")
+
+    monkeypatch.setattr(wr, "validate_bus_kinds", _raise_conflict)
+    resp = client.post(
+        "/api/wizard/finish",
+        data=json.dumps(
+            {
+                "selections": {"grillplatform": "custom", "display": "ili9341b", "distance": "hcsr04"},
+                "settings_dep_values": {},
+                "display_config": {},
+            }
+        ),
+        content_type="application/json",
+    )
+    assert resp.status_code == 422
+    body = resp.get_json()
+    assert body["result"] == "error"
+    assert body["message"] == "bus_conflict"
+    assert fired == []  # installer must NOT fire
