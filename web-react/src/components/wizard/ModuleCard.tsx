@@ -22,6 +22,7 @@ export interface ModuleCardProps {
   onDepChange: (key: string, value: string) => void;
   onConfigChange: (optionName: string, value: string) => void;
   baseUrl: string;
+  disabled?: boolean;
 }
 
 export function ModuleCard({
@@ -35,6 +36,7 @@ export function ModuleCard({
   onDepChange,
   onConfigChange,
   baseUrl,
+  disabled = false,
 }: ModuleCardProps) {
   const selected = selectedModule ? modules[selectedModule] : undefined;
 
@@ -96,6 +98,7 @@ export function ModuleCard({
         <select
           className="pf-input"
           value={selectedModule ?? ""}
+          disabled={disabled}
           onChange={(e) => onSelectModule(e.target.value)}
         >
           <option value="">— select —</option>
