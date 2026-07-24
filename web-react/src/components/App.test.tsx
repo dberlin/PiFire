@@ -8,7 +8,11 @@ rs.mock("../helpers/useDashData", () => ({
   useDashData: () => useDashDataMock(),
 }));
 
-const getSettingsMock = rs.fn();
+// Default-resolved so every test has a valid promise: DashboardRoute now calls
+// getSettings() unconditionally on mount for the first_time_setup gate, and a
+// bare rs.fn() would return undefined and blow up its .then(). Individual tests
+// still override this with their own mockResolvedValue.
+const getSettingsMock = rs.fn().mockResolvedValue({});
 const getModeMock = rs.fn();
 const getControllerMetadataMock = rs.fn().mockResolvedValue(null);
 rs.mock("../helpers/settings/settingsApi", () => ({

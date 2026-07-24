@@ -26,20 +26,25 @@ function renderShell() {
   return render(<RouterProvider router={router} />);
 }
 
+// Every tab in SettingsShell's nav, in nav order. Keep in sync with TABS there
+// (the title deliberately does NOT hardcode a count -- it drifted from 8 to 9
+// to 11 while still claiming "8").
 const TAB_LABELS = [
   "General",
   "Work Mode",
+  "Controller",
   "PWM Fan",
   "Startup / Shutdown",
   "Safety",
   "Pellet Levels",
   "History",
+  "Notifications",
   "Units",
   "Platform",
 ];
 
 describe("SettingsShell", () => {
-  it("renders all 8 nav tabs and the back-to-dashboard control", async () => {
+  it("renders every nav tab and the back-to-dashboard control", async () => {
     renderShell();
     // Loader data resolves asynchronously even though the loader itself is
     // synchronous — wait for the first tab link before asserting on the rest.

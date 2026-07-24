@@ -112,6 +112,43 @@ describe("ConfigOptionField", () => {
     expect(screen.getByRole("combobox", { name: "Screen Rotation" })).toHaveValue("270");
   });
 
+  it("keeps a falsy-but-real stored value instead of the manifest default", () => {
+    // Regression pin for the fallback's `=== undefined` check: 0 is a REAL
+    // configured value. A naive `value || option.default` or truthiness test
+    // would render "90" here instead of "0".
+    render(
+      <ConfigOptionField
+        option={{
+          option_name: "rotation",
+          option_friendly_name: "Screen Rotation",
+          option_type: "list",
+          list_values: [0, 90, 180, 270],
+          list_labels: ["0°", "90°", "180°", "270°"],
+          default: 90,
+        }}
+        value={0}
+        onChange={rs.fn()}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Screen Rotation" })).toHaveValue("0");
+  });
+
+  it("keeps an empty-string stored value instead of the manifest default", () => {
+    render(
+      <ConfigOptionField
+        option={{
+          option_name: "display_data_filename",
+          option_friendly_name: "Layout File",
+          option_type: "string",
+          default: "./display/default.json",
+        }}
+        value=""
+        onChange={rs.fn()}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "Layout File" })).toHaveValue("");
+  });
+
   it("renders nothing when hidden", () => {
     const hiddenOption: ConfigOption = { ...listOption, hidden: true };
     const { container } = render(

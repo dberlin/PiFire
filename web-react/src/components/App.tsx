@@ -39,12 +39,10 @@ export function HydrateFallback() {
 // microtask (see SettingsShell.test.tsx's comment on this) -- so adding one
 // would turn the dashboard's first paint into an async gap, breaking the
 // existing synchronous assertions in App.test.tsx / DashboardRoute.test.tsx
-// and adding an extra network round trip to every dashboard load. Per the
-// task brief's escape hatch ("gate ONLY where it's safe and document the
-// limitation"), the gate is intentionally NOT wired here. /wizard itself is
-// always reachable directly; forcing navigation there on first-time setup is
-// left as follow-up work (e.g. a non-blocking check inside DashboardRoute,
-// or restructuring "/" to a loader-backed route with a HydrateFallback).
+// and adding an extra network round trip to every dashboard load. The gate is
+// instead a non-blocking post-mount check inside DashboardRoute: it fetches
+// settings once after mount and navigates to /wizard only on a fresh install,
+// so "/" keeps its synchronous first paint and a failed check stays advisory.
 export const routes = [
   { path: "/", element: <DashboardRoute /> },
   {
