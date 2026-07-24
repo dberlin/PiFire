@@ -10,6 +10,7 @@ import { GeneralTab } from "./settings/tabs/GeneralTab";
 import { HistoryTab } from "./settings/tabs/HistoryTab";
 import { NotificationsTab } from "./settings/tabs/NotificationsTab";
 import { PelletsTab } from "./settings/tabs/PelletsTab";
+import { PlatformTab } from "./settings/tabs/PlatformTab";
 import { PwmTab } from "./settings/tabs/PwmTab";
 import { SafetyTab } from "./settings/tabs/SafetyTab";
 import { StartupTab } from "./settings/tabs/StartupTab";
@@ -71,6 +72,7 @@ export const routes = [
       { path: "history", element: <HistoryTab /> },
       { path: "notifications", element: <NotificationsTab /> },
       { path: "units", element: <UnitsTab /> },
+      { path: "platform", element: <PlatformTab /> },
     ],
   },
 ];

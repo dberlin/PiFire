@@ -35,6 +35,7 @@ const TAB_LABELS = [
   "Pellet Levels",
   "History",
   "Units",
+  "Platform",
 ];
 
 describe("SettingsShell", () => {

@@ -12,6 +12,7 @@ const SETTINGS_TABS = [
   { path: "history", label: "History" },
   { path: "notifications", label: "Notifications" },
   { path: "units", label: "Units" },
+  { path: "platform", label: "Platform" },
 ];
 
 export function SettingsShell() {
