@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import type { WizardState } from "../../helpers/wizard/wizardTypes";
 
@@ -138,10 +138,17 @@ describe("WizardShell", () => {
 
     // A genuine through-the-DOM edit on the rendered DisplayStep/ModuleCard,
     // performed AFTER mount and AFTER the earlier navigations above --
-    // exercises setWorking, not a direct state mutation.
+    // exercises setWorking, not a direct state mutation. DisplayStep now
+    // round-trips the module switch through useModuleSwitch (fetches the
+    // new module's values before applying), so wait for that async apply to
+    // land -- i.e. for the controlled select to reflect the new selection --
+    // before moving on, or the flush below would race the pending fetch.
     fireEvent.change(screen.getByRole("combobox", { name: "Module" }), {
       target: { value: "generic" },
     });
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Module" })).toHaveValue("generic"),
+    );
 
     saveDraftMock.mockClear();
     await clickNext("Distance / Hopper");

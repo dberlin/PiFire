@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { WizardState, WizardWorking } from "../../../helpers/wizard/wizardTypes";
 import { DisplayStep } from "./DisplayStep";
 
+const fetchModuleValues = rs.fn();
 rs.mock("../../../helpers/wizard/wizardApi", () => ({
   scan: rs.fn().mockResolvedValue({ groups: [], error: null }),
+  fetchModuleValues: (...args: unknown[]) => fetchModuleValues(...args),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  rs.resetAllMocks();
+});
 
 const state: WizardState = {
   modules_metadata: {
@@ -61,7 +66,8 @@ function baseWorking(): WizardWorking {
 }
 
 describe("DisplayStep", () => {
-  it("selecting a display module calls onChange with an updated display selection", () => {
+  it("selecting a display module fetches its values and calls onChange with the new selection", async () => {
+    fetchModuleValues.mockResolvedValue({ settings: {}, config: {} });
     const onChange = rs.fn();
     render(<DisplayStep state={state} working={baseWorking()} onChange={onChange} baseUrl="" />);
 
@@ -69,9 +75,10 @@ describe("DisplayStep", () => {
       target: { value: "generic" },
     });
 
-    expect(onChange).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
     const next = onChange.mock.calls[0][0] as WizardWorking;
     expect(next.selections.display).toBe("generic");
+    expect(fetchModuleValues).toHaveBeenCalledWith("", "display", "generic");
   });
 
   it("editing a config option calls onChange with updated display_config for the selected module", () => {
@@ -113,5 +120,68 @@ describe("DisplayStep", () => {
       render(<DisplayStep state={state} working={baseWorking()} onChange={rs.fn()} baseUrl="" />),
     ).not.toThrow();
     expect(screen.getByText("Display")).toBeInTheDocument();
+  });
+
+  it("replaces the display dep map wholesale so a stale key from the previous module is gone", async () => {
+    // 12 of 30 display modules carry `buttonslevel`; the rest carry none.
+    // Switching must not leave the old module's key behind -- a stale key
+    // reaches /finish and used to KeyError inside the detached installer.
+    fetchModuleValues.mockResolvedValue({ settings: {}, config: {} });
+    const onChange = rs.fn();
+    const working = {
+      ...baseWorking(),
+      selections: { ...baseWorking().selections, display: "generic" },
+      settings_dep_values: {
+        ...baseWorking().settings_dep_values,
+        display: { buttonslevel: "HIGH" },
+      },
+    };
+    render(<DisplayStep state={state} working={working} onChange={onChange} baseUrl="" />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Module" }), {
+      target: { value: "other" },
+    });
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    const next = onChange.mock.calls[0][0] as WizardWorking;
+    expect(next.settings_dep_values.display).toEqual({});
+    expect(next.settings_dep_values.display.buttonslevel).toBeUndefined();
+  });
+
+  it("preserves an unsaved display_config edit across a module switch", async () => {
+    // D1: the switch applies only `settings`; display_config stays client-held,
+    // so the user's unsaved edit survives switching away (and back).
+    fetchModuleValues.mockResolvedValue({
+      settings: {},
+      config: { units: "F" }, // server copy -- must be IGNORED
+    });
+    const onChange = rs.fn();
+    const working = {
+      ...baseWorking(),
+      selections: { ...baseWorking().selections, display: "generic" },
+      display_config: { generic: { units: "C" } }, // the user's unsaved edit
+    };
+    render(<DisplayStep state={state} working={working} onChange={onChange} baseUrl="" />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Module" }), {
+      target: { value: "other" },
+    });
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    const next = onChange.mock.calls[0][0] as WizardWorking;
+    expect(next.display_config.generic.units).toBe("C");
+  });
+
+  it("shows an error banner and does not call onChange when the fetch fails", async () => {
+    fetchModuleValues.mockRejectedValue(new Error("boom"));
+    const onChange = rs.fn();
+    render(<DisplayStep state={state} working={baseWorking()} onChange={onChange} baseUrl="" />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Module" }), {
+      target: { value: "generic" },
+    });
+
+    await waitFor(() => expect(screen.getByText(/couldn't load the display/i)).toBeInTheDocument());
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
