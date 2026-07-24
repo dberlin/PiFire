@@ -8,6 +8,7 @@ const saveDraftMock = rs.fn();
 const finishWizardMock = rs.fn();
 const getInstallStatusMock = rs.fn();
 const scanMock = rs.fn();
+const fetchModuleValuesMock = rs.fn();
 
 rs.mock("../../helpers/wizard/wizardApi", () => ({
   getWizardState: (...args: unknown[]) => getWizardStateMock(...args),
@@ -15,6 +16,7 @@ rs.mock("../../helpers/wizard/wizardApi", () => ({
   finishWizard: (...args: unknown[]) => finishWizardMock(...args),
   getInstallStatus: (...args: unknown[]) => getInstallStatusMock(...args),
   scan: (...args: unknown[]) => scanMock(...args),
+  fetchModuleValues: (...args: unknown[]) => fetchModuleValuesMock(...args),
 }));
 
 const { WizardShell } = await import("./WizardShell");
@@ -25,6 +27,7 @@ afterEach(() => {
   finishWizardMock.mockReset();
   getInstallStatusMock.mockReset();
   scanMock.mockReset().mockResolvedValue({ groups: [], error: null });
+  fetchModuleValuesMock.mockReset().mockResolvedValue({ settings: {}, config: {} });
   saveDraftMock.mockResolvedValue(true);
   getInstallStatusMock.mockResolvedValue({ percent: 0, status: "Starting install…", output: "" });
 });
@@ -95,6 +98,16 @@ describe("WizardShell", () => {
   it("renders the welcome step first", async () => {
     renderShell(fixtureState());
     expect(await screen.findByRole("heading", { name: "Welcome" })).toBeInTheDocument();
+  });
+
+  it("renders GrillPlatformStep (a module select) on the grill platform step, not the placeholder", async () => {
+    renderShell(fixtureState());
+    await screen.findByRole("heading", { name: "Welcome" });
+
+    await clickNext("Grill Platform");
+
+    expect(screen.getByRole("combobox", { name: "Module" })).toBeInTheDocument();
+    expect(screen.queryByText(/coming in a later release/i)).not.toBeInTheDocument();
   });
 
   it("Next advances the step and flushes a draft with the current working state", async () => {

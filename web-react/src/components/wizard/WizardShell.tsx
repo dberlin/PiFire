@@ -6,6 +6,7 @@ import { initialWorking } from "../../helpers/wizard/wizardState";
 import type { WizardState, WizardWorking } from "../../helpers/wizard/wizardTypes";
 import { InstallProgress } from "./InstallProgress";
 import { DisplayStep } from "./steps/DisplayStep";
+import { GrillPlatformStep } from "./steps/GrillPlatformStep";
 import { PlaceholderStep } from "./steps/PlaceholderStep";
 import { ProbesStep } from "./steps/ProbesStep";
 
@@ -161,6 +162,14 @@ export function WizardShell() {
           </div>
         );
       case "grillplatform":
+        return (
+          <GrillPlatformStep
+            state={state}
+            working={working}
+            onChange={setWorking}
+            baseUrl={BASE_URL}
+          />
+        );
       case "distance":
         return <PlaceholderStep section={currentStep} />;
       case "probes":
