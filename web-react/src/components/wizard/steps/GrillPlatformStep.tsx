@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { fetchModuleValues } from "../../../helpers/wizard/wizardApi";
+import { useModuleSwitch } from "../../../helpers/wizard/useModuleSwitch";
 import {
   EMPTY_PROBE_MAP,
   replaceProbeMap,
@@ -8,7 +7,7 @@ import {
   setDepValue,
   setSectionDepValues,
 } from "../../../helpers/wizard/wizardState";
-import type { WizardState, WizardWorking } from "../../../helpers/wizard/wizardTypes";
+import type { ModuleValues, WizardState, WizardWorking } from "../../../helpers/wizard/wizardTypes";
 import { ModuleCard } from "../ModuleCard";
 
 export interface GrillPlatformStepProps {
@@ -19,35 +18,31 @@ export interface GrillPlatformStepProps {
 }
 
 export function GrillPlatformStep({ state, working, onChange, baseUrl }: GrillPlatformStepProps) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSelect(newModule: string) {
-    const prevModule = working.selections.grillplatform;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchModuleValues(baseUrl, "grillplatform", newModule);
+  const { loading, error, switchModule } = useModuleSwitch({
+    baseUrl,
+    section: "grillplatform",
+    errorMessage: "Couldn't load the platform configuration. Please try again.",
+    apply: (values: ModuleValues, newModule: string) => {
+      // `working` is this render's (pre-switch) value, so this reads the
+      // PREVIOUS selection -- same semantics as capturing prevModule before the
+      // fetch.
+      const prevModule = working.selections.grillplatform;
       let next = selectModule(working, "grillplatform", newModule);
-      next = setSectionDepValues(next, "grillplatform", res.settings);
+      next = setSectionDepValues(next, "grillplatform", values.settings);
       const prevBoardMap = state.board_probe_maps[prevModule ?? ""] ?? EMPTY_PROBE_MAP;
       const newBoardMap = state.board_probe_maps[newModule] ?? EMPTY_PROBE_MAP;
-      const reseeded = reseedProbeMapForBoard(
-        working.probe_map,
-        prevBoardMap,
-        newBoardMap,
-        state.first_time_setup,
+      next = replaceProbeMap(
+        next,
+        reseedProbeMapForBoard(
+          working.probe_map,
+          prevBoardMap,
+          newBoardMap,
+          state.first_time_setup,
+        ),
       );
-      next = replaceProbeMap(next, reseeded);
       onChange(next);
-    } catch {
-      // Advisory failure: leave the prior selection/deps/probe_map intact so
-      // the user can retry -- never half-apply a switch.
-      setError("Couldn't load the platform configuration. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+  });
 
   return (
     <div className="pf-wizard-step" data-step="grillplatform">
@@ -62,7 +57,7 @@ export function GrillPlatformStep({ state, working, onChange, baseUrl }: GrillPl
         configValues={{}}
         baseUrl={baseUrl}
         disabled={loading}
-        onSelectModule={(m) => void handleSelect(m)}
+        onSelectModule={(m) => switchModule(m)}
         onDepChange={(k, v) => onChange(setDepValue(working, "grillplatform", k, v))}
         onConfigChange={() => {}}
       />
