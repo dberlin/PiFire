@@ -1,10 +1,14 @@
 import { describe, expect, it, test } from "@rstest/core";
 import {
   displayConfigFor,
+  EMPTY_PROBE_MAP,
   initialWorking,
+  replaceProbeMap,
+  reseedProbeMapForBoard,
   selectModule,
   setDepValue,
   setDisplayConfig,
+  setSectionDepValues,
 } from "./wizardState";
 import type { WizardState } from "./wizardTypes";
 
@@ -111,5 +115,75 @@ describe("wizardState", () => {
     expect(w.probes_units).toBe("C");
     w.probe_map.probe_devices[0].device = "MUT";
     expect(s.probe_map.probe_devices[0].device).toBe("D1"); // no aliasing
+  });
+});
+
+describe("wizardState grillplatform helpers", () => {
+  const boardA: import("./probeTypes").ProbeMap = {
+    probe_devices: [
+      { device: "DA", module: "ads1115", module_filename: "ads1115", ports: ["ADC0"], config: {} },
+    ],
+    probe_info: [],
+  };
+  const boardB: import("./probeTypes").ProbeMap = {
+    probe_devices: [
+      { device: "DB", module: "ads1115", module_filename: "ads1115", ports: ["ADC1"], config: {} },
+    ],
+    probe_info: [],
+  };
+
+  test("setSectionDepValues replaces a section's dep map immutably", () => {
+    const w = initialWorking(base);
+    const w2 = setSectionDepValues(w, "grillplatform", {
+      output_auger: "14",
+      system_type: "raspberry_pi_all",
+    });
+    expect(w2.settings_dep_values.grillplatform).toEqual({
+      output_auger: "14",
+      system_type: "raspberry_pi_all",
+    });
+    expect(w.settings_dep_values.grillplatform).toEqual({}); // original untouched
+  });
+
+  test("replaceProbeMap swaps the probe_map immutably", () => {
+    const w = initialWorking(base);
+    const w2 = replaceProbeMap(w, boardB);
+    expect(w2.probe_map).toEqual(boardB);
+    expect(w.probe_map).toEqual({ probe_devices: [], probe_info: [] });
+  });
+
+  test("reseedProbeMapForBoard reseeds when fresh + current equals previous board default", () => {
+    // user hasn't edited: current == prev board default -> adopt new board
+    const result = reseedProbeMapForBoard(boardA, boardA, boardB, true);
+    expect(result).toEqual(boardB);
+    expect(result).not.toBe(boardB); // deep-cloned, not aliased
+  });
+
+  test("reseedProbeMapForBoard preserves current when the user has edited it", () => {
+    const edited: import("./probeTypes").ProbeMap = {
+      probe_devices: [
+        { device: "EDITED", module: "m", module_filename: "m", ports: [], config: {} },
+      ],
+      probe_info: [],
+    };
+    const result = reseedProbeMapForBoard(edited, boardA, boardB, true);
+    expect(result).toBe(edited); // unchanged
+  });
+
+  test("reseedProbeMapForBoard is a no-op on an existing install", () => {
+    const result = reseedProbeMapForBoard(boardA, boardA, boardB, false);
+    expect(result).toBe(boardA);
+  });
+
+  test("reseedProbeMapForBoard reseeds to EMPTY when the new board has no entry (unedited)", () => {
+    // caller passes EMPTY_PROBE_MAP for a board with no manifest entry
+    const result = reseedProbeMapForBoard(boardA, boardA, EMPTY_PROBE_MAP, true);
+    expect(result).toEqual({ probe_devices: [], probe_info: [] });
+  });
+
+  test("reseedProbeMapForBoard treats an initial EMPTY previous board correctly", () => {
+    // prev selection was null -> prevBoardMap is EMPTY; current also EMPTY -> reseed
+    const result = reseedProbeMapForBoard(EMPTY_PROBE_MAP, EMPTY_PROBE_MAP, boardB, true);
+    expect(result).toEqual(boardB);
   });
 });

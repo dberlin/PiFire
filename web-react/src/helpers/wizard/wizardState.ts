@@ -1,3 +1,4 @@
+import type { ProbeMap } from "./probeTypes";
 import type { WizardSection, WizardState, WizardWorking } from "./wizardTypes";
 
 export function initialWorking(state: WizardState): WizardWorking {
@@ -50,4 +51,54 @@ export function setDisplayConfig(
       [module]: { ...displayConfigFor(w, module), [optionName]: value },
     },
   };
+}
+
+export const EMPTY_PROBE_MAP: ProbeMap = { probe_devices: [], probe_info: [] };
+
+// Order-insensitive structural equality. probe_maps are plain JSON (arrays of
+// objects with fixed string/number keys); a manifest-sourced map and a
+// reducer-built map can differ only in object key order, which this ignores.
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
+    return false;
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ak = Object.keys(a as object);
+  const bk = Object.keys(b as object);
+  if (ak.length !== bk.length) return false;
+  return ak.every((k) =>
+    deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
+  );
+}
+
+export function setSectionDepValues(
+  w: WizardWorking,
+  section: WizardSection,
+  values: Record<string, string | null>,
+): WizardWorking {
+  return {
+    ...w,
+    settings_dep_values: { ...w.settings_dep_values, [section]: { ...values } },
+  };
+}
+
+export function replaceProbeMap(w: WizardWorking, probe_map: ProbeMap): WizardWorking {
+  return { ...w, probe_map };
+}
+
+// D2 guard: reseed the probe_map from the newly-selected board's default only
+// on a fresh install AND only when the current map has NOT diverged from the
+// previous board's default -- so manual probe edits are never clobbered.
+// Callers resolve prev/new board maps as `board_probe_maps[module] ?? EMPTY_PROBE_MAP`.
+export function reseedProbeMapForBoard(
+  currentMap: ProbeMap,
+  prevBoardMap: ProbeMap,
+  newBoardMap: ProbeMap,
+  firstTimeSetup: boolean,
+): ProbeMap {
+  if (firstTimeSetup && deepEqual(currentMap, prevBoardMap)) {
+    return structuredClone(newBoardMap);
+  }
+  return currentMap;
 }
