@@ -1,18 +1,39 @@
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { FIXTURE_DASH } from "../helpers/fixture";
-import { renderRoute } from "../test-utils";
 
 const useDashDataMock = rs.fn();
+const navigateMock = rs.fn();
+const getSettingsMock = rs.fn();
 
 rs.mock("../helpers/useDashData", () => ({
   useDashData: () => useDashDataMock(),
+}));
+rs.mock("react-router", () => ({
+  useNavigate: () => navigateMock,
+}));
+rs.mock("../helpers/settings/settingsApi", () => ({
+  getSettings: (...args: unknown[]) => getSettingsMock(...args),
 }));
 
 const { DashboardRoute } = await import("./DashboardRoute");
 const { AppPrefsProvider } = await import("./AppPrefs");
 
+function renderDashboardRoute() {
+  return render(
+    <AppPrefsProvider>
+      <DashboardRoute />
+    </AppPrefsProvider>,
+  );
+}
+
 afterEach(cleanup);
+
+beforeEach(() => {
+  navigateMock.mockClear();
+  getSettingsMock.mockReset();
+  getSettingsMock.mockResolvedValue({ globals: { first_time_setup: false } });
+});
 
 const command = {
   setMode: rs.fn(),
@@ -37,12 +58,7 @@ describe("DashboardRoute", () => {
       command,
     });
 
-    renderRoute(
-      <AppPrefsProvider>
-        <DashboardRoute />
-      </AppPrefsProvider>,
-      undefined,
-    );
+    renderDashboardRoute();
 
     expect(screen.getByText("Connecting to PiFire…")).toBeInTheDocument();
     expect(screen.getByText("http://pifire.local:5000")).toBeInTheDocument();
@@ -57,14 +73,56 @@ describe("DashboardRoute", () => {
       command,
     });
 
-    renderRoute(
-      <AppPrefsProvider>
-        <DashboardRoute />
-      </AppPrefsProvider>,
-      undefined,
-    );
+    renderDashboardRoute();
 
     expect(screen.getByText("HOLD")).toBeInTheDocument();
     expect(screen.getByText("LIVE")).toBeInTheDocument();
+  });
+
+  it("navigates to /wizard when first_time_setup is true", async () => {
+    useDashDataMock.mockReturnValue({
+      dash: FIXTURE_DASH,
+      phase: "live",
+      controlAlive: true,
+      targetUrl: "http://pifire.local:5000",
+      command,
+    });
+    getSettingsMock.mockResolvedValue({ globals: { first_time_setup: true } });
+
+    renderDashboardRoute();
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/wizard"));
+  });
+
+  it("does not navigate when first_time_setup is false", async () => {
+    useDashDataMock.mockReturnValue({
+      dash: FIXTURE_DASH,
+      phase: "live",
+      controlAlive: true,
+      targetUrl: "http://pifire.local:5000",
+      command,
+    });
+    getSettingsMock.mockResolvedValue({ globals: { first_time_setup: false } });
+
+    renderDashboardRoute();
+
+    await waitFor(() => expect(getSettingsMock).toHaveBeenCalled());
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("still renders the dashboard when the check fails (advisory only)", async () => {
+    useDashDataMock.mockReturnValue({
+      dash: FIXTURE_DASH,
+      phase: "live",
+      controlAlive: true,
+      targetUrl: "http://pifire.local:5000",
+      command,
+    });
+    getSettingsMock.mockRejectedValue(new Error("offline"));
+
+    renderDashboardRoute();
+
+    await waitFor(() => expect(getSettingsMock).toHaveBeenCalled());
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 });
