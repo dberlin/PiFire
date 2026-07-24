@@ -1,0 +1,61 @@
+/* HistoryChart -- uPlot host + the cursor-following tooltip plugin markup.
+   Colours reuse the app's design tokens from src/theme.css rather than
+   introducing new ones. */
+
+.pf-history-chart {
+  position: relative;
+  width: 100%;
+}
+
+.pf-history-chart .u-legend {
+  color: var(--text-dim);
+  font:
+    600 12px "Barlow",
+    system-ui,
+    sans-serif;
+}
+
+.pf-history-tip {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font:
+    600 12px "Barlow",
+    system-ui,
+    sans-serif;
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  min-width: 140px;
+}
+
+.pf-history-tip .t {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.pf-history-tip .r {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
+.pf-history-tip .r i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.pf-history-tip .r b {
+  margin-left: auto;
+  font-weight: 700;
+  color: var(--text);
+}

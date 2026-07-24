@@ -4,3 +4,57 @@ import { cleanup } from "@testing-library/react";
 
 expect.extend(matchers);
 afterEach(cleanup);
+
+// jsdom implements neither `window.matchMedia` nor canvas 2D contexts. uPlot
+// (src/components/history/HistoryChart.tsx) touches both at construction
+// time to track devicePixelRatio and to draw. Component tests only assert
+// the mount/update/unmount contract (jsdom has no canvas to assert pixels
+// against), so a minimal no-op stub is enough to let uPlot construct without
+// throwing.
+if (typeof window !== "undefined" && !window.matchMedia) {
+  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList;
+}
+
+// jsdom's canvas getContext("2d") returns null unless the (native-binding)
+// `canvas` npm package is installed, which this project intentionally does
+// not depend on for a headless test run. Stand in a permissive stub: stored
+// properties (e.g. `ctx.font = ...`) round-trip, everything else no-ops as a
+// function call. Good enough for uPlot to run its draw routines without
+// throwing; pixel output isn't something these tests assert on.
+if (typeof HTMLCanvasElement !== "undefined") {
+  const noop = () => {};
+  HTMLCanvasElement.prototype.getContext = ((..._args: unknown[]) =>
+    new Proxy(
+      {},
+      {
+        get: (target, prop) => (prop in target ? (target as never)[prop] : noop),
+      },
+    )) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+}
+
+// jsdom also has no Path2D (used by uPlot to build series paths before
+// stroking them via the stubbed context above). Same permissive-stub idea,
+// via a plain constructor function rather than a class -- a class
+// constructor returning a value trips the noConstructorReturn lint, but an
+// ordinary function invoked with `new` is allowed to override `this` this way.
+if (typeof (globalThis as { Path2D?: unknown }).Path2D === "undefined") {
+  function Path2DStub() {
+    return new Proxy(
+      {},
+      {
+        get: (target, prop) => (prop in target ? (target as never)[prop] : () => {}),
+      },
+    );
+  }
+  (globalThis as { Path2D?: unknown }).Path2D = Path2DStub;
+}
