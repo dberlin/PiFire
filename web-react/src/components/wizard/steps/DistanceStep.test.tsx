@@ -27,9 +27,13 @@ const state: WizardState = {
         friendly_name: "SEN0628 USB ToF",
         settings_dependencies: {
           sen0628_device: {
-            friendly_name: "USB Serial Device",
+            friendly_name: "Serial Device (USB)",
             type: "usb_serial_device",
             settings: ["platform", "devices", "distance", "device"],
+            options: {
+              "/dev/ttyACM0": "/dev/ttyACM0",
+              "/dev/ttyUSB0": "/dev/ttyUSB0",
+            },
           },
         },
       },
@@ -63,7 +67,7 @@ describe("DistanceStep", () => {
     expect(screen.getByRole("heading", { name: "Distance / Hopper" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Module" })).toBeInTheDocument();
     // no dep fields for `none`
-    expect(screen.queryByLabelText("USB Serial Device")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Serial Device (USB)")).not.toBeInTheDocument();
   });
 
   it("renders the sen0628 USB serial field when that module is selected", () => {
@@ -72,7 +76,25 @@ describe("DistanceStep", () => {
       selections: { ...baseWorking().selections, distance: "sen0628" },
     };
     render(<DistanceStep state={state} working={working} onChange={rs.fn()} baseUrl="" />);
-    expect(screen.getByLabelText("USB Serial Device")).toBeInTheDocument();
+    expect(screen.getByLabelText("Serial Device (USB)")).toBeInTheDocument();
+  });
+
+  it("changing the sen0628 serial device field routes through setDepValue without a fetch round-trip", () => {
+    const onChange = rs.fn();
+    const working = {
+      ...baseWorking(),
+      selections: { ...baseWorking().selections, distance: "sen0628" },
+    };
+    render(<DistanceStep state={state} working={working} onChange={onChange} baseUrl="" />);
+
+    fireEvent.change(screen.getByLabelText("Serial Device (USB)"), {
+      target: { value: "/dev/ttyUSB0" },
+    });
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0] as WizardWorking;
+    expect(next.settings_dep_values.distance.sen0628_device).toBe("/dev/ttyUSB0");
+    expect(fetchModuleValues).not.toHaveBeenCalled();
   });
 
   it("switching modules fetches values and applies them to the distance dep map", async () => {

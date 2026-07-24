@@ -281,6 +281,37 @@ def test_finish_uses_probe_map_from_payload(ds, client, monkeypatch):
     assert captured["modules"]["probes"]["profile_selected"] == ["ads1115_adafruit"]
 
 
+def test_finish_sends_flat_display_config_for_selected_module(ds, client, monkeypatch):
+    """The React client's display_config is module-keyed:
+    {module: {option: value}}. The detached installer (wizard.py's
+    run_wizard()) indexes
+    WizardInstallInfo["modules"]["display"]["config"] as a FLAT
+    {option: value} dict for the SELECTED module -- matching what legacy
+    prepare_wizard_data built. Sending the module-keyed bag verbatim would
+    nest it one level too deep and the installer would silently fall back to
+    defaults instead of applying the user's chosen display options."""
+    import blueprints.api_wizard.routes as wr
+
+    fired = []
+    monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))
+    monkeypatch.setattr(wr, "wizard_bus_kinds", lambda *a, **k: {})
+    monkeypatch.setattr(wr, "validate_bus_kinds", lambda *a, **k: None)
+    captured = {}
+    monkeypatch.setattr(wr, "store_wizard_install_info", lambda info: captured.update(info))
+    payload = {
+        "selections": {"grillplatform": "custom", "display": "ili9341b", "distance": "hcsr04"},
+        "settings_dep_values": {},
+        "display_config": {
+            "ili9341b": {"rotation": 90},
+            "other_module": {"rotation": 270},
+        },
+    }
+    resp = client.post("/api/wizard/finish", data=json.dumps(payload), content_type="application/json")
+    assert resp.status_code == 200
+    assert captured["modules"]["display"]["config"] == {"rotation": 90}
+    assert fired and "wizard.py" in fired[0]
+
+
 def test_finish_rejects_empty_selection(ds, client, monkeypatch):
     """The detached installer (wizard.py's run_wizard()) unconditionally
     indexes WizardInstallInfo["modules"]["grillplatform"|"display"|"distance"]

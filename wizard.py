@@ -201,10 +201,27 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
     time.sleep(2)
 
     display_selected = WizardInstallInfo["modules"]["display"]["profile_selected"][0]
-    settings["modules"]["display"] = WizardData["modules"]["display"][display_selected]["filename"]
-    settings["display"]["selected"] = display_selected
+    display_module_data = WizardData["modules"]["display"].get(display_selected)
+    if display_module_data is None:
+        # A stale draft can name a module a later manifest upgrade removed.
+        # Skip the settings["modules"]["display"]/settings["display"]["selected"]
+        # write rather than raising -- this loop runs in the DETACHED installer
+        # process, where an uncaught exception freezes the install at its last
+        # status line forever.
+        set_wizard_install_status(
+            percent, status, f"   - Skipped unknown module {display_selected} for section display"
+        )
+    else:
+        settings["modules"]["display"] = display_module_data["filename"]
+        settings["display"]["selected"] = display_selected
     distance_selected = WizardInstallInfo["modules"]["distance"]["profile_selected"][0]
-    settings["modules"]["dist"] = WizardData["modules"]["distance"][distance_selected]["filename"]
+    distance_module_data = WizardData["modules"]["distance"].get(distance_selected)
+    if distance_module_data is None:
+        set_wizard_install_status(
+            percent, status, f"   - Skipped unknown module {distance_selected} for section distance"
+        )
+    else:
+        settings["modules"]["dist"] = distance_module_data["filename"]
 
     """ Configuring Probes Data """
     settings["probe_settings"]["probe_map"] = WizardInstallInfo["probe_map"]
@@ -241,7 +258,19 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
                 # no probe devices are configured -- computing these before the units
                 # check would raise IndexError and silently kill the detached installer.
                 selected = WizardInstallInfo["modules"][module]["profile_selected"][0]
-                dependencies = WizardData["modules"][module][selected]["settings_dependencies"]
+                module_data = WizardData["modules"][module].get(selected)
+                if module_data is None:
+                    # The selected MODULE name isn't in the manifest for this
+                    # section (e.g. a stale draft naming a module a later
+                    # manifest upgrade removed). Skip past this module's
+                    # settings rather than raising: this loop runs in the
+                    # DETACHED installer process, where an uncaught exception
+                    # freezes the install at its last status line forever.
+                    set_wizard_install_status(
+                        percent, status, f"   - Skipped unknown module {selected} for section {module}"
+                    )
+                    continue
+                dependencies = module_data["settings_dependencies"]
                 dependency = dependencies.get(setting)
                 if dependency is None:
                     # A setting name that isn't in the selected module's manifest entry
@@ -291,11 +320,20 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
         for selected in WizardInstallInfo["modules"][module]["profile_selected"]:
             if module == "grillplatform":
                 selected = WizardInstallInfo["modules"][module]["settings"]["current"]
-            for py_dependency in WizardData["modules"][module][selected]["py_dependencies"]:
+            module_data = WizardData["modules"][module].get(selected)
+            if module_data is None:
+                # Same stale-draft/unknown-module guard as the settings-writing
+                # loop above: a module name that isn't in the manifest must not
+                # raise inside the detached installer process.
+                set_wizard_install_status(
+                    percent, status, f"   - Skipped unknown module {selected} for section {module}"
+                )
+                continue
+            for py_dependency in module_data["py_dependencies"]:
                 py_dependencies.append(py_dependency)
-            for apt_dependency in WizardData["modules"][module][selected]["apt_dependencies"]:
+            for apt_dependency in module_data["apt_dependencies"]:
                 apt_dependencies.append(apt_dependency)
-            for command in WizardData["modules"][module][selected]["command_list"]:
+            for command in module_data["command_list"]:
                 command_list.append(command)
 
     # Calculate the percent done from remaining items to install

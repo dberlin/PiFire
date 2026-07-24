@@ -58,4 +58,19 @@ describe("useModuleSwitch", () => {
     await waitFor(() => expect(result.current.error).toBeNull());
     expect(apply).toHaveBeenCalledTimes(1);
   });
+
+  it("clears the selection without fetching when switched to a blank module", async () => {
+    const apply = rs.fn();
+    const { result } = renderHook(() =>
+      useModuleSwitch({ baseUrl: "", section: "display", errorMessage: "could not load", apply }),
+    );
+
+    result.current.switchModule("");
+
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+    expect(apply).toHaveBeenCalledWith({ settings: {}, config: {} }, "");
+    expect(fetchModuleValues).not.toHaveBeenCalled();
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+  });
 });

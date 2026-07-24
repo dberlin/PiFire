@@ -90,3 +90,26 @@ def test_run_wizard_skips_unknown_setting_key(ds, no_install):
 
     percent, status, output = datastore_accessors.get_wizard_install_status()
     assert percent == 101  # ran to completion (restart-only), not frozen mid-install
+
+
+def test_run_wizard_skips_unknown_module_name(ds, no_install):
+    """A previous fix guarded an unknown dependency KEY within a known
+    module. The selected MODULE name itself is also indexed unguarded in the
+    detached installer -- a stale draft naming a module that a later
+    manifest upgrade removed raises KeyError and silently freezes the
+    install, the same failure class as the unknown-setting-key bug above.
+    """
+    settings = defaults.default_settings()
+    settings["probe_settings"]["probe_map"]["probe_devices"] = []
+    datastore_accessors.write_settings_store(settings)
+
+    wizard_data = read_wizard()
+    install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
+    # A module name that exists in no section of the manifest.
+    install_info["modules"]["display"]["profile_selected"] = ["totally_bogus_display_module"]
+
+    # Must not raise.
+    wizard.run_wizard(settings, wizard_data, install_info)
+
+    percent, status, output = datastore_accessors.get_wizard_install_status()
+    assert percent == 101  # ran to completion (restart-only), not frozen mid-install

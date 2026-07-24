@@ -151,6 +151,14 @@ describe("DisplayStep", () => {
   it("preserves an unsaved display_config edit across a module switch", async () => {
     // D1: the switch applies only `settings`; display_config stays client-held,
     // so the user's unsaved edit survives switching away (and back).
+    //
+    // The unsaved edit is seeded on BOTH the FROM module (generic) and the TO
+    // module (other), with the server returning a DIFFERENT value ("F") for
+    // the newly selected module. This closes a gap in the previous version of
+    // this test: a regression that wrote `values.config` under the newly
+    // selected module (instead of leaving display_config untouched) would
+    // land on display_config.other and still pass, since that assertion only
+    // checked the untouched `generic` entry.
     fetchModuleValues.mockResolvedValue({
       settings: {},
       config: { units: "F" }, // server copy -- must be IGNORED
@@ -159,7 +167,10 @@ describe("DisplayStep", () => {
     const working = {
       ...baseWorking(),
       selections: { ...baseWorking().selections, display: "generic" },
-      display_config: { generic: { units: "C" } }, // the user's unsaved edit
+      display_config: {
+        generic: { units: "C" }, // the user's unsaved edit on the FROM module
+        other: { units: "C" }, // the user's unsaved edit on the TO module
+      },
     };
     render(<DisplayStep state={state} working={working} onChange={onChange} baseUrl="" />);
 
@@ -169,6 +180,9 @@ describe("DisplayStep", () => {
 
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
     const next = onChange.mock.calls[0][0] as WizardWorking;
+    // Server's "F" must be ignored for the newly selected module.
+    expect(next.display_config.other.units).toBe("C");
+    // The other module's unsaved edit is left untouched.
     expect(next.display_config.generic.units).toBe("C");
   });
 

@@ -31,6 +31,17 @@ export function useModuleSwitch({
   const [error, setError] = useState<string | null>(null);
 
   async function run(newModule: string) {
+    if (!newModule) {
+      // The "-- select --" blank option in ModuleCard. There is no module to
+      // fetch values for, so don't hit the server (an empty module POSTed to
+      // /module-values 400s and would surface a misleading error banner).
+      // Just clear this section's selection/dep-values via the caller's
+      // `apply` composition -- /finish still rejects an empty selection, so
+      // this is purely a "clear the picker" UX affordance.
+      setError(null);
+      apply({ settings: {}, config: {} }, newModule);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {

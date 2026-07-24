@@ -339,7 +339,16 @@ def _wizard_install_info_from_payload(payload, existing):
     modules["display"] = {
         "profile_selected": [display_selected] if display_selected else [],
         "settings": settings_dep_values.get("display", {}) or {},
-        "config": display_config,
+        # display_config is the React client's module-keyed bag
+        # {module: {option: value}}, but the detached installer
+        # (wizard.py's run_wizard) indexes
+        # WizardInstallInfo["modules"]["display"]["config"] as a FLAT
+        # {option: value} dict for the SELECTED module only -- matching what
+        # legacy prepare_wizard_data built via its
+        # `config.startswith(module_ + "config_")` loop. Passing the
+        # module-keyed bag here would nest it one level too deep and the
+        # installer would silently fall back to defaults.
+        "config": display_config.get(display_selected, {}) if display_selected else {},
     }
     probes_settings = dict(settings_dep_values.get("probes", {}) or {})
     if probes_units:
