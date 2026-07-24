@@ -115,6 +115,19 @@ def wizard_draft():
     info = _load_draft()
     if not isinstance(info, dict):
         info = {}
+
+    if payload.get("clear"):
+        # Drop the draft marker + working keys only -- any other persisted
+        # keys (e.g. probe_map from a prior /finish) are left alone. A
+        # subsequent /state then recomputes selections from settings/defaults
+        # (has_draft == false) instead of resuming the cleared draft.
+        info.pop(_DRAFT_KEY, None)
+        info.pop("selections", None)
+        info.pop("settings_dep_values", None)
+        info.pop("display_config", None)
+        store_wizard_install_info(info)
+        return jsonify({"result": "success"}), 200
+
     info[_DRAFT_KEY] = True
     info["selections"] = payload.get("selections", {})
     info["settings_dep_values"] = payload.get("settings_dep_values", {})

@@ -42,6 +42,23 @@ def test_draft_persists_and_state_resumes(ds, client):
     assert body["display_config"]["ili9341b"]["rotation"] == 90
 
 
+def test_draft_clear_removes_draft_and_leaves_other_keys(ds, client):
+    draft = {
+        "selections": {"display": "ili9341b"},
+        "settings_dep_values": {"display": {}},
+        "display_config": {"ili9341b": {"rotation": 90}},
+    }
+    r1 = client.post("/api/wizard/draft", data=json.dumps(draft), content_type="application/json")
+    assert r1.status_code == 200
+
+    r2 = client.post("/api/wizard/draft", data=json.dumps({"clear": True}), content_type="application/json")
+    assert r2.status_code == 200 and r2.get_json()["result"] == "success"
+
+    r3 = client.get("/api/wizard/state")
+    body = r3.get_json()
+    assert body["has_draft"] is False
+
+
 def test_state_existing_stale_module_returns_empty_selection(ds, client):
     """Characterizes the (now-fixed) stale-module recovery path in
     wizardInstallInfoExisting() (blueprints/wizard/wizard.py): when
