@@ -159,6 +159,26 @@ describe("wizardState grillplatform helpers", () => {
     expect(result).not.toBe(boardB); // deep-cloned, not aliased
   });
 
+  test("reseedProbeMapForBoard treats same-content maps with different key order as equal", () => {
+    // Same content as boardA, keys written in a different order. deepEqual must be
+    // structural -- a JSON.stringify comparison would see these as different and
+    // wrongly SKIP the reseed (preserving `reordered` instead of adopting boardB).
+    const reordered: import("./probeTypes").ProbeMap = {
+      probe_info: [],
+      probe_devices: [
+        {
+          config: {},
+          ports: ["ADC0"],
+          module_filename: "ads1115",
+          module: "ads1115",
+          device: "DA",
+        },
+      ],
+    };
+    const result = reseedProbeMapForBoard(reordered, boardA, boardB, true);
+    expect(result).toEqual(boardB);
+  });
+
   test("reseedProbeMapForBoard preserves current when the user has edited it", () => {
     const edited: import("./probeTypes").ProbeMap = {
       probe_devices: [
@@ -179,6 +199,7 @@ describe("wizardState grillplatform helpers", () => {
     // caller passes EMPTY_PROBE_MAP for a board with no manifest entry
     const result = reseedProbeMapForBoard(boardA, boardA, EMPTY_PROBE_MAP, true);
     expect(result).toEqual({ probe_devices: [], probe_info: [] });
+    expect(result).not.toBe(EMPTY_PROBE_MAP); // deep-cloned, not aliased to the shared singleton
   });
 
   test("reseedProbeMapForBoard treats an initial EMPTY previous board correctly", () => {
