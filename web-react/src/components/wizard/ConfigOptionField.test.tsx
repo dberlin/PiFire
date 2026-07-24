@@ -58,6 +58,60 @@ describe("ConfigOptionField", () => {
     expect(screen.getByRole("textbox")).toHaveValue("");
   });
 
+  it("falls back to the manifest default for a list option with no stored value", () => {
+    render(
+      <ConfigOptionField
+        option={{
+          option_name: "rotation",
+          option_friendly_name: "Screen Rotation",
+          option_type: "list",
+          list_values: [0, 90, 180, 270],
+          list_labels: ["0°", "90°", "180°", "270°"],
+          default: 90,
+        }}
+        value={undefined}
+        onChange={rs.fn()}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Screen Rotation" })).toHaveValue("90");
+  });
+
+  it("falls back to the manifest default for a string option with no stored value", () => {
+    render(
+      <ConfigOptionField
+        option={{
+          option_name: "display_data_filename",
+          option_friendly_name: "Layout File",
+          option_type: "string",
+          default: "./display/default.json",
+        }}
+        value={undefined}
+        onChange={rs.fn()}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "Layout File" })).toHaveValue(
+      "./display/default.json",
+    );
+  });
+
+  it("prefers a stored value over the manifest default", () => {
+    render(
+      <ConfigOptionField
+        option={{
+          option_name: "rotation",
+          option_friendly_name: "Screen Rotation",
+          option_type: "list",
+          list_values: [0, 90, 180, 270],
+          list_labels: ["0°", "90°", "180°", "270°"],
+          default: 90,
+        }}
+        value={270}
+        onChange={rs.fn()}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Screen Rotation" })).toHaveValue("270");
+  });
+
   it("renders nothing when hidden", () => {
     const hiddenOption: ConfigOption = { ...listOption, hidden: true };
     const { container } = render(

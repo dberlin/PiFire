@@ -9,6 +9,11 @@ export interface ConfigOptionFieldProps {
 export function ConfigOptionField({ option, value, onChange }: ConfigOptionFieldProps) {
   if (option.hidden) return null;
 
+  // A module that has never been configured has no stored value for its
+  // options; fall back to the manifest's `default` so the field shows what the
+  // driver will actually use rather than a blank/"undefined" selection.
+  const effective = value === undefined ? option.default : value;
+
   if (option.option_type === "list") {
     const listValues = option.list_values ?? [];
     const listLabels = option.list_labels ?? [];
@@ -17,7 +22,7 @@ export function ConfigOptionField({ option, value, onChange }: ConfigOptionField
         <span className="pf-field-label">{option.option_friendly_name}</span>
         <select
           className="pf-input"
-          value={String(value)}
+          value={String(effective)}
           onChange={(e) => {
             const chosen = listValues.find((item) => String(item) === e.target.value);
             onChange(String(chosen ?? e.target.value));
@@ -39,7 +44,7 @@ export function ConfigOptionField({ option, value, onChange }: ConfigOptionField
       <input
         className="pf-input"
         type="text"
-        value={String(value ?? "")}
+        value={String(effective ?? "")}
         onChange={(e) => onChange(e.target.value)}
       />
     </label>
