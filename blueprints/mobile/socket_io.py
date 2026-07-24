@@ -220,6 +220,10 @@ def _get_dash_data(settings, pelletdb):
         "displayMode": status["mode"],
         "smokePlus": control["s_plus"],
         "pwmControl": control["pwm_control"],
+        # Current manual DC-fan duty cycle (0-100), so the duty entry opens on
+        # the real value rather than a guess. Distinct from pwmControl, which
+        # is the automatic PWM-control enable flag.
+        "manualPwm": control["manual"]["pwm"],
         "pMode": settings["cycle_data"]["PMode"],
         "hopperLevel": pelletdb["current"]["hopper_level"],
         "startupTimestamp": math.trunc(control["startup_timestamp"]),
@@ -250,6 +254,10 @@ def _get_dash_data(settings, pelletdb):
             "fan": status["outpins"]["fan"],
             "auger": status["outpins"]["auger"],
             "igniter": status["outpins"]["igniter"],
+            # The manual control panel toggles a power relay too (platform
+            # outputs.power); the dashboard needs its live state to render the
+            # button's on/off styling.
+            "power": status["outpins"]["power"],
         },
         "recipeStatus": {
             "recipeMode": status["recipe"],

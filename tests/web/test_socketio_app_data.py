@@ -230,6 +230,24 @@ def test_get_manual_data(sio):
     assert resp["data"]["dcFan"] == read_settings()["platform"]["dc_fan"]
 
 
+def test_dash_data_exposes_manual_power_and_pwm(sio):
+    """The React manual controls need the power relay's live state and the
+    current DC-fan duty. Legacy's control panel reads both (status['outpins']
+    has all four pins; the PWM slider is seeded from control['manual']['pwm']),
+    but the socketio dash payload only carried fan/auger/igniter."""
+    # _get_dash_data's probe assembly indexes current["P"]/current["F"] by
+    # probe label -- seed it the way the control-loop does at startup (same
+    # pattern as test_get_dash_data_and_probe_data_full_structure), otherwise
+    # a fresh empty datastore raises KeyError before we ever reach the
+    # outputs/manualPwm keys this test cares about.
+    read_current(zero_out=True)
+    dash = sio.mod._get_dash_data(read_settings(), read_pellets_store())
+
+    assert set(dash["outputs"]) == {"fan", "auger", "igniter", "power"}
+    assert isinstance(dash["outputs"]["power"], bool)
+    assert isinstance(dash["manualPwm"], int)
+
+
 def test_get_recipe_data_details_none_found(sio):
     # No recipe files (mock the file lister) -> empty list -> Error.
     with mock.patch.object(sio.mod, "get_recipefilelist", return_value=[]):

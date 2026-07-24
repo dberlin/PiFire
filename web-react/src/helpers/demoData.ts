@@ -25,7 +25,7 @@ export function demoDashAt(elapsedSec: number): DashData {
     currentMode: "Hold",
     displayMode: "Hold",
     hopperLevel,
-    outputs: { fan: true, auger: augerOn, igniter: false },
+    outputs: { fan: true, auger: augerOn, igniter: false, power: true },
     primaryProbe: { ...FIXTURE_DASH.primaryProbe, temp: primaryTemp, setTemp: 225 },
     foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], temp: foodTemp, target: 203, targetReq: true }],
   };

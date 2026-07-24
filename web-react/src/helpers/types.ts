@@ -67,8 +67,9 @@ export interface DashData {
   startupGotoTemp: number;
   startupGotoMode: string;
   allowManualOutputs: boolean;
+  manualPwm: number;
   timer: { start: number; paused: number; end: number; keepWarm: boolean; shutdown: boolean };
-  outputs: { fan: boolean; auger: boolean; igniter: boolean };
+  outputs: { fan: boolean; auger: boolean; igniter: boolean; power: boolean };
   recipeStatus: {
     recipeMode: boolean;
     filename: string;

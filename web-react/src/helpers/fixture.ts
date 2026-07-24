@@ -39,6 +39,7 @@ export const FIXTURE_DASH: DashData = {
   startupGotoTemp: 165,
   startupGotoMode: "Smoke",
   allowManualOutputs: false,
+  manualPwm: 100,
   timer: {
     start: 0,
     paused: 0,
@@ -50,6 +51,7 @@ export const FIXTURE_DASH: DashData = {
     fan: false,
     auger: false,
     igniter: false,
+    power: false,
   },
   recipeStatus: {
     recipeMode: false,

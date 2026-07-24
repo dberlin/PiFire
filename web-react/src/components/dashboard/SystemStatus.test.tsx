@@ -8,7 +8,10 @@ afterEach(cleanup);
 
 describe("SystemStatus", () => {
   it("shows RUNNING/FEEDING/HOT when outputs are on", () => {
-    const v = deriveView({ ...FIXTURE_DASH, outputs: { fan: true, auger: true, igniter: true } });
+    const v = deriveView({
+      ...FIXTURE_DASH,
+      outputs: { fan: true, auger: true, igniter: true, power: true },
+    });
     render(<SystemStatus fan={v.fan} auger={v.auger} igniter={v.igniter} animate={false} />);
     expect(screen.getByText("RUNNING")).toBeInTheDocument();
     expect(screen.getByText("FEEDING")).toBeInTheDocument();
@@ -18,14 +21,17 @@ describe("SystemStatus", () => {
   it("shows IDLE/IDLE/IDLE when outputs are off", () => {
     const v = deriveView({
       ...FIXTURE_DASH,
-      outputs: { fan: false, auger: false, igniter: false },
+      outputs: { fan: false, auger: false, igniter: false, power: false },
     });
     render(<SystemStatus fan={v.fan} auger={v.auger} igniter={v.igniter} animate={false} />);
     expect(screen.getAllByText("IDLE")).toHaveLength(3);
   });
 
   it("uses the accent color for a running fan and the fixed ember color for a hot igniter", () => {
-    const v = deriveView({ ...FIXTURE_DASH, outputs: { fan: true, auger: false, igniter: true } });
+    const v = deriveView({
+      ...FIXTURE_DASH,
+      outputs: { fan: true, auger: false, igniter: true, power: false },
+    });
     render(<SystemStatus fan={v.fan} auger={v.auger} igniter={v.igniter} animate={false} />);
     expect(screen.getByText("RUNNING")).toHaveStyle({ color: "var(--accent)" });
     expect(screen.getByText("HOT")).toHaveStyle({ color: "#ff7a1a" });
@@ -34,7 +40,7 @@ describe("SystemStatus", () => {
   it("uses the idle color when an output is off", () => {
     const v = deriveView({
       ...FIXTURE_DASH,
-      outputs: { fan: false, auger: false, igniter: false },
+      outputs: { fan: false, auger: false, igniter: false, power: false },
     });
     render(<SystemStatus fan={v.fan} auger={v.auger} igniter={v.igniter} animate={false} />);
     expect(screen.getAllByText("IDLE")[0]).toHaveStyle({ color: "#57514a" });
