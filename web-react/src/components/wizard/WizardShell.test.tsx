@@ -110,6 +110,18 @@ describe("WizardShell", () => {
     expect(screen.queryByText(/coming in a later release/i)).not.toBeInTheDocument();
   });
 
+  it("renders DistanceStep on the distance step, not the placeholder", async () => {
+    renderShell(fixtureState());
+    await screen.findByRole("heading", { name: "Welcome" });
+    await clickNext("Grill Platform");
+    await clickNext("Probes");
+    await clickNext("Display");
+    await clickNext("Distance / Hopper");
+
+    expect(screen.getByRole("combobox", { name: "Module" })).toBeInTheDocument();
+    expect(screen.queryByText(/coming in a later release/i)).not.toBeInTheDocument();
+  });
+
   it("Next advances the step and flushes a draft with the current working state", async () => {
     const state = fixtureState();
     renderShell(state);
