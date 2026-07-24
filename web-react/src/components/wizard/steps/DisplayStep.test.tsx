@@ -41,6 +41,9 @@ const state: WizardState = {
   selections: { grillplatform: null, probes: null, distance: null, display: null },
   settings_dep_values: { grillplatform: {}, probes: {}, distance: {}, display: {} },
   display_config: {},
+  probe_map: { probe_devices: [], probe_info: [] },
+  probe_profiles: [],
+  probes_units: "F",
   control_mode: "Stop",
   first_time_setup: false,
   has_draft: false,
@@ -51,6 +54,8 @@ function baseWorking(): WizardWorking {
     selections: { grillplatform: null, probes: null, distance: null, display: null },
     settings_dep_values: { grillplatform: {}, probes: {}, distance: {}, display: {} },
     display_config: {},
+    probe_map: { probe_devices: [], probe_info: [] },
+    probes_units: "F",
   };
 }
 

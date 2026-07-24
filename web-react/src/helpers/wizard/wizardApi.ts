@@ -1,3 +1,4 @@
+import type { BtScanRow, ProbeDevice, RowsResult, ThermoworksRow } from "./probeTypes";
 import type { InstallStatus, ScanResult, WizardState, WizardWorking } from "./wizardTypes";
 
 function url(baseUrl: string, path: string): string {
@@ -46,4 +47,38 @@ export async function finishWizard(
 export async function getInstallStatus(baseUrl: string): Promise<InstallStatus> {
   const r = await fetch(url(baseUrl, "installstatus"));
   return (await r.json()) as InstallStatus;
+}
+
+export async function scanBluetooth(baseUrl: string): Promise<RowsResult<BtScanRow>> {
+  const r = await fetch(url(baseUrl, "scan/bluetooth"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  return (await r.json()) as RowsResult<BtScanRow>;
+}
+
+export async function scanThermoworks(
+  baseUrl: string,
+  email: string,
+  password: string,
+): Promise<RowsResult<ThermoworksRow>> {
+  const r = await fetch(url(baseUrl, "scan/thermoworks"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  return (await r.json()) as RowsResult<ThermoworksRow>;
+}
+
+export async function validateBusKinds(
+  baseUrl: string,
+  probeDevices: ProbeDevice[],
+): Promise<{ ok: boolean; detail?: string }> {
+  const r = await fetch(url(baseUrl, "probes/validate-bus-kinds"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ probe_devices: probeDevices }),
+  });
+  return (await r.json()) as { ok: boolean; detail?: string };
 }

@@ -5,6 +5,8 @@ export function initialWorking(state: WizardState): WizardWorking {
     selections: { ...state.selections },
     settings_dep_values: structuredClone(state.settings_dep_values),
     display_config: structuredClone(state.display_config),
+    probe_map: structuredClone(state.probe_map),
+    probes_units: state.probes_units,
   };
 }
 

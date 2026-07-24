@@ -24,6 +24,8 @@ describe("wizardApi", () => {
       selections: { grillplatform: "", display: "", distance: "", probes: "" },
       settings_dep_values: { grillplatform: {}, display: {}, distance: {}, probes: {} },
       display_config: {},
+      probe_map: { probe_devices: [], probe_info: [] },
+      probes_units: "F",
     });
     expect(ok).toBe(true);
     const call = (globalThis.fetch as ReturnType<typeof rs.fn>).mock.calls[0];
@@ -87,5 +89,46 @@ describe("wizardApi", () => {
     expect((globalThis.fetch as ReturnType<typeof rs.fn>).mock.calls[0][0]).toContain(
       "/api/wizard/installstatus",
     );
+  });
+
+  test("scanBluetooth posts to /scan/bluetooth and returns rows", async () => {
+    const fake = { rows: [{ name: "iBBQ", hw_id: "AA", info: "" }], error: null };
+    globalThis.fetch = rs.fn().mockResolvedValue({ ok: true, json: async () => fake }) as never;
+    const { scanBluetooth } = await import("./wizardApi");
+    const r = await scanBluetooth("");
+    const call = (globalThis.fetch as ReturnType<typeof rs.fn>).mock.calls[0];
+    expect(call[0]).toContain("/api/wizard/scan/bluetooth");
+    expect((call[1] as RequestInit).method).toBe("POST");
+    expect(r.rows[0].hw_id).toBe("AA");
+  });
+
+  test("scanThermoworks posts email/password to /scan/thermoworks and returns rows", async () => {
+    const fake = {
+      rows: [{ label: "TW", type: "smoke", serial: "SN1", num_channels: 4 }],
+      error: null,
+    };
+    globalThis.fetch = rs.fn().mockResolvedValue({ ok: true, json: async () => fake }) as never;
+    const { scanThermoworks } = await import("./wizardApi");
+    const r = await scanThermoworks("", "a@b.com", "pw");
+    const call = (globalThis.fetch as ReturnType<typeof rs.fn>).mock.calls[0];
+    expect(call[0]).toContain("/api/wizard/scan/thermoworks");
+    expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({
+      email: "a@b.com",
+      password: "pw",
+    });
+    expect(r.rows[0].serial).toBe("SN1");
+  });
+
+  test("validateBusKinds posts probe_devices and returns ok", async () => {
+    globalThis.fetch = rs
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }) as never;
+    const { validateBusKinds } = await import("./wizardApi");
+    const r = await validateBusKinds("", [
+      { device: "D1", module: "m", module_filename: "m", ports: [], config: {} },
+    ]);
+    const call = (globalThis.fetch as ReturnType<typeof rs.fn>).mock.calls[0];
+    expect(call[0]).toContain("/api/wizard/probes/validate-bus-kinds");
+    expect(r.ok).toBe(true);
   });
 });

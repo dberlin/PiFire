@@ -1,3 +1,5 @@
+import type { ProbeMap, ProbeModuleData, ProbeProfile } from "./probeTypes";
+
 export type WizardSection = "grillplatform" | "display" | "distance" | "probes";
 export interface SettingsDependency {
   friendly_name: string;
@@ -26,10 +28,18 @@ export interface WizardModuleData {
   config?: ConfigOption[];
 }
 export interface WizardState {
-  modules_metadata: Record<WizardSection, Record<string, WizardModuleData>>;
+  modules_metadata: {
+    grillplatform: Record<string, WizardModuleData>;
+    display: Record<string, WizardModuleData>;
+    distance: Record<string, WizardModuleData>;
+    probes: Record<string, ProbeModuleData>;
+  };
   selections: Record<WizardSection, string | null>;
   settings_dep_values: Record<WizardSection, Record<string, string | null>>;
   display_config: Record<string, Record<string, unknown>>;
+  probe_map: ProbeMap;
+  probe_profiles: ProbeProfile[];
+  probes_units: string;
   control_mode: string;
   first_time_setup: boolean;
   has_draft: boolean;
@@ -52,4 +62,6 @@ export interface WizardWorking {
   selections: Record<WizardSection, string | null>;
   settings_dep_values: Record<WizardSection, Record<string, string | null>>;
   display_config: Record<string, Record<string, unknown>>;
+  probe_map: ProbeMap;
+  probes_units: string;
 }
