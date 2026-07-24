@@ -44,10 +44,20 @@ def test_check_alive_ok():
     }
 
 
-def test_os_info_ok_shape():
+def test_os_info_ok_shape(monkeypatch):
+    # get_os_info() defaults to filepath="os_info.json" and WRITES it, so
+    # calling through unpatched drops an os_info.json in the repo root (and
+    # shells out to read os-release/uname). This test only asserts the
+    # response envelope's shape, so stub the probe out: hermetic, and no
+    # stray artifact.
+    monkeypatch.setattr(
+        "grillplat.system_commands.get_os_info",
+        lambda *a, **k: {"os_name": "test-os", "os_version": "1.0"},
+    )
     data = _bare().os_info([])
     assert data["result"] == "OK"
     assert data["message"] == "OS information retrieved successfully."
+    assert data["data"] == {"os_name": "test-os", "os_version": "1.0"}
 
 
 def test_network_info_ok_shape():

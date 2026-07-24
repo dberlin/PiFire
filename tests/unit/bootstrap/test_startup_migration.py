@@ -163,12 +163,18 @@ def test_boot_path_import_via_app_import(tmp_path):
         )
         assert proc.returncode == 0, f"importing app.py failed:\nstdout={proc.stdout}\nstderr={proc.stderr}"
     finally:
-        if orig_settings is not None:
-            with open(settings_path, "w") as fh:
-                fh.write(orig_settings)
-        if orig_pelletdb is not None:
-            with open(pelletdb_path, "w") as fh:
-                fh.write(orig_pelletdb)
+        # Restore what was there, and REMOVE what we created. Only restoring
+        # `if orig is not None` used to leave the sentinel files behind on a
+        # clean checkout, where they then became load-bearing: the repo root's
+        # settings.json/pelletdb.json are the first-boot IMPORT source, so a
+        # leftover sentinel is silently imported by the next fresh-DB boot
+        # (that is how "BOOT_PATH_SENTINEL_GRILL" ended up in a dev install).
+        for path, orig in ((settings_path, orig_settings), (pelletdb_path, orig_pelletdb)):
+            if orig is not None:
+                with open(path, "w") as fh:
+                    fh.write(orig)
+            elif os.path.exists(path):
+                os.remove(path)
 
     # Read the subprocess's isolated DB directly (it is not the DB this test
     # process's `datastore` module is bound to).
