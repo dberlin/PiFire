@@ -57,6 +57,8 @@ def _build_state(settings, control):
         selections = draft.get("selections", {})
         settings_dep_values = draft.get("settings_dep_values", {})
         display_config = draft.get("display_config", {})
+        probe_map = draft.get("probe_map") or {"probe_devices": [], "probe_info": []}
+        probes_units = draft.get("probes_units") or settings["globals"].get("units", "F")
     else:
         # Compute from current settings/defaults (do NOT overwrite the blob here).
         if settings["globals"]["first_time_setup"]:
@@ -90,12 +92,22 @@ def _build_state(settings, control):
             mod_data = modules.get(section, {}).get(sel)
             settings_dep_values[section] = get_settings_dependencies_values(settings, mod_data) if mod_data else {}
         display_config = settings.get("display", {}).get("config", {})
+        probe_map = settings.get("probe_settings", {}).get("probe_map", {"probe_devices": [], "probe_info": []})
+        probes_units = settings["globals"].get("units", "F")
+
+    # probe_profiles is shipped as a LIST for the port form's picker. Live
+    # settings store it as a dict keyed by id; flatten to the value objects.
+    profiles_dict = settings.get("probe_settings", {}).get("probe_profiles", {})
+    probe_profiles = list(profiles_dict.values())
 
     return {
         "modules_metadata": {s: modules.get(s, {}) for s in _SECTIONS if s in modules},
         "selections": selections,
         "settings_dep_values": settings_dep_values,
         "display_config": display_config,
+        "probe_map": probe_map,
+        "probe_profiles": probe_profiles,
+        "probes_units": probes_units,
         "control_mode": control.get("mode", "Stop"),
         "first_time_setup": bool(settings["globals"]["first_time_setup"]),
         "has_draft": has_draft,
@@ -125,6 +137,8 @@ def wizard_draft():
         info.pop("selections", None)
         info.pop("settings_dep_values", None)
         info.pop("display_config", None)
+        info.pop("probe_map", None)
+        info.pop("probes_units", None)
         store_wizard_install_info(info)
         return jsonify({"result": "success"}), 200
 
@@ -132,6 +146,8 @@ def wizard_draft():
     info["selections"] = payload.get("selections", {})
     info["settings_dep_values"] = payload.get("settings_dep_values", {})
     info["display_config"] = payload.get("display_config", {})
+    info["probe_map"] = payload.get("probe_map", {"probe_devices": [], "probe_info": []})
+    info["probes_units"] = payload.get("probes_units", "F")
     store_wizard_install_info(info)
     return jsonify({"result": "success"}), 200
 

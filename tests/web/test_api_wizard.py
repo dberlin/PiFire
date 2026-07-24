@@ -92,6 +92,60 @@ def test_state_existing_stale_module_returns_empty_selection(ds, client):
     assert body["selections"]["distance"] is None
 
 
+def test_state_includes_probe_map_profiles_units(ds, client):
+    resp = client.get("/api/wizard/state")
+    body = resp.get_json()
+    assert isinstance(body["probe_map"], dict)
+    assert "probe_devices" in body["probe_map"] and "probe_info" in body["probe_map"]
+    # probe_profiles is a LIST of profile objects (not the settings dict keyed by id)
+    assert isinstance(body["probe_profiles"], list)
+    assert all("id" in p and "name" in p for p in body["probe_profiles"])
+    assert body["probes_units"] in ("F", "C")
+
+
+def test_draft_persists_and_resumes_probe_map_and_units(ds, client):
+    draft = {
+        "selections": {"display": "ili9341b"},
+        "settings_dep_values": {},
+        "display_config": {},
+        "probe_map": {
+            "probe_devices": [
+                {
+                    "device": "D1",
+                    "module": "ads1115_adafruit",
+                    "module_filename": "ads1115_adafruit",
+                    "ports": ["ADC0"],
+                    "config": {},
+                }
+            ],
+            "probe_info": [],
+        },
+        "probes_units": "C",
+    }
+    r1 = client.post("/api/wizard/draft", data=json.dumps(draft), content_type="application/json")
+    assert r1.status_code == 200
+    body = client.get("/api/wizard/state").get_json()
+    assert body["has_draft"] is True
+    assert body["probe_map"]["probe_devices"][0]["device"] == "D1"
+    assert body["probes_units"] == "C"
+
+
+def test_draft_clear_drops_probe_map_and_units(ds, client):
+    draft = {
+        "selections": {},
+        "settings_dep_values": {},
+        "display_config": {},
+        "probe_map": {"probe_devices": [{"device": "D1"}], "probe_info": []},
+        "probes_units": "C",
+    }
+    client.post("/api/wizard/draft", data=json.dumps(draft), content_type="application/json")
+    client.post("/api/wizard/draft", data=json.dumps({"clear": True}), content_type="application/json")
+    body = client.get("/api/wizard/state").get_json()
+    assert body["has_draft"] is False
+    # After clear, probe_map falls back to the computed value (from live settings), not the drafted one
+    assert body["probe_map"]["probe_devices"][0]["device"] != "D1" or body["probe_map"]["probe_devices"] == []
+
+
 def test_scan_extended_i2c_returns_groups(ds, client, monkeypatch):
     import blueprints.api_wizard.routes as wr
 
