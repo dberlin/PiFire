@@ -2,8 +2,16 @@
 // _COMMAND_DISPATCH) via blueprints/api/routes.py. Writes only; live reads come
 // over the socket. Envelope: { result, message, data } (common/app.py api_response).
 
-export type GrillMode = "startup" | "smoke" | "shutdown" | "stop" | "monitor" | "reignite";
+export type GrillMode =
+  | "startup"
+  | "smoke"
+  | "shutdown"
+  | "stop"
+  | "monitor"
+  | "reignite"
+  | "manual";
 export type SystemCmd = "reboot" | "shutdown" | "restart";
+export type ManualOutput = "power" | "igniter" | "auger" | "fan";
 
 export interface CommandResult {
   ok: boolean;
@@ -22,6 +30,8 @@ export interface CommandClient {
   timerStop(): Promise<CommandResult>;
   system(cmd: SystemCmd): Promise<CommandResult>;
   setUnits(units: "F" | "C"): Promise<CommandResult>;
+  manualOutput(output: ManualOutput, action?: "toggle" | "true" | "false"): Promise<CommandResult>;
+  manualPwm(duty: number): Promise<CommandResult>;
 }
 
 export function buildCommandUrl(baseUrl: string, segments: (string | number)[]): string {
@@ -55,5 +65,10 @@ export function createCommand(baseUrl: string): CommandClient {
     timerStop: () => post(baseUrl, ["set", "timer", "stop"]),
     system: (cmd) => post(baseUrl, ["cmd", cmd]),
     setUnits: (units) => post(baseUrl, ["set", "units", units]),
+    manualOutput: (output, action = "toggle") => post(baseUrl, ["set", "manual", output, action]),
+    // The backend takes an integer 0-100; clamp here so a slider/entry can't
+    // send an out-of-range duty that the API would reject.
+    manualPwm: (duty) =>
+      post(baseUrl, ["set", "manual", "pwm", Math.min(100, Math.max(0, Math.round(duty)))]),
   };
 }

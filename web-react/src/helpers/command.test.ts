@@ -55,6 +55,27 @@ describe("createCommand issues the right URLs", () => {
     await createCommand("").setUnits("C");
     expect(url()).toBe("/api/set/units/C");
   });
+  it("manualOutput → toggle command for an output", async () => {
+    await createCommand("").manualOutput("auger");
+    expect(url()).toBe("/api/set/manual/auger/toggle");
+  });
+  it("manualOutput → accepts an explicit true/false action", async () => {
+    await createCommand("").manualOutput("power", "false");
+    expect(url()).toBe("/api/set/manual/power/false");
+  });
+  it("manualPwm → rounds and clamps the duty cycle", async () => {
+    const c = createCommand("");
+    await c.manualPwm(42.6);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/set/manual/pwm/43");
+    await c.manualPwm(150);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/set/manual/pwm/100");
+    await c.manualPwm(-5);
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/set/manual/pwm/0");
+  });
+  it("setMode → supports manual", async () => {
+    await createCommand("").setMode("manual");
+    expect(url()).toBe("/api/set/mode/manual");
+  });
   it("maps a non-OK envelope to ok:false", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
