@@ -22,9 +22,9 @@ def test_get_os_info_parses_os_release_and_appends_architecture():
     with (
         mock.patch("builtins.open", m),
         mock.patch.object(cc.subprocess, "check_output", return_value=b"x86_64\n") as check_output,
-        mock.patch.object(cc, "write_generic_json") as write_json,
+        mock.patch.object(cc, "store_os_info") as store,
     ):
-        os_info = cc.get_os_info(filepath="unused.json")
+        os_info = cc.get_os_info()
 
     # Quotes stripped, comment/blank lines skipped (152->151 continue branch)
     # -- exactly the 4 '='-bearing os-release lines plus ARCHITECTURE, no
@@ -35,7 +35,7 @@ def test_get_os_info_parses_os_release_and_appends_architecture():
     assert os_info["ARCHITECTURE"] == "x86_64"
 
     check_output.assert_called_once_with(["/bin/uname", "-m"])
-    write_json.assert_called_once_with(os_info, "unused.json")
+    store.assert_called_once_with(os_info)  # cached in the datastore, not a CWD file
 
 
 def test_get_display_os_info_uses_cached_json_and_computes_64bit():
@@ -48,12 +48,12 @@ def test_get_display_os_info_uses_cached_json_and_computes_64bit():
         "ARCHITECTURE": "x86_64",
     }
     with (
-        mock.patch.object(cc, "read_generic_json", return_value=cached) as read_json,
+        mock.patch.object(cc, "load_os_info", return_value=cached) as load_cache,
         mock.patch.object(cc, "get_os_info") as get_os_info,
     ):
         info = cc.get_display_os_info()
 
-    read_json.assert_called_once_with("os_info.json")
+    load_cache.assert_called_once_with()
     get_os_info.assert_not_called()  # cache hit -- no live fallback read
     assert info["BITS"] == "64-Bit"
     assert info["PRETTY_NAME"] == "Fedora Linux 39"
@@ -61,14 +61,14 @@ def test_get_display_os_info_uses_cached_json_and_computes_64bit():
 
 def test_get_display_os_info_32bit_architecture():
     cached = {"ARCHITECTURE": "armv7l"}
-    with mock.patch.object(cc, "read_generic_json", return_value=cached):
+    with mock.patch.object(cc, "load_os_info", return_value=cached):
         info = cc.get_display_os_info()
     assert info["BITS"] == "32-Bit"
 
 
 def test_get_display_os_info_unrecognized_architecture_is_unknown_bits():
     cached = {"ARCHITECTURE": "riscv64"}
-    with mock.patch.object(cc, "read_generic_json", return_value=cached):
+    with mock.patch.object(cc, "load_os_info", return_value=cached):
         info = cc.get_display_os_info()
     assert info["BITS"] == "Unknown"
 
@@ -76,7 +76,7 @@ def test_get_display_os_info_unrecognized_architecture_is_unknown_bits():
 def test_get_display_os_info_falls_back_to_live_read_when_cache_empty():
     live = {"ARCHITECTURE": "aarch64", "PRETTY_NAME": "Live Read OS"}
     with (
-        mock.patch.object(cc, "read_generic_json", return_value={}),
+        mock.patch.object(cc, "load_os_info", return_value={}),
         mock.patch.object(cc, "get_os_info", return_value=live) as get_os_info,
     ):
         info = cc.get_display_os_info()
@@ -91,7 +91,7 @@ def test_get_display_os_info_falls_back_to_live_read_when_cache_empty():
 
 def test_get_display_os_info_logs_and_defaults_when_cache_read_raises():
     with (
-        mock.patch.object(cc, "read_generic_json", side_effect=RuntimeError("disk error")),
+        mock.patch.object(cc, "load_os_info", side_effect=RuntimeError("disk error")),
         mock.patch.object(cc, "write_log") as write_log,
     ):
         info = cc.get_display_os_info()

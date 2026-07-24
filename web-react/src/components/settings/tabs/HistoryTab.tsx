@@ -112,6 +112,11 @@ export function HistoryTab() {
     setSaved(await save(d, [])); // bare write — no control flag
   };
 
+  // Extended-data logging changes the history schema, so it is gated to a
+  // stopped grill. getMode() returns "" when it cannot read the mode, which
+  // gates too (fail closed) -- but "stop the grill" is the wrong explanation
+  // in that case, since the grill may well already be stopped.
+  const modeUnknown = mode === "";
   const ext_data_disabled = mode !== "Stop";
   const probeLabels = Object.keys(v.probeConfig);
   const labelPrefixes = computeLabelPrefixes(v.probeConfig);
@@ -149,7 +154,11 @@ export function HistoryTab() {
             disabled={ext_data_disabled}
           />
           {ext_data_disabled && (
-            <span className="pf-settings-hint">Stop the grill to change extended-data logging</span>
+            <span className="pf-settings-hint">
+              {modeUnknown
+                ? "Can't confirm the grill is stopped — extended-data logging stays locked"
+                : "Stop the grill to change extended-data logging"}
+            </span>
           )}
         </div>
       </Section>

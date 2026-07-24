@@ -496,6 +496,24 @@ def _read_json_key_or_none(key):
     return json.loads(raw) if raw is not None else None
 
 
+_OS_INFO_KEY = "system:os_info"
+
+
+def store_os_info(os_info):
+    """Cache the OS/architecture probe (see common.system.get_os_info).
+
+    Lives in the datastore rather than an os_info.json next to the process:
+    the file was resolved against the CWD, so where it landed depended on who
+    started PiFire, and a mere read could create one in the wrong place.
+    """
+    datastore.set_blob(_OS_INFO_KEY, json.dumps(os_info))
+
+
+def load_os_info():
+    """Return the cached OS info, or {} when nothing has been cached yet."""
+    return _read_json_key_or_none(_OS_INFO_KEY) or {}
+
+
 def _get_install_status(prefix):
     return (
         _read_json_key_or_none(f"{prefix}:percent"),

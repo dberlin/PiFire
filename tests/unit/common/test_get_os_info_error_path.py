@@ -48,7 +48,7 @@ def test_get_os_info_returns_gracefully_when_uname_probe_fails(tmp_path, monkeyp
     logger_name = f"events-test-{uuid.uuid4().hex}"
 
     with mock.patch("common.system.subprocess.check_output", side_effect=OSError("boom")):
-        os_info = get_os_info(filepath=str(tmp_path / "os_info.json"), loggername=logger_name)
+        os_info = get_os_info(loggername=logger_name, persist=False)
 
     # The bug: write_log(event, level="error", loggername=...) raised
     # TypeError before this line was ever reached. Reaching it -- and getting

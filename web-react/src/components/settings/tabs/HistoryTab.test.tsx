@@ -113,6 +113,32 @@ describe("HistoryTab", () => {
 
     const extDataToggle = screen.getByRole("button", { name: "Extended Data Logging" });
     expect(extDataToggle).toBeDisabled();
+    expect(screen.getByText(/stop the grill to change/i)).toBeInTheDocument();
+  });
+
+  it("explains an unknown grill mode instead of telling you to stop the grill", () => {
+    // getMode() returns "" when it cannot read the mode. That still gates the
+    // toggle (fail closed -- changing extended data mid-cook changes the
+    // history schema), but "stop the grill" would be a misleading reason: the
+    // grill may already be stopped and we simply could not confirm it.
+    const context = {
+      settings: {
+        history_page: {
+          minutes: 240,
+          datapoints: 100,
+          clearhistoryonstart: false,
+          autorefresh: "on",
+        },
+        globals: { ext_data: false },
+      },
+      mode: "",
+    };
+
+    renderRoute(<HistoryTab />, context);
+
+    expect(screen.getByRole("button", { name: "Extended Data Logging" })).toBeDisabled();
+    expect(screen.getByText(/can't confirm the grill is stopped/i)).toBeInTheDocument();
+    expect(screen.queryByText(/stop the grill to change/i)).not.toBeInTheDocument();
   });
 
   it("autorefresh toggle persists string on/off in the delta", async () => {

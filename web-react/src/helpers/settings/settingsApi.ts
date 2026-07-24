@@ -53,7 +53,13 @@ export async function getMode(baseUrl: string): Promise<string> {
     const body = (await res.json()) as { data?: { mode?: string } };
     return body.data?.mode ?? "";
   } catch {
-    return ""; // mode-gating fails open to "unknown"; History tab treats non-"Stop" as gated
+    // "" means UNKNOWN, and consumers gate on it -- i.e. this fails CLOSED,
+    // not open. That is deliberate: the History tab's extended-data toggle is
+    // a data-integrity guard (changing it mid-cook changes the history
+    // schema), so when we cannot confirm the grill is stopped we must not
+    // allow the change. Consumers should distinguish "" from a real mode when
+    // explaining WHY a control is locked.
+    return "";
   }
 }
 

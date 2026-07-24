@@ -18,8 +18,8 @@ import subprocess
 import threading
 import time
 
-from common.common import WriteKind, read_generic_json, write_generic_json, write_log
-from common.datastore_accessors import read_settings, write_control
+from common.common import WriteKind, write_log
+from common.datastore_accessors import load_os_info, read_settings, store_os_info, write_control
 
 
 def is_real_hardware(settings=None):
@@ -141,8 +141,21 @@ def shutdown_system():
         threading.Thread(target=_shutdown, daemon=True).start()
 
 
-def get_os_info(filepath="os_info.json", loggername="events"):
-    """Get operating system information"""
+def get_os_info(loggername="events", persist=True):
+    """Probe operating-system information (/etc/os-release + `uname -m`).
+
+    `persist=True` (the default) also caches the result in the DATASTORE, which
+    is how provisioning refreshes it (board-config.py --osversion, and the
+    system_commands "os_info" API command).
+
+    This used to write an os_info.json resolved against the process CWD, so
+    where the cache landed depended on who started PiFire -- and a plain READ
+    could silently create one in the wrong directory (running the test suite
+    dropped one in the repo root). The datastore is the single source of truth
+    for live state; JSON files are exports, not the live copy.
+
+    Pass `persist=False` for read paths that only need the values.
+    """
     os_info = {}
 
     try:
@@ -159,8 +172,9 @@ def get_os_info(filepath="os_info.json", loggername="events"):
         arch = subprocess.check_output(["/bin/uname", "-m"]).decode().strip()
         os_info["ARCHITECTURE"] = arch
 
-        # Save to JSON file
-        write_generic_json(os_info, filepath)
+        # Cache in the datastore (provisioning/refresh paths only -- see `persist`)
+        if persist:
+            store_os_info(os_info)
         return os_info
 
     except Exception as e:
@@ -172,9 +186,9 @@ def get_os_info(filepath="os_info.json", loggername="events"):
 def get_display_os_info():
     """Get OS info for display purposes (admin page / mobile app system-info panel).
 
-    Reads the cached os_info.json, falling back to a live get_os_info() read if the
-    cache is missing/empty; backfills any missing fields with "Unknown"; computes
-    BITS from ARCHITECTURE.
+    Reads the datastore's cached OS info, falling back to a live probe if the cache
+    is missing/empty; backfills any missing fields with "Unknown"; computes BITS
+    from ARCHITECTURE.
 
     This collapses two independently-duplicated wrapper copies that used to live in
     blueprints/admin/routes.py and blueprints/mobile/socket_io.py. Those two copies
@@ -187,8 +201,12 @@ def get_display_os_info():
     operation.
     """
     try:
-        os_info = read_generic_json("os_info.json")
+        os_info = load_os_info()
         if not os_info:
+            # Cache miss: probe live and populate it. The probe is cheap and
+            # local (/etc/os-release + uname), and the cache now lives in the
+            # datastore, so this no longer depends on -- or writes to -- the
+            # process CWD.
             os_info = get_os_info()
     except Exception as e:
         write_log(f"Error reading OS info: {e}", loggername="events")
