@@ -46,7 +46,7 @@ it("shows the Profile row when device_port is an ADC value", () => {
       error={null}
     />,
   );
-  expect(screen.getByText(/probe profile/i)).toBeInTheDocument();
+  expect(screen.getByText(/^probe profile$/i)).toBeInTheDocument();
 });
 
 it("hides the Enabled row when type is Aux", () => {
@@ -63,6 +63,22 @@ it("hides the Enabled row when type is Aux", () => {
     />,
   );
   expect(screen.queryByText(/^enabled$/i)).not.toBeInTheDocument();
+});
+
+it("renders the Probe Type field description as real HTML", () => {
+  render(
+    <PortForm
+      mode="add"
+      devicePortOptions={devicePortOptions}
+      profiles={profiles}
+      values={{ name: "", device_port: "Avg:VIRT0", type: "Food", profile_id: "", enabled: "true" }}
+      onFieldChange={rs.fn()}
+      onSubmit={rs.fn()}
+      onCancel={rs.fn()}
+      error={null}
+    />,
+  );
+  expect(document.querySelector(".pf-field-hint strong")).not.toBeNull();
 });
 
 it("shows the Enabled row when type is not Aux", () => {

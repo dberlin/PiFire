@@ -122,7 +122,34 @@ it("editDevice keeps module/ports immutable and cascades the rename to probes [F
   }
 });
 
-it("editDevice cascades a rename into virtual devices' own device key and deps", () => {
+it("editDevice rejects a rename to an existing different device's name", () => {
+  let pm = empty();
+  pm = (
+    addDevice(pm, {
+      name: "ADS1115",
+      module: "ads1115_adafruit",
+      moduleData: ADS_MODULE,
+      config: {},
+    }) as { probeMap: ProbeMap }
+  ).probeMap;
+  pm = (
+    addDevice(pm, {
+      name: "ADS2",
+      module: "ads1115_adafruit",
+      moduleData: ADS_MODULE,
+      config: {},
+    }) as { probeMap: ProbeMap }
+  ).probeMap;
+  const r = editDevice(pm, { originalName: "ADS1115", newName: "ADS2", config: {} });
+  expect(r.ok).toBe(false);
+});
+
+it("editDevice returns ok:false when originalName matches no device", () => {
+  const r = editDevice(empty(), { originalName: "NoSuchDevice", newName: "New", config: {} });
+  expect(r.ok).toBe(false);
+});
+
+it("editDevice rename cascades to probe_info[].device even when a virtual device is present", () => {
   const pm: ProbeMap = {
     probe_devices: [
       {

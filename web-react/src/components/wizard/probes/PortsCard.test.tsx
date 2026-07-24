@@ -138,6 +138,42 @@ it("an add validation error surfaces inside the form dialog without emitting", (
   expect(onChange).not.toHaveBeenCalled();
 });
 
+it("disables row Edit/Delete buttons while the Add-Probe form is open", () => {
+  const pm = pmWith([
+    {
+      name: "Grill",
+      label: "Grill",
+      type: "Primary",
+      enabled: true,
+      device: "ADS1115",
+      port: "ADC0",
+      profile: {},
+    },
+  ]);
+  render(<PortsCard probeMap={pm} profiles={profiles} onChange={rs.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: /add probe/i }));
+  expect(screen.getByRole("button", { name: /^edit$/i })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /^delete$/i })).toBeDisabled();
+});
+
+it("disables row Edit/Delete buttons while the edit form is open", () => {
+  const pm = pmWith([
+    {
+      name: "Grill",
+      label: "Grill",
+      type: "Primary",
+      enabled: true,
+      device: "ADS1115",
+      port: "ADC0",
+      profile: {},
+    },
+  ]);
+  render(<PortsCard probeMap={pm} profiles={profiles} onChange={rs.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+  expect(screen.getByRole("button", { name: /^edit$/i })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /^delete$/i })).toBeDisabled();
+});
+
 it("adding a probe emits the new map", () => {
   const onChange = rs.fn();
   render(<PortsCard probeMap={pmWith([])} profiles={profiles} onChange={onChange} />);

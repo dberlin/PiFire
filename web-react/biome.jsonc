@@ -64,5 +64,21 @@
         "noImportantStyles": "off"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      // PortForm renders the 5 wizard_manifest.json probe_config_options
+      // descriptions verbatim (static trusted manifest copy, not user
+      // input) -- mirrors legacy Jinja `|safe` rendering of the same
+      // strings. Scoped off here rather than globally.
+      "includes": ["src/components/wizard/probes/PortForm.tsx"],
+      "linter": {
+        "rules": {
+          "security": {
+            "noDangerouslySetInnerHtml": "off"
+          }
+        }
+      }
+    }
+  ]
 }

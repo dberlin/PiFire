@@ -93,10 +93,10 @@ export function PortsCard({ probeMap, profiles, onChange }: PortsCardProps) {
                 {p.port.includes("ADC") ? ((p.profile as { name?: string }).name ?? "") : "NA"}
               </td>
               <td>
-                <button type="button" onClick={() => openEdit(p)}>
+                <button type="button" disabled={!!form} onClick={() => openEdit(p)}>
                   Edit
                 </button>
-                <button type="button" onClick={() => del(p.label)}>
+                <button type="button" disabled={!!form} onClick={() => del(p.label)}>
                   Delete
                 </button>
               </td>

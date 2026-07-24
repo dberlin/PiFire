@@ -161,6 +161,13 @@ function violatesPrimaryRule(list: Probe[]): boolean {
   return list.length > 0 && primaryCount(list) === 0;
 }
 
+// A delete/type-change breaks the invariant only when it takes a map that
+// HAS a Primary into a >0-probes / 0-Primary state (delta-based, human-approved
+// 2026-07-24). Do NOT replace call sites with a raw post-state check.
+function breaksPrimaryInvariant(before: Probe[], after: Probe[]): boolean {
+  return !violatesPrimaryRule(before) && violatesPrimaryRule(after);
+}
+
 export function addProbe(pm: ProbeMap, profiles: ProbeProfile[], input: ProbeInput): ReducerResult {
   if (input.name === "")
     return { ok: false, error: "Probe name is empty. Please enter a probe name." };
@@ -293,7 +300,7 @@ export function editProbe(
   // out-of-invariant state (e.g. a fixture with no Primary at all) is left
   // alone -- the guard exists to stop actions from causing the violation,
   // not to retroactively re-block every other field on an already-broken map.
-  if (!violatesPrimaryRule(pm.probe_info) && violatesPrimaryRule(probe_info)) {
+  if (breaksPrimaryInvariant(pm.probe_info, probe_info)) {
     return { ok: false, error: "At least one probe must be Primary while probes are configured." };
   }
   return { ok: true, probeMap: { probe_devices, probe_info } };
@@ -303,7 +310,7 @@ export function deleteProbe(pm: ProbeMap, label: string): ReducerResult {
   const probe_info = pm.probe_info.filter((p) => p.label !== label);
   // FIX 2 (delta-based, see editProbe above): only reject when deleting is
   // what pushes a compliant map into zero-Primary-with-probes-remaining.
-  if (!violatesPrimaryRule(pm.probe_info) && violatesPrimaryRule(probe_info)) {
+  if (breaksPrimaryInvariant(pm.probe_info, probe_info)) {
     return {
       ok: false,
       error:

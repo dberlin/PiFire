@@ -6,6 +6,18 @@ const TYPE_OPTIONS = [
   { value: "Aux", label: "Auxillary Probe" },
 ];
 
+// Copied verbatim from wizard/wizard_manifest.json probe_config_options.<key>.description.
+// Legacy renders these with |safe (raw HTML); mirrored here via dangerouslySetInnerHTML
+// since this is static trusted manifest copy, not user input.
+const FIELD_DESCRIPTIONS: Record<string, string> = {
+  name: "This name will be displayed throughout the PiFire UI for this probe.  It should be unique to this probe and not match other probe names.",
+  device_port: "The device name and port where the temperature readings will be read from.",
+  type: "Probe types are as follows: <i><br><strong>Food</strong> - Used as a food probe to track the temperature of food items.  This probe will be displayed in the UI and tracked in history. <br><strong>Primary</strong> - Used as the primary probe to control the grill/smoker in hold mode, etc.  There must be one Primary probe, and only one.  This probe is displayed in the UI and tracked in the history.  <br><strong>Aux</strong> - Auxillary temperature input, not displayed in the UI, but tracked in the history. Used by virtual probes or for reference in tuning.</i>",
+  profile_id:
+    "The probe profile that will be applied to this probe (if applicable for the device).",
+  enabled: "Probe is enabled and visible in the UI.",
+};
+
 export interface PortFormProps {
   mode: "add" | "edit";
   devicePortOptions: { value: string; label: string }[];
@@ -40,6 +52,10 @@ export function PortForm({
           value={values.name}
           onChange={(e) => onFieldChange("name", e.target.value)}
         />
+        <span
+          className="pf-field-hint"
+          dangerouslySetInnerHTML={{ __html: FIELD_DESCRIPTIONS.name }}
+        />
       </label>
       <label className="pf-field">
         <span className="pf-field-label">Device &amp; Port</span>
@@ -55,6 +71,10 @@ export function PortForm({
             </option>
           ))}
         </select>
+        <span
+          className="pf-field-hint"
+          dangerouslySetInnerHTML={{ __html: FIELD_DESCRIPTIONS.device_port }}
+        />
       </label>
       <label className="pf-field">
         <span className="pf-field-label">Probe Type</span>
@@ -69,6 +89,10 @@ export function PortForm({
             </option>
           ))}
         </select>
+        <span
+          className="pf-field-hint"
+          dangerouslySetInnerHTML={{ __html: FIELD_DESCRIPTIONS.type }}
+        />
       </label>
       {showProfile && (
         <label className="pf-field">
@@ -85,6 +109,10 @@ export function PortForm({
               </option>
             ))}
           </select>
+          <span
+            className="pf-field-hint"
+            dangerouslySetInnerHTML={{ __html: FIELD_DESCRIPTIONS.profile_id }}
+          />
         </label>
       )}
       {showEnabled && (
@@ -98,6 +126,10 @@ export function PortForm({
             <option value="true">Yes</option>
             <option value="false">No</option>
           </select>
+          <span
+            className="pf-field-hint"
+            dangerouslySetInnerHTML={{ __html: FIELD_DESCRIPTIONS.enabled }}
+          />
         </label>
       )}
       <div className="pf-form-actions">
