@@ -91,6 +91,7 @@ describe("App routing", () => {
       selections: { grillplatform: null, probes: null, distance: null, display: null },
       settings_dep_values: { grillplatform: {}, probes: {}, distance: {}, display: {} },
       display_config: {},
+      board_probe_maps: {},
       control_mode: "Stop",
       first_time_setup: false,
       has_draft: false,

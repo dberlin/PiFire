@@ -1,5 +1,12 @@
 import type { BtScanRow, ProbeDevice, RowsResult, ThermoworksRow } from "./probeTypes";
-import type { InstallStatus, ScanResult, WizardState, WizardWorking } from "./wizardTypes";
+import type {
+  InstallStatus,
+  ModuleValues,
+  ScanResult,
+  WizardSection,
+  WizardState,
+  WizardWorking,
+} from "./wizardTypes";
 
 function url(baseUrl: string, path: string): string {
   return `${baseUrl}/api/wizard/${path}`;
@@ -29,6 +36,20 @@ export async function scan(
     body: JSON.stringify(body),
   });
   return (await r.json()) as ScanResult;
+}
+
+export async function fetchModuleValues(
+  baseUrl: string,
+  section: WizardSection,
+  module: string,
+): Promise<ModuleValues> {
+  const r = await fetch(url(baseUrl, "module-values"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ section, module }),
+  });
+  if (!r.ok) throw new Error(`module-values failed: ${r.status}`);
+  return (await r.json()) as ModuleValues;
 }
 
 export async function finishWizard(

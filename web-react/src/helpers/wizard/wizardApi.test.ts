@@ -131,4 +131,25 @@ describe("wizardApi", () => {
     expect(call[0]).toContain("/api/wizard/probes/validate-bus-kinds");
     expect(r.ok).toBe(true);
   });
+
+  test("fetchModuleValues posts section/module to /module-values and returns parsed JSON", async () => {
+    const fake = { settings: { system_type: "raspberry_pi_all" }, config: {} };
+    globalThis.fetch = rs.fn().mockResolvedValue({ ok: true, json: async () => fake }) as never;
+    const { fetchModuleValues } = await import("./wizardApi");
+    const r = await fetchModuleValues("", "grillplatform", "pcb_4.x.x");
+    const call = (globalThis.fetch as ReturnType<typeof rs.fn>).mock.calls[0];
+    expect(call[0]).toContain("/api/wizard/module-values");
+    expect((call[1] as RequestInit).method).toBe("POST");
+    expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({
+      section: "grillplatform",
+      module: "pcb_4.x.x",
+    });
+    expect(r.settings.system_type).toBe("raspberry_pi_all");
+  });
+
+  test("fetchModuleValues throws on a non-ok response", async () => {
+    globalThis.fetch = rs.fn().mockResolvedValue({ ok: false, status: 400 }) as never;
+    const { fetchModuleValues } = await import("./wizardApi");
+    await expect(fetchModuleValues("", "grillplatform", "nope")).rejects.toThrow();
+  });
 });

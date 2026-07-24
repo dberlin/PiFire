@@ -40,9 +40,14 @@ export interface WizardState {
   probe_map: ProbeMap;
   probe_profiles: ProbeProfile[];
   probes_units: string;
+  board_probe_maps: Record<string, ProbeMap>;
   control_mode: string;
   first_time_setup: boolean;
   has_draft: boolean;
+}
+export interface ModuleValues {
+  settings: Record<string, string | null>;
+  config: Record<string, unknown>;
 }
 export interface ScanGroup {
   title: string;

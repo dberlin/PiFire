@@ -45,6 +45,7 @@ function fixtureState(overrides: Partial<WizardState> = {}): WizardState {
     probe_map: { probe_devices: [], probe_info: [] },
     probe_profiles: [],
     probes_units: "F",
+    board_probe_maps: {},
     control_mode: "Stop",
     first_time_setup: false,
     has_draft: false,
