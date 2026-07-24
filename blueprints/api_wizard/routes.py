@@ -1,13 +1,16 @@
+import asyncio
 import os
 
 from flask import jsonify, request
 
 from blueprints.wizard.wizard import (
     get_settings_dependencies_values,
+    parse_bt_device_info,
     wizard_bus_kinds,
     wizardInstallInfoDefaults,
     wizardInstallInfoExisting,
 )
+from common.app import get_supported_cmds, get_system_command_output, process_command
 from common.common import read_wizard
 from common.datastore_accessors import (
     get_wizard_install_status,
@@ -26,11 +29,19 @@ from common.i2c_bus import (
 )
 from common.modes import Mode
 from common.usb_serial import discover_usb_serial_devices
+from probes.thermoworks_cloud import discover as _thermoworks_discover_impl
+from thermoworks_cloud import AuthenticationError
 
 from . import api_wizard_bp
 
 _SECTIONS = ["grillplatform", "display", "distance", "probes"]
 _DRAFT_KEY = "react_draft"  # marker key inside the wizard blob
+
+
+def _thermoworks_discover(email, password):
+    """Sync seam over the async ThermoWorks discovery, matching legacy
+    _wizard_thermoworks_discover (blueprints/wizard/routes.py:162)."""
+    return asyncio.run(_thermoworks_discover_impl(email, password))
 
 
 def _load_draft():
@@ -343,3 +354,51 @@ def wizard_finish():
 def wizard_installstatus():
     percent, status, output = get_wizard_install_status()
     return jsonify({"percent": percent, "status": status, "output": output}), 200
+
+
+@api_wizard_bp.route("/scan/bluetooth", methods=["POST"])
+def wizard_scan_bluetooth():
+    """Bluetooth peripheral discovery for probe device forms. Hardware-mediated:
+    routes scan_bluetooth through the control process (6s timeout). Mirrors
+    blueprints/wizard/routes.py::_wizard_bt_scan but returns JSON rows."""
+    rows = []
+    error = None
+    try:
+        if "scan_bluetooth" in get_supported_cmds():
+            process_command(action="sys", arglist=["scan_bluetooth"], origin="admin")
+            data = get_system_command_output(requested="scan_bluetooth", timeout=6)
+            if data["result"] != "OK":
+                error = data["message"]
+            else:
+                rows = parse_bt_device_info(data["data"]["bt_devices"])
+                if rows == []:
+                    error = "No bluetooth devices found."
+        else:
+            error = "No support for bluetooth scan command."
+    except Exception as e:  # never 500 -- surface as a friendly banner
+        error = f"Something bad happened: {e}"
+        rows = []
+    return jsonify({"rows": rows, "error": error}), 200
+
+
+@api_wizard_bp.route("/scan/thermoworks", methods=["POST"])
+def wizard_scan_thermoworks():
+    """ThermoWorks Cloud account discovery for the thermoworks_cloud device.
+    Blocking network auth; distinguishes bad-creds from generic failure.
+    Mirrors blueprints/wizard/routes.py::_wizard_thermoworks_discover."""
+    payload = request.get_json(silent=True) or {}
+    email = payload.get("email", "")
+    password = payload.get("password", "")
+    rows = []
+    error = None
+    try:
+        rows = _thermoworks_discover(email, password)
+        if rows == []:
+            error = "No ThermoWorks Cloud devices found for this account."
+    except AuthenticationError as e:
+        error = f"Could not log in to ThermoWorks Cloud: {e}"
+        rows = []
+    except Exception as e:
+        error = f"Something bad happened: {e}"
+        rows = []
+    return jsonify({"rows": rows, "error": error}), 200

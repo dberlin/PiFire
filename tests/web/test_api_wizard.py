@@ -324,3 +324,70 @@ def test_finish_bus_conflict_returns_422(ds, client, monkeypatch):
     assert body["result"] == "error"
     assert body["message"] == "bus_conflict"
     assert fired == []  # installer must NOT fire
+
+
+def test_scan_bluetooth_returns_rows(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    monkeypatch.setattr(wr, "get_supported_cmds", lambda: ["scan_bluetooth"])
+    monkeypatch.setattr(wr, "process_command", lambda **k: None)
+    monkeypatch.setattr(
+        wr,
+        "get_system_command_output",
+        lambda **k: {"result": "OK", "data": {"bt_devices": [{"name": "iBBQ", "hw_id": "AA:BB", "info": ""}]}},
+    )
+    monkeypatch.setattr(wr, "parse_bt_device_info", lambda devs: devs)
+    resp = client.post("/api/wizard/scan/bluetooth", data=json.dumps({}), content_type="application/json")
+    body = resp.get_json()
+    assert body["error"] is None
+    assert body["rows"][0]["hw_id"] == "AA:BB"
+
+
+def test_scan_bluetooth_unsupported_is_friendly_error(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    monkeypatch.setattr(wr, "get_supported_cmds", lambda: [])
+    resp = client.post("/api/wizard/scan/bluetooth", data=json.dumps({}), content_type="application/json")
+    body = resp.get_json()
+    assert body["rows"] == []
+    assert body["error"] == "No support for bluetooth scan command."
+
+
+def test_scan_thermoworks_auth_error(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+    from thermoworks_cloud import AuthenticationError
+    from thermoworks_cloud.auth import AuthenticationErrorReason
+
+    def _boom(*a, **k):
+        # Real signature is (message, reason, details) -- the brief's
+        # single-arg construction doesn't match the installed
+        # thermoworks-cloud package and raises TypeError instead.
+        raise AuthenticationError("bad creds", AuthenticationErrorReason.INVALID_PASSWORD, [])
+
+    monkeypatch.setattr(wr, "_thermoworks_discover", _boom)
+    resp = client.post(
+        "/api/wizard/scan/thermoworks",
+        data=json.dumps({"email": "x@y.z", "password": "nope"}),
+        content_type="application/json",
+    )
+    body = resp.get_json()
+    assert body["rows"] == []
+    assert "Could not log in" in body["error"]
+
+
+def test_scan_thermoworks_returns_rows(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    monkeypatch.setattr(
+        wr,
+        "_thermoworks_discover",
+        lambda email, password: [{"label": "Signals", "type": "signals", "serial": "S1", "num_channels": 4}],
+    )
+    resp = client.post(
+        "/api/wizard/scan/thermoworks",
+        data=json.dumps({"email": "x@y.z", "password": "ok"}),
+        content_type="application/json",
+    )
+    body = resp.get_json()
+    assert body["error"] is None
+    assert body["rows"][0]["serial"] == "S1"
