@@ -164,6 +164,9 @@ function violatesPrimaryRule(list: Probe[]): boolean {
 export function addProbe(pm: ProbeMap, profiles: ProbeProfile[], input: ProbeInput): ReducerResult {
   if (input.name === "")
     return { ok: false, error: "Probe name is empty. Please enter a probe name." };
+  if (!input.devicePort?.includes(":")) {
+    return { ok: false, error: "Please select a device and port for this probe." };
+  }
   const probe = buildProbe(profiles, input);
   // exactly-one-Primary: a NEW Primary conflicts with any existing Primary.
   if (probe.type === "Primary" && primaryCount(pm.probe_info) > 0) {
@@ -190,6 +193,9 @@ export function editProbe(
 ): ReducerResult {
   if (input.name === "")
     return { ok: false, error: "Probe name is empty. Please enter a probe name." };
+  if (!input.devicePort?.includes(":")) {
+    return { ok: false, error: "Please select a device and port for this probe." };
+  }
   const found = pm.probe_info.findIndex((p) => p.label === originalLabel);
   if (found === -1) return { ok: false, error: "Error editing probe. Please try again." };
   const probe = buildProbe(profiles, input);

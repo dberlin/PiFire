@@ -43,6 +43,19 @@ it("addProbe rejects an empty name", () => {
   ).toBe(false);
 });
 
+it("addProbe rejects an empty devicePort", () => {
+  const pm: ProbeMap = { probe_devices: [dev("ADS1115", ["ADC0"])], probe_info: [] };
+  expect(
+    addProbe(pm, PROFILES, {
+      name: "Grill 1",
+      devicePort: "",
+      type: "Food",
+      profileId: "PT-1000",
+      enabled: true,
+    }).ok,
+  ).toBe(false);
+});
+
 it("addProbe blocks a second Primary", () => {
   let pm: ProbeMap = { probe_devices: [dev("ADS1115", ["ADC0", "ADC1"])], probe_info: [] };
   pm = (
@@ -189,6 +202,31 @@ it("editProbe type-change away from the only Primary is blocked while probes rem
     name: "Grill",
     devicePort: "ADS1115:ADC0",
     type: "Food",
+    profileId: "PT-1000",
+    enabled: true,
+  });
+  expect(r.ok).toBe(false);
+});
+
+it("editProbe rejects an empty devicePort", () => {
+  const pm: ProbeMap = {
+    probe_devices: [dev("ADS1115", ["ADC0"])],
+    probe_info: [
+      {
+        name: "Grill",
+        label: "Grill",
+        type: "Primary",
+        enabled: true,
+        device: "ADS1115",
+        port: "ADC0",
+        profile: {},
+      },
+    ],
+  };
+  const r = editProbe(pm, PROFILES, "Grill", {
+    name: "Grill",
+    devicePort: "",
+    type: "Primary",
     profileId: "PT-1000",
     enabled: true,
   });
