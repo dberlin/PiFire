@@ -1,0 +1,153 @@
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ProbeMap, ProbeModuleData } from "../../../helpers/wizard/probeTypes";
+import { DevicesCard } from "./DevicesCard";
+
+afterEach(cleanup);
+
+const modules: Record<string, ProbeModuleData> = {
+  ads1115_adafruit: {
+    friendly_name: "ADS1115 Adafruit",
+    filename: "ads1115_adafruit",
+    image: "ads1115.png",
+    device_specific: {
+      ports: ["ADC0", "ADC1"],
+      type: "adc",
+      config: [
+        {
+          label: "i2c_bus_addr",
+          friendly_name: "I2C Bus Address",
+          type: "list",
+          default: "0x48",
+          list_values: ["0x48"],
+          list_labels: ["0x48"],
+        },
+      ],
+    },
+  },
+};
+const emptyMap: ProbeMap = { probe_devices: [], probe_info: [] };
+
+it("lists existing devices with module name", () => {
+  const pm: ProbeMap = {
+    probe_devices: [
+      {
+        device: "ADS1115",
+        module: "ads1115_adafruit",
+        module_filename: "ads1115_adafruit",
+        ports: ["ADC0"],
+        config: {},
+      },
+    ],
+    probe_info: [],
+  };
+  render(<DevicesCard probeMap={pm} modules={modules} baseUrl="" onChange={rs.fn()} />);
+  expect(screen.getByText("ADS1115")).toBeInTheDocument();
+  expect(screen.getByRole("cell", { name: "ADS1115 Adafruit" })).toBeInTheDocument();
+});
+
+it("adding a device runs the reducer and emits the new probe_map", () => {
+  const onChange = rs.fn();
+  render(<DevicesCard probeMap={emptyMap} modules={modules} baseUrl="" onChange={onChange} />);
+  fireEvent.change(screen.getByLabelText(/add device module/i), {
+    target: { value: "ads1115_adafruit" },
+  });
+  // default name pre-filled from friendly_name -> "ADS1115Adafruit"
+  fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+  expect(onChange).toHaveBeenCalledWith(
+    expect.objectContaining({
+      probe_devices: expect.arrayContaining([
+        expect.objectContaining({ device: "ADS1115Adafruit" }),
+      ]),
+    }),
+  );
+});
+
+it("surfaces a duplicate-name error without emitting", () => {
+  const pm: ProbeMap = {
+    probe_devices: [
+      {
+        device: "ADS1115Adafruit",
+        module: "ads1115_adafruit",
+        module_filename: "ads1115_adafruit",
+        ports: ["ADC0"],
+        config: {},
+      },
+    ],
+    probe_info: [],
+  };
+  const onChange = rs.fn();
+  render(<DevicesCard probeMap={pm} modules={modules} baseUrl="" onChange={onChange} />);
+  fireEvent.change(screen.getByLabelText(/add device module/i), {
+    target: { value: "ads1115_adafruit" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+  expect(screen.getByRole("alert")).toHaveTextContent(/already exists/i);
+  expect(onChange).not.toHaveBeenCalled();
+});
+
+it("deleting a device emits the cascade-updated map", () => {
+  const pm: ProbeMap = {
+    probe_devices: [
+      {
+        device: "ADS1115",
+        module: "ads1115_adafruit",
+        module_filename: "ads1115_adafruit",
+        ports: ["ADC0"],
+        config: {},
+      },
+    ],
+    probe_info: [],
+  };
+  const onChange = rs.fn();
+  render(<DevicesCard probeMap={pm} modules={modules} baseUrl="" onChange={onChange} />);
+  fireEvent.click(screen.getByRole("button", { name: /delete/i }));
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ probe_devices: [] }));
+});
+
+it("opening edit backfills manifest defaults absent from saved config", () => {
+  const pm: ProbeMap = {
+    probe_devices: [
+      {
+        device: "ADS1115",
+        module: "ads1115_adafruit",
+        module_filename: "ads1115_adafruit",
+        ports: ["ADC0"],
+        config: {},
+      },
+    ],
+    probe_info: [],
+  };
+  render(<DevicesCard probeMap={pm} modules={modules} baseUrl="" onChange={rs.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+  expect(screen.getByDisplayValue("0x48")).toBeInTheDocument();
+});
+
+it("cancelling the form clears it without emitting", () => {
+  const pm: ProbeMap = {
+    probe_devices: [
+      {
+        device: "ADS1115",
+        module: "ads1115_adafruit",
+        module_filename: "ads1115_adafruit",
+        ports: ["ADC0"],
+        config: {},
+      },
+    ],
+    probe_info: [],
+  };
+  const onChange = rs.fn();
+  render(<DevicesCard probeMap={pm} modules={modules} baseUrl="" onChange={onChange} />);
+  fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+  fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(onChange).not.toHaveBeenCalled();
+});
+
+describe("module select placeholder", () => {
+  it("selecting the empty placeholder option does not open a form", () => {
+    render(<DevicesCard probeMap={emptyMap} modules={modules} baseUrl="" onChange={rs.fn()} />);
+    fireEvent.change(screen.getByLabelText(/add device module/i), { target: { value: "" } });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
