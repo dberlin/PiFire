@@ -82,6 +82,7 @@ from blueprints.recipes import recipes_bp
 from blueprints.settings import settings_bp
 from blueprints.wizard import wizard_bp
 from blueprints.api_wizard import api_wizard_bp
+from blueprints.api_history import api_history_bp
 from blueprints.update import update_bp
 
 """ Register Flask Blueprints """
@@ -102,6 +103,7 @@ app.register_blueprint(recipes_bp, url_prefix="/recipes")
 app.register_blueprint(settings_bp, url_prefix="/settings")
 app.register_blueprint(wizard_bp, url_prefix="/wizard")
 app.register_blueprint(api_wizard_bp, url_prefix="/api/wizard")
+app.register_blueprint(api_history_bp, url_prefix="/api/history")
 app.register_blueprint(update_bp, url_prefix="/update")
 
 """
