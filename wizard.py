@@ -241,8 +241,17 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
                 # no probe devices are configured -- computing these before the units
                 # check would raise IndexError and silently kill the detached installer.
                 selected = WizardInstallInfo["modules"][module]["profile_selected"][0]
-                settingsLocation = WizardData["modules"][module][selected]["settings_dependencies"][setting]["settings"]
-                settings = set_nested_key_value(settings, settingsLocation, selected_setting)
+                dependencies = WizardData["modules"][module][selected]["settings_dependencies"]
+                dependency = dependencies.get(setting)
+                if dependency is None:
+                    # A setting name that isn't in the selected module's manifest entry
+                    # (e.g. a stale key left over from a module switch in the wizard UI).
+                    # Skip it rather than raising: this loop runs in the DETACHED
+                    # installer process, where an uncaught exception freezes the install
+                    # at its last status line forever.
+                    set_wizard_install_status(percent, status, f"   - Skipped unknown setting {setting}")
+                    continue
+                settings = set_nested_key_value(settings, dependency["settings"], selected_setting)
             output = f"   + Set {setting} in settings.json"
             set_wizard_install_status(percent, status, output)
         if module == "display":

@@ -64,3 +64,29 @@ def test_run_wizard_dev_mode_resolves_to_restart_not_reboot(ds, no_install):
 
     percent, status, output = datastore_accessors.get_wizard_install_status()
     assert percent == 101
+
+
+def test_run_wizard_skips_unknown_setting_key(ds, no_install):
+    """A dependency key that isn't in the selected module's manifest entry must
+    not crash the detached installer.
+
+    Reachable from the React wizard: 12 of 30 display modules carry a
+    `buttonslevel` dependency. Switching to one of the other 18 used to leave
+    that stale key in the display section's settings, which reached this loop
+    and raised KeyError inside the detached process -- silently freezing the
+    install at its last status line while the browser polled forever.
+    """
+    settings = defaults.default_settings()
+    settings["probe_settings"]["probe_map"]["probe_devices"] = []
+    datastore_accessors.write_settings_store(settings)
+
+    wizard_data = read_wizard()
+    install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
+    # A setting name that exists in no module's settings_dependencies.
+    install_info["modules"]["display"]["settings"]["totally_bogus_setting"] = "x"
+
+    # Must not raise.
+    wizard.run_wizard(settings, wizard_data, install_info)
+
+    percent, status, output = datastore_accessors.get_wizard_install_status()
+    assert percent == 101  # ran to completion (restart-only), not frozen mid-install
