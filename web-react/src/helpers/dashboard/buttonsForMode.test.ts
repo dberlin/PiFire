@@ -18,6 +18,8 @@ function stubCommand(): CommandClient {
     timerStop: rs.fn(async () => OK),
     system: rs.fn(async () => OK),
     setUnits: rs.fn(async () => OK),
+    manualOutput: rs.fn(async () => OK),
+    manualPwm: rs.fn(async () => OK),
   };
 }
 
@@ -29,10 +31,10 @@ const at = (mode: string, over: Partial<DashData> = {}): DashData => ({
 
 describe("buttonsForMode", () => {
   it.each(["Stop", "Error", ""])(
-    "%s renders Startup / Prime / Monitor as command actions",
+    "%s renders Startup / Prime / Monitor / Manual as command actions",
     async (mode) => {
       const buttons = buttonsForMode(at(mode, { primeAmount: 25 }));
-      expect(buttons.map((b) => b.label)).toEqual(["Startup", "Prime", "Monitor"]);
+      expect(buttons.map((b) => b.label)).toEqual(["Startup", "Prime", "Monitor", "Manual"]);
       expect(buttons.every((b) => b.action.type === "command")).toBe(true);
 
       const command = stubCommand();
@@ -43,6 +45,10 @@ describe("buttonsForMode", () => {
       const monitor = buttons[2];
       if (monitor.action.type === "command") await monitor.action.run(command);
       expect(command.setMode).toHaveBeenCalledWith("monitor");
+
+      const manual = buttons[3];
+      if (manual.action.type === "command") await manual.action.run(command);
+      expect(command.setMode).toHaveBeenCalledWith("manual");
     },
   );
 
@@ -118,5 +124,45 @@ describe("buttonsForMode", () => {
       await shutdown.action.run(command);
     }
     expect(command.setMode).toHaveBeenCalledWith("shutdown");
+  });
+
+  it("offers a Manual entry button when idle", () => {
+    const buttons = buttonsForMode({ ...FIXTURE_DASH, currentMode: "Stop" });
+    expect(buttons.map((b) => b.label)).toContain("Manual");
+  });
+
+  it("in Manual mode shows the four output toggles and Stop", () => {
+    const buttons = buttonsForMode({ ...FIXTURE_DASH, currentMode: "Manual", hasDcFan: false });
+    expect(buttons.map((b) => b.label)).toEqual(["Power", "Igniter", "Auger", "Fan", "Stop"]);
+  });
+
+  it("marks an output button accent while that output is live", () => {
+    const buttons = buttonsForMode({
+      ...FIXTURE_DASH,
+      currentMode: "Manual",
+      hasDcFan: false,
+      outputs: { fan: false, auger: true, igniter: false, power: false },
+    });
+    const byLabel = Object.fromEntries(buttons.map((b) => [b.label, b]));
+    expect(byLabel.Auger.variant).toBe("accent");
+    expect(byLabel.Fan.variant).toBeUndefined();
+  });
+
+  it("adds a Fan % button only when the platform has a DC fan", () => {
+    const withFan = buttonsForMode({ ...FIXTURE_DASH, currentMode: "Manual", hasDcFan: true });
+    expect(withFan.map((b) => b.label)).toContain("Fan %");
+    const withoutFan = buttonsForMode({ ...FIXTURE_DASH, currentMode: "Manual", hasDcFan: false });
+    expect(withoutFan.map((b) => b.label)).not.toContain("Fan %");
+  });
+
+  it("does not show manual outputs outside Manual mode even if manual changes are allowed", () => {
+    // Legacy hides these unless mode == Manual, despite _cmd_set_manual also
+    // permitting toggles when safety.allow_manual_changes is true. Match that.
+    const buttons = buttonsForMode({
+      ...FIXTURE_DASH,
+      currentMode: "Smoke",
+      allowManualOutputs: true,
+    });
+    expect(buttons.map((b) => b.label)).not.toContain("Auger");
   });
 });

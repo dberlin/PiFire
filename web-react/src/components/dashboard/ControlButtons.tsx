@@ -3,6 +3,7 @@ import type { CommandClient, CommandResult } from "../../helpers/command";
 import { type ButtonAction, buttonsForMode } from "../../helpers/dashboard/buttonsForMode";
 import type { DashData } from "../../helpers/types";
 import { ConfirmAction } from "./ConfirmAction";
+import { PwmEntry } from "./PwmEntry";
 import { SetpointEntry } from "./SetpointEntry";
 
 // Mode-driven control row, styled to the design's button grid. Each press
@@ -19,6 +20,7 @@ export function ControlButtons({
 }) {
   const buttons = buttonsForMode(dash);
   const [setpointOpen, setSetpointOpen] = useState(false);
+  const [pwmOpen, setPwmOpen] = useState(false);
   const [confirm, setConfirm] = useState<{
     title: string;
     run(c: CommandClient): Promise<CommandResult>;
@@ -37,6 +39,7 @@ export function ControlButtons({
   const onClick = (action: ButtonAction) => {
     if (action.type === "command") fire(action.run);
     else if (action.type === "setpoint") setSetpointOpen(true);
+    else if (action.type === "pwm") setPwmOpen(true);
     else setConfirm({ title: action.title, run: action.run });
   };
 
@@ -87,6 +90,15 @@ export function ControlButtons({
         onSubmit={(temp) => {
           setSetpointOpen(false);
           fire((c) => c.hold(temp));
+        }}
+      />
+      <PwmEntry
+        open={pwmOpen}
+        initial={dash.manualPwm}
+        onCancel={() => setPwmOpen(false)}
+        onSubmit={(duty) => {
+          setPwmOpen(false);
+          fire((c) => c.manualPwm(duty));
         }}
       />
       <ConfirmAction

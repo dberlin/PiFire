@@ -24,6 +24,8 @@ function makeCommand(): CommandClient {
     timerStop: rs.fn(async () => OK),
     system: rs.fn(async () => OK),
     setUnits: rs.fn(async () => OK),
+    manualOutput: rs.fn(async () => OK),
+    manualPwm: rs.fn(async () => OK),
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CommandClient, CommandResult } from "../../helpers/command";
 import { FIXTURE_DASH } from "../../helpers/fixture";
@@ -25,6 +25,8 @@ function stubCommand(): CommandClient {
     timerStop: rs.fn(async () => OK),
     system: rs.fn(async () => OK),
     setUnits: rs.fn(async () => OK),
+    manualOutput: rs.fn(async () => OK),
+    manualPwm: rs.fn(async () => OK),
   };
 }
 
@@ -112,5 +114,35 @@ describe("ControlButtons", () => {
     await user.click(screen.getByRole("button", { name: "Set Hold" }));
     expect(screen.queryByText("Set Hold Temperature")).not.toBeInTheDocument();
     expect(command.hold).toHaveBeenCalledWith(expect.any(Number));
+  });
+
+  it("fires a manual output toggle from the Manual button row", async () => {
+    const command = stubCommand();
+    render(
+      <ControlButtons
+        dash={at("Manual", { hasDcFan: false })}
+        command={command}
+        disabled={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Auger" }));
+    await waitFor(() => expect(command.manualOutput).toHaveBeenCalledWith("auger"));
+  });
+
+  it("opens the PWM entry and submits a duty cycle", async () => {
+    const command = stubCommand();
+    render(
+      <ControlButtons
+        dash={at("Manual", { hasDcFan: true, manualPwm: 40 })}
+        command={command}
+        disabled={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Fan %" }));
+    fireEvent.change(screen.getByRole("slider", { name: /fan duty/i }), {
+      target: { value: "75" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /set/i }));
+    await waitFor(() => expect(command.manualPwm).toHaveBeenCalledWith(75));
   });
 });
