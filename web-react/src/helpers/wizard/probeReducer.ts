@@ -229,9 +229,59 @@ export function editProbe(
             },
           };
         });
-  // Non-virtual ordering: straight in-place replace (§3 branch 3c). Virtual
-  // reposition (branches 3a/3b) is layered on in Task 8.
-  const probe_info = pm.probe_info.map((p, i) => (i === found ? probe : p));
+  // Virtual-port reposition (§3 branches 3a/3b/3c), reproducing
+  // blueprints/probeconfig/routes.py:321-358 exactly. Build the working
+  // probe_info as a mutable copy; the reposition branches splice it in
+  // place, mirroring legacy list.insert/pop index arithmetic.
+  const info = [...pm.probe_info];
+
+  if (probe.port.includes("VIRT")) {
+    // 3a: this probe IS a virtual device's output entry. Ensure its config
+    // entry sorts after every one of that device's input probes.
+    const owning = probe_devices.find((d) => isVirtualDevice(d) && d.device === probe.device);
+    const inputProbes = (owning?.config.probes_list as string[] | undefined) ?? [];
+    for (let i = info.length - 1; i >= 0; i--) {
+      if (i === found) {
+        // Own entry reached first (by index, not label) -- already correct.
+        info[found] = probe;
+        break;
+      }
+      if (inputProbes.includes(info[i].label)) {
+        // Hit an input probe at a higher index -- relocate right after it.
+        info.splice(i + 1, 0, probe);
+        info.splice(found, 1);
+        break;
+      }
+    }
+  } else {
+    // Does this probe feed any virtual device? (§3 in_virtual_device)
+    const consuming = probe_devices
+      .filter(
+        (d) =>
+          isVirtualDevice(d) &&
+          ((d.config.probes_list as string[] | undefined) ?? []).includes(probe.label),
+      )
+      .map((d) => d.device);
+    if (consuming.length > 0) {
+      // 3b: ensure this input's entry sorts before the consuming virtual entry.
+      for (let i = 0; i < info.length; i++) {
+        if (info[i].label === originalLabel) {
+          info[i] = probe; // own slot reached first -- already correct.
+          break;
+        }
+        if (consuming.includes(info[i].device)) {
+          info.splice(i, 0, probe); // insert before the virtual entry
+          info.splice(found + 1, 1); // +1: the insert shifted the stale copy up
+          break;
+        }
+      }
+    } else {
+      // 3c: ordinary probe -- in-place replace.
+      info[found] = probe;
+    }
+  }
+
+  const probe_info = info;
   // FIX 2 is delta-based: reject only when THIS edit is what breaks the
   // invariant (was compliant, would become non-compliant). A pre-existing
   // out-of-invariant state (e.g. a fixture with no Primary at all) is left
