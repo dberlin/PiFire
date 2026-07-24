@@ -1,4 +1,11 @@
-import type { ProbeDevice, ProbeMap, ProbeModuleData } from "./probeTypes";
+import type {
+  Probe,
+  ProbeDevice,
+  ProbeMap,
+  ProbeModuleData,
+  ProbeProfile,
+  ProbeType,
+} from "./probeTypes";
 
 export type ReducerResult = { ok: true; probeMap: ProbeMap } | { ok: false; error: string };
 
@@ -119,4 +126,139 @@ export function deleteDevice(pm: ProbeMap, name: string): ProbeMap {
     });
   const probe_info = pm.probe_info.filter((p) => p.device !== name);
   return { probe_devices, probe_info };
+}
+
+export interface ProbeInput {
+  name: string;
+  devicePort: string;
+  type: ProbeType;
+  profileId: string;
+  enabled: boolean;
+}
+
+function buildProbe(profiles: ProbeProfile[], input: ProbeInput): Probe {
+  const [device, port] = input.devicePort.split(":");
+  const matched = profiles.find((p) => p.id === input.profileId);
+  return {
+    name: input.name,
+    label: alnum(input.name),
+    type: input.type,
+    enabled: input.enabled,
+    device,
+    port,
+    // Value copy, not a FK -- probes carry a profile snapshot (§5).
+    profile: matched ? { ...matched } : {},
+  };
+}
+
+function primaryCount(list: Probe[]): number {
+  return list.filter((p) => p.type === "Primary").length;
+}
+
+// FIX 2: zero primaries are valid ONLY when there are zero probes. Any result
+// with >=1 probe and 0 primaries is rejected on a delete/type-change path.
+function violatesPrimaryRule(list: Probe[]): boolean {
+  return list.length > 0 && primaryCount(list) === 0;
+}
+
+export function addProbe(pm: ProbeMap, profiles: ProbeProfile[], input: ProbeInput): ReducerResult {
+  if (input.name === "")
+    return { ok: false, error: "Probe name is empty. Please enter a probe name." };
+  const probe = buildProbe(profiles, input);
+  // exactly-one-Primary: a NEW Primary conflicts with any existing Primary.
+  if (probe.type === "Primary" && primaryCount(pm.probe_info) > 0) {
+    return {
+      ok: false,
+      error: "There must be only one Primary probe. Change the existing Primary first.",
+    };
+  }
+  if (pm.probe_info.some((p) => p.label === probe.label)) {
+    return {
+      ok: false,
+      error: "Probe name is already used or too similar to another. Choose a different name.",
+    };
+  }
+  // New adds append at the end (legacy branch, routes.py:360-363).
+  return { ok: true, probeMap: { ...pm, probe_info: [...pm.probe_info, probe] } };
+}
+
+export function editProbe(
+  pm: ProbeMap,
+  profiles: ProbeProfile[],
+  originalLabel: string,
+  input: ProbeInput,
+): ReducerResult {
+  if (input.name === "")
+    return { ok: false, error: "Probe name is empty. Please enter a probe name." };
+  const found = pm.probe_info.findIndex((p) => p.label === originalLabel);
+  if (found === -1) return { ok: false, error: "Error editing probe. Please try again." };
+  const probe = buildProbe(profiles, input);
+  // exactly-one-Primary, skipping the probe being edited.
+  if (probe.type === "Primary") {
+    const otherPrimary = pm.probe_info.some((p, i) => i !== found && p.type === "Primary");
+    if (otherPrimary)
+      return {
+        ok: false,
+        error: "There must be only one Primary probe. Change the existing Primary first.",
+      };
+  }
+  // A rename must not collide with a DIFFERENT existing probe.
+  if (
+    probe.label !== originalLabel &&
+    pm.probe_info.some((p, i) => i !== found && p.label === probe.label)
+  ) {
+    return {
+      ok: false,
+      error: "Probe name is already used or too similar to another. Choose a different name.",
+    };
+  }
+  // Rename cascade into virtual probes_list (§3 pre-step): rewrite the old
+  // label to the new one everywhere it is consumed.
+  const probe_devices =
+    probe.label === originalLabel
+      ? pm.probe_devices
+      : pm.probe_devices.map((d) => {
+          if (!isVirtualDevice(d)) return d;
+          const list = (d.config.probes_list as string[] | undefined) ?? [];
+          if (!list.includes(originalLabel)) return d;
+          return {
+            ...d,
+            config: {
+              ...d.config,
+              probes_list: list.map((l) => (l === originalLabel ? probe.label : l)),
+            },
+          };
+        });
+  // Non-virtual ordering: straight in-place replace (§3 branch 3c). Virtual
+  // reposition (branches 3a/3b) is layered on in Task 8.
+  const probe_info = pm.probe_info.map((p, i) => (i === found ? probe : p));
+  // FIX 2 is delta-based: reject only when THIS edit is what breaks the
+  // invariant (was compliant, would become non-compliant). A pre-existing
+  // out-of-invariant state (e.g. a fixture with no Primary at all) is left
+  // alone -- the guard exists to stop actions from causing the violation,
+  // not to retroactively re-block every other field on an already-broken map.
+  if (!violatesPrimaryRule(pm.probe_info) && violatesPrimaryRule(probe_info)) {
+    return { ok: false, error: "At least one probe must be Primary while probes are configured." };
+  }
+  return { ok: true, probeMap: { probe_devices, probe_info } };
+}
+
+export function deleteProbe(pm: ProbeMap, label: string): ReducerResult {
+  const probe_info = pm.probe_info.filter((p) => p.label !== label);
+  // FIX 2 (delta-based, see editProbe above): only reject when deleting is
+  // what pushes a compliant map into zero-Primary-with-probes-remaining.
+  if (!violatesPrimaryRule(pm.probe_info) && violatesPrimaryRule(probe_info)) {
+    return {
+      ok: false,
+      error:
+        "At least one probe must be Primary while probes are configured. Reassign Primary before deleting.",
+    };
+  }
+  const probe_devices = pm.probe_devices.map((d) => {
+    if (!isVirtualDevice(d)) return d;
+    const list = (d.config.probes_list as string[] | undefined) ?? [];
+    if (!list.includes(label)) return d;
+    return { ...d, config: { ...d.config, probes_list: list.filter((l) => l !== label) } };
+  });
+  return { ok: true, probeMap: { probe_devices, probe_info } };
 }
