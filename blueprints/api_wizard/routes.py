@@ -62,6 +62,15 @@ def _build_state(settings, control):
     wizard_data = read_wizard()
     modules = wizard_data.get("modules", {})
 
+    # Board default probe maps (the 4 PCB ids). The client reseeds probe_map
+    # from these on a fresh-install platform switch (guarded). Boards without a
+    # probe_map are skipped.
+    board_probe_maps = {
+        board_id: board["probe_map"]
+        for board_id, board in wizard_data.get("boards", {}).items()
+        if isinstance(board, dict) and isinstance(board.get("probe_map"), dict)
+    }
+
     draft = _load_draft()
     has_draft = isinstance(draft, dict) and draft.get(_DRAFT_KEY) is True
 
@@ -104,7 +113,14 @@ def _build_state(settings, control):
             mod_data = modules.get(section, {}).get(sel)
             settings_dep_values[section] = get_settings_dependencies_values(settings, mod_data) if mod_data else {}
         display_config = settings.get("display", {}).get("config", {})
-        probe_map = settings.get("probe_settings", {}).get("probe_map", {"probe_devices": [], "probe_info": []})
+        if settings["globals"]["first_time_setup"]:
+            # Fresh install: seed from the default board's probe_map (which
+            # wizardInstallInfoDefaults already computed into info["probe_map"])
+            # instead of the live-settings map, so the default board's probes
+            # show up-front and establish the reseed baseline.
+            probe_map = info.get("probe_map") or {"probe_devices": [], "probe_info": []}
+        else:
+            probe_map = settings.get("probe_settings", {}).get("probe_map", {"probe_devices": [], "probe_info": []})
         probes_units = settings["globals"].get("units", "F")
 
     # probe_profiles is shipped as a LIST for the port form's picker. Live
@@ -120,6 +136,7 @@ def _build_state(settings, control):
         "probe_map": probe_map,
         "probe_profiles": probe_profiles,
         "probes_units": probes_units,
+        "board_probe_maps": board_probe_maps,
         "control_mode": control.get("mode", "Stop"),
         "first_time_setup": bool(settings["globals"]["first_time_setup"]),
         "has_draft": has_draft,

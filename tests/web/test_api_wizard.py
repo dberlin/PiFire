@@ -26,6 +26,28 @@ def test_state_fresh_returns_metadata_and_selections(ds, client):
     assert "control_mode" in body and "first_time_setup" in body
 
 
+def test_state_ships_board_probe_maps(ds, client):
+    body = client.get("/api/wizard/state").get_json()
+    assert isinstance(body["board_probe_maps"], dict)
+    # the 4 PCB boards each carry a probe_map with the two probe arrays
+    assert "pcb_4.x.x" in body["board_probe_maps"]
+    board = body["board_probe_maps"]["pcb_4.x.x"]
+    assert "probe_devices" in board and "probe_info" in board
+    assert len(board["probe_devices"]) >= 1
+
+
+def test_state_fresh_install_seeds_default_board_probe_map(ds, client):
+    settings = read_settings()
+    settings["globals"]["first_time_setup"] = True
+    write_settings_store(settings)
+
+    body = client.get("/api/wizard/state").get_json()
+    # On a fresh install the returned probe_map is the DEFAULT board's map,
+    # not the live-settings one -- it matches board_probe_maps[default_board].
+    assert body["probe_map"] == body["board_probe_maps"]["pcb_4.x.x"]
+    assert len(body["probe_map"]["probe_devices"]) >= 1
+
+
 def test_draft_persists_and_state_resumes(ds, client):
     draft = {
         "selections": {"display": "ili9341b"},
