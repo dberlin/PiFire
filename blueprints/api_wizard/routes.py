@@ -243,6 +243,35 @@ def wizard_scan():
     return jsonify({"groups": groups, "error": error}), 200
 
 
+@api_wizard_bp.route("/module-values", methods=["POST"])
+def wizard_module_values():
+    """Return a module's settings-dependency values (+ display config bag) for
+    the wizard's client-side module-switch, mirroring the legacy
+    _wizard_modulecard round-trip (blueprints/wizard/routes.py:105-119).
+
+    `settings` come from the LIVE settings tree via
+    get_settings_dependencies_values -- NOT manifest defaults -- so a switch
+    reproduces legacy behavior exactly (D1). `config` is display-only and
+    guarded with .get(module, {}) because a display module may never have been
+    configured (callout #2 -- legacy indexes it unguarded and KeyErrors)."""
+    payload = request.get_json(silent=True) or {}
+    section = payload.get("section")
+    module = payload.get("module")
+    if section not in ("grillplatform", "display", "distance"):
+        return jsonify({"result": "error", "message": "unknown_module"}), 400
+    wizard_data = read_wizard()
+    module_data = wizard_data.get("modules", {}).get(section, {}).get(module)
+    if not isinstance(module_data, dict):
+        return jsonify({"result": "error", "message": "unknown_module"}), 400
+    settings = read_settings()
+    dep_values = get_settings_dependencies_values(settings, module_data)
+    if section == "display":
+        config = settings.get("display", {}).get("config", {}).get(module, {})
+    else:
+        config = {}
+    return jsonify({"settings": dep_values, "config": config}), 200
+
+
 def _wizard_install_info_from_payload(payload, existing):
     """Translate the React draft payload ({selections, settings_dep_values,
     display_config} -- the same shape /draft persists) into the

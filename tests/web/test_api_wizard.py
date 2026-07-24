@@ -427,3 +427,54 @@ def test_validate_bus_kinds_conflict(ds, client, monkeypatch):
     body = resp.get_json()
     assert body["ok"] is False
     assert "USB-HID" in body["detail"]
+
+
+def test_module_values_grillplatform_returns_live_settings(ds, client):
+    resp = client.post(
+        "/api/wizard/module-values",
+        data=json.dumps({"section": "grillplatform", "module": "pcb_4.x.x"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    # settings is the dep-key -> value map for the module's settings_dependencies
+    assert isinstance(body["settings"], dict)
+    assert "system_type" in body["settings"]
+    # grillplatform never has a config bag
+    assert body["config"] == {}
+
+
+def test_module_values_display_config_is_guarded(ds, client):
+    # A display module that has never been persisted must not KeyError -- the
+    # config bag falls back to {} (mirrors legacy _wizard_modulecard callout #2).
+    resp = client.post(
+        "/api/wizard/module-values",
+        data=json.dumps({"section": "display", "module": "ili9341b"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert isinstance(body["settings"], dict)
+    assert isinstance(body["config"], dict)  # dict, never a crash
+
+
+def test_module_values_unknown_module_is_400(ds, client):
+    resp = client.post(
+        "/api/wizard/module-values",
+        data=json.dumps({"section": "grillplatform", "module": "does_not_exist"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["message"] == "unknown_module"
+
+
+def test_module_values_unknown_section_is_400(ds, client):
+    # "probes" has no module-card round-trip; anything outside the 3 non-probe
+    # sections is rejected.
+    resp = client.post(
+        "/api/wizard/module-values",
+        data=json.dumps({"section": "probes", "module": "default"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["message"] == "unknown_module"
