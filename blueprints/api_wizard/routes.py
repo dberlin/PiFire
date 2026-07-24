@@ -22,6 +22,7 @@ from common.datastore_accessors import (
 )
 from common.i2c_bus import (
     I2CBusConfigError,
+    configured_bus_kinds,
     discover_extended_i2c_buses,
     discover_ft232h_devices,
     discover_mcp2221_devices,
@@ -379,6 +380,21 @@ def wizard_scan_bluetooth():
         error = f"Something bad happened: {e}"
         rows = []
     return jsonify({"rows": rows, "error": error}), 200
+
+
+@api_wizard_bp.route("/probes/validate-bus-kinds", methods=["POST"])
+def wizard_probes_validate_bus_kinds():
+    """Per-device bus-kind coexistence check for the in-progress probe device
+    set only (settings=None, §7) -- deliberately excludes the live fan/distance
+    kinds so a mid-wizard edit doesn't false-positive against stale settings.
+    The FULL cross-subsystem check still runs at /finish."""
+    payload = request.get_json(silent=True) or {}
+    probe_devices = payload.get("probe_devices") or []
+    try:
+        validate_bus_kinds(configured_bus_kinds(None, {"probe_devices": probe_devices}))
+    except I2CBusConfigError as exc:
+        return jsonify({"ok": False, "detail": str(exc)}), 200
+    return jsonify({"ok": True}), 200
 
 
 @api_wizard_bp.route("/scan/thermoworks", methods=["POST"])

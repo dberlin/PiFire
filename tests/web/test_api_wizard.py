@@ -391,3 +391,39 @@ def test_scan_thermoworks_returns_rows(ds, client, monkeypatch):
     body = resp.get_json()
     assert body["error"] is None
     assert body["rows"][0]["serial"] == "S1"
+
+
+def test_validate_bus_kinds_clean(ds, client):
+    devs = [
+        {
+            "device": "D1",
+            "module": "ads1115_adafruit",
+            "config": {"i2c_bus_kind": "basic"},
+            "ports": ["ADC0"],
+        }
+    ]
+    resp = client.post(
+        "/api/wizard/probes/validate-bus-kinds",
+        data=json.dumps({"probe_devices": devs}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+
+
+def test_validate_bus_kinds_conflict(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+    from common.i2c_bus import I2CBusConfigError
+
+    def _boom(*a, **k):
+        raise I2CBusConfigError("'basic' I2C can't share a process with a USB-HID bus")
+
+    monkeypatch.setattr(wr, "validate_bus_kinds", _boom)
+    resp = client.post(
+        "/api/wizard/probes/validate-bus-kinds",
+        data=json.dumps({"probe_devices": [{"device": "D1", "config": {"i2c_bus_kind": "basic"}}]}),
+        content_type="application/json",
+    )
+    body = resp.get_json()
+    assert body["ok"] is False
+    assert "USB-HID" in body["detail"]
