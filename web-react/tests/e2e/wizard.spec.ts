@@ -48,3 +48,80 @@ test("display step selection + config edit round-trips as a draft, then is clear
   const afterClear = await page.request.get("/api/wizard/state");
   expect((await afterClear.json()).has_draft).toBe(false);
 });
+
+test("probes step: add device + probe, staged into draft", async ({ page }) => {
+  await page.goto("/wizard");
+  await expect(page.getByRole("heading", { name: "Welcome" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByRole("heading", { name: "Grill Platform" })).toBeVisible();
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByRole("heading", { name: "Probes" })).toBeVisible();
+  await expect(page.locator('[data-step="probes"]')).toBeVisible();
+
+  const devicesSection = page.locator('section[aria-label="Probe devices"]');
+  const portsSection = page.locator('section[aria-label="Probe ports"]');
+
+  // The live settings seed the working probe_map with a board-default
+  // Primary + several Food probes on a "proto_adc" device. Clear every
+  // probe first so a freshly-added Primary below doesn't trip the
+  // exactly-one-Primary guard (deleting the last Primary is only allowed
+  // once no other probes remain -- delete non-Primary rows first).
+  let nonPrimaryRow = portsSection.locator("tbody tr").filter({ hasNotText: "Primary" }).first();
+  while (await nonPrimaryRow.count()) {
+    await nonPrimaryRow.getByRole("button", { name: "Delete" }).click();
+    nonPrimaryRow = portsSection.locator("tbody tr").filter({ hasNotText: "Primary" }).first();
+  }
+  while (await portsSection.locator("tbody tr").count()) {
+    await portsSection.locator("tbody tr").first().getByRole("button", { name: "Delete" }).click();
+  }
+  await expect(portsSection.locator("tbody tr")).toHaveCount(0);
+
+  // Add a device: select the ADS1115 module, accept its default name, submit.
+  await devicesSection.getByLabel("Add device module").selectOption("ads1115_adafruit");
+  const deviceDialog = page.getByRole("dialog", { name: "add device" });
+  await expect(deviceDialog).toBeVisible();
+  await deviceDialog.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(devicesSection.getByText("ADS1115Adafruit", { exact: true })).toBeVisible();
+
+  // Add a probe on the new device: name, device:port, type Primary, a profile.
+  await portsSection.getByRole("button", { name: "Add Probe" }).click();
+  const probeDialog = page.getByRole("dialog", { name: "add probe" });
+  await probeDialog.getByLabel("Probe Name").fill("Grill");
+  await probeDialog.getByLabel("Device & Port").selectOption("ADS1115Adafruit:ADC0");
+  await probeDialog.getByLabel("Probe Type").selectOption("Primary");
+  await probeDialog.getByLabel("Probe Profile").selectOption({ index: 1 });
+  await probeDialog.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(portsSection.getByText("Grill", { exact: true })).toBeVisible();
+
+  // Next flushes the draft -- intercept the POST body to assert the staged
+  // probe_map reached the backend.
+  const draftReq = page.waitForRequest(
+    (r) => r.url().includes("/api/wizard/draft") && r.method() === "POST",
+  );
+  await page.getByRole("button", { name: "Next" }).click();
+  const body = (await (await draftReq).postData()) ?? "{}";
+  const parsed = JSON.parse(body) as {
+    probe_map: {
+      probe_devices: { device: string; module: string }[];
+      probe_info: { label: string; type: string; device: string; port: string }[];
+    };
+  };
+  const addedDevice = parsed.probe_map.probe_devices.find((d) => d.device === "ADS1115Adafruit");
+  expect(addedDevice?.module).toBe("ads1115_adafruit");
+  expect(parsed.probe_map.probe_info).toHaveLength(1);
+  expect(parsed.probe_map.probe_info[0].label).toBe("Grill");
+  expect(parsed.probe_map.probe_info[0].type).toBe("Primary");
+  expect(parsed.probe_map.probe_info[0].device).toBe("ADS1115Adafruit");
+  expect(parsed.probe_map.probe_info[0].port).toBe("ADC0");
+
+  await expect(page.getByRole("heading", { name: "Display" })).toBeVisible();
+
+  // Do NOT click Finish here -- it would fire the real installer.
+
+  // Restore: clear the staged draft so the backend is left as found.
+  const clearRes = await page.request.post("/api/wizard/draft", { data: { clear: true } });
+  expect(clearRes.ok()).toBeTruthy();
+  const afterClear = await page.request.get("/api/wizard/state");
+  expect((await afterClear.json()).has_draft).toBe(false);
+});
