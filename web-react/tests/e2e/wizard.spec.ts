@@ -125,3 +125,29 @@ test("probes step: add device + probe, staged into draft", async ({ page }) => {
   const afterClear = await page.request.get("/api/wizard/state");
   expect((await afterClear.json()).has_draft).toBe(false);
 });
+
+test("grill platform step renders the platform module card and switches modules", async ({
+  page,
+}) => {
+  await page.goto("/wizard");
+  await expect(page.getByRole("heading", { name: "Welcome" })).toBeVisible();
+
+  // Step from Welcome to the Grill Platform step via Next.
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByRole("heading", { name: "Grill Platform" })).toBeVisible();
+
+  const moduleSelect = page.getByRole("combobox", { name: "Module" });
+  await expect(moduleSelect).toBeVisible();
+
+  // Switching the platform re-fetches its config (module-values round-trip);
+  // the card stays rendered with the new selection.
+  await moduleSelect.selectOption({ index: 1 });
+  await expect(page.getByRole("heading", { name: "Grill Platform" })).toBeVisible();
+  await expect(moduleSelect).toBeVisible();
+
+  // Restore: clear the staged draft so the backend is left as found.
+  const clearRes = await page.request.post("/api/wizard/draft", { data: { clear: true } });
+  expect(clearRes.ok()).toBeTruthy();
+  const afterClear = await page.request.get("/api/wizard/state");
+  expect((await afterClear.json()).has_draft).toBe(false);
+});
