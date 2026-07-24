@@ -245,24 +245,29 @@ def _wizard_install_info_from_payload(payload, existing):
     blueprints/wizard/wizard.py's wizardInstallInfoDefaults /
     wizardInstallInfoExisting / prepare_wizard_data.
 
-    probe_map is carried over from whatever is already persisted in the
-    shared "wizard:install" blob (populated by the legacy probeconfig
-    blueprint's direct reads/writes of wizardInstallInfo["probe_map"], or by
-    a prior full wizard run) rather than rebuilt from the payload -- the
-    React draft shape has no per-probe-device fields (just a single flat
-    `selections["probes"]` module name or None, per _build_state's
-    `pf[0] if pf else None` extraction), so the persisted probe_map is the only source of truth for
-    the per-device i2c_bus_kind configuration that wizard_bus_kinds() needs
-    to catch a real basic+USB-HID conflict.
+    probe_map is client-held (owned by the React probe reducer, not part of
+    {selections, settings_dep_values, display_config}) and is preferred
+    straight from `payload["probe_map"]` when present; it falls back to
+    whatever is already persisted in the shared "wizard:install" blob
+    (populated by the legacy probeconfig blueprint's direct reads/writes of
+    wizardInstallInfo["probe_map"], or by a prior full wizard run) only when
+    the payload omits it -- this keeps the per-device i2c_bus_kind
+    configuration that wizard_bus_kinds() needs to catch a real
+    basic+USB-HID conflict.
     """
     selections = payload.get("selections", {}) or {}
     settings_dep_values = payload.get("settings_dep_values", {}) or {}
     display_config = payload.get("display_config", {}) or {}
 
-    probe_map = existing.get("probe_map") if isinstance(existing, dict) else None
+    # probe_map is client-held (the React probe reducer): prefer the payload,
+    # fall back to whatever is persisted only when the payload omits it.
+    probe_map = payload.get("probe_map")
     if not isinstance(probe_map, dict):
-        probe_map = {}
+        probe_map = existing.get("probe_map") if isinstance(existing, dict) else None
+    if not isinstance(probe_map, dict):
+        probe_map = {"probe_devices": [], "probe_info": []}
     probe_devices = probe_map.get("probe_devices") or []
+    probes_units = payload.get("probes_units") or ""
 
     modules = {}
     for section in ("grillplatform", "distance"):
@@ -278,12 +283,15 @@ def _wizard_install_info_from_payload(payload, existing):
         "settings": settings_dep_values.get("display", {}) or {},
         "config": display_config,
     }
+    probes_settings = dict(settings_dep_values.get("probes", {}) or {})
+    if probes_units:
+        probes_settings["units"] = probes_units
     modules["probes"] = {
         # One entry per already-configured probe device, matching
         # wizardInstallInfoDefaults/Existing's `.append(device["module"])`
         # pattern -- profile_selected is always a list, never scalar.
         "profile_selected": [d.get("module") for d in probe_devices if d.get("module")],
-        "settings": settings_dep_values.get("probes", {}) or {},
+        "settings": probes_settings,
         "config": {},
     }
     return {"modules": modules, "probe_map": probe_map}

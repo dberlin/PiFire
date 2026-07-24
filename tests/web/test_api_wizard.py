@@ -225,6 +225,40 @@ def test_finish_fires_installer_when_stopped(ds, client, monkeypatch):
     assert st["percent"] == 0 and "Starting Install" in st["status"]
 
 
+def test_finish_uses_probe_map_from_payload(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    fired = []
+    monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))
+    monkeypatch.setattr(wr, "wizard_bus_kinds", lambda *a, **k: {})
+    monkeypatch.setattr(wr, "validate_bus_kinds", lambda *a, **k: None)
+    captured = {}
+    monkeypatch.setattr(wr, "store_wizard_install_info", lambda info: captured.update(info))
+    payload = {
+        "selections": {"grillplatform": "custom", "display": "ili9341b", "distance": "hcsr04"},
+        "settings_dep_values": {},
+        "display_config": {},
+        "probe_map": {
+            "probe_devices": [
+                {
+                    "device": "PAYLOAD_DEV",
+                    "module": "ads1115_adafruit",
+                    "module_filename": "ads1115_adafruit",
+                    "ports": ["ADC0"],
+                    "config": {},
+                }
+            ],
+            "probe_info": [],
+        },
+        "probes_units": "C",
+    }
+    resp = client.post("/api/wizard/finish", data=json.dumps(payload), content_type="application/json")
+    assert resp.status_code == 200
+    assert captured["probe_map"]["probe_devices"][0]["device"] == "PAYLOAD_DEV"
+    assert captured["modules"]["probes"]["settings"]["units"] == "C"
+    assert captured["modules"]["probes"]["profile_selected"] == ["ads1115_adafruit"]
+
+
 def test_finish_rejects_empty_selection(ds, client, monkeypatch):
     """The detached installer (wizard.py's run_wizard()) unconditionally
     indexes WizardInstallInfo["modules"]["grillplatform"|"display"|"distance"]
