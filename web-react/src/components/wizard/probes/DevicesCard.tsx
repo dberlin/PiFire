@@ -7,6 +7,7 @@ import {
   editDevice,
 } from "../../../helpers/wizard/probeReducer";
 import type { ProbeMap, ProbeModuleData } from "../../../helpers/wizard/probeTypes";
+import { validateBusKinds } from "../../../helpers/wizard/wizardApi";
 import { DeviceForm } from "./DeviceForm";
 
 export interface DevicesCardProps {
@@ -65,7 +66,7 @@ export function DevicesCard({ probeMap, modules, baseUrl, onChange }: DevicesCar
     });
   }
 
-  function submit() {
+  async function submit() {
     if (!form) return;
     const mod = modules[form.module];
     const result =
@@ -81,13 +82,28 @@ export function DevicesCard({ probeMap, modules, baseUrl, onChange }: DevicesCar
             newName: form.name,
             config: form.values,
           });
-    if (result.ok) {
-      onChange(result.probeMap);
-      setForm(null);
-      setError(null);
-    } else {
+    if (!result.ok) {
       setError(result.error);
+      return;
     }
+    // In-progress bus-kind coexistence check (§7). The full cross-subsystem
+    // check still runs at /finish; this is inline pre-Finish feedback.
+    let verdict: { ok: boolean; detail?: string };
+    try {
+      verdict = await validateBusKinds(baseUrl, result.probeMap.probe_devices);
+    } catch (err) {
+      // Advisory check; the authoritative bus-kind validation runs at /finish.
+      // Don't strand the user on a transient validate failure -- proceed.
+      console.warn("Wizard: bus-kind validation unavailable, proceeding", err);
+      verdict = { ok: true };
+    }
+    if (!verdict.ok) {
+      setError(verdict.detail ?? "This device's bus configuration conflicts with another device.");
+      return;
+    }
+    onChange(result.probeMap);
+    setForm(null);
+    setError(null);
   }
 
   return (
@@ -149,7 +165,7 @@ export function DevicesCard({ probeMap, modules, baseUrl, onChange }: DevicesCar
           onFieldChange={(label, value) =>
             setForm({ ...form, values: { ...form.values, [label]: value } })
           }
-          onSubmit={submit}
+          onSubmit={() => void submit()}
           onCancel={() => {
             setForm(null);
             setError(null);

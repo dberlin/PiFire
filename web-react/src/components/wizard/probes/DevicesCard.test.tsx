@@ -1,7 +1,17 @@
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ProbeMap, ProbeModuleData } from "../../../helpers/wizard/probeTypes";
 import { DevicesCard } from "./DevicesCard";
+
+rs.mock("../../../helpers/wizard/wizardApi", () => ({
+  validateBusKinds: rs.fn(async () => ({ ok: true })),
+}));
+
+import { validateBusKinds } from "../../../helpers/wizard/wizardApi";
+
+beforeEach(() => {
+  (validateBusKinds as ReturnType<typeof rs.fn>).mockClear();
+});
 
 afterEach(cleanup);
 
@@ -46,7 +56,7 @@ it("lists existing devices with module name", () => {
   expect(screen.getByRole("cell", { name: "ADS1115 Adafruit" })).toBeInTheDocument();
 });
 
-it("adding a device runs the reducer and emits the new probe_map", () => {
+it("adding a device runs the reducer and emits the new probe_map", async () => {
   const onChange = rs.fn();
   render(<DevicesCard probeMap={emptyMap} modules={modules} baseUrl="" onChange={onChange} />);
   fireEvent.change(screen.getByLabelText(/add device module/i), {
@@ -54,16 +64,18 @@ it("adding a device runs the reducer and emits the new probe_map", () => {
   });
   // default name pre-filled from friendly_name -> "ADS1115Adafruit"
   fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
-  expect(onChange).toHaveBeenCalledWith(
-    expect.objectContaining({
-      probe_devices: expect.arrayContaining([
-        expect.objectContaining({ device: "ADS1115Adafruit" }),
-      ]),
-    }),
+  await waitFor(() =>
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        probe_devices: expect.arrayContaining([
+          expect.objectContaining({ device: "ADS1115Adafruit" }),
+        ]),
+      }),
+    ),
   );
 });
 
-it("surfaces a duplicate-name error without emitting", () => {
+it("surfaces a duplicate-name error without emitting", async () => {
   const pm: ProbeMap = {
     probe_devices: [
       {
@@ -82,8 +94,45 @@ it("surfaces a duplicate-name error without emitting", () => {
     target: { value: "ads1115_adafruit" },
   });
   fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
-  expect(screen.getByRole("alert")).toHaveTextContent(/already exists/i);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/already exists/i));
   expect(onChange).not.toHaveBeenCalled();
+  expect(validateBusKinds).not.toHaveBeenCalled();
+});
+
+it("blocks an add whose bus kind conflicts and shows the detail [inline validate]", async () => {
+  (validateBusKinds as ReturnType<typeof rs.fn>).mockResolvedValueOnce({
+    ok: false,
+    detail: "'basic' I2C can't share a process with a USB-HID bus",
+  });
+  const onChange = rs.fn();
+  render(<DevicesCard probeMap={emptyMap} modules={modules} baseUrl="" onChange={onChange} />);
+  fireEvent.change(screen.getByLabelText(/add device module/i), {
+    target: { value: "ads1115_adafruit" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/USB-HID/i);
+  expect(onChange).not.toHaveBeenCalled();
+});
+
+it("emits when the bus kind validates clean", async () => {
+  const onChange = rs.fn();
+  render(<DevicesCard probeMap={emptyMap} modules={modules} baseUrl="" onChange={onChange} />);
+  fireEvent.change(screen.getByLabelText(/add device module/i), {
+    target: { value: "ads1115_adafruit" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+  await waitFor(() => expect(onChange).toHaveBeenCalled());
+});
+
+it("proceeds (fail-open) when validateBusKinds rejects [inline validate]", async () => {
+  (validateBusKinds as ReturnType<typeof rs.fn>).mockRejectedValueOnce(new Error("network"));
+  const onChange = rs.fn();
+  render(<DevicesCard probeMap={emptyMap} modules={modules} baseUrl="" onChange={onChange} />);
+  fireEvent.change(screen.getByLabelText(/add device module/i), {
+    target: { value: "ads1115_adafruit" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+  await waitFor(() => expect(onChange).toHaveBeenCalled());
 });
 
 it("deleting a device emits the cascade-updated map", () => {
