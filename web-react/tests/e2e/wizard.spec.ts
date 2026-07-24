@@ -151,3 +151,34 @@ test("grill platform step renders the platform module card and switches modules"
   const afterClear = await page.request.get("/api/wizard/state");
   expect((await afterClear.json()).has_draft).toBe(false);
 });
+
+test("distance step renders the sensor module card and switches modules", async ({ page }) => {
+  await page.goto("/wizard");
+  await expect(page.getByRole("heading", { name: "Welcome" })).toBeVisible();
+
+  // Welcome -> Grill Platform -> Probes -> Display -> Distance / Hopper
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByRole("heading", { name: "Grill Platform" })).toBeVisible();
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByRole("heading", { name: "Probes" })).toBeVisible();
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByRole("heading", { name: "Display" })).toBeVisible();
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByRole("heading", { name: "Distance / Hopper" })).toBeVisible();
+
+  const distanceSelect = page.getByRole("combobox", { name: "Module" });
+  await expect(distanceSelect).toBeVisible();
+
+  // sen0628 is the one distance module carrying a settings dependency (a
+  // usb_serial_device field); the other six render a bare card. Switching to it
+  // round-trips through /module-values, then the field appears. The label is the
+  // manifest's friendly_name for sen0628_device -- "Serial Device (USB)".
+  await distanceSelect.selectOption("sen0628");
+  await expect(page.getByLabel("Serial Device (USB)")).toBeVisible();
+
+  // Restore: clear the staged draft so the backend is left as found.
+  const distClear = await page.request.post("/api/wizard/draft", { data: { clear: true } });
+  expect(distClear.ok()).toBeTruthy();
+  const distAfterClear = await page.request.get("/api/wizard/state");
+  expect((await distAfterClear.json()).has_draft).toBe(false);
+});
