@@ -6,6 +6,7 @@ import {
   editProbe,
 } from "../../../helpers/wizard/probeReducer";
 import type { ProbeMap, ProbeProfile } from "../../../helpers/wizard/probeTypes";
+import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { PortForm } from "./PortForm";
 
 export interface PortsCardProps {
@@ -25,6 +26,7 @@ const EMPTY = { name: "", device_port: "", type: "Food", profile_id: "", enabled
 export function PortsCard({ probeMap, profiles, onChange }: PortsCardProps) {
   const [form, setForm] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const options = devicePortOptions(probeMap);
 
   function openEdit(p: ProbeMap["probe_info"][number]) {
@@ -96,7 +98,7 @@ export function PortsCard({ probeMap, profiles, onChange }: PortsCardProps) {
                 <button type="button" disabled={!!form} onClick={() => openEdit(p)}>
                   Edit
                 </button>
-                <button type="button" disabled={!!form} onClick={() => del(p.label)}>
+                <button type="button" disabled={!!form} onClick={() => setPendingDelete(p.label)}>
                   Delete
                 </button>
               </td>
@@ -134,6 +136,21 @@ export function PortsCard({ probeMap, profiles, onChange }: PortsCardProps) {
           }}
         />
       )}
+
+      {/* Legacy asked before removing a probe too -- _macro_probes_config.html:354-360
+          ("Delete Probe?"). `del` still owns the Primary-probe invariant, so a
+          confirmed-but-rejected delete closes the dialog and surfaces the guard
+          error in the alert slot above. */}
+      <ConfirmAction
+        open={pendingDelete !== null}
+        title="Delete Probe?"
+        message="This probe will be removed from the configuration."
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete !== null) del(pendingDelete);
+          setPendingDelete(null);
+        }}
+      />
     </section>
   );
 }

@@ -185,6 +185,14 @@
   color: #f4ede2;
   text-align: center;
 }
+/* Body copy for consequences the headline can't carry (a cascading delete).
+   Deliberately quieter than .pf-modal-title -- it is a sentence, not a shout. */
+.pf-modal-message {
+  font: 400 15px "Barlow";
+  color: #c9bdab;
+  text-align: center;
+  max-width: 34ch;
+}
 .pf-setpoint-row {
   display: flex;
   align-items: center;

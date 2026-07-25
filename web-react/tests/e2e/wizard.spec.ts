@@ -67,13 +67,17 @@ test("probes step: add device + probe, staged into draft", async ({ page }) => {
   // probe first so a freshly-added Primary below doesn't trip the
   // exactly-one-Primary guard (deleting the last Primary is only allowed
   // once no other probes remain -- delete non-Primary rows first).
+  // Delete is confirmed now ("Delete Probe?" -- PortsCard hosts a ConfirmAction),
+  // so each removal is two clicks: the row's Delete, then the dialog's Confirm.
   let nonPrimaryRow = portsSection.locator("tbody tr").filter({ hasNotText: "Primary" }).first();
   while (await nonPrimaryRow.count()) {
     await nonPrimaryRow.getByRole("button", { name: "Delete" }).click();
+    await portsSection.getByRole("button", { name: "Confirm" }).click();
     nonPrimaryRow = portsSection.locator("tbody tr").filter({ hasNotText: "Primary" }).first();
   }
   while (await portsSection.locator("tbody tr").count()) {
     await portsSection.locator("tbody tr").first().getByRole("button", { name: "Delete" }).click();
+    await portsSection.getByRole("button", { name: "Confirm" }).click();
   }
   await expect(portsSection.locator("tbody tr")).toHaveCount(0);
 

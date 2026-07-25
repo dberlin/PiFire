@@ -9,6 +9,7 @@ import {
 import type { ProbeMap, ProbeModuleData } from "../../../helpers/wizard/probeTypes";
 import { validateBusKinds } from "../../../helpers/wizard/wizardApi";
 import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
+import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { DeviceForm } from "./DeviceForm";
 
 export interface DevicesCardProps {
@@ -37,6 +38,7 @@ function defaultsFor(mod: ProbeModuleData): Record<string, unknown> {
 export function DevicesCard({ probeMap, modules, baseUrl, onChange }: DevicesCardProps) {
   const [form, setForm] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const probes = availableProbes(probeMap);
 
   function openAdd(module: string) {
@@ -130,7 +132,7 @@ export function DevicesCard({ probeMap, modules, baseUrl, onChange }: DevicesCar
                 <button type="button" onClick={() => openEdit(d)}>
                   Edit
                 </button>
-                <button type="button" onClick={() => onChange(deleteDevice(probeMap, d.device))}>
+                <button type="button" onClick={() => setPendingDelete(d.device)}>
                   Delete
                 </button>
               </td>
@@ -178,6 +180,21 @@ export function DevicesCard({ probeMap, modules, baseUrl, onChange }: DevicesCar
           }}
         />
       )}
+
+      {/* Deleting a device CASCADES: probeReducer.deleteDevice (probeReducer.ts:113-129)
+          drops every probe_info row whose `device` matches and scrubs those labels out
+          of any virtual device's probes_list. Legacy warned about exactly this before
+          acting -- _macro_probes_config.html:70-89 ("delProbeDeviceModal"). */}
+      <ConfirmAction
+        open={pendingDelete !== null}
+        title="Delete Probe Device?"
+        message="All probes associated with this device will also be deleted."
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete !== null) onChange(deleteDevice(probeMap, pendingDelete));
+          setPendingDelete(null);
+        }}
+      />
     </section>
   );
 }

@@ -45,17 +45,48 @@ it("lists probes and shows profile name only for ADC ports", () => {
   expect(screen.getByText("NA")).toBeInTheDocument();
 });
 
+const onePrimary = (): ProbeMap["probe_info"] => [
+  {
+    name: "Grill",
+    label: "Grill",
+    type: "Primary",
+    enabled: true,
+    device: "ADS1115",
+    port: "ADC0",
+    profile: {},
+  },
+];
+
+it("deleting a probe asks first instead of deleting on the click", () => {
+  const onChange = rs.fn();
+  render(<PortsCard probeMap={pmWith(onePrimary())} profiles={profiles} onChange={onChange} />);
+  fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+  expect(screen.getByText("Delete Probe?")).toBeInTheDocument();
+  expect(onChange).not.toHaveBeenCalled();
+});
+
+it("cancelling the delete dialog closes it and deletes nothing", () => {
+  const onChange = rs.fn();
+  render(<PortsCard probeMap={pmWith(onePrimary())} profiles={profiles} onChange={onChange} />);
+  fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByText("Delete Probe?")).not.toBeInTheDocument();
+  expect(onChange).not.toHaveBeenCalled();
+});
+
+it("confirming the delete emits the updated map", () => {
+  const onChange = rs.fn();
+  render(<PortsCard probeMap={pmWith(onePrimary())} profiles={profiles} onChange={onChange} />);
+  fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ probe_info: [] }));
+  expect(screen.queryByText("Delete Probe?")).not.toBeInTheDocument();
+});
+
 it("deleting the only Primary while a probe remains surfaces the guard error", () => {
   const pm = pmWith([
-    {
-      name: "Grill",
-      label: "Grill",
-      type: "Primary",
-      enabled: true,
-      device: "ADS1115",
-      port: "ADC0",
-      profile: {},
-    },
+    ...onePrimary(),
     {
       name: "Food",
       label: "Food",
@@ -68,7 +99,11 @@ it("deleting the only Primary while a probe remains surfaces the guard error", (
   ]);
   const onChange = rs.fn();
   render(<PortsCard probeMap={pm} profiles={profiles} onChange={onChange} />);
-  fireEvent.click(screen.getAllByRole("button", { name: /delete/i })[0]); // delete Grill (Primary)
+  fireEvent.click(screen.getAllByRole("button", { name: /^delete$/i })[0]); // Grill (Primary)
+  // The invariant is enforced after the confirmation, not instead of it: the
+  // dialog closes either way and the guard error takes over the alert slot.
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(screen.queryByText("Delete Probe?")).not.toBeInTheDocument();
   expect(screen.getByRole("alert")).toHaveTextContent(/Primary/i);
   expect(onChange).not.toHaveBeenCalled();
 });

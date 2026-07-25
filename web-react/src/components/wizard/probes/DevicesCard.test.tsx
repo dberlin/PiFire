@@ -135,23 +135,98 @@ it("proceeds (fail-open) when validateBusKinds rejects [inline validate]", async
   await waitFor(() => expect(onChange).toHaveBeenCalled());
 });
 
-it("deleting a device emits the cascade-updated map", () => {
-  const pm: ProbeMap = {
-    probe_devices: [
-      {
-        device: "ADS1115",
-        module: "ads1115_adafruit",
-        module_filename: "ads1115_adafruit",
-        ports: ["ADC0"],
-        config: {},
-      },
-    ],
-    probe_info: [],
-  };
-  const onChange = rs.fn();
-  render(<DevicesCard probeMap={pm} modules={modules} baseUrl="" onChange={onChange} />);
-  fireEvent.click(screen.getByRole("button", { name: /delete/i }));
-  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ probe_devices: [] }));
+// Deleting a device CASCADES (probeReducer.deleteDevice): every probe sitting
+// on it goes too. These four cases pin that the user is told so first.
+const pmWithAttachedProbe: ProbeMap = {
+  probe_devices: [
+    {
+      device: "ADS1115",
+      module: "ads1115_adafruit",
+      module_filename: "ads1115_adafruit",
+      ports: ["ADC0"],
+      config: {},
+    },
+  ],
+  probe_info: [
+    {
+      name: "Grill",
+      label: "Grill",
+      type: "Primary",
+      enabled: true,
+      device: "ADS1115",
+      port: "ADC0",
+      profile: {},
+    },
+  ],
+};
+
+describe("deleting a device", () => {
+  it("asks first instead of deleting on the click", () => {
+    const onChange = rs.fn();
+    render(
+      <DevicesCard
+        probeMap={pmWithAttachedProbe}
+        modules={modules}
+        baseUrl=""
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+    expect(screen.getByText("Delete Probe Device?")).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("names the cascade in the dialog", () => {
+    render(
+      <DevicesCard
+        probeMap={pmWithAttachedProbe}
+        modules={modules}
+        baseUrl=""
+        onChange={rs.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+    expect(
+      screen.getByText("All probes associated with this device will also be deleted."),
+    ).toBeInTheDocument();
+  });
+
+  it("cancelling closes the dialog and deletes nothing", () => {
+    const onChange = rs.fn();
+    render(
+      <DevicesCard
+        probeMap={pmWithAttachedProbe}
+        modules={modules}
+        baseUrl=""
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Delete Probe Device?")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText("ADS1115")).toBeInTheDocument();
+  });
+
+  it("confirming emits the cascade-updated map exactly once", () => {
+    const onChange = rs.fn();
+    render(
+      <DevicesCard
+        probeMap={pmWithAttachedProbe}
+        modules={modules}
+        baseUrl=""
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    // Both halves matter: the device row AND the probe that rode on it.
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ probe_devices: [], probe_info: [] }),
+    );
+    expect(screen.queryByText("Delete Probe Device?")).not.toBeInTheDocument();
+  });
 });
 
 it("opening edit backfills manifest defaults absent from saved config", () => {

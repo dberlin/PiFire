@@ -326,3 +326,11 @@
   width: 72px;
   text-align: right;
 }
+
+/* The wizard's probe cards host ConfirmAction, whose .pf-modal-scrim is
+   position:absolute (dashboard.css:165-172) rather than fixed. Without a
+   positioned ancestor it resolves against the initial containing block and
+   floats free of the card it belongs to. */
+.pf-probes-card {
+  position: relative;
+}

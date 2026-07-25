@@ -70,6 +70,8 @@ describe("ProbesStep", () => {
     const onChange = rs.fn();
     render(<ProbesStep state={state} working={working} onChange={onChange} baseUrl="" />);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    // A device delete cascades to its probes, so DevicesCard confirms first.
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         probe_map: expect.objectContaining({ probe_devices: [] }),
