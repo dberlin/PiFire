@@ -36,7 +36,10 @@ describe("buttonsForMode", () => {
   it.each(["Stop", "Error", ""])(
     "%s renders Startup / Prime / Monitor / Manual as command actions",
     async (mode) => {
-      const buttons = buttonsForMode(at(mode, { primeAmount: 25 }));
+      // startupCheck off explicitly: the fixture ships it ON, and with either
+      // gate configured Startup is a "startup" intent rather than a bare
+      // command (see the startup-confirmation block below).
+      const buttons = buttonsForMode(at(mode, { primeAmount: 25, startupCheck: false }));
       expect(buttons.map((b) => b.label)).toEqual(["Startup", "Prime", "Monitor", "Manual"]);
       expect(buttons.every((b) => b.action.type === "command")).toBe(true);
 
@@ -65,7 +68,7 @@ describe("buttonsForMode", () => {
   });
 
   it("Monitor mode renders Startup (command) / Stop (confirm, danger)", async () => {
-    const buttons = buttonsForMode(at("Monitor"));
+    const buttons = buttonsForMode(at("Monitor", { startupCheck: false }));
     expect(buttons.map((b) => b.label)).toEqual(["Startup", "Stop"]);
     expect(buttons[0].action.type).toBe("command");
     expect(buttons[1].action.type).toBe("confirm");
@@ -167,5 +170,56 @@ describe("buttonsForMode", () => {
       allowManualOutputs: true,
     });
     expect(buttons.map((b) => b.label)).not.toContain("Auger");
+  });
+});
+
+// I3: Flask gates ignition behind a modal (_macro_control_panel.html:89-90).
+// React shipped Startup as a bare command, so the safety check and the hold
+// prompt both disappeared. buttonsForMode returns the INTENT; which of the two
+// variants to render is ControlButtons' decision.
+describe("buttonsForMode startup confirmation", () => {
+  const startupAction = (dash: LiveState) =>
+    buttonsForMode(dash).find((b) => b.label === "Startup")?.action;
+
+  it("is a plain command when neither the check nor the hold prompt is configured", () => {
+    expect(
+      startupAction(at("Stop", { startupCheck: false, startToHoldPrompt: false })),
+    ).toMatchObject({ type: "command" });
+  });
+
+  it("asks for confirmation when safety.startup_check is set", () => {
+    expect(startupAction(at("Stop", { startupCheck: true, startToHoldPrompt: false }))).toEqual({
+      type: "startup",
+    });
+  });
+
+  it("asks for confirmation when the hold prompt is configured for Hold", () => {
+    expect(
+      startupAction(
+        at("Stop", { startupCheck: false, startToHoldPrompt: true, startupGotoMode: "Hold" }),
+      ),
+    ).toEqual({ type: "startup" });
+  });
+
+  it("asks for confirmation when both are set", () => {
+    expect(
+      startupAction(
+        at("Stop", { startupCheck: true, startToHoldPrompt: true, startupGotoMode: "Hold" }),
+      ),
+    ).toEqual({ type: "startup" });
+  });
+
+  it("stays a plain command when the hold prompt is set but the target mode is not Hold", () => {
+    // Flask's condition is `start_to_hold_prompt AND after_startup_mode ==
+    // 'Hold'` (_macro_control_panel.html:89) -- the prompt alone is not enough.
+    expect(
+      startupAction(
+        at("Stop", { startupCheck: false, startToHoldPrompt: true, startupGotoMode: "Smoke" }),
+      ),
+    ).toMatchObject({ type: "command" });
+  });
+
+  it("applies the same gate to the Startup button in Monitor mode", () => {
+    expect(startupAction(at("Monitor", { startupCheck: true }))).toEqual({ type: "startup" });
   });
 });

@@ -5,6 +5,9 @@ export type ButtonAction =
   | { type: "command"; run(c: CommandClient): Promise<CommandResult> }
   | { type: "setpoint" }
   | { type: "pwm" }
+  // Ignition behind Flask's startup modal. WHICH of its two variants to show is
+  // a presentation decision, so this carries only the intent.
+  | { type: "startup" }
   | { type: "confirm"; title: string; run(c: CommandClient): Promise<CommandResult> };
 
 export interface ControlButton {
@@ -27,18 +30,25 @@ const STOP: ControlButton = {
   variant: "danger",
   action: confirm("Stop the cook?", (c) => c.setMode("stop")),
 };
-const STARTUP: ControlButton = {
+// Flask gates ignition behind #startupModal whenever
+//   safety.startup_check OR (start_to_hold_prompt AND after_startup_mode == 'Hold')
+// (_macro_control_panel.html:89-90). Both halves matter: the hold prompt alone
+// is not enough -- it only fires when the configured post-startup mode is Hold.
+const startupButton = (dash: LiveState): ControlButton => ({
   label: "Startup",
   variant: "accent",
-  action: cmd((c) => c.setMode("startup")),
-};
+  action:
+    dash.startupCheck || (dash.startToHoldPrompt && dash.startupGotoMode === "Hold")
+      ? { type: "startup" }
+      : cmd((c) => c.setMode("startup")),
+});
 
 export function buttonsForMode(dash: LiveState): ControlButton[] {
   const mode = dash.currentMode;
 
   if (mode === "Stop" || mode === "Error" || mode === "") {
     return [
-      STARTUP,
+      startupButton(dash),
       { label: "Prime", action: cmd((c) => c.prime(dash.primeAmount || 10, "startup")) },
       { label: "Monitor", action: cmd((c) => c.setMode("monitor")) },
       { label: "Manual", action: cmd((c) => c.setMode("manual")) },
@@ -46,7 +56,7 @@ export function buttonsForMode(dash: LiveState): ControlButton[] {
   }
 
   if (mode === "Monitor") {
-    return [STARTUP, STOP];
+    return [startupButton(dash), STOP];
   }
 
   // Manual mode: the button row becomes the output control panel, mirroring

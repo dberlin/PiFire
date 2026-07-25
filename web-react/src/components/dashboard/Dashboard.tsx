@@ -376,7 +376,12 @@ export function Dashboard({
               )}
             </div>
 
-            <ControlButtons dash={dash} command={command} disabled={!health.alive} />
+            <ControlButtons
+              dash={dash}
+              command={command}
+              disabled={!health.alive}
+              apiBase={apiBase}
+            />
           </div>
 
           {/* Right: system + pills + hopper */}
