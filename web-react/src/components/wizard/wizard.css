@@ -610,3 +610,15 @@
 .pf-wizard-system-active-modal {
   border-color: color-mix(in srgb, #ff5a4d 55%, transparent);
 }
+
+/* ConfirmAction (dashboard/ConfirmAction.tsx) paints .pf-modal-scrim as
+   position:absolute. On the dashboard that is right -- its nearest positioned
+   ancestor is the full-bleed stage, so the scrim covers everything. In the
+   wizard the nearest positioned ancestor is the scrolling content area, so the
+   scrim stopped at the content edge and left the sticky header, the step pills
+   and the Back/Next footer at full brightness behind the dialog. Anchor it to
+   the viewport instead, above the wizard chrome. */
+.pf-wizard .pf-modal-scrim {
+  position: fixed;
+  z-index: 30;
+}
