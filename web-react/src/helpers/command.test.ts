@@ -274,3 +274,34 @@ describe("createCommand.recipeNextStep", () => {
     expect(res).toEqual({ ok: false, message: "network down" });
   });
 });
+
+describe("createCommand.hopperCheck", () => {
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  it('POSTs /api/control with exactly {"hopper_check": true}', async () => {
+    const fetchMock: ReturnType<typeof rs.fn> = rs.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({ result: "success" }),
+    }));
+    rs.stubGlobal("fetch", fetchMock);
+
+    await expect(createCommand("").hopperCheck()).resolves.toEqual({ ok: true, message: "" });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/control");
+    expect(JSON.parse(String(init.body))).toEqual({ hopper_check: true });
+  });
+
+  // The landmine this endpoint carries: it answers lowercase "success", not the
+  // "OK" that post() tests for (blueprints/api/routes.py:211). Routing this
+  // through post() unchanged would report every successful refresh as a failure.
+  it("treats lowercase success as ok", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => ({ ok: true, status: 201, json: async () => ({ result: "success" }) })),
+    );
+    expect((await createCommand("").hopperCheck()).ok).toBe(true);
+  });
+});

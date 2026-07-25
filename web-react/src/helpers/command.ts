@@ -75,6 +75,8 @@ export interface CommandClient {
   // this module's post() tests for -- see controlPatch below.
   /** Advance a running recipe to its next step (control_panel.js:530). */
   recipeNextStep(): Promise<CommandResult>;
+  /** Ask the distance sensor to re-measure the hopper (dash_default.js:878-897). */
+  hopperCheck(): Promise<CommandResult>;
 }
 
 /** Bridge POST /api/control into this module's CommandResult envelope.
@@ -184,5 +186,10 @@ export function createCommand(baseUrl: string): CommandClient {
     // merges the whole posted object, so any extra key is a value patched back
     // over whatever the control loop set meanwhile.
     recipeNextStep: () => controlPatch(baseUrl, { updated: true }),
+    // Flask re-reads GET /api/hopper 500ms later (dash_default.js:891). Not
+    // needed here: the socket pushes hopperLevel on its own
+    // (socket_io.py:258), so posting the flag and letting the next frame carry
+    // the answer is both simpler and correct at any measurement latency.
+    hopperCheck: () => controlPatch(baseUrl, { hopper_check: true }),
   };
 }

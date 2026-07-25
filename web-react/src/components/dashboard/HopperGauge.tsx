@@ -1,8 +1,27 @@
+import { useState } from "react";
 import type { HopperView } from "../../helpers/dashboard/deriveView";
 
 // Vertical pellet-hopper level with a subtle pellet-texture overlay; color and
 // caption escalate as it drains (green -> amber -> red / REFILL PELLETS).
-export function HopperGauge({ h }: { h: HopperView }) {
+export function HopperGauge({
+  h,
+  onRefresh,
+}: {
+  h: HopperView;
+  /** Asks the distance sensor to re-measure. Flask labels this "Refresh
+   *  Status" (_macro_dash_default.html:358). */
+  onRefresh(): Promise<unknown>;
+}) {
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <div
       data-pf="hopper"
@@ -79,13 +98,28 @@ export function HopperGauge({ h }: { h: HopperView }) {
       </div>
       <div
         style={{
-          font: "600 12px 'Barlow'",
-          letterSpacing: 2,
-          color: h.labelColor,
-          textTransform: "uppercase",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
         }}
       >
-        {h.label}
+        <span
+          style={{
+            font: "600 12px 'Barlow'",
+            letterSpacing: 2,
+            color: h.labelColor,
+            textTransform: "uppercase",
+          }}
+        >
+          {h.label}
+        </span>
+        {/* The reading is only as fresh as the last measurement, and the
+            controller does not re-measure on demand otherwise. Sits in the
+            card's existing caption row so the card's box does not change. */}
+        <button className="pf-toggle" onClick={refresh} disabled={refreshing}>
+          Refresh Status
+        </button>
       </div>
     </div>
   );

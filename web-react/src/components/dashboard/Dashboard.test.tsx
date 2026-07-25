@@ -31,6 +31,7 @@ function makeCommand(): CommandClient {
     manualOutput: rs.fn(async () => OK),
     manualPwm: rs.fn(async () => OK),
     recipeNextStep: rs.fn(async () => OK),
+    hopperCheck: rs.fn(async () => OK),
   };
 }
 
@@ -561,5 +562,30 @@ describe("Dashboard P-Mode control", () => {
     await waitFor(() => expect(screen.queryByText("P-Mode")).not.toBeInTheDocument());
     expect(screen.getByText("P-2")).toBeInTheDocument();
     expect(screen.queryByText("P-7")).not.toBeInTheDocument();
+  });
+});
+
+// M8: hasDistanceSensor is settings["modules"]["dist"] != "none"
+// (socket_io.py:270) and had zero consumers, so React rendered a pellet gauge --
+// reading a hard-coded level -- on grills with no distance sensor at all.
+describe("Dashboard hopper card", () => {
+  it("renders the hopper card when the grill has a distance sensor", () => {
+    renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor: true });
+    expect(screen.getByText("Hopper")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh Status" })).toBeInTheDocument();
+  });
+
+  it("hides the whole card when the grill has none, exactly as Flask does", () => {
+    renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor: false });
+    expect(screen.queryByText("Hopper")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh Status" })).not.toBeInTheDocument();
+  });
+
+  it("asks the controller to re-measure", async () => {
+    const user = userEvent.setup();
+    const command = makeCommand();
+    renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor: true }, { command });
+    await user.click(screen.getByRole("button", { name: "Refresh Status" }));
+    await waitFor(() => expect(command.hopperCheck).toHaveBeenCalled());
   });
 });

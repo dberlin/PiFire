@@ -23,6 +23,11 @@ export function demoDashAt(elapsedSec: number): LiveState {
   return {
     ...FIXTURE_DASH,
     currentMode: "Hold",
+    // The simulated grill HAS a distance sensor -- it is the thing draining the
+    // hopper level below. Without this the dashboard now hides the hopper card
+    // (Flask hides it when settings.modules.dist == "none"), and the demo would
+    // be modelling a grill it is not simulating.
+    hasDistanceSensor: true,
     displayMode: "Hold",
     hopperLevel,
     outputs: { fan: true, auger: augerOn, igniter: false, power: true },

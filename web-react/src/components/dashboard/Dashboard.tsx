@@ -463,7 +463,14 @@ export function Dashboard({
               />
               <Pill p={view.pillR} />
             </div>
-            <HopperGauge h={view.hopper} />
+            {/* Flask hides the whole hopper card when settings.modules.dist is
+                "none" (_macro_dash_default.html:416-420), which is exactly what
+                hasDistanceSensor is on the wire (socket_io.py:270). That field
+                had zero consumers, so React showed a pellet gauge -- reading a
+                hard-coded level -- on grills with no sensor at all. */}
+            {dash.hasDistanceSensor && (
+              <HopperGauge h={view.hopper} onRefresh={() => command.hopperCheck()} />
+            )}
           </div>
         </div>
 
