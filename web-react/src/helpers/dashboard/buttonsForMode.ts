@@ -46,6 +46,30 @@ const startupButton = (dash: LiveState): ControlButton => ({
 export function buttonsForMode(dash: LiveState): ControlButton[] {
   const mode = dash.currentMode;
 
+  // A running recipe drives the mode itself, so the ordinary ladder below would
+  // offer Smoke / Hold / Smoke+ -- the exact controls Flask HIDES during a
+  // recipe (control_panel.js:181-182 hides #active_group AND #inactive_group),
+  // because pressing them breaks out of it. This branch comes first for the
+  // same reason Flask's does.
+  //
+  // Gated on recipeStatus.recipeMode, not on a string compare against
+  // currentMode: the boolean is what the controller publishes
+  // (controller/runtime/modes/base.py:478) and the mode string is a second-hand
+  // copy that reads as the running SUB-mode in some frames.
+  if (dash.recipeStatus?.recipeMode) {
+    return [
+      {
+        label: "Next Step",
+        // Flask makes this a glowbutton while the recipe is paused waiting on a
+        // trigger (control_panel.js:207-217).
+        variant: dash.recipeStatus.paused ? "accent" : undefined,
+        action: cmd((c) => c.recipeNextStep()),
+      },
+      { label: "Shutdown", action: confirm("Shut down the grill?", (c) => c.setMode("shutdown")) },
+      STOP,
+    ];
+  }
+
   if (mode === "Stop" || mode === "Error" || mode === "") {
     return [
       startupButton(dash),

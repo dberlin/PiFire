@@ -30,6 +30,7 @@ function stubCommand(): CommandClient {
     setUnits: rs.fn(async () => OK),
     manualOutput: rs.fn(async () => OK),
     manualPwm: rs.fn(async () => OK),
+    recipeNextStep: rs.fn(async () => OK),
   };
 }
 

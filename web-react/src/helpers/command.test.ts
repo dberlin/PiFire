@@ -222,3 +222,55 @@ describe("timerStartWithOptions", () => {
     expect(r.ok).toBe(false);
   });
 });
+
+// recipeNextStep has no /api/set/... grammar behind it: Flask sends a bare
+// control patch (control_panel.js:530). That path answers lowercase "success",
+// not the "OK" that post() tests for, so it goes through notifyApi's postControl
+// rather than through post() -- routing it through post() would report every
+// successful advance as a failure.
+describe("createCommand.recipeNextStep", () => {
+  let fetchMock: ReturnType<typeof rs.fn>;
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  it('POSTs /api/control with exactly {"updated": true}', async () => {
+    fetchMock = rs.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({ result: "success" }),
+    }));
+    rs.stubGlobal("fetch", fetchMock);
+
+    await expect(createCommand("").recipeNextStep()).resolves.toEqual({ ok: true, message: "" });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/control");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ updated: true });
+  });
+
+  it("treats lowercase success as ok and anything else as a failure", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => ({
+        ok: true,
+        status: 201,
+        json: async () => ({ result: "error", message: "nope" }),
+      })),
+    );
+    const res = await createCommand("").recipeNextStep();
+    expect(res.ok).toBe(false);
+    expect(res.message).toBe("nope");
+  });
+
+  it("reports a network failure rather than throwing", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    const res = await createCommand("").recipeNextStep();
+    expect(res).toEqual({ ok: false, message: "network down" });
+  });
+});

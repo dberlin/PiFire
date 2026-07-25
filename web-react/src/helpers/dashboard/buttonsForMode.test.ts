@@ -23,6 +23,7 @@ function stubCommand(): CommandClient {
     setUnits: rs.fn(async () => OK),
     manualOutput: rs.fn(async () => OK),
     manualPwm: rs.fn(async () => OK),
+    recipeNextStep: rs.fn(async () => OK),
   };
 }
 
@@ -221,5 +222,75 @@ describe("buttonsForMode startup confirmation", () => {
 
   it("applies the same gate to the Startup button in Monitor mode", () => {
     expect(startupAction(at("Monitor", { startupCheck: true }))).toEqual({ type: "startup" });
+  });
+});
+
+// I4a: buttonsForMode used to fall through to the active-cook ladder for any
+// unrecognised mode, so a running recipe offered Smoke / Hold / Smoke+ --
+// exactly the buttons that break out of the recipe, and exactly the ones Flask
+// hides (control_panel.js:181-182).
+describe("buttonsForMode during a recipe", () => {
+  const inRecipe = (over: Partial<LiveState["recipeStatus"]> = {}, mode = "Recipe") =>
+    at(mode, {
+      recipeStatus: { ...FIXTURE_DASH.recipeStatus, recipeMode: true, ...over },
+    });
+
+  it("offers only the recipe controls", () => {
+    const labels = buttonsForMode(inRecipe()).map((b) => b.label);
+    expect(labels).toEqual(["Next Step", "Shutdown", "Stop"]);
+  });
+
+  it("offers none of the controls that would break out of the recipe", () => {
+    const labels = buttonsForMode(inRecipe()).map((b) => b.label);
+    expect(labels).not.toContain("Smoke");
+    expect(labels).not.toContain("Hold");
+    expect(labels).not.toContain("Smoke+");
+  });
+
+  it("keys off recipeStatus.recipeMode, not the mode string", () => {
+    // The controller publishes the boolean; currentMode can read as the running
+    // SUB-mode (controller/runtime/modes/base.py:478).
+    const labels = buttonsForMode(inRecipe({}, "Smoke")).map((b) => b.label);
+    expect(labels).toEqual(["Next Step", "Shutdown", "Stop"]);
+  });
+
+  it("is unaffected when recipeMode is false even in mode Recipe", () => {
+    const labels = buttonsForMode(
+      at("Recipe", { recipeStatus: { ...FIXTURE_DASH.recipeStatus, recipeMode: false } }),
+    ).map((b) => b.label);
+    expect(labels).toEqual(["Smoke", "Hold", "Smoke+", "Shutdown", "Stop"]);
+  });
+
+  it("Next Step advances the recipe", async () => {
+    const command = stubCommand();
+    const next = buttonsForMode(inRecipe())[0];
+    if (next.action.type === "command") await next.action.run(command);
+    expect(command.recipeNextStep).toHaveBeenCalled();
+  });
+
+  it("glows Next Step while the recipe is paused, and sends the same command", async () => {
+    const paused = buttonsForMode(inRecipe({ paused: true }))[0];
+    expect(paused.variant).toBe("accent");
+    expect(buttonsForMode(inRecipe({ paused: false }))[0].variant).toBeUndefined();
+
+    const command = stubCommand();
+    if (paused.action.type === "command") await paused.action.run(command);
+    expect(command.recipeNextStep).toHaveBeenCalled();
+  });
+
+  it("keeps Shutdown behind its confirmation, and Stop behind its own", () => {
+    const buttons = buttonsForMode(inRecipe());
+    expect(buttons[1].action.type).toBe("confirm");
+    expect(buttons[2].action.type).toBe("confirm");
+    expect(buttons[2].variant).toBe("danger");
+  });
+
+  // Flask's #recipe_group also carries a "Step N" link to /recipes, a Flask
+  // page. The app-shell decision forbids linking out -- it drops the live
+  // socket -- so it is deliberately absent. This assertion is what stops it
+  // coming back.
+  it("offers no link out to the Flask recipes page", () => {
+    const labels = buttonsForMode(inRecipe({ step: 3 })).map((b) => b.label);
+    expect(labels.some((l) => /step\s*\d/i.test(l))).toBe(false);
   });
 });

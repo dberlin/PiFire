@@ -1,3 +1,5 @@
+import { postControl } from "./notify/notifyApi";
+
 // REST command client using PiFire's command grammar (common/api_commands.py
 // _COMMAND_DISPATCH) via blueprints/api/routes.py. Writes only; live reads come
 // over the socket. Envelope: { result, message, data } (common/app.py api_response).
@@ -68,6 +70,28 @@ export interface CommandClient {
   setUnits(units: "F" | "C"): Promise<CommandResult>;
   manualOutput(output: ManualOutput, action?: "toggle" | "true" | "false"): Promise<CommandResult>;
   manualPwm(duty: number): Promise<CommandResult>;
+  // The two writes with no /api/set/... grammar behind them. Both go through
+  // POST /api/control, which answers lowercase "success" rather than the "OK"
+  // this module's post() tests for -- see controlPatch below.
+  /** Advance a running recipe to its next step (control_panel.js:530). */
+  recipeNextStep(): Promise<CommandResult>;
+}
+
+/** Bridge POST /api/control into this module's CommandResult envelope.
+ *  The fetch itself lives in helpers/notify/notifyApi.ts, which already carries
+ *  the two landmines that path has: the response says lowercase "success", and
+ *  the server merges the WHOLE posted object with RFC 7396 json_patch. One
+ *  implementation, not two. */
+async function controlPatch(
+  baseUrl: string,
+  patch: Record<string, unknown>,
+): Promise<CommandResult> {
+  try {
+    await postControl(baseUrl, patch);
+    return { ok: true, message: "" };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "network error" };
+  }
 }
 
 export function buildCommandUrl(baseUrl: string, segments: (string | number)[]): string {
@@ -154,5 +178,11 @@ export function createCommand(baseUrl: string): CommandClient {
     // send an out-of-range duty that the API would reject.
     manualPwm: (duty) =>
       post(baseUrl, ["set", "manual", "pwm", Math.min(100, Math.max(0, Math.round(duty)))]),
+    // `updated: true` alone is what Flask's "Goto Next Step" sends
+    // (control_panel.js:530); the control loop reads it as "re-evaluate the
+    // recipe now". Deliberately nothing else in the patch -- POST /api/control
+    // merges the whole posted object, so any extra key is a value patched back
+    // over whatever the control loop set meanwhile.
+    recipeNextStep: () => controlPatch(baseUrl, { updated: true }),
   };
 }

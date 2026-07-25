@@ -41,6 +41,7 @@ function stubCommand(): CommandClient {
     setUnits: rs.fn(ok),
     manualOutput: rs.fn(ok),
     manualPwm: rs.fn(ok),
+    recipeNextStep: rs.fn(ok),
   };
 }
 
