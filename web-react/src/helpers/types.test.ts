@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { FIXTURE_DASH } from "./fixture";
 
-describe("DashData fixture shape", () => {
+describe("LiveState fixture shape", () => {
   it("has the real top-level keys", () => {
     for (const k of [
       "uuid",

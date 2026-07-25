@@ -1,5 +1,5 @@
 import type { CommandClient, CommandResult, ManualOutput } from "../command";
-import type { DashData } from "../types";
+import type { LiveState } from "../types";
 
 export type ButtonAction =
   | { type: "command"; run(c: CommandClient): Promise<CommandResult> }
@@ -33,7 +33,7 @@ const STARTUP: ControlButton = {
   action: cmd((c) => c.setMode("startup")),
 };
 
-export function buttonsForMode(dash: DashData): ControlButton[] {
+export function buttonsForMode(dash: LiveState): ControlButton[] {
   const mode = dash.currentMode;
 
   if (mode === "Stop" || mode === "Error" || mode === "") {

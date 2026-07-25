@@ -1,4 +1,4 @@
-import type { DashData } from "../types";
+import type { LiveState } from "../types";
 
 // Pure presentation logic for the PiFire Dashboard (port of the design's
 // renderVals(), but driven by the REAL socket_dash_data contract instead of the
@@ -92,7 +92,7 @@ function outputView(on: boolean, onColor: string, onStatus: string): OutputView 
   };
 }
 
-function probeCard(fp: DashData["foodProbes"][number], units: "F" | "C"): ProbeCardView {
+function probeCard(fp: LiveState["foodProbes"][number], units: "F" | "C"): ProbeCardView {
   const hasTarget = fp.target > 0 && fp.targetReq;
   const done = hasTarget && fp.temp >= fp.target - 1;
   return {
@@ -119,7 +119,7 @@ function hopperView(level: number): HopperView {
   };
 }
 
-export function deriveView(dash: DashData): DashView {
+export function deriveView(dash: LiveState): DashView {
   const mode = dash.currentMode || "Stop";
   const cooking = COOKING_MODES.has(mode);
   const units = dash.tempUnits;

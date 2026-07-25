@@ -3,11 +3,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CommandClient, CommandResult } from "../../helpers/command";
 import { FIXTURE_DASH } from "../../helpers/fixture";
-import type { DashData } from "../../helpers/types";
+import type { LiveState } from "../../helpers/types";
 import { ControlButtons } from "./ControlButtons";
 
 const OK: CommandResult = { ok: true, message: "" };
-const at = (mode: string, over: Partial<DashData> = {}): DashData => ({
+const at = (mode: string, over: Partial<LiveState> = {}): LiveState => ({
   ...FIXTURE_DASH,
   currentMode: mode,
   ...over,

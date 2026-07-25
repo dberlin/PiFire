@@ -1,4 +1,4 @@
-import type { ConnectionPhase } from "../helpers/useDashData";
+import type { ConnectionPhase } from "../helpers/useLiveState";
 
 // Shown instead of the dashboard while we have no live data in `dev` mode.
 // Names the URL being contacted and whether it's reachable — never fakes data.

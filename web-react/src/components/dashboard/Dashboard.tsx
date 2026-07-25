@@ -3,8 +3,8 @@ import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
 import { deriveView, fmtDuration, type PillView } from "../../helpers/dashboard/deriveView";
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
-import type { AccentName, DashData } from "../../helpers/types";
-import type { ConnectionPhase } from "../../helpers/useDashData";
+import type { AccentName, LiveState } from "../../helpers/types";
+import type { ConnectionPhase } from "../../helpers/useLiveState";
 import { Banners } from "./Banners";
 import { ControlButtons } from "./ControlButtons";
 import { GrillGauge } from "./GrillGauge";
@@ -16,7 +16,7 @@ const ACCENTS: AccentName[] = ["ember", "ice", "crimson"];
 const SWATCH: Record<AccentName, string> = { ember: "#ff8a2b", ice: "#3cc7d0", crimson: "#ff6a5a" };
 
 interface DashboardProps {
-  dash: DashData;
+  dash: LiveState;
   command: CommandClient;
   phase: ConnectionPhase;
   controlAlive: boolean;

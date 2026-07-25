@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { getSettings } from "../helpers/settings/settingsApi";
-import { useDashData } from "../helpers/useDashData";
+import { useLiveState } from "../helpers/useLiveState";
 import { useAppPrefs } from "./AppPrefs";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { Dashboard } from "./dashboard/Dashboard";
@@ -9,7 +9,7 @@ import { Dashboard } from "./dashboard/Dashboard";
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 export function DashboardRoute() {
-  const { dash, phase, controlAlive, targetUrl, command } = useDashData();
+  const { live, phase, controlAlive, targetUrl, command } = useLiveState();
   const { accent, setAccent, animate, setAnimate } = useAppPrefs();
   const navigate = useNavigate();
 
@@ -43,7 +43,7 @@ export function DashboardRoute() {
   }
   return (
     <Dashboard
-      dash={dash}
+      dash={live}
       command={command}
       phase={phase}
       controlAlive={controlAlive}

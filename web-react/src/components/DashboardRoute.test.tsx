@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { FIXTURE_DASH } from "../helpers/fixture";
 
-const useDashDataMock = rs.fn();
+const useLiveStateMock = rs.fn();
 const navigateMock = rs.fn();
 const getSettingsMock = rs.fn();
 
-rs.mock("../helpers/useDashData", () => ({
-  useDashData: () => useDashDataMock(),
+rs.mock("../helpers/useLiveState", () => ({
+  useLiveState: () => useLiveStateMock(),
 }));
 rs.mock("react-router", () => ({
   useNavigate: () => navigateMock,
@@ -50,8 +50,8 @@ const command = {
 
 describe("DashboardRoute", () => {
   it("renders ConnectionStatus when there is no live/demo data yet", () => {
-    useDashDataMock.mockReturnValue({
-      dash: FIXTURE_DASH,
+    useLiveStateMock.mockReturnValue({
+      live: FIXTURE_DASH,
       phase: "connecting",
       controlAlive: false,
       targetUrl: "http://pifire.local:5000",
@@ -65,8 +65,8 @@ describe("DashboardRoute", () => {
   });
 
   it("renders the Dashboard with the current mode badge once phase is live", () => {
-    useDashDataMock.mockReturnValue({
-      dash: { ...FIXTURE_DASH, currentMode: "Hold" },
+    useLiveStateMock.mockReturnValue({
+      live: { ...FIXTURE_DASH, currentMode: "Hold" },
       phase: "live",
       controlAlive: true,
       targetUrl: "http://pifire.local:5000",
@@ -80,8 +80,8 @@ describe("DashboardRoute", () => {
   });
 
   it("navigates to /wizard when first_time_setup is true", async () => {
-    useDashDataMock.mockReturnValue({
-      dash: FIXTURE_DASH,
+    useLiveStateMock.mockReturnValue({
+      live: FIXTURE_DASH,
       phase: "live",
       controlAlive: true,
       targetUrl: "http://pifire.local:5000",
@@ -95,8 +95,8 @@ describe("DashboardRoute", () => {
   });
 
   it("does not navigate when first_time_setup is false", async () => {
-    useDashDataMock.mockReturnValue({
-      dash: FIXTURE_DASH,
+    useLiveStateMock.mockReturnValue({
+      live: FIXTURE_DASH,
       phase: "live",
       controlAlive: true,
       targetUrl: "http://pifire.local:5000",
@@ -111,8 +111,8 @@ describe("DashboardRoute", () => {
   });
 
   it("still renders the dashboard when the check fails (advisory only)", async () => {
-    useDashDataMock.mockReturnValue({
-      dash: FIXTURE_DASH,
+    useLiveStateMock.mockReturnValue({
+      live: FIXTURE_DASH,
       phase: "live",
       controlAlive: true,
       targetUrl: "http://pifire.local:5000",

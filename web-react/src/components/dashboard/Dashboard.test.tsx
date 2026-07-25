@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { CommandClient, CommandResult } from "../../helpers/command";
 import { FIXTURE_DASH } from "../../helpers/fixture";
-import type { DashData } from "../../helpers/types";
+import type { LiveState } from "../../helpers/types";
 import { renderRoute } from "../../test-utils";
 import { Dashboard } from "./Dashboard";
 
@@ -29,7 +29,10 @@ function makeCommand(): CommandClient {
   };
 }
 
-function renderDashboard(dash: DashData, overrides: Partial<Parameters<typeof Dashboard>[0]> = {}) {
+function renderDashboard(
+  dash: LiveState,
+  overrides: Partial<Parameters<typeof Dashboard>[0]> = {},
+) {
   return renderRoute(
     <Dashboard
       dash={dash}

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, renderHook } from "@testing-library/react";
-import type { DashData } from "./types";
-import { useDashData } from "./useDashData";
+import type { LiveState } from "./types";
+import { useLiveState } from "./useLiveState";
 
 type Handler = (...args: unknown[]) => void;
 
@@ -40,9 +40,9 @@ afterEach(() => {
 // this test build, so FORCE_DEMO is always false here — only the live-socket
 // branch is reachable. See task-2b22 brief: demo branch left uncovered
 // rather than contorting the module to reach it.
-describe("useDashData (live mode)", () => {
+describe("useLiveState (live mode)", () => {
   it("opens a socket.io connection and registers the expected handlers", () => {
-    renderHook(() => useDashData());
+    renderHook(() => useLiveState());
     expect(ioMock).toHaveBeenCalled();
     expect(Object.keys(handlers)).toEqual(
       expect.arrayContaining(["connect", "connect_error", "disconnect", "socket_dash_data"]),
@@ -50,7 +50,7 @@ describe("useDashData (live mode)", () => {
   });
 
   it("starts in the connecting phase and flips to live + emits listen_app_data on connect", () => {
-    const { result } = renderHook(() => useDashData());
+    const { result } = renderHook(() => useLiveState());
     expect(result.current.phase).toBe("connecting");
 
     act(() => handlers.connect());
@@ -59,19 +59,19 @@ describe("useDashData (live mode)", () => {
     expect(fakeSocket.emit).toHaveBeenCalledWith("listen_app_data");
   });
 
-  it("the first socket_dash_data frame replaces dash and flips phase to live", () => {
-    const { result } = renderHook(() => useDashData());
-    const frame: DashData = { ...result.current.dash, currentMode: "Hold", smokePlus: true };
+  it("the first socket_dash_data frame replaces the live state and flips phase to live", () => {
+    const { result } = renderHook(() => useLiveState());
+    const frame: LiveState = { ...result.current.live, currentMode: "Hold", smokePlus: true };
 
     act(() => handlers.socket_dash_data(frame));
 
-    expect(result.current.dash.currentMode).toBe("Hold");
-    expect(result.current.dash.smokePlus).toBe(true);
+    expect(result.current.live.currentMode).toBe("Hold");
+    expect(result.current.live.smokePlus).toBe(true);
     expect(result.current.phase).toBe("live");
   });
 
   it("disconnect flips phase to unreachable", () => {
-    const { result } = renderHook(() => useDashData());
+    const { result } = renderHook(() => useLiveState());
     act(() => handlers.connect());
     expect(result.current.phase).toBe("live");
 
@@ -81,7 +81,7 @@ describe("useDashData (live mode)", () => {
   });
 
   it("connect_error sets unreachable while not yet connected, but is a no-op once live", () => {
-    const { result } = renderHook(() => useDashData());
+    const { result } = renderHook(() => useLiveState());
 
     act(() => handlers.connect_error());
     expect(result.current.phase).toBe("unreachable");
@@ -94,13 +94,13 @@ describe("useDashData (live mode)", () => {
   });
 
   it("closes the socket on unmount", () => {
-    const { unmount } = renderHook(() => useDashData());
+    const { unmount } = renderHook(() => useLiveState());
     unmount();
     expect(fakeSocket.close).toHaveBeenCalled();
   });
 
-  it("derives controlAlive from dash state and exposes a command client + fallback targetUrl", () => {
-    const { result } = renderHook(() => useDashData());
+  it("derives controlAlive from the live state and exposes a command client + fallback targetUrl", () => {
+    const { result } = renderHook(() => useLiveState());
     expect(typeof result.current.controlAlive).toBe("boolean");
     expect(result.current.targetUrl).toBe("http://localhost:5000");
     expect(result.current.command).toBeTruthy();

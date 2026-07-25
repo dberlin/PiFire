@@ -1,7 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { CommandClient, CommandResult } from "../command";
 import { FIXTURE_DASH } from "../fixture";
-import type { DashData } from "../types";
+import type { LiveState } from "../types";
 import { buttonsForMode } from "./buttonsForMode";
 
 const OK: CommandResult = { ok: true, message: "" };
@@ -23,7 +23,7 @@ function stubCommand(): CommandClient {
   };
 }
 
-const at = (mode: string, over: Partial<DashData> = {}): DashData => ({
+const at = (mode: string, over: Partial<LiveState> = {}): LiveState => ({
   ...FIXTURE_DASH,
   currentMode: mode,
   ...over,

@@ -3,9 +3,9 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { FIXTURE_DASH } from "../helpers/fixture";
 
-const useDashDataMock = rs.fn();
-rs.mock("../helpers/useDashData", () => ({
-  useDashData: () => useDashDataMock(),
+const useLiveStateMock = rs.fn();
+rs.mock("../helpers/useLiveState", () => ({
+  useLiveState: () => useLiveStateMock(),
 }));
 
 // Default-resolved so every test has a valid promise: DashboardRoute now calls
@@ -60,8 +60,8 @@ function renderApp(initialEntry: string) {
 
 describe("App routing", () => {
   it("renders the dashboard at /", () => {
-    useDashDataMock.mockReturnValue({
-      dash: { ...FIXTURE_DASH, currentMode: "Hold" },
+    useLiveStateMock.mockReturnValue({
+      live: { ...FIXTURE_DASH, currentMode: "Hold" },
       phase: "live",
       controlAlive: true,
       targetUrl: "http://pifire.local:5000",
@@ -115,8 +115,8 @@ describe("App routing", () => {
   });
 
   it("the default export mounts its own AppPrefsProvider + browser router and renders the dashboard at /", () => {
-    useDashDataMock.mockReturnValue({
-      dash: { ...FIXTURE_DASH, currentMode: "Monitor" },
+    useLiveStateMock.mockReturnValue({
+      live: { ...FIXTURE_DASH, currentMode: "Monitor" },
       phase: "live",
       controlAlive: true,
       targetUrl: "http://pifire.local:5000",

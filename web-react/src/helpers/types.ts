@@ -37,7 +37,7 @@ export interface ProbeData {
   [k: string]: unknown;
 }
 
-export interface DashData {
+export interface LiveState {
   uuid: string;
   errors: string[];
   warnings: string[];

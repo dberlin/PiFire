@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { CommandClient, CommandResult } from "../../helpers/command";
 import { type ButtonAction, buttonsForMode } from "../../helpers/dashboard/buttonsForMode";
-import type { DashData } from "../../helpers/types";
+import type { LiveState } from "../../helpers/types";
 import { ConfirmAction } from "./ConfirmAction";
 import { PwmEntry } from "./PwmEntry";
 import { SetpointEntry } from "./SetpointEntry";
@@ -14,7 +14,7 @@ export function ControlButtons({
   command,
   disabled,
 }: {
-  dash: DashData;
+  dash: LiveState;
   command: CommandClient;
   disabled: boolean;
 }) {

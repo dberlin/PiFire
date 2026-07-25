@@ -1,11 +1,11 @@
 import { FIXTURE_DASH } from "./fixture";
-import type { DashData } from "./types";
+import type { LiveState } from "./types";
 
-// Live demo simulator: produces an evolving DashData so the UI animates without
+// Live demo simulator: produces an evolving LiveState so the UI animates without
 // a real PiFire. Models a "Hold at 225°F" cook — primary eases up to setpoint
 // then wobbles, the food probe climbs toward its target, and the auger pulses.
 // Pure function of elapsed seconds so it's deterministic and testable.
-export function demoDashAt(elapsedSec: number): DashData {
+export function demoDashAt(elapsedSec: number): LiveState {
   const t = elapsedSec;
 
   // Primary: climb 180 -> 225 with exponential ease-in, then oscillate ±3.

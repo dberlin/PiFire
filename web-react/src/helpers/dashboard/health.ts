@@ -1,10 +1,10 @@
-import type { DashData } from "../types";
+import type { LiveState } from "../types";
 
 // Substring of the exact error socket_io._check_control_status appends every 30s
 // when the control process is unreachable.
 const CONTROL_DOWN_MARKER = "control process did not respond";
 
-export function deriveControlAlive(dash: DashData): boolean {
+export function deriveControlAlive(dash: LiveState): boolean {
   return !(dash.errors ?? []).some((e) => e.includes(CONTROL_DOWN_MARKER));
 }
 
