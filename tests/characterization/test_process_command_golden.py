@@ -1272,39 +1272,49 @@ def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
 # control dict, read_control() serves the persisted blob and never the queue,
 # so every writer in a cycle sends a full copy built from the same stale read.
 #
-# HALF of this is now fixed at the seam. control["notify_data"] is three-way
-# merged per entry during the drain (common/common.py::merge_notify_data,
-# tests/characterization/test_control_writes_cross_writer.py), so a writer only
-# imposes the notification fields it actually changed -- which is why the
-# assertions below on the timer NOTIFY entry now show both writers surviving.
+# This is now FIXED at the seam, for the whole control dict. Each patch is
+# reduced against the blob as it stood when the drain began -- the ancestor
+# every writer in the cycle read -- so a member identical to that ancestor
+# carries no evidence its writer touched it and is dropped
+# (common/common.py::reduce_control_patch); notify_data additionally merges
+# element-wise (::merge_notify_data). See
+# tests/characterization/test_control_writes_cross_writer.py.
 #
-# The other half is UNCHANGED and still pinned: control["timer"] (and every
-# other scalar/object field) is applied with json_patch, which overwrites each
-# key the stale partial supplies. Extending the three-way merge to the whole
-# control dict would fix that too, but it changes the semantics of every field
-# every writer touches, so it is deliberately not done here.
+# ONE case remains, and it is information-theoretic rather than a gap: a writer
+# whose intent is to restore the value the cycle STARTED with produces a patch
+# indistinguishable from one that never touched it. `timer stop` against an
+# already-zero timer is the live example; it is pinned in
+# test_a_reset_to_the_ancestor_value_cannot_be_distinguished_from_silence.
+# Closing it requires writers to express deltas rather than whole states.
 #
-# The constraint for clients therefore still holds: ONE control write per user
-# operation, carrying every field that operation needs. That is why
-# /api/set/timer/start/{seconds}/{options} exists, and why web-react's timer bar
-# refuses a second write until the socket has republished the first
+# The single-write client forms below are therefore no longer load-bearing for
+# correctness -- but they are still the better shape (one user gesture, one
+# write, no reliance on merge subtleties) and are deliberately left in place.
+# That includes /api/set/timer/start/{seconds}/{options} and web-react's timer
+# bar refusing a second write until the socket has republished the first
 # (web-react/src/components/shell/TimerBar.tsx).
 # ---------------------------------------------------------------------------
 
 
-def test_a_flag_write_after_a_start_in_one_cycle_destroys_the_timer(seeded):
-    """start + shutdown, undrained: the timer is GONE.
+def test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer(seeded):
+    """start + shutdown, undrained: BOTH halves now survive. FIXED.
 
-    The shutdown command reads the pre-start blob, so its partial carries
-    timer.start/paused/end as ZEROS and is queued second -- and control['timer']
-    is a JSON object whose three keys the partial all supplies, so json_patch
-    overwrites every one of them. The user asked for a 10-minute timer that
-    shuts the grill down and got a `shutdown` flag on no timer at all.
+    This used to be the sharpest instance of the seam. The shutdown command
+    reads the pre-start blob, so its partial carried timer.start/paused/end as
+    ZEROS and was queued second; control['timer'] is a JSON object whose three
+    keys the partial all supplied, so json_patch overwrote every one of them.
+    The user asked for a 10-minute timer that shuts the grill down and got a
+    `shutdown` flag on no timer at all.
 
-    The notify_data half of this is now fixed: the start's `req=True` used to be
-    undone by the shutdown command's stale array, and survives the three-way
-    merge. control['timer'] is untouched by that merge, so the countdown is
-    still destroyed -- which is why the 4-argument form below remains the fix.
+    The drain now reduces each patch against the blob as it stood when the drain
+    began -- which is exactly what BOTH commands read. The shutdown command's
+    timer object is identical to that ancestor, so it carries no evidence the
+    command touched the timer and is dropped; only its `shutdown` flag lands.
+    Same for the start's `req`, via the notify_data element merge.
+
+    control['timer'] is reduced WHOLE rather than key-by-key
+    (common.common.CONTROL_COUPLED_MEMBERS): start/paused/end are one countdown
+    and merging them independently can synthesize a state no writer computed.
     """
     control = dsa.read_control()
     control["timer"] = {"start": 0, "paused": 0, "end": 0}
@@ -1317,11 +1327,9 @@ def test_a_flag_write_after_a_start_in_one_cycle_destroys_the_timer(seeded):
     dsa.execute_control_writes()
 
     after = dsa.read_control()
-    assert after["timer"] == {"start": 0, "paused": 0, "end": 0}
-    assert _timer_entry(after)["shutdown"] is True  # the flag landed; the timer did not
-    # ...but the start's own req is NO LONGER undone: the shutdown command did
-    # not touch `req`, so its stale copy of it is not imposed by the merge.
-    assert _timer_entry(after)["req"] is True
+    assert after["timer"] == {"start": FIXED_NOW, "paused": 0, "end": FIXED_NOW + 600}
+    assert _timer_entry(after)["shutdown"] is True  # the flag landed...
+    assert _timer_entry(after)["req"] is True  # ...and so did the timer
 
     # The 4-argument form is the fix: same intent, one write, both halves survive.
     c.SqliteQueue("queue_control_write").flush()

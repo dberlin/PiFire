@@ -704,6 +704,95 @@ def deep_update(dictionary, updates):
     return dictionary
 
 
+CONTROL_COUPLED_MEMBERS = frozenset({"timer"})
+"""Top-level control members that must be reduced WHOLE, never member-by-member.
+
+``control["timer"]`` is a value object: ``start``/``paused``/``end`` describe one
+countdown and only mean anything together, and the code branches on their
+combinations -- ``_cmd_set_timer`` resumes or starts depending on
+``paused == 0``, and clears depending on ``start != 0``. Reducing its members
+independently can therefore synthesize a state no writer ever computed: a `stop`
+(which zeroes all three) racing a `pause` (which sets ``paused`` and carries the
+other two unchanged) yields ``{start: 0, paused: <now>, end: 0}``, a "paused"
+timer with no countdown, which makes the NEXT `start` take the unpause branch and
+arm an already-expired timer.
+
+So the whole object is kept or dropped together: if any member differs from the
+ancestor, that writer computed a timer state and its version is taken intact.
+
+``control["manual"]`` looks similar (``change``/``output`` are equally coupled)
+but does NOT need this: the control loop clears both to False and OVERWRITEs
+after acting (controller/runtime/modes/base.py), so the ancestor's ``change`` is
+False at the start of every cycle and no writer's value can collide with it.
+It is a one-shot command slot, not persistent state.
+"""
+
+
+def reduce_control_patch(patch, base, coupled=CONTROL_COUPLED_MEMBERS):
+    """Drop from a queued control patch every member that already equals ``base``.
+
+    This is the general half of the control-write seam fix; see
+    :func:`merge_notify_data` for the ``notify_data`` half and
+    ``common/datastore_accessors.py::execute_control_writes`` for the drain that
+    uses both.
+
+    Nearly every ``write_control(control, WriteKind.MERGE)`` call site queues the
+    WHOLE control dict it read, not a minimal partial -- so each patch carries a
+    stale copy of every field the writer never touched, and the last patch of a
+    control cycle used to impose all of them. ``base`` is the control blob as it
+    stood when the drain began, which is exactly what every writer in that cycle
+    read (the blob changes only when the control loop drains or overwrites it).
+    A member whose incoming value already equals ``base`` therefore carries no
+    evidence that this writer touched it, and imposing it would revert whatever
+    an earlier writer in the same cycle did.
+
+    Dropping such members is safe precisely because the patch is applied as a
+    MERGE: an absent key is silence, not deletion. That is the asymmetry with
+    :func:`merge_notify_data` -- dict members travel partial, so a missing key
+    means "unmentioned"; array elements travel whole, so a missing element means
+    "deleted".
+
+    :param patch: the queued partial (already null-stripped)
+    :param base: the common ancestor -- the pre-drain control blob
+    :param coupled: member names to reduce whole rather than member-by-member;
+        see :data:`CONTROL_COUPLED_MEMBERS`. Nested levels are never treated as
+        coupled, so the name cannot match accidentally further down the tree.
+    :return: a new dict containing only the members that differ from ``base``
+
+    Note the one thing this cannot recover: a writer whose intent is to set a
+    member back to the value ``base`` already holds produces a patch identical
+    to ``base`` in that member, and is indistinguishable from a writer that
+    never touched it. `/api/set/timer/stop` against an already-zero timer is the
+    live example. That is information the queue does not carry, not a defect in
+    the reduction; closing it needs writers to express deltas rather than whole
+    states. See
+    tests/characterization/test_control_writes_cross_writer.py::
+    test_a_reset_to_the_ancestor_value_cannot_be_distinguished_from_silence.
+    """
+    if not isinstance(base, Mapping) or not isinstance(patch, Mapping):
+        return copy.deepcopy(patch)
+    reduced = {}
+    for key, value in patch.items():
+        if key not in base:
+            # New member: the writer is adding it, so it is necessarily a change.
+            reduced[key] = copy.deepcopy(value)
+            continue
+        base_value = base[key]
+        if key in coupled:
+            # All-or-nothing: see CONTROL_COUPLED_MEMBERS.
+            if value != base_value:
+                reduced[key] = copy.deepcopy(value)
+            continue
+        if isinstance(value, Mapping) and isinstance(base_value, Mapping):
+            nested = reduce_control_patch(value, base_value, coupled=frozenset())
+            if nested:
+                reduced[key] = nested
+            continue
+        if value != base_value:
+            reduced[key] = copy.deepcopy(value)
+    return reduced
+
+
 def notify_data_key(entry):
     """The identity of a ``control["notify_data"]`` element: ``(label, type)``.
 

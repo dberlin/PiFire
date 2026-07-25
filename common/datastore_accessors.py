@@ -19,7 +19,13 @@ import math
 import time
 
 from common import datastore
-from common.common import WriteKind, generate_uuid, merge_notify_data, strip_null_members
+from common.common import (
+    WriteKind,
+    generate_uuid,
+    merge_notify_data,
+    reduce_control_patch,
+    strip_null_members,
+)
 from common.defaults import (
     METRIC_COLUMNS,
     default_control,
@@ -88,14 +94,20 @@ def execute_control_writes():
     strip_null_members) so the merge only ever adds or overwrites keys -- never
     deletes -- preserving the historical deep_update contract.
 
-    ``notify_data`` -- the only array in the control dict -- does NOT go through
-    json_patch, which replaces arrays wholesale (RFC 7386). Writers cannot see
-    the pending queue, so every writer in a control cycle builds its full array
-    from the same stale read and the last one applied would discard the rest.
-    Instead it is three-way merged per entry against the blob as it stood when
-    this drain began -- the state every writer in this cycle read -- so each
-    patch imposes only the fields it actually changed. See
-    :func:`common.common.merge_notify_data`.
+    Each partial is then THREE-WAY merged before it is applied. Nearly every
+    call site queues the whole control dict it read, and read_control() cannot
+    see this queue, so without that the last patch of a control cycle imposes a
+    stale copy of every field it never touched and silently reverts every writer
+    ahead of it. The common ancestor is the blob as it stood when this drain
+    began -- exactly what every writer in the cycle read, since the blob changes
+    only here or on an OVERWRITE. Members already equal to it are dropped from
+    the patch (:func:`common.common.reduce_control_patch`), so a patch imposes
+    only what its writer actually changed.
+
+    ``notify_data`` needs one extra step: it is an array, and json_patch replaces
+    arrays wholesale (RFC 7386), so it is additionally merged element-wise
+    against the ancestor, keyed on (label, type)
+    (:func:`common.common.merge_notify_data`).
 
     :param None
 
@@ -110,7 +122,7 @@ def execute_control_writes():
     # Captured ONCE, before any patch lands: this is the common ancestor for
     # every writer in this cycle, since control:general only changes when the
     # control loop drains or overwrites it.
-    base_notify_data = read_control().get("notify_data") if q.length() > 0 else None
+    base = read_control() if q.length() > 0 else None
     while q.length() > 0:
         command = q.pop()
         if command is None:
@@ -130,12 +142,19 @@ def execute_control_writes():
                 stripped,
                 origin,
             )
+        # Reduce FIRST: a notify_data array identical to the ancestor is dropped
+        # here, which is the correct outcome (the writer did not touch it) and
+        # saves the element merge entirely. If it survived, it genuinely differs
+        # and needs merging against what earlier patches in this batch left.
+        patch = reduce_control_patch(patch, base)
         if "notify_data" in patch:
             patch["notify_data"] = merge_notify_data(
-                base_notify_data,
+                base.get("notify_data"),
                 read_control().get("notify_data"),
                 patch["notify_data"],
             )
+        if not patch:
+            continue  # nothing this writer changed; json_patch would be a no-op
         datastore.execute_write(
             "UPDATE kv SET value = json_patch(value, ?) WHERE key = 'control:general'", (json.dumps(patch),)
         )

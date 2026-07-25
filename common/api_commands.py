@@ -570,11 +570,16 @@ def _timer_start_with_options(data, control, arglist, index, now, kind):
     an expired timer with 'shutdown' set shuts the grill down mid-cook.
 
     Both flags and the countdown are set on the SAME control dict and written
-    once. They cannot be split across requests: every web-process write queues
-    the whole control dict, read_control() never sees the pending queue, and the
-    queued partials are applied with SQLite json_patch (RFC 7396), which
-    REPLACES the notify_data array wholesale -- so the last write of a batch
-    silently undoes the flags the earlier ones set.
+    once. That used to be load-bearing for correctness: splitting them across
+    requests meant the last write of a control cycle silently undid the earlier
+    ones. The drain now three-way merges each queued partial against the blob as
+    it stood when it began, so a split write survives
+    (common/common.py::reduce_control_patch, ::merge_notify_data), and this form
+    is no longer the only safe way to arm a timer with expiry actions.
+
+    It is still the RIGHT way, and is kept: the server-clock rationale above is
+    entirely independent of the merge, as are this form's input rejections
+    below. One gesture, one write, no reliance on merge subtleties.
 
     Deliberately does NOT unpause. The bare `start` form is also the resume
     command and ignores its seconds argument when the timer is paused; doing

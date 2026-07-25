@@ -121,6 +121,56 @@ def test_notify_data_cross_writer_merge_parity(store):
         assert st.read_control()["notify_data"] == expected
 
 
+def test_whole_dict_cross_writer_merge_parity(store):
+    # Same seam, now for every member of the control dict rather than just the
+    # notify_data array: SqliteStore reduces then json_patches, InMemoryStore
+    # reduces then deep_updates, and they must land on the same state. Both
+    # writers below queue the WHOLE dict from the same pre-drain read, which is
+    # what every production call site does.
+    from common.common import WriteKind
+    from controller.runtime.store import InMemoryStore
+
+    base = {
+        "mode": "Stop",
+        "updated": False,
+        "s_plus": False,
+        "primary_setpoint": 0,
+        "settings_update": False,
+        "manual": {"change": False, "output": False, "pwm": 100},
+        "timer": {"start": 0, "paused": 0, "end": 0},
+    }
+
+    def _writer(**changes):
+        stale = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
+        for key, value in changes.items():
+            if isinstance(value, dict):
+                stale[key].update(value)
+            else:
+                stale[key] = value
+        return stale
+
+    expected = {
+        "mode": "Hold",
+        "updated": True,
+        "s_plus": True,
+        "primary_setpoint": 225,
+        "settings_update": True,
+        "manual": {"change": "fan", "output": True, "pwm": 100},
+        "timer": {"start": 500.0, "paused": 0, "end": 1100.0},
+    }
+
+    mem = InMemoryStore()
+    for st in (store, mem):
+        st.write_control({k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}, WriteKind.OVERWRITE)
+        st.write_control(_writer(mode="Hold", primary_setpoint=225, updated=True), WriteKind.MERGE, origin="app")
+        st.write_control(_writer(s_plus=True), WriteKind.MERGE, origin="app-socketio")
+        st.write_control(_writer(settings_update=True), WriteKind.MERGE, origin="app")
+        st.write_control(_writer(manual={"change": "fan", "output": True}), WriteKind.MERGE, origin="app")
+        st.write_control(_writer(timer={"start": 500.0, "end": 1100.0}), WriteKind.MERGE, origin="display")
+        st.execute_control_writes()
+        assert st.read_control() == expected
+
+
 def test_sqlite_update_metrics_amend_last_parity(store):
     # update_metrics(metrics) amends the last record in place rather than
     # appending, matching InMemoryStore's update behavior.
