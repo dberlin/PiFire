@@ -3,7 +3,7 @@ Characterization + refactor tests for notify.notifications.send_notifications.
 
 Pins the exact (title, body, channel, query_args) tuple produced by every live
 event string, plus the sender fan-out gating, before/through the EVENTS-table
-refactor (Phase H). All network/apprise senders are mocked -- no real
+refactor. All network/apprise senders are mocked -- no real
 notification is ever sent by this module.
 """
 
@@ -112,7 +112,7 @@ def test_pellet_level_low(monkeypatch):
 def test_grill_error_01(monkeypatch):
     rec = _capture(monkeypatch, "Grill_Error_01")
     assert rec["title"] == "Grill Error!"
-    # Approved behavior change (Task 2): "exceded" -> "exceeded" typo fix.
+    # Behavior change: "exceded" -> "exceeded" typo fix.
     assert rec["body"].startswith("Grill exceeded maximum temperature limit of 550F! Shutting down. ")
     assert rec["channel"] == "pifire_error_alerts"
     assert rec["query_args"] == {"value1": "550"}
@@ -177,8 +177,8 @@ def test_unmatched_event_falls_back(monkeypatch):
 
 
 def test_grill_error_00_is_dropped_and_falls_back(monkeypatch, caplog):
-    # Approved behavior change (Task 2): Grill_Error_00 is a dead, never-emitted
-    # event and is dropped from EVENTS -- it now routes to the Unknown-Notification
+    # Behavior change: Grill_Error_00 is a dead, never-emitted event and is
+    # dropped from EVENTS -- it now routes to the Unknown-Notification
     # fallback, logged at ERROR.
     with caplog.at_level("ERROR", logger="events"):
         rec = _capture(monkeypatch, "Grill_Error_00")
@@ -190,8 +190,8 @@ def test_grill_error_00_is_dropped_and_falls_back(monkeypatch, caplog):
 
 
 def test_grill_warning_is_dropped_and_falls_back(monkeypatch, caplog):
-    # Approved behavior change (Task 2): Grill_Warning is a dead, never-emitted
-    # event and is dropped from EVENTS -- it now routes to the Unknown-Notification
+    # Behavior change: Grill_Warning is a dead, never-emitted event and is
+    # dropped from EVENTS -- it now routes to the Unknown-Notification
     # fallback, logged at ERROR.
     with caplog.at_level("ERROR", logger="events"):
         rec = _capture(monkeypatch, "Grill_Warning")

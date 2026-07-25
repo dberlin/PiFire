@@ -17,7 +17,7 @@ export function alnum(s: string): string {
     .join("");
 }
 
-// "virtual" in device["module"] -- a substring match on the module KEY (§3),
+// "virtual" in device["module"] -- a substring match on the module KEY,
 // NOT the manifest device_specific.type field.
 export function isVirtualDevice(d: ProbeDevice): boolean {
   return d.module.includes("virtual");
@@ -50,7 +50,7 @@ export function addDevice(
   if (input.name === "")
     return { ok: false, error: "Device name is blank. Please enter a device name." };
   // FIX 3: an all-punctuation name sanitizes to "" -- reject (legacy checked
-  // only the raw name and let an empty sanitized key through, §9).
+  // only the raw name and let an empty sanitized key through).
   if (deviceName === "")
     return {
       ok: false,
@@ -87,7 +87,7 @@ export function editDevice(
     return { ok: false, error: "Device name already exists. Please choose a unique name." };
   }
   const original = pm.probe_devices[idx];
-  // module/module_filename/ports are immutable on edit (§2 edit_device).
+  // module/module_filename/ports are immutable on edit.
   const updated: ProbeDevice = {
     device: newName,
     module: original.module,
@@ -116,7 +116,7 @@ export function deleteDevice(pm: ProbeMap, name: string): ProbeMap {
     .filter((d) => d.device !== name)
     .map((d) => {
       // FIX 4: scrub the cascade-deleted probe labels out of any virtual
-      // device's probes_list (legacy leaves them dangling, §2 delete_device).
+      // device's probes_list (legacy leaves them dangling).
       if (!isVirtualDevice(d)) return d;
       const list = (d.config.probes_list as string[] | undefined) ?? [];
       const scrubbed = list.filter((label) => !doomed.has(label));
@@ -146,7 +146,7 @@ function buildProbe(profiles: ProbeProfile[], input: ProbeInput): Probe {
     enabled: input.enabled,
     device,
     port,
-    // Value copy, not a FK -- probes carry a profile snapshot (§5).
+    // Value copy, not a FK -- probes carry a profile snapshot.
     profile: matched ? { ...matched } : {},
   };
 }
@@ -162,8 +162,8 @@ function violatesPrimaryRule(list: Probe[]): boolean {
 }
 
 // A delete/type-change breaks the invariant only when it takes a map that
-// HAS a Primary into a >0-probes / 0-Primary state (delta-based, human-approved
-// 2026-07-24). Do NOT replace call sites with a raw post-state check.
+// HAS a Primary into a >0-probes / 0-Primary state (delta-based). Do NOT
+// replace call sites with a raw post-state check.
 function breaksPrimaryInvariant(before: Probe[], after: Probe[]): boolean {
   return !violatesPrimaryRule(before) && violatesPrimaryRule(after);
 }
@@ -225,8 +225,8 @@ export function editProbe(
       error: "Probe name is already used or too similar to another. Choose a different name.",
     };
   }
-  // Rename cascade into virtual probes_list (§3 pre-step): rewrite the old
-  // label to the new one everywhere it is consumed.
+  // Rename cascade into virtual probes_list: rewrite the old label to the
+  // new one everywhere it is consumed.
   const probe_devices =
     probe.label === originalLabel
       ? pm.probe_devices
@@ -242,7 +242,7 @@ export function editProbe(
             },
           };
         });
-  // Virtual-port reposition (§3 branches 3a/3b/3c), reproducing
+  // Virtual-port reposition (branches 3a/3b/3c below), reproducing
   // blueprints/probeconfig/routes.py:321-358 exactly. Build the working
   // probe_info as a mutable copy; the reposition branches splice it in
   // place, mirroring legacy list.insert/pop index arithmetic.
@@ -267,7 +267,8 @@ export function editProbe(
       }
     }
   } else {
-    // Does this probe feed any virtual device? (§3 in_virtual_device)
+    // Does this probe feed any virtual device? (mirrors the legacy
+    // `in_virtual_device` list, routes.py:306)
     const consuming = probe_devices
       .filter(
         (d) =>

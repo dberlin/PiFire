@@ -163,7 +163,7 @@ def test_terminal_stop_write():
 
 
 # --------------------------------------------------------------------------
-# ALLOWED_EXITS legality (Task 10: populated graph, enforced)
+# ALLOWED_EXITS legality: populated graph, enforced
 # --------------------------------------------------------------------------
 
 # Committed snapshot of the whole legal-exit graph -- the single-place FSM view.
@@ -182,7 +182,7 @@ _EXPECTED_GRAPH = {
 
 
 def test_allowed_exits_matches_committed_snapshot():
-    # Whole state-machine graph in one asserted view (Step 3 inspectability).
+    # Whole state-machine graph in one asserted view.
     assert transitions_mod.ALLOWED_EXITS == _EXPECTED_GRAPH
 
 
@@ -224,13 +224,13 @@ def _guard_dump():
 
 
 def test_guards_match_committed_snapshot():
-    # The whole declarative guard graph in one asserted view (Task 17 Step 1).
+    # The whole declarative guard graph in one asserted view.
     assert _guard_dump() == _EXPECTED_GUARDS
 
 
 def test_every_guard_edge_target_is_a_legal_exit():
     # Cross-check the two declarations agree: every GUARDS edge's `to` is in the
-    # source mode's ALLOWED_EXITS (Task 17 Step 2). The universal "*" edges apply
+    # source mode's ALLOWED_EXITS. The universal "*" edges apply
     # to every mode, so their target must be a legal exit for EVERY declared mode.
     allowed = transitions_mod.ALLOWED_EXITS
     for mode, phases in transitions_mod.GUARDS.items():

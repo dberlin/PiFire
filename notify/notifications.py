@@ -216,7 +216,7 @@ def _evt_pellet_low(ctx):
 def _evt_grill_error_01(ctx):
     maxtemp = ctx["settings"]["safety"]["maxtemp"]
     body = (
-        "Grill exceeded maximum temperature limit of "  # typo fix: "exceded" -> "exceeded" (deliberate, see Task 1 note)
+        "Grill exceeded maximum temperature limit of "  # typo fix: "exceded" -> "exceeded"
         + str(maxtemp)
         + ctx["unit"]
         + "! Shutting down. "
@@ -281,7 +281,7 @@ def _evt_control_stopped(ctx):
 #
 # NOTE: "Grill_Error_00" and "Grill_Warning" are intentionally omitted -- both are dead,
 # never-emitted events (verified zero emitters repo-wide); they now route to the
-# Unknown-Notification fallback (approved behavior change, see plan Task 2).
+# Unknown-Notification fallback.
 EVENTS = {
     "Probe_Temp_Achieved": _evt_probe_achieved,
     "Probe_Temp_Limit_Alarm": _evt_probe_limit,

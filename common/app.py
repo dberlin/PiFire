@@ -280,7 +280,7 @@ def render_cookfile_page(cookfilestruct, settings, cookfilename, filenameonly, e
     (mutating it in place: `\\n`->`<br>` on comment text, epoch->display-time on
     metadata start/end) and returns the `cookfile/index.html` render Response.
 
-    Extracted (route-cleanup Task 3) from six byte-identical copies of the
+    Extracted from six byte-identical copies of the
     reshape+render block: `blueprints/cookfile/routes.py` (thumbSelected,
     ulmedia/ulthumb, repairCF, upgradeCF, delmedialist) and
     `blueprints/history/routes.py` (opencookfile). The six copies differed only
@@ -315,7 +315,7 @@ def render_cookfile_page(cookfilestruct, settings, cookfilename, filenameonly, e
 
 def classify_cookfile_error(status):
     """
-    Shared cook-file error classifier. Extracted (route-cleanup Task 3) from
+    Shared cook-file error classifier. Extracted from
     five byte-identical copies of the `errortype` if/elif/else in
     `blueprints/cookfile/routes.py` (repairCF x2, upgradeCF, delmedialist) and
     `blueprints/history/routes.py` (opencookfile). Returns the errortype string
@@ -416,7 +416,7 @@ def save_settings_and_flag_update(settings, control, *flags, origin="app"):
 def api_response(result, message=None, data=None):
     """
     Shared Socket.IO response envelope. Relocated from
-    blueprints/mobile/socket_io.py's `_response` (Phase D, Task 5) so it can
+    blueprints/mobile/socket_io.py's `_response` so it can
     be shared by any future Socket.IO consumer.
 
     Returns a bare dict (no jsonify/status) with the same key order as the

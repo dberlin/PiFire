@@ -1,6 +1,6 @@
 """Golden-master characterization tests for the OUTER control loop
 (controller.runtime.controller.Controller), extracted from control.py's old
-__main__ in Task 10.1.
+__main__.
 
 These pin the ORCHESTRATION behavior -- mode dispatch, Stop/Error cleanup,
 boot-to-monitor, switch-off, timers, hopper/settings/probe-profile handling --
@@ -259,20 +259,19 @@ def test_tick_stop_mode_cleanup(monkeypatch):
 
 
 def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
-    """DESIGN CALL (flagged for human review -- see task report): a failed
-    create_cookfile() must not crash the control loop. On a real grill an
-    uncaught exception here kills the whole `control.py` process and
-    crash-loops the controller at every cook's end -- see the LIVE crash this
-    commit also fixes (common/common.py process_metrics raising TypeError on
-    a None starttime). tick()'s Stop/Error cleanup block wraps ONLY the
-    `create_cookfile()` call in try/except, logs via `self.eventLogger.error`,
-    and continues -- every OTHER Stop-cleanup step (outputs off, status/
-    control reset, display clear) still runs unconditionally, same as
-    `test_tick_stop_mode_cleanup` above.
+    """DESIGN CALL: a failed create_cookfile() must not crash the control loop.
+    On a real grill an uncaught exception here kills the whole `control.py`
+    process and crash-loops the controller at every cook's end -- see the LIVE
+    crash this commit also fixes (common/common.py process_metrics raising
+    TypeError on a None starttime). tick()'s Stop/Error cleanup block wraps
+    ONLY the `create_cookfile()` call in try/except, logs via
+    `self.eventLogger.error`, and continues -- every OTHER Stop-cleanup step
+    (outputs off, status/control reset, display clear) still runs
+    unconditionally, same as `test_tick_stop_mode_cleanup` above.
 
-    Item 3 of the metrics-safety fix wave: a failed cookfile write is
-    potential cook-data loss and previously was only visible on the passive
-    Logs page (self.eventLogger.error above). It now ALSO gets surfaced
+    A failed cookfile write is potential cook-data loss and previously was
+    only visible on the passive Logs page (self.eventLogger.error above). It
+    now ALSO gets surfaced
     through the same active mechanism the dashboard error banners already
     read -- store.read_errors()/write_errors() (the same "errors" list
     build_devices()/build_display() append to on hardware-load failure),

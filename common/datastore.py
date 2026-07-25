@@ -251,7 +251,7 @@ class transaction:
 
 def init():
     connection()
-    _first_boot_import()  # filled in Task 13
+    _first_boot_import()
 
 
 def _first_boot_import():

@@ -12,7 +12,7 @@ Description: Backup/restore of the settings and pellet databases, plus the
   order to back it up), which is why they cannot stay in common/common.py:
   common/common.py is the bottom utility layer that datastore_accessors
   imports from, so leaving them there means the bottom layer calls upward --
-  a module-level cycle the moment Task 9 deletes the compatibility facade.
+  a module-level cycle once the compatibility facade below is deleted.
 
   common/common.py re-imports these names for now so that existing
   `common.common.X` call sites keep resolving.

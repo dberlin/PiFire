@@ -4,7 +4,7 @@ state axis (orthogonal to `control["mode"]`) -- BEFORE it is formalized as a
 
 These pin the CURRENT string values and the one mode x status coupling
 (a Monitor-mode error keeps the OEM controller powered on) so the refactor
-in Task 2/3 can be verified byte-identical: zero assertion edits here after
+can be verified byte-identical: zero assertion edits here after
 the enum + predicate land.
 
 See docs/superpowers/specs/2026-07-18-status-second-dimension-design.md and

@@ -73,7 +73,7 @@ Display base class definition
 """
 
 
-# FlexObject types added for the "ember" dashboard redesign (Tasks 16-23).
+# FlexObject types added for the "ember" dashboard redesign.
 # Objects of these types receive the resolved accent palette at build time.
 NEW_EMBER_FLEX_TYPES = {
     "probe_card",
@@ -91,7 +91,7 @@ class DisplayBase:
         # Init Global Variables and Constants
         self.config = config
 
-        # Ember dashboard accent palette (Task 24), used by the new flex object types.
+        # Ember dashboard accent palette, used by the new flex object types.
         self.accent = resolve_accent(self.config.get("accent_theme", "Ember"))
 
         self.dev_pins = dev_pins
@@ -416,7 +416,7 @@ class DisplayBase:
                 self.status_data.get("hopper_level_enabled", False) == False
                 and object_data["type"] == "hopper_vertical"
             ):
-                # D1: Hopper level reporting is not enabled - skip the ember hopper card entirely
+                # Hopper level reporting is not enabled - skip the ember hopper card entirely
                 continue
             if self.status_data.get("hopper_level", None) != None and object_data["type"] == "hopper_vertical":
                 object_data.setdefault("data", {})
@@ -424,7 +424,7 @@ class DisplayBase:
                 object_data["data"]["enabled"] = self.status_data.get("hopper_level_enabled", False)
 
             if object_data["type"] in NEW_EMBER_FLEX_TYPES:
-                # Inject the resolved accent palette (Task 24) for the new ember dash objects
+                # Inject the resolved accent palette for the new ember dash objects
                 object_data["accent"] = self.accent
 
             FlexObject_ClassName = FlexObject_TypeMap[object_data["type"]]
@@ -436,7 +436,7 @@ class DisplayBase:
         num_food_probes = min(len(self.config["probe_info"]["food"]), self.display_data["metadata"]["max_food_probes"])
         self.food_probe_label_map = {}
         self.food_probe_name_map = {}
-        # Ember dashboard probe_card_N slots (Task 24) mirror the food_probe_gauge_N mapping above.
+        # Ember dashboard probe_card_N slots mirror the food_probe_gauge_N mapping above.
         self.probe_card_label_map = {}
         self.probe_card_name_map = {}
         for index in range(num_food_probes):
@@ -451,7 +451,7 @@ class DisplayBase:
             if "food_probe_gauge_" in object["name"] and object["name"] not in list(self.food_probe_label_map.keys()):
                 pass
             elif "probe_card_" in object["name"] and object["name"] not in list(self.probe_card_label_map.keys()):
-                # D1/no-probes handling: hide any probe_card slot with no configured food probe
+                # Hide any probe_card slot with no configured food probe
                 pass
             else:
                 if "food_probe_gauge_" in object["name"]:

@@ -497,7 +497,7 @@ def _cf_update_metadata():
 
 def _rename_graph_label(filename, old_label, new_label):
     """
-    Multi-step graph-label rename extracted (route-cleanup Task 3) from
+    Multi-step graph-label rename extracted from
     `cookfile_update`'s `graph_labels` branch. Steps: read graph_labels.json ->
     rename the label (safe-name) -> write graph_labels.json -> read
     graph_data.json -> remap `probe_mapper` + relabel chart_data -> write

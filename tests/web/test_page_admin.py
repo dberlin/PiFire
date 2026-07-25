@@ -8,15 +8,13 @@ harness (live_server, read-back helpers, precondition seeding).
 REBOOT / SHUTDOWN / RESTART HAZARD -- read this before touching this file
 ==========================================================================
 This repo has had THREE real, unintended `sudo reboot`/`sudo shutdown`
-dispatches fired by test/verification code in past sessions (see the
-project memory note `feedback_neutralize_os_system_before_verification.md`).
+dispatches fired by test/verification code.
 `admin_page`'s `reboot`/`shutdown`/`restart` actions, and the `setting`
 action's `factorydefaults` and (successful) `restoresettings` sub-actions,
 all eventually call one of `common.system.reboot_system()` /
 `shutdown_system()` / `restart_scripts()`.
 
-Two things make a naive `os.system` patch INSUFFICIENT here (both are
-exactly the failure modes the memory note documents):
+Two things make a naive `os.system` patch INSUFFICIENT here:
 
 1. `common/system.py`'s `reboot_system()`/`shutdown_system()`/
    `restart_scripts()` dispatch PRIMARILY via `subprocess.run(["sudo",
@@ -29,10 +27,10 @@ exactly the failure modes the memory note documents):
    `blueprints.admin.routes`'s own module globals when it calls
    `reboot_system()` -- NOT in `common.system`. A
    `mock.patch("common.system.reboot_system", ...)` would silently fail to
-   intercept the call admin_page() actually makes (this is precisely the
-   "moving code out from under a mock" failure mode from the memory note,
-   here caused by a `from X import Y` rather than a code move, but with the
-   identical silent-disarm effect).
+   intercept the call admin_page() actually makes (this is a "moving code
+   out from under a mock" failure mode: a `from X import Y` binds the name
+   into the importing module's own globals, so patching the origin module
+   doesn't touch what the caller actually looks up).
 3. Belt-and-suspenders is also NOT enough on its own: `default_settings()`
    ships `platform.real_hw = True` (correct for production, meaning
    `is_real_hardware()` -- which these three functions gate their real

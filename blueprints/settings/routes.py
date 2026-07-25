@@ -479,12 +479,10 @@ def _settings_pwm(settings, control, controller, event):
     # max_duty_cycle -- but edited on a DIFFERENT tab/endpoint, so untouched
     # by this handler -- consistent with a min/max change made here. Without
     # this, narrowing min/max alone can leave either of these outside the
-    # new bounds, which the schema now rejects at write_settings() (S2 Task
-    # 5's gate): real regressions this closes, found running the full suite
-    # post-flip (see the S2 Task 5 report).
+    # new bounds, which the schema now rejects at write_settings().
     min_dc = settings["pwm"]["min_duty_cycle"]
     max_dc = settings["pwm"]["max_duty_cycle"]
-    # 1. pwm.profiles (PwmSettings._check_profiles, S2 Task 2) -- the duty-
+    # 1. pwm.profiles (PwmSettings._check_profiles) -- the duty-
     #    cycle profile table, edited on /settings/pwm_duty_cycle.
     for profile in settings["pwm"]["profiles"]:
         profile["duty_cycle"] = max(min_dc, min(max_dc, profile["duty_cycle"]))
@@ -724,8 +722,8 @@ def settings_page(action=None):
             result = handler(settings, control, controller, event)
         except SettingsValidationError as exc:
             # Single choke point for every write_settings()/
-            # save_settings_and_flag_update() call this blueprint makes (S2
-            # Task 5): the settings tree failed strict validation and was
+            # save_settings_and_flag_update() call this blueprint makes:
+            # the settings tree failed strict validation and was
             # NOT persisted. Route to whichever of this blueprint's two
             # existing error styles the failing handler itself uses --
             # JSON-body handlers (probe_config_save/smartstart/

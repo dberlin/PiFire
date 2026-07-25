@@ -99,8 +99,8 @@ def _channel_to_celsius(data):
 
 class ThermoworksCloudDevice:
     """Owns the cache of last-known channel readings. The background thread
-    that populates the cache is started separately via start() (Task 3), so
-    unit tests can construct this and poke _cache directly without spinning
+    that populates the cache is started separately via start(), so unit
+    tests can construct this and poke _cache directly without spinning
     a real thread."""
 
     def __init__(self, email, password, device_serial, num_probes, poll_interval):

@@ -82,21 +82,10 @@ export function HistoryChart({ times, series, height = 360 }: HistoryChartProps)
   // built in refs (updated here, inside the effect), and either rebuilds
   // the plot or calls setData.
   //
-  // This replaces what used to be two effects here: a no-deps "mirror"
-  // effect whose only job was smuggling fresh `times`/`series` past a
-  // shape-only-deps rebuild effect that read them from a ref, plus that
-  // rebuild effect itself (a third, separate effect fed `setData`).
-  // Nothing enforced the mirror and rebuild effects staying adjacent and in
-  // declaration order, and a reordering would have silently seeded a fresh
-  // plot with stale (or pre-mount-default empty) data -- correctness
-  // actually came from useRef's lazy initializer running during the first
-  // render, before either effect, not from effect ordering itself, but
-  // nothing enforced the two staying paired that way either. Folding
-  // everything into one effect removes the coupling entirely: `times`/
-  // `series` are just ordinary, always-fresh closure values here, because
-  // this effect legitimately reruns on every data tick (it's in the
-  // dependency array below) -- no smuggling via a ref written by a sibling
-  // effect is needed.
+  // `times`/`series` are ordinary, always-fresh closure values here -- this
+  // effect reruns on every data tick (it's in the dependency array below),
+  // so there's no need to smuggle fresh data in via a ref written by a
+  // sibling effect.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;

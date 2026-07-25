@@ -9,10 +9,9 @@ import { TextField } from "../fields/TextField";
 import { Toggle } from "../fields/Toggle";
 
 // Each notify service is a loosely-typed bag: the tab only reads/writes the
-// scalar fields the legacy `_settings_notify` form submits (see the design
-// spec), and rebuilds the WHOLE `notify_services` subtree on Save so every
-// other key (WLED preset grids, onesignal uuid/app_id/devices, ...) survives
-// byte-identical.
+// scalar fields the legacy `_settings_notify` form submits, and rebuilds the
+// WHOLE `notify_services` subtree on Save so every other key (WLED preset
+// grids, onesignal uuid/app_id/devices, ...) survives byte-identical.
 type NotifyService = Record<string, unknown>;
 type NotifyServicesState = Record<string, NotifyService>;
 

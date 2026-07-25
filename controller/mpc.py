@@ -34,7 +34,7 @@ from controller.mpc_allocator import allocate
 _DEFAULTS = dict(
     # R_dQ (firing-move penalty) kept low: 1.0 was over-damped -> sluggish rise AND
     # a looser steady band. 0.1 gives ~4x faster setpoint-step rise and a tighter
-    # band, at a modest step-overshoot increase. See experiments/mpc_risetime.py.
+    # band, at a modest step-overshoot increase.
     n_horizon=24,
     t_step=25.0,
     control_period=5.0,
@@ -66,7 +66,7 @@ _DEFAULTS = dict(
     enable_fan_input=False,
     # est_q_dist deliberately slow: a fast disturbance estimate chases unmeasured
     # transients and worsens setpoint-step overshoot; 0.05 cut step overshoot ~30%
-    # with no change to the steady-state band. See experiments/mpc_overshoot_fix.py.
+    # with no change to the steady-state band.
     est_q_temp=1e-2,
     est_q_dist=0.05,
     est_r_meas=0.04,

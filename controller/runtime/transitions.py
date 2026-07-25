@@ -16,8 +16,8 @@ kind semantics:
     given). Authoritative kinds never touch primary_setpoint.
 
 Raises TransitionError if to_mode is not in the source mode's ALLOWED_EXITS.
-ALLOWED_EXITS is filled in Task 10; while it is empty the legality check is a
-no-op passthrough.
+A mode absent from ALLOWED_EXITS skips the legality check entirely (a no-op
+passthrough).
 """
 
 from dataclasses import dataclass
@@ -75,8 +75,9 @@ STATUS_TRANSITIONS = (
 
 
 # The explicit mode-transition graph: every legal `from -> {to, ...}` edge the
-# seam may perform. Derived from the transition inventory + the characterization
-# suite. `to` targets for the cycling modes are data-driven (control['next_mode']),
+# seam may perform, cross-checked against the characterization suite (see the
+# committed-snapshot tests in tests/unit/runtime/test_request_transition.py).
+# `to` targets for the cycling modes are data-driven (control['next_mode']),
 # so a mode's set is the UNION of its universal safety/switch-off targets
 # (Error/Reignite/Stop) and every mode it can legally advance into.
 #
@@ -151,7 +152,7 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
 
 
 # ==========================================================================
-# Phase 2 -- declarative phased guard-engine.
+# Declarative phased guard engine.
 #
 # The transition GUARDS live in data: {mode: {phase: [Edge, ...]}}. An engine
 # (evaluate_phase) walks a mode's edges for a pipeline phase in priority order
@@ -163,15 +164,15 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
 #   - "pre_act":  the in-loop SAFETY section, BEFORE any actuation (on_tick).
 #     Max-temp + flameout here read the fresh in-loop `ptemp`.
 # Moving a guard relative to actuation would change whether the auger/fan cycle
-# on the trip tick (observable), so the wiring (Task 14) inserts evaluate_phase
-# AT those two points only.
+# on the trip tick (observable), so the wiring inserts evaluate_phase AT those
+# two points only.
 #
-# GUARD PREDICATE SIGNATURE (deviation from the plan's (ctx, control, ptemp, now)):
-# predicates take `mode_obj` as well, because over_max_temp needs the mode's
-# settings (mode_obj.settings) and the flameout wrap needs the mode name. The
+# GUARD PREDICATE SIGNATURE: predicates take (mode_obj, ctx, control, ptemp, now)
+# -- mode_obj is needed because over_max_temp needs the mode's settings
+# (mode_obj.settings) and the flameout wrap needs the mode name. The
 # pre_loop/pre_act flameout split into *_setup (afterstarttemp) and *_inloop
 # (ptemp) variants is required by live code -- setup_safety and check_safety read
-# DIFFERENT temperatures (verified in smoke.py/hold.py; inventory rows 4-11).
+# DIFFERENT temperatures (verified in smoke.py/hold.py).
 # ==========================================================================
 
 
@@ -256,7 +257,8 @@ def _flameout_edges(*, setup):
 # at the pre_act safety point) and is stateful (edge-detection on the previous
 # switch reading), so a pure pre_act guard would both move it relative to
 # actuation and drop the edge-detection. It stays as the inline seam call in
-# base.run (like the bespoke recipe/startup writes left direct in Phase 1).
+# base.run, like the bespoke recipe/startup writes, which also call the seam
+# directly rather than going through GUARDS.
 GUARDS: dict[Mode | str, dict[str, list]] = {
     "*": {  # "*" is a wildcard applying to every mode, NOT a Mode value.
         "pre_act": [

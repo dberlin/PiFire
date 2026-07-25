@@ -4,8 +4,8 @@ METHOD: RUN-THEN-FREEZE, golden-file oracle. Every case in CASES was executed
 ONCE against the pre-refactor `process_command` (common/common.py:2505-3168) and
 its complete observable footprint frozen into
 `tests/characterization/fixtures/process_command_golden.json`. That file is the
-CONTRACT. Tasks 6-7 (which decompose this 666-line function) may only pass if
-they reproduce it byte-for-byte.
+CONTRACT. Any refactor that decomposes this 666-line function into shared
+helpers may only pass if it reproduces the contract byte-for-byte.
 
 THIS FILE ONLY EVER *READS* THE GOLDEN. There is deliberately no capture/record
 mode, no `--update-golden` flag, and no committed capture script -- so there is
@@ -16,7 +16,7 @@ and this constant, in a diff a reviewer cannot miss. If you are refactoring
 process_command and a case fails: that is a behavior change. Fix the refactor,
 not the fixture.
 
-DELIBERATE RE-BASELINE (S2 Task 4, settings-writer strict matrix): fixed
+DELIBERATE RE-BASELINE (settings-writer strict matrix): fixed
 common/common.py's `convert_settings_units` to also convert
 `settings["pwm"]["temp_range_list"]` (a "degrees below setpoint" DELTA list
 that was never converted at all -- a real, pre-existing bug found while
@@ -277,8 +277,8 @@ def _case(cid, action, arglist, **kw):
 #   * p_mode / s_plus / lid_open_detected hardcoded
 #   * get/timer shutdown <-> keep_warm swapped (both False)
 # That is the same class of defect as the CANONICAL_VERSIONS build==0 collision:
-# a value a plausible slip can produce by accident proves nothing. Task 7 moves
-# these bodies into `_cmd_*` functions, which is exactly when such a slip
+# a value a plausible slip can produce by accident proves nothing. A refactor
+# that moves these bodies into `_cmd_*` functions is exactly when such a slip
 # happens.
 #
 # So every field gets a DISTINCT, non-default value:
@@ -503,8 +503,8 @@ CASES = [
     ),
 ]
 
-# The four manual outputs Task 6 will collapse into a shared `_manual_toggle`.
-# Each is generated identically here precisely so that collapse is provably
+# The four manual outputs a future refactor will collapse into a shared
+# `_manual_toggle` helper. Each is generated identically here precisely so that collapse is provably
 # behavior-preserving -- including the fan branch's extra `pwm = 100` reset on
 # 'false', which is the one asymmetry between them.
 _MANUAL_CONTROL = {"mode": "Manual"}
@@ -520,7 +520,7 @@ def _pins(output, value):
     saw the same value and the slip was invisible. Making the others the
     opposite means any wrong-pin read inverts the resolved toggle and is caught.
     This is the same discriminating-seed principle as _STATUS_A/_B, applied to
-    the four branches Task 6 collapses into one helper.
+    the four branches a future refactor collapses into one helper.
     """
     return {p: (value if p == output else not value) for p in _OUTPUTS}
 
@@ -557,8 +557,9 @@ CASES += [
     # with a default control that write is invisible -- seeding pwm=55 is what
     # makes it observable. Verified by mutation testing: without these two
     # cases, deleting the `control['manual']['pwm'] = 100` line passes the
-    # whole suite. Task 6 collapses these four branches into one helper; these
-    # cases are what stop that collapse from silently dropping the asymmetry.
+    # whole suite. A future refactor collapses these four branches into one
+    # helper; these cases are what stop that collapse from silently dropping
+    # the asymmetry.
     _case(
         "set_manual_fan_false_resets_pwm",
         "set",
@@ -592,7 +593,7 @@ CASES += [
     # ---- SYS ----------------------------------------------------------
     _case("sys_push", "sys", ["restart", "control"]),
     _case("sys_push_empty", "sys", []),
-    # ---- Fallback / unknown action (Task 7 must preserve exactly) ------
+    # ---- Fallback / unknown action (must be preserved exactly by any refactor) ------
     _case("unknown_action", "bogus", ["whatever"]),
     _case("none_action", None, ["whatever"]),
     _case("empty_string_action", "", ["whatever"]),
@@ -673,8 +674,8 @@ def _canonical_settings():
         -- i.e. the capture was polluted by an unrelated suite.
       * `get/versions` froze 1.10.10/build 70, which any version bump breaks.
 
-    All of those are red cases that have nothing to do with a Task 6-7 refactor,
-    and the only obvious escape from them is regenerating the golden -- exactly
+    All of those are red cases that have nothing to do with refactoring
+    process_command, and the only obvious escape from them is regenerating the golden -- exactly
     the act this suite's locks exist to prevent. So the fix is at the source:
     seed a fixed baseline and never read the machine's file.
 
@@ -859,8 +860,8 @@ def test_case_ids_are_unique():
 def test_golden_file_digest_is_pinned():
     """Tripwire against silent re-baselining.
 
-    The golden fixture is the equivalence oracle for the Task 6-7 decomposition
-    of process_command. Pinning its digest here means the contract cannot be
+    The golden fixture is the equivalence oracle for decomposing process_command
+    into shared helpers. Pinning its digest here means the contract cannot be
     regenerated without also hand-editing GOLDEN_SHA256 in this file -- an edit
     a reviewer cannot miss. If this fails, someone rewrote the oracle.
     """
@@ -875,13 +876,13 @@ def test_golden_file_digest_is_pinned():
 # ---------------------------------------------------------------------------
 # Explicit inline assertions for the load-bearing / easy-to-lose behaviors.
 # These duplicate part of the golden on purpose: a JSON blob is easy to skim
-# past, and these particular behaviors are the ones Tasks 6-7 are most likely
+# past, and these particular behaviors are the ones a refactor is most likely
 # to "clean up" without noticing they are contract.
 # ---------------------------------------------------------------------------
 
 
 def test_unknown_action_fallback_is_exact(seeded):
-    """Task 7 must preserve this fallback verbatim, message included."""
+    """A future refactor must preserve this fallback verbatim, message included."""
     assert api_commands.process_command(action="bogus", arglist=["x"], origin="test") == {
         "result": "ERROR",
         "message": "Action [bogus] not valid/recognized.",
@@ -944,8 +945,8 @@ def test_manual_toggle_rewrites_the_callers_arglist(seeded):
 def test_only_the_fan_branch_resets_manual_pwm_to_100(seeded):
     """The single asymmetry among the four manual outputs, stated explicitly.
 
-    Task 6 collapses power/igniter/fan/auger into one `_manual_toggle` helper.
-    Turning the FAN off also resets manual.pwm to 100; turning power/igniter/
+    A future refactor collapses power/igniter/fan/auger into one `_manual_toggle`
+    helper. Turning the FAN off also resets manual.pwm to 100; turning power/igniter/
     auger off does not. manual.pwm already defaults to 100, so this is only
     observable from a non-default seed -- which is exactly why deleting the
     reset survived an earlier version of this suite. Do not let the collapse
@@ -975,9 +976,9 @@ def test_get_status_reads_each_field_from_the_right_blob(seeded):
     """`mode` comes from CONTROL, `display_mode` from STATUS -- and four keys
     exist in both blobs.
 
-    get/status is the function's largest response builder (17 fields) and Task 7
-    moves its body into a `_cmd_*` function, which is exactly when a
-    right-key/wrong-blob slip happens. `mode`, `s_plus`, `prime_amount` and
+    get/status is the function's largest response builder (17 fields), and
+    moving its body into a `_cmd_*` function during a refactor is exactly when
+    a right-key/wrong-blob slip happens. `mode`, `s_plus`, `prime_amount` and
     `startup_timestamp` all exist in BOTH control and status, and `units` in
     both settings.globals and status, so every one of those is seeded to a
     different value on each side: reading the correct key off the wrong blob
@@ -1031,7 +1032,7 @@ def test_sys_pushes_the_padded_arglist(seeded):
 
 def test_kind_overwrite_is_honored_by_splus_but_ignored_by_pmode(seeded):
     """Wart #8: some branches hard-code WriteKind.MERGE and ignore `kind`.
-    Task 6 must not "consistently" thread `kind` through -- that is a change."""
+    A refactor must not "consistently" thread `kind` through -- that is a change."""
     c.SqliteQueue("queue_control_write").flush()
     api_commands.process_command(action="set", arglist=["splus", "true"], origin="test", kind=WriteKind.OVERWRITE)
     # OVERWRITE writes control:general directly; nothing is queued.

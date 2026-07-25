@@ -120,7 +120,7 @@ class GrillPlatform(SystemCommandsMixin):
                     pass
             raise
 
-        # Open the fan controller if PWM fan mode is selected (Task 2).
+        # Open the fan controller if PWM fan mode is selected.
         self.emc = None
         if self.pwm_fan:
             self._init_fan_controller()

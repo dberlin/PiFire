@@ -91,10 +91,10 @@ def _build_state(settings, control):
         # profile_selected is ALWAYS a list (verified against
         # wizardInstallInfoDefaults/Existing and prepare_wizard_data in
         # blueprints/wizard/wizard.py) -- for grillplatform/display/distance
-        # it holds exactly one module name (matches Task 1's single-default
-        # manifest), or is empty when there's no selection (e.g.
-        # wizardInstallInfoExisting()'s stale-module recovery path); for
-        # probes it may hold several device modules.
+        # it holds exactly one module name (the wizard manifest marks only one
+        # module per section as the default), or is empty when there's no
+        # selection (e.g. wizardInstallInfoExisting()'s stale-module recovery
+        # path); for probes it may hold several device modules.
         selections = {}
         for section in _SECTIONS:
             if section not in modules:
@@ -303,9 +303,9 @@ def wizard_module_values():
 
     `settings` come from the LIVE settings tree via
     get_settings_dependencies_values -- NOT manifest defaults -- so a switch
-    reproduces legacy behavior exactly (D1). `config` is display-only and
+    reproduces legacy behavior exactly. `config` is display-only and
     guarded with .get(module, {}) because a display module may never have been
-    configured (callout #2 -- legacy indexes it unguarded and KeyErrors)."""
+    configured -- legacy indexes it unguarded and KeyErrors."""
     payload = request.get_json(silent=True) or {}
     section = payload.get("section")
     module = payload.get("module")
@@ -475,7 +475,7 @@ def wizard_scan_bluetooth():
 @api_wizard_bp.route("/probes/validate-bus-kinds", methods=["POST"])
 def wizard_probes_validate_bus_kinds():
     """Per-device bus-kind coexistence check for the in-progress probe device
-    set only (settings=None, §7) -- deliberately excludes the live fan/distance
+    set only (settings=None) -- deliberately excludes the live fan/distance
     kinds so a mid-wizard edit doesn't false-positive against stale settings.
     The FULL cross-subsystem check still runs at /finish."""
     payload = request.get_json(silent=True) or {}

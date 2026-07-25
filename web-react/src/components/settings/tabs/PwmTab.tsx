@@ -51,8 +51,9 @@ export function PwmTab() {
 
   // Re-sync from the loader on revalidation via render-phase adjustment (the
   // repo's house style — NOT a useEffect; the React Compiler lint rule
-  // `react-hooks/set-state-in-effect` rejects setState-in-effect, and Task 1's
-  // Dashboard cook-timer established this `prev`-compare pattern. Do NOT suppress.)
+  // `react-hooks/set-state-in-effect` rejects setState-in-effect, and the
+  // Dashboard cook-timer established this `prev`-compare pattern. Do NOT
+  // suppress.)
   const [prevSettings, setPrevSettings] = useState(settings);
   if (settings !== prevSettings) {
     setPrevSettings(settings);
@@ -78,8 +79,8 @@ export function PwmTab() {
   const onSave = async () => {
     let d: object = {};
     // pwm.temp_range_list and pwm.profiles ride the same delta wholesale
-    // (plan ruling: single Save per tab, existing ["settings_update"] flag
-    // kept) — they're already keys of `pwm`, so this loop covers them too.
+    // (single Save per tab, using the existing ["settings_update"] flag) —
+    // they're already keys of `pwm`, so this loop covers them too.
     for (const [k, v] of Object.entries(pwm)) d = setPath(d, `pwm.${k}`, v);
     setSaved(await save(d, ["settings_update"])); // control loop must re-read pwm
   };

@@ -416,8 +416,7 @@ def test_cycle_blank_pmode_is_skipped_not_crashed(live_server, page):
     every numeric field across cycle/pwm/startup/history/safety/pellets:
     emptying a guarded field is silently skipped (prior value retained),
     not a crash. One test stands in for all six actions since they share
-    the exact same guard function -- this was a real bug Phase A fixed
-    (see project_phaseA_common_split memory)."""
+    the exact same guard function."""
     apply_settings(lambda s: s["platform"].__setitem__("dc_fan", False))
     apply_settings(lambda s: s["cycle_data"].__setitem__("PMode", 7))
 
@@ -526,7 +525,7 @@ def test_history_via_real_ui(live_server, page):
     """`history` -- History tab: numeric fields, two checkboxes, and the
     per-probe graph-color loop (`clr_temp_<label>` etc). Only the Grill
     probe's colors are filled/asserted; the rest are left as the browser
-    provides them (see the color-picker note in the task report)."""
+    provides them."""
     page.goto(f"{live_server}/settings/")
     page.click("#v-pills-history-tab")
     page.wait_for_selector("#v-pills-history.active")
@@ -1097,8 +1096,8 @@ def test_cycle_controller_config_option_types(live_server, page):
     controller (controller/controllers.json) has float/int/bool/string
     options, covering 4 of the 5 branches; `numlist` (routes.py:403-404)
     has no real controller metadata using that type anywhere in
-    controllers.json -- it looks like dead/defensive code, not chased here
-    per the task's "genuinely unreachable" carve-out."""
+    controllers.json -- it looks like dead/defensive code, so it is not
+    exercised here."""
     resp = page.request.post(
         f"{live_server}/settings/cycle",
         form={
@@ -1212,7 +1211,7 @@ def test_startup_pwm_duty_cycle_clamped_to_pwm_settings_range(live_server, page)
     def _seed(s):
         s["pwm"]["min_duty_cycle"] = 20
         s["pwm"]["max_duty_cycle"] = 80
-        # S2 Task 5: write_settings() strict-validates the FULL tree, so this
+        # write_settings() strict-validates the FULL tree, so this
         # precondition (bypassing it via apply_settings) must itself already
         # satisfy the schema -- a real /settings/pwm submission narrowing
         # min/max this far now re-clamps both of these the same way (see

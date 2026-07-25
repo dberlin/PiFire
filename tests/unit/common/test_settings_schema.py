@@ -1,11 +1,10 @@
 """Parity: the pydantic shadow models must round-trip default_settings() exactly.
 
-Phase 2 Task 2b flipped `_Section.model_config` from `extra="allow"` to
-`extra="forbid"`: raw `SettingsSchema.model_validate()` now REJECTS any
-unmodeled key outright (see test_extra_keys_rejected_by_raw_model_validate).
+`_Section.model_config` is `extra="forbid"`: raw `SettingsSchema.model_validate()`
+REJECTS any unmodeled key outright (see test_extra_keys_rejected_by_raw_model_validate).
 The write-time gate, `validate_settings_tree()`, wraps that with a
-self-healing repair pass -- see the "Phase 2 Task 2b: self-healing repair
-wrapper" section near the bottom of this file -- so a stray/legacy/future key
+self-healing repair pass -- see the "extra=\"forbid\" self-healing repair
+behavior" section near the bottom of this file -- so a stray/legacy/future key
 never permanently blocks a settings save; it's stripped, logged, and the
 write proceeds.
 """
@@ -42,11 +41,11 @@ def test_default_settings_round_trips():
 
 
 def test_extra_keys_rejected_by_raw_model_validate():
-    """Phase 2 Task 2b: `_Section` flipped `extra="allow"` -> `extra="forbid"`.
-    Raw `SettingsSchema.model_validate()` (i.e. NOT going through the
-    write_settings() gate's repair wrapper) now rejects unknown keys outright
-    -- self-healing lives ONLY in validate_settings_tree(), see the Task 2b
-    repair-wrapper tests near the bottom of this file."""
+    """`_Section` is `extra="forbid"`. Raw `SettingsSchema.model_validate()`
+    (i.e. NOT going through the write_settings() gate's repair wrapper) rejects
+    unknown keys outright -- self-healing lives ONLY in
+    validate_settings_tree(), see the repair-wrapper tests near the bottom of
+    this file."""
     s = default_settings()
     s["safety"]["future_knob"] = 42
     with pytest.raises(ValidationError):
@@ -144,7 +143,7 @@ def test_migrated_ancient_settings_round_trip(_migration_env):
 
 
 # ---------------------------------------------------------------------------
-# Drift test (Task 3): schema committed to web-react/schema/settings.schema.json
+# Drift test: schema committed to web-react/schema/settings.schema.json
 # must match export_schema() at all times. Flags unintended schema drift.
 # ---------------------------------------------------------------------------
 
@@ -164,17 +163,16 @@ def test_committed_schema_is_current():
 
 
 # ---------------------------------------------------------------------------
-# Final-review Finding 1a: extras allowlist. extra="allow" means any unmodeled
-# key in defaults.py silently rides through every nested model's
-# __pydantic_extra__ -- this closes that mesh by walking the FULL validated
-# tree and asserting no undocumented extras exist anywhere.
-# (Task 2 promoted platform.system's "1WIRE" to a real aliased field --
-# one_wire = Field(alias="1WIRE") on _SystemConfig -- so it no longer rides
-# through extra="allow" and has left this list. Phase 2 Task 2a promoted
-# ProbeChartConfig's Primary-only setpoint colors -- bg_color_setpoint/
-# line_color_setpoint (defaults.py:329-331) -- to real optional fields for
-# the same reason, leaving the allowlist EMPTY: the default tree now has
-# zero live extras.)
+# Extras allowlist: under extra="allow", any unmodeled key in defaults.py
+# would silently ride through every nested model's __pydantic_extra__ -- this
+# closes that mesh by walking the FULL validated tree and asserting no
+# undocumented extras exist anywhere.
+# platform.system's "1WIRE" is now a real aliased field -- one_wire =
+# Field(alias="1WIRE") on _SystemConfig -- so it no longer rides through
+# extra="allow" and has left this list. ProbeChartConfig's Primary-only
+# setpoint colors -- bg_color_setpoint/line_color_setpoint (defaults.py:
+# 329-331) -- were promoted to real optional fields for the same reason,
+# leaving the allowlist EMPTY: the default tree now has zero live extras.
 # A NEW unmodeled key anywhere in defaults.py must fail this test; that claim
 # is proven (not just asserted) by test_extras_walker_flags_unmodeled_key
 # below, which injects a synthetic extra into a COPY of the input and shows
@@ -211,9 +209,9 @@ def _collect_extras(value, path: str = "") -> set[tuple[str, str]]:
 
 def test_documented_extras_allowlist():
     """No extras anywhere in the validated default tree -- DOCUMENTED_EXTRAS
-    is empty (Phase 2 Task 2a promoted the last live extras to real fields;
-    Task 2b's extra="forbid" flip means a model with any undeclared key can
-    no longer even construct, so __pydantic_extra__ is always empty for any
+    is empty (the last live extras were promoted to real fields, and the
+    extra="forbid" flip means a model with any undeclared key can no longer
+    even construct, so __pydantic_extra__ is always empty for any
     successfully-validated model -- this walk is now a belt-and-suspenders
     check, not the primary enforcement)."""
     model = SettingsSchema.model_validate(default_settings())
@@ -221,14 +219,14 @@ def test_documented_extras_allowlist():
 
 
 def test_unmodeled_key_now_rejected_at_construction_not_walked_as_extra():
-    """Negative proof for test_documented_extras_allowlist, updated for Phase
-    2 Task 2b: under extra="allow" (pre-Task-2b), an unmodeled key silently
-    became a walkable __pydantic_extra__ entry the walker could catch after
-    the fact -- see test_extra_keys_rejected_by_raw_model_validate's history.
-    Under extra="forbid", SettingsSchema.model_validate() itself rejects the
-    key at construction time, before any walk could ever run: the walker's
-    drift-catching job is now subsumed by strict construction rejecting the
-    key outright, which is the stronger guarantee."""
+    """Negative proof for test_documented_extras_allowlist: under the old
+    extra="allow" config, an unmodeled key silently became a walkable
+    __pydantic_extra__ entry the walker could catch after the fact -- see
+    test_extra_keys_rejected_by_raw_model_validate. Under extra="forbid",
+    SettingsSchema.model_validate() itself rejects the key at construction
+    time, before any walk could ever run: the walker's drift-catching job is
+    now subsumed by strict construction rejecting the key outright, which is
+    the stronger guarantee."""
     s = copy.deepcopy(default_settings())
     s["safety"]["totally_unmodeled_future_knob"] = "surprise"
     with pytest.raises(ValidationError) as ei:
@@ -261,7 +259,7 @@ def test_documented_extras_allowlist_migrated_ancient(_migration_env):
 
 
 # ---------------------------------------------------------------------------
-# Final-review Finding 1b: defaults-instantiation parity. Closes the other
+# Defaults-instantiation parity. Closes the other
 # open mesh -- a model field could carry a default that has silently drifted
 # from defaults.py's static value while both test_default_settings_round_trips
 # (validates FROM defaults.py, so an inline model default is never
@@ -360,18 +358,16 @@ def _masked_defaults_instantiation_diff():
 def test_defaults_instantiation_parity():
     """Makes every inline model default in the SettingsSchema tree
     load-bearing: proven by manually flipping SafetySettings.maxtemp from 550
-    to 555, confirming this test fails, then reverting (see final-review fix
-    report for the paste of both runs)."""
+    to 555, confirming this test fails, then reverting."""
     actual, expected = _masked_defaults_instantiation_diff()
     assert actual == expected
 
 
 # ---------------------------------------------------------------------------
-# Task S2.1: strict validator entry point + partial model. Enforcement itself
-# is a LATER task -- these pin the OBSERVED strict-mode semantics of
-# validate_settings_tree() / SettingsSchema.model_validate(strict=True) so a
-# pydantic upgrade that changes behavior is caught here, not silently at the
-# (future) enforcement call site.
+# Strict validator entry point + partial model: these pin the OBSERVED
+# strict-mode semantics of validate_settings_tree() /
+# SettingsSchema.model_validate(strict=True) so a pydantic upgrade that
+# changes behavior is caught here, not silently at the enforcement call site.
 # ---------------------------------------------------------------------------
 
 from common.settings_schema import (
@@ -404,9 +400,9 @@ def test_strict_bool_for_int_rejects():
 
 
 def test_unknown_keys_repaired_not_rejected_under_strict():
-    # Phase 2 Task 2b: under extra="forbid", this no longer "passes through"
-    # -- it's stripped by validate_settings_tree()'s repair wrapper (see the
-    # dedicated Task 2b section below), but the call still must not raise.
+    # Under extra="forbid", this no longer "passes through" -- it's stripped
+    # by validate_settings_tree()'s repair wrapper (see the dedicated section
+    # below), but the call still must not raise.
     s = default_settings()
     s["safety"]["future_knob"] = 42
     validate_settings_tree(s)
@@ -425,7 +421,7 @@ def test_partial_model_accepts_sparse_delta_and_rejects_bad_field():
 
 
 # ---------------------------------------------------------------------------
-# Final-review fix: Layer 1 (validate_partial_settings, used by the API's
+# Layer 1 (validate_partial_settings, used by the API's
 # _api_post_settings_update) must report precise FIELD-level errors but must
 # NOT enforce cross-field/cross-section model_validator rules -- those run
 # against absent sections' STATIC DEFAULTS on a sparse delta and can falsely
@@ -469,10 +465,9 @@ def test_partial_validate_settings_rejects_structurally_bad_section():
 
 
 # ---------------------------------------------------------------------------
-# Task S2.2: legacy clamps migrated to schema constraints (Field ge/le and
-# cross-field model_validators), one representative pin per constraint found
-# in Step 1's enumeration (see the Task 2 report for the full source-line
-# list). Every constraint here traces to an actual clamp/invariant found in
+# Legacy clamps migrated to schema constraints (Field ge/le and cross-field
+# model_validators), one representative pin per constraint. Every constraint
+# here traces to an actual clamp/invariant found in
 # blueprints/settings/routes.py or the React settings tabs -- no new limits
 # invented.
 # ---------------------------------------------------------------------------
@@ -599,9 +594,9 @@ def test_pwm_duty_cycle_must_be_within_min_max():
 
 
 # ---------------------------------------------------------------------------
-# Task S2.2: 1WIRE promotion. platform.system's "1WIRE" is now a real,
-# aliased field (one_wire = Field(alias="1WIRE"), populate_by_name=True on
-# _SystemConfig) instead of an extra="allow" pass-through.
+# 1WIRE promotion: platform.system's "1WIRE" is now a real, aliased field
+# (one_wire = Field(alias="1WIRE"), populate_by_name=True on _SystemConfig)
+# instead of an extra="allow" pass-through.
 # ---------------------------------------------------------------------------
 
 

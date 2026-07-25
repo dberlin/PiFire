@@ -157,7 +157,7 @@ def _api_post_settings_update(settings, request_json):
     clobbering unrelated control keys, so requests with any unknown flag are
     rejected outright without writing settings or control.
 
-    Two-layer rejection (S2 Task 5):
+    Two-layer rejection:
       1. The DELTA itself is FIELD-level strict-validated against
          PartialSettingsSchema before anything is touched -- catches a
          structurally-bad delta (e.g. a section replaced with a scalar, or a
@@ -171,7 +171,7 @@ def _api_post_settings_update(settings, request_json):
          common/settings_schema.py for the full rationale + discriminator).
       2. The delta is merged onto the current tree and handed to
          save_settings_and_flag_update() -> write_settings(), which
-         strict-validates the FULL merged tree (Task 5's gate) and raises
+         strict-validates the FULL merged tree and raises
          SettingsValidationError on any violation -- including the
          cross-field constraints Layer 1 skips, now checked against real
          values everywhere. Caught here and turned into the same error

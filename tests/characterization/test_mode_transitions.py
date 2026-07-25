@@ -3,10 +3,10 @@ transitions -- the writes that a mode's setup_safety()/check_safety() (and the
 base skeleton's inner-loop switch-off) perform when they change control['mode']
 from INSIDE a work cycle.
 
-These fill inventory coverage gaps #1-#6 (Hold setup_safety->Error/Reignite,
-Hold check_safety->Error/Reignite, Smoke in-loop check_safety->Error/Reignite,
-base inner-loop switch-off->Stop): today these edges have NO transition-level
-test. They are the safety net for repointing those inline writes onto the
+These fill coverage gaps for transition edges that today have NO transition-level
+test: Hold setup_safety->Error/Reignite, Hold check_safety->Error/Reignite,
+Smoke in-loop check_safety->Error/Reignite, and base inner-loop switch-off->Stop.
+They are the safety net for repointing those inline writes onto the
 request_transition() seam -- if a refactor changes any captured value, that is a
 regression to investigate.
 
@@ -194,7 +194,8 @@ def test_base_inloop_switch_off_triggers_stop():
 
 
 # ==========================================================================
-# Task 12 -- guard-phase / actuation-timing characterization (Phase 2 net).
+# Guard-phase / actuation-timing characterization for the declarative phased
+# guard engine.
 #
 # These pin the behaviors a phased guard-engine rewrite could disturb:
 #   (a) an in-loop max-temp trip breaks BEFORE actuation (on_tick never runs on
