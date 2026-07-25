@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNow } from "../../helpers/clock";
-import type { CommandClient } from "../../helpers/command";
+import type { CommandClient, CommandResult } from "../../helpers/command";
 import { deriveTimer, formatRemaining } from "../../helpers/timer/timerState";
 import type { LiveState } from "../../helpers/types";
 import { TimerModal } from "./TimerModal";
@@ -30,6 +30,26 @@ export function TimerBar({
 
   const { state, remaining } = deriveTimer(timer, now);
 
+  // ONE control write per gesture -- see the block below the component for why a
+  // second one inside the same control cycle undoes the first. The write is
+  // "landed" once the live timer block changes, which is exactly when the
+  // control loop has drained the queue and the socket has republished.
+  const signature = `${timer.start}|${timer.paused}|${timer.end}`;
+  const [pendingAt, setPendingAt] = useState<string | null>(null);
+  // Render-phase adjustment rather than an effect (React Compiler is on, and
+  // this is derived state): the guard is only meaningful for the state that was
+  // on screen when the button was pressed.
+  if (pendingAt !== null && pendingAt !== signature) setPendingAt(null);
+  const pending = pendingAt !== null;
+
+  async function write(issue: () => Promise<CommandResult>) {
+    setPendingAt(signature);
+    const result = await issue();
+    // A rejected or failed command queues nothing, so nothing will ever arrive
+    // to release the guard. Release it here instead of stranding the controls.
+    if (!result.ok) setPendingAt(null);
+  }
+
   return (
     <div className="pf-timer-bar">
       <span className="pf-timer-time">
@@ -52,7 +72,8 @@ export function TimerBar({
           type="button"
           className="pf-timer-btn"
           aria-label="Pause timer"
-          onClick={() => command.timerPause()}
+          disabled={pending}
+          onClick={() => write(() => command.timerPause())}
         >
           Pause
         </button>
@@ -67,7 +88,8 @@ export function TimerBar({
           // timer.paused non-zero the backend shifts the existing end time and
           // ignores this argument entirely. It is passed anyway so the call
           // still reads as "run for the time that is left" if that ever changes.
-          onClick={() => command.timerStart(remaining)}
+          disabled={pending}
+          onClick={() => write(() => command.timerStart(remaining))}
         >
           Resume
         </button>
@@ -78,17 +100,51 @@ export function TimerBar({
           type="button"
           className="pf-timer-btn"
           aria-label="Stop timer"
-          // Note: stop also resets the shutdown/keep-warm flags on the control
+          // Stop also resets the shutdown/keep-warm flags on the control
           // process, which is why the modal always re-sends them on start.
-          onClick={() => command.timerStop()}
+          // Nothing re-sends them separately: that would be a second write.
+          disabled={pending}
+          onClick={() => write(() => command.timerStop())}
         >
           Stop
         </button>
       ) : null}
 
+      {/* The modal issues its own single write (timerStartWithOptions) and is
+          deliberately NOT covered by the guard: it is reachable only from the
+          `stopped` branch, where Pause/Resume/Stop are not rendered at all, so
+          its write cannot be followed by another one before the loop publishes.
+          Re-arming twice in a cycle is harmless -- each arm write is complete,
+          so the later one simply wins. */}
       {modalOpen ? (
         <TimerModal timer={timer} command={command} onClose={() => setModalOpen(false)} />
       ) : null}
     </div>
   );
 }
+
+// --------------------------------------------------------------------------
+// Why the write buttons go inert until the socket republishes
+//
+// Every web-process control write queues the WHOLE control dict
+// (common/datastore_accessors.py write_control), read_control() serves the
+// persisted blob and never the pending queue, and only the control loop drains
+// that queue -- applying each partial with SQLite json_patch (RFC 7396), which
+// merges objects key by key but REPLACES arrays wholesale. So two commands
+// issued inside one control cycle both read pre-write state, and the one queued
+// LAST wins outright, including for keys it never meant to touch.
+//
+// Pause and Stop are on screen together while a timer runs, and this component
+// re-renders only when the live socket republishes -- which cannot happen until
+// the loop drains. Clicking Stop and then Pause inside that window used to
+// RESURRECT the timer: the pause command read the pre-stop blob, so its partial
+// carried the old start/end and the old notify_data, and landed after the
+// stop's zeros. Worse than a lost click -- a timer the user stopped came back
+// with `shutdown` still armed, and shuts the grill down when it later expires.
+// Stop-then-Resume from the paused state is the same bug.
+//
+// The fix is the invariant the API's 4-argument start form already encodes: one
+// control write per operation, carrying everything that operation needs. Here
+// that means one write per gesture, and no next gesture until this one is
+// visible.
+// --------------------------------------------------------------------------

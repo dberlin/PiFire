@@ -36,9 +36,14 @@ export interface CommandClient {
   //    the backend ignores `seconds` and just shifts the existing end time.
   //  - timerPause CLEARS the whole timer (and the shutdown/keep_warm flags)
   //    when the timer was never started (timer.start == 0).
-  //  - timerStop clears the timer AND resets shutdown/keep_warm to False, so
-  //    those flags must be re-sent after any stop.
+  //  - timerStop clears the timer AND resets shutdown/keep_warm to False. Do
+  //    NOT "restore" them afterwards with timerShutdown/timerKeepWarm: that
+  //    second write is the clobber (see the block above createCommand), and
+  //    nothing needs restoring -- the next arm carries both flags itself.
   //  - A non-numeric `seconds` makes the backend silently substitute 60s.
+  //  - Every one of these is ONE control write, and no UI flow may issue two of
+  //    them before the socket republishes. components/shell/TimerBar.tsx holds
+  //    that line for the bar's buttons.
   timerStart(seconds: number): Promise<CommandResult>;
   // Arms a NEW timer for a DURATION, together with its expiry flags, in a
   // single request that the server turns into a single control write -- see
@@ -49,6 +54,14 @@ export interface CommandClient {
   timerStartWithOptions(seconds: number, options: TimerOptions): Promise<CommandResult>;
   timerPause(): Promise<CommandResult>;
   timerStop(): Promise<CommandResult>;
+  // Standalone flag writes. NOTHING in this app calls them, and nothing should:
+  // on their own they set a flag on a timer that is not armed, and next to any
+  // other timer write they are the clobber -- verified against the backend,
+  // /api/set/timer/start/600 followed by /api/set/timer/shutdown/true inside one
+  // control cycle leaves start/paused/end all ZERO, i.e. no timer at all. Use
+  // timerStartWithOptions. They stay on the interface because the REST paths
+  // stay (the Flask dashboard and mobile still use them) and command.ts is this
+  // app's map of that grammar.
   timerShutdown(on: boolean): Promise<CommandResult>;
   timerKeepWarm(on: boolean): Promise<CommandResult>;
   system(cmd: SystemCmd): Promise<CommandResult>;

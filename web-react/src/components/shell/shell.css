@@ -217,9 +217,15 @@
   padding: 6px 14px;
   cursor: pointer;
 }
-.pf-timer-btn:hover {
+.pf-timer-btn:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--text);
+}
+/* A timer write is queued and the control loop has not published it yet, so a
+   second click would clobber the first (see TimerBar.tsx). */
+.pf-timer-btn:disabled {
+  opacity: 0.45;
+  cursor: progress;
 }
 
 /* The dashboard scrim is absolute inside .pf-stage; the shell's timer modal
