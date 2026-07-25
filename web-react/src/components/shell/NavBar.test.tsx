@@ -1,15 +1,36 @@
-import { describe, expect, it } from "@rstest/core";
+import { describe, expect, it, rs } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { NavBar } from "./NavBar";
 
-function renderNav(at = "/", grillName = "") {
-  const router = createMemoryRouter([{ path: "*", element: <NavBar grillName={grillName} /> }], {
-    initialEntries: [at],
-  });
+interface TimerProps {
+  visible?: boolean;
+  running?: boolean;
+  onToggle?: () => void;
+}
+
+function renderNav(at = "/", grillName = "", timer: TimerProps = {}) {
+  const router = createMemoryRouter(
+    [
+      {
+        path: "*",
+        element: (
+          <NavBar
+            grillName={grillName}
+            timerVisible={timer.visible ?? false}
+            timerRunning={timer.running ?? false}
+            onToggleTimer={timer.onToggle ?? (() => {})}
+          />
+        ),
+      },
+    ],
+    { initialEntries: [at] },
+  );
   return render(<RouterProvider router={router} />);
 }
+
+const stopwatch = () => screen.getByRole("button", { name: /toggle timer bar/i });
 
 describe("NavBar", () => {
   it("renders all six navigation labels from base.html", () => {
@@ -107,5 +128,57 @@ describe("NavBar", () => {
     const controls = toggle.getAttribute("aria-controls");
     expect(controls).toBeTruthy();
     expect(container.querySelector(`#${controls}`)).toBeTruthy();
+  });
+});
+
+// base.html:50-57 -- the stopwatch that shows and hides the timer bar.
+describe("NavBar timer toggle", () => {
+  it("renders a stopwatch button", () => {
+    renderNav();
+    expect(stopwatch()).toBeTruthy();
+  });
+
+  it("reads as unpressed while the bar is hidden", () => {
+    renderNav("/", "", { visible: false });
+    expect(stopwatch().getAttribute("aria-pressed")).toBe("false");
+    expect(stopwatch().className).not.toContain("on");
+  });
+
+  it("reads as pressed while the bar is showing", () => {
+    renderNav("/", "", { visible: true });
+    expect(stopwatch().getAttribute("aria-pressed")).toBe("true");
+    expect(stopwatch().className).toContain("on");
+  });
+
+  it("asks the shell to toggle when clicked", async () => {
+    const onToggle = rs.fn();
+    const user = userEvent.setup();
+    renderNav("/", "", { onToggle });
+
+    await user.click(stopwatch());
+
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks itself while a timer is counting down (timer.js:207)", () => {
+    renderNav("/", "", { running: true });
+    expect(stopwatch().className).toContain("running");
+  });
+
+  it("carries no running marker when no timer is counting down", () => {
+    renderNav("/", "", { running: false });
+    expect(stopwatch().className).not.toContain("running");
+  });
+
+  it("stays outside the collapsible menu, as it does in base.html", () => {
+    const { container } = renderNav();
+    const list = container.querySelector("#pf-nav-list");
+    expect(list).toBeTruthy();
+    expect(list?.contains(stopwatch())).toBe(false);
+  });
+
+  it("does not answer to the navigation toggle's name", () => {
+    renderNav();
+    expect(screen.getByRole("button", { name: /toggle navigation/i })).not.toBe(stopwatch());
   });
 });

@@ -46,8 +46,40 @@
 .pf-nav-grill::before {
   content: "| ";
 }
-.pf-nav-toggle {
+/* base.html:50-61 keeps the stopwatch and the hamburger together in one
+   right-hand group, outside the collapsible menu. */
+.pf-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
+  order: 2;
+}
+.pf-nav-timer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  color: var(--text-dim);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.pf-nav-timer:hover {
+  color: var(--text);
+}
+.pf-nav-timer.on {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+/* Flask recolours this same button while a timer counts down and clears the
+   colour when it stops or expires (timer.js:207, :180). */
+.pf-nav-timer.running {
+  color: var(--accent-1);
+  border-color: color-mix(in srgb, var(--accent-1) 55%, transparent);
+}
+.pf-nav-toggle {
   display: none;
   background: none;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -82,6 +114,7 @@
   list-style: none;
   margin: 0;
   padding: 0;
+  order: 1;
 }
 .pf-nav-item {
   display: block;
@@ -117,6 +150,8 @@
     flex-direction: column;
     align-items: stretch;
     text-align: center;
+    /* Wraps below the brand and the action buttons, not between them. */
+    order: 3;
   }
   .pf-nav-list.open {
     display: flex;

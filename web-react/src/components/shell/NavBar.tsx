@@ -18,7 +18,36 @@ const NAV_ITEMS = [
 
 const NAV_LIST_ID = "pf-nav-list";
 
-export function NavBar({ grillName }: { grillName: string }) {
+// The stopwatch face beside the hamburger, ported from base.html:50-57 (a
+// fa-stopwatch button wired to timerToggle()). Drawn inline because the React
+// app carries no icon font.
+function StopwatchIcon() {
+  return (
+    <svg width={16} height={17} viewBox="0 0 20 21" aria-hidden="true" focusable="false">
+      <g fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
+        <path d="M8 1.5h4" />
+        <path d="M10 1.5v2.2" />
+        <circle cx={10} cy={12.5} r={7} />
+        <path d="M10 8.8v3.7h2.6" />
+      </g>
+    </svg>
+  );
+}
+
+export function NavBar({
+  grillName,
+  timerVisible,
+  timerRunning,
+  onToggleTimer,
+}: {
+  grillName: string;
+  /** Whether the shell is currently showing the timer bar. */
+  timerVisible: boolean;
+  /** Whether a timer is counting down right now. */
+  timerRunning: boolean;
+  /** Show/hide the timer bar. */
+  onToggleTimer: () => void;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -31,16 +60,35 @@ export function NavBar({ grillName }: { grillName: string }) {
         {grillName ? <small className="pf-nav-grill">{grillName}</small> : null}
       </NavLink>
 
-      <button
-        type="button"
-        className="pf-nav-toggle"
-        aria-label="Toggle navigation"
-        aria-expanded={open}
-        aria-controls={NAV_LIST_ID}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span className="pf-nav-bars" aria-hidden="true" />
-      </button>
+      <div className="pf-nav-actions">
+        {/* base.html:50-57 keeps the stopwatch outside the collapsible menu,
+            so the timer stays one click away on a phone. `aria-pressed` is
+            what carries the on/off state; the accessible name stays fixed so
+            the control does not rename itself under the user. The running
+            marker mirrors timer.js:207 / :180, which recolours this same
+            button while a timer counts down and clears it when it ends. */}
+        <button
+          type="button"
+          className={`pf-nav-timer ${timerVisible ? "on" : ""} ${timerRunning ? "running" : ""}`}
+          aria-label="Toggle timer bar"
+          aria-pressed={timerVisible}
+          title={timerRunning ? "Timer running" : "Timer"}
+          onClick={onToggleTimer}
+        >
+          <StopwatchIcon />
+        </button>
+
+        <button
+          type="button"
+          className="pf-nav-toggle"
+          aria-label="Toggle navigation"
+          aria-expanded={open}
+          aria-controls={NAV_LIST_ID}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span className="pf-nav-bars" aria-hidden="true" />
+        </button>
+      </div>
 
       <ul id={NAV_LIST_ID} className={`pf-nav-list ${open ? "open" : ""}`}>
         {NAV_ITEMS.map((item) => (

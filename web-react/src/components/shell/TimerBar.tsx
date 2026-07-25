@@ -1,17 +1,15 @@
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { useState } from "react";
+import { useNow } from "../../helpers/clock";
 import type { CommandClient } from "../../helpers/command";
 import { deriveTimer, formatRemaining } from "../../helpers/timer/timerState";
 import type { LiveState } from "../../helpers/types";
 import { TimerModal } from "./TimerModal";
 import "./shell.css";
 
-// Ported from templates/_macro_timer.html:1-29. The Flask bar is hidden until
-// the navbar stopwatch reveals it; here it is always present, so the timer is
-// one click away from every page instead of behind a toggle.
-
-function nowSeconds(): number {
-  return Math.floor(Date.now() / 1000);
-}
+// Ported from templates/_macro_timer.html:1-29. Like the Flask bar this one is
+// hidden until the navbar's stopwatch button reveals it: the shell renders it
+// only while useTimerVisibility (helpers/timer/timerVisibility.ts) says it is
+// showing, so hiding the bar also unmounts it and detaches it from the clock.
 
 export function TimerBar({
   timer,
@@ -22,22 +20,13 @@ export function TimerBar({
 }) {
   const [modalOpen, setModalOpen] = useState(false);
 
-  // The wall clock is an external mutable source, so it is subscribed to rather
-  // than mirrored into state: the remaining time is derived at render from
-  // timer + now and never stored. A running timer is the only state whose
-  // display changes on its own, so no interval is armed when stopped or paused
-  // -- and the snapshot is then a constant, which keeps renders quiet too.
+  // The remaining time is derived at render from timer + now and never stored.
+  // `now` comes from the app's shared clock (helpers/clock.ts) rather than an
+  // interval of this component's own, and is subscribed to only while a timer
+  // is actually counting down: a stopped or paused bar reads a real time, it
+  // just has no reason to be woken when that time changes.
   const ticking = timer.start !== 0 && timer.paused === 0;
-  const subscribe = useCallback(
-    (onClockTick: () => void) => {
-      if (!ticking) return () => {};
-      const id = window.setInterval(onClockTick, 1000);
-      return () => window.clearInterval(id);
-    },
-    [ticking],
-  );
-  const readClock = useCallback(() => (ticking ? nowSeconds() : 0), [ticking]);
-  const now = useSyncExternalStore(subscribe, readClock, readClock);
+  const now = useNow(ticking);
 
   const { state, remaining } = deriveTimer(timer, now);
 
