@@ -141,6 +141,39 @@ test("module cards and probe cards read as cards, and every step is captured", a
   expect((await afterClear.json()).has_draft).toBe(false);
 });
 
+// wizardStyles.test.ts pins that the @media (prefers-reduced-motion: reduce)
+// block EXISTS in the source. That is a text check; it cannot see whether the
+// rule actually wins in the cascade once the bundler has processed the file.
+// This is the other end of that path, in the real engine.
+//
+// InstallProgress reads matchMedia once at first render and never again, so the
+// media query -- not the -reduced-motion class -- is what holds if the user
+// flips the preference mid-install. The bar is probed synthetically because the
+// real one only appears once the installer is running.
+test("prefers-reduced-motion stops the install stripe animation", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/wizard");
+  await expect(page.getByRole("heading", { name: "Welcome", exact: true })).toBeVisible();
+
+  const motion = await page.evaluate(() => {
+    const bar = document.createElement("div");
+    bar.className = "pf-install-progress-bar";
+    document.querySelector(".pf-wizard-content")?.appendChild(bar);
+    const cs = getComputedStyle(bar);
+    const out = {
+      emulated: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      animationName: cs.animationName,
+      transitionProperty: cs.transitionProperty,
+    };
+    bar.remove();
+    return out;
+  });
+  // Guards the guard: a false here would make the two assertions below vacuous.
+  expect(motion.emulated).toBe(true);
+  expect(motion.animationName).toBe("none");
+  expect(motion.transitionProperty).toBe("none");
+});
+
 // The three role="dialog" elements cannot be reached from a test run: the 409
 // dialog needs a RUNNING grill and the reboot dialog needs the real installer to
 // have finished. This is a synthetic probe -- it proves the rules resolve and are
