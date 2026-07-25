@@ -444,6 +444,10 @@
             "link": "",
             "contributors": [],
             "attributions": [],
+            "dependencies": {
+                "extra": "mpc",
+                "modules": ["do_mpc"]
+            },
             "recommendations": {
                 "cycle": {
                     "cycle_time": 25,

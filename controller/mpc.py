@@ -80,6 +80,58 @@ def _to_c(value, units):
     return (value - 32.0) * 5.0 / 9.0 if units == "F" else value
 
 
+def _load_net_policy(cfg):
+    """Load the numpy net policy, or return None to fall back to the NLP.
+
+    Module-level (not a method) because `requires_modules` below has to ask the
+    same question before any Controller exists -- and asking it any other way
+    would mean re-deriving this logic in a second place.
+    """
+    from controller.mpc_net import NetPolicy, net_path_for
+
+    base = cfg.get("policy_net_path")
+    path = net_path_for(base, bool(cfg.get("enable_fan_input"))) if base else base
+    if not path or not os.path.exists(path):
+        print(f"[mpc] policy=net but artifact not found ({path}); using NLP")
+        return None
+    try:
+        net = NetPolicy.load(path)
+    except Exception as e:
+        print(f"[mpc] could not load net policy ({e}); using NLP")
+        return None
+    if not net.matches_config(cfg):
+        print("[mpc] net policy calibration does not match config; using NLP")
+        return None
+    return net
+
+
+def requires_modules(config):
+    """Import names `Controller(config, ...)` will need but a base install lacks.
+
+    do-mpc (CasADi/IPOPT, plus torch/onnx via its [full] extra) publishes no
+    Linux-ARM wheel, so it is a PiFire *optional* dependency -- the `mpc` extra
+    in pyproject.toml -- installed only when someone selects this controller.
+    Whether a given MPC config actually needs it depends on the config, so the
+    settings-save gate (common/controller_deps.py) asks THIS function rather
+    than re-deriving __init__'s branch structure, which would silently drift the
+    moment the policy/estimator wiring changes.
+
+    Returns an empty tuple when the base install is sufficient.
+    """
+    cfg = dict(_DEFAULTS)
+    cfg.update(config or {})
+    # GreyBoxMHE solves an NLP, so it imports do_mpc (controller/mpc_model.py)
+    # regardless of which firing-rate policy is selected.
+    if str(cfg.get("estimator", "ekf")).lower() == "mhe":
+        return ("do_mpc",)
+    # policy='net' is pure numpy/scipy -- but only if its artifact actually loads
+    # AND matches this config; otherwise __init__ falls back to the NLP, which
+    # does need do_mpc.
+    if str(cfg.get("policy", "nlp")).lower() == "net" and _load_net_policy(cfg) is not None:
+        return ()
+    return ("do_mpc",)
+
+
 class Controller(ControllerBase):
     def __init__(self, config, units, cycle_data):
         super().__init__(config, units, cycle_data)
@@ -153,7 +205,7 @@ class Controller(ControllerBase):
         self.mpc = None
         self._net = None
         if str(cfg.get("policy", "nlp")).lower() == "net":
-            self._net = self._load_net_policy(cfg)
+            self._net = _load_net_policy(cfg)
         if self._net is None:
             self._build_nlp(cfg, n_delay)
 
@@ -166,25 +218,6 @@ class Controller(ControllerBase):
                     f.write("time_s,temp_c,Q\n")
             except OSError:
                 self._log_path = None  # disable logging if the path is unwritable
-
-    def _load_net_policy(self, cfg):
-        """Load the numpy net policy, or return None to fall back to the NLP."""
-        from controller.mpc_net import NetPolicy, net_path_for
-
-        base = cfg.get("policy_net_path")
-        path = net_path_for(base, bool(cfg.get("enable_fan_input"))) if base else base
-        if not path or not os.path.exists(path):
-            print(f"[mpc] policy=net but artifact not found ({path}); using NLP")
-            return None
-        try:
-            net = NetPolicy.load(path)
-        except Exception as e:
-            print(f"[mpc] could not load net policy ({e}); using NLP")
-            return None
-        if not net.matches_config(cfg):
-            print("[mpc] net policy calibration does not match config; using NLP")
-            return None
-        return net
 
     def _build_nlp(self, cfg, n_delay):
         """Build the do-mpc NLP policy (lazily imports do_mpc/CasADi/IPOPT)."""
