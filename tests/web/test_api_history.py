@@ -38,4 +38,31 @@ def test_chart_is_read_only(ds, client):
 def test_chart_rejects_a_bad_window(ds, client):
     resp = client.get("/api/history/chart?minutes=notanumber")
     assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("minutes", [0, -1, -999])
+def test_chart_rejects_a_non_positive_window(ds, client, minutes):
+    """A zero or negative window is a client bug, not a request for "all data".
+
+    Pinned rather than merely reasoned about: the arithmetic downstream
+    (num_items = minutes * SAMPLES_PER_MINUTE, and read_history's
+    rows[-num_items:]) treats a negative count as a slice from the front, so
+    letting one through would silently return the WRONG END of the history.
+    """
+    resp = client.get(f"/api/history/chart?minutes={minutes}")
+    assert resp.status_code == 400
     assert resp.get_json()["message"] == "invalid_minutes"
+
+
+def test_chart_survives_an_absurdly_large_window(ds, client):
+    """A window far larger than the stored history must clamp, not explode.
+
+    read_history's rows[-num_items:] slice is already safe for an oversized
+    count, but nothing pinned that, so a future change to the windowing math
+    could start raising here without any test noticing.
+    """
+    resp = client.get("/api/history/chart?minutes=100000000")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["minutes"] == 100000000
+    assert isinstance(body["time_labels"], list)

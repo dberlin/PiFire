@@ -41,6 +41,7 @@ def history_chart():
         num_items=minutes * SAMPLES_PER_MINUTE,
         reduce=True,
         data_points=history_page.get("datapoints", 10000),
+        tolerance=history_page.get("fidelity_degrees", 2.0),
     )
     payload["annotations"] = prepare_annotations(time.time() - minutes * 60)
     payload["minutes"] = minutes
