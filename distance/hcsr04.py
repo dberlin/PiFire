@@ -19,19 +19,34 @@
 # *****************************************
 
 from hcsr04sensor import sensor
-from common.common import write_log
+
+from distance._sampled_base import SampledHopperLevel
 
 
-class HopperLevel:
+class HopperLevel(SampledHopperLevel):
+    """Ultrasonic hopper level, sampled on a background thread.
+
+    Shares distance/_sampled_base.py's sampling loop with the ToF sensors so
+    that get_level() is a free cached read for the control loop's timed
+    refresh, instead of a synchronous ultrasonic measurement on the loop's
+    own thread.
+    """
+
+    sensor_label = "HC-SR04 sensor"
+
+    # hcsr04sensor's raw_distance() already averages a burst of pings
+    # internally (11 by default, spaced by its own sample_wait), so one call
+    # per cycle IS the average. Taking the base's default 3 would triple a
+    # read that is already ~1.1s of deliberate sleeps, for no extra accuracy.
+    samples_per_cycle = 1
+
+    # Consequently a HEALTHY ultrasonic read is ~1.1s, where a healthy ToF
+    # read is ~0.1-0.2s. Keeping the ToF sensors' 0.5s threshold here would
+    # declare every normal reading a stuck sensor and re-initialize forever.
+    slow_cycle_seconds = 2.0
+
     def __init__(self, dev_pins, empty=22, full=4, debug=False):
-        self.empty = empty  # Empty is greater than distance measured for empty
-        self.full = full  # Full is less than or equal to the minimum full distance.
-        if self.empty <= self.full:
-            event = "ERROR: Invalid Hopper Level Configuration Empty Level <= Full Level (forcing defaults)"
-            write_log(event)
-            # Set defaults that are valid
-            self.empty = 22
-            self.full = 4
+        super().__init__(empty=empty, full=full, debug=debug)
 
         # (NOTE: This is a 5V device and must be connected to 5V VCC)
         self.trig_pin = dev_pins["distance"]["trig"]
@@ -43,36 +58,14 @@ class HopperLevel:
         # unit = 'metric'
         # temperature = 20 (room temp in Celsius)
 
+        self._restart_sensor()
+        # Setup & Start Sensor Loop Thread
+        self._start_sampling()
+
+    def _restart_sensor(self):
         #  Create a distance reading with the hcsr04 sensor module
         self.ultrasonic = sensor.Measurement(self.trig_pin, self.echo_pin)
 
-    def set_level(self, level=100):
-        # Do nothing
-        return ()
-
-    def update_distances(self, empty=22, full=4):
-        self.empty = empty
-        self.full = full
-
-    def get_distances(self):
-        levels = {}
-        levels["empty"] = self.empty
-        levels["full"] = self.full
-        return levels
-
-    def get_level(self, override=False):
-        avg_dist = self.ultrasonic.raw_distance()  # Average Distance in cm
-
-        # If Average Distance is less than the full distance, we are at 100%
-        if avg_dist <= self.full:
-            level = 100
-        # If Average Distance is less than the empty distance, calculate percentage
-        elif avg_dist <= self.empty:
-            capacity = self.empty - self.full
-            adjusted_ratio = (self.empty / capacity) * 100
-            level = adjusted_ratio * (1 - (avg_dist / self.empty))
-        # If Average Distance is higher than empty distance, report 0 level
-        else:
-            level = 0
-
-        return int(level)
+    def _read_distance_mm(self):
+        # raw_distance() answers in cm; the sampling loop works in mm.
+        return self.ultrasonic.raw_distance() * 10
