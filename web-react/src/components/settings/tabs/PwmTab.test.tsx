@@ -134,6 +134,10 @@ describe("PwmTab", () => {
             { duty_cycle: 100 },
           ],
         },
+        // The delta now also carries the cross-section clamp of
+        // startup.pwm_duty_cycle (routes.py:495). This fixture has no
+        // `startup`, so the 100 default is used, already inside [20, 100].
+        startup: { pwm_duty_cycle: 100 },
       },
       ["settings_update"],
     );
@@ -267,5 +271,129 @@ describe("PwmTab", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "PWM Control" })).toBeInTheDocument();
     expect(screen.getByLabelText("Duty cycle row 1")).toBeInTheDocument();
+  });
+  // Ports index.html:747-758 (validateDutyCycle blocks submit) plus
+  // routes.py:485-495 (the two dependent re-clamps). A min >= max save is
+  // ALWAYS a rejection in practice: PwmSettings._check_profiles requires every
+  // profile to satisfy min <= duty <= max, and profiles is never empty.
+  describe("min/max guard and dependent clamps", () => {
+    const boundsFixture = (min: number, max: number, extra: object = {}) => ({
+      settings: {
+        platform: { dc_fan: true },
+        pwm: {
+          pwm_control: true,
+          update_time: 10,
+          min_duty_cycle: min,
+          max_duty_cycle: max,
+          frequency: 100,
+          temp_range_list: [3, 7, 10, 15],
+          profiles: [
+            { duty_cycle: 20 },
+            { duty_cycle: 35 },
+            { duty_cycle: 50 },
+            { duty_cycle: 75 },
+            { duty_cycle: 100 },
+          ],
+        },
+        ...extra,
+      },
+      mode: "Stop",
+    });
+
+    it("refuses to save when min_duty_cycle > max_duty_cycle and names the constraint", async () => {
+      renderRoute(<PwmTab />, boundsFixture(90, 50));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(saveMock).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent(/Max Duty Cycle/i);
+    });
+
+    // Flask's own check is `>=` (index.html:752): with equal bounds every
+    // profile would have to equal exactly that value.
+    it("refuses to save when min_duty_cycle === max_duty_cycle", async () => {
+      renderRoute(<PwmTab />, boundsFixture(50, 50));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(saveMock).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+
+    it("saves once when the bounds are valid", async () => {
+      renderRoute(<PwmTab />, boundsFixture(20, 100));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(saveMock).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("re-clamps every profile duty_cycle into the narrowed range (routes.py:489-490)", async () => {
+      renderRoute(<PwmTab />, boundsFixture(40, 60));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Assert on the DELTA, not the rendered table: the table only clamps a
+      // cell when that cell is edited, so narrowing min/max alone leaves the
+      // on-screen rows untouched.
+      const [delta] = saveMock.mock.calls[0];
+      expect(delta.pwm.profiles).toEqual([
+        { duty_cycle: 40 },
+        { duty_cycle: 40 },
+        { duty_cycle: 50 },
+        { duty_cycle: 60 },
+        { duty_cycle: 60 },
+      ]);
+    });
+
+    // THE cross-section assertion. startup.pwm_duty_cycle lives on a DIFFERENT
+    // tab; without this the save is rejected by
+    // SettingsSchema._check_startup_pwm_duty_cycle (routes.py:495).
+    it("clamps startup.pwm_duty_cycle into the new range and writes it into the delta", async () => {
+      renderRoute(<PwmTab />, boundsFixture(40, 60, { startup: { pwm_duty_cycle: 100 } }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const [delta, flags] = saveMock.mock.calls[0];
+      expect(delta.startup.pwm_duty_cycle).toBe(60);
+      // The flag list is a control-loop contract, not a style choice.
+      expect(flags).toEqual(["settings_update"]);
+    });
+
+    it("still writes startup.pwm_duty_cycle when it is already inside the range", async () => {
+      renderRoute(<PwmTab />, boundsFixture(40, 60, { startup: { pwm_duty_cycle: 55 } }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const [delta] = saveMock.mock.calls[0];
+      expect(delta.startup.pwm_duty_cycle).toBe(55);
+    });
+
+    // NumberField wraps its input in a <label> whose text also carries the
+    // suffix, so getByLabelText("Min Duty Cycle") does not match. Reach the
+    // input through the label span instead.
+    const inputFor = (label: string) => {
+      const input = screen.getByText(label).closest("label")?.querySelector("input");
+      if (!input) throw new Error(`no input for field "${label}"`);
+      return input;
+    };
+
+    it("bounds the two duty-cycle inputs at min 1 / max 100 (index.html:735,743)", () => {
+      renderRoute(<PwmTab />, boundsFixture(20, 100));
+
+      const minInput = inputFor("Min Duty Cycle");
+      const maxInput = inputFor("Max Duty Cycle");
+      expect(minInput).toHaveAttribute("min", "1");
+      expect(minInput).toHaveAttribute("max", "100");
+      expect(maxInput).toHaveAttribute("min", "1");
+      expect(maxInput).toHaveAttribute("max", "100");
+    });
   });
 });

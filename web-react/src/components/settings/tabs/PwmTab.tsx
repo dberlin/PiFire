@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router";
+import { clampToBounds } from "../../../helpers/settings/bounds";
 import { setPath } from "../../../helpers/settings/delta";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
@@ -49,6 +50,9 @@ export function PwmTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving, status } = useSaveSettings();
   const [pwm, setPwm] = useState<Pwm>(() => readPwm(settings));
+  // Client-side and pre-flight, so it is deliberately NOT routed through
+  // SaveBar's `status` — that channel carries the server's verdict.
+  const [boundsError, setBoundsError] = useState<string | null>(null);
 
   // Re-sync from the loader on revalidation via render-phase adjustment (the
   // repo's house style — NOT a useEffect; the React Compiler lint rule
@@ -84,11 +88,46 @@ export function PwmTab() {
   const units = settings.globals?.units === "C" ? "°C" : "°F";
 
   const onSave = async () => {
+    // Ported from index.html:747-758 (validateDutyCycle, wired as
+    // onclick="return validateDutyCycle()" on the submit button). Flask's test
+    // is `>=`: with equal bounds every profile would have to equal exactly that
+    // value, and PwmSettings._check_profiles would reject anything else.
+    if (pwm.min_duty_cycle >= pwm.max_duty_cycle) {
+      setBoundsError("Max Duty Cycle must be greater than Min Duty Cycle.");
+      return; // do NOT call save()
+    }
+    setBoundsError(null);
+
+    // Ported from blueprints/settings/routes.py:485-495 — narrowing min/max
+    // alone leaves these two outside the new range, which write_settings()
+    // then rejects (PwmSettings._check_profiles /
+    // SettingsSchema._check_startup_pwm_duty_cycle). The table only clamps a
+    // cell when that cell is edited, so it does not cover this.
+    const clamped: Pwm = {
+      ...pwm,
+      profiles: pwm.profiles.map((p) => ({
+        ...p,
+        duty_cycle: clampToBounds(p.duty_cycle, pwm.min_duty_cycle, pwm.max_duty_cycle),
+      })),
+    };
+
     let d: object = {};
     // pwm.temp_range_list and pwm.profiles ride the same delta wholesale
     // (single Save per tab, using the existing ["settings_update"] flag) —
     // they're already keys of `pwm`, so this loop covers them too.
-    for (const [k, v] of Object.entries(pwm)) d = setPath(d, `pwm.${k}`, v);
+    for (const [k, v] of Object.entries(clamped)) d = setPath(d, `pwm.${k}`, v);
+    // Cross-section: startup.pwm_duty_cycle lives on another tab but is bound
+    // to this range (routes.py:495). Written unconditionally — writing back an
+    // unchanged value is harmless and keeps this branch-free.
+    d = setPath(
+      d,
+      "startup.pwm_duty_cycle",
+      clampToBounds(
+        settings.startup?.pwm_duty_cycle ?? 100,
+        pwm.min_duty_cycle,
+        pwm.max_duty_cycle,
+      ),
+    );
     await save(d, ["settings_update"]); // control loop must re-read pwm
   };
 
@@ -122,7 +161,7 @@ export function PwmTab() {
         label="Min Duty Cycle"
         value={pwm.min_duty_cycle}
         onChange={(v) => set("min_duty_cycle", v)}
-        min={0}
+        min={1}
         max={100}
         suffix="%"
       />
@@ -130,7 +169,7 @@ export function PwmTab() {
         label="Max Duty Cycle"
         value={pwm.max_duty_cycle}
         onChange={(v) => set("max_duty_cycle", v)}
-        min={0}
+        min={1}
         max={100}
         suffix="%"
       />
@@ -151,6 +190,11 @@ export function PwmTab() {
           setPwm((s) => ({ ...s, temp_range_list, profiles }))
         }
       />
+      {boundsError && (
+        <p className="pf-settings-error-text" role="alert">
+          {boundsError}
+        </p>
+      )}
       <SaveBar onSave={onSave} saving={saving} status={status} />
     </Section>
   );
