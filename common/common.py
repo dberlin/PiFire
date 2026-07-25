@@ -15,6 +15,7 @@ Description: This library provides functions that are common to
 ==============================================================================
 """
 import time
+import copy
 import datetime
 import os
 import json
@@ -701,6 +702,108 @@ def deep_update(dictionary, updates):
         else:
             dictionary[key] = value
     return dictionary
+
+
+def notify_data_key(entry):
+    """The identity of a ``control["notify_data"]`` element: ``(label, type)``.
+
+    This is how entries are identified everywhere else -- ``_cmd_set_notify``
+    in common/api_commands.py matches on label and (for the limit variants)
+    type; ``_get_probe_data``/``_get_timer_notify_data`` in
+    blueprints/mobile/socket_io.py match the same way. ``label`` alone is not
+    unique: each probe contributes three entries (``probe``,
+    ``probe_limit_high``, ``probe_limit_low``) sharing one label.
+    """
+    return (entry["label"], entry["type"])
+
+
+def _key_notify_data(array):
+    """``{(label, type): entry}`` for a notify_data array, or None if unkeyable.
+
+    Returns None -- meaning "fall back to wholesale replacement" -- when the
+    value is not a list of dicts each carrying a unique ``label``/``type``.
+    A merge keyed on a non-unique or absent key would silently move data
+    between entries, which is worse than the array-replacing behaviour it
+    would be improving on.
+    """
+    if not isinstance(array, list):
+        return None
+    keyed = {}
+    for entry in array:
+        if not isinstance(entry, Mapping) or "label" not in entry or "type" not in entry:
+            return None
+        key = notify_data_key(entry)
+        if key in keyed:
+            return None
+        keyed[key] = entry
+    return keyed
+
+
+def merge_notify_data(base, current, incoming):
+    """Three-way, element-wise merge of a ``control["notify_data"]`` array.
+
+    ``control["notify_data"]`` is the only array in the control dict, and
+    json_patch (RFC 7386) replaces arrays wholesale. Every writer therefore
+    ships the array whole, built from a ``read_control()`` that cannot see the
+    pending write queue -- so two writers in one control cycle each send a full
+    array from the same stale read and the second discards the first's change.
+    See tests/characterization/test_control_writes_cross_writer.py.
+
+    A plain element-wise merge does NOT fix that: a full array from a stale
+    read still carries a stale value for every entry, so overwriting per entry
+    is identical to overwriting the lot. What is missing is the writer's
+    *intent*, and that is recoverable from a common ancestor: ``base`` is the
+    control blob as it stood when the drain began, which is exactly the blob
+    every writer in this cycle read. A field whose incoming value equals
+    ``base`` was not touched by this writer and must not be imposed on
+    ``current`` (which may already carry an earlier writer's change).
+
+    :param base: notify_data as of the start of this drain (the common ancestor)
+    :param current: notify_data as it stands now (earlier patches applied)
+    :param incoming: notify_data carried by the patch being applied
+    :return: the merged array; a deep copy of ``incoming`` if any of the three
+        cannot be keyed on ``(label, type)``, which reproduces the previous
+        wholesale-replacement behaviour exactly.
+
+    Semantics:
+
+    * Field present in ``incoming`` and differing from ``base`` -> applied.
+    * Field equal to ``base`` -> the writer did not touch it; ``current`` wins.
+    * Field absent from ``incoming`` -> never deleted, matching the
+      never-deletes contract :func:`strip_null_members` documents.
+    * Entry in ``incoming`` but not ``base`` -> an addition; appended (or
+      field-merged if another patch already added it).
+    * Entry in ``base`` but not ``incoming`` -> a deletion the writer made
+      (a factory-defaults reseed with a different probe map does this);
+      removed, as wholesale replacement did.
+    * Two writers changing the SAME field -> a genuine conflict with nothing in
+      the queue to resolve it; the later patch wins, as it did before.
+    """
+    base_keyed = _key_notify_data(base)
+    current_keyed = _key_notify_data(current)
+    incoming_keyed = _key_notify_data(incoming)
+    if base_keyed is None or current_keyed is None or incoming_keyed is None:
+        return copy.deepcopy(incoming)
+
+    # dicts preserve insertion order, so `current`'s ordering is preserved and
+    # entries new to this patch land at the end.
+    merged = {key: copy.deepcopy(entry) for key, entry in current_keyed.items()}
+
+    for key in base_keyed:
+        if key not in incoming_keyed:
+            merged.pop(key, None)
+
+    for key, entry in incoming_keyed.items():
+        base_entry = base_keyed.get(key)
+        target = merged.get(key)
+        if target is None:
+            merged[key] = copy.deepcopy(entry)
+            continue
+        for field, value in entry.items():
+            if base_entry is None or field not in base_entry or base_entry[field] != value:
+                target[field] = copy.deepcopy(value)
+
+    return list(merged.values())
 
 
 MODE_MAP = {

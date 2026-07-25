@@ -6,7 +6,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import deque
 
-from common.common import WriteKind, deep_update, generate_uuid, strip_null_members
+from common.common import WriteKind, deep_update, generate_uuid, merge_notify_data, strip_null_members
 from common.defaults import METRIC_COLUMNS, default_control, default_metrics
 
 
@@ -154,12 +154,24 @@ class InMemoryStore(Store):
             raise TypeError(f"write_control: kind must be WriteKind, got {kind!r}")
 
     def execute_control_writes(self):
+        # Captured once, before any patch lands: the common ancestor every
+        # writer in this cycle read. Mirrors common.execute_control_writes.
+        base_notify_data = self._control.get("notify_data") if self._write_queue else None
         while self._write_queue:
             partial = self._write_queue.popleft()
             partial.pop("origin", None)
             # Mirror common.execute_control_writes: strip null members so the merge
             # only adds/overwrites keys (json_patch parity), never deletes.
-            self._control = deep_update(self._control, strip_null_members(partial))
+            partial = strip_null_members(partial)
+            if "notify_data" in partial:
+                # deep_update replaces lists wholesale, exactly as json_patch
+                # does, so notify_data needs the same three-way element merge.
+                partial["notify_data"] = merge_notify_data(
+                    base_notify_data,
+                    self._control.get("notify_data"),
+                    partial["notify_data"],
+                )
+            self._control = deep_update(self._control, partial)
 
     def read_settings(self):
         return copy.deepcopy(self._settings)

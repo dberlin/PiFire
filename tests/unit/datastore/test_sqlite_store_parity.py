@@ -78,6 +78,49 @@ def test_control_merge_null_handling_parity(store):
         assert st.read_control() == expected
 
 
+def test_notify_data_cross_writer_merge_parity(store):
+    # SqliteStore (json_patch + merge_notify_data) and InMemoryStore
+    # (deep_update + merge_notify_data) must agree that two writers in ONE
+    # cycle, each sending the whole notify_data array built from the same
+    # pre-drain read, both survive. This is the cross-process seam: the web
+    # process queues, the control process drains, and the two stores are
+    # swappable only if they resolve that identically.
+    from common.common import WriteKind
+    from controller.runtime.store import InMemoryStore
+
+    base = [
+        {"label": "Grill", "type": "probe", "req": False, "target": 0},
+        {"label": "Grill", "type": "probe_limit_high", "req": False, "target": 0},
+        {"label": "Timer", "type": "timer", "req": False, "shutdown": False},
+    ]
+
+    def _writer(mutate):
+        """A whole-array write built from the caller's stale (pre-drain) read."""
+        stale = [dict(entry) for entry in base]
+        mutate(stale)
+        return {"notify_data": stale}
+
+    def _arm_probe(array):
+        array[0].update(req=True, target=203)
+
+    def _arm_timer(array):
+        array[2].update(req=True, shutdown=True)
+
+    expected = [
+        {"label": "Grill", "type": "probe", "req": True, "target": 203},
+        {"label": "Grill", "type": "probe_limit_high", "req": False, "target": 0},
+        {"label": "Timer", "type": "timer", "req": True, "shutdown": True},
+    ]
+
+    mem = InMemoryStore()
+    for st in (store, mem):
+        st.write_control({"mode": "Stop", "notify_data": [dict(e) for e in base]}, WriteKind.OVERWRITE)
+        st.write_control(_writer(_arm_probe), WriteKind.MERGE, origin="app")
+        st.write_control(_writer(_arm_timer), WriteKind.MERGE, origin="app-socketio")
+        st.execute_control_writes()
+        assert st.read_control()["notify_data"] == expected
+
+
 def test_sqlite_update_metrics_amend_last_parity(store):
     # update_metrics(metrics) amends the last record in place rather than
     # appending, matching InMemoryStore's update behavior.

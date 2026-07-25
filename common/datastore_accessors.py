@@ -19,7 +19,7 @@ import math
 import time
 
 from common import datastore
-from common.common import WriteKind, generate_uuid, strip_null_members
+from common.common import WriteKind, generate_uuid, merge_notify_data, strip_null_members
 from common.defaults import (
     METRIC_COLUMNS,
     default_control,
@@ -88,6 +88,15 @@ def execute_control_writes():
     strip_null_members) so the merge only ever adds or overwrites keys -- never
     deletes -- preserving the historical deep_update contract.
 
+    ``notify_data`` -- the only array in the control dict -- does NOT go through
+    json_patch, which replaces arrays wholesale (RFC 7386). Writers cannot see
+    the pending queue, so every writer in a control cycle builds its full array
+    from the same stale read and the last one applied would discard the rest.
+    Instead it is three-way merged per entry against the blob as it stood when
+    this drain began -- the state every writer in this cycle read -- so each
+    patch imposes only the fields it actually changed. See
+    :func:`common.common.merge_notify_data`.
+
     :param None
 
     :return status : 'OK', 'ERROR'
@@ -98,6 +107,10 @@ def execute_control_writes():
     # fallback, which the old read-modify-write path relied on).
     if q.length() > 0 and datastore.get_blob("control:general") is None:
         datastore.set_blob("control:general", json.dumps(default_control()))
+    # Captured ONCE, before any patch lands: this is the common ancestor for
+    # every writer in this cycle, since control:general only changes when the
+    # control loop drains or overwrites it.
+    base_notify_data = read_control().get("notify_data") if q.length() > 0 else None
     while q.length() > 0:
         command = q.pop()
         if command is None:
@@ -116,6 +129,12 @@ def execute_control_writes():
                 "json_patch would delete these keys. Fix the source to stop sending nulls.",
                 stripped,
                 origin,
+            )
+        if "notify_data" in patch:
+            patch["notify_data"] = merge_notify_data(
+                base_notify_data,
+                read_control().get("notify_data"),
+                patch["notify_data"],
             )
         datastore.execute_write(
             "UPDATE kv SET value = json_patch(value, ?) WHERE key = 'control:general'", (json.dumps(patch),)
