@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { FIXTURE_DASH } from "../helpers/fixture";
 
+// AppShell -- the layout route wrapping /, /history and /settings -- is the one
+// caller of useLiveState, so every route inside the shell needs this mocked
+// even when the test is about a settings tab. A beforeEach below supplies a
+// usable default; tests that care about the payload override it.
 const useLiveStateMock = rs.fn();
 rs.mock("../helpers/useLiveState", () => ({
   useLiveState: () => useLiveStateMock(),
@@ -45,9 +49,22 @@ const command = {
   timerStart: rs.fn(),
   timerPause: rs.fn(),
   timerStop: rs.fn(),
+  timerShutdown: rs.fn(),
+  timerKeepWarm: rs.fn(),
   system: rs.fn(),
   setUnits: rs.fn(),
 };
+
+beforeEach(() => {
+  useLiveStateMock.mockReset();
+  useLiveStateMock.mockReturnValue({
+    live: FIXTURE_DASH,
+    phase: "live",
+    controlAlive: true,
+    targetUrl: "http://pifire.local:5000",
+    command,
+  });
+});
 
 function renderApp(initialEntry: string) {
   const router = createMemoryRouter(routes, { initialEntries: [initialEntry] });
@@ -112,6 +129,53 @@ describe("App routing", () => {
     const wizardRoute = routes.find((r) => r.path === "/wizard");
     expect(wizardRoute).toBeDefined();
     expect(wizardRoute?.loader).toBeDefined();
+  });
+
+  it("wraps the dashboard in the app shell so the other pages are reachable", () => {
+    renderApp("/");
+
+    expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "History" })).toHaveAttribute("href", "/history");
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
+  });
+
+  it("wraps the history page in the app shell too", () => {
+    renderApp("/history");
+
+    expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "History" })).toBeInTheDocument();
+  });
+
+  it("renders the settings page inside the app shell", async () => {
+    getSettingsMock.mockResolvedValue({
+      globals: { grill_name: "Backyard Smoker", page_theme: "dark" },
+    });
+    getModeMock.mockResolvedValue("Stop");
+
+    renderApp("/settings/general");
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
+  });
+
+  it("renders the wizard WITHOUT the shell, so a fresh install cannot wander out of it", async () => {
+    getWizardStateMock.mockResolvedValue({
+      modules_metadata: { grillplatform: {}, probes: {}, distance: {}, display: {} },
+      selections: { grillplatform: null, probes: null, distance: null, display: null },
+      settings_dep_values: { grillplatform: {}, probes: {}, distance: {}, display: {} },
+      display_config: {},
+      board_probe_maps: {},
+      control_mode: "Stop",
+      first_time_setup: false,
+      has_draft: false,
+    });
+
+    renderApp("/wizard");
+
+    expect(await screen.findByRole("heading", { name: "Welcome" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
+    // No shell means no second live-state subscriber either.
+    expect(useLiveStateMock).not.toHaveBeenCalled();
   });
 
   it("the default export mounts its own AppPrefsProvider + browser router and renders the dashboard at /", () => {

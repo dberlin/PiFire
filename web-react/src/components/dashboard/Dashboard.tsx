@@ -5,7 +5,6 @@ import { deriveView, fmtDuration, type PillView } from "../../helpers/dashboard/
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
 import type { AccentName, LiveState } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
-import { Banners } from "./Banners";
 import { ControlButtons } from "./ControlButtons";
 import { GrillGauge } from "./GrillGauge";
 import { HopperGauge } from "./HopperGauge";
@@ -42,7 +41,9 @@ export function Dashboard({
   const view = deriveView(dash);
   const navigate = useNavigate();
   const now = useClock();
-  const scale = useFitScale(1280, 720);
+  // `fitRef` goes on the .pf-fit box below: inside the app shell that box is
+  // the area left under the navbar, not the whole viewport.
+  const { scale, ref: fitRef } = useFitScale(1280, 720);
 
   // Cook-time counter: seconds since the current cook began (reset when the
   // controller leaves an active cooking mode). Adjusted synchronously during
@@ -60,7 +61,7 @@ export function Dashboard({
   const clock = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   return (
-    <div className="pf-fit">
+    <div className="pf-fit" ref={fitRef}>
       <div
         className="pf-stage"
         data-animate={animate ? "true" : "false"}
@@ -82,11 +83,9 @@ export function Dashboard({
           }}
         />
 
-        <Banners
-          errors={dash.errors ?? []}
-          warnings={dash.warnings ?? []}
-          criticalError={dash.criticalError}
-        />
+        {/* The error/warning banners used to float here, over the stage. They
+            are now shell chrome (components/shell/Banners.tsx) shown above
+            every page, matching Flask, which renders them from base.html. */}
 
         {/* Header */}
         <div

@@ -3,6 +3,35 @@
    the pf-* class vocabulary already used by the settings and dashboard
    surfaces. No second visual language. */
 
+/* ---- layout ---- */
+/* The shell fills the viewport and stacks chrome above the routed page. The
+   page area is the only scrolling region, so the navbar and the alert strip
+   stay put. */
+.pf-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--page);
+}
+.pf-shell-main {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+/* Two page roots were written before there was any chrome above them and size
+   themselves against the viewport: .pf-fit pins to it (position: fixed), and
+   .pf-settings reserves a full 100vh. Inside the shell both must measure the
+   area BELOW the navbar instead, or they would slide under it. Scoped to
+   .pf-shell-main so each page still stands alone in its own tests. */
+.pf-shell-main .pf-fit {
+  position: absolute;
+}
+.pf-shell-main .pf-settings {
+  min-height: 100%;
+}
+
 /* ---- navbar ---- */
 .pf-nav {
   display: flex;
@@ -244,4 +273,37 @@
   color: #ff8b82;
   font: 600 14px "Barlow";
   margin: 10px 0 0;
+}
+
+/* ---- global alert strip ---- */
+/* Moved here from dashboard.css with Banners.tsx. It used to float over the
+   dashboard stage (position: absolute, top: 62px); as shell chrome it is a
+   plain row in the stack, above the routed page like base.html's alert block.
+   HistoryPage reuses .pf-banner--error on its own for an inline error. */
+.pf-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 16px;
+}
+.pf-banner {
+  border-radius: 10px;
+  padding: 8px 14px;
+  font: 600 13px "Barlow";
+}
+.pf-banner--warning {
+  background: rgba(255, 176, 32, 0.14);
+  border: 1px solid #ffb020;
+  color: #ffce6a;
+}
+.pf-banner--error {
+  background: rgba(255, 90, 77, 0.14);
+  border: 1px solid #ff5a4d;
+  color: #ff8b82;
+}
+.pf-banner--critical {
+  background: rgba(255, 90, 77, 0.24);
+  border: 1px solid #ff5a4d;
+  color: #ffd0cb;
+  font-weight: 700;
 }

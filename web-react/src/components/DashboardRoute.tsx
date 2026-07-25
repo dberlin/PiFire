@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { getSettings } from "../helpers/settings/settingsApi";
-import { useLiveState } from "../helpers/useLiveState";
+import { useShellState } from "../helpers/shellContext";
 import { useAppPrefs } from "./AppPrefs";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { Dashboard } from "./dashboard/Dashboard";
@@ -9,7 +9,10 @@ import { Dashboard } from "./dashboard/Dashboard";
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 export function DashboardRoute() {
-  const { live, phase, controlAlive, targetUrl, command } = useLiveState();
+  // Takes the shell's subscription rather than calling useLiveState() itself:
+  // that hook opens a socket per call, and AppShell already holds the one this
+  // page's data arrives on. See helpers/shellContext.ts.
+  const { live, phase, controlAlive, targetUrl, command } = useShellState();
   const { accent, setAccent, animate, setAnimate } = useAppPrefs();
   const navigate = useNavigate();
 

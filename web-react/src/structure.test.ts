@@ -90,6 +90,30 @@ function resolvesIntoComponents(file: string, specifier: string): boolean {
   return rel === "" || !rel.startsWith("..");
 }
 
+// Guard the app's single live-data subscription. useLiveState() opens its own
+// socket.io connection every time it is called (helpers/useLiveState.ts), so a
+// second caller anywhere in the tree means a second socket and a doubled
+// `listen_app_data` stream -- which nothing else would fail on, and which no
+// component test can see, because each one mocks the hook. AppShell is the one
+// caller; every page below it reads the same bundle from Outlet context via
+// useShellState(). This is that rule, written down where it breaks loudly.
+describe("single live-state subscription", () => {
+  it("is imported by AppShell and nowhere else", () => {
+    // A value import of the hook, which is the only way to call it. Matching
+    // the import rather than the call keeps prose about `useLiveState()` in
+    // comments -- of which there is a good deal, since this rule needs
+    // explaining wherever it bites -- from reading as a call site.
+    const valueImport =
+      /import\s*\{[^}]*\buseLiveState\b[^}]*\}\s*from\s*["'][^"']*useLiveState["']/;
+    const files: string[] = [];
+    collectFiles("src", files);
+    const importers = files.filter(
+      (file) => !/\.(test|spec)\.tsx?$/.test(file) && valueImport.test(readFileSync(file, "utf8")),
+    );
+    expect(importers).toEqual([join("src", "components", "shell", "AppShell.tsx")]);
+  });
+});
+
 describe("component/helper layering", () => {
   it("helpers/ never imports from components/", () => {
     const files: string[] = [];

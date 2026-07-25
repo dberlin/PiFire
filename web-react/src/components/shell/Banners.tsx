@@ -1,5 +1,10 @@
-// Errors/warnings/critical strip, rendered over the stage below the header.
-// Source: dash.errors / dash.warnings / dash.criticalError (socket_dash_data).
+import "./shell.css";
+
+// Errors/warnings/critical strip. Source: dash.errors / dash.warnings /
+// dash.criticalError (socket_dash_data).
+//
+// Part of the shell rather than the dashboard because Flask renders these
+// alerts on every page (templates/base.html), not only on the controller view.
 export function Banners({
   errors,
   warnings,

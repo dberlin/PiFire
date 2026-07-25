@@ -17,6 +17,7 @@ import { SafetyTab } from "./settings/tabs/SafetyTab";
 import { StartupTab } from "./settings/tabs/StartupTab";
 import { UnitsTab } from "./settings/tabs/UnitsTab";
 import { WorkModeTab } from "./settings/tabs/WorkModeTab";
+import { AppShell } from "./shell/AppShell";
 import {
   WizardError,
   HydrateFallback as WizardHydrateFallback,
@@ -45,37 +46,53 @@ export function HydrateFallback() {
 // settings once after mount and navigates to /wizard only on a fresh install,
 // so "/" keeps its synchronous first paint and a failed check stays advisory.
 export const routes = [
-  { path: "/", element: <DashboardRoute /> },
-  // The cook-history chart page. NOT to be confused with the /settings/history
-  // child route below, which is the History *settings* tab.
-  { path: "/history", element: <HistoryPage /> },
+  // Pathless layout route: AppShell renders the navbar, the timer strip and the
+  // global alert strip around whichever page below it matched, and owns the
+  // single useLiveState() subscription that those pages read off Outlet
+  // context. Nesting a page here is what makes it reachable by clicking.
+  {
+    element: <AppShell />,
+    children: [
+      { path: "/", element: <DashboardRoute /> },
+      // The cook-history chart page. NOT to be confused with the
+      // /settings/history child route below, which is the History *settings* tab.
+      { path: "/history", element: <HistoryPage /> },
+      {
+        path: "/settings",
+        element: <SettingsShell />,
+        loader: settingsLoader,
+        errorElement: <SettingsError />,
+        // Still honoured under the layout route: react-router renders the
+        // fallback of the DEEPEST match that declares one, so the shell keeps
+        // painting while the settings loader runs.
+        HydrateFallback,
+        children: [
+          { index: true, element: <Navigate to="general" replace /> },
+          { path: "general", element: <GeneralTab /> },
+          { path: "work-mode", element: <WorkModeTab /> },
+          { path: "controller", element: <ControllerTab /> },
+          { path: "pwm", element: <PwmTab /> },
+          { path: "startup", element: <StartupTab /> },
+          { path: "safety", element: <SafetyTab /> },
+          { path: "pellets", element: <PelletsTab /> },
+          { path: "history", element: <HistoryTab /> },
+          { path: "notifications", element: <NotificationsTab /> },
+          { path: "units", element: <UnitsTab /> },
+          { path: "platform", element: <PlatformTab /> },
+        ],
+      },
+    ],
+  },
+  // Deliberately OUTSIDE the shell. A first-run install is a linear flow, and
+  // a navbar would offer a half-configured user a way to wander out of it. It
+  // follows that the wizard opens no live socket either, which it has no use
+  // for: nothing is running yet.
   {
     path: "/wizard",
     element: <WizardShell />,
     loader: wizardLoader,
     errorElement: <WizardError />,
     HydrateFallback: WizardHydrateFallback,
-  },
-  {
-    path: "/settings",
-    element: <SettingsShell />,
-    loader: settingsLoader,
-    errorElement: <SettingsError />,
-    HydrateFallback,
-    children: [
-      { index: true, element: <Navigate to="general" replace /> },
-      { path: "general", element: <GeneralTab /> },
-      { path: "work-mode", element: <WorkModeTab /> },
-      { path: "controller", element: <ControllerTab /> },
-      { path: "pwm", element: <PwmTab /> },
-      { path: "startup", element: <StartupTab /> },
-      { path: "safety", element: <SafetyTab /> },
-      { path: "pellets", element: <PelletsTab /> },
-      { path: "history", element: <HistoryTab /> },
-      { path: "notifications", element: <NotificationsTab /> },
-      { path: "units", element: <UnitsTab /> },
-      { path: "platform", element: <PlatformTab /> },
-    ],
   },
 ];
 

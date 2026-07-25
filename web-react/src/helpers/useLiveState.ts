@@ -8,7 +8,10 @@ import type { LiveState } from "./types";
 
 export type ConnectionPhase = "connecting" | "live" | "unreachable" | "demo";
 
-interface LiveStateResult {
+// Exported because AppShell hands this exact bundle to its child routes via
+// Outlet context (helpers/shellContext.ts). Sharing the type keeps the context
+// from drifting away from what the hook actually returns.
+export interface LiveStateResult {
   live: LiveState;
   phase: ConnectionPhase;
   controlAlive: boolean;

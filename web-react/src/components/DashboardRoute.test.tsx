@@ -1,17 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
+import type { CommandClient, CommandResult } from "../helpers/command";
 import { FIXTURE_DASH } from "../helpers/fixture";
+import type { ShellContext } from "../helpers/shellContext";
 
-const useLiveStateMock = rs.fn();
-const navigateMock = rs.fn();
 const getSettingsMock = rs.fn();
 
-rs.mock("../helpers/useLiveState", () => ({
-  useLiveState: () => useLiveStateMock(),
-}));
-rs.mock("react-router", () => ({
-  useNavigate: () => navigateMock,
-}));
 rs.mock("../helpers/settings/settingsApi", () => ({
   getSettings: (...args: unknown[]) => getSettingsMock(...args),
 }));
@@ -19,110 +14,109 @@ rs.mock("../helpers/settings/settingsApi", () => ({
 const { DashboardRoute } = await import("./DashboardRoute");
 const { AppPrefsProvider } = await import("./AppPrefs");
 
-function renderDashboardRoute() {
-  return render(
-    <AppPrefsProvider>
-      <DashboardRoute />
-    </AppPrefsProvider>,
-  );
-}
-
 afterEach(cleanup);
 
 beforeEach(() => {
-  navigateMock.mockClear();
   getSettingsMock.mockReset();
   getSettingsMock.mockResolvedValue({ globals: { first_time_setup: false } });
 });
 
-const command = {
-  setMode: rs.fn(),
-  hold: rs.fn(),
-  setSmokePlus: rs.fn(),
-  setPMode: rs.fn(),
-  prime: rs.fn(),
-  timerStart: rs.fn(),
-  timerPause: rs.fn(),
-  timerStop: rs.fn(),
-  system: rs.fn(),
-  setUnits: rs.fn(),
-};
+const OK: CommandResult = { ok: true, message: "" };
+
+function stubCommand(): CommandClient {
+  const ok = async () => OK;
+  return {
+    setMode: rs.fn(ok),
+    hold: rs.fn(ok),
+    setSmokePlus: rs.fn(ok),
+    setPMode: rs.fn(ok),
+    prime: rs.fn(ok),
+    timerStart: rs.fn(ok),
+    timerPause: rs.fn(ok),
+    timerStop: rs.fn(ok),
+    timerShutdown: rs.fn(ok),
+    timerKeepWarm: rs.fn(ok),
+    system: rs.fn(ok),
+    setUnits: rs.fn(ok),
+    manualOutput: rs.fn(ok),
+    manualPwm: rs.fn(ok),
+  };
+}
+
+// DashboardRoute reads its live state off the shell's Outlet context now
+// (AppShell owns the app's single useLiveState subscription), so the harness
+// supplies that context through a real memory router instead of mocking the
+// hook. /wizard is mounted as a sibling stand-in so the first_time_setup
+// redirect can be asserted by where the router actually ends up, rather than
+// by a spy on useNavigate.
+function renderDashboardRoute(over: Partial<ShellContext> = {}) {
+  const context: ShellContext = {
+    live: FIXTURE_DASH,
+    phase: "live",
+    controlAlive: true,
+    targetUrl: "http://pifire.local:5000",
+    command: stubCommand(),
+    ...over,
+  };
+  const router = createMemoryRouter(
+    [
+      {
+        element: <Outlet context={context} />,
+        children: [{ path: "/", element: <DashboardRoute /> }],
+      },
+      { path: "/wizard", element: <div>wizard stand-in</div> },
+    ],
+    { initialEntries: ["/"] },
+  );
+  return render(
+    <AppPrefsProvider>
+      <RouterProvider router={router} />
+    </AppPrefsProvider>,
+  );
+}
+
+const wizardShowing = () => screen.queryByText("wizard stand-in") !== null;
 
 describe("DashboardRoute", () => {
   it("renders ConnectionStatus when there is no live/demo data yet", () => {
-    useLiveStateMock.mockReturnValue({
-      live: FIXTURE_DASH,
-      phase: "connecting",
-      controlAlive: false,
-      targetUrl: "http://pifire.local:5000",
-      command,
-    });
-
-    renderDashboardRoute();
+    renderDashboardRoute({ phase: "connecting", controlAlive: false });
 
     expect(screen.getByText("Connecting to PiFire…")).toBeInTheDocument();
     expect(screen.getByText("http://pifire.local:5000")).toBeInTheDocument();
   });
 
   it("renders the Dashboard with the current mode badge once phase is live", () => {
-    useLiveStateMock.mockReturnValue({
-      live: { ...FIXTURE_DASH, currentMode: "Hold" },
-      phase: "live",
-      controlAlive: true,
-      targetUrl: "http://pifire.local:5000",
-      command,
-    });
-
-    renderDashboardRoute();
+    renderDashboardRoute({ live: { ...FIXTURE_DASH, currentMode: "Hold" } });
 
     expect(screen.getByText("HOLD")).toBeInTheDocument();
     expect(screen.getByText("LIVE")).toBeInTheDocument();
   });
 
   it("navigates to /wizard when first_time_setup is true", async () => {
-    useLiveStateMock.mockReturnValue({
-      live: FIXTURE_DASH,
-      phase: "live",
-      controlAlive: true,
-      targetUrl: "http://pifire.local:5000",
-      command,
-    });
     getSettingsMock.mockResolvedValue({ globals: { first_time_setup: true } });
 
     renderDashboardRoute();
 
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/wizard"));
+    await waitFor(() => expect(wizardShowing()).toBe(true));
   });
 
   it("does not navigate when first_time_setup is false", async () => {
-    useLiveStateMock.mockReturnValue({
-      live: FIXTURE_DASH,
-      phase: "live",
-      controlAlive: true,
-      targetUrl: "http://pifire.local:5000",
-      command,
-    });
     getSettingsMock.mockResolvedValue({ globals: { first_time_setup: false } });
 
     renderDashboardRoute();
 
     await waitFor(() => expect(getSettingsMock).toHaveBeenCalled());
-    expect(navigateMock).not.toHaveBeenCalled();
+    expect(wizardShowing()).toBe(false);
+    expect(screen.getByText("LIVE")).toBeInTheDocument();
   });
 
   it("still renders the dashboard when the check fails (advisory only)", async () => {
-    useLiveStateMock.mockReturnValue({
-      live: FIXTURE_DASH,
-      phase: "live",
-      controlAlive: true,
-      targetUrl: "http://pifire.local:5000",
-      command,
-    });
     getSettingsMock.mockRejectedValue(new Error("offline"));
 
     renderDashboardRoute();
 
     await waitFor(() => expect(getSettingsMock).toHaveBeenCalled());
-    expect(navigateMock).not.toHaveBeenCalled();
+    expect(wizardShowing()).toBe(false);
+    expect(screen.getByText("LIVE")).toBeInTheDocument();
   });
 });

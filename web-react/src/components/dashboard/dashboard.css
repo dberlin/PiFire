@@ -240,35 +240,7 @@
   color: #ff8b82;
 }
 
-/* Error/warning banners */
-.pf-banners {
-  position: absolute;
-  top: 62px;
-  left: 18px;
-  right: 18px;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.pf-banner {
-  border-radius: 10px;
-  padding: 8px 14px;
-  font: 600 13px "Barlow";
-}
-.pf-banner--warning {
-  background: rgba(255, 176, 32, 0.14);
-  border: 1px solid #ffb020;
-  color: #ffce6a;
-}
-.pf-banner--error {
-  background: rgba(255, 90, 77, 0.14);
-  border: 1px solid #ff5a4d;
-  color: #ff8b82;
-}
-.pf-banner--critical {
-  background: rgba(255, 90, 77, 0.24);
-  border: 1px solid #ff5a4d;
-  color: #ffd0cb;
-  font-weight: 700;
-}
+/* The error/warning banner rules moved to components/shell/shell.css along
+   with Banners.tsx: the strip is chrome for every page now, not part of the
+   1280x720 stage. HistoryPage still borrows .pf-banner--error for its inline
+   failure message, which keeps working -- every stylesheet here is global. */
