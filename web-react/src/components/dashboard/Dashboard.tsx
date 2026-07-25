@@ -21,8 +21,12 @@ interface DashboardProps {
   dash: LiveState;
   command: CommandClient;
   /** Base URL for the REST writes that do not go through CommandClient --
-   *  currently just the notify round trip, which needs a GET as well as a POST. */
-  targetUrl: string;
+   *  currently just the notify round trip, which needs a GET as well as a POST.
+   *  This is the API base (empty in dev, so requests stay same-origin and the
+   *  dev proxy forwards them), NOT the human-readable target shown by
+   *  ConnectionStatus -- those differ, and fetching the display string sends
+   *  the browser cross-origin. */
+  apiBase: string;
   phase: ConnectionPhase;
   controlAlive: boolean;
   accent: AccentName;
@@ -37,7 +41,7 @@ interface DashboardProps {
 export function Dashboard({
   dash,
   command,
-  targetUrl,
+  apiBase,
   phase,
   controlAlive,
   accent,
@@ -92,7 +96,7 @@ export function Dashboard({
     setNotifySaving(true);
     setNotifyError(null);
     try {
-      await saveTargetEdit(targetUrl, notifyLabel, edit);
+      await saveTargetEdit(apiBase, notifyLabel, edit);
       setNotifyLabel(null);
     } catch (e) {
       // Stay open on failure. This write is not echoed back until the control

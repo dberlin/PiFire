@@ -41,7 +41,7 @@ function renderDashboard(
     <Dashboard
       dash={dash}
       command={makeCommand()}
-      targetUrl=""
+      apiBase=""
       phase="live"
       controlAlive={true}
       accent="ember"
@@ -120,7 +120,7 @@ describe("Dashboard", () => {
         <Dashboard
           dash={{ ...FIXTURE_DASH, currentMode: "Stop" }}
           command={makeCommand()}
-          targetUrl=""
+          apiBase=""
           phase="live"
           controlAlive={true}
           accent="ember"
@@ -139,7 +139,7 @@ describe("Dashboard", () => {
         <Dashboard
           dash={{ ...FIXTURE_DASH, currentMode: "Smoke" }}
           command={makeCommand()}
-          targetUrl=""
+          apiBase=""
           phase="live"
           controlAlive={true}
           accent="ember"
@@ -180,7 +180,7 @@ describe("Dashboard", () => {
               <Dashboard
                 dash={FIXTURE_DASH}
                 command={makeCommand()}
-                targetUrl=""
+                apiBase=""
                 phase="live"
                 controlAlive={true}
                 accent="ember"

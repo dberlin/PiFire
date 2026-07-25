@@ -40,6 +40,8 @@ export function DashboardRoute() {
   if (phase !== "live" && phase !== "demo") {
     return (
       <div className="pf-fit">
+        {/* The human-readable origin, which is what this renders for the user
+            to read -- deliberately not BASE_URL, which is empty in dev. */}
         <ConnectionStatus phase={phase} targetUrl={targetUrl} />
       </div>
     );
@@ -50,7 +52,7 @@ export function DashboardRoute() {
       command={command}
       // The notify write is a GET + POST pair rather than a CommandClient call,
       // so the dashboard needs the base URL as well as the command client.
-      targetUrl={targetUrl}
+      apiBase={BASE_URL}
       phase={phase}
       controlAlive={controlAlive}
       accent={accent}
