@@ -3,6 +3,23 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
+  // Every spec drives ONE shared, stateful PiFire instance (control.py plus
+  // its SQLite datastore), so these tests are not isolated from each other the
+  // way ordinary unit tests are. Playwright runs separate spec FILES in
+  // parallel workers by default, and several of the things this suite does are
+  // globally destructive to that shared instance:
+  //
+  //   - a units change (settings.spec.ts) and entering Startup mode
+  //     (roundtrip.spec.ts) each make control.py run
+  //     `read_history(0, flushhistory=True)`, wiping the ENTIRE history store
+  //     -- including the rows history.spec.ts seeds to get a chart to render;
+  //   - `ensureStopped` and the mode buttons move a single global grill mode,
+  //     so one file's Stop cancels another file's cook mid-assertion.
+  //
+  // Serialising the suite is what actually makes it deterministic; before
+  // this, roundtrip.spec.ts already failed intermittently on exactly that
+  // shared-mode race. The cost is roughly ten seconds of wall clock.
+  workers: 1,
   use: { baseURL: "http://localhost:5173", headless: true, viewport: { width: 1280, height: 720 } },
   webServer: {
     command: "bun run dev",
