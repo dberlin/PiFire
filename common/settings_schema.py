@@ -317,10 +317,10 @@ class PwmSettings(_Section):
 
 
 class SmartStartProfile(_Section):
-    # Clamp source: web-react/src/components/settings/tabs/StartupTab.tsx:13-15
-    # (RangeProfileTable column min/max for the smartstart profile table).
+    # Clamp source: blueprints/settings/templates/settings/index.html (the
+    # smartstart profile add/edit forms, which are what a Flask user is held to).
     startuptime: int = Field(ge=30, le=1200)
-    augerontime: int = Field(ge=1, le=60)
+    augerontime: int = Field(ge=1, le=1000)
     p_mode: int = Field(ge=0, le=9)
 
 

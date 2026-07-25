@@ -1160,7 +1160,7 @@
       "additionalProperties": false,
       "properties": {
         "augerontime": {
-          "maximum": 60,
+          "maximum": 1000,
           "minimum": 1,
           "title": "Augerontime",
           "type": "integer"

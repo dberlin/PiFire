@@ -542,13 +542,30 @@ def test_smartstart_profile_count_invariant():
 
 
 def test_smartstart_profile_field_bounds_reject():
-    # Clamp source: web-react StartupTab.tsx RangeProfileTable columns
-    # (startuptime 30-1200 / augerontime 1-60 / p_mode 0-9).
+    # Clamp source: the Flask smartstart profile forms in
+    # blueprints/settings/templates/settings/index.html
+    # (startuptime 30-1200 / augerontime 1-1000 / p_mode 0-9).
     s = default_settings()
     s["startup"]["smartstart"]["profiles"][0]["startuptime"] = 29
     with pytest.raises(SettingsValidationError) as ei:
         validate_settings_tree(s)
     assert any("startuptime" in m for m in ei.value.errors)
+
+
+def test_smartstart_augerontime_accepts_the_full_flask_range():
+    """augerontime's ceiling is 1000, matching the Flask form's max.
+
+    A 60 s ceiling would reject settings a Flask user can legitimately save,
+    so a value above 60 must validate.
+    """
+    s = default_settings()
+    s["startup"]["smartstart"]["profiles"][0]["augerontime"] = 1000
+    validate_settings_tree(s)
+
+    s["startup"]["smartstart"]["profiles"][0]["augerontime"] = 1001
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("augerontime" in m for m in ei.value.errors)
 
 
 def test_pwm_profile_count_invariant():

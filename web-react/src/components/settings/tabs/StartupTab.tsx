@@ -11,7 +11,7 @@ import { type RangeProfileColumn, RangeProfileTable } from "../RangeProfileTable
 
 const SMARTSTART_COLUMNS: RangeProfileColumn[] = [
   { key: "startuptime", label: "Startup time", suffix: "s", min: 30, max: 1200 },
-  { key: "augerontime", label: "Auger on", suffix: "s", min: 1, max: 60 },
+  { key: "augerontime", label: "Auger on", suffix: "s", min: 1, max: 1000 },
   { key: "p_mode", label: "P-Mode", min: 0, max: 9 },
 ];
 
