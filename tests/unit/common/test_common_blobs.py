@@ -1,6 +1,6 @@
 from common import datastore_accessors as c
 from common import defaults
-from common.common import WriteKind, strip_null_members, read_events_records
+from common.common import WriteKind, strip_null_members, read_events_records, flush_events_records
 from common import datastore
 
 
@@ -116,12 +116,12 @@ def test_errors_and_current_status_roundtrip(ds):
 
 
 def test_autotune_uses_queue(ds):
-    c.read_autotune(flush=True)
+    c.flush_autotune()
     c.write_autotune({"tr": 1})
     c.write_autotune({"tr": 2})
     assert c.read_autotune() == [{"tr": 1}, {"tr": 2}]
     assert c.read_autotune(size_only=True) == 2
-    c.read_autotune(flush=True)
+    c.flush_autotune()
     assert c.read_autotune() == []
 
 
@@ -140,7 +140,7 @@ def test_connected_users_add_remove(ds):
     assert sorted(c.read_connected_users()) == ["sidA", "sidB"]
     c.remove_connected_user("sidA")
     assert c.read_connected_users() == ["sidB"]
-    c.read_connected_users(flush=True)
+    c.flush_connected_users()
     assert c.read_connected_users() == []
 
 
@@ -151,7 +151,7 @@ def test_flush_control_clears_only_control_not_history(ds):
     )
     c.write_control({"mode": "Hold"}, WriteKind.OVERWRITE, origin="t")
     c.write_control({"x": 1}, WriteKind.MERGE, origin="t")
-    control = c.read_control(flush=True)
+    control = c.flush_control()
     assert control == defaults.default_control()  # reseeded default
     from common.sqlite_queue import SqliteQueue
 
@@ -201,8 +201,8 @@ def test_read_events_records_caps_at_60(ds, monkeypatch):
     assert len(result) == 60
 
 
-def test_read_events_records_flush_clears_and_returns_empty(ds):
-    assert read_events_records(flush=True) == []
+def test_flush_events_records_clears_and_returns_empty(ds):
+    assert flush_events_records() == []
 
 
 def test_read_probe_status_skips_unknown_type_without_raising(ds):

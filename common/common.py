@@ -343,17 +343,26 @@ def write_event(settings, event):
         write_log(event)
 
 
-def read_events_records(flush=False):
+def flush_events_records():
+    """
+    Erase the events log.
+
+    Previously reachable only as ``read_events_records(flush=True)`` -- the same
+    delete-behind-a-read_-name defect as the old ``read_history(flushhistory=True)``
+    (see common.datastore_accessors.flush_history).
+
+    :return: An empty events list (the post-flush state).
+    """
+    datastore.clear_log("events")
+    return []
+
+
+def read_events_records():
     """
     Read Events from events.log and return a list of event dictionaries.
 
-    :param flush: True to clean events. False otherwise
     :return: events_list - list of {'date':, 'time':, 'message':} dicts
     """
-    if flush:
-        datastore.clear_log("events")
-        return []
-
     events, num_events = read_events()
     events_list = []
     for item in range(min(num_events, 60)):

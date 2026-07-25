@@ -31,10 +31,15 @@ from common.settings_schema import validate_settings_tree
 from common.sqlite_queue import SqliteMembershipList, SqliteQueue
 
 
-def _flush_control():
+def flush_control():
     """
     Clear the control queues and control blob keys (NOT history/current), then
     reseed default_control().
+
+    Previously reachable only as ``read_control(flush=True)`` -- see
+    :func:`flush_history` for why hiding a delete behind a ``read_`` name was a
+    problem. Like flush_current (and unlike flush_history) this one returns the
+    new state, because every caller rebinds its local ``control`` to it.
 
     :return: The reseeded default control dictionary.
     """
@@ -47,15 +52,12 @@ def _flush_control():
     return control
 
 
-def read_control(flush=False):
+def read_control():
     """
     Read Control from SQLite DB
 
-    :param flush: True to clean control. False otherwise
     :return: control
     """
-    if flush:
-        return _flush_control()
     return _read_json_blob("control:general", default_control)
 
 
@@ -121,17 +123,32 @@ def execute_control_writes():
     return "OK"
 
 
-def read_errors(flush=False):
+def read_errors():
     """
     Read Errors from SQLite DB
 
-    :param flush: True to clear errors. False otherwise
     :return: errors
     """
-    if flush:
-        write_errors([])
-        return []
     return _read_json_blob("errors", list)
+
+
+def flush_errors():
+    """
+    Clear the stored error list.
+
+    Returns ``[]`` -- the *new* state, not the discarded contents. This is
+    deliberately not a read-and-clear: the sole caller (``control.py``'s boot
+    path) wants a cleared store plus a fresh accumulator to hand to
+    ``build_devices()``. Returning the pre-flush errors would change what
+    build_devices accumulates into, resurrecting errors from the previous run.
+
+    Previously reachable only as ``read_errors(flush=True)`` -- see
+    :func:`flush_history` for why that spelling was a problem.
+
+    :return: An empty error list.
+    """
+    write_errors([])
+    return []
 
 
 def write_errors(errors):
@@ -288,16 +305,29 @@ def write_settings_store(settings):
     _write_json_blob("settings:general", settings)
 
 
-def read_connected_users(flush=False):
+def read_connected_users():
     """
     Read Connected Users from SQLite DB
 
-    :param flush: True to clean connected_users. False otherwise
     :return: connected_users (List of Client ID's)
     """
+    return SqliteMembershipList("list_users_connected").list()
+
+
+def flush_connected_users():
+    """
+    Drop every connected-user client ID.
+
+    Called once at web-process import time: any client IDs still in the list
+    belong to sockets of a previous process and can never reconnect.
+
+    Previously reachable only as ``read_connected_users(flush=True)`` -- see
+    :func:`flush_history` for why that spelling was a problem.
+
+    :return: An empty user list (the post-flush state).
+    """
     m = SqliteMembershipList("list_users_connected")
-    if flush:
-        m.flush()
+    m.flush()
     return m.list()
 
 
@@ -506,14 +536,24 @@ def write_autotune(data):
     SqliteQueue("queue_autotune").push(data)
 
 
-def read_autotune(flush=False, size_only=False):
+def read_autotune(size_only=False):
     q = SqliteQueue("queue_autotune")
-    if flush:
-        q.flush()
-        return []
     if size_only:
         return q.length()
     return q.list()
+
+
+def flush_autotune():
+    """
+    Discard every queued autotune sample.
+
+    Previously reachable only as ``read_autotune(flush=True)`` -- see
+    :func:`flush_history` for why that spelling was a problem.
+
+    :return: An empty sample list (the post-flush state).
+    """
+    SqliteQueue("queue_autotune").flush()
+    return []
 
 
 def _read_json_key_or_none(key):

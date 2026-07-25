@@ -9,6 +9,7 @@ from common.datastore_accessors import (
     read_settings,
     write_settings,
     read_control,
+    flush_control,
     write_control,
     read_pellet_db,
     write_pellet_db,
@@ -127,7 +128,7 @@ def _admin_setting_factorydefaults(ctx):
     if response["factorydefaults"] == "true":
         write_log("Resetting Settings, Control and History to factory defaults.")
         flush_history()
-        read_control(flush=True)
+        flush_control()
         os.system("rm settings.json")
         os.system("rm pelletdb.json")
         settings = default_settings()

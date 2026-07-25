@@ -251,7 +251,7 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     assert store.read_status()["mode"] == "Stop"
     control = store.read_control()
     # Stop persists status='inactive' (bug fix): the assignment now runs AFTER the
-    # `control = read_control(flush=True)` reset, mirroring the Error branch, instead
+    # `control = flush_control()` reset, mirroring the Error branch, instead
     # of before it where it was a dead write discarded by the reset (had persisted '').
     assert control["status"] == "inactive"
     assert control["updated"] is False

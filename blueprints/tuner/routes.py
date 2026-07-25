@@ -7,6 +7,7 @@ from common.datastore_accessors import (
     write_control,
     read_tr,
     read_autotune,
+    flush_autotune,
     write_autotune,
     read_current,
 )
@@ -107,7 +108,7 @@ def tuner_page():
             if not control["tuning_mode"]:
                 control["tuning_mode"] = True  # Enable tuning mode
                 write_control(control, WriteKind.MERGE, origin="app")
-                read_autotune(flush=True)  # Flush autotune data
+                flush_autotune()  # Flush autotune data
                 first_run = True
 
             if control["mode"] == Mode.STOP:

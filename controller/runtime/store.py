@@ -51,7 +51,9 @@ class _DequeQueue(Queue):
 class Store(ABC):
     # --- control ---
     @abstractmethod
-    def read_control(self, flush=False): ...
+    def read_control(self): ...
+    @abstractmethod
+    def flush_control(self): ...
     @abstractmethod
     def write_control(self, control, kind, origin="control"): ...
     @abstractmethod
@@ -88,7 +90,9 @@ class Store(ABC):
     @abstractmethod
     def write_pellet_db(self, db): ...
     @abstractmethod
-    def read_errors(self, flush=False): ...
+    def read_errors(self): ...
+    @abstractmethod
+    def flush_errors(self): ...
     @abstractmethod
     def write_errors(self, errors): ...
     @abstractmethod
@@ -119,15 +123,17 @@ class InMemoryStore(Store):
         self._systemo = _DequeQueue()
         self._displayq = _DequeQueue()
 
-    def read_control(self, flush=False):
-        if flush:
-            # Mirror common.read_control(flush=True): reset control to defaults
-            # and discard pending writes + system-command queues. (The datastore
-            # persistence-config toggle is a no-op for the in-memory fake.)
-            self._control = default_control()
-            self._write_queue.clear()
-            self._systemq.flush()
-            self._systemo.flush()
+    def read_control(self):
+        return copy.deepcopy(self._control)
+
+    def flush_control(self):
+        # Mirror common.datastore_accessors.flush_control: reset control to
+        # defaults and discard pending writes + system-command queues. (The
+        # datastore persistence-config toggle is a no-op for the in-memory fake.)
+        self._control = default_control()
+        self._write_queue.clear()
+        self._systemq.flush()
+        self._systemo.flush()
         return copy.deepcopy(self._control)
 
     def write_control(self, control, kind, origin="control"):
@@ -224,10 +230,15 @@ class InMemoryStore(Store):
     def write_pellet_db(self, db):
         self._pellet = copy.deepcopy(db)
 
-    def read_errors(self, flush=False):
-        if flush:
-            self._errors = []
+    def read_errors(self):
         return list(self._errors)
+
+    def flush_errors(self):
+        # Mirror common.datastore_accessors.flush_errors: returns the NEW
+        # (empty) list, not the discarded contents -- callers use it as a fresh
+        # accumulator.
+        self._errors = []
+        return []
 
     def write_errors(self, errors):
         self._errors = list(errors)
@@ -278,8 +289,11 @@ class SqliteStore(Store):
         self._systemo = _SqliteQueueAdapter("queue_systemo")
         self._displayq = _SqliteQueueAdapter("queue_displayq")
 
-    def read_control(self, flush=False):
-        return _c.read_control(flush=flush)
+    def read_control(self):
+        return _c.read_control()
+
+    def flush_control(self):
+        return _c.flush_control()
 
     def write_control(self, control, kind, origin="control"):
         _c.write_control(control, kind, origin=origin)
@@ -335,8 +349,11 @@ class SqliteStore(Store):
     def write_pellet_db(self, db):
         _c.write_pellet_db(db)
 
-    def read_errors(self, flush=False):
-        return _c.read_errors(flush=flush)
+    def read_errors(self):
+        return _c.read_errors()
+
+    def flush_errors(self):
+        return _c.flush_errors()
 
     def write_errors(self, errors):
         _c.write_errors(errors)

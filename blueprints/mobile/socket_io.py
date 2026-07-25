@@ -23,6 +23,7 @@ import time
 
 from common.common import (
     read_events_records,
+    flush_events_records,
     read_generic_json,
     deep_update,
     WriteKind,
@@ -35,6 +36,7 @@ from common.datastore_accessors import (
     read_settings_store,
     read_pellets_store,
     read_control,
+    flush_control,
     read_status,
     read_current,
     read_errors,
@@ -45,6 +47,7 @@ from common.datastore_accessors import (
     write_pellet_db,
     write_connected_user,
     read_connected_users,
+    flush_connected_users,
     remove_connected_user,
     write_errors,
 )
@@ -80,8 +83,8 @@ thread = None
 """
 read_settings_store(init=True)
 read_pellets_store(init=True)
-read_connected_users(flush=True)
-read_events_records(flush=True)
+flush_connected_users()
+flush_events_records()
 
 recipe_folder = Config.RECIPE_FOLDER
 
@@ -435,7 +438,7 @@ def _post_app_data_admin(settings, type, request):
         return _response(result="OK")
     elif type == "factory_defaults":
         flush_history()
-        read_control(flush=True)
+        flush_control()
         os.system("rm settings.json")
         settings = default_settings()
         control = default_control()

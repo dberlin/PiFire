@@ -414,10 +414,10 @@ class Controller:
                     self.eventLogger.info("Stop Mode Started.")
                     store.display_commands().push(("clear", None))
                     # Reset Control to Defaults, then stamp status (mirrors the Error
-                    # branch below). Setting status BEFORE this flush-read was a dead
-                    # assignment -- read_control(flush=True) rebinds control to a fresh
+                    # branch below). Setting status BEFORE this flush was a dead
+                    # assignment -- flush_control() rebinds control to a fresh
                     # default_control() (status ""), discarding it, so Stop persisted "".
-                    self.control = store.read_control(flush=True)
+                    self.control = store.flush_control()
                     self.control["status"] = StatusState.INACTIVE
                     self.control["updated"] = False
                     self.control["tuning_mode"] = False  # Turn off Tuning Mode on Stop just in case it is on

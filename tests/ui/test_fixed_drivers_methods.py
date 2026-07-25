@@ -322,7 +322,7 @@ def _fake_control_pair(initial_mode=Mode.STOP):
     state["mode"] = initial_mode
     calls = []
 
-    def read_control(flush=False):
+    def read_control():
         return dict(state)
 
     def write_control(control, kind=None, origin=None):
