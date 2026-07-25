@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
+import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
@@ -91,6 +92,10 @@ export function WorkModeTab() {
     k: K,
     val: WorkMode["keep_warm"][K],
   ) => setV((s) => ({ ...s, keep_warm: { ...s.keep_warm, [k]: val } }));
+
+  // Flask gates the fan-ramp NOTE, the sp_fan_ramp switch and the sp_duty_cycle
+  // input on platform.dc_fan (settings/index.html:405-423).
+  const dcFan = hasDcFan(settings);
 
   const onSave = async () => {
     let d: object = {};
@@ -201,19 +206,30 @@ export function WorkModeTab() {
           min={0}
           suffix="s"
         />
-        <NumberField
-          label="Duty Cycle"
-          value={v.smoke_plus.duty_cycle}
-          onChange={(n) => setSmokePlus("duty_cycle", n)}
-          min={20}
-          max={100}
-          suffix="%"
-        />
-        <Toggle
-          label="Fan Ramp"
-          checked={v.smoke_plus.fan_ramp}
-          onChange={(b) => setSmokePlus("fan_ramp", b)}
-        />
+        {/* Hiding these does NOT drop their keys: onSave iterates
+            Object.entries(v.smoke_plus), so the loaded values keep
+            round-tripping on an AC build — which matches Flask, whose
+            _settings_cycle leaves untouched keys alone. */}
+        {dcFan && (
+          <>
+            <p className="pf-settings-hint">
+              Fan ramping and duty cycle apply to a PWM-driven DC fan.
+            </p>
+            <NumberField
+              label="Duty Cycle"
+              value={v.smoke_plus.duty_cycle}
+              onChange={(n) => setSmokePlus("duty_cycle", n)}
+              min={20}
+              max={100}
+              suffix="%"
+            />
+            <Toggle
+              label="Fan Ramp"
+              checked={v.smoke_plus.fan_ramp}
+              onChange={(b) => setSmokePlus("fan_ramp", b)}
+            />
+          </>
+        )}
       </Section>
 
       <Section title="Keep Warm">

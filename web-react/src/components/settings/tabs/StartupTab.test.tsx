@@ -23,6 +23,7 @@ describe("StartupTab", () => {
   it("renders all sections with loaded values", () => {
     const context = {
       settings: {
+        platform: { dc_fan: true },
         shutdown: {
           shutdown_duration: 90,
           auto_power_off: true,
@@ -92,6 +93,7 @@ describe("StartupTab", () => {
   it("clamps prime_on_startup to 0 when set to out-of-range value 999", async () => {
     const context = {
       settings: {
+        platform: { dc_fan: true },
         shutdown: {
           shutdown_duration: 60,
           auto_power_off: false,
@@ -148,6 +150,7 @@ describe("StartupTab", () => {
   it("changes after_startup_mode Select and saves with settings_update flag", async () => {
     const context = {
       settings: {
+        platform: { dc_fan: true },
         shutdown: {
           shutdown_duration: 60,
           auto_power_off: false,
@@ -204,6 +207,7 @@ describe("StartupTab", () => {
   it("clamps pwm_duty_cycle to max_duty_cycle when value exceeds bound", async () => {
     const context = {
       settings: {
+        platform: { dc_fan: true },
         shutdown: {
           shutdown_duration: 60,
           auto_power_off: false,
@@ -258,6 +262,7 @@ describe("StartupTab", () => {
 
   const smartstartFixture = () => ({
     settings: {
+      platform: { dc_fan: true },
       shutdown: {
         shutdown_duration: 60,
         auto_power_off: false,
@@ -352,5 +357,37 @@ describe("StartupTab", () => {
       p_mode: 5,
     });
     expect(flags).toEqual(["settings_update"]);
+  });
+  // Flask hides the DC-fan duty-cycle NOTE and its input on an AC-fan build
+  // (settings/index.html:857-868).
+  it("hides PWM Duty Cycle when platform.dc_fan is false", () => {
+    renderRoute(<StartupTab />, {
+      settings: { platform: { dc_fan: false } },
+      mode: "Stop",
+    });
+
+    expect(screen.queryByText("PWM Duty Cycle")).toBeNull();
+    // The rest of the Startup section is untouched.
+    expect(screen.getByText("Duration")).toBeInTheDocument();
+    expect(screen.getByText("Prime on Startup")).toBeInTheDocument();
+  });
+
+  // The clamp at onSave stays unconditional: the value is still in the delta on
+  // an AC build, so it still has to satisfy _check_startup_pwm_duty_cycle.
+  it("still clamps and writes pwm_duty_cycle on an AC-fan build", async () => {
+    renderRoute(<StartupTab />, {
+      settings: {
+        platform: { dc_fan: false },
+        startup: { pwm_duty_cycle: 500 },
+        pwm: { min_duty_cycle: 20, max_duty_cycle: 80 },
+      },
+      mode: "Stop",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const [delta] = saveMock.mock.calls[0];
+    expect(delta.startup.pwm_duty_cycle).toBe(80);
   });
 });

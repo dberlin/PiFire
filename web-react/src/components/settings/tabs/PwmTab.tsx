@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
+import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
@@ -62,6 +63,12 @@ export function PwmTab() {
 
   const set = <K extends keyof Pwm>(k: K, v: Pwm[K]) => setPwm((s) => ({ ...s, [k]: v }));
 
+  // Flask hides this entire pane on an AC-fan build
+  // (settings/index.html:581-768). We render a notice instead of early-return
+  // BEFORE the hooks above — an early return there would break the Rules of
+  // Hooks — and the route stays registered so a bookmarked URL still resolves.
+  const dcFan = hasDcFan(settings);
+
   // Column min/max come from the tab's CURRENT local values so a duty-cycle
   // edit clamps against whatever is on screen (including an un-saved
   // min/max edit), not the last-saved settings.
@@ -84,6 +91,18 @@ export function PwmTab() {
     for (const [k, v] of Object.entries(pwm)) d = setPath(d, `pwm.${k}`, v);
     await save(d, ["settings_update"]); // control loop must re-read pwm
   };
+
+  if (!dcFan) {
+    return (
+      <Section title="PWM Fan">
+        <p className="pf-settings-hint">
+          PWM fan control is unavailable on this grill. These settings apply only to a DC fan driven
+          by a PWM output; this platform is configured for an AC fan. Change the fan type in the
+          Setup Wizard to enable them.
+        </p>
+      </Section>
+    );
+  }
 
   return (
     <Section title="PWM Fan">

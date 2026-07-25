@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
+import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
@@ -79,6 +80,11 @@ export function StartupTab() {
 
   const set = <K extends keyof Startup>(k: K, val: Startup[K]) => setV((s) => ({ ...s, [k]: val }));
   const units = settings.globals?.units === "C" ? "°C" : "°F";
+  // Flask gates the DC-fan duty-cycle NOTE + input on platform.dc_fan
+  // (settings/index.html:857-868). The clamp in onSave stays UNCONDITIONAL:
+  // the value is still in the delta on an AC build, so it still has to satisfy
+  // SettingsSchema._check_startup_pwm_duty_cycle.
+  const dcFan = hasDcFan(settings);
 
   const onSave = async () => {
     let d: object = {};
@@ -164,14 +170,16 @@ export function StartupTab() {
           onChange={(n) => set("prime_on_startup", n)}
           min={0}
         />
-        <NumberField
-          label="PWM Duty Cycle"
-          value={v.pwm_duty_cycle}
-          onChange={(n) => set("pwm_duty_cycle", n)}
-          min={0}
-          max={100}
-          suffix="%"
-        />
+        {dcFan && (
+          <NumberField
+            label="PWM Duty Cycle"
+            value={v.pwm_duty_cycle}
+            onChange={(n) => set("pwm_duty_cycle", n)}
+            min={0}
+            max={100}
+            suffix="%"
+          />
+        )}
       </Section>
 
       <Section title="SmartStart">

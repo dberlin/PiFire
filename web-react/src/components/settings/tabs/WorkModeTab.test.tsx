@@ -23,6 +23,7 @@ describe("WorkModeTab", () => {
   it("renders all three sections with loaded values", () => {
     const context = {
       settings: {
+        platform: { dc_fan: true },
         cycle_data: {
           HoldCycleTime: 10,
           SmokeOnCycleTime: 5,
@@ -93,6 +94,7 @@ describe("WorkModeTab", () => {
   it("saves settings with settings_update flag when Save is clicked after editing cycle_data and smoke_plus", async () => {
     const context = {
       settings: {
+        platform: { dc_fan: true },
         cycle_data: {
           HoldCycleTime: 10,
           SmokeOnCycleTime: 5,
@@ -160,6 +162,7 @@ describe("WorkModeTab", () => {
     // several fields default to 5 or 150).
     const context = {
       settings: {
+        platform: { dc_fan: true },
         cycle_data: {
           HoldCycleTime: 11,
           SmokeOnCycleTime: 6,
@@ -255,5 +258,44 @@ describe("WorkModeTab", () => {
       },
       ["settings_update"],
     );
+  });
+  // Flask hides the Smoke-Plus fan-ramp NOTE, the sp_fan_ramp switch and the
+  // sp_duty_cycle input on an AC-fan build (settings/index.html:405-423).
+  it("hides the DC-fan-only Smoke Plus controls when platform.dc_fan is false", () => {
+    renderRoute(<WorkModeTab />, {
+      settings: { platform: { dc_fan: false } },
+      mode: "Stop",
+    });
+
+    expect(screen.queryByRole("button", { name: "Fan Ramp" })).toBeNull();
+    expect(screen.queryByText("Duty Cycle")).toBeNull();
+
+    // Every other Smoke Plus control survives.
+    expect(screen.getByRole("button", { name: "Enabled" })).toBeInTheDocument();
+    expect(screen.getByText("Min Temp")).toBeInTheDocument();
+    expect(screen.getByText("Max Temp")).toBeInTheDocument();
+    expect(screen.getByText("On Time")).toBeInTheDocument();
+    expect(screen.getByText("Off Time")).toBeInTheDocument();
+  });
+
+  // Hiding a control must NOT drop its key: onSave iterates Object.entries over
+  // the whole smoke_plus object, so the loaded values keep round-tripping on an
+  // AC build. That matches Flask, whose _settings_cycle leaves untouched keys
+  // alone.
+  it("still round-trips duty_cycle and fan_ramp in the delta on an AC-fan build", async () => {
+    renderRoute(<WorkModeTab />, {
+      settings: {
+        platform: { dc_fan: false },
+        smoke_plus: { enabled: true, duty_cycle: 65, fan_ramp: true },
+      },
+      mode: "Stop",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const [delta] = saveMock.mock.calls[0];
+    expect(delta.smoke_plus.duty_cycle).toBe(65);
+    expect(delta.smoke_plus.fan_ramp).toBe(true);
   });
 });

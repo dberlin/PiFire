@@ -10,13 +10,16 @@ import { SettingsShell } from "./SettingsShell";
 // loader stubbed to return { settings, mode } synchronously, plus a sibling
 // "/" route so the back-to-dashboard navigation (SettingsShell.tsx:21) can
 // be observed landing somewhere.
-function renderShell() {
+function renderShell(dcFan = true) {
   const router = createMemoryRouter(
     [
       {
         path: "/settings",
         element: <SettingsShell />,
-        loader: () => ({ settings: { globals: { units: "F" } }, mode: "Stop" }),
+        loader: () => ({
+          settings: { globals: { units: "F" }, platform: { dc_fan: dcFan } },
+          mode: "Stop",
+        }),
         children: [{ index: true, element: <div /> }],
       },
       { path: "/", element: <div data-testid="dashboard-root">Dashboard</div> },
@@ -52,7 +55,24 @@ describe("SettingsShell", () => {
     for (const label of TAB_LABELS) {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
     }
+    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(TAB_LABELS);
     expect(screen.getByRole("button", { name: /Dashboard/ })).toBeInTheDocument();
+  });
+
+  // Flask gates the PWM nav pill on settings['platform']['dc_fan']
+  // (blueprints/settings/templates/settings/index.html:63-65). The /settings/pwm
+  // ROUTE stays registered either way so a bookmarked URL still resolves — only
+  // the pill goes away.
+  it("hides the PWM Fan tab on an AC-fan build, keeping every other tab in order", async () => {
+    renderShell(false);
+    await screen.findByRole("link", { name: "General" });
+
+    expect(screen.queryByRole("link", { name: "PWM Fan" })).toBeNull();
+    for (const label of TAB_LABELS.filter((l) => l !== "PWM Fan")) {
+      expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
+    }
+    const rendered = screen.getAllByRole("link").map((a) => a.textContent);
+    expect(rendered).toEqual(TAB_LABELS.filter((l) => l !== "PWM Fan"));
   });
 
   it("navigates back to the dashboard when the back button is clicked", async () => {

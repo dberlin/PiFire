@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useLoaderData, useNavigate } from "react-router";
+import { hasDcFan } from "../../helpers/settings/platform";
 import type { ControllerMetadata, Settings } from "../../helpers/settings/settingsApi";
 
 const SETTINGS_TABS = [
@@ -22,6 +23,10 @@ export function SettingsShell() {
     controllerMeta: ControllerMetadata | null;
   };
   const navigate = useNavigate();
+  // Flask hides the PWM pill on an AC-fan build (settings/index.html:63-65).
+  // Only the PILL goes; the /settings/pwm route stays registered in App.tsx so
+  // a bookmarked URL still resolves, and PwmTab explains why it is inert.
+  const tabs = SETTINGS_TABS.filter((t) => t.path !== "pwm" || hasDcFan(settings));
   return (
     <div className="pf-settings">
       <aside className="pf-settings-nav">
@@ -29,7 +34,7 @@ export function SettingsShell() {
           ← Dashboard
         </button>
         <div className="pf-settings-title">Settings</div>
-        {SETTINGS_TABS.map((t) => (
+        {tabs.map((t) => (
           <NavLink
             key={t.path}
             to={t.path}

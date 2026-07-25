@@ -31,6 +31,7 @@ describe("PwmTab", () => {
   it("renders pwm fields with loaded values", () => {
     const context = {
       settings: {
+        platform: { dc_fan: true },
         pwm: {
           pwm_control: true,
           update_time: 5,
@@ -60,7 +61,7 @@ describe("PwmTab", () => {
 
   it("falls back to defaults when settings.pwm is absent", () => {
     const context = {
-      settings: {},
+      settings: { platform: { dc_fan: true } },
       mode: "Stop",
     };
 
@@ -90,6 +91,7 @@ describe("PwmTab", () => {
   it("edits a number field and a toggle, then saves with the settings_update flag", async () => {
     const context = {
       settings: {
+        platform: { dc_fan: true },
         pwm: {
           pwm_control: false,
           update_time: 10,
@@ -139,6 +141,7 @@ describe("PwmTab", () => {
 
   const dutyCycleFixture = () => ({
     settings: {
+      platform: { dc_fan: true },
       pwm: {
         pwm_control: true,
         update_time: 10,
@@ -236,5 +239,33 @@ describe("PwmTab", () => {
     // The refused values stay on screen so the user can fix them and retry.
     expect(screen.getByLabelText("Duty cycle row 1")).toHaveValue(20);
     expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
+  });
+
+  // Flask hides the entire PWM pane on an AC-fan build
+  // (settings/index.html:581-768). The React route stays registered so a
+  // bookmarked /settings/pwm still resolves — the tab explains why it is inert
+  // rather than 404ing.
+  it("renders an explanatory notice and no controls when platform.dc_fan is false", () => {
+    renderRoute(<PwmTab />, {
+      settings: { platform: { dc_fan: false }, pwm: { min_duty_cycle: 20, max_duty_cycle: 100 } },
+      mode: "Stop",
+    });
+
+    expect(screen.getByText(/DC fan/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "PWM Control" })).toBeNull();
+    expect(screen.queryByLabelText("Duty cycle row 1")).toBeNull();
+    expect(screen.queryByDisplayValue("20")).toBeNull();
+  });
+
+  it("renders the full control set when platform.dc_fan is true", () => {
+    renderRoute(<PwmTab />, {
+      settings: dutyCycleFixture().settings,
+      mode: "Stop",
+    });
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "PWM Control" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Duty cycle row 1")).toBeInTheDocument();
   });
 });
