@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useRef } from "react";
 import type { HistoryChartData } from "../../helpers/history/historyApi";
 
@@ -9,6 +9,13 @@ let chartInstances = 0;
 const fetchHistoryChartMock = rs.fn();
 rs.mock("../../helpers/history/historyApi", () => ({
   fetchHistoryChart: (...args: unknown[]) => fetchHistoryChartMock(...args),
+}));
+
+// The page reads Settings > History > Auto Refresh once on mount. Defaulted to
+// "off" so the tests that aren't about polling see no timers at all.
+const getSettingsMock = rs.fn();
+rs.mock("../../helpers/settings/settingsApi", () => ({
+  getSettings: (...args: unknown[]) => getSettingsMock(...args),
 }));
 
 // jsdom has no canvas, so the real uPlot chart is stubbed. The stub records
@@ -85,9 +92,14 @@ beforeEach(() => {
   chartInstances = 0;
   fetchHistoryChartMock.mockReset();
   fetchHistoryChartMock.mockResolvedValue(PAYLOAD);
+  getSettingsMock.mockReset();
+  getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "off" } });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  rs.useRealTimers();
+});
 
 describe("HistoryPage", () => {
   it("loads and renders the chart", async () => {
@@ -263,5 +275,136 @@ describe("HistoryPage", () => {
 
     const link = screen.getByRole("link", { name: /export csv/i });
     expect(link.getAttribute("href")).toContain("/history/export");
+  });
+});
+
+describe("HistoryPage — auto refresh", () => {
+  // Mirrors REFRESH_MS in HistoryPage.tsx. Deliberately duplicated rather than
+  // imported: exporting a non-component from a component file trips
+  // react-refresh/only-export-components (the reason tooltipFormat.ts and
+  // scaleReset.ts are separate modules), and one constant does not warrant a
+  // module of its own. InstallProgress.test.tsx hardcodes its 250ms the same
+  // way.
+  const REFRESH_MS = 5000;
+
+  // Settles the mount-time settings read and the first chart fetch. waitFor
+  // can't be used here: it polls on a timer that fake timers freeze.
+  async function settle() {
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+  }
+
+  async function tick(ms: number) {
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(ms);
+      await Promise.resolve();
+    });
+  }
+
+  it("refetches on the interval while autorefresh is on", async () => {
+    getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
+    rs.useFakeTimers();
+
+    render(<HistoryPage />);
+    await settle();
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+
+    await tick(REFRESH_MS);
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(2);
+
+    // The timer is re-armed after each response settles, so polling keeps
+    // going rather than firing exactly once.
+    await tick(REFRESH_MS);
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps asking for the same window a poll refreshes", async () => {
+    getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
+    rs.useFakeTimers();
+
+    render(<HistoryPage />);
+    await settle();
+    fireEvent.change(screen.getByLabelText(/minutes/i), { target: { value: "120" } });
+    await settle();
+    fetchHistoryChartMock.mockClear();
+
+    await tick(REFRESH_MS);
+
+    expect(fetchHistoryChartMock).toHaveBeenCalledWith(expect.anything(), 120);
+  });
+
+  it("does not remount the chart on a refresh tick, so a drag-zoom survives", async () => {
+    // A poll is NOT a window change: it must ride the ordinary data-update
+    // path (same chartKey -> re-render, uPlot setData, shouldResetScales
+    // preserving the zoom) rather than the remount a window change forces.
+    getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
+    rs.useFakeTimers();
+
+    render(<HistoryPage />);
+    await settle();
+    const before = chartEl().getAttribute("data-instance");
+
+    await tick(REFRESH_MS);
+
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(2);
+    expect(chartEl().getAttribute("data-instance")).toBe(before);
+  });
+
+  it("does not poll while autorefresh is off", async () => {
+    getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "off" } });
+    rs.useFakeTimers();
+
+    render(<HistoryPage />);
+    await settle();
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+
+    await tick(REFRESH_MS * 4);
+
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not poll when the settings read fails", async () => {
+    getSettingsMock.mockRejectedValue(new Error("boom"));
+    rs.useFakeTimers();
+
+    render(<HistoryPage />);
+    await settle();
+
+    await tick(REFRESH_MS * 4);
+
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the interval on unmount", async () => {
+    getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
+    rs.useFakeTimers();
+
+    const view = render(<HistoryPage />);
+    await settle();
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    await tick(REFRESH_MS * 4);
+
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not stack a poll on top of a request that is still in flight", async () => {
+    // The in-flight guard is the page's own request id (via `loading`), not a
+    // second mechanism: while a request is outstanding no timer is armed at
+    // all, so a response slower than the interval cannot pile polls up.
+    getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
+    rs.useFakeTimers();
+    fetchHistoryChartMock.mockReturnValue(new Promise(() => {})); // never settles
+
+    render(<HistoryPage />);
+    await settle();
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+
+    await tick(REFRESH_MS * 4);
+
+    expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
   });
 });

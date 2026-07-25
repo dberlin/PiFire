@@ -46,6 +46,7 @@ const COLOR_FIELD_SPECS: { key: ColorFieldKey; label: string }[] = [
 type History = {
   minutes: number;
   datapoints: number;
+  fidelity_degrees: number;
   clearhistoryonstart: boolean;
   autorefresh: boolean;
   ext_data: boolean;
@@ -67,12 +68,22 @@ function computeLabelPrefixes(probeConfig: ProbeConfig): Record<string, string> 
   return prefixes;
 }
 
+// Fallbacks mirror common/defaults.py's history_page block -- a missing key
+// means "never saved", and the server will be using the default, so the tab
+// has to show the same number or the next save silently rewrites it.
+// `fidelity_degrees` is reached through the generated type's index signature
+// (it types as `unknown`), hence the runtime check rather than a cast.
+const DEFAULT_DATAPOINTS = 10000;
+const DEFAULT_FIDELITY_DEGREES = 2.0;
+
 function readHistory(s: Settings): History {
   const hp = s.history_page ?? {};
   const g = s.globals ?? {};
   return {
     minutes: hp.minutes ?? 240,
-    datapoints: hp.datapoints ?? 100,
+    datapoints: hp.datapoints ?? DEFAULT_DATAPOINTS,
+    fidelity_degrees:
+      typeof hp.fidelity_degrees === "number" ? hp.fidelity_degrees : DEFAULT_FIDELITY_DEGREES,
     clearhistoryonstart: !!hp.clearhistoryonstart,
     autorefresh: hp.autorefresh === "on",
     ext_data: !!g.ext_data,
@@ -105,6 +116,7 @@ export function HistoryTab() {
     let d: object = {};
     d = setPath(d, "history_page.minutes", v.minutes);
     d = setPath(d, "history_page.datapoints", v.datapoints);
+    d = setPath(d, "history_page.fidelity_degrees", v.fidelity_degrees);
     d = setPath(d, "history_page.clearhistoryonstart", v.clearhistoryonstart);
     d = setPath(d, "history_page.autorefresh", v.autorefresh ? "on" : "off");
     d = setPath(d, "history_page.probe_config", v.probeConfig);
@@ -130,12 +142,32 @@ export function HistoryTab() {
           onChange={(n) => set("minutes", n)}
           min={0}
         />
+        {/* NOT "how many points to draw": file_mgmt/downsample.py's
+            select_indices returns EVERY index when the window holds this many
+            samples or fewer, and only downsamples above it. Two samples are
+            the fewest that can draw a line, so that is the floor. */}
         <NumberField
-          label="Data Points"
+          label="Downsample above (samples)"
           value={v.datapoints}
           onChange={(n) => set("datapoints", n)}
-          min={0}
+          min={2}
         />
+        <p className="pf-settings-hint">
+          Windows holding this many samples or fewer are drawn from every sample. Above it, the
+          chart is thinned to the fewest points that still meet the fidelity limit below.
+        </p>
+        <NumberField
+          label="Chart Fidelity"
+          value={v.fidelity_degrees}
+          onChange={(n) => set("fidelity_degrees", n)}
+          min={0}
+          step={0.1}
+          suffix="degrees"
+        />
+        <p className="pf-settings-hint">
+          The most the drawn line may deviate from the real reading. Smaller keeps more detail and
+          sends more points; larger sends fewer.
+        </p>
         <Toggle
           label="Clear History on Start"
           checked={v.clearhistoryonstart}

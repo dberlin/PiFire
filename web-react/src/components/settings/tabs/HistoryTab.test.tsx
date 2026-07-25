@@ -141,6 +141,64 @@ describe("HistoryTab", () => {
     expect(screen.queryByText(/stop the grill to change/i)).not.toBeInTheDocument();
   });
 
+  it("labels datapoints as a downsampling threshold, not a point count", async () => {
+    // history_page.datapoints is the size at which downsampling STARTS (see
+    // file_mgmt/downsample.py select_indices: every index is returned when the
+    // window holds min_points or fewer). Labelling it "Data Points" read as
+    // "how many points to draw", which is the opposite of what raising it does.
+    renderRoute(<HistoryTab />, {
+      settings: {
+        history_page: { minutes: 240, datapoints: 5000, fidelity_degrees: 1.5 },
+        globals: {},
+      },
+      mode: "Stop",
+    });
+
+    const field = screen.getByLabelText(/downsample above/i);
+    expect(field).toHaveValue(5000);
+    expect(field).toHaveAttribute("min", "2"); // a threshold of 0 or 1 draws nothing
+    expect(screen.queryByLabelText("Data Points")).not.toBeInTheDocument();
+    expect(screen.getByText(/or fewer are drawn from every sample/i)).toBeInTheDocument();
+  });
+
+  it("falls back to the real defaults (10000 samples, 2 degrees) when the keys are absent", async () => {
+    // A missing key means the server is using common/defaults.py's value, so
+    // showing anything else would make the next save silently rewrite it.
+    renderRoute(<HistoryTab />, {
+      settings: { history_page: { minutes: 240 }, globals: {} },
+      mode: "Stop",
+    });
+
+    expect(screen.getByLabelText(/downsample above/i)).toHaveValue(10000);
+    expect(screen.getByLabelText(/chart fidelity/i)).toHaveValue(2);
+  });
+
+  it("exposes fidelity_degrees and includes it in the save delta", async () => {
+    renderRoute(<HistoryTab />, {
+      settings: {
+        history_page: { minutes: 240, datapoints: 10000, fidelity_degrees: 2.0 },
+        globals: {},
+      },
+      mode: "Stop",
+    });
+
+    const fidelity = screen.getByLabelText(/chart fidelity/i);
+    expect(fidelity).toHaveValue(2);
+    expect(screen.getByText("degrees")).toBeInTheDocument();
+    expect(screen.getByText(/deviate from the real reading/i)).toBeInTheDocument();
+
+    fireEvent.change(fidelity, { target: { value: "0.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(saveMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        history_page: expect.objectContaining({ fidelity_degrees: 0.5, datapoints: 10000 }),
+      }),
+      [],
+    );
+  });
+
   it("autorefresh toggle persists string on/off in the delta", async () => {
     const context = {
       settings: {
