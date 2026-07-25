@@ -53,6 +53,8 @@ const MODULE_CARD = [
   "pf-form-actions",
 ];
 
+const PROBES = ["pf-probes-table", "pf-port-form", "pf-device-form"];
+
 describe("wizard stylesheet — chrome layer", () => {
   it("is imported by WizardShell.tsx", () => {
     const src = readFileSync(join(WIZARD_DIR, "WizardShell.tsx"), "utf8");
@@ -67,5 +69,19 @@ describe("wizard stylesheet — chrome layer", () => {
   it("declares a non-empty rule for every module-card class", () => {
     const declared = declaredClasses(readFileSync(WIZARD_CSS, "utf8"));
     expect(MODULE_CARD.filter((c) => !declared.has(c))).toEqual([]);
+  });
+
+  it("declares a non-empty rule for every probes-step class", () => {
+    const declared = declaredClasses(readFileSync(WIZARD_CSS, "utf8"));
+    expect(PROBES.filter((c) => !declared.has(c))).toEqual([]);
+  });
+
+  // settings.css owns `.pf-probes-card { position: relative }` (it is the
+  // containing block for ConfirmAction's absolutely-positioned scrim) and this
+  // plan does not edit that file. The card's APPEARANCE is added here instead,
+  // scoped so it wins on specificity rather than on injection order.
+  it("scopes its .pf-probes-card override under .pf-wizard", () => {
+    const css = readFileSync(WIZARD_CSS, "utf8");
+    expect(css).toContain(".pf-wizard .pf-probes-card");
   });
 });
