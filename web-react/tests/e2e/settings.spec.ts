@@ -10,7 +10,10 @@ test("grill name saves and round-trips to the dashboard header", async ({ page }
   await page.reload();
   await expect(page.getByLabel("Grill Name")).toHaveValue(name);
   await page.goto("/");
-  await expect(page.getByText(name)).toBeVisible({ timeout: 15000 });
+  // Scoped to <main>: the shell's navbar renders the grill name too, so an
+  // unscoped match resolves to two elements and trips strict mode. The
+  // dashboard header is the one this test is about.
+  await expect(page.getByRole("main").getByText(name)).toBeVisible({ timeout: 15000 });
 });
 
 test("PWM update-time saves via the settings_update path", async ({ page }) => {
