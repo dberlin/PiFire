@@ -124,7 +124,10 @@
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  font-size: 25px;
+  /* Fallback is load-bearing: .pf-btn is shared with the wizard and the
+     settings pages, which are outside the dashboard root and so never see the
+     token. Without it those buttons would lose their size entirely. */
+  font-size: var(--pf-btn-font, 25px);
   font-family: "Barlow";
   letter-spacing: 0.5px;
   transition:
@@ -200,7 +203,9 @@
   gap: 16px;
 }
 .pf-setpoint-val {
-  font: 800 56px "Barlow Semi Condensed";
+  font-weight: 800;
+  font-size: 56px;
+  font-family: "Barlow Semi Condensed";
   color: #f8f2e8;
   font-variant-numeric: tabular-nums;
 }
@@ -317,7 +322,9 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 12px;
   padding: 6px 12px;
-  font: 800 34px "Barlow Semi Condensed";
+  font-weight: 800;
+  font-size: 34px;
+  font-family: "Barlow Semi Condensed";
   font-variant-numeric: tabular-nums;
   color: #f8f2e8;
   text-align: right;
@@ -410,6 +417,38 @@
 }
 
 /* ==========================================================================
+   Size tokens.
+
+   Every value here is exactly the literal it replaces, so the desktop
+   rendering is unchanged by construction. Task 13's media queries override
+   ONLY these names -- which is what makes "1280x720 is untouched" a structural
+   property of this stylesheet rather than something to be careful about.
+
+   Deliberately NOT a single global scale unit. A `--pf-u: 1px` multiplier
+   applied to everything would just be useFitScale rewritten in CSS, and
+   uniform scaling is precisely what the reflow decision rejected. Per-element
+   tokens are what let a phone get relatively LARGER type in some places and
+   smaller in others.
+   ========================================================================== */
+.pf-stage {
+  --pf-header-h: 58px; /* was Dashboard.tsx header height */
+  --pf-probecol-w: 298px; /* was Dashboard.tsx probe column width */
+  --pf-col-w: 300px; /* was Dashboard.tsx right column width */
+  --pf-gauge-size: 392px; /* was GrillGauge.tsx svg width/height */
+  --pf-gauge-ring: 360px; /* was GrillGauge.tsx glow circle */
+  --pf-gauge-num: 112px; /* was GrillGauge.tsx big temperature */
+  --pf-gauge-unit: 40px; /* was GrillGauge.tsx degree unit */
+  --pf-probe-temp: 66px; /* was ProbeCard.tsx big temperature */
+  --pf-probe-unit: 26px; /* was ProbeCard.tsx degree unit */
+  --pf-probe-name: 15px; /* was ProbeCard.tsx probe name */
+  --pf-btn-font: 25px; /* was .pf-btn font-size */
+  --pf-btn-h: 82px; /* was ControlButtons.tsx row height */
+  --pf-cook-val: 26px; /* was Dashboard.tsx cook-time value */
+  --pf-pill-val: 24px; /* was Dashboard.tsx pill value */
+  --pf-hopper-val: 34px; /* was HopperGauge.tsx percentage */
+}
+
+/* ==========================================================================
    Dashboard layout.
 
    Every value below is the literal that used to sit in a style={{...}} object
@@ -439,8 +478,8 @@
 
 /* ---- header ---- */
 .pf-dash-header {
-  height: 58px;
-  flex: 0 0 58px;
+  height: var(--pf-header-h);
+  flex: 0 0 var(--pf-header-h);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -487,7 +526,13 @@
   color: var(--pf-status-color);
 }
 .pf-dash-clock {
-  font: 600 22px "Barlow Semi Condensed";
+  /* Longhands, never the `font` shorthand: this build's CSS pipeline folds a
+     following font-variant-numeric back into the shorthand, and the tabular
+     figures are silently lost. Measured -- the clock computed
+     font-variant-numeric: normal until this was split. */
+  font-weight: 600;
+  font-size: 22px;
+  font-family: "Barlow Semi Condensed";
   color: #cfc6b8;
   font-variant-numeric: tabular-nums;
 }
@@ -508,8 +553,8 @@
   min-height: 0;
 }
 .pf-dash-probecol {
-  width: 298px;
-  flex: 0 0 298px;
+  width: var(--pf-probecol-w);
+  flex: 0 0 var(--pf-probecol-w);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -523,8 +568,8 @@
   min-width: 0;
 }
 .pf-dash-rightcol {
-  width: 300px;
-  flex: 0 0 300px;
+  width: var(--pf-col-w);
+  flex: 0 0 var(--pf-col-w);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -579,7 +624,14 @@
   white-space: nowrap;
 }
 .pf-dash-cookval {
-  font: 700 26px "Barlow Semi Condensed";
+  /* Longhands, NOT the `font` shorthand. A var() inside a shorthand makes the
+     whole declaration pending-substitution: it expands at computed-value time,
+     AFTER the cascade, so it resets font-variant-numeric back to normal and
+     silently defeats the tabular-nums below it. Caught by the fidelity
+     screenshot -- the digits changed width while every landmark box stayed put. */
+  font-weight: 700;
+  font-size: var(--pf-cook-val);
+  font-family: "Barlow Semi Condensed";
   font-variant-numeric: tabular-nums;
   color: #cfc6b8;
 }
@@ -619,8 +671,8 @@
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   gap: 12px;
-  height: 82px;
-  flex: 0 0 82px;
+  height: var(--pf-btn-h);
+  flex: 0 0 var(--pf-btn-h);
 }
 
 /* ---- probe card ---- */
@@ -641,7 +693,9 @@
   align-items: baseline;
 }
 .pf-dash-probename {
-  font: 600 15px "Barlow";
+  font-weight: 600;
+  font-size: var(--pf-probe-name);
+  font-family: "Barlow";
   letter-spacing: 1.5px;
   color: #b7ac9c;
   text-transform: uppercase;
@@ -662,12 +716,12 @@
   line-height: 0.92;
 }
 .pf-dash-probetemp-int {
-  font-size: 66px;
+  font-size: var(--pf-probe-temp);
   font-weight: 800;
   color: #f4ede2;
 }
 .pf-dash-probetemp-unit {
-  font-size: 26px;
+  font-size: var(--pf-probe-unit);
   font-weight: 600;
   color: #8a7f70;
   margin-left: 2px;
@@ -699,8 +753,8 @@
 }
 .pf-dash-gauge-glow {
   position: absolute;
-  width: 360px;
-  height: 360px;
+  width: var(--pf-gauge-ring);
+  height: var(--pf-gauge-ring);
   border-radius: 50%;
   background: radial-gradient(closest-side, var(--accent), transparent 68%);
   opacity: 0.3;
@@ -708,8 +762,8 @@
 }
 .pf-dash-gauge-svg {
   position: relative;
-  width: 392px;
-  height: 392px;
+  width: var(--pf-gauge-size);
+  height: var(--pf-gauge-size);
 }
 .pf-dash-gauge-overlay {
   position: absolute;
@@ -732,12 +786,12 @@
   line-height: 0.9;
 }
 .pf-dash-gauge-temp {
-  font-size: 112px;
+  font-size: var(--pf-gauge-num);
   font-weight: 800;
   color: #f8f2e8;
 }
 .pf-dash-gauge-unit {
-  font-size: 40px;
+  font-size: var(--pf-gauge-unit);
   font-weight: 600;
   color: #8a7f70;
   margin-left: 4px;
@@ -841,7 +895,9 @@ button.pf-dash-pill {
   white-space: nowrap;
 }
 .pf-dash-pill-val {
-  font: 800 24px "Barlow Semi Condensed";
+  font-weight: 800;
+  font-size: var(--pf-pill-val);
+  font-family: "Barlow Semi Condensed";
   color: var(--pf-pill-val-color);
   white-space: nowrap;
   line-height: 1;
@@ -863,7 +919,9 @@ button.pf-dash-pill {
   align-items: baseline;
 }
 .pf-dash-hopper-val {
-  font: 800 34px "Barlow Semi Condensed";
+  font-weight: 800;
+  font-size: var(--pf-hopper-val);
+  font-family: "Barlow Semi Condensed";
   font-variant-numeric: tabular-nums;
   color: var(--pf-hopper-color);
   line-height: 1;
