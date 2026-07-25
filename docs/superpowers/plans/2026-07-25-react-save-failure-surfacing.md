@@ -27,6 +27,29 @@ This is not theoretical. The rejection path is reachable from the UI today: rais
 `PwmSettings._check_profiles` (`common/settings_schema.py:303-316`), and `PwmTab.tsx:78-85`
 neither clamps nor guards (audit finding I6). The user gets silence.
 
+> **DECIDED 2026-07-25, after this plan shipped: the unit test is the accepted
+> coverage for the UI half.**
+>
+> The settings guards sweep landed on top of this slice and clamped exactly the
+> value the witness spec raised, so `PwmTab.onSave` now re-clamps every profile
+> duty cycle into the new range and that save succeeds by design. The vector
+> above is no longer reachable through the UI.
+>
+> A search for a replacement found none: every schema constraint is now
+> client-bounded, pre-flight-guarded, clamped at save, structurally maintained,
+> or on a field React does not render. The options were to accept
+> `PwmTab.test.tsx`'s "surfaces a rejected save inline and withholds the success
+> marker" as the coverage, or to add a fault-injection e2e whose only purpose is
+> to manufacture a rejection the product can no longer produce. **The unit test
+> is accepted.** Inventing a rejection path in order to test rejection would
+> test the fixture, not the feature.
+>
+> Still covered elsewhere: the server-rejection channel itself by the API-level
+> spec (`settings.spec.ts`, "invalid settings_update delta is rejected
+> atomically with a dotted-path error"), and the UI-level behaviour by the
+> `PwmTab` unit test. The original witness spec was re-pointed rather than
+> deleted, and now proves the clamp.
+
 It also contradicts the project's own design spec —
 `docs/superpowers/specs/2026-07-22-settings-foundation-design.md:169`: *"Save failure →
 inline error on the tab."*
