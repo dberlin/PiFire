@@ -147,7 +147,14 @@ socketio both call it, so whichever polls first consumes the other's warnings.
 
 Roughly ordered by daily-use value:
 
-- [ ] **pellets** — pellet inventory manager (distinct from the Pellets settings tab)
+- [ ] **pellets** — pellet inventory manager (distinct from the Pellets settings
+      tab, which covers level thresholds only). **Planned:**
+      `plans/2026-07-25-react-pellets-page.md`, 13 tasks. Needs two new REST
+      endpoints — no path reads or writes the pellet archive today. The eight
+      actions already exist as Socket.IO handlers and get extracted so both
+      transports share one implementation, and the backend already broadcasts
+      the whole pellet DB as `socket_pellet_data`, which `useLiveState` does not
+      yet subscribe to.
 - [ ] **admin** — restart/reboot/shutdown, backups
 - [ ] **recipes** + **cookfile** — recipe editor and cook-file browser (share a
       data model and need a JSON listing endpoint that does not exist yet)
