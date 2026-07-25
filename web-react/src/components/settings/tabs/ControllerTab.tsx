@@ -144,6 +144,7 @@ export function ControllerTab() {
               onChange={(n) => set(opt.option_name, n)}
               min={opt.option_min ?? undefined}
               max={opt.option_max ?? undefined}
+              step={opt.option_step ?? undefined}
             />
           );
         }

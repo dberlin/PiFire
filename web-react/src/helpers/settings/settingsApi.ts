@@ -26,6 +26,9 @@ export interface ControllerOption {
   option_default: number | boolean | string | null;
   option_min: number | null;
   option_max: number | null;
+  // _macro_settings.html:51 forwards this; controllers.json declares steps down
+  // to 1e-10, so without it those spinners default to a step of 1.
+  option_step?: number | null;
   list_values?: (string | number)[];
   list_labels?: string[];
 }

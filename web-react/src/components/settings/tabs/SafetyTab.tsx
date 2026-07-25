@@ -53,25 +53,33 @@ export function SafetyTab() {
         label="Min Startup Temp"
         value={v.minstartuptemp}
         onChange={(n) => set("minstartuptemp", n)}
+        // index.html:1262 — without this React accepts a NEGATIVE grill temp
+        min={1}
         suffix="°"
       />
       <NumberField
         label="Max Startup Temp"
         value={v.maxstartuptemp}
         onChange={(n) => set("maxstartuptemp", n)}
+        // index.html:1269
+        min={1}
         suffix="°"
       />
       <NumberField
         label="Max Grill Temp"
         value={v.maxtemp}
         onChange={(n) => set("maxtemp", n)}
+        // index.html:1276
+        min={1}
         suffix="°"
       />
       <NumberField
         label="Reignite Retries"
         value={v.reigniteretries}
         onChange={(n) => set("reigniteretries", n)}
+        // index.html:1286
         min={0}
+        max={10}
       />
       <NumberField
         label="Manual Override Time"

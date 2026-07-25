@@ -315,7 +315,9 @@ export function NotificationsTab() {
           label="WLED Notify Duration"
           value={num(wled, "notify_duration", 120)}
           onChange={(n) => setField("wled", "notify_duration", n)}
+          // index.html:2003. UI-only: the schema has ge=0 and no upper bound.
           min={0}
+          max={3600}
         />
       </Section>
 

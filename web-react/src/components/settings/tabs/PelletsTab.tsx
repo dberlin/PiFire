@@ -80,7 +80,9 @@ export function PelletsTab() {
         label="Warning Time"
         value={v.warning_time}
         onChange={(n) => set("warning_time", n)}
-        min={0}
+        // index.html:1325
+        min={5}
+        max={240}
         suffix="min"
       />
       <NumberField
@@ -95,14 +97,18 @@ export function PelletsTab() {
         label="Empty"
         value={v.empty}
         onChange={(n) => set("empty", n)}
-        min={0}
+        // index.html:1362 — the audit missed this one
+        min={1}
+        max={100}
         suffix="cm"
       />
       <NumberField
         label="Full"
         value={v.full}
         onChange={(n) => set("full", n)}
+        // index.html:1354 — the audit missed this one
         min={0}
+        max={100}
         suffix="cm"
       />
       <NumberField
@@ -116,6 +122,14 @@ export function PelletsTab() {
         checked={v.prime_ignition}
         onChange={(b) => set("prime_ignition", b)}
       />
+      {/* I16 — safety copy from index.html:1403-1412, dropped in the port.
+          This control lights a fire, so the warning travels with it. */}
+      <p className="pf-settings-error-text">
+        DANGER: Only enable the igniter during Priming if you are absolutely sure that you need to
+        do this. Enabling the igniter will ignite pellets and start the firepot, even without the
+        fan enabled. This feature will only turn on the igniter if Prime &amp; Startup is selected;
+        otherwise, priming without startup will not utilize the igniter.
+      </p>
       <SaveBar onSave={onSave} saving={saving} status={status} />
     </Section>
   );

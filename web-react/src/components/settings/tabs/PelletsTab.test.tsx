@@ -21,6 +21,14 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+// NumberField wraps its input in a <label> whose text also carries the suffix,
+// so getByLabelText(field) does not match. Reach the input via the label span.
+function inputFor(label: string): HTMLInputElement {
+  const input = screen.getByText(label).closest("label")?.querySelector("input");
+  if (!input) throw new Error(`no input for field "${label}"`);
+  return input;
+}
+
 describe("PelletsTab", () => {
   it("renders pellets fields with loaded values", () => {
     const context = {
@@ -176,5 +184,46 @@ describe("PelletsTab", () => {
       }),
       ["settings_update", "distance_update"],
     );
+  });
+  describe("input bounds and prime-ignition danger copy", () => {
+    const fixture = { settings: {}, mode: "Stop" };
+
+    it("bounds warning_time 5-240 (index.html:1325)", () => {
+      renderRoute(<PelletsTab />, fixture);
+      const el = inputFor("Warning Time");
+      expect(el).toHaveAttribute("min", "5");
+      expect(el).toHaveAttribute("max", "240");
+    });
+
+    it("bounds empty 1-100 and full 0-100 (index.html:1354, 1362)", () => {
+      renderRoute(<PelletsTab />, fixture);
+      expect(inputFor("Empty")).toHaveAttribute("min", "1");
+      expect(inputFor("Empty")).toHaveAttribute("max", "100");
+      expect(inputFor("Full")).toHaveAttribute("min", "0");
+      expect(inputFor("Full")).toHaveAttribute("max", "100");
+    });
+
+    it("leaves warning_level at its already-correct 0-100", () => {
+      renderRoute(<PelletsTab />, fixture);
+      expect(inputFor("Warning Level")).toHaveAttribute("min", "0");
+      expect(inputFor("Warning Level")).toHaveAttribute("max", "100");
+    });
+
+    it("clamps warning_time on blur", () => {
+      renderRoute(<PelletsTab />, fixture);
+      const el = inputFor("Warning Time");
+      fireEvent.change(el, { target: { value: "9999" } });
+      fireEvent.blur(el);
+      expect(inputFor("Warning Time")).toHaveValue(240);
+    });
+
+    // I16 — safety copy on a control that lights a fire, dropped in the port
+    // (index.html:1403-1412). The triage assigned it to no slice.
+    it("renders the DANGER copy under the Prime Ignition toggle", () => {
+      renderRoute(<PelletsTab />, fixture);
+      const danger = screen.getByText(/DANGER/);
+      expect(danger).toBeInTheDocument();
+      expect(screen.getByText(/ignite pellets and start the firepot/i)).toBeInTheDocument();
+    });
   });
 });

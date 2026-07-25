@@ -21,6 +21,14 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+// NumberField wraps its input in a <label> whose text also carries the suffix,
+// so getByLabelText(field) does not match. Reach the input via the label span.
+function inputFor(label: string): HTMLInputElement {
+  const input = screen.getByText(label).closest("label")?.querySelector("input");
+  if (!input) throw new Error(`no input for field "${label}"`);
+  return input;
+}
+
 describe("SafetyTab", () => {
   it("renders safety fields with loaded values", () => {
     const context = {
@@ -137,5 +145,32 @@ describe("SafetyTab", () => {
       },
       [],
     );
+  });
+  describe("input bounds", () => {
+    const fixture = { settings: {}, mode: "Stop" };
+
+    // React currently accepts NEGATIVE grill temperatures here — these three
+    // fields carry no min at all (index.html:1262, 1269, 1276 all say min="1").
+    it("gives the three temperature fields a min of 1", () => {
+      renderRoute(<SafetyTab />, fixture);
+      for (const label of ["Min Startup Temp", "Max Startup Temp", "Max Grill Temp"]) {
+        expect(inputFor(label)).toHaveAttribute("min", "1");
+      }
+    });
+
+    it("bounds reignite retries 0-10 (index.html:1286)", () => {
+      renderRoute(<SafetyTab />, fixture);
+      const el = inputFor("Reignite Retries");
+      expect(el).toHaveAttribute("min", "0");
+      expect(el).toHaveAttribute("max", "10");
+    });
+
+    it("clamps a negative max grill temp on blur", () => {
+      renderRoute(<SafetyTab />, fixture);
+      const el = inputFor("Max Grill Temp");
+      fireEvent.change(el, { target: { value: "-40" } });
+      fireEvent.blur(el);
+      expect(inputFor("Max Grill Temp")).toHaveValue(1);
+    });
   });
 });

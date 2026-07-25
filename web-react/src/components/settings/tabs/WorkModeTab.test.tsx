@@ -19,6 +19,14 @@ beforeEach(() => {
   saveMock.mockClear();
 });
 
+// NumberField wraps its input in a <label> whose text also carries the suffix,
+// so getByLabelText(field) does not match. Reach the input via the label span.
+function inputFor(label: string): HTMLInputElement {
+  const input = screen.getByText(label).closest("label")?.querySelector("input");
+  if (!input) throw new Error(`no input for field "${label}"`);
+  return input;
+}
+
 describe("WorkModeTab", () => {
   it("renders all three sections with loaded values", () => {
     const context = {
@@ -297,5 +305,64 @@ describe("WorkModeTab", () => {
     const [delta] = saveMock.mock.calls[0];
     expect(delta.smoke_plus.duty_cycle).toBe(65);
     expect(delta.smoke_plus.fan_ramp).toBe(true);
+  });
+  // Bounds ported from settings/index.html:343, 421, 430-454, 502, 511, 559.
+  // None of these have a schema counterpart; Flask is the authority on what is
+  // sensible, the schema on what is rejected.
+  describe("input bounds (M16)", () => {
+    const boundsFixture = { settings: { platform: { dc_fan: true } }, mode: "Stop" };
+
+    it("bounds PMode 0-9 with a hint (index.html:343)", () => {
+      renderRoute(<WorkModeTab />, boundsFixture);
+      const pmode = inputFor("PMode");
+      expect(pmode).toHaveAttribute("min", "0");
+      expect(pmode).toHaveAttribute("max", "9");
+      expect(screen.getByText("0–9")).toBeInTheDocument();
+    });
+
+    it("bounds Lid Open Threshold 1-80 step 1 (index.html:502)", () => {
+      renderRoute(<WorkModeTab />, boundsFixture);
+      const el = inputFor("Lid Open Threshold");
+      expect(el).toHaveAttribute("min", "1");
+      expect(el).toHaveAttribute("max", "80");
+      expect(el).toHaveAttribute("step", "1");
+    });
+
+    it("bounds Lid Open Pause Time 10-1000 step 1 (index.html:511)", () => {
+      renderRoute(<WorkModeTab />, boundsFixture);
+      const el = inputFor("Lid Open Pause Time");
+      expect(el).toHaveAttribute("min", "10");
+      expect(el).toHaveAttribute("max", "1000");
+      expect(el).toHaveAttribute("step", "1");
+    });
+
+    it("raises the cosmetic min-0 fields to min 1", () => {
+      renderRoute(<WorkModeTab />, boundsFixture);
+      for (const label of ["Smoke On Cycle Time", "Smoke Off Cycle Time"]) {
+        expect(inputFor(label)).toHaveAttribute("min", "1");
+      }
+      // Smoke Plus + Keep Warm
+      expect(inputFor("Min Temp")).toHaveAttribute("min", "1");
+      expect(inputFor("Max Temp")).toHaveAttribute("min", "1");
+      expect(inputFor("On Time")).toHaveAttribute("min", "1");
+      expect(inputFor("Off Time")).toHaveAttribute("min", "1");
+      expect(inputFor("Temp")).toHaveAttribute("min", "1");
+    });
+
+    it("leaves Smoke Plus Duty Cycle at its already-correct 20-100", () => {
+      renderRoute(<WorkModeTab />, boundsFixture);
+      const el = inputFor("Duty Cycle");
+      expect(el).toHaveAttribute("min", "20");
+      expect(el).toHaveAttribute("max", "100");
+    });
+
+    // Task 1's enforcement, reaching a real call site.
+    it("clamps PMode on blur", () => {
+      renderRoute(<WorkModeTab />, boundsFixture);
+      const pmode = inputFor("PMode");
+      fireEvent.change(pmode, { target: { value: "44" } });
+      fireEvent.blur(pmode);
+      expect(inputFor("PMode")).toHaveValue(9);
+    });
   });
 });

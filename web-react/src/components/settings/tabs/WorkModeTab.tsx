@@ -119,21 +119,26 @@ export function WorkModeTab() {
           label="Smoke On Cycle Time"
           value={v.cycle_data.SmokeOnCycleTime}
           onChange={(n) => setCycleData("SmokeOnCycleTime", n)}
-          min={0}
+          min={1}
           suffix="s"
         />
         <NumberField
           label="Smoke Off Cycle Time"
           value={v.cycle_data.SmokeOffCycleTime}
           onChange={(n) => setCycleData("SmokeOffCycleTime", n)}
-          min={0}
+          min={1}
           suffix="s"
         />
         <NumberField
           label="PMode"
           value={v.cycle_data.PMode}
           onChange={(n) => setCycleData("PMode", n)}
+          // index.html:343. No schema counterpart on cycle_data.PMode, but
+          // SmartStartProfile.p_mode IS schema-bound ge=0/le=9
+          // (settings_schema.py:324), so 0-9 is the house rule.
           min={0}
+          max={9}
+          hint="0–9"
         />
         <NumberField
           label="U Min"
@@ -156,13 +161,19 @@ export function WorkModeTab() {
           label="Lid Open Threshold"
           value={v.cycle_data.LidOpenThreshold}
           onChange={(n) => setCycleData("LidOpenThreshold", n)}
-          min={0}
+          // index.html:502
+          min={1}
+          max={80}
+          step={1}
         />
         <NumberField
           label="Lid Open Pause Time"
           value={v.cycle_data.LidOpenPauseTime}
           onChange={(n) => setCycleData("LidOpenPauseTime", n)}
-          min={0}
+          // index.html:511 — the audit missed this one
+          min={10}
+          max={1000}
+          step={1}
           suffix="s"
         />
         <Toggle
@@ -182,28 +193,28 @@ export function WorkModeTab() {
           label="Min Temp"
           value={v.smoke_plus.min_temp}
           onChange={(n) => setSmokePlus("min_temp", n)}
-          min={0}
+          min={1}
           suffix="°"
         />
         <NumberField
           label="Max Temp"
           value={v.smoke_plus.max_temp}
           onChange={(n) => setSmokePlus("max_temp", n)}
-          min={0}
+          min={1}
           suffix="°"
         />
         <NumberField
           label="On Time"
           value={v.smoke_plus.on_time}
           onChange={(n) => setSmokePlus("on_time", n)}
-          min={0}
+          min={1}
           suffix="s"
         />
         <NumberField
           label="Off Time"
           value={v.smoke_plus.off_time}
           onChange={(n) => setSmokePlus("off_time", n)}
-          min={0}
+          min={1}
           suffix="s"
         />
         {/* Hiding these does NOT drop their keys: onSave iterates
@@ -237,7 +248,7 @@ export function WorkModeTab() {
           label="Temp"
           value={v.keep_warm.temp}
           onChange={(n) => setKeepWarm("temp", n)}
-          min={0}
+          min={1}
           suffix="°"
         />
         <Toggle

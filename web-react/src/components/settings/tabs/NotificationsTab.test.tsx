@@ -106,6 +106,14 @@ function contextWithNotifyServices(notify_services: unknown, mode = "Stop") {
   };
 }
 
+// NumberField wraps its input in a <label> whose text also carries the suffix,
+// so getByLabelText(field) does not match. Reach the input via the label span.
+function inputFor(label: string): HTMLInputElement {
+  const input = screen.getByText(label).closest("label")?.querySelector("input");
+  if (!input) throw new Error(`no input for field "${label}"`);
+  return input;
+}
+
 describe("NotificationsTab", () => {
   it("renders a Section for each of the six simple services + Apprise + OneSignal", () => {
     renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES));
@@ -416,5 +424,18 @@ describe("NotificationsTab", () => {
       expect(screen.queryByLabelText(/Friendly Name/)).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Delete/ })).not.toBeInTheDocument();
     });
+  });
+  // index.html:2003 — Flask's 3600 is UI-only (the schema has ge=0 and no
+  // upper), but it is the sensible ceiling: a notification lasting longer than
+  // an hour is a stuck notification.
+  it("caps the WLED notify duration at 3600 seconds", () => {
+    renderRoute(<NotificationsTab />, { settings: {}, mode: "Stop" });
+    const el = inputFor("WLED Notify Duration");
+    expect(el).toHaveAttribute("min", "0");
+    expect(el).toHaveAttribute("max", "3600");
+
+    fireEvent.change(el, { target: { value: "99999" } });
+    fireEvent.blur(el);
+    expect(inputFor("WLED Notify Duration")).toHaveValue(3600);
   });
 });

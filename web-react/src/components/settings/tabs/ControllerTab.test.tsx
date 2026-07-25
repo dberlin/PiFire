@@ -133,6 +133,14 @@ function makeContext(overrides: Partial<{ controllerMeta: ControllerMetadata | n
   };
 }
 
+// NumberField wraps its input in a <label> whose text also carries the suffix,
+// so getByLabelText(field) does not match. Reach the input via the label span.
+function inputFor(label: string): HTMLInputElement {
+  const input = screen.getByText(label).closest("label")?.querySelector("input");
+  if (!input) throw new Error(`no input for field "${label}"`);
+  return input;
+}
+
 describe("ControllerTab", () => {
   it("renders the Select with the selected controller and shows config value + fallback defaults", () => {
     renderRoute(<ControllerTab />, makeContext());
@@ -284,5 +292,51 @@ describe("ControllerTab", () => {
 
     expect(screen.getByText(/controller metadata unavailable/i)).toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  });
+  // _macro_settings.html:51 forwards option['option_step']; ControllerTab
+  // passed option_min/option_max but dropped the step, so a float option whose
+  // real granularity is 1e-10 got the browser's default step of 1 and its
+  // spinner became useless.
+  it("forwards option_step to the NumberField", () => {
+    const metaWithStep: ControllerMetadata = {
+      metadata: {
+        pid: {
+          friendly_name: "PID Standard",
+          description: "",
+          config: [
+            {
+              option_name: "PB",
+              option_friendly_name: "Proportional Band(PB)",
+              option_description: "",
+              option_type: "float",
+              option_default: 60.0,
+              option_min: 0,
+              option_max: 100,
+              option_step: 0.001,
+            },
+            {
+              option_name: "Ti",
+              option_friendly_name: "Integral Time (Ti)",
+              option_description: "",
+              option_type: "float",
+              option_default: 180.0,
+              option_min: null,
+              option_max: null,
+              option_step: null,
+            },
+          ],
+        },
+      },
+    };
+
+    renderRoute(<ControllerTab />, {
+      settings: { controller: { selected: "pid", config: {} } },
+      mode: "Stop",
+      controllerMeta: metaWithStep,
+    });
+
+    expect(inputFor("Proportional Band(PB)")).toHaveAttribute("step", "0.001");
+    // A null option_step must not emit step="null" — it stays absent.
+    expect(inputFor("Integral Time (Ti)")).not.toHaveAttribute("step");
   });
 });
