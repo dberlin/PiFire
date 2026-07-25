@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
-import { deriveView, fmtDuration, type PillView } from "../../helpers/dashboard/deriveView";
+import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
+import { deriveView, type PillView } from "../../helpers/dashboard/deriveView";
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
 import { readTargetEdit, saveTargetEdit, type TargetEdit } from "../../helpers/notify/notifyState";
 import type { AccentName, LiveState, ProbeData } from "../../helpers/types";
@@ -58,19 +59,14 @@ export function Dashboard({
   // the area left under the navbar, not the whole viewport.
   const { scale, ref: fitRef } = useFitScale(1280, 720);
 
-  // Cook-time counter: seconds since the current cook began (reset when the
-  // controller leaves an active cooking mode). Adjusted synchronously during
-  // render on the cooking-state transition edge (React's recommended pattern
-  // for deriving state from a prop change), rather than in an effect.
-  const [cookStart, setCookStart] = useState<number | null>(() =>
-    view.cooking ? now.getTime() : null,
-  );
-  const [prevCooking, setPrevCooking] = useState(view.cooking);
-  if (view.cooking !== prevCooking) {
-    setPrevCooking(view.cooking);
-    setCookStart(view.cooking ? now.getTime() : null);
-  }
-  const cookTime = fmtDuration(cookStart != null ? (now.getTime() - cookStart) / 1000 : 0);
+  // Elapsed cook time comes from the CONTROLLER's startup_timestamp
+  // (blueprints/mobile/socket_io.py:234, epoch seconds), not from when this
+  // browser happened to mount. Reloading four hours into a brisket used to
+  // report 00:00, and two devices watching the same cook disagreed with each
+  // other. Reignite deliberately does not rewrite the timestamp
+  // (controller/runtime/modes/reignite.py:17-18), so a reignited cook keeps
+  // counting from the original ignition -- which is what Flask has always done.
+  const cookTime = fmtElapsed(cookElapsed(dash.startupTimestamp, now.getTime() / 1000));
   const clock = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   // Per-probe target notifications. Only the LABEL of the probe being edited is

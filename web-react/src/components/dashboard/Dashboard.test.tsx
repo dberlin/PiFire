@@ -70,7 +70,9 @@ describe("Dashboard", () => {
     renderDashboard({ ...FIXTURE_DASH, currentMode: "Stop" });
     expect(screen.getByText("STOP")).toBeInTheDocument();
     expect(screen.getByText("Cook Time")).toBeInTheDocument();
-    expect(screen.getByText("00:00")).toBeInTheDocument();
+    // No cook running: startupTimestamp is 0, which Flask renders as "--"
+    // (dash_default.js:410). Not "00:00" -- that claimed a cook of zero length.
+    expect(screen.getByText("--")).toBeInTheDocument();
   });
 
   it("renders the food-probe column when foodProbes are present", () => {
@@ -97,60 +99,46 @@ describe("Dashboard", () => {
     expect(screen.getByText("OFF")).toBeInTheDocument();
   });
 
-  it("shows the MONITOR mode badge and a zeroed cook-time counter (non-cooking)", () => {
+  it("shows the MONITOR mode badge and an inactive cook-time counter", () => {
     renderDashboard({ ...FIXTURE_DASH, currentMode: "Monitor" });
     expect(screen.getByText("MONITOR")).toBeInTheDocument();
-    expect(screen.getByText("00:00")).toBeInTheDocument();
+    expect(screen.getByText("--")).toBeInTheDocument();
   });
 
-  it("shows the SHUTDOWN mode badge and a zeroed cook-time counter (non-cooking)", () => {
+  it("shows the SHUTDOWN mode badge and an inactive cook-time counter", () => {
     renderDashboard({ ...FIXTURE_DASH, currentMode: "Shutdown" });
     expect(screen.getByText("SHUTDOWN")).toBeInTheDocument();
-    expect(screen.getByText("00:00")).toBeInTheDocument();
+    expect(screen.getByText("--")).toBeInTheDocument();
   });
 
-  it("resets the cook-time counter across cooking <-> non-cooking transitions on the same instance", () => {
-    const { rerender } = renderDashboard({ ...FIXTURE_DASH, currentMode: "Hold" });
+  // C3: the counter is a pure function of the CONTROLLER's startup_timestamp,
+  // so it survives a reload and two browsers watching one cook agree. It used
+  // to be seeded from `new Date()` at mount, which reported 00:00 four hours
+  // into a brisket.
+  it("counts from the controller's startup_timestamp, not from mount", () => {
+    const started = Math.floor(Date.now() / 1000) - 3723;
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Hold", startupTimestamp: started });
     expect(screen.getByText("HOLD")).toBeInTheDocument();
-    expect(screen.getByText("00:00")).toBeInTheDocument();
+    expect(screen.getByText(/^01:02:0\d$/)).toBeInTheDocument();
+  });
 
-    // Hold (cooking) -> Stop (not cooking): prevCooking edge fires, cookStart clears.
-    rerender(
-      <MemoryRouter>
-        <Dashboard
-          dash={{ ...FIXTURE_DASH, currentMode: "Stop" }}
-          command={makeCommand()}
-          apiBase=""
-          phase="live"
-          controlAlive={true}
-          accent="ember"
-          setAccent={rs.fn()}
-          animate={false}
-          setAnimate={rs.fn()}
-        />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText("STOP")).toBeInTheDocument();
-    expect(screen.getByText("00:00")).toBeInTheDocument();
+  it("does not restart the counter when a fresh instance mounts mid-cook", () => {
+    const started = Math.floor(Date.now() / 1000) - 754;
+    const dash = { ...FIXTURE_DASH, currentMode: "Smoke", startupTimestamp: started };
+    renderDashboard(dash);
+    expect(screen.getByText(/^12:3\d$/)).toBeInTheDocument();
+    cleanup();
+    renderDashboard(dash);
+    expect(screen.getByText(/^12:3\d$/)).toBeInTheDocument();
+  });
 
-    // Stop (not cooking) -> Smoke (cooking): prevCooking edge fires again, cookStart re-seeds.
-    rerender(
-      <MemoryRouter>
-        <Dashboard
-          dash={{ ...FIXTURE_DASH, currentMode: "Smoke" }}
-          command={makeCommand()}
-          apiBase=""
-          phase="live"
-          controlAlive={true}
-          accent="ember"
-          setAccent={rs.fn()}
-          animate={false}
-          setAnimate={rs.fn()}
-        />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText("SMOKE")).toBeInTheDocument();
-    expect(screen.getByText("00:00")).toBeInTheDocument();
+  // Reignite deliberately does not rewrite startup_timestamp
+  // (controller/runtime/modes/reignite.py:17-18), so the elapsed time keeps
+  // running from the ORIGINAL ignition -- Flask's behaviour, reproduced.
+  it("keeps counting from the original ignition through a Reignite", () => {
+    const started = Math.floor(Date.now() / 1000) - 7;
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Reignite", startupTimestamp: started });
+    expect(screen.getByText(/^0\ds$/)).toBeInTheDocument();
   });
 
   it("clicking an accent swatch calls setAccent with that accent", async () => {
