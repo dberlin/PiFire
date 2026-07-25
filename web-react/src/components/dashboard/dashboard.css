@@ -247,6 +247,85 @@
   border-color: #ff5a4d;
   color: #ff8b82;
 }
+.pf-modal-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Per-probe target-notification modal (ProbeNotifyModal). It sits inside the
+   shared .pf-modal shell above; these rules only style its body. */
+.pf-notify-switch,
+.pf-notify-actions label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 600 15px "Barlow";
+  color: #e8dfd1;
+  cursor: pointer;
+}
+.pf-notify-switch input,
+.pf-notify-actions input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.pf-notify-row {
+  display: flex;
+  justify-content: center;
+}
+.pf-notify-num {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font: 600 12px "Barlow";
+  letter-spacing: 2px;
+  color: #7d7264;
+  text-transform: uppercase;
+}
+.pf-notify-num input {
+  width: 140px;
+  background: #1d1813;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 6px 12px;
+  font: 800 34px "Barlow Semi Condensed";
+  font-variant-numeric: tabular-nums;
+  color: #f8f2e8;
+  text-align: right;
+}
+.pf-notify-num input:disabled {
+  color: #7d7264;
+}
+.pf-notify-unit {
+  font: 600 20px "Barlow Semi Condensed";
+  color: #8a7f70;
+}
+.pf-notify-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 10px 14px 12px;
+  margin: 0;
+}
+.pf-notify-actions:disabled {
+  opacity: 0.5;
+}
+.pf-notify-actions legend {
+  font: 600 11px "Barlow";
+  letter-spacing: 2px;
+  color: #7d7264;
+  text-transform: uppercase;
+  padding: 0 6px;
+}
+.pf-notify-alert {
+  font: 600 14px "Barlow";
+  color: #ff8b82;
+  text-align: center;
+  max-width: 34ch;
+}
 
 /* The error/warning banner rules moved to components/shell/shell.css along
    with Banners.tsx: the strip is chrome for every page now, not part of the
