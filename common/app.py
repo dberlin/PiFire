@@ -2,7 +2,16 @@
 Common PiFire WebApp Functions Shared Between Blueprints
 """
 
-from common.common import seconds_to_string, WriteKind, epoch_to_time, guard_none_metric_field
+from common.common import (
+    seconds_to_string,
+    WriteKind,
+    epoch_to_time,
+    guard_none_metric_field,
+    # Re-exported, not redefined: this module used to carry a byte-identical
+    # second copy of get_system_command_output, so a fix to one silently left
+    # the other (used by blueprints/mobile/socket_io.py) broken.
+    get_system_command_output,
+)
 from common.modes import Mode
 from common.datastore_accessors import read_settings, read_all_metrics, read_history, write_settings, write_control
 from common.defaults import metrics_items
@@ -26,23 +35,6 @@ def get_supported_cmds():
         return data["data"]["supported_cmds"]
     else:
         return data
-
-
-def get_system_command_output(requested="supported_commands", timeout=1):
-    system_output = SqliteQueue("queue_systemo")
-    endtime = timeout + time.time()
-    while time.time() < endtime:
-        while system_output.length() > 0:
-            data = system_output.pop()
-            if data["command"][0] == requested:
-                return data
-
-    return {
-        "command": [requested, None, None, None],
-        "result": "ERROR",
-        "message": "The requested command output could not be found.",
-        "data": {"Response_Was": "To_Fast"},
-    }
 
 
 def create_ui_hash():

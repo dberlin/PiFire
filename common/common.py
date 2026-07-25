@@ -606,14 +606,53 @@ def seconds_to_string(seconds):
     return time_string
 
 
+def _is_output_for(entry, requested):
+    try:
+        return entry["command"][0] == requested
+    except TypeError, KeyError, IndexError:
+        return False
+
+
 def get_system_command_output(requested="supported_commands", timeout=1):
+    """Wait (up to `timeout` seconds) for the control process's answer to `requested`.
+
+    `queue_systemo` is shared by every consumer: dash_page and
+    socket_io._check_control_status poll for "check_alive", get_supported_cmds
+    for "supported_commands", common/system.py's system-info gather for
+    check_wifi_quality/check_throttled/check_cpu_temp/network_info/
+    hardware_info, and the wizard for "scan_bluetooth".
+
+    This used to pop entries one at a time and DISCARD every non-matching one,
+    so a poll running while another consumer's answer sat in the queue
+    destroyed it -- that consumer then busy-waited out its whole timeout and
+    returned the "could not be found" envelope for a command the control
+    process had actually answered. Entries that are not ours are now left
+    where they are.
+    """
     system_output = SqliteQueue("queue_systemo")
     endtime = timeout + time.time()
     while time.time() < endtime:
+        # Peek before touching anything: when our answer has not arrived yet
+        # (the common case while waiting) the queue is left completely
+        # undisturbed, rather than being churned pop-by-pop every iteration.
+        if not any(_is_output_for(entry, requested) for entry in system_output.list()):
+            continue
+        # SqliteQueue is pop-from-head only, so reach our entry by popping the
+        # ones ahead of it and pushing them back, preserving their order.
+        deferred = []
+        data = None
         while system_output.length() > 0:
-            data = system_output.pop()
-            if data["command"][0] == requested:
-                return data
+            entry = system_output.pop()
+            if entry is None:  # raced with another consumer
+                break
+            if _is_output_for(entry, requested):
+                data = entry
+                break
+            deferred.append(entry)
+        for entry in deferred:
+            system_output.push(entry)
+        if data is not None:
+            return data
 
     return {
         "command": [requested, None, None, None],
