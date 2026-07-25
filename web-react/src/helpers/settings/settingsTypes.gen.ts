@@ -33,13 +33,16 @@ export type Venv = boolean;
 export type Autorefresh = "on" | "off";
 export type Clearhistoryonstart = boolean;
 export type Datapoints = number;
+export type FidelityDegrees = number;
 export type Minutes = number;
 export type BgColor = string;
+export type BgColorSetpoint = string | null;
 export type BgColorTarget = string;
 export type DashSetpoint = boolean;
 export type Enabled = boolean;
 export type Fill = boolean;
 export type LineColor = string;
+export type LineColorSetpoint = string | null;
 export type LineColorTarget = string;
 export type Name = string;
 export type Type = string;
@@ -225,12 +228,10 @@ export interface SettingsSchema {
   smoke_plus?: SmokePlus;
   startup?: StartupSettings;
   versions: Versions;
-  [k: string]: unknown;
 }
 export interface ControllerSettings {
   config?: Config;
   selected?: Selected;
-  [k: string]: unknown;
 }
 export interface Config {
   [k: string]: {
@@ -248,12 +249,10 @@ export interface CycleData {
   SmokeOnCycleTime?: Smokeoncycletime;
   u_max?: UMax;
   u_min?: UMin;
-  [k: string]: unknown;
 }
 export interface Dashboard {
   current?: Current;
   dashboards?: Dashboards;
-  [k: string]: unknown;
 }
 export interface Dashboards {
   [k: string]: {
@@ -264,7 +263,6 @@ export interface DisplaySettings {
   config?: Config1;
   selected?: Selected1;
   sleep_timeout?: SleepTimeout;
-  [k: string]: unknown;
 }
 export interface Config1 {
   [k: string]: {
@@ -287,45 +285,42 @@ export interface GlobalSettings {
   updated_message?: UpdatedMessage;
   uv?: Uv;
   venv?: Venv;
-  [k: string]: unknown;
 }
 export interface HistoryPage {
   autorefresh?: Autorefresh;
   clearhistoryonstart?: Clearhistoryonstart;
   datapoints?: Datapoints;
+  fidelity_degrees?: FidelityDegrees;
   minutes?: Minutes;
   probe_config?: ProbeConfig;
-  [k: string]: unknown;
 }
 export interface ProbeConfig {
   [k: string]: ProbeChartConfig;
 }
 export interface ProbeChartConfig {
   bg_color: BgColor;
+  bg_color_setpoint?: BgColorSetpoint;
   bg_color_target: BgColorTarget;
   dash_setpoint: DashSetpoint;
   enabled: Enabled;
   fill: Fill;
   line_color: LineColor;
+  line_color_setpoint?: LineColorSetpoint;
   line_color_target: LineColorTarget;
   name: Name;
   type: Type;
-  [k: string]: unknown;
 }
 export interface KeepWarm {
   s_plus?: SPlus;
   temp?: Temp;
-  [k: string]: unknown;
 }
 export interface LastUpdated {
   time: Time;
-  [k: string]: unknown;
 }
 export interface Modules {
   display?: Display;
   dist?: Dist;
   grillplat?: Grillplat;
-  [k: string]: unknown;
 }
 export interface NotifyServices {
   apprise?: AppriseService;
@@ -336,17 +331,14 @@ export interface NotifyServices {
   pushbullet?: PushbulletService;
   pushover?: PushoverService;
   wled?: WledService;
-  [k: string]: unknown;
 }
 export interface AppriseService {
   enabled?: Enabled1;
   locations?: Locations;
-  [k: string]: unknown;
 }
 export interface IftttService {
   APIKey?: Apikey;
   enabled?: Enabled2;
-  [k: string]: unknown;
 }
 export interface InfluxdbService {
   bucket?: Bucket;
@@ -354,7 +346,6 @@ export interface InfluxdbService {
   org?: Org;
   token?: Token;
   url?: Url;
-  [k: string]: unknown;
 }
 export interface MqttService {
   broker?: Broker;
@@ -365,14 +356,12 @@ export interface MqttService {
   port?: Port;
   update_sec?: UpdateSec;
   username?: Username;
-  [k: string]: unknown;
 }
 export interface OneSignalService {
   app_id?: AppId;
   devices?: Devices;
   enabled?: Enabled5;
   uuid: Uuid;
-  [k: string]: unknown;
 }
 export interface Devices {
   [k: string]: unknown;
@@ -381,14 +370,12 @@ export interface PushbulletService {
   APIKey?: Apikey1;
   PublicURL?: Publicurl;
   enabled?: Enabled6;
-  [k: string]: unknown;
 }
 export interface PushoverService {
   APIKey?: Apikey2;
   PublicURL?: Publicurl1;
   UserKeys?: Userkeys;
   enabled?: Enabled7;
-  [k: string]: unknown;
 }
 export interface WledService {
   device_address?: DeviceAddress;
@@ -400,7 +387,6 @@ export interface WledService {
   suggested_config?: WledSuggestedConfig;
   use_profiles?: UseProfiles;
   use_suggested_presets?: UseSuggestedPresets;
-  [k: string]: unknown;
 }
 export interface WledEventPresets {
   Grill_Error?: GrillError;
@@ -408,7 +394,6 @@ export interface WledEventPresets {
   Recipe_Next?: RecipeNext;
   Temp_Achieved?: TempAchieved;
   Timer_Expired?: TimerExpired;
-  [k: string]: unknown;
 }
 export interface WledModePresets {
   Hold?: Hold;
@@ -418,7 +403,6 @@ export interface WledModePresets {
   Smoke?: Smoke;
   Startup?: Startup;
   Stop?: Stop;
-  [k: string]: unknown;
 }
 export interface WledProfileNumbers {
   booting?: Booting;
@@ -433,14 +417,12 @@ export interface WledProfileNumbers {
   probe_alarm?: ProbeAlarm;
   target_reached?: TargetReached;
   timer_done?: TimerDone;
-  [k: string]: unknown;
 }
 export interface WledSuggestedConfig {
   cooking_color?: CookingColor;
   idle_brightness?: IdleBrightness;
   led_count?: LedCount;
   night_mode?: NightMode1;
-  [k: string]: unknown;
 }
 export interface PelletLevel {
   empty?: Empty;
@@ -448,7 +430,6 @@ export interface PelletLevel {
   warning_enabled?: WarningEnabled;
   warning_level?: WarningLevel;
   warning_time?: WarningTime;
-  [k: string]: unknown;
 }
 export interface Platform {
   buttonslevel?: Buttonslevel;
@@ -465,19 +446,16 @@ export interface Platform {
   system?: _SystemConfig;
   system_type?: SystemType;
   triggerlevel?: Triggerlevel;
-  [k: string]: unknown;
 }
 export interface _DevicesConfig {
   display?: _DisplayDeviceConfig;
   distance?: _DistanceDeviceConfig;
   input?: _InputDeviceConfig;
-  [k: string]: unknown;
 }
 export interface _DisplayDeviceConfig {
   dc?: Dc;
   led?: Led;
   rst?: Rst;
-  [k: string]: unknown;
 }
 export interface _DistanceDeviceConfig {
   address?: Address;
@@ -486,34 +464,28 @@ export interface _DistanceDeviceConfig {
   i2c_bus_kind?: I2CBusKind;
   i2c_bus_num?: I2CBusNum;
   trig?: Trig;
-  [k: string]: unknown;
 }
 export interface _InputDeviceConfig {
   down_dt?: DownDt;
   enter_sw?: EnterSw;
   up_clk?: UpClk;
-  [k: string]: unknown;
 }
 export interface _FanControllerConfig {
   address?: Address1;
   chip?: Chip;
   i2c_bus_kind?: I2CBusKind1;
   i2c_bus_num?: I2CBusNum1;
-  [k: string]: unknown;
 }
 export interface _FT232HConfig {
   url?: Url1;
-  [k: string]: unknown;
 }
 export interface _InputsConfig {
   selector?: Selector;
   shutdown?: Shutdown1;
-  [k: string]: unknown;
 }
 export interface _NumatoConfig {
   baudrate?: Baudrate;
   device?: Device1;
-  [k: string]: unknown;
 }
 export interface _OutputsConfig {
   auger?: Auger;
@@ -522,27 +494,22 @@ export interface _OutputsConfig {
   igniter?: Igniter;
   power?: Power;
   pwm?: Pwm;
-  [k: string]: unknown;
 }
 export interface _SystemConfig {
   "1WIRE"?: Wire;
   SPI0?: _SPI0Config;
-  [k: string]: unknown;
 }
 export interface _SPI0Config {
   CE0?: Ce0;
   CE1?: Ce1;
-  [k: string]: unknown;
 }
 export interface ProbeSettings {
   probe_map?: ProbeMap;
   probe_profiles?: ProbeProfiles;
-  [k: string]: unknown;
 }
 export interface ProbeMap {
   probe_devices?: ProbeDevices;
   probe_info?: ProbeInfo;
-  [k: string]: unknown;
 }
 export interface ProbeProfiles {
   [k: string]: {
@@ -557,20 +524,16 @@ export interface PwmSettings {
   pwm_control?: PwmControl;
   temp_range_list?: TempRangeList;
   update_time?: UpdateTime;
-  [k: string]: unknown;
 }
 export interface PwmProfile {
   duty_cycle: DutyCycle;
-  [k: string]: unknown;
 }
 export interface Recipe {
   probe_map?: RecipeProbeMap;
-  [k: string]: unknown;
 }
 export interface RecipeProbeMap {
   food?: Food;
   primary?: Primary;
-  [k: string]: unknown;
 }
 export interface SafetySettings {
   allow_manual_changes?: AllowManualChanges;
@@ -580,16 +543,13 @@ export interface SafetySettings {
   minstartuptemp?: Minstartuptemp;
   reigniteretries?: Reigniteretries;
   startup_check?: StartupCheck;
-  [k: string]: unknown;
 }
 export interface ServerInfo {
   uuid: Uuid1;
-  [k: string]: unknown;
 }
 export interface ShutdownSettings {
   auto_power_off?: AutoPowerOff;
   shutdown_duration?: ShutdownDuration;
-  [k: string]: unknown;
 }
 export interface SmokePlus {
   duty_cycle?: DutyCycle1;
@@ -599,7 +559,6 @@ export interface SmokePlus {
   min_temp?: MinTemp;
   off_time?: OffTime;
   on_time?: OnTime;
-  [k: string]: unknown;
 }
 export interface StartupSettings {
   duration?: Duration;
@@ -608,31 +567,26 @@ export interface StartupSettings {
   smartstart?: SmartStart;
   start_to_mode?: StartToMode;
   startup_exit_temp?: StartupExitTemp;
-  [k: string]: unknown;
 }
 export interface SmartStart {
   enabled?: Enabled10;
   exit_temp?: ExitTemp;
   profiles?: Profiles1;
   temp_range_list?: TempRangeList1;
-  [k: string]: unknown;
 }
 export interface SmartStartProfile {
   augerontime: Augerontime;
   p_mode: PMode;
   startuptime: Startuptime;
-  [k: string]: unknown;
 }
 export interface StartToMode {
   after_startup_mode?: AfterStartupMode;
   primary_setpoint?: PrimarySetpoint;
   start_to_hold_prompt?: StartToHoldPrompt;
-  [k: string]: unknown;
 }
 export interface Versions {
   build: Build;
   cookfile: Cookfile;
   recipe: Recipe1;
   server: Server;
-  [k: string]: unknown;
 }

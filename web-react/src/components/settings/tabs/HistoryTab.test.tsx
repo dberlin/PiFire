@@ -291,6 +291,28 @@ describe("HistoryTab — Chart Colors", () => {
     expect(screen.getByText("Food")).toBeInTheDocument();
   });
 
+  // The schema declares the setpoint colors as `string | null` defaulting to
+  // null, while common/defaults.py omits the keys outright for Food probes.
+  // Both spellings mean "not applicable to this probe", so an explicit null
+  // must render nothing rather than an empty color input.
+  it("treats a null setpoint color the same as an absent one", () => {
+    renderRoute(
+      <HistoryTab />,
+      contextWithProbeConfig({
+        Probe1: {
+          ...PROBE_CONFIG.Probe1,
+          line_color_setpoint: null,
+          bg_color_setpoint: null,
+        },
+      }),
+    );
+
+    expect(screen.queryByLabelText("Probe-1 Line Color (Setpoint)")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Probe-1 Background Color (Setpoint)")).not.toBeInTheDocument();
+    // The non-nullable colors still render, so this is not a blanket blank-out.
+    expect(screen.getByLabelText("Probe-1 Line Color")).toBeInTheDocument();
+  });
+
   it("Grill shows setpoint ColorFields, Probe-1 does not", () => {
     renderRoute(<HistoryTab />, contextWithProbeConfig(PROBE_CONFIG));
 

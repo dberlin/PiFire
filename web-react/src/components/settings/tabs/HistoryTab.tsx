@@ -2,25 +2,17 @@ import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import type { ProbeChartConfig } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { ColorField } from "../fields/ColorField";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { Toggle } from "../fields/Toggle";
 
-type ProbeColorConfig = {
-  name: string;
-  type: string;
-  enabled: boolean;
-  line_color: string;
-  bg_color: string;
-  line_color_setpoint?: string;
-  bg_color_setpoint?: string;
-  line_color_target?: string;
-  bg_color_target?: string;
-  dash_setpoint: boolean;
-  fill: boolean;
-};
+// The schema is the source of truth for this shape, so the generated type is
+// used directly rather than restated. Notably the setpoint colors are
+// `string | null` there, not `string` -- see COLOR_FIELD_SPECS below.
+type ProbeColorConfig = ProbeChartConfig;
 type ProbeConfig = Record<string, ProbeColorConfig>;
 
 type ColorFieldKey =
@@ -34,6 +26,11 @@ type ColorFieldKey =
 // Presence-driven: a probe only carries the color keys relevant to its type
 // (see common/defaults.py default_probe_config — setpoint colors are
 // Primary-only). Rendered in this fixed order when present.
+//
+// "Present" means "holds a color string". defaults.py OMITS the setpoint keys
+// for Food probes, while the schema declares them `string | null` defaulting to
+// null — so both absent and null mean "not applicable to this probe" and must
+// render nothing rather than an empty color input.
 const COLOR_FIELD_SPECS: { key: ColorFieldKey; label: string }[] = [
   { key: "line_color", label: "Line Color" },
   { key: "bg_color", label: "Background Color" },
@@ -71,8 +68,6 @@ function computeLabelPrefixes(probeConfig: ProbeConfig): Record<string, string> 
 // Fallbacks mirror common/defaults.py's history_page block -- a missing key
 // means "never saved", and the server will be using the default, so the tab
 // has to show the same number or the next save silently rewrites it.
-// `fidelity_degrees` is reached through the generated type's index signature
-// (it types as `unknown`), hence the runtime check rather than a cast.
 const DEFAULT_DATAPOINTS = 10000;
 const DEFAULT_FIDELITY_DEGREES = 2.0;
 
@@ -82,8 +77,7 @@ function readHistory(s: Settings): History {
   return {
     minutes: hp.minutes ?? 240,
     datapoints: hp.datapoints ?? DEFAULT_DATAPOINTS,
-    fidelity_degrees:
-      typeof hp.fidelity_degrees === "number" ? hp.fidelity_degrees : DEFAULT_FIDELITY_DEGREES,
+    fidelity_degrees: hp.fidelity_degrees ?? DEFAULT_FIDELITY_DEGREES,
     clearhistoryonstart: !!hp.clearhistoryonstart,
     autorefresh: hp.autorefresh === "on",
     ext_data: !!g.ext_data,
@@ -136,11 +130,13 @@ export function HistoryTab() {
   return (
     <>
       <Section title="History">
+        {/* Floor is 1, not 0: blueprints/api_history/routes.py:36 rejects
+            minutes < 1 with a 400 (invalid_minutes). */}
         <NumberField
           label="Minutes"
           value={v.minutes}
           onChange={(n) => set("minutes", n)}
-          min={0}
+          min={1}
         />
         {/* NOT "how many points to draw": file_mgmt/downsample.py's
             select_indices returns EVERY index when the window holds this many
@@ -213,14 +209,20 @@ export function HistoryTab() {
                     onChange={(b) => setProbe(probeKey, "enabled", b)}
                   />
                 </div>
-                {COLOR_FIELD_SPECS.filter((f) => entry[f.key] !== undefined).map((f) => (
-                  <ColorField
-                    key={f.key}
-                    label={`${labelPrefix} ${f.label}`}
-                    value={entry[f.key] as string}
-                    onChange={(c) => setProbe(probeKey, f.key, c)}
-                  />
-                ))}
+                {COLOR_FIELD_SPECS.map((f) => {
+                  const color = entry[f.key];
+                  // Narrows away both undefined (key omitted) and null (schema
+                  // default for a probe the color does not apply to).
+                  if (typeof color !== "string") return null;
+                  return (
+                    <ColorField
+                      key={f.key}
+                      label={`${labelPrefix} ${f.label}`}
+                      value={color}
+                      onChange={(c) => setProbe(probeKey, f.key, c)}
+                    />
+                  );
+                })}
                 <Toggle
                   label={`${labelPrefix} Dash Setpoint`}
                   checked={entry.dash_setpoint}
