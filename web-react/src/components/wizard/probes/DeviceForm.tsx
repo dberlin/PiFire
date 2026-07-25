@@ -1,4 +1,5 @@
 import type { ProbeModuleData } from "../../../helpers/wizard/probeTypes";
+import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
 import { DeviceConfigField } from "./DeviceConfigField";
 
 export interface DeviceFormProps {
@@ -19,8 +20,12 @@ export function DeviceForm(props: DeviceFormProps) {
   const { moduleData, values, nameValue, availableProbes, baseUrl } = props;
   return (
     <div className="pf-device-form" role="dialog" aria-label={`${props.mode} device`}>
-      {moduleData.image && (
-        <img className="pf-module-image" src={moduleData.image} alt={moduleData.friendly_name} />
+      {moduleImageUrl(baseUrl, moduleData.image) && (
+        <img
+          className="pf-module-image"
+          src={moduleImageUrl(baseUrl, moduleData.image)}
+          alt={moduleData.friendly_name}
+        />
       )}
       <h3 className="pf-module-name">{moduleData.friendly_name}</h3>
       {moduleData.description && <p className="pf-module-description">{moduleData.description}</p>}

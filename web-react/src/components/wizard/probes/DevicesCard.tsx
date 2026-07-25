@@ -8,6 +8,7 @@ import {
 } from "../../../helpers/wizard/probeReducer";
 import type { ProbeMap, ProbeModuleData } from "../../../helpers/wizard/probeTypes";
 import { validateBusKinds } from "../../../helpers/wizard/wizardApi";
+import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
 import { DeviceForm } from "./DeviceForm";
 
 export interface DevicesCardProps {
@@ -114,8 +115,13 @@ export function DevicesCard({ probeMap, modules, baseUrl, onChange }: DevicesCar
           {probeMap.probe_devices.map((d) => (
             <tr key={d.device}>
               <td>
-                {modules[d.module]?.image && (
-                  <img src={modules[d.module].image} alt="" width={48} height={48} />
+                {moduleImageUrl(baseUrl, modules[d.module]?.image) && (
+                  <img
+                    src={moduleImageUrl(baseUrl, modules[d.module]?.image)}
+                    alt=""
+                    width={48}
+                    height={48}
+                  />
                 )}
               </td>
               <td>{d.device}</td>

@@ -1,4 +1,5 @@
 import { scan } from "../../helpers/wizard/wizardApi";
+import { moduleImageUrl } from "../../helpers/wizard/wizardAssets";
 import type {
   SettingsDependency,
   WizardModuleData,
@@ -112,8 +113,12 @@ export function ModuleCard({
 
       {selected && (
         <div className="pf-module-details">
-          {selected.image && (
-            <img className="pf-module-image" src={selected.image} alt={selected.friendly_name} />
+          {moduleImageUrl(baseUrl, selected.image) && (
+            <img
+              className="pf-module-image"
+              src={moduleImageUrl(baseUrl, selected.image)}
+              alt={selected.friendly_name}
+            />
           )}
           <h3 className="pf-module-name">{selected.friendly_name}</h3>
           {selected.description && <p className="pf-module-description">{selected.description}</p>}

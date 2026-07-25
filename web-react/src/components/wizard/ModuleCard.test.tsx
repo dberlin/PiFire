@@ -57,6 +57,14 @@ const moduleWithUsbSerial: WizardModuleData = {
   },
 };
 
+// wizard_manifest.json stores a BARE filename here; the card has to resolve it
+// against PiFire's own origin or every board photo 404s.
+const moduleWithImage: WizardModuleData = {
+  friendly_name: "PCB 4.x.x",
+  image: "pcb_4.x.x.png",
+  settings_dependencies: {},
+};
+
 const moduleWithConfig: WizardModuleData = {
   friendly_name: "Configurable Module",
   settings_dependencies: {},
@@ -77,6 +85,7 @@ const modules: Record<string, WizardModuleData> = {
   hidden_dep: moduleWithHiddenDep,
   i2c: moduleWithI2c,
   usb_serial: moduleWithUsbSerial,
+  imaged: moduleWithImage,
   configurable: moduleWithConfig,
 };
 
@@ -175,6 +184,29 @@ describe("ModuleCard", () => {
 
     fireEvent.click(discoverButton);
     expect(scan).toHaveBeenCalledWith("", { kind: "usb_serial" });
+  });
+
+  it("resolves the manifest's bare image filename against PiFire's static path", () => {
+    render(<ModuleCard {...baseProps()} selectedModule="imaged" />);
+    expect(screen.getByRole("img", { name: "PCB 4.x.x" })).toHaveAttribute(
+      "src",
+      "/static/img/wizard/pcb_4.x.x.png",
+    );
+  });
+
+  it("prefixes the image with a remote PiFire origin when one is configured", () => {
+    render(
+      <ModuleCard {...baseProps()} baseUrl="http://pifire.local:5000" selectedModule="imaged" />,
+    );
+    expect(screen.getByRole("img", { name: "PCB 4.x.x" })).toHaveAttribute(
+      "src",
+      "http://pifire.local:5000/static/img/wizard/pcb_4.x.x.png",
+    );
+  });
+
+  it("renders no <img> for a module the manifest gives no image", () => {
+    render(<ModuleCard {...baseProps()} selectedModule="basic" />);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
   it("renders no config table when configSource is none, even if the module has config", () => {
