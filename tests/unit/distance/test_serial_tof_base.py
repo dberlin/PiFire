@@ -2,11 +2,14 @@ from unittest import mock
 
 import pytest
 
+import distance._sampled_base as sampled_base
+
 
 class _FakeClock:
     """Deterministic stand-in for the `time` module as seen by
-    distance._serial_tof_base. Mirrors tests/unit/distance/test_tof_base.py's
-    _FakeClock -- see that file for the full rationale."""
+    distance._sampled_base, which holds the sampling loop this transport
+    shares. Mirrors tests/unit/distance/test_tof_base.py's _FakeClock -- see
+    that file for the full rationale."""
 
     def __init__(self):
         self._now = 0.0
@@ -42,7 +45,7 @@ class FakeSensorMixin:
 
     def _read_distance_mm(self):
         if self._read_delay:
-            self._serial_tof_mod.time.advance(self._read_delay)
+            sampled_base.time.advance(self._read_delay)
         return self._reading_mm
 
 
@@ -52,7 +55,7 @@ def serial_tof_mod():
 
     with (
         mock.patch.object(mod.serial, "Serial", return_value=mock.sentinel.ser),
-        mock.patch.object(mod, "time", _FakeClock()),
+        mock.patch.object(sampled_base, "time", _FakeClock()),
     ):
         yield mod
 
@@ -183,7 +186,7 @@ def test_reinit_closes_previous_serial_port(monkeypatch):
 
     with (
         mock.patch.object(mod.serial, "Serial", side_effect=_fake_serial),
-        mock.patch.object(mod, "time", _FakeClock()),
+        mock.patch.object(sampled_base, "time", _FakeClock()),
     ):
         hopper = _make_hopper(mod, reading_mm=100, read_delay=0.2)  # forces a re-init every cycle
         try:

@@ -2,21 +2,26 @@ from unittest import mock
 
 import pytest
 
+import distance._sampled_base as sampled_base
+
 
 class _FakeClock:
     """Deterministic stand-in for the `time` module as seen by
-    distance._tof_base. `_sensing_loop` measures a read cycle's duration via
-    time.time() to decide whether the sensor looks stuck and needs
-    re-initializing; a slow fake read advances this clock via `advance()`
-    instead of the real one, so that timing-dependent behavior can be
-    exercised without the test process actually blocking on a real sleep.
+    distance._sampled_base -- the sampling loop is shared by every transport
+    and lives there, so that is the module the clock is patched into.
+    `_sensing_loop` measures a read cycle's duration via time.time() to decide
+    whether the sensor looks stuck and needs re-initializing; a slow fake read
+    advances this clock via `advance()` instead of the real one, so that
+    timing-dependent behavior can be exercised without the test process
+    actually blocking on a real sleep.
 
     `sleep()` (the loop's once-per-iteration idle pacing wait) is a genuine
     no-op that deliberately does *not* advance the clock: if it did, the
     background thread -- no longer throttled by a real sleep -- would spin
-    fast enough to blow past the 60s read-interval threshold many times
-    over during a single test, re-triggering reads/re-inits well beyond
-    what the test intends to exercise."""
+    fast enough to blow past the read-interval threshold
+    (intervals.SENSOR_SAMPLE_INTERVAL) many times over during a single test,
+    re-triggering reads/re-inits well beyond what the test intends to
+    exercise."""
 
     def __init__(self):
         self._now = 0.0
@@ -52,7 +57,7 @@ class FakeSensorMixin:
 
     def _read_distance_mm(self):
         if self._read_delay:
-            self._tof_mod.time.advance(self._read_delay)
+            sampled_base.time.advance(self._read_delay)
         return self._reading_mm
 
 
@@ -62,7 +67,7 @@ def tof_mod():
 
     with (
         mock.patch.object(mod, "open_i2c_bus", return_value=mock.sentinel.bus),
-        mock.patch.object(mod, "time", _FakeClock()),
+        mock.patch.object(sampled_base, "time", _FakeClock()),
     ):
         yield mod
 
@@ -150,5 +155,34 @@ def test_address_override_parses_hex_string(tof_mod):
     hopper = _make_hopper(tof_mod, dev_pins={"distance": {"address": "0x2a"}})
     try:
         assert hopper.opened_with[1] == 0x2A
+    finally:
+        _stop(hopper)
+
+
+def test_sampling_interval_comes_from_the_shared_constant(tof_mod):
+    # This used to be a hard-coded 60, which made the cached level -- the only
+    # thing the control loop's automatic refresh can read for free -- up to a
+    # minute stale. It is now the one tuned constant every transport shares.
+    from distance.intervals import SENSOR_SAMPLE_INTERVAL
+
+    hopper = _make_hopper(tof_mod)
+    try:
+        assert hopper.sensor_thread_read_interval == SENSOR_SAMPLE_INTERVAL
+    finally:
+        _stop(hopper)
+
+
+def test_get_level_without_override_never_waits_on_the_sensor(tof_mod):
+    """The cached read the control loop's timer uses. It must not set the
+    override flag and must not touch the wait event, or a timed poll would
+    stall the loop that is timing the auger and igniter."""
+    hopper = _make_hopper(tof_mod)
+    try:
+        hopper.get_level(override=True)  # settle: one real sample, flag cleared
+        hopper.sensor_thread_override = False
+        hopper.event.clear()
+        assert hopper.get_level() == hopper.distance_read
+        assert hopper.sensor_thread_override is False
+        assert hopper.event.is_set() is False
     finally:
         _stop(hopper)
