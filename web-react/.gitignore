@@ -11,3 +11,6 @@ dist/
 
 # Generated istanbul coverage output (bun run test:coverage)
 coverage/
+
+# Playwright review artifacts (screenshots are for humans, not gates)
+tests/e2e/artifacts/
