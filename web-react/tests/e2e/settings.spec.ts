@@ -17,6 +17,12 @@ test("grill name saves and round-trips to the dashboard header", async ({ page }
 });
 
 test("PWM update-time saves via the settings_update path", async ({ page }) => {
+  // The PWM tab renders an "unavailable" notice with no Save button when the
+  // platform is an AC-fan build, so there is nothing here to exercise.
+  const res = await page.request.get("/api/settings");
+  const body = (await res.json()) as { settings?: { platform?: { dc_fan?: boolean } } };
+  test.skip(!body.settings?.platform?.dc_fan, "PWM tab is hidden on an AC-fan build");
+
   await page.goto("/settings/pwm");
   await page.getByLabel("Update Time").fill("9");
   await page.getByRole("button", { name: "Save" }).click();
@@ -134,15 +140,23 @@ test("invalid settings_update delta is rejected atomically with a dotted-path er
   expect(afterBody.settings?.safety?.maxtemp).toBe(originalMaxtemp);
 });
 
-test("a save the backend rejects is shown inline on the tab and writes nothing", async ({
+// NOTE (guards sweep, Task 3): this spec's original vector -- raising
+// min_duty_cycle above the lowest profile duty cycle so PwmSettings._check_profiles
+// rejects the merged tree -- is NO LONGER REACHABLE through the PWM tab. PwmTab.onSave
+// now re-clamps every profile duty_cycle AND startup.pwm_duty_cycle into the new range
+// (ported from blueprints/settings/routes.py:485-495), so that save now succeeds by
+// design. The spec is kept, not deleted, and re-pointed at what the guard actually does;
+// the server-rejection channel itself is still covered by the API-level spec above
+// ("invalid settings_update delta is rejected atomically...") and, at the UI level, by
+// the PwmTab unit test "surfaces a rejected save inline and withholds the success marker".
+test("narrowing the duty-cycle range clamps the dependent profiles instead of being rejected", async ({
   page,
 }) => {
-  // Read the live pwm section: the e2e suite shares one store, so the values
-  // here are whatever an earlier test left behind, not the schema defaults.
   const beforeRes = await page.request.get("/api/settings");
   expect(beforeRes.ok()).toBeTruthy();
   const beforeBody = (await beforeRes.json()) as {
     settings?: {
+      platform?: { dc_fan?: boolean };
       pwm?: {
         min_duty_cycle?: number;
         max_duty_cycle?: number;
@@ -150,40 +164,128 @@ test("a save the backend rejects is shown inline on the tab and writes nothing",
       };
     };
   };
+  test.skip(!beforeBody.settings?.platform?.dc_fan, "PWM tab is hidden on an AC-fan build");
+
   const pwm = beforeBody.settings?.pwm;
   const originalMin = pwm?.min_duty_cycle;
   expect(originalMin).not.toBeUndefined();
   const dutyCycles = (pwm?.profiles ?? []).map((p) => p.duty_cycle);
   expect(dutyCycles.length).toBeGreaterThan(0);
   const lowestDuty = Math.min(...dutyCycles);
-  // One above the lowest profile duty cycle, so PwmSettings._check_profiles
-  // must reject the merged tree. The tab neither clamps nor guards this.
-  const rejectedMin = lowestDuty + 1;
-  expect(rejectedMin).toBeLessThanOrEqual(pwm?.max_duty_cycle ?? 100);
+  // One above the lowest profile duty cycle: before the guard this tripped
+  // PwmSettings._check_profiles and the save was refused.
+  const narrowedMin = lowestDuty + 1;
+  expect(narrowedMin).toBeLessThan(pwm?.max_duty_cycle ?? 100);
+
+  try {
+    await page.goto("/settings/pwm");
+    const minField = page.getByLabel("Min Duty Cycle");
+    await expect(minField).toBeVisible();
+    await minField.fill(String(narrowedMin));
+    await page.getByRole("button", { name: "Save" }).click();
+
+    await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("alert")).toHaveCount(0);
+
+    const afterRes = await page.request.get("/api/settings");
+    expect(afterRes.ok()).toBeTruthy();
+    const afterBody = (await afterRes.json()) as {
+      settings?: {
+        pwm?: { min_duty_cycle?: number; profiles?: { duty_cycle: number }[] };
+        startup?: { pwm_duty_cycle?: number };
+      };
+    };
+    expect(afterBody.settings?.pwm?.min_duty_cycle).toBe(narrowedMin);
+    // Every profile, and the cross-section startup value, are inside the range.
+    for (const p of afterBody.settings?.pwm?.profiles ?? []) {
+      expect(p.duty_cycle).toBeGreaterThanOrEqual(narrowedMin);
+    }
+    expect(afterBody.settings?.startup?.pwm_duty_cycle).toBeGreaterThanOrEqual(narrowedMin);
+  } finally {
+    // This spec WRITES, so put the range back however the assertions went.
+    await page.request.post("/api/settings_update", {
+      data: { settings: { pwm: { min_duty_cycle: originalMin, profiles: pwm?.profiles } } },
+    });
+  }
+});
+
+// Guards sweep, Task 2 (I5). Flask gates the PWM nav pill on
+// settings['platform']['dc_fan'] (settings/index.html:63-65); React showed it
+// unconditionally. The /settings/pwm ROUTE stays registered either way so a
+// bookmarked URL still resolves.
+test("the PWM Fan nav item tracks platform.dc_fan and the route still resolves", async ({
+  page,
+}) => {
+  // Read the flag -- do NOT assume. The e2e suite shares one live store, which
+  // is why it runs with workers: 1.
+  const res = await page.request.get("/api/settings");
+  expect(res.ok()).toBeTruthy();
+  const body = (await res.json()) as { settings?: { platform?: { dc_fan?: boolean } } };
+  const dcFan = !!body.settings?.platform?.dc_fan;
+
+  await page.goto("/settings/general");
+  const pwmLink = page.getByRole("link", { name: "PWM Fan" });
+  await expect(page.getByRole("link", { name: "General" })).toBeVisible({ timeout: 10000 });
+  await expect(pwmLink).toHaveCount(dcFan ? 1 : 0);
+
+  // Either way the route resolves rather than 404ing.
+  await page.goto("/settings/pwm");
+  // The heading specifically: a bare text match also hits the "PWM fan control
+  // is unavailable..." hint rendered in the gated branch.
+  await expect(page.getByRole("heading", { name: "PWM Fan" })).toBeVisible({ timeout: 10000 });
+  if (!dcFan) {
+    await expect(page.getByText(/AC fan/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
+  }
+});
+
+// Guards sweep, Task 3 (I6). This is the CLIENT-side half; it deliberately does
+// not collide with the server-rejection spec above, which now proves the clamp.
+test("a min >= max duty cycle is refused client-side without issuing any request", async ({
+  page,
+}) => {
+  const beforeRes = await page.request.get("/api/settings");
+  expect(beforeRes.ok()).toBeTruthy();
+  const beforeBody = (await beforeRes.json()) as {
+    settings?: { platform?: { dc_fan?: boolean }; pwm?: { max_duty_cycle?: number } };
+  };
+  test.skip(!beforeBody.settings?.platform?.dc_fan, "PWM tab is hidden on an AC-fan build");
+  const beforeSnapshot = JSON.stringify(beforeBody.settings);
+
+  // Observe the wire directly -- do not infer "no save" from the absence of a
+  // success marker.
+  let posted = false;
+  await page.route("**/api/settings_update", (route) => {
+    posted = true;
+    return route.continue();
+  });
 
   await page.goto("/settings/pwm");
-  const minField = page.getByLabel("Min Duty Cycle");
-  await expect(minField).toBeVisible();
-  await minField.fill(String(rejectedMin));
+  const maxField = page.getByLabel("Max Duty Cycle");
+  await expect(maxField).toBeVisible();
+  const originalMax = await maxField.inputValue();
+
+  // Push min above max. Both fields carry min=1/max=100, so this is a legal
+  // pair of values that is nonetheless an illegal RANGE -- exactly Flask's
+  // validateDutyCycle() case (index.html:747-758).
+  await page
+    .getByLabel("Min Duty Cycle")
+    .fill(String(Number(originalMax) + 5 > 100 ? 100 : Number(originalMax) + 5));
+  await maxField.fill(String(Math.max(1, Number(originalMax) - 5)));
   await page.getByRole("button", { name: "Save" }).click();
 
-  // The whole point of this plan: the rejection is HTTP 200, so without the
-  // inline message the user would see nothing at all.
   const alert = page.getByRole("alert");
   await expect(alert).toBeVisible({ timeout: 10000 });
-  await expect(alert).toContainText("duty_cycle");
-  await expect(page.getByText("Saved ✓")).not.toBeVisible();
+  await expect(alert).toContainText("Max Duty Cycle");
+  await expect(page.getByText("Saved ✓")).toHaveCount(0);
+  expect(posted).toBe(false);
 
-  // The refused value stays on screen so the user can correct it...
-  await expect(page.getByLabel("Min Duty Cycle")).toHaveValue(String(rejectedMin));
-  // ...but nothing reached the store: write_settings() is atomic. Nothing to
-  // restore -- the failure path is the one under test.
+  // Read-back is byte-identical: the guard fires before any network call, so
+  // there is nothing to restore -- but assert that rather than assume it.
   const afterRes = await page.request.get("/api/settings");
   expect(afterRes.ok()).toBeTruthy();
-  const afterBody = (await afterRes.json()) as {
-    settings?: { pwm?: { min_duty_cycle?: number } };
-  };
-  expect(afterBody.settings?.pwm?.min_duty_cycle).toBe(originalMin);
+  const afterBody = (await afterRes.json()) as { settings?: unknown };
+  expect(JSON.stringify(afterBody.settings)).toBe(beforeSnapshot);
 });
 
 test("controller tab shows the live controller and PB round-trips, cross-checked via /api/settings", async ({

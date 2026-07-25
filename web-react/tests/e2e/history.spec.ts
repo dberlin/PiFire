@@ -89,8 +89,23 @@ function runSeedScript(args: string[]): string {
   });
 }
 
-test.beforeAll(async () => {
+test.beforeAll(async ({ request }) => {
   seeded = JSON.parse(runSeedScript(["seed"]).trim()) as SeedResult;
+
+  // The seed script writes through common/datastore.py, whose DB_PATH defaults
+  // to `<repo root>/pifire.db` -- the root of whatever checkout the script runs
+  // from. Run this spec from a jj workspace while the backend serves the main
+  // checkout and the rows land in a different database entirely: every test
+  // below then fails on a missing chart, which reads like a broken chart rather
+  // than a misdirected write. Fail here instead, with the fix.
+  const res = await request.get("http://localhost:5000/api/history/chart?minutes=40");
+  const body = (await res.json()) as { time_labels?: unknown[] };
+  expect(
+    body.time_labels?.length ?? 0,
+    "Seeded history is not visible to the backend. The seed script and the running " +
+      "server are using different pifire.db files -- set PIFIRE_DB_PATH to the " +
+      "database the backend serves, or run this spec from that checkout.",
+  ).toBeGreaterThan(0);
 });
 
 test.afterAll(async () => {

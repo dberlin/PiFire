@@ -132,7 +132,9 @@ test("a probe target set in the UI reaches the backend and comes back over the s
   await page.getByRole("checkbox", { name: /notify/i }).check();
   await page.getByRole("spinbutton", { name: /target/i }).fill("203");
   await page.getByRole("radio", { name: /keep warm/i }).check();
-  await page.getByRole("button", { name: "Set" }).click();
+  // exact: the dashboard's settings gear is aria-label="settings", which a
+  // substring match on "Set" also selects.
+  await page.getByRole("button", { name: "Set", exact: true }).click();
 
   // POLL, do not sleep: the write is queued and only applied when the control
   // loop drains it. Measured at ~110 ms in Stop mode against this backend, but
@@ -189,7 +191,9 @@ test("turning the notification off clears the target and still leaves the limits
   await page.goto("/");
   await page.getByRole("button", { name: `Notifications for ${name}` }).click();
   await page.getByRole("checkbox", { name: /notify/i }).uncheck();
-  await page.getByRole("button", { name: "Set" }).click();
+  // exact: the dashboard's settings gear is aria-label="settings", which a
+  // substring match on "Set" also selects.
+  await page.getByRole("button", { name: "Set", exact: true }).click();
 
   await expect
     .poll(
