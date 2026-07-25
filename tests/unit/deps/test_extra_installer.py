@@ -42,23 +42,31 @@ def test_uv_command_keeps_inexact_so_wizard_installed_drivers_survive():
 
 
 def test_uv_command_never_hardcodes_the_package_spec():
-    # The whole point of --extra: the `do-mpc[full]>=5.1.1` spec stays in
+    # The whole point of --extra: the `do-mpc>=5.1.1` spec stays in
     # pyproject.toml/uv.lock and cannot drift from a copy kept here.
     command = ei.build_install_command("mpc", use_uv=True)
     assert not any("do-mpc" in part or "do_mpc" in part for part in command)
 
 
-def test_pip_command_carries_the_full_extras_marker_intact_as_one_argv_entry():
+def test_pip_command_passes_the_pyproject_spec_through_verbatim():
     command = ei.build_install_command("mpc", use_uv=False, python_exec="/venv/bin/python")
     assert command[:4] == ["/venv/bin/python", "-m", "pip", "install"]
-    requirements = command[4:]
-    # The bracket marker is the easy silent mistake: plain `do-mpc` resolves and
-    # installs fine, so nothing errors -- you just end up without [full]. Pin
-    # that it arrives at the subprocess boundary whole, as a single argv element
-    # (an argv list is never re-parsed by a shell, so `[` and `]` survive).
-    assert requirements == ["do-mpc[full]>=5.1.1"]
-    assert requirements == _pyproject_mpc_extra()
-    assert "[full]" in requirements[0]
+    assert command[4:] == _pyproject_mpc_extra()
+
+
+def test_pip_command_keeps_an_extras_marker_whole_as_one_argv_entry(tmp_path):
+    # An extras marker is the easy silent mistake: `pkg` resolves and installs
+    # fine where `pkg[extra]` was meant, so nothing errors -- you just end up
+    # missing the extras. PiFire's own `mpc` extra carries no marker today, so
+    # pin the behaviour against a synthetic project rather than leaving it
+    # untested until some future extra needs one.
+    (tmp_path / "pyproject.toml").write_text('[project.optional-dependencies]\nvision = ["some-pkg[cuda,dev]>=2.0"]\n')
+    command = ei.build_install_command(
+        "vision", use_uv=False, python_exec="/venv/bin/python", project_root=str(tmp_path)
+    )
+    # One argv element, brackets intact. An argv list is never re-parsed by a
+    # shell, so `[` and `]` survive -- but only if the spec is not split.
+    assert command[4:] == ["some-pkg[cuda,dev]>=2.0"]
 
 
 def test_pip_requirements_are_read_from_pyproject_not_a_literal():

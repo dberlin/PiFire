@@ -56,13 +56,24 @@ dependencies = [
 # pure numpy/scipy). Every import of it is lazy (controller/mpc.py:191,
 # controller/mpc_model.py:112,342), so an install without this extra runs fine
 # until someone selects MPC. Installed on demand when that happens.
-mpc = ["do-mpc[full]>=5.1.1"]
+#
+# Deliberately NOT do-mpc[full]. That extra is asyncua + ipykernel + onnx +
+# packaging + torch, and torch alone is gigabytes onto an SD card. Nothing PiFire
+# runs on a grill imports any of them: the 'net' policy is hand-rolled numpy
+# (controller/mpc_net.py) and the 'nlp' policy uses do_mpc.controller.MPC, which
+# needs only the core casadi/numpy/scipy/pandas/matplotlib requirements. `full`
+# is what TRAINS the net, so it lives in the dev group below instead.
+mpc = ["do-mpc>=5.1.1"]
 
 [dependency-groups]
 dev = [
-    # Mirrors the `mpc` extra above. A dev machine always has it, so
-    # tests/unit/mpc/ can exercise do-mpc for real; `uv sync --no-dev`, which is
-    # what the installers run, leaves it out and skips the CasADi source build.
+    # do-mpc WITH [full], unlike the runtime `mpc` extra above: torch and
+    # do_mpc.approximateMPC are what generate the 'net' policy's weights
+    # (docs/superpowers/experiments/approxmpc_span.py, export_span_net.py,
+    # driven by tools/regenerate_mpc_net.py). A dev machine also gets the core
+    # package, so tests/unit/mpc/ can exercise do-mpc for real; `uv sync
+    # --no-dev`, which is what the installers run, leaves the whole thing out
+    # and skips the CasADi source build.
     "do-mpc[full]>=5.1.1",
     "diff-cover>=9.0.0",
     "ipython>=9.14.1",

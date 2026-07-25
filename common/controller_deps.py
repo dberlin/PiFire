@@ -1,11 +1,11 @@
 """Optional per-controller Python dependencies: detection and on-demand install.
 
 Most controllers need nothing beyond the base install. MPC needs do-mpc, which
-drags in CasADi -- no Linux-ARM wheel, so every Pi compiles it from source
-(minutes, plus torch/onnx via do-mpc's own [full] extra: gigabytes onto an SD
-card). That is unacceptable to inflict on every PiFire install, so do-mpc lives
-in the `mpc` optional-dependency extra in pyproject.toml and `uv sync --no-dev`
--- what the installers run -- deliberately leaves it out.
+drags in CasADi -- no Linux-ARM wheel, so every Pi compiles it from source, which
+is minutes of a C++ toolchain the machine may not even have. That is unacceptable
+to inflict on every PiFire install, so do-mpc lives in the `mpc`
+optional-dependency extra in pyproject.toml and `uv sync --no-dev` -- what the
+installers run -- deliberately leaves it out.
 
 The cost of that is a hole this module fills: selecting a controller whose extra
 is absent must not be allowed to reach the control loop. Two rules:

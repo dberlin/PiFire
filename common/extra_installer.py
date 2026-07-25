@@ -9,7 +9,7 @@ never run in-process: installing the `mpc` extra compiles CasADi from source,
 which is minutes of CPU on a Pi.
 
 The requirement spec is NEVER written here. Both install paths inherit it from
-pyproject.toml/uv.lock, so `do-mpc[full]>=5.1.1` lives in exactly one place:
+pyproject.toml/uv.lock, so `do-mpc>=5.1.1` lives in exactly one place:
 
   * uv (the default, settings['globals']['uv']):
         uv sync --frozen --inexact --no-dev --extra <extra>
@@ -21,9 +21,10 @@ pyproject.toml/uv.lock, so `do-mpc[full]>=5.1.1` lives in exactly one place:
     in the lock. Without it, installing the MPC extra would silently uninstall
     the user's probe/display drivers.
   * pip (legacy non-uv installs): the requirement strings are read out of
-    pyproject.toml's [project.optional-dependencies] and passed as argv, so the
-    `[full]` marker cannot be dropped by a hand-maintained copy. They are passed
-    as separate argv entries, never through a shell, so the brackets survive.
+    pyproject.toml's [project.optional-dependencies] and passed as argv, so a
+    hand-maintained copy cannot drift from the declared spec. Each string is one
+    argv entry and never goes through a shell, so an extras marker on some
+    future extra (`pkg[a,b]>=1`) survives intact rather than being word-split.
 
 Outcome is reported three ways: the install-state blob (polled by the settings
 gate, so a second Save says something useful), a dashboard warning/error banner

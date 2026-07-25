@@ -108,8 +108,8 @@ def _load_net_policy(cfg):
 def requires_modules(config):
     """Import names `Controller(config, ...)` will need but a base install lacks.
 
-    do-mpc (CasADi/IPOPT, plus torch/onnx via its [full] extra) publishes no
-    Linux-ARM wheel, so it is a PiFire *optional* dependency -- the `mpc` extra
+    do-mpc's CasADi/IPOPT stack publishes no Linux-ARM wheel and so builds from
+    source, which is why it is a PiFire *optional* dependency -- the `mpc` extra
     in pyproject.toml -- installed only when someone selects this controller.
     Whether a given MPC config actually needs it depends on the config, so the
     settings-save gate (common/controller_deps.py) asks THIS function rather

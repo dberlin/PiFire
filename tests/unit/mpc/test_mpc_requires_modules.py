@@ -82,22 +82,29 @@ def test_manifest_extra_exists_in_pyproject():
     assert extra in _pyproject()["project"]["optional-dependencies"]
 
 
-def test_mpc_extra_carries_the_full_marker_and_is_not_a_default_dependency():
+def test_mpc_extra_is_core_do_mpc_and_is_not_a_default_dependency():
     project = _pyproject()["project"]
     mpc_extra = project["optional-dependencies"]["mpc"]
-    # [full] pulls onnx/torch/asyncua/ipykernel. PiFire's own code only needs
-    # do_mpc.model/controller/estimator (i.e. CasADi), but the declared spec is
-    # do-mpc[full] and the install path must not quietly drop the marker.
-    assert mpc_extra == ["do-mpc[full]>=5.1.1"]
+    # Core do-mpc, WITHOUT [full]. That extra is asyncua + ipykernel + onnx +
+    # packaging + torch, none of which anything on a grill imports: policy='net'
+    # is hand-rolled numpy (controller/mpc_net.py) and policy='nlp' uses
+    # do_mpc.controller.MPC, which needs only casadi/numpy/scipy/pandas/
+    # matplotlib. Putting torch on an SD card to run a controller that never
+    # calls it is gigabytes for nothing.
+    assert mpc_extra == ["do-mpc>=5.1.1"]
+    assert "[full]" not in mpc_extra[0]
     # Regression guard for the original bug: it must not creep back into the
     # unconditional dependency list, which is what forced a CasADi source build
     # onto every Pi.
     assert not any(dep.startswith(("do-mpc", "do_mpc")) for dep in project["dependencies"])
 
 
-def test_dev_group_mirrors_the_extra_exactly():
-    # The dev machine keeps do-mpc so tests/unit/mpc/ can exercise it for real.
-    # Both strings must stay identical or the dev venv and a Pi diverge.
+def test_dev_group_takes_do_mpc_with_the_training_extras():
+    # The two DELIBERATELY differ. A dev machine trains the 'net' policy's
+    # weights (docs/superpowers/experiments/approxmpc_span.py via
+    # tools/regenerate_mpc_net.py), which needs torch and
+    # do_mpc.approximateMPC -- i.e. [full]. A grill only ever runs the result.
+    # [full] is a superset, so the dev venv still exercises everything the `mpc`
+    # extra installs and tests/unit/mpc/ can use do-mpc for real.
     dev = _pyproject()["dependency-groups"]["dev"]
-    extra = _pyproject()["project"]["optional-dependencies"]["mpc"]
-    assert extra[0] in dev
+    assert "do-mpc[full]>=5.1.1" in dev

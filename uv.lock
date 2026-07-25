@@ -1909,7 +1909,7 @@ dependencies = [
 
 [package.optional-dependencies]
 mpc = [
-    { name = "do-mpc", extra = ["full"] },
+    { name = "do-mpc" },
 ]
 
 [package.dev-dependencies]
@@ -1935,7 +1935,7 @@ requires-dist = [
     { name = "apprise", specifier = ">=1.11.0" },
     { name = "bleak", specifier = ">=3.0.2" },
     { name = "bluepy", specifier = ">=1.3.0" },
-    { name = "do-mpc", extras = ["full"], marker = "extra == 'mpc'", specifier = ">=5.1.1" },
+    { name = "do-mpc", marker = "extra == 'mpc'", specifier = ">=5.1.1" },
     { name = "easymcp2221", specifier = ">=1.8.4" },
     { name = "flask", specifier = ">=3.1.3" },
     { name = "flask-mobility", specifier = ">=2.0.1" },
