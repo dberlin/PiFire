@@ -1,3 +1,4 @@
+import copy
 import json
 
 import pytest
@@ -166,6 +167,63 @@ def test_draft_clear_drops_probe_map_and_units(ds, client):
     assert body["has_draft"] is False
     # After clear, probe_map falls back to the computed value (from live settings), not the drafted one
     assert body["probe_map"]["probe_devices"][0]["device"] != "D1" or body["probe_map"]["probe_devices"] == []
+
+
+def test_cancel_clears_first_time_setup(ds, client):
+    settings = read_settings()
+    settings["globals"]["first_time_setup"] = True
+    write_settings_store(settings)
+
+    resp = client.post("/api/wizard/cancel")
+    assert resp.status_code == 200
+    assert resp.get_json()["result"] == "success"
+    # The React dashboard bounces back to /wizard while this flag is set
+    # (web-react/src/components/DashboardRoute.tsx:23-35), so an exit that
+    # leaves it True is an inescapable loop, not a partial fix.
+    assert read_settings()["globals"]["first_time_setup"] is False
+    assert client.get("/api/wizard/state").get_json()["first_time_setup"] is False
+
+
+def test_cancel_preserves_the_draft(ds, client):
+    draft = {
+        "selections": {"display": "ili9341b"},
+        "settings_dep_values": {"display": {}},
+        "display_config": {"ili9341b": {"rotation": 90}},
+    }
+    client.post("/api/wizard/draft", data=json.dumps(draft), content_type="application/json")
+
+    assert client.post("/api/wizard/cancel").status_code == 200
+
+    # Legacy _wizard_cancel (blueprints/wizard/routes.py:71-74) does not touch
+    # the install blob either, and the welcome step promises the draft is kept.
+    body = client.get("/api/wizard/state").get_json()
+    assert body["has_draft"] is True
+    assert body["selections"]["display"] == "ili9341b"
+
+
+def test_cancel_is_idempotent_when_not_a_fresh_install(ds, client):
+    settings = read_settings()
+    settings["globals"]["first_time_setup"] = False
+    write_settings_store(settings)
+
+    assert client.post("/api/wizard/cancel").status_code == 200
+    assert read_settings()["globals"]["first_time_setup"] is False
+
+
+def test_cancel_does_not_flag_a_control_update(ds, client):
+    """Legacy _wizard_cancel (blueprints/wizard/routes.py:71-74) uses a plain
+    write_settings() -- NOT save_settings_and_flag_update() (common/app.py:401)
+    -- because nothing about the running hardware changed: no install was
+    started and no module configuration was applied. Flagging a settings/probe
+    update here would make the control process needlessly reload its modules on
+    a mere "never mind", so the control blob must come back untouched."""
+    from common.datastore_accessors import read_control
+
+    before = copy.deepcopy(read_control())
+
+    assert client.post("/api/wizard/cancel").status_code == 200
+
+    assert read_control() == before
 
 
 def test_scan_extended_i2c_returns_groups(ds, client, monkeypatch):

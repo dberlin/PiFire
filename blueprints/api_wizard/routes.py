@@ -19,6 +19,7 @@ from common.datastore_accessors import (
     read_settings,
     set_wizard_install_status,
     store_wizard_install_info,
+    write_settings,
 )
 from common.i2c_bus import (
     I2CBusConfigError,
@@ -178,6 +179,40 @@ def wizard_draft():
     info["probe_map"] = payload.get("probe_map", {"probe_devices": [], "probe_info": []})
     info["probes_units"] = payload.get("probes_units", "F")
     store_wizard_install_info(info)
+    return jsonify({"result": "success"}), 200
+
+
+@api_wizard_bp.route("/cancel", methods=["POST"])
+def wizard_cancel():
+    """Leave the wizard without installing anything -- the React counterpart of
+    legacy `_wizard_cancel` (blueprints/wizard/routes.py:71-74, dispatched as
+    ("POST", "cancel") at :265). Legacy does exactly three things: clear
+    settings["globals"]["first_time_setup"], write_settings(), and
+    redirect("/"). This ports the first two verbatim and returns JSON instead
+    of the redirect -- the React client navigates itself.
+
+    Clearing `first_time_setup` is the whole point, not a side effect: the React
+    dashboard re-checks that flag after mount and navigates straight back to
+    /wizard while it is True (web-react/src/components/DashboardRoute.tsx:26-38),
+    so an exit that left it set would be an inescapable loop.
+
+    Deliberately does NOT touch the wizard draft blob. The client POSTs /draft
+    before calling this and /state resumes it on the next visit, which is what
+    makes the welcome step's "your progress is saved as a draft" promise true.
+    Legacy does not clear it either.
+
+    Uses plain write_settings(), matching legacy -- NOT
+    save_settings_and_flag_update() (common/app.py:401-413). No control
+    update-flag is set because nothing about the running hardware changed;
+    no install was started and no module configuration was applied.
+
+    Note this route must exist as its own static rule: without it, the generic
+    api blueprint's `/api/<action>/<arg0>` catch-all (blueprints/api/routes.py:291)
+    swallows POST /api/wizard/cancel and answers 415, not 404.
+    """
+    settings = read_settings()
+    settings["globals"]["first_time_setup"] = False
+    write_settings(settings)
     return jsonify({"result": "success"}), 200
 
 
