@@ -8,6 +8,7 @@ import { ColorField } from "../fields/ColorField";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { Toggle } from "../fields/Toggle";
+import { SaveBar } from "../SaveBar";
 
 // The schema is the source of truth for this shape, so the generated type is
 // used directly rather than restated. Notably the setpoint colors are
@@ -87,10 +88,9 @@ function readHistory(s: Settings): History {
 
 export function HistoryTab() {
   const { settings, mode } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving } = useSaveSettings();
+  const { save, saving, status } = useSaveSettings();
   const [v, setV] = useState<History>(() => readHistory(settings));
   const [prev, setPrev] = useState(settings);
-  const [saved, setSaved] = useState(false);
   if (settings !== prev) {
     setPrev(settings);
     setV(readHistory(settings));
@@ -115,7 +115,7 @@ export function HistoryTab() {
     d = setPath(d, "history_page.autorefresh", v.autorefresh ? "on" : "off");
     d = setPath(d, "history_page.probe_config", v.probeConfig);
     d = setPath(d, "globals.ext_data", v.ext_data);
-    setSaved(await save(d, [])); // bare write — no control flag
+    await save(d, []); // bare write — no control flag
   };
 
   // Extended-data logging changes the history schema, so it is gated to a
@@ -237,12 +237,7 @@ export function HistoryTab() {
             );
           })
         )}
-        <div className="pf-settings-actions">
-          <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
-            {saving ? "Saving…" : "Save"}
-          </button>
-          {saved && <span className="pf-settings-saved">Saved ✓</span>}
-        </div>
+        <SaveBar onSave={onSave} saving={saving} status={status} />
       </Section>
     </>
   );

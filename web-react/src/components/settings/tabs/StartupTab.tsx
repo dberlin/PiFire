@@ -8,6 +8,7 @@ import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";
 import { Toggle } from "../fields/Toggle";
 import { type RangeProfileColumn, RangeProfileTable } from "../RangeProfileTable";
+import { SaveBar } from "../SaveBar";
 
 const SMARTSTART_COLUMNS: RangeProfileColumn[] = [
   { key: "startuptime", label: "Startup time", suffix: "s", min: 30, max: 1200 },
@@ -68,10 +69,9 @@ function readStartup(s: Settings): Startup {
 
 export function StartupTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving } = useSaveSettings();
+  const { save, saving, status } = useSaveSettings();
   const [v, setV] = useState<Startup>(() => readStartup(settings));
   const [prev, setPrev] = useState(settings);
-  const [saved, setSaved] = useState(false);
   if (settings !== prev) {
     setPrev(settings);
     setV(readStartup(settings));
@@ -118,7 +118,7 @@ export function StartupTab() {
     d = setPath(d, "startup.start_to_mode.primary_setpoint", v.primary_setpoint);
     d = setPath(d, "startup.start_to_mode.start_to_hold_prompt", v.start_to_hold_prompt);
 
-    setSaved(await save(d, ["settings_update"]));
+    await save(d, ["settings_update"]);
   };
 
   const modeOptions = [
@@ -218,12 +218,7 @@ export function StartupTab() {
           checked={v.start_to_hold_prompt}
           onChange={(b) => set("start_to_hold_prompt", b)}
         />
-        <div className="pf-settings-actions">
-          <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
-            {saving ? "Saving…" : "Save"}
-          </button>
-          {saved && <span className="pf-settings-saved">Saved ✓</span>}
-        </div>
+        <SaveBar onSave={onSave} saving={saving} status={status} />
       </Section>
     </>
   );

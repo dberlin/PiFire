@@ -6,6 +6,7 @@ import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { Toggle } from "../fields/Toggle";
+import { SaveBar } from "../SaveBar";
 
 type WorkMode = {
   cycle_data: {
@@ -70,10 +71,9 @@ function readWorkMode(s: Settings): WorkMode {
 
 export function WorkModeTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving } = useSaveSettings();
+  const { save, saving, status } = useSaveSettings();
   const [v, setV] = useState<WorkMode>(() => readWorkMode(settings));
   const [prev, setPrev] = useState(settings);
-  const [saved, setSaved] = useState(false);
   if (settings !== prev) {
     setPrev(settings);
     setV(readWorkMode(settings));
@@ -97,7 +97,7 @@ export function WorkModeTab() {
     for (const [k, val] of Object.entries(v.cycle_data)) d = setPath(d, `cycle_data.${k}`, val);
     for (const [k, val] of Object.entries(v.smoke_plus)) d = setPath(d, `smoke_plus.${k}`, val);
     for (const [k, val] of Object.entries(v.keep_warm)) d = setPath(d, `keep_warm.${k}`, val);
-    setSaved(await save(d, ["settings_update"]));
+    await save(d, ["settings_update"]);
   };
 
   return (
@@ -229,12 +229,7 @@ export function WorkModeTab() {
           checked={v.keep_warm.s_plus}
           onChange={(b) => setKeepWarm("s_plus", b)}
         />
-        <div className="pf-settings-actions">
-          <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
-            {saving ? "Saving…" : "Save"}
-          </button>
-          {saved && <span className="pf-settings-saved">Saved ✓</span>}
-        </div>
+        <SaveBar onSave={onSave} saving={saving} status={status} />
       </Section>
     </>
   );

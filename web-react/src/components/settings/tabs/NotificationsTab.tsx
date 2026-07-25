@@ -7,6 +7,7 @@ import { Section } from "../fields/Section";
 import { StringListField } from "../fields/StringListField";
 import { TextField } from "../fields/TextField";
 import { Toggle } from "../fields/Toggle";
+import { SaveBar } from "../SaveBar";
 
 // Each notify service is a loosely-typed bag: the tab only reads/writes the
 // scalar fields the legacy `_settings_notify` form submits, and rebuilds the
@@ -47,10 +48,9 @@ function devicesOf(o: NotifyService): Record<string, OneSignalDevice> {
 
 export function NotificationsTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving } = useSaveSettings();
+  const { save, saving, status } = useSaveSettings();
   const [v, setV] = useState(() => readNotify(settings));
   const [prev, setPrev] = useState(settings);
-  const [saved, setSaved] = useState(false);
   if (settings !== prev) {
     setPrev(settings);
     setV(readNotify(settings));
@@ -65,7 +65,7 @@ export function NotificationsTab() {
     }));
 
   const onSave = async () => {
-    setSaved(await save({ notify_services: v.ns }, ["settings_update"]));
+    await save({ notify_services: v.ns }, ["settings_update"]);
   };
 
   const setDeviceField = (deviceId: string, key: keyof OneSignalDevice, val: string) =>
@@ -319,12 +319,7 @@ export function NotificationsTab() {
         />
       </Section>
 
-      <div className="pf-settings-actions">
-        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
-          {saving ? "Saving…" : "Save"}
-        </button>
-        {saved && <span className="pf-settings-saved">Saved ✓</span>}
-      </div>
+      <SaveBar onSave={onSave} saving={saving} status={status} />
     </>
   );
 }

@@ -1,21 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
+import type { SaveStatus } from "../../../helpers/settings/useSaveSettings";
 import { renderRoute } from "../../../test-utils";
 import { PwmTab } from "./PwmTab";
 
 const saveMock = rs.fn().mockResolvedValue(true);
+// Read at hook-call time (i.e. during render), so a test can choose the status
+// the tab is handed. The applySettings -> SaveStatus mapping itself is pinned
+// in useSaveSettings.test.tsx; what matters here is that the tab forwards it.
+let mockStatus: SaveStatus = { kind: "idle" };
 
 // Mock the useSaveSettings module
 rs.mock("../../../helpers/settings/useSaveSettings", () => ({
   useSaveSettings: () => ({
     save: saveMock,
     saving: false,
+    status: mockStatus,
     baseUrl: "",
   }),
 }));
 
 beforeEach(() => {
   saveMock.mockClear();
+  mockStatus = { kind: "idle" };
 });
 
 afterEach(cleanup);
@@ -208,5 +215,26 @@ describe("PwmTab", () => {
     fireEvent.change(cell, { target: { value: "999" } });
 
     expect(screen.getByLabelText("Duty cycle row 1")).toHaveValue(80);
+  });
+
+  // PwmTab is the witness for the rejection path because it is the tab with a
+  // live, reachable backend rejection: raising min_duty_cycle above an existing
+  // profile duty cycle trips PwmSettings._check_profiles, and the tab neither
+  // clamps nor guards. Before SaveBar the user got silence.
+  it("surfaces a rejected save inline and withholds the success marker", () => {
+    mockStatus = {
+      kind: "error",
+      message: "pwm: Value error, profiles[0].duty_cycle must be within [min, max]",
+    };
+
+    renderRoute(<PwmTab />, dutyCycleFixture());
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "pwm: Value error, profiles[0].duty_cycle must be within [min, max]",
+    );
+    expect(screen.queryByText("Saved ✓")).toBeNull();
+    // The refused values stay on screen so the user can fix them and retry.
+    expect(screen.getByLabelText("Duty cycle row 1")).toHaveValue(20);
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
   });
 });

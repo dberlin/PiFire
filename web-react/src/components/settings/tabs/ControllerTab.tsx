@@ -8,6 +8,7 @@ import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";
 import { TextField } from "../fields/TextField";
 import { Toggle } from "../fields/Toggle";
+import { SaveBar } from "../SaveBar";
 
 type ControllerValues = Record<string, number | boolean | string>;
 
@@ -58,7 +59,7 @@ export function ControllerTab() {
     mode: string;
     controllerMeta: ControllerMetadata | null;
   }>();
-  const { save, saving } = useSaveSettings();
+  const { save, saving, status } = useSaveSettings();
 
   const [selected, setSelected] = useState(() => readSelected(settings, controllerMeta));
   const [values, setValues] = useState<ControllerValues>(() =>
@@ -66,7 +67,6 @@ export function ControllerTab() {
   );
   const [prevSettings, setPrevSettings] = useState(settings);
   const [prevSelected, setPrevSelected] = useState(selected);
-  const [saved, setSaved] = useState(false);
 
   if (settings !== prevSettings || selected !== prevSelected) {
     setPrevSettings(settings);
@@ -106,7 +106,7 @@ export function ControllerTab() {
       } else if (opt.option_type === "string") rebuilt[opt.option_name] = String(v ?? "");
     }
     d = setPath(d, `controller.config.${selected}`, rebuilt);
-    setSaved(await save(d, ["controller_update"]));
+    await save(d, ["controller_update"]);
   };
 
   return (
@@ -175,12 +175,7 @@ export function ControllerTab() {
         }
         return null;
       })}
-      <div className="pf-settings-actions">
-        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
-          {saving ? "Saving…" : "Save"}
-        </button>
-        {saved && <span className="pf-settings-saved">Saved ✓</span>}
-      </div>
+      <SaveBar onSave={onSave} saving={saving} status={status} />
     </Section>
   );
 }

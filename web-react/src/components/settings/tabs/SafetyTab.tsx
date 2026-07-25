@@ -6,6 +6,7 @@ import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { Toggle } from "../fields/Toggle";
+import { SaveBar } from "../SaveBar";
 
 type Safety = {
   minstartuptemp: number;
@@ -31,10 +32,9 @@ function readSafety(s: Settings): Safety {
 
 export function SafetyTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving } = useSaveSettings();
+  const { save, saving, status } = useSaveSettings();
   const [v, setV] = useState<Safety>(() => readSafety(settings));
   const [prev, setPrev] = useState(settings);
-  const [saved, setSaved] = useState(false);
   if (settings !== prev) {
     setPrev(settings);
     setV(readSafety(settings));
@@ -44,7 +44,7 @@ export function SafetyTab() {
   const onSave = async () => {
     let d: object = {};
     for (const [k, val] of Object.entries(v)) d = setPath(d, `safety.${k}`, val);
-    setSaved(await save(d, [])); // _settings_safety does a bare write — no control flag
+    await save(d, []); // _settings_safety does a bare write — no control flag
   };
 
   return (
@@ -90,12 +90,7 @@ export function SafetyTab() {
         checked={v.allow_manual_changes}
         onChange={(b) => set("allow_manual_changes", b)}
       />
-      <div className="pf-settings-actions">
-        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
-          {saving ? "Saving…" : "Save"}
-        </button>
-        {saved && <span className="pf-settings-saved">Saved ✓</span>}
-      </div>
+      <SaveBar onSave={onSave} saving={saving} status={status} />
     </Section>
   );
 }

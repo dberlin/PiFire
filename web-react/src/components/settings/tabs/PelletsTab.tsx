@@ -6,6 +6,7 @@ import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { Toggle } from "../fields/Toggle";
+import { SaveBar } from "../SaveBar";
 
 type Pellets = {
   warning_enabled: boolean;
@@ -33,10 +34,9 @@ function readPellets(s: Settings): Pellets {
 
 export function PelletsTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving } = useSaveSettings();
+  const { save, saving, status } = useSaveSettings();
   const [v, setV] = useState<Pellets>(() => readPellets(settings));
   const [prev, setPrev] = useState(settings);
-  const [saved, setSaved] = useState(false);
 
   if (settings !== prev) {
     setPrev(settings);
@@ -66,7 +66,7 @@ export function PelletsTab() {
       flags.push("distance_update");
     }
 
-    setSaved(await save(d, flags));
+    await save(d, flags);
   };
 
   return (
@@ -116,12 +116,7 @@ export function PelletsTab() {
         checked={v.prime_ignition}
         onChange={(b) => set("prime_ignition", b)}
       />
-      <div className="pf-settings-actions">
-        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
-          {saving ? "Saving…" : "Save"}
-        </button>
-        {saved && <span className="pf-settings-saved">Saved ✓</span>}
-      </div>
+      <SaveBar onSave={onSave} saving={saving} status={status} />
     </Section>
   );
 }

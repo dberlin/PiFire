@@ -7,6 +7,7 @@ import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { Toggle } from "../fields/Toggle";
 import { type RangeProfileColumn, RangeProfileTable } from "../RangeProfileTable";
+import { SaveBar } from "../SaveBar";
 
 const DEFAULT_PWM_TEMPS = [3, 7, 10, 15];
 const DEFAULT_PWM_PROFILES: Record<string, number>[] = [
@@ -45,9 +46,8 @@ function readPwm(settings: Settings): Pwm {
 
 export function PwmTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving } = useSaveSettings();
+  const { save, saving, status } = useSaveSettings();
   const [pwm, setPwm] = useState<Pwm>(() => readPwm(settings));
-  const [saved, setSaved] = useState(false);
 
   // Re-sync from the loader on revalidation via render-phase adjustment (the
   // repo's house style — NOT a useEffect; the React Compiler lint rule
@@ -82,7 +82,7 @@ export function PwmTab() {
     // (single Save per tab, using the existing ["settings_update"] flag) —
     // they're already keys of `pwm`, so this loop covers them too.
     for (const [k, v] of Object.entries(pwm)) d = setPath(d, `pwm.${k}`, v);
-    setSaved(await save(d, ["settings_update"])); // control loop must re-read pwm
+    await save(d, ["settings_update"]); // control loop must re-read pwm
   };
 
   return (
@@ -132,12 +132,7 @@ export function PwmTab() {
           setPwm((s) => ({ ...s, temp_range_list, profiles }))
         }
       />
-      <div className="pf-settings-actions">
-        <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
-          {saving ? "Saving…" : "Save"}
-        </button>
-        {saved && <span className="pf-settings-saved">Saved ✓</span>}
-      </div>
+      <SaveBar onSave={onSave} saving={saving} status={status} />
     </Section>
   );
 }
