@@ -3,6 +3,7 @@ import { settingsLoader } from "../helpers/settings/settingsRoutes";
 import { wizardLoader } from "../helpers/wizard/wizardRoutes";
 import { AppPrefsProvider } from "./AppPrefs";
 import { DashboardRoute } from "./DashboardRoute";
+import { HistoryPage } from "./history/HistoryPage";
 import { SettingsError } from "./settings/SettingsError";
 import { SettingsShell } from "./settings/SettingsShell";
 import { ControllerTab } from "./settings/tabs/ControllerTab";
@@ -45,6 +46,9 @@ export function HydrateFallback() {
 // so "/" keeps its synchronous first paint and a failed check stays advisory.
 export const routes = [
   { path: "/", element: <DashboardRoute /> },
+  // The cook-history chart page. NOT to be confused with the /settings/history
+  // child route below, which is the History *settings* tab.
+  { path: "/history", element: <HistoryPage /> },
   {
     path: "/wizard",
     element: <WizardShell />,
