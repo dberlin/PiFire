@@ -54,11 +54,11 @@ class SmokeMode(ControlMode):
         self.state.lid.expires = 0
         # Stage p_mode/auger_cycle_time on self.state.metrics for later use, but
         # do NOT update_metrics() here: setup() (this method's caller) runs BEFORE
-        # ControlMode.run() stamps a fresh metrics row (append_metric(
-        # True) + self.state.metrics = read_metrics()), so self.state.metrics is
+        # ControlMode.run() stamps a fresh metrics row (append_metric() +
+        # self.state.metrics = read_metrics()), so self.state.metrics is
         # still the freshly-constructed WorkCycleState default ({}) at this point
         # -- missing 'starttime' and every other column. update_metrics() would hit
-        # the "replace last record" path and, via `metrics.get(k)` defaulting
+        # the "amend last record" path and, via `metrics.get(k)` defaulting
         # missing keys to None, silently null out EVERY column (including
         # starttime) of the PREVIOUS mode's already-stamped row -- the root cause
         # of a None-starttime row that later crashes process_metrics/create_cookfile

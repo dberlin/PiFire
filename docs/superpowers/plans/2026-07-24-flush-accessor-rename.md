@@ -166,6 +166,38 @@ Tiers 1–3 touch disjoint *functions*, but all of them edit the same two files
 workspaces would conflict on every merge. **Run sequentially.** Same reasoning
 for Tiers 4 and 5.
 
+## WAVE 2 — found by the review, NOT in the original tiers
+
+The tier enumeration scoped itself to `common/datastore_accessors.py`. That was
+too narrow: the implementer found one instance outside it
+(`common/common.py::read_events_records(flush=True)`, fixed in Tier 1) and the
+reviewer's independent AST scan found three more.
+
+- [ ] **`common/system.py:144` — `get_os_info(loggername="events", persist=True)`.**
+      A `get_`-named function that WRITES the datastore via `store_os_info()`,
+      and **the destructive flag DEFAULTS TO TRUE** — strictly worse than every
+      Tier-1 case, where the default was `False`. Three production call sites
+      (`board-config.py:230,597`, `grillplat/system_commands.py:114`) all take
+      the default; two tests pass `persist=False` precisely because they need a
+      pure read. Split into `probe_os_info()` + `refresh_os_info()`.
+- [ ] **`common/common.py:609` — `get_system_command_output()`.** Pops
+      `SqliteQueue("queue_systemo")` and **silently discards every non-matching
+      entry it pops**. A destructive drain behind a `get_` name, with real data
+      loss for any concurrent consumer. This one is a bug, not just a naming
+      problem.
+- [ ] **`common/settings_migration.py:37` — `read_settings_file(..., init=False)`.**
+      `init=True` runs `backup_settings()` (writes files) and `write_warning()`.
+      Called with `init=True` from `common/datastore.py:279`. The comment above
+      that call describes `init=True` as only "the version-overlay /
+      upgrade_settings() path" — accurate but incomplete; extend it.
+- [ ] **`read_warnings()` → `drain_warnings()`.** Deliberately left alone in
+      wave 1 as "a genuine read-and-clear with no flag". The reviewer's counter
+      is decisive: `blueprints/dash/routes.py:22` and
+      `blueprints/mobile/socket_io.py:208` BOTH call it, so whichever polls
+      first eats the other's warnings. That is the same cross-consumer
+      interference that forced `workers: 1` on the e2e suite. 4 sites, cheap,
+      and worth fixing as behaviour, not just naming.
+
 ## Not in scope
 
 `write_control(kind=WriteKind…)` — an explicit enum, not a boolean flag, and
