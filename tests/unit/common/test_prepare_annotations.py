@@ -1,5 +1,5 @@
 """Metrics-safety fix wave, item 2: `common/app.py::prepare_annotations()`
-consumes `read_metrics(all=True)` rows directly, without the None guards
+consumes `read_all_metrics()` rows directly, without the None guards
 `process_metrics()` gained (f3d5a83, extended into `guard_none_metric_field`
 in this fix wave) -- a poisoned row (None starttime, the same shape that DID
 exist in a real datastore -- see update_metrics' "amend last record"

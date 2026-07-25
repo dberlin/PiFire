@@ -187,21 +187,29 @@ def _metrics_row_to_dict(row):
     return metrics
 
 
-def read_metrics(all=False):
+def read_all_metrics():
     """
-    Read Metrics from SQLite DB
+    Read every metrics record, in insertion order.
 
-    :param all: True to read entire list. False for top of list.
+    Split out of ``read_metrics(all=True)``: the flag did not change what was
+    read so much as what TYPE came back -- a list here, a dict without it. A
+    caller could not tell which it was going to get without opening the callee.
+
+    :return: List of metrics dictionaries (empty when the table is empty).
     """
-    conn = datastore.connection()
     cols_sql = ", ".join(METRIC_COLUMNS)
-    if all:
-        # Read entire list of Metrics, in insertion order
-        rows = conn.execute(f"SELECT {cols_sql} FROM metrics ORDER BY seq").fetchall()
-        return [_metrics_row_to_dict(row) for row in rows]
+    rows = datastore.connection().execute(f"SELECT {cols_sql} FROM metrics ORDER BY seq").fetchall()
+    return [_metrics_row_to_dict(row) for row in rows]
 
-    # Read current Metrics Record (i.e. last one written)
-    row = conn.execute(f"SELECT {cols_sql} FROM metrics ORDER BY seq DESC LIMIT 1").fetchone()
+
+def read_metrics():
+    """
+    Read the current metrics record, i.e. the last one written.
+
+    :return: A single metrics dictionary; default_metrics() when none exist.
+    """
+    cols_sql = ", ".join(METRIC_COLUMNS)
+    row = datastore.connection().execute(f"SELECT {cols_sql} FROM metrics ORDER BY seq DESC LIMIT 1").fetchone()
     return _metrics_row_to_dict(row) if row else default_metrics()
 
 
@@ -584,11 +592,26 @@ def write_autotune(data):
     SqliteQueue("queue_autotune").push(data)
 
 
-def read_autotune(size_only=False):
-    q = SqliteQueue("queue_autotune")
-    if size_only:
-        return q.length()
-    return q.list()
+def read_autotune():
+    """
+    Read every queued autotune sample.
+
+    :return: List of autotune sample dictionaries.
+    """
+    return SqliteQueue("queue_autotune").list()
+
+
+def autotune_length():
+    """
+    Count the queued autotune samples without materializing them.
+
+    Split out of ``read_autotune(size_only=True)``, which returned an **int**
+    where the same name otherwise returned a **list** -- invisible at the call
+    site.
+
+    :return: Number of queued samples.
+    """
+    return SqliteQueue("queue_autotune").length()
 
 
 def flush_autotune():

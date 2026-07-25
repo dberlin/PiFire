@@ -87,7 +87,7 @@ def test_sqlite_update_metrics_amend_last_parity(store):
     metrics["mode"] = "Hold"
     store.update_metrics(metrics)
     assert store.read_metrics()["mode"] == "Hold"
-    assert len(store.read_metrics(all=True)) == 1  # replaced, not appended
+    assert len(store.read_all_metrics()) == 1  # replaced, not appended
 
 
 def test_update_metrics_partial_dict_parity(store):
@@ -115,4 +115,4 @@ def test_update_metrics_partial_dict_parity(store):
         st.update_metrics({"pellet_brand_type": None})  # explicit null still nulls
         assert st.read_metrics()["pellet_brand_type"] is None
         assert st.read_metrics()["mode"] == "Hold"  # still untouched
-        assert len(st.read_metrics(all=True)) == 1  # amended, never appended
+        assert len(st.read_all_metrics()) == 1  # amended, never appended

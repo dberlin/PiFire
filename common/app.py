@@ -4,7 +4,7 @@ Common PiFire WebApp Functions Shared Between Blueprints
 
 from common.common import seconds_to_string, WriteKind, epoch_to_time, guard_none_metric_field
 from common.modes import Mode
-from common.datastore_accessors import read_settings, read_metrics, read_history, write_settings, write_control
+from common.datastore_accessors import read_settings, read_all_metrics, read_history, write_settings, write_control
 from common.defaults import metrics_items
 from common.api_commands import process_command
 from flask import current_app, render_template
@@ -98,7 +98,7 @@ def paginate_list(datalist, sortkey="", reversesortorder=False, itemsperpage=10,
 
 def prepare_annotations(displayed_starttime, metrics_data=[]):
     if metrics_data == []:
-        metrics_data = read_metrics(all=True)
+        metrics_data = read_all_metrics()
     annotation_json = {}
     # Process Additional Metrics Information for Display
     for index in range(0, len(metrics_data)):

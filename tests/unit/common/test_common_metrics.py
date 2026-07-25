@@ -12,7 +12,7 @@ def test_replace_last_matches_oracle(ds, oracle):
     m2["mode"] = "Hold"
     c.update_metrics(m2)
     assert c.read_metrics()["mode"] == exp["last"]["mode"] == "Hold"
-    assert len(c.read_metrics(all=True)) == exp["all_len"] == 1
+    assert len(c.read_all_metrics()) == exp["all_len"] == 1
 
 
 def test_replace_last_partial_dict_preserves_other_columns(ds):

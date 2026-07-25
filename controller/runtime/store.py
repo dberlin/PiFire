@@ -82,7 +82,9 @@ class Store(ABC):
     @abstractmethod
     def write_history(self, in_data, maxsizelines=28800, ext_data=False): ...
     @abstractmethod
-    def read_metrics(self, all=False): ...
+    def read_metrics(self): ...
+    @abstractmethod
+    def read_all_metrics(self): ...
     @abstractmethod
     def flush_metrics(self): ...
     @abstractmethod
@@ -242,10 +244,15 @@ class InMemoryStore(Store):
         if len(self._history) > maxsizelines:
             self._history = self._history[-maxsizelines:]
 
-    def read_metrics(self, all=False):
-        if all:
-            return list(self._metrics_list)
-        return copy.deepcopy(self._metrics_list[-1]) if self._metrics_list else {}
+    def read_metrics(self):
+        # Mirror common.datastore_accessors.read_metrics: an empty store reads
+        # back as default_metrics(), not {}. The fake used to return {}, so a
+        # consumer that indexes a metrics column would KeyError against the fake
+        # and quietly succeed in production (or vice versa).
+        return copy.deepcopy(self._metrics_list[-1]) if self._metrics_list else default_metrics()
+
+    def read_all_metrics(self):
+        return copy.deepcopy(self._metrics_list)
 
     def flush_metrics(self):
         self._metrics_list = []
@@ -388,8 +395,11 @@ class SqliteStore(Store):
     def write_history(self, in_data, maxsizelines=28800, ext_data=False):
         _c.write_history(in_data, maxsizelines=maxsizelines, ext_data=ext_data)
 
-    def read_metrics(self, all=False):
-        return _c.read_metrics(all=all)
+    def read_metrics(self):
+        return _c.read_metrics()
+
+    def read_all_metrics(self):
+        return _c.read_all_metrics()
 
     def flush_metrics(self):
         _c.flush_metrics()

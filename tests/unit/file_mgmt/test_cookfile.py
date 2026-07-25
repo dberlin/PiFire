@@ -51,7 +51,7 @@ import pytest
 
 import file_mgmt.cookfile as cookfile_mod
 from common.common import epoch_to_time, process_metrics
-from common.datastore_accessors import append_metric, read_history, read_metrics, update_metrics, write_history
+from common.datastore_accessors import append_metric, read_all_metrics, read_history, update_metrics, write_history
 from common.defaults import default_metrics
 from file_mgmt.cookfile import create_cookfile, prepare_chartdata, read_cookfile, upgrade_cookfile
 from file_mgmt.downsample import max_interpolation_error
@@ -895,7 +895,7 @@ def test_create_cookfile_writes_pifire_archive_with_seeded_history_and_metrics(d
 
     # Datastore purged after the cook file is written.
     assert read_history() == []
-    assert read_metrics(all=True) == []
+    assert read_all_metrics() == []
 
 
 # ---------------------------------------------------------------------------
@@ -997,7 +997,7 @@ def test_create_cookfile_survives_poisoned_none_starttime_row(ds, isolated_histo
     update_metrics(dict(default_metrics(), id=0, mode="Smoke", augerontime=120, starttime=None))
     append_metric(dict(default_metrics(), id=1, mode="Stop", augerontime=30))
 
-    assert read_metrics(all=True)[0]["starttime"] is None  # sanity: poisoned as expected
+    assert read_all_metrics()[0]["starttime"] is None  # sanity: poisoned as expected
 
     create_cookfile()  # pre-fix: TypeError: unsupported operand type(s) for /: 'NoneType' and 'int'
 

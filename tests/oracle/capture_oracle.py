@@ -54,7 +54,7 @@ def scenario_metrics_replace_last():
     m2 = defaults.default_metrics()
     m2["mode"] = "Hold"
     datastore_accessors.update_metrics(m2)
-    return {"last": datastore_accessors.read_metrics(), "all_len": len(datastore_accessors.read_metrics(all=True))}
+    return {"last": datastore_accessors.read_metrics(), "all_len": len(datastore_accessors.read_all_metrics())}
 
 
 def scenario_warnings():

@@ -51,7 +51,7 @@ def test_write_history_accepts_maxsizelines():
 def test_flush_metrics_empties_the_list():
     s = InMemoryStore(metrics={"a": 1})
     s.flush_metrics()
-    assert s.read_metrics(all=True) == []
+    assert s.read_all_metrics() == []
 
 
 def test_in_memory_history_cap():

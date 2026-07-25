@@ -7,6 +7,7 @@ from common.datastore_accessors import (
     write_control,
     read_tr,
     read_autotune,
+    autotune_length,
     flush_autotune,
     write_autotune,
     read_current,
@@ -149,7 +150,7 @@ def tuner_page():
 
             # Some probes (i.e. the DS18B20) may be slow to respond when Monitor mode starts, and may report 0 degrees
             # Thus we should ignore these first few data points if they are 0
-            autotune_data_size = read_autotune(size_only=True)
+            autotune_data_size = autotune_length()
             if (
                 (autotune_data_size > 4 or status_data["current_temp"] > 0)
                 and status_data["current_tr"] >= 0

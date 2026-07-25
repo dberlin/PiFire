@@ -28,7 +28,7 @@ from common.datastore_accessors import (
     read_settings,
     read_history,
     flush_history,
-    read_metrics,
+    read_all_metrics,
 )
 from common.defaults import default_probe_config
 from file_mgmt.common import read_json_file_data, update_json_file_data
@@ -119,7 +119,7 @@ def create_cookfile():
 
         cook_file_struct["raw_data"] = raw_data
 
-        cook_file_struct["events"] = process_metrics(read_metrics(all=True), augerrate=settings["globals"]["augerrate"])
+        cook_file_struct["events"] = process_metrics(read_all_metrics(), augerrate=settings["globals"]["augerrate"])
 
         # 1. Create all JSON data files
         files_list = ["metadata", "graph_data", "raw_data", "graph_labels", "events", "comments", "assets"]

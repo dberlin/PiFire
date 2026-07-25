@@ -363,7 +363,7 @@ class Controller:
                 grill_platform.igniter_off()
                 grill_platform.fan_off()
                 # Register Stop Mode in Metrics DB if this is not initial stop-mode on startup (i.e. DB is empty)
-                metrics_list = store.read_metrics(all=True)
+                metrics_list = store.read_all_metrics()
                 if len(metrics_list) != 0:
                     store.append_metric()
                     metrics = store.read_metrics()

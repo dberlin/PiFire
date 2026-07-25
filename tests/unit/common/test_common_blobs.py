@@ -120,7 +120,7 @@ def test_autotune_uses_queue(ds):
     c.write_autotune({"tr": 1})
     c.write_autotune({"tr": 2})
     assert c.read_autotune() == [{"tr": 1}, {"tr": 2}]
-    assert c.read_autotune(size_only=True) == 2
+    assert c.autotune_length() == 2
     c.flush_autotune()
     assert c.read_autotune() == []
 

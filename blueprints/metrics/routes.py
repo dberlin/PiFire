@@ -1,7 +1,7 @@
 import datetime
 from flask import render_template, request, send_file
 from common.common import process_metrics
-from common.datastore_accessors import read_settings, read_control, read_metrics
+from common.datastore_accessors import read_settings, read_control, read_all_metrics
 from common.app import prepare_metrics_csv
 
 from . import metrics_bp
@@ -13,7 +13,7 @@ def metrics_page(action=None):
     settings = read_settings()
     control = read_control()
 
-    metrics_data = process_metrics(read_metrics(all=True))
+    metrics_data = process_metrics(read_all_metrics())
 
     if (request.method == "GET") and (action == "export"):
         filename = datetime.datetime.now().strftime("%Y%m%d-%H%M") + "-PiFire-Metrics-Export"
