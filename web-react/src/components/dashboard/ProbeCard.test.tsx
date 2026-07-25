@@ -11,12 +11,17 @@ afterEach(cleanup);
 // `width`/`background` are driven directly by barPct/barColor. Grabbing that
 // inner div lets tests fail if the bar geometry/color regresses independently
 // of the (separately styled) target text color.
-function getBar(container: HTMLElement): HTMLElement {
-  const track = container.querySelector('div[style*="margin-top"]');
-  expect(track).not.toBeNull();
-  const bar = track!.firstElementChild;
-  expect(bar).not.toBeNull();
-  return bar as HTMLElement;
+function barVars(container: HTMLElement): { pct: string; color: string } {
+  // The fill's width and colour are per-frame data, so they travel as custom
+  // properties on the card and the stylesheet applies them. jsdom resolves
+  // neither var() nor layout, so the assertion has to read them at the source.
+  expect(container.querySelector(".pf-dash-bar-fill")).not.toBeNull();
+  const card = container.querySelector(".pf-dash-probecard") as HTMLElement;
+  expect(card).not.toBeNull();
+  return {
+    pct: card.style.getPropertyValue("--pf-bar-pct"),
+    color: card.style.getPropertyValue("--pf-bar-color"),
+  };
 }
 
 describe("ProbeCard", () => {
@@ -27,12 +32,12 @@ describe("ProbeCard", () => {
     });
     const { container } = render(<ProbeCard p={v.probes[0]} onOpenNotify={rs.fn()} />);
     expect(screen.getByText("→ 203°")).toBeInTheDocument();
-    expect(screen.getByText("→ 203°")).toHaveStyle({ color: "#5ec96f" });
+    expect(screen.getByText("→ 203°")).toHaveStyle({ color: "rgb(94, 201, 111)" });
     expect(screen.getByText("203")).toBeInTheDocument(); // tempInt rounds 202.5 -> 203
 
-    const bar = getBar(container);
-    expect(parseFloat(bar.style.width)).toBeGreaterThan(90); // (202.5/203)*100 ~= 99.75%
-    expect(bar).toHaveStyle({ background: "#5ec96f" }); // done -> green, not the accent
+    const bar = barVars(container);
+    expect(Number.parseFloat(bar.pct)).toBeGreaterThan(90); // (202.5/203)*100 ~= 99.75%
+    expect(bar.color).toBe("#5ec96f"); // done -> green, not the accent
   });
 
   it("renders an untargeted probe as AMBIENT with an empty bar", () => {
@@ -44,9 +49,9 @@ describe("ProbeCard", () => {
     expect(screen.getByText("AMBIENT")).toBeInTheDocument();
     expect(screen.getByText("72")).toBeInTheDocument();
 
-    const bar = getBar(container);
-    expect(bar.style.width).toBe("0%");
-    expect(bar).toHaveStyle({ background: "var(--accent)" });
+    const bar = barVars(container);
+    expect(bar.pct).toBe("0%");
+    expect(bar.color).toBe("var(--accent)");
   });
 
   it("shows the probe name and temperature unit", () => {

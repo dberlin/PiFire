@@ -408,3 +408,505 @@
 .pf-badge-unknown {
   color: #7d7264;
 }
+
+/* ==========================================================================
+   Dashboard layout.
+
+   Every value below is the literal that used to sit in a style={{...}} object
+   in Dashboard.tsx / ProbeCard.tsx / ControlButtons.tsx / GrillGauge.tsx /
+   HopperGauge.tsx / SystemStatus.tsx. Nothing here is new and nothing is
+   rounded: this file is where a @media query can reach these numbers, which is
+   the only reason the move happened.
+
+   Values that come from deriveView (a bar percentage, a pill tint, an output
+   colour) stay inline as custom properties -- those are per-frame data, not
+   layout.
+   ========================================================================== */
+
+.pf-dash-glow {
+  position: absolute;
+  left: 50%;
+  bottom: -160px;
+  transform: translateX(-50%);
+  width: 820px;
+  height: 420px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--glow), transparent 70%);
+  filter: blur(14px);
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+/* ---- header ---- */
+.pf-dash-header {
+  height: 58px;
+  flex: 0 0 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  position: relative;
+  z-index: 2;
+}
+.pf-dash-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pf-dash-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--pf-live-color);
+  box-shadow: 0 0 10px var(--pf-live-color);
+  animation: pf-blink 2.4s ease-in-out infinite;
+}
+.pf-dash-wordmark {
+  font: 700 20px "Barlow";
+  letter-spacing: 0.5px;
+  color: #f4ede2;
+}
+.pf-dash-grillname {
+  font: 600 12px "Barlow";
+  letter-spacing: 2px;
+  color: #7d7264;
+  text-transform: uppercase;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  margin-left: 2px;
+}
+.pf-dash-headerright {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.pf-dash-status {
+  font: 600 13px "Barlow";
+  letter-spacing: 1px;
+  color: var(--pf-status-color);
+}
+.pf-dash-clock {
+  font: 600 22px "Barlow Semi Condensed";
+  color: #cfc6b8;
+  font-variant-numeric: tabular-nums;
+}
+.pf-dash-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- body and columns ---- */
+.pf-dash-body {
+  flex: 1;
+  display: flex;
+  gap: 16px;
+  padding: 16px 18px 18px;
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+}
+.pf-dash-probecol {
+  width: 298px;
+  flex: 0 0 298px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.pf-dash-centercol {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.pf-dash-rightcol {
+  width: 300px;
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+/* Section caption: "Food Probes", "System", "Hopper", "Cook Time". One rule,
+   because they were four copies of the same object with different padding. */
+.pf-dash-caption {
+  font: 600 13px "Barlow";
+  letter-spacing: 2.5px;
+  color: #7d7264;
+  text-transform: uppercase;
+}
+.pf-dash-coltitle {
+  padding-left: 4px;
+}
+
+/* ---- cook row ---- */
+.pf-dash-cookrow {
+  display: flex;
+  gap: 14px;
+  height: 52px;
+  flex: 0 0 52px;
+}
+.pf-dash-card {
+  background: #2c231a;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+}
+.pf-dash-cookcard {
+  flex: 1;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+}
+.pf-dash-cooklabels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pf-dash-cookcaption {
+  font: 600 12px "Barlow";
+  letter-spacing: 2px;
+  color: #7d7264;
+  text-transform: uppercase;
+}
+.pf-dash-modeleft {
+  font: 600 12px "Barlow";
+  letter-spacing: 1px;
+  color: #8fe09a;
+  white-space: nowrap;
+}
+.pf-dash-cookval {
+  font: 700 26px "Barlow Semi Condensed";
+  font-variant-numeric: tabular-nums;
+  color: #cfc6b8;
+}
+.pf-dash-bellbox {
+  flex: 0 0 52px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pf-dash-lid {
+  flex: 0 0 210px;
+  border-radius: 14px;
+  background: rgba(255, 90, 77, 0.14);
+  border: 1.5px solid #ff5a4d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 1px;
+  color: #ff8b82;
+  animation: pf-blink 1s ease-in-out infinite;
+}
+.pf-dash-lid-title {
+  font: 700 16px "Barlow";
+  letter-spacing: 2px;
+}
+.pf-dash-lid-sub {
+  font: 600 12px "Barlow";
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+/* ---- control row ---- */
+.pf-dash-controls {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 12px;
+  height: 82px;
+  flex: 0 0 82px;
+}
+
+/* ---- probe card ---- */
+.pf-dash-probecard {
+  border-radius: 18px;
+  padding: 15px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: relative;
+  overflow: hidden;
+  flex: 1;
+  justify-content: center;
+}
+.pf-dash-probehead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.pf-dash-probename {
+  font: 600 15px "Barlow";
+  letter-spacing: 1.5px;
+  color: #b7ac9c;
+  text-transform: uppercase;
+}
+.pf-dash-probemeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pf-dash-probetarget {
+  font: 600 15px "Barlow";
+}
+.pf-dash-probetemp {
+  display: flex;
+  align-items: baseline;
+  font-family: "Barlow Semi Condensed";
+  font-variant-numeric: tabular-nums;
+  line-height: 0.92;
+}
+.pf-dash-probetemp-int {
+  font-size: 66px;
+  font-weight: 800;
+  color: #f4ede2;
+}
+.pf-dash-probetemp-unit {
+  font-size: 26px;
+  font-weight: 600;
+  color: #8a7f70;
+  margin-left: 2px;
+}
+.pf-dash-bar {
+  height: 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.11);
+  margin-top: 8px;
+  overflow: hidden;
+}
+.pf-dash-bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  width: var(--pf-bar-pct);
+  background: var(--pf-bar-color);
+  transition: width 0.9s ease;
+}
+
+/* ---- grill gauge ---- */
+.pf-dash-gauge {
+  border-radius: 22px;
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.pf-dash-gauge-glow {
+  position: absolute;
+  width: 360px;
+  height: 360px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--accent), transparent 68%);
+  opacity: 0.3;
+  filter: blur(6px);
+}
+.pf-dash-gauge-svg {
+  position: relative;
+  width: 392px;
+  height: 392px;
+}
+.pf-dash-gauge-overlay {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.pf-dash-gauge-caption {
+  font: 600 14px "Barlow";
+  letter-spacing: 4px;
+  color: #7d7264;
+  text-transform: uppercase;
+}
+.pf-dash-gauge-num {
+  display: flex;
+  align-items: baseline;
+  font-family: "Barlow Semi Condensed";
+  font-variant-numeric: tabular-nums;
+  line-height: 0.9;
+}
+.pf-dash-gauge-temp {
+  font-size: 112px;
+  font-weight: 800;
+  color: #f8f2e8;
+}
+.pf-dash-gauge-unit {
+  font-size: 40px;
+  font-weight: 600;
+  color: #8a7f70;
+  margin-left: 4px;
+}
+.pf-dash-gauge-set {
+  font: 600 20px "Barlow";
+  letter-spacing: 1px;
+  color: #6cc8ff;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+.pf-dash-gauge-mode {
+  margin-top: 12px;
+  padding: 6px 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  font: 700 17px "Barlow";
+  letter-spacing: 3px;
+  color: var(--accent);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ---- system card ---- */
+.pf-dash-system {
+  border-radius: 18px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pf-dash-statusrow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: #1c1712;
+  border-radius: 13px;
+  border: 1px solid var(--pf-out-edge);
+}
+.pf-dash-statusicon {
+  width: 64px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.pf-dash-statustext {
+  flex: 1;
+}
+.pf-dash-statusname {
+  font: 600 17px "Barlow";
+  letter-spacing: 1.5px;
+  color: #cfc6b8;
+}
+.pf-dash-statusstate {
+  font: 600 13px "Barlow";
+  letter-spacing: 2px;
+  color: var(--pf-out-color);
+}
+.pf-dash-statusdot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--pf-out-dot);
+  box-shadow: 0 0 8px var(--pf-out-dot);
+}
+
+/* ---- pills ---- */
+.pf-dash-pills {
+  display: flex;
+  gap: 14px;
+  height: 64px;
+  flex: 0 0 64px;
+}
+.pf-dash-pill {
+  flex: 1;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  background: var(--pf-pill-bg);
+  border: 1.5px solid var(--pf-pill-border);
+  /* Reset, so the <button> variant measures identically to the <div> one --
+     which is exactly what the 1280x720 fidelity gate checks. */
+  font: inherit;
+  padding: 0;
+  margin: 0;
+  text-align: center;
+  appearance: none;
+}
+button.pf-dash-pill {
+  cursor: pointer;
+}
+.pf-dash-pill-label {
+  font: 600 10px "Barlow";
+  letter-spacing: 1.5px;
+  color: var(--pf-pill-label-color);
+  white-space: nowrap;
+}
+.pf-dash-pill-val {
+  font: 800 24px "Barlow Semi Condensed";
+  color: var(--pf-pill-val-color);
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* ---- hopper ---- */
+.pf-dash-hopper {
+  flex: 1;
+  border-radius: 18px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.pf-dash-hopper-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.pf-dash-hopper-val {
+  font: 800 34px "Barlow Semi Condensed";
+  font-variant-numeric: tabular-nums;
+  color: var(--pf-hopper-color);
+  line-height: 1;
+}
+.pf-dash-hopper-track {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.pf-dash-hopper-fill,
+.pf-dash-hopper-tex {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--pf-hopper-pct);
+  transition: height 0.9s ease;
+}
+.pf-dash-hopper-fill {
+  background: linear-gradient(180deg, var(--pf-hopper-color2), var(--pf-hopper-color));
+}
+.pf-dash-hopper-tex {
+  background-image: radial-gradient(
+    circle at 3px 3px,
+    rgba(0, 0, 0, 0.16) 1.6px,
+    transparent 1.8px
+  );
+  background-size: 11px 11px;
+  opacity: 0.55;
+}
+.pf-dash-hopper-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.pf-dash-hopper-label {
+  font: 600 12px "Barlow";
+  letter-spacing: 2px;
+  color: var(--pf-hopper-label-color);
+  text-transform: uppercase;
+}

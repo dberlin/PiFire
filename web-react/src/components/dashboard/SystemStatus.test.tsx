@@ -6,6 +6,13 @@ import { SystemStatus } from "./SystemStatus";
 
 afterEach(cleanup);
 
+/** Read a custom property off the .pf-dash-statusrow wrapping a status label. */
+function rowVar(label: HTMLElement, name: string): string {
+  const row = label.closest(".pf-dash-statusrow");
+  expect(row).not.toBeNull();
+  return (row as HTMLElement).style.getPropertyValue(name);
+}
+
 describe("SystemStatus", () => {
   it("shows RUNNING/FEEDING/HOT when outputs are on", () => {
     const v = deriveView({
@@ -33,8 +40,10 @@ describe("SystemStatus", () => {
       outputs: { fan: true, auger: false, igniter: true, power: false },
     });
     render(<SystemStatus fan={v.fan} auger={v.auger} igniter={v.igniter} animate={false} />);
-    expect(screen.getByText("RUNNING")).toHaveStyle({ color: "var(--accent)" });
-    expect(screen.getByText("HOT")).toHaveStyle({ color: "#ff7a1a" });
+    // The row's colours reach the stylesheet as custom properties now; the
+    // assertion is the same value in its new place.
+    expect(rowVar(screen.getByText("RUNNING"), "--pf-out-color")).toBe("var(--accent)");
+    expect(rowVar(screen.getByText("HOT"), "--pf-out-color")).toBe("#ff7a1a");
   });
 
   it("uses the idle color when an output is off", () => {
@@ -43,6 +52,6 @@ describe("SystemStatus", () => {
       outputs: { fan: false, auger: false, igniter: false, power: false },
     });
     render(<SystemStatus fan={v.fan} auger={v.auger} igniter={v.igniter} animate={false} />);
-    expect(screen.getAllByText("IDLE")[0]).toHaveStyle({ color: "#57514a" });
+    expect(rowVar(screen.getAllByText("IDLE")[0], "--pf-out-color")).toBe("#57514a");
   });
 });

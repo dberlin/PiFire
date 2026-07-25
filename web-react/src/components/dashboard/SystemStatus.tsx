@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { augerRunStroke, type OutputView } from "../../helpers/dashboard/deriveView";
 
 // Right-column "System" card: fan / auger / igniter, each with a hand-drawn SVG
@@ -16,28 +16,8 @@ export function SystemStatus({
   animate: boolean;
 }) {
   return (
-    <div
-      data-pf="system"
-      style={{
-        background: "#2c231a",
-        border: "1px solid rgba(255,255,255,0.13)",
-        borderRadius: 18,
-        padding: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
-    >
-      <div
-        style={{
-          font: "600 13px 'Barlow'",
-          letterSpacing: 2.5,
-          color: "#7d7264",
-          textTransform: "uppercase",
-        }}
-      >
-        System
-      </div>
+    <div data-pf="system" className="pf-dash-card pf-dash-system">
+      <div className="pf-dash-caption">System</div>
       <StatusRow name="FAN" o={fan} icon={<FanIcon color={fan.color} spin={fan.on && animate} />} />
       <StatusRow
         name="AUGER"
@@ -54,38 +34,20 @@ export function SystemStatus({
 }
 
 function StatusRow({ name, o, icon }: { name: string; o: OutputView; icon: ReactNode }) {
+  // Per-frame colours from deriveView; the row's box is in dashboard.css.
+  const vars = {
+    "--pf-out-edge": o.edge,
+    "--pf-out-color": o.color,
+    "--pf-out-dot": o.dot,
+  } as CSSProperties;
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
-        padding: "10px 14px",
-        background: "#1c1712",
-        borderRadius: 13,
-        border: `1px solid ${o.edge}`,
-      }}
-    >
-      <div style={{ width: 64, display: "flex", justifyContent: "center", alignItems: "center" }}>
-        {icon}
+    <div className="pf-dash-statusrow" style={vars}>
+      <div className="pf-dash-statusicon">{icon}</div>
+      <div className="pf-dash-statustext">
+        <div className="pf-dash-statusname">{name}</div>
+        <div className="pf-dash-statusstate">{o.status}</div>
       </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ font: "600 17px 'Barlow'", letterSpacing: 1.5, color: "#cfc6b8" }}>
-          {name}
-        </div>
-        <div style={{ font: "600 13px 'Barlow'", letterSpacing: 2, color: o.color }}>
-          {o.status}
-        </div>
-      </div>
-      <div
-        style={{
-          width: 9,
-          height: 9,
-          borderRadius: "50%",
-          background: o.dot,
-          boxShadow: `0 0 8px ${o.dot}`,
-        }}
-      />
+      <div className="pf-dash-statusdot" />
     </div>
   );
 }

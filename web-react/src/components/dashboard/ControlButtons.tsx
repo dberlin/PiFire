@@ -119,17 +119,7 @@ export function ControlButtons({
   };
 
   return (
-    <div
-      data-pf="controls"
-      style={{
-        display: "grid",
-        gridAutoFlow: "column",
-        gridAutoColumns: "1fr",
-        gap: 12,
-        height: 82,
-        flex: "0 0 82px",
-      }}
-    >
+    <div data-pf="controls" className="pf-dash-controls">
       {buttons.map((b) => {
         const danger = b.variant === "danger";
         const accent = b.variant === "accent";

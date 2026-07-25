@@ -135,77 +135,34 @@ export function Dashboard({
         data-animate={animate ? "true" : "false"}
         style={{ transform: `translate(-50%, -50%) scale(${scale})` }}
       >
-        <div
-          style={{
-            position: "absolute",
-            left: "50%",
-            bottom: -160,
-            transform: "translateX(-50%)",
-            width: 820,
-            height: 420,
-            borderRadius: "50%",
-            background: "radial-gradient(closest-side, var(--glow), transparent 70%)",
-            filter: "blur(14px)",
-            opacity: 0.28,
-            pointerEvents: "none",
-          }}
-        />
+        <div className="pf-dash-glow" />
 
         {/* The error/warning banners used to float here, over the stage. They
             are now shell chrome (components/shell/Banners.tsx) shown above
             every page, matching Flask, which renders them from base.html. */}
 
         {/* Header */}
-        <div
-          data-pf="header"
-          style={{
-            height: 58,
-            flex: "0 0 58px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "0 22px",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-            position: "relative",
-            zIndex: 2,
-          }}
-        >
-          <div data-pf="brand" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div data-pf="header" className="pf-dash-header">
+          <div data-pf="brand" className="pf-dash-brand">
             <div
-              style={{
-                width: 12,
-                height: 12,
-                borderRadius: "50%",
-                background: view.liveColor,
-                boxShadow: `0 0 10px ${view.liveColor}`,
-                animation: "pf-blink 2.4s ease-in-out infinite",
-              }}
+              className="pf-dash-dot"
+              style={{ "--pf-live-color": view.liveColor } as CSSProperties}
             />
-            <span style={{ font: "700 20px 'Barlow'", letterSpacing: 0.5, color: "#f4ede2" }}>
+            <span className="pf-dash-wordmark">
               Pi<span style={{ color: "var(--accent)" }}>Fire</span>
             </span>
-            <span
-              style={{
-                font: "600 12px 'Barlow'",
-                letterSpacing: 2,
-                color: "#7d7264",
-                textTransform: "uppercase",
-                paddingLeft: 8,
-                borderLeft: "1px solid rgba(255,255,255,0.08)",
-                marginLeft: 2,
-              }}
-            >
-              {dash.grillName}
-            </span>
+            <span className="pf-dash-grillname">{dash.grillName}</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <div className="pf-dash-headerright">
             <span
               data-pf="status"
-              style={{
-                font: "600 13px 'Barlow'",
-                letterSpacing: 1,
-                color: phase === "demo" ? "#7d7264" : health.alive ? "#8fe09a" : "#ff8b82",
-              }}
+              className="pf-dash-status"
+              style={
+                {
+                  "--pf-status-color":
+                    phase === "demo" ? "#7d7264" : health.alive ? "#8fe09a" : "#ff8b82",
+                } as CSSProperties
+              }
             >
               {phase === "demo" ? "DEMO" : health.alive ? "LIVE" : "CTRL OFFLINE"}
             </span>
@@ -219,17 +176,10 @@ export function Dashboard({
                 Recheck
               </button>
             )}
-            <span
-              data-pf="clock"
-              style={{
-                font: "600 22px 'Barlow Semi Condensed'",
-                color: "#cfc6b8",
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
+            <span data-pf="clock" className="pf-dash-clock">
               {clock}
             </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="pf-dash-tools">
               {ACCENTS.map((a) => (
                 <button
                   key={a}
@@ -257,41 +207,11 @@ export function Dashboard({
         </div>
 
         {/* Body */}
-        <div
-          data-pf="body"
-          style={{
-            flex: 1,
-            display: "flex",
-            gap: 16,
-            padding: "16px 18px 18px",
-            position: "relative",
-            zIndex: 1,
-            minHeight: 0,
-          }}
-        >
+        <div data-pf="body" className="pf-dash-body">
           {/* Left: food probes */}
           {view.hasProbes && (
-            <div
-              data-pf="probeCol"
-              style={{
-                width: 298,
-                flex: "0 0 298px",
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-                minHeight: 0,
-              }}
-            >
-              <div
-                data-pf="probeColTitle"
-                style={{
-                  font: "600 13px 'Barlow'",
-                  letterSpacing: 2.5,
-                  color: "#7d7264",
-                  textTransform: "uppercase",
-                  paddingLeft: 4,
-                }}
-              >
+            <div data-pf="probeCol" className="pf-dash-probecol">
+              <div data-pf="probeColTitle" className="pf-dash-caption pf-dash-coltitle">
                 Food Probes
               </div>
               {view.probes.map((p, i) => (
@@ -301,10 +221,7 @@ export function Dashboard({
           )}
 
           {/* Center: gauge + cook time + controls */}
-          <div
-            data-pf="centerCol"
-            style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}
-          >
+          <div data-pf="centerCol" className="pf-dash-centercol">
             <GrillGauge
               temp={dash.primaryProbe.temp}
               setpoint={dash.primaryProbe.setTemp}
@@ -317,78 +234,27 @@ export function Dashboard({
               animate={animate}
             />
 
-            <div
-              data-pf="cookRow"
-              style={{ display: "flex", gap: 14, height: 52, flex: "0 0 52px" }}
-            >
-              <div
-                data-pf="cookCard"
-                style={{
-                  flex: 1,
-                  background: "#2c231a",
-                  border: "1px solid rgba(255,255,255,0.13)",
-                  borderRadius: 14,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "0 20px",
-                }}
-              >
-                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                  <span
-                    style={{
-                      font: "600 12px 'Barlow'",
-                      letterSpacing: 2,
-                      color: "#7d7264",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    Cook Time
-                  </span>
+            <div data-pf="cookRow" className="pf-dash-cookrow">
+              <div data-pf="cookCard" className="pf-dash-card pf-dash-cookcard">
+                <div className="pf-dash-cooklabels">
+                  <span className="pf-dash-cookcaption">Cook Time</span>
                   {/* Flask's literal string, `s` suffix included
                       (_macro_dash_default.html:373). No MM:SS -- only the
                       integer is injected there. Rendered as a second line in
                       this card's existing label column so the 52px row keeps
                       its height. */}
                   {modeLeft !== null && (
-                    <span
-                      style={{
-                        font: "600 12px 'Barlow'",
-                        letterSpacing: 1,
-                        color: "#8fe09a",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Time Left in Mode: {modeLeft}s
-                    </span>
+                    <span className="pf-dash-modeleft">Time Left in Mode: {modeLeft}s</span>
                   )}
                 </div>
-                <span
-                  style={{
-                    font: "700 26px 'Barlow Semi Condensed'",
-                    fontVariantNumeric: "tabular-nums",
-                    color: "#cfc6b8",
-                  }}
-                >
-                  {cookTime}
-                </span>
+                <span className="pf-dash-cookval">{cookTime}</span>
               </div>
               {/* The primary probe gets a bell too: the Flask dashboard renders
                   the notify modal for probe_status['P'] as well as ['F']
                   (dash_default.html:36,53), so a target on the grill probe is
                   not a food-probe-only feature. The gauge column has no card
                   header to hang it on, so it sits beside the Cook Time card. */}
-              <div
-                style={{
-                  flex: "0 0 52px",
-                  background: "#2c231a",
-                  border: "1px solid rgba(255,255,255,0.13)",
-                  borderRadius: 14,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
+              <div className="pf-dash-card pf-dash-bellbox">
                 <NotifyBell
                   probeName={dash.primaryProbe.title}
                   on={dash.primaryProbe.targetReq}
@@ -396,35 +262,13 @@ export function Dashboard({
                 />
               </div>
               {view.lidOpen && (
-                <div
-                  style={{
-                    flex: "0 0 210px",
-                    borderRadius: 14,
-                    background: "rgba(255,90,77,0.14)",
-                    border: "1.5px solid #ff5a4d",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexDirection: "column",
-                    gap: 1,
-                    color: "#ff8b82",
-                    animation: "pf-blink 1s ease-in-out infinite",
-                  }}
-                >
-                  <span style={{ font: "700 16px 'Barlow'", letterSpacing: 2 }}>LID OPEN</span>
+                <div className="pf-dash-lid">
+                  <span className="pf-dash-lid-title">LID OPEN</span>
                   {/* Flask: "Lid Open Detected: PID Paused Ns"
                       (dash_default.js:397). Two lines inside the SAME 210x52
                       box -- the box is not widened. */}
                   {lidLeft !== null && (
-                    <span
-                      style={{
-                        font: "600 12px 'Barlow'",
-                        letterSpacing: 1,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      PID Paused {lidLeft}s
-                    </span>
+                    <span className="pf-dash-lid-sub">PID Paused {lidLeft}s</span>
                   )}
                 </div>
               )}
@@ -439,24 +283,14 @@ export function Dashboard({
           </div>
 
           {/* Right: system + pills + hopper */}
-          <div
-            data-pf="rightCol"
-            style={{
-              width: 300,
-              flex: "0 0 300px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-              minHeight: 0,
-            }}
-          >
+          <div data-pf="rightCol" className="pf-dash-rightcol">
             <SystemStatus
               fan={view.fan}
               auger={view.auger}
               igniter={view.igniter}
               animate={animate}
             />
-            <div data-pf="pills" style={{ display: "flex", gap: 14, height: 64, flex: "0 0 64px" }}>
+            <div data-pf="pills" className="pf-dash-pills">
               <Pill
                 p={view.pillL}
                 onClick={view.pModeEditable ? () => setPModeOpen(true) : undefined}
@@ -509,35 +343,24 @@ export function Dashboard({
 }
 
 function Pill({ p, onClick }: { p: PillView; onClick?: () => void }) {
-  // A <button> defaults to a different font, padding, border and background
-  // than a <div>, so every one of those is reset explicitly here -- the two
-  // variants must measure identically, which is exactly what the fidelity gate
-  // checks.
-  const box: CSSProperties = {
-    flex: 1,
-    borderRadius: 14,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 1,
-    background: p.bg,
-    border: `1.5px solid ${p.border}`,
-    font: "inherit",
-    padding: 0,
-    margin: 0,
-    textAlign: "center",
-    appearance: "none",
-  };
+  // The <button> and <div> variants share one class, so they measure
+  // identically -- which is exactly what the 1280x720 fidelity gate checks. The
+  // button reset (font/padding/margin/appearance) lives in .pf-dash-pill.
+  const vars = {
+    "--pf-pill-bg": p.bg,
+    "--pf-pill-border": p.border,
+    "--pf-pill-label-color": p.labelColor,
+    "--pf-pill-val-color": p.valColor,
+  } as CSSProperties;
   if (onClick !== undefined) {
     return (
-      <button type="button" style={{ ...box, cursor: "pointer" }} onClick={onClick}>
+      <button type="button" className="pf-dash-pill" style={vars} onClick={onClick}>
         <PillBody p={p} />
       </button>
     );
   }
   return (
-    <div style={box}>
+    <div className="pf-dash-pill" style={vars}>
       <PillBody p={p} />
     </div>
   );
@@ -546,26 +369,8 @@ function Pill({ p, onClick }: { p: PillView; onClick?: () => void }) {
 function PillBody({ p }: { p: PillView }) {
   return (
     <>
-      <span
-        style={{
-          font: "600 10px 'Barlow'",
-          letterSpacing: 1.5,
-          color: p.labelColor,
-          whiteSpace: "nowrap",
-        }}
-      >
-        {p.label}
-      </span>
-      <span
-        style={{
-          font: "800 24px 'Barlow Semi Condensed'",
-          color: p.valColor,
-          whiteSpace: "nowrap",
-          lineHeight: 1,
-        }}
-      >
-        {p.value}
-      </span>
+      <span className="pf-dash-pill-label">{p.label}</span>
+      <span className="pf-dash-pill-val">{p.value}</span>
     </>
   );
 }

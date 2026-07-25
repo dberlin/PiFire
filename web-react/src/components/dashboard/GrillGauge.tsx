@@ -38,33 +38,11 @@ export function GrillGauge({
   const glowAnim = cooking && animate ? "pf-glow 3.2s ease-in-out infinite" : "none";
 
   return (
-    <div
-      data-pf="gauge"
-      style={{
-        background: "#2c231a",
-        border: "1px solid rgba(255,255,255,0.13)",
-        borderRadius: 22,
-        flex: 1,
-        position: "relative",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          width: 360,
-          height: 360,
-          borderRadius: "50%",
-          background: "radial-gradient(closest-side, var(--accent), transparent 68%)",
-          opacity: 0.3,
-          filter: "blur(6px)",
-          animation: glowAnim,
-        }}
-      />
-      <svg width={392} height={392} viewBox="0 0 220 220" style={{ position: "relative" }}>
+    <div data-pf="gauge" className="pf-dash-card pf-dash-gauge">
+      <div className="pf-dash-gauge-glow" style={{ animation: glowAnim }} />
+      {/* No width/height attributes: the size is in dashboard.css so a
+          breakpoint can reach it. viewBox keeps the drawing coordinates. */}
+      <svg className="pf-dash-gauge-svg" viewBox="0 0 220 220">
         <defs>
           <linearGradient id="pfGauge" x1="0" y1="1" x2="1" y2="0">
             <stop offset="0" stopColor="var(--accent-2)" />
@@ -98,70 +76,14 @@ export function GrillGauge({
           />
         )}
       </svg>
-      <div
-        style={{
-          position: "absolute",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 2,
-        }}
-      >
-        <div
-          style={{
-            font: "600 14px 'Barlow'",
-            letterSpacing: 4,
-            color: "#7d7264",
-            textTransform: "uppercase",
-          }}
-        >
-          Grill
+      <div className="pf-dash-gauge-overlay">
+        <div className="pf-dash-gauge-caption">Grill</div>
+        <div className="pf-dash-gauge-num">
+          <span className="pf-dash-gauge-temp">{Math.round(temp)}</span>
+          <span className="pf-dash-gauge-unit">°{units}</span>
         </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            fontFamily: "'Barlow Semi Condensed'",
-            fontVariantNumeric: "tabular-nums",
-            lineHeight: 0.9,
-          }}
-        >
-          <span style={{ fontSize: 112, fontWeight: 800, color: "#f8f2e8" }}>
-            {Math.round(temp)}
-          </span>
-          <span style={{ fontSize: 40, fontWeight: 600, color: "#8a7f70", marginLeft: 4 }}>
-            °{units}
-          </span>
-        </div>
-        {hasSetpoint && (
-          <div
-            style={{
-              font: "600 20px 'Barlow'",
-              letterSpacing: 1,
-              color: "#6cc8ff",
-              marginTop: 2,
-              whiteSpace: "nowrap",
-            }}
-          >
-            SET {Math.round(setpoint)}°
-          </div>
-        )}
-        <div
-          style={{
-            marginTop: 12,
-            padding: "6px 20px",
-            borderRadius: 999,
-            background: "color-mix(in srgb, var(--accent) 14%, transparent)",
-            border: "1.5px solid color-mix(in srgb, var(--accent) 55%, transparent)",
-            font: "700 17px 'Barlow'",
-            letterSpacing: 3,
-            color: "var(--accent)",
-            textTransform: "uppercase",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {modeLabel}
-        </div>
+        {hasSetpoint && <div className="pf-dash-gauge-set">SET {Math.round(setpoint)}°</div>}
+        <div className="pf-dash-gauge-mode">{modeLabel}</div>
       </div>
     </div>
   );
