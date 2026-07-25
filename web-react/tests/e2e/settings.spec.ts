@@ -134,6 +134,58 @@ test("invalid settings_update delta is rejected atomically with a dotted-path er
   expect(afterBody.settings?.safety?.maxtemp).toBe(originalMaxtemp);
 });
 
+test("a save the backend rejects is shown inline on the tab and writes nothing", async ({
+  page,
+}) => {
+  // Read the live pwm section: the e2e suite shares one store, so the values
+  // here are whatever an earlier test left behind, not the schema defaults.
+  const beforeRes = await page.request.get("/api/settings");
+  expect(beforeRes.ok()).toBeTruthy();
+  const beforeBody = (await beforeRes.json()) as {
+    settings?: {
+      pwm?: {
+        min_duty_cycle?: number;
+        max_duty_cycle?: number;
+        profiles?: { duty_cycle: number }[];
+      };
+    };
+  };
+  const pwm = beforeBody.settings?.pwm;
+  const originalMin = pwm?.min_duty_cycle;
+  expect(originalMin).not.toBeUndefined();
+  const dutyCycles = (pwm?.profiles ?? []).map((p) => p.duty_cycle);
+  expect(dutyCycles.length).toBeGreaterThan(0);
+  const lowestDuty = Math.min(...dutyCycles);
+  // One above the lowest profile duty cycle, so PwmSettings._check_profiles
+  // must reject the merged tree. The tab neither clamps nor guards this.
+  const rejectedMin = lowestDuty + 1;
+  expect(rejectedMin).toBeLessThanOrEqual(pwm?.max_duty_cycle ?? 100);
+
+  await page.goto("/settings/pwm");
+  const minField = page.getByLabel("Min Duty Cycle");
+  await expect(minField).toBeVisible();
+  await minField.fill(String(rejectedMin));
+  await page.getByRole("button", { name: "Save" }).click();
+
+  // The whole point of this plan: the rejection is HTTP 200, so without the
+  // inline message the user would see nothing at all.
+  const alert = page.getByRole("alert");
+  await expect(alert).toBeVisible({ timeout: 10000 });
+  await expect(alert).toContainText("duty_cycle");
+  await expect(page.getByText("Saved ✓")).not.toBeVisible();
+
+  // The refused value stays on screen so the user can correct it...
+  await expect(page.getByLabel("Min Duty Cycle")).toHaveValue(String(rejectedMin));
+  // ...but nothing reached the store: write_settings() is atomic. Nothing to
+  // restore -- the failure path is the one under test.
+  const afterRes = await page.request.get("/api/settings");
+  expect(afterRes.ok()).toBeTruthy();
+  const afterBody = (await afterRes.json()) as {
+    settings?: { pwm?: { min_duty_cycle?: number } };
+  };
+  expect(afterBody.settings?.pwm?.min_duty_cycle).toBe(originalMin);
+});
+
 test("controller tab shows the live controller and PB round-trips, cross-checked via /api/settings", async ({
   page,
 }) => {
