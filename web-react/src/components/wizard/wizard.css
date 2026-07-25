@@ -473,3 +473,124 @@
 .pf-wizard .pf-field-column > .pf-discovery-group-items {
   margin-top: 8px;
 }
+
+/* ---- install progress ---- */
+/* This replaces the whole step body once /finish succeeds, and WizardShell hides
+   the footer at the same time -- there is nothing to go back to, the installer
+   is running detached. */
+.pf-install-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 48px 0;
+  text-align: center;
+}
+.pf-install-progress-status {
+  margin: 0;
+  color: var(--text);
+  font: 700 22px "Barlow";
+}
+.pf-install-progress-track {
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--pill-radius);
+  background: var(--inset);
+  overflow: hidden;
+}
+@keyframes pf-install-stripes {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 28px 0;
+  }
+}
+/* Flask's progress-bar-striped progress-bar-animated (wizard-finish.html),
+   rebuilt on the accent token. The width comes from the one legitimate inline
+   style in this whole surface (InstallProgress). */
+.pf-install-progress-bar {
+  height: 100%;
+  background-color: var(--accent);
+  background-image: linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0.22) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.22) 50%,
+    rgba(255, 255, 255, 0.22) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 28px 28px;
+  animation: pf-install-stripes 900ms linear infinite;
+  transition: width 200ms var(--ease-out-cubic);
+}
+/* Applied by InstallProgress from a one-shot matchMedia read. Kept because it
+   documents the component's intent and works where the media query is
+   unsupported -- but the media query below is the one that always holds,
+   because the component never re-reads the preference. */
+.pf-install-progress-bar-reduced-motion {
+  animation: none;
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pf-install-progress-bar {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* ---- modals ---- */
+/* Three role="dialog" aria-modal="true" elements ship as bare <div>s with NO
+   backdrop element of their own (WizardShell, InstallProgress) -- unlike the
+   dashboard, which wraps .pf-modal in a .pf-modal-scrim div. This plan changes
+   no markup, so each dialog paints its own scrim.
+   NOT with ::before { z-index: -1 }: a position:fixed element with a z-index
+   forms a stacking context, and CSS paints negative-z descendants AFTER that
+   element's own background -- the scrim would tint the card itself. A spread
+   box-shadow paints strictly OUTSIDE the border box, and being ink rather than
+   layout it cannot create a scrollbar. */
+.pf-wizard-modal,
+.pf-install-reboot-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 20;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  min-width: 320px;
+  max-width: 480px;
+  padding: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--card-radius);
+  background: var(--card);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 100vmax rgba(0, 0, 0, 0.6);
+  text-align: center;
+}
+.pf-wizard-modal > p,
+.pf-install-reboot-message {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--text);
+  font: 500 15px "Barlow";
+  line-height: 1.6;
+}
+.pf-install-reboot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+/* The only one of the three that appears over a step the user can still act on
+   (a 409 from /finish while the grill is running). A red edge marks it as a
+   block, not a note. */
+.pf-wizard-system-active-modal {
+  border-color: color-mix(in srgb, #ff5a4d 55%, transparent);
+}
