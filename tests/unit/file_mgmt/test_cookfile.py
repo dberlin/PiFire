@@ -132,19 +132,29 @@ _PROBE_CONFIG = {
 }
 
 
-def test_prepare_chartdata_empty_history_returns_single_placeholder_point(ds):
+def test_prepare_chartdata_empty_history_returns_empty_series(ds):
     """With no rows in the datastore and `history=None` (the default),
-    `read_history()` comes back `[]`, taking the `list_length == 0` branch
-    (cookfile.py:430-439): a single now()-timestamped point of value 0 per
-    probe/target/primarysp series, instead of a real series."""
+    `read_history()` comes back `[]`, taking the `list_length == 0` branch.
+
+    This used to fabricate a single now()-timestamped point of value 0 per
+    series. It no longer does, and that is the point of this test: a 0 stamped
+    at "now" is a temperature reading that was never taken, and a consumer has
+    no way to tell it apart from a real 0. It also made `data` two different
+    element types -- {"x", "y"} objects on the populated branch, bare ints
+    here -- which Chart.js happens to tolerate and a typed client does not.
+    Empty lists say "no data" honestly.
+    """
     result = prepare_chartdata(_PROBE_CONFIG, num_items=10, reduce=True, data_points=60)
 
-    assert len(result["time_labels"]) == 1
+    assert result["time_labels"] == []
     probe_mapper = result["probe_mapper"]
-    assert result["chart_data"][probe_mapper["probes"]["grill1"]]["data"] == [0]
-    assert result["chart_data"][probe_mapper["targets"]["grill1"]]["data"] == [0]
-    assert result["chart_data"][probe_mapper["primarysp"]["grill1"]]["data"] == [0]
-    assert result["chart_data"][probe_mapper["probes"]["probe1"]]["data"] == [0]
+    assert result["chart_data"][probe_mapper["probes"]["grill1"]]["data"] == []
+    assert result["chart_data"][probe_mapper["targets"]["grill1"]]["data"] == []
+    assert result["chart_data"][probe_mapper["primarysp"]["grill1"]]["data"] == []
+    assert result["chart_data"][probe_mapper["probes"]["probe1"]]["data"] == []
+    # The datasets themselves still exist -- only their points are empty, so a
+    # chart keeps its legend/colors and simply draws nothing.
+    assert result["chart_data"][probe_mapper["probes"]["grill1"]]["label"] == "Grill"
     # probe1 is "Food" type -- no primarysp entry created for it at all.
     assert "probe1" not in probe_mapper["primarysp"]
 

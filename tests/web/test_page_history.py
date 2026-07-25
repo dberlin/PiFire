@@ -238,8 +238,15 @@ def test_refresh_persists_minutes_and_returns_chart_shape(live_server, page):
     # (Primary probes also get a 3rd "Set Point" series -- see
     # file_mgmt/cookfile.py's prepare_chartdata()).
     assert len(body["chart_data"]) >= 2
+    assert body["time_labels"] == []
     for series in body["chart_data"]:
-        # prepare_chartdata()'s "no history yet" fallback (list_length == 0)
-        # emits a single synthetic zero-value point per series rather than
-        # an empty list, so charts still render a flat baseline.
-        assert series["data"] == [0]
+        # prepare_chartdata()'s "no history yet" branch (list_length == 0)
+        # returns EMPTY point lists. It used to emit one synthetic zero-value
+        # point per series so Chart.js drew a flat baseline -- but that
+        # baseline was a temperature reading nobody took, indistinguishable
+        # from a real 0. history.js assigns time_labels/chart_data straight
+        # into Chart.js (see blueprints/history/static/history/js/history.js
+        # around line 240), so empty arrays render an empty chart instead.
+        assert series["data"] == []
+        # The dataset itself survives -- legend and colors intact, no points.
+        assert series["label"]

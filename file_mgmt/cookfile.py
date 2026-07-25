@@ -462,16 +462,14 @@ def prepare_chartdata(
                 )
 
             time_labels.append(history["T"][index])
-    else:
-        now = datetime.datetime.now()
-        time_now = int(now.timestamp() * 1000)  # Use timestamp format * 1000 for JavaScript usages
-        time_labels.append(time_now)
-        for key in probe_mapper["probes"].keys():
-            chart_data[probe_mapper["probes"][key]]["data"].append(0)
-        for key in probe_mapper["targets"].keys():
-            chart_data[probe_mapper["targets"][key]]["data"].append(0)
-        for key in probe_mapper["primarysp"].keys():
-            chart_data[probe_mapper["primarysp"][key]]["data"].append(0)
+    # No history: return empty series. This used to fabricate one point per
+    # probe -- a literal 0 stamped at "now" -- which drew a reading that was
+    # never taken, the same failure mode as the every-Nth decimation this
+    # module now avoids. It also made `data` two different element types
+    # ({"x", "y"} objects normally, bare ints here), which Chart.js tolerates
+    # and a typed client cannot. Empty lists say "no data" honestly; both
+    # Chart.js consumers assign time_labels/chart_data straight through and
+    # render an empty chart.
 
     """ Create data structure to return """
     data_blob = {
