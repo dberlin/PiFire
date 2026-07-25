@@ -1073,10 +1073,15 @@ def test_timer_start_hardcodes_origin_app(seeded):
 # absolute end itself hands over a value from a different clock, and a browser
 # running behind the Pi therefore arms an ALREADY-EXPIRED timer -- which, with
 # 'shutdown' ticked, shuts the grill down mid-cook. So the client sends a
-# DURATION and the server does the arithmetic. Both expiry flags ride along in
-# the same write_control() call because they cannot be sent separately:
-# json_patch (RFC 7396) replaces the notify_data ARRAY wholesale, so a later
-# write undoes an earlier one's flags.
+# DURATION and the server does the arithmetic. It also refuses what the bare
+# `start` form accepts: a non-numeric, zero or negative duration, and a paused
+# timer.
+#
+# It was ALSO built to force a single control write, because a split write used
+# to lose the earlier half. That reason is gone -- the drain three-way merges
+# each queued patch against the blob as it stood when it began
+# (common/common.py::reduce_control_patch, ::merge_notify_data) -- and the form
+# is kept on the reasons above, which are independent of the write seam.
 # ---------------------------------------------------------------------------
 
 
@@ -1112,14 +1117,17 @@ def test_timer_start_with_options_computes_end_from_the_server_clock(seeded):
 def test_timer_start_with_options_sets_both_flags_in_the_same_write(seeded):
     """One write_control, carrying the countdown AND both expiry flags.
 
-    Two writes is the bug this form closes: each web-process write queues the
-    whole control dict read from a blob that does not reflect the queue, so the
-    second carries a stale copy of everything the first changed. The drain now
-    three-way merges notify_data (common/common.py::merge_notify_data), which
-    protects the two expiry FLAGS; control['timer'] is a plain object whose
-    keys json_patch still overwrites from the stale read, so the countdown
-    itself is still only safe in a single write. Keeping this form single-write
-    keeps both halves correct.
+    Two writes used to be the bug this form closed: each web-process write
+    queues the whole control dict read from a blob that does not reflect the
+    queue, so the second carried a stale copy of everything the first changed.
+    The drain now reduces each patch against the blob as it stood when it began
+    and merges notify_data element-wise (common/common.py::reduce_control_patch,
+    ::merge_notify_data), so a split arm survives too -- see
+    test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer.
+
+    This test pins the SHAPE, which is still the right one for the reasons in
+    the section header (server-computed end, input rejections): one gesture,
+    one queued patch, both halves of it applied.
     """
     for shutdown, keep_warm, options in (
         (False, False, "none"),
@@ -1143,15 +1151,17 @@ def test_timer_start_with_options_sets_both_flags_in_the_same_write(seeded):
         assert entry["keep_warm"] is keep_warm, f"options={options}"
         assert entry["req"] is True
         assert queued[0]["timer"]["end"] == FIXED_NOW + 600
-        # The flags are not merely queued -- they survive the json_patch apply.
+        # The flags are not merely queued -- they survive the drain.
         dsa.execute_control_writes()
         applied = _timer_entry(dsa.read_control())
         assert (applied["shutdown"], applied["keep_warm"]) == (shutdown, keep_warm), f"options={options}"
 
 
 def test_timer_start_with_options_leaves_the_other_notifications_alone(seeded):
-    """notify_data goes back whole: json_patch replaces the array, so a partial
-    one would delete every probe notification the user has armed."""
+    """notify_data goes back whole: an entry the incoming array omits is treated
+    as a DELETION (common/common.py::merge_notify_data, matching the json_patch
+    array replacement it replaced), so a partial one would delete every probe
+    notification the user has armed."""
     control = dsa.read_control()
     grill = next(obj for obj in control["notify_data"] if obj["label"] == "Grill" and obj["type"] == "probe")
     grill["req"] = True
@@ -1254,8 +1264,10 @@ def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
     """Other clients still set the flags one at a time; those paths stay.
 
     Note the `execute_control_writes()` inside the loop: each command is given a
-    control cycle of its own. That is the only way these paths are safe -- see
-    the two tests below.
+    control cycle of its own, so this pins the flags themselves rather than any
+    cross-writer interaction. Sharing a cycle with another writer is now safe
+    for the FLAGS (the notify_data element merge) -- see the two tests below for
+    what sharing a cycle does and does not still cost.
     """
     for command, key in (("shutdown", "shutdown"), ("keep_warm", "keep_warm")):
         for arg, expected in (("true", True), ("false", False)):
@@ -1287,12 +1299,21 @@ def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
 # test_a_reset_to_the_ancestor_value_cannot_be_distinguished_from_silence.
 # Closing it requires writers to express deltas rather than whole states.
 #
-# The single-write client forms below are therefore no longer load-bearing for
-# correctness -- but they are still the better shape (one user gesture, one
-# write, no reliance on merge subtleties) and are deliberately left in place.
-# That includes /api/set/timer/start/{seconds}/{options} and web-react's timer
-# bar refusing a second write until the socket has republished the first
-# (web-react/src/components/shell/TimerBar.tsx).
+# One more case is NOT closed, and it is the reason the timer UI still refuses
+# a second write until the socket republishes
+# (web-react/src/components/shell/TimerBar.tsx). control['timer'] is reduced
+# WHOLE rather than member-by-member (common.common.CONTROL_COUPLED_MEMBERS),
+# so two writers that BOTH compute a timer state still resolve last-wins on the
+# whole object. Stop-then-pause and stop-then-resume are exactly that pair, and
+# both buttons are on screen together while a timer runs:
+# test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer and
+# test_a_resume_after_a_stop_in_one_cycle_resurrects_the_timer below still show
+# a stopped countdown coming back. The expiry FLAGS no longer come back with it,
+# which is the sharp end of the old bug, but the countdown does.
+#
+# /api/set/timer/start/{seconds}/{options} is a different case: its single-write
+# rationale IS obsolete, and it is kept on its independent ones (server-computed
+# end, input rejections) -- see the section header above.
 # ---------------------------------------------------------------------------
 
 
@@ -1386,6 +1407,54 @@ def test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer(seeded):
 
     after = dsa.read_control()
     assert after["timer"] == {"start": 0, "paused": 0, "end": 0}
+    assert _timer_entry(after)["shutdown"] is False
+
+
+def test_a_resume_after_a_stop_in_one_cycle_resurrects_the_timer(seeded):
+    """stop + resume, undrained: the other reachable pair, same outcome.
+
+    The paused bar renders Resume and Stop together, so this is as ordinary a
+    pair of clicks as stop-then-pause. Resume is the bare `start` form, which
+    on a paused timer takes the unpause branch: it reads the pre-stop blob,
+    shifts `end` forward and clears `paused`. That is a timer state the writer
+    computed, so the coupled reduction keeps it whole and it lands after the
+    stop's zeros.
+
+    Pinned so that a future attempt to drop the client-side one-write-per-gesture
+    guard (web-react/src/components/shell/TimerBar.tsx) fails here rather than
+    on a grill.
+    """
+    control = dsa.read_control()
+    control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+    _timer_notify(shutdown=True, keep_warm=False)(control)
+    _timer_entry(control)["req"] = True
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    c.SqliteQueue("queue_control_write").flush()
+
+    with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
+        api_commands.process_command(action="set", arglist=["timer", "stop"], origin="api")
+        api_commands.process_command(action="set", arglist=["timer", "start", "500"], origin="api")
+    dsa.execute_control_writes()
+
+    after = dsa.read_control()
+    assert after["timer"] == {"start": 1000.0, "paused": 0, "end": 2000.0 - 1500.0 + FIXED_NOW}
+    # As with the pause pair, the expiry action the stop disarmed stays disarmed.
+    assert _timer_entry(after)["shutdown"] is False
+
+    # One cycle apart -- the same clicks -- and the stop is honoured: the resume
+    # reads the stopped blob, sees paused == 0, and arms a fresh 500s timer.
+    control = dsa.read_control()
+    control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
+        api_commands.process_command(action="set", arglist=["timer", "stop"], origin="api")
+        dsa.execute_control_writes()
+        assert dsa.read_control()["timer"] == {"start": 0, "paused": 0, "end": 0}
+        api_commands.process_command(action="set", arglist=["timer", "start", "500"], origin="api")
+        dsa.execute_control_writes()
+
+    after = dsa.read_control()
+    assert after["timer"] == {"start": FIXED_NOW, "paused": 0, "end": FIXED_NOW + 500}
     assert _timer_entry(after)["shutdown"] is False
 
 
