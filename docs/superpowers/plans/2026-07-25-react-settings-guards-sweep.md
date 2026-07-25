@@ -291,6 +291,11 @@ settings tab (`UnitsTab.tsx:5, 62-67`). Its CSS (`pf-modal-scrim` / `pf-modal-ti
 `pf-modal-actions`, `dashboard.css:165, 183, 218`) is globally imported at `main.tsx:5`, so it works
 from `components/settings/` with no CSS work.
 
+**It now also takes an optional `message` prop** (`ConfirmAction.tsx:4-7, 18`), added by the wizard
+slice for cascade copy, with the source note *"`.pf-modal-title` is a bold, centred 20px headline,
+so a second sentence does not belong up there."* Use `title` for the question and `message` for the
+consequence; do not stuff both into `title`.
+
 ### Two findings that do NOT hold — dropped with evidence
 
 1. **Controller `option['hidden']` rows.** `_macro_settings.html:47` renders
@@ -682,8 +687,10 @@ and do not invent a bound that appears in neither Flask nor the schema.**
 
 **Files:** Modify `NotificationsTab.tsx` + `.test.tsx`, `fields/StringListField.tsx` + `.test.tsx`.
 
-Reuse `components/dashboard/ConfirmAction.tsx` exactly as `UnitsTab.tsx:5, 62-67` does. No new CSS —
-its classes live in the globally-imported `dashboard.css`.
+Reuse `components/dashboard/ConfirmAction.tsx` exactly as `UnitsTab.tsx:5, 62-67` does, using its
+`message` prop for the consequence sentence. No new CSS — its classes live in the globally-imported
+`dashboard.css`. **Check `ConfirmAction.tsx` for a `.pf-modal-message` rule before assuming it is
+styled**; the prop was added by the wizard slice and the class may not have a rule yet.
 
 - [ ] **Step 1: Write failing tests.**
       - OneSignal: clicking Delete shows a dialog naming the device (`friendly_name` when set,

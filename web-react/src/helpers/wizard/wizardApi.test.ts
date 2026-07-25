@@ -33,6 +33,31 @@ describe("wizardApi", () => {
     expect((call[1] as RequestInit).method).toBe("POST");
   });
 
+  test("cancelWizard posts /api/wizard/cancel and returns ok status", async () => {
+    globalThis.fetch = rs.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ result: "success" }),
+    }) as never;
+    const { cancelWizard } = await import("./wizardApi");
+    const ok = await cancelWizard("");
+    expect(ok).toBe(true);
+    const call = (globalThis.fetch as ReturnType<typeof rs.fn>).mock.calls[0];
+    expect(call[0]).toContain("/api/wizard/cancel");
+    expect((call[1] as RequestInit).method).toBe("POST");
+  });
+
+  test("cancelWizard reports a failed cancel as false rather than throwing", async () => {
+    // The caller uses this to decide whether it is safe to navigate away: a
+    // false must keep the user in the wizard, because globals.first_time_setup
+    // is still set and the dashboard would bounce them straight back.
+    globalThis.fetch = rs
+      .fn()
+      .mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }) as never;
+    const { cancelWizard } = await import("./wizardApi");
+    expect(await cancelWizard("")).toBe(false);
+  });
+
   test("scan posts /api/wizard/scan and returns parsed JSON", async () => {
     const fake = {
       groups: [{ title: "By Bus", items: [{ value: "1", label: "i2c-1" }] }],

@@ -26,6 +26,21 @@ export async function saveDraft(baseUrl: string, working: WizardWorking): Promis
   return r.ok;
 }
 
+/** Leave the wizard without installing anything. The route clears
+ * `globals.first_time_setup`, which is what stops DashboardRoute's post-mount
+ * check from bouncing the user straight back to /wizard. Returns the response's
+ * ok-ness rather than throwing: a false must keep the caller in the wizard,
+ * because the flag is then still set and navigating away would loop. Leaves the
+ * draft alone -- flush it with saveDraft() first if it should survive. */
+export async function cancelWizard(baseUrl: string): Promise<boolean> {
+  const r = await fetch(url(baseUrl, "cancel"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  return r.ok;
+}
+
 export async function scan(
   baseUrl: string,
   body: { kind: string; vid?: number; pid?: number },

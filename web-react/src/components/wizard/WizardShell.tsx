@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useLoaderData } from "react-router";
-import { finishWizard, saveDraft } from "../../helpers/wizard/wizardApi";
+import { useLoaderData, useNavigate } from "react-router";
+import { cancelWizard, finishWizard, saveDraft } from "../../helpers/wizard/wizardApi";
 import { BASE_URL } from "../../helpers/wizard/wizardRoutes";
 import { initialWorking } from "../../helpers/wizard/wizardState";
 import type { WizardState, WizardWorking } from "../../helpers/wizard/wizardTypes";
@@ -63,6 +63,9 @@ export function WizardShell() {
   const [step, setStep] = useState(0);
   const [finishState, setFinishState] = useState<FinishResult | null>(null);
   const [finishing, setFinishing] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  const [exitError, setExitError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const currentStep = STEPS[step];
   // Belt-and-suspenders with the server's 409 (system_active): the server is
@@ -87,6 +90,33 @@ export function WizardShell() {
 
   function handleNext() {
     void goToStep(step + 1);
+  }
+
+  async function handleExit() {
+    setExiting(true);
+    // Save first, cancel second. The welcome step promises the progress is
+    // kept, and the draft has to be persisted before the flag that brought the
+    // user here is cleared. Best-effort, like goToStep's flush: a failed save
+    // must not trap the user in a wizard they asked to leave.
+    try {
+      await saveDraft(BASE_URL, working);
+    } catch (err) {
+      console.warn("Wizard: failed to save draft on exit", err);
+    }
+    const ok = await cancelWizard(BASE_URL);
+    setExiting(false);
+    if (!ok) {
+      // globals.first_time_setup is still set, so DashboardRoute would bounce
+      // us right back here -- staying put with a visible error is the only
+      // honest outcome.
+      setExitError("Couldn't leave setup — please try again.");
+      return;
+    }
+    setExitError(null);
+    // /api/wizard/cancel has cleared globals.first_time_setup, so
+    // DashboardRoute's post-mount check (DashboardRoute.tsx:26-38) will NOT
+    // send us straight back. Navigating without that clear would loop.
+    navigate("/");
   }
 
   async function handleFinish() {
@@ -156,8 +186,8 @@ export function WizardShell() {
             <h2 className="pf-wizard-step-title">Welcome</h2>
             <p>
               This wizard walks through configuring PiFire's hardware modules — grill platform,
-              probes, display, and distance/hopper sensing. You can leave at any point; your
-              progress is saved as a draft.
+              probes, display, and distance/hopper sensing. Use <strong>Exit Setup</strong> to leave
+              at any point; your progress is saved as a draft and picked up next time.
             </p>
           </div>
         );
@@ -202,7 +232,24 @@ export function WizardShell() {
             </span>
           ))}
         </div>
+        {/* In the chrome rather than the footer so the way out is reachable
+            from every step. Suppressed once the install is running (the same
+            signal that hides Back/Next): the installer runs detached in its
+            own process, so there would be nothing to cancel -- clearing
+            first_time_setup mid-install would just drop the user on a
+            dashboard whose hardware config is still being rewritten. */}
+        {!hideFooter && (
+          <button
+            type="button"
+            className="pf-btn pf-wizard-exit"
+            disabled={exiting}
+            onClick={() => void handleExit()}
+          >
+            {exiting ? "Leaving…" : "Exit Setup"}
+          </button>
+        )}
       </header>
+      {exitError && <p className="pf-wizard-finish-error">{exitError}</p>}
       <main className="pf-wizard-content">{renderStepBody()}</main>
       {!hideFooter && (
         <footer className="pf-wizard-footer">

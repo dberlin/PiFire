@@ -9,6 +9,7 @@ const finishWizardMock = rs.fn();
 const getInstallStatusMock = rs.fn();
 const scanMock = rs.fn();
 const fetchModuleValuesMock = rs.fn();
+const cancelWizardMock = rs.fn();
 
 rs.mock("../../helpers/wizard/wizardApi", () => ({
   getWizardState: (...args: unknown[]) => getWizardStateMock(...args),
@@ -17,6 +18,7 @@ rs.mock("../../helpers/wizard/wizardApi", () => ({
   getInstallStatus: (...args: unknown[]) => getInstallStatusMock(...args),
   scan: (...args: unknown[]) => scanMock(...args),
   fetchModuleValues: (...args: unknown[]) => fetchModuleValuesMock(...args),
+  cancelWizard: (...args: unknown[]) => cancelWizardMock(...args),
 }));
 
 const { WizardShell } = await import("./WizardShell");
@@ -28,6 +30,7 @@ afterEach(() => {
   getInstallStatusMock.mockReset();
   scanMock.mockReset().mockResolvedValue({ groups: [], error: null });
   fetchModuleValuesMock.mockReset().mockResolvedValue({ settings: {}, config: {} });
+  cancelWizardMock.mockReset().mockResolvedValue(true);
   saveDraftMock.mockResolvedValue(true);
   getInstallStatusMock.mockResolvedValue({ percent: 0, status: "Starting install…", output: "" });
 });
@@ -64,6 +67,10 @@ function renderShell(state: WizardState) {
         element: <WizardShell />,
         loader: () => state,
       },
+      // Exit Setup navigates here; without a matching route react-router has
+      // nothing to render and the assertions below couldn't tell a successful
+      // navigation apart from a silently swallowed one.
+      { path: "/", element: <div>dashboard</div> },
     ],
     { initialEntries: ["/wizard"] },
   );
@@ -267,6 +274,86 @@ describe("WizardShell", () => {
         "The selected I2C bus configuration conflicts — resolve it before finishing.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("offers an Exit Setup control from the wizard chrome, on the very first step", async () => {
+    renderShell(fixtureState());
+    await screen.findByRole("heading", { name: "Welcome" });
+
+    expect(screen.getByRole("button", { name: "Exit Setup" })).toBeInTheDocument();
+  });
+
+  it("Exit Setup saves the draft BEFORE cancelling, then lands on the dashboard", async () => {
+    const order: string[] = [];
+    saveDraftMock.mockImplementation(async () => {
+      order.push("saveDraft");
+      return true;
+    });
+    cancelWizardMock.mockImplementation(async () => {
+      order.push("cancelWizard");
+      return true;
+    });
+    renderShell(fixtureState());
+    await screen.findByRole("heading", { name: "Welcome" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Exit Setup" }));
+
+    expect(await screen.findByText("dashboard")).toBeInTheDocument();
+    // The welcome copy promises the progress is kept, and the cancel route
+    // clears globals.first_time_setup -- so the draft has to be persisted
+    // first or leaving would silently discard it.
+    expect(order).toEqual(["saveDraft", "cancelWizard"]);
+    expect(cancelWizardMock).toHaveBeenCalledWith("");
+  });
+
+  it("still leaves when the pre-exit draft flush rejects (the flush is best-effort)", async () => {
+    saveDraftMock.mockRejectedValueOnce(new Error("network error"));
+    renderShell(fixtureState());
+    await screen.findByRole("heading", { name: "Welcome" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Exit Setup" }));
+
+    expect(await screen.findByText("dashboard")).toBeInTheDocument();
+    expect(cancelWizardMock).toHaveBeenCalled();
+  });
+
+  it("a failed cancel keeps the user in the wizard and says so", async () => {
+    // globals.first_time_setup is still set on the server, so navigating away
+    // would be bounced straight back by DashboardRoute -- staying put with a
+    // visible error is the only honest outcome.
+    cancelWizardMock.mockResolvedValue(false);
+    renderShell(fixtureState());
+    await screen.findByRole("heading", { name: "Welcome" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Exit Setup" }));
+
+    expect(await screen.findByText("Couldn't leave setup — please try again.")).toBeInTheDocument();
+    expect(screen.queryByText("dashboard")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Welcome" })).toBeInTheDocument();
+  });
+
+  it("the welcome copy names the control that exists instead of an unqualified promise", async () => {
+    const { container } = renderShell(fixtureState());
+    await screen.findByRole("heading", { name: "Welcome" });
+
+    const welcome = container.querySelector('[data-step="welcome"]');
+    expect(welcome).not.toBeNull();
+    expect(welcome?.textContent).toContain("Exit Setup");
+    // The shipped sentence asserted a capability the UI did not have. It must
+    // not come back in that unqualified form.
+    expect(welcome?.textContent).not.toContain("You can leave at any point");
+  });
+
+  it("hides Exit Setup once an install is running — cancelling can't stop the installer", async () => {
+    renderShell(fixtureState());
+    await screen.findByRole("heading", { name: "Welcome" });
+    await advanceToFinish();
+    finishWizardMock.mockResolvedValue({ ok: true, status: 200 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(await screen.findByRole("progressbar")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Exit Setup" })).not.toBeInTheDocument();
   });
 
   it("disables Finish and shows a note when control_mode is not Stop", async () => {
