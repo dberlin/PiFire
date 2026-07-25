@@ -125,12 +125,26 @@ def test_autotune_uses_queue(ds):
     assert c.read_autotune() == []
 
 
-def test_warnings_read_and_clear_matches_oracle(ds, oracle):
+def test_warnings_drain_and_clear_matches_oracle(ds, oracle):
+    # The oracle pinned the Valkey accessor's read-AND-burn behavior. That
+    # behavior now lives in drain_warnings(); read_warnings() is a plain read
+    # (see the next test and tests/web/test_warnings_cross_consumer.py for
+    # why it had to stop consuming). The fixture is unchanged -- only the
+    # function that still owns those semantics.
     exp = oracle("warnings")
     c.write_warning("first")
     c.write_warning("second")
-    assert c.read_warnings() == exp["read1"]
-    assert c.read_warnings() == exp["read2_after_clear"]
+    assert c.drain_warnings() == exp["read1"]
+    assert c.drain_warnings() == exp["read2_after_clear"]
+
+
+def test_read_warnings_does_not_consume(ds):
+    c.write_warning("first")
+    c.write_warning("second")
+    assert c.read_warnings() == ["first", "second"]
+    assert c.read_warnings() == ["first", "second"]
+    assert c.drain_warnings() == ["first", "second"]
+    assert c.read_warnings() == []
 
 
 def test_connected_users_add_remove(ds):

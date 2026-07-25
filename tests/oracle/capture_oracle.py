@@ -61,7 +61,10 @@ def scenario_warnings():
     c.cmdsts.delete("warnings")
     datastore_accessors.write_warning("first")
     datastore_accessors.write_warning("second")
-    return {"read1": datastore_accessors.read_warnings(), "read2_after_clear": datastore_accessors.read_warnings()}
+    # drain_warnings() carries the read-AND-burn semantics the original
+    # accessor had; read_warnings() is now a plain read, so capturing with it
+    # would no longer reproduce the committed fixtures/warnings.json.
+    return {"read1": datastore_accessors.drain_warnings(), "read2_after_clear": datastore_accessors.drain_warnings()}
 
 
 def main():

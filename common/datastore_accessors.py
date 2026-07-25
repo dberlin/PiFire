@@ -162,9 +162,36 @@ def write_errors(errors):
 
 def read_warnings():
     """
-    Read Warnings from SQLite DB and then burn them
+    Read the outstanding warnings from SQLite DB, without consuming them.
+
+    This used to be a read-and-burn: it returned the warnings AND flushed the
+    table. ``list_warnings`` has two independent consumers -- ``dash_page``
+    (renders them into the page banner) and ``_get_dash_data`` (puts them in
+    the ``socket_dash_data`` payload) -- so whichever ran first ate the
+    other's. A background socket tick could swallow a settings-upgrade notice
+    before the user's page load ever rendered it.
+
+    Reads are now non-destructive, matching :func:`read_errors`, which sits
+    beside this call in both of those consumers. Draining is explicit and has
+    a single owner: :func:`drain_warnings`, called from ``dash_page``.
 
     :return: warnings
+    """
+    return SqliteQueue("list_warnings", raw=True).list()
+
+
+def drain_warnings():
+    """
+    Return the outstanding warnings AND clear them.
+
+    The one-shot half of :func:`read_warnings`. Deliberately called from
+    exactly one place -- ``blueprints/dash/routes.py::dash_page`` -- because a
+    page render is the point at which a human actually sees the banner
+    (templates/base.html). The Socket.IO emitter must NOT drain: it is a
+    repeating poll, so a warning consumed there lands in a single payload and
+    is lost to every client that reconnects afterwards.
+
+    :return: The warnings that were outstanding before the clear.
     """
     q = SqliteQueue("list_warnings", raw=True)
     warnings = q.list()

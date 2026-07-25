@@ -4,7 +4,7 @@ from common.datastore_accessors import (
     read_settings,
     read_control,
     read_errors,
-    read_warnings,
+    drain_warnings,
     read_probe_status,
     write_settings,
 )
@@ -19,7 +19,10 @@ def dash_page():
     settings = read_settings()
     control = read_control()
     errors = read_errors()
-    warnings = read_warnings()
+    # The single drain point for `list_warnings`: rendering the page is where a
+    # human actually sees the banner, so this is the one consumer entitled to
+    # clear it. The Socket.IO emitter only reads (see drain_warnings' docstring).
+    warnings = drain_warnings()
 
     current = settings["dashboard"].get("current", "Default")
     dash_template = (
