@@ -31,6 +31,12 @@ type Startup = {
   duration: number;
   startup_exit_temp: number;
   prime_on_startup: number;
+  // Remembered "last non-zero" values for the two 0-means-disabled numbers.
+  // Seeded in readStartup, NOT derived in an effect (React Compiler rejects
+  // setState-in-effect). Flask's settings.js:952-956 / :967-971 captures the
+  // loaded value first and only substitutes its default when it was 0.
+  exit_temp_default: number;
+  prime_default: number;
   pwm_duty_cycle: number;
   smartstart_enabled: boolean;
   smartstart_exit_temp: number;
@@ -52,6 +58,8 @@ function readStartup(s: Settings): Startup {
     duration: st.duration ?? 60,
     startup_exit_temp: st.startup_exit_temp ?? 150,
     prime_on_startup: st.prime_on_startup ?? 0,
+    exit_temp_default: (st.startup_exit_temp ?? 0) > 0 ? (st.startup_exit_temp as number) : 140,
+    prime_default: (st.prime_on_startup ?? 0) > 0 ? (st.prime_on_startup as number) : 10,
     pwm_duty_cycle: st.pwm_duty_cycle ?? 50,
     smartstart_enabled: !!ss.enabled,
     smartstart_exit_temp: ss.exit_temp ?? 150,
@@ -85,6 +93,13 @@ export function StartupTab() {
   // the value is still in the delta on an AC build, so it still has to satisfy
   // SettingsSchema._check_startup_pwm_duty_cycle.
   const dcFan = hasDcFan(settings);
+
+  // The switches are DERIVED from the numbers, never stored alongside them:
+  // two sources of truth for one value is exactly how "0 = disabled" got lost.
+  // Off writes 0; on writes the remembered default.
+  const exitTempOn = v.startup_exit_temp > 0;
+  const primeOn = v.prime_on_startup > 0;
+  const holdSelected = v.after_startup_mode === "Hold";
 
   const onSave = async () => {
     let d: object = {};
@@ -157,19 +172,36 @@ export function StartupTab() {
           min={0}
           suffix="s"
         />
-        <NumberField
-          label="Startup Exit Temp"
-          value={v.startup_exit_temp}
-          onChange={(n) => set("startup_exit_temp", n)}
-          min={0}
-          suffix="°"
+        <Toggle
+          label="Exit Startup @ Temperature"
+          checked={exitTempOn}
+          onChange={(b) => set("startup_exit_temp", b ? v.exit_temp_default : 0)}
         />
-        <NumberField
-          label="Prime on Startup"
-          value={v.prime_on_startup}
-          onChange={(n) => set("prime_on_startup", n)}
-          min={0}
+        {exitTempOn && (
+          <NumberField
+            label="Startup Exit Temp"
+            value={v.startup_exit_temp}
+            onChange={(n) => set("startup_exit_temp", n)}
+            min={0}
+            suffix="°"
+            hint="0 = disabled"
+          />
+        )}
+        <Toggle
+          label="Always Prime on Startup"
+          checked={primeOn}
+          onChange={(b) => set("prime_on_startup", b ? v.prime_default : 0)}
         />
+        {primeOn && (
+          <NumberField
+            label="Prime on Startup"
+            value={v.prime_on_startup}
+            onChange={(n) => set("prime_on_startup", n)}
+            min={0}
+            max={200}
+            hint="0 = disabled"
+          />
+        )}
         {dcFan && (
           <NumberField
             label="PWM Duty Cycle"
@@ -214,18 +246,28 @@ export function StartupTab() {
           options={modeOptions}
           onChange={(v) => set("after_startup_mode", v)}
         />
-        <NumberField
-          label="Primary Setpoint"
-          value={v.primary_setpoint}
-          onChange={(n) => set("primary_setpoint", n)}
-          min={0}
-          suffix="°"
-        />
-        <Toggle
-          label="Start to Hold Prompt"
-          checked={v.start_to_hold_prompt}
-          onChange={(b) => set("start_to_hold_prompt", b)}
-        />
+        {/* Flask hides the whole Hold block unless after_startup_mode is
+            'Hold' (index.html:812-826, settings.js:943-950). Hiding is NOT
+            clearing: both values stay in state and in the delta. */}
+        {holdSelected && (
+          <>
+            <NumberField
+              label="Primary Setpoint"
+              value={v.primary_setpoint}
+              onChange={(n) => set("primary_setpoint", n)}
+              // index.html:819 — the bound is dynamic, read off the Safety tab.
+              // Defaults match settings_schema.py:48-49.
+              min={settings.safety?.maxstartuptemp ?? 100}
+              max={settings.safety?.maxtemp ?? 550}
+              suffix="°"
+            />
+            <Toggle
+              label="Start to Hold Prompt"
+              checked={v.start_to_hold_prompt}
+              onChange={(b) => set("start_to_hold_prompt", b)}
+            />
+          </>
+        )}
         <SaveBar onSave={onSave} saving={saving} status={status} />
       </Section>
     </>

@@ -19,6 +19,15 @@ beforeEach(() => {
   saveMock.mockClear();
 });
 
+// NumberField wraps its input in a <label> whose text also carries the suffix,
+// so getByLabelText("Prime on Startup") does not match. Reach the input through
+// the label span instead.
+function inputFor(label: string): HTMLInputElement {
+  const input = screen.getByText(label).closest("label")?.querySelector("input");
+  if (!input) throw new Error(`no input for field "${label}"`);
+  return input;
+}
+
 describe("StartupTab", () => {
   it("renders all sections with loaded values", () => {
     const context = {
@@ -123,10 +132,11 @@ describe("StartupTab", () => {
 
     renderRoute(<StartupTab />, context);
 
-    // Find and change prime_on_startup to 999
-    const primeInputs = screen.getAllByDisplayValue("0");
-    // The first 0 should be prime_on_startup in the Startup section
-    const primeInput = primeInputs[0];
+    // prime_on_startup is 0, i.e. DISABLED, so its number field is hidden
+    // behind the "Always Prime on Startup" switch (Flask index.html:843-856).
+    // Turn it on to reach the field, then push it out of range.
+    fireEvent.click(screen.getByRole("button", { name: "Always Prime on Startup" }));
+    const primeInput = inputFor("Prime on Startup");
     fireEvent.change(primeInput, { target: { value: "999" } });
 
     // Click Save
@@ -367,9 +377,10 @@ describe("StartupTab", () => {
     });
 
     expect(screen.queryByText("PWM Duty Cycle")).toBeNull();
-    // The rest of the Startup section is untouched.
+    // The rest of the Startup section is untouched. (The prime AMOUNT field is
+    // behind its own 0-means-disabled switch, so assert on the switch.)
     expect(screen.getByText("Duration")).toBeInTheDocument();
-    expect(screen.getByText("Prime on Startup")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Always Prime on Startup" })).toBeInTheDocument();
   });
 
   // The clamp at onSave stays unconditional: the value is still in the delta on
@@ -389,5 +400,209 @@ describe("StartupTab", () => {
 
     const [delta] = saveMock.mock.calls[0];
     expect(delta.startup.pwm_duty_cycle).toBe(80);
+  });
+  // Flask's Startup pane is three conditionals plus one dynamic bound:
+  // index.html:812-856 with settings.js:943-980. React rendered all of them as
+  // always-visible fields, which made "0 = disabled" undiscoverable.
+  describe("conditional structure (I15)", () => {
+    const fixture = (startup: object = {}, extra: object = {}) => ({
+      settings: {
+        platform: { dc_fan: true },
+        startup: {
+          duration: 60,
+          startup_exit_temp: 150,
+          prime_on_startup: 0,
+          pwm_duty_cycle: 50,
+          smartstart: { enabled: false, exit_temp: 160 },
+          start_to_mode: {
+            after_startup_mode: "Smoke",
+            primary_setpoint: 225,
+            start_to_hold_prompt: false,
+          },
+          ...startup,
+        },
+        pwm: { min_duty_cycle: 20, max_duty_cycle: 100 },
+        ...extra,
+      },
+      mode: "Stop",
+    });
+
+    it("hides the Hold block unless after_startup_mode is Hold, and reveals it on switch", () => {
+      renderRoute(<StartupTab />, fixture());
+
+      expect(screen.queryByText("Primary Setpoint")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Start to Hold Prompt" })).toBeNull();
+
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "Hold" } });
+      expect(screen.getByText("Primary Setpoint")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Start to Hold Prompt" })).toBeInTheDocument();
+
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "Smoke" } });
+      expect(screen.queryByText("Primary Setpoint")).toBeNull();
+    });
+
+    it("hiding the Hold block does not clear primary_setpoint", () => {
+      renderRoute(
+        <StartupTab />,
+        fixture({
+          start_to_mode: {
+            after_startup_mode: "Hold",
+            primary_setpoint: 275,
+            start_to_hold_prompt: false,
+          },
+        }),
+      );
+
+      expect(inputFor("Primary Setpoint")).toHaveValue(275);
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "Smoke" } });
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "Hold" } });
+      expect(inputFor("Primary Setpoint")).toHaveValue(275);
+    });
+
+    it("still writes primary_setpoint into the delta while Hold is not selected", async () => {
+      renderRoute(<StartupTab />, fixture());
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const [delta] = saveMock.mock.calls[0];
+      expect(delta.startup.start_to_mode.primary_setpoint).toBe(225);
+    });
+
+    it("renders the exit-temp switch OFF with no field when startup_exit_temp is 0, seeding 140 on enable", () => {
+      renderRoute(<StartupTab />, fixture({ startup_exit_temp: 0 }));
+
+      const toggle = screen.getByRole("button", { name: "Exit Startup @ Temperature" });
+      expect(toggle).toHaveAttribute("aria-pressed", "false");
+      expect(screen.queryByText("Startup Exit Temp")).toBeNull();
+
+      fireEvent.click(toggle);
+      expect(inputFor("Startup Exit Temp")).toHaveValue(140);
+    });
+
+    it("renders the exit-temp switch ON with its value, and writes 0 when switched off", async () => {
+      renderRoute(<StartupTab />, fixture({ startup_exit_temp: 200 }));
+
+      const toggle = screen.getByRole("button", { name: "Exit Startup @ Temperature" });
+      expect(toggle).toHaveAttribute("aria-pressed", "true");
+      expect(inputFor("Startup Exit Temp")).toHaveValue(200);
+
+      fireEvent.click(toggle);
+      expect(screen.queryByText("Startup Exit Temp")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const [delta] = saveMock.mock.calls[0];
+      expect(delta.startup.startup_exit_temp).toBe(0);
+    });
+
+    // Flask's settings.js:952-956 captures the LOADED value first and only
+    // substitutes 140 when it was 0.
+    it("restores the loaded exit temp (not 140) when toggled off and back on", () => {
+      renderRoute(<StartupTab />, fixture({ startup_exit_temp: 200 }));
+
+      const toggle = screen.getByRole("button", { name: "Exit Startup @ Temperature" });
+      fireEvent.click(toggle);
+      fireEvent.click(toggle);
+      expect(inputFor("Startup Exit Temp")).toHaveValue(200);
+    });
+
+    it("renders the prime switch OFF with no field when prime_on_startup is 0, seeding 10 on enable", () => {
+      renderRoute(<StartupTab />, fixture({ prime_on_startup: 0 }));
+
+      const toggle = screen.getByRole("button", { name: "Always Prime on Startup" });
+      expect(toggle).toHaveAttribute("aria-pressed", "false");
+      expect(screen.queryByText("Prime on Startup")).toBeNull();
+
+      fireEvent.click(toggle);
+      expect(inputFor("Prime on Startup")).toHaveValue(10);
+    });
+
+    it("renders the prime switch ON with its value, and writes 0 when switched off", async () => {
+      renderRoute(<StartupTab />, fixture({ prime_on_startup: 40 }));
+
+      const toggle = screen.getByRole("button", { name: "Always Prime on Startup" });
+      expect(toggle).toHaveAttribute("aria-pressed", "true");
+      expect(inputFor("Prime on Startup")).toHaveValue(40);
+
+      fireEvent.click(toggle);
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const [delta] = saveMock.mock.calls[0];
+      expect(delta.startup.prime_on_startup).toBe(0);
+    });
+
+    it("restores the loaded prime amount (not 10) when toggled off and back on", () => {
+      renderRoute(<StartupTab />, fixture({ prime_on_startup: 40 }));
+
+      const toggle = screen.getByRole("button", { name: "Always Prime on Startup" });
+      fireEvent.click(toggle);
+      fireEvent.click(toggle);
+      expect(inputFor("Prime on Startup")).toHaveValue(40);
+    });
+
+    // index.html:819 — min="{{ safety.maxstartuptemp }}" max="{{ safety.maxtemp }}".
+    it("bounds the setpoint dynamically by safety.maxstartuptemp / safety.maxtemp", () => {
+      renderRoute(
+        <StartupTab />,
+        fixture(
+          {
+            start_to_mode: {
+              after_startup_mode: "Hold",
+              primary_setpoint: 250,
+              start_to_hold_prompt: false,
+            },
+          },
+          { safety: { maxstartuptemp: 100, maxtemp: 550 } },
+        ),
+      );
+
+      const setpoint = inputFor("Primary Setpoint");
+      expect(setpoint).toHaveAttribute("min", "100");
+      expect(setpoint).toHaveAttribute("max", "550");
+
+      // Task 1's blur clamp, seen through a real call site: typing is not
+      // clamped, finishing the edit is.
+      fireEvent.change(setpoint, { target: { value: "700" } });
+      expect(inputFor("Primary Setpoint")).toHaveValue(700);
+      fireEvent.blur(setpoint);
+      expect(inputFor("Primary Setpoint")).toHaveValue(550);
+    });
+
+    it("caps Prime on Startup at the schema-backed max of 200", () => {
+      renderRoute(<StartupTab />, fixture({ prime_on_startup: 40 }));
+      expect(inputFor("Prime on Startup")).toHaveAttribute("max", "200");
+    });
+
+    // Hiding a control must never drop its key, or the next save silently
+    // reverts a hidden field.
+    it("writes all thirteen delta paths regardless of which controls are hidden", async () => {
+      renderRoute(<StartupTab />, fixture({ startup_exit_temp: 0, prime_on_startup: 0 }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const [delta] = saveMock.mock.calls[0];
+      expect(Object.keys(delta.shutdown).sort()).toEqual(["auto_power_off", "shutdown_duration"]);
+      expect(Object.keys(delta.startup).sort()).toEqual([
+        "duration",
+        "prime_on_startup",
+        "pwm_duty_cycle",
+        "smartstart",
+        "start_to_mode",
+        "startup_exit_temp",
+      ]);
+      expect(Object.keys(delta.startup.smartstart).sort()).toEqual([
+        "enabled",
+        "exit_temp",
+        "profiles",
+        "temp_range_list",
+      ]);
+      expect(Object.keys(delta.startup.start_to_mode).sort()).toEqual([
+        "after_startup_mode",
+        "primary_setpoint",
+        "start_to_hold_prompt",
+      ]);
+    });
   });
 });
