@@ -69,7 +69,14 @@ if __name__ == "__main__":
     # in either order, is safe).
     datastore.init()
 
-    settings = read_settings(init=True)
+    # NOTE: this used to read `read_settings(init=True)`, but that `init` flag has
+    # been dead since the JSON->SQLite move -- it never seeded anything. So the
+    # control process does NOT persist settings:general at boot; it relies on the
+    # web process (blueprints/mobile/socket_io.py) calling seed_settings_store()
+    # at import. Until then read_settings() self-heals by RETURNING
+    # default_settings() without writing it. Making this line seed for real would
+    # be a behaviour change, so it is left as a plain read pending sign-off.
+    settings = read_settings()
 
     # Setup logging
     log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.ERROR

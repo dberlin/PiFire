@@ -281,13 +281,15 @@ def update_metrics(metrics):
                 conn.execute(f"UPDATE metrics SET {set_sql} WHERE seq=?", values + [row[0]])
 
 
-def read_settings(filename="settings.json", init=False, retry_count=0):
+def read_settings():
     """
     Read Settings from SQLite DB (source of truth at runtime).
 
-    :param filename: Unused; kept for signature compatibility.
-    :param init: Unused; kept for signature compatibility.
-    :param retry_count: Unused; kept for signature compatibility.
+    The old signature carried three parameters -- filename="settings.json",
+    init=False, retry_count=0 -- all three documented "Unused; kept for
+    signature compatibility" since the JSON-file backend was replaced by SQLite.
+    They are gone: a dead ``filename`` default in particular implied this
+    function still reads a file next to the process, which it does not.
     """
     return read_settings_store()
 
@@ -396,11 +398,12 @@ def remove_connected_user(client_id):
     SqliteMembershipList("list_users_connected").remove(client_id)
 
 
-def read_pellet_db(filename="pelletdb.json"):
+def read_pellet_db():
     """
     Read Pellet DataBase from SQLite DB (source of truth at runtime).
 
-    :param filename: Unused; kept for signature compatibility.
+    The old signature carried a dead filename="pelletdb.json" parameter; see
+    :func:`read_settings` for why that default was actively misleading.
     """
     return read_pellets_store()
 
