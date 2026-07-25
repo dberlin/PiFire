@@ -122,3 +122,91 @@
     display: flex;
   }
 }
+
+/* ---- timer bar ---- */
+/* Reuses the dashboard's .pf-modal / .pf-modal-title / .pf-modal-actions /
+   .pf-modal-btn rules (dashboard.css) so the set-timer dialog is visually the
+   same object as the setpoint dialog. Only the pieces that do not already
+   exist are defined here. */
+.pf-timer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--card);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pf-timer-time {
+  font: 700 18px "Barlow Semi Condensed";
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-1);
+  min-width: 92px;
+  text-align: center;
+}
+.pf-timer-btn {
+  background: #1d1813;
+  color: #e8dfd1;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  font: 700 14px "Barlow";
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.pf-timer-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--text);
+}
+
+/* The dashboard scrim is absolute inside .pf-stage; the shell's timer modal
+   sits above the whole page instead. */
+.pf-modal-scrim-fixed {
+  position: fixed;
+}
+.pf-timer-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 280px;
+}
+.pf-timer-dial {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: 8px;
+}
+.pf-timer-readout {
+  font: 800 40px "Barlow Semi Condensed";
+  color: #f8f2e8;
+  font-variant-numeric: tabular-nums;
+}
+.pf-timer-unit {
+  font: 600 15px "Barlow";
+  color: var(--text-dim);
+}
+.pf-timer-dial input[type="range"] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: var(--accent);
+}
+.pf-timer-expiry {
+  font: 600 14px "Barlow";
+  color: var(--text-dim);
+  margin: 12px 0 4px;
+}
+.pf-timer-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 15px "Barlow";
+}
+.pf-timer-check input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+.pf-timer-error {
+  color: #ff8b82;
+  font: 600 14px "Barlow";
+  margin: 10px 0 0;
+}
