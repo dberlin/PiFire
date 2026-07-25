@@ -523,11 +523,106 @@ def _cmd_set_tuning_mode(data, control, settings, arglist, origin, kind):
     write_control(control, kind, origin=origin)
 
 
+""" The expiry flags /api/set/timer/start/{seconds}/{options} can name, in the
+    order they are emitted back. Both live on the timer's notify_data object. """
+_TIMER_EXPIRY_OPTIONS = ("shutdown", "keep_warm")
+
+""" The option segment that names no flag at all. A path segment cannot be
+    empty (an empty one collapses the URL back to the 3-argument form, which
+    leaves both flags at whatever the previous cook set), so 'neither' has to
+    have a spelling of its own. """
+_TIMER_EXPIRY_NONE = "none"
+
+
+def _parse_timer_expiry_options(spec):
+    """
+    Parse the expiry-option segment of /api/set/timer/start/{seconds}/{options}.
+
+    Accepts 'none', or a comma-separated list of distinct names drawn from
+    _TIMER_EXPIRY_OPTIONS in any order -- e.g. 'shutdown', 'keep_warm',
+    'shutdown,keep_warm'.
+
+    :return: {'shutdown': bool, 'keep_warm': bool} with EVERY flag stated
+             explicitly (an unnamed flag is False, not "leave it alone"), or
+             None if the segment is not a valid option list.
+    """
+    tokens = [token.strip() for token in str(spec).split(",")]
+    if tokens == [_TIMER_EXPIRY_NONE]:
+        return dict.fromkeys(_TIMER_EXPIRY_OPTIONS, False)
+    if len(set(tokens)) != len(tokens):
+        return None
+    if any(token not in _TIMER_EXPIRY_OPTIONS for token in tokens):
+        return None
+    return {name: name in tokens for name in _TIMER_EXPIRY_OPTIONS}
+
+
+def _timer_start_with_options(data, control, arglist, index, now, kind):
+    """
+    Arm a NEW timer for a DURATION, with both expiry flags, in ONE control write.
+
+    /api/set/timer/start/{seconds}/{options}
+
+    The client sends how LONG the timer should run; this function computes the
+    absolute end from the server's own clock. That is the whole point of the
+    form: the control process decides a timer has expired by comparing
+    control.timer.end against its own time.time(), so an end computed on a
+    client whose clock runs behind the Pi's arms an already-expired timer -- and
+    an expired timer with 'shutdown' set shuts the grill down mid-cook.
+
+    Both flags and the countdown are set on the SAME control dict and written
+    once. They cannot be split across requests: every web-process write queues
+    the whole control dict, read_control() never sees the pending queue, and the
+    queued partials are applied with SQLite json_patch (RFC 7396), which
+    REPLACES the notify_data array wholesale -- so the last write of a batch
+    silently undoes the flags the earlier ones set.
+
+    Deliberately does NOT unpause. The bare `start` form is also the resume
+    command and ignores its seconds argument when the timer is paused; doing
+    that here would silently discard the duration the caller asked for, which is
+    the same "asked for X, got Y" failure this form exists to close. A paused
+    timer is rejected: resume it with /api/set/timer/start/{seconds}, or clear
+    it with /api/set/timer/stop first.
+
+    Rejections write nothing.
+    """
+    options = _parse_timer_expiry_options(arglist[3])
+    if options is None:
+        data["result"] = "ERROR"
+        data["message"] = (
+            f"Timer expiry options [{arglist[3]}] not recognized. Expected "
+            f"'{_TIMER_EXPIRY_NONE}' or a comma-separated list of: {', '.join(_TIMER_EXPIRY_OPTIONS)}."
+        )
+        return
+
+    """ No silent 60-second substitution here (see the bare `start` form) and no
+        zero/negative duration: a timer that is already expired the moment it is
+        armed fires its expiry action immediately. """
+    seconds = int(float(arglist[2])) if is_float(arglist[2]) else 0
+    if seconds <= 0:
+        data["result"] = "ERROR"
+        data["message"] = f"Timer duration [{arglist[2]}] must be a number of seconds greater than zero."
+        return
+
+    if control["timer"]["paused"] != 0:
+        data["result"] = "ERROR"
+        data["message"] = "Timer is paused. Resume or stop it before starting a new timer."
+        return
+
+    control["notify_data"][index]["req"] = True
+    control["notify_data"][index]["shutdown"] = options["shutdown"]
+    control["notify_data"][index]["keep_warm"] = options["keep_warm"]
+    control["timer"]["start"] = now
+    control["timer"]["end"] = now + seconds
+    write_log("Timer started.  Ends at: " + epoch_to_time(control["timer"]["end"]))
+    write_control(control, kind, origin="app")
+
+
 def _cmd_set_timer(data, control, settings, arglist, origin, kind):
     """
     Timer Control
 
     /api/set/timer/start/{seconds}
+    /api/set/timer/start/{seconds}/{options}
     /api/set/timer/pause
     /api/set/timer/stop
     /api/set/timer/shutdown/{true/false}
@@ -544,7 +639,13 @@ def _cmd_set_timer(data, control, settings, arglist, origin, kind):
     """ Get timestamp """
     now = time.time()
 
-    if arglist[1] == "start":
+    if arglist[1] == "start" and arglist[3] is not None:
+        """ The 4-argument form: server-computed end + both expiry flags, one
+            write. Kept separate from the 3-argument form below, which other
+            clients (the Flask dashboard, mobile) still use and which doubles
+            as the unpause command. """
+        _timer_start_with_options(data, control, arglist, index, now, kind)
+    elif arglist[1] == "start":
         control["notify_data"][index]["req"] = True
         # If starting new timer
         if control["timer"]["paused"] == 0:

@@ -1059,6 +1059,201 @@ def test_timer_start_hardcodes_origin_app(seeded):
     assert [q["origin"] for q in queued] == ["api"]  # this one honors it
 
 
+# ---------------------------------------------------------------------------
+# /api/set/timer/start/{seconds}/{options} -- the 4-argument form.
+#
+# The 3-argument forms above are frozen contract (CASES + the golden fixture).
+# This form is NEW, so it is asserted inline rather than added to CASES: the
+# golden is the pre-refactor oracle and is not regenerated to accommodate new
+# behavior (see the module docstring).
+#
+# Why it exists: the control process decides a timer has expired by comparing
+# control.timer.end against its OWN time.time(). A client that computes that
+# absolute end itself hands over a value from a different clock, and a browser
+# running behind the Pi therefore arms an ALREADY-EXPIRED timer -- which, with
+# 'shutdown' ticked, shuts the grill down mid-cook. So the client sends a
+# DURATION and the server does the arithmetic. Both expiry flags ride along in
+# the same write_control() call because they cannot be sent separately:
+# json_patch (RFC 7396) replaces the notify_data ARRAY wholesale, so a later
+# write undoes an earlier one's flags.
+# ---------------------------------------------------------------------------
+
+
+def _timer_entry(control):
+    return next(obj for obj in control["notify_data"] if obj["type"] == "timer")
+
+
+def _start_with_options(seconds, options, origin="api"):
+    """Run the 4-argument start form with write_log neutralized (it appends to
+    ./logs/events.log relative to cwd)."""
+    with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
+        return api_commands.process_command(action="set", arglist=["timer", "start", seconds, options], origin=origin)
+
+
+def test_timer_start_with_options_computes_end_from_the_server_clock(seeded):
+    """The caller sends a DURATION; the end comes from the server's clock.
+
+    FIXED_NOW is the frozen server clock here. Nothing the caller sent appears
+    in control.timer.end except as an offset from it, which is the property
+    that makes a skewed client clock unable to arm an expired timer.
+    """
+    c.SqliteQueue("queue_control_write").flush()
+    result = _start_with_options("3600", "none")
+    assert result["result"] == "OK"
+
+    dsa.execute_control_writes()
+    control = dsa.read_control()
+    assert control["timer"]["start"] == FIXED_NOW
+    assert control["timer"]["end"] == FIXED_NOW + 3600
+    assert control["timer"]["paused"] == 0
+
+
+def test_timer_start_with_options_sets_both_flags_in_the_same_write(seeded):
+    """One write_control, carrying the countdown AND both expiry flags.
+
+    Two writes is the bug this form closes: each web-process write queues the
+    whole control dict read from a blob that does not reflect the queue, and
+    execute_control_writes applies them with json_patch -- which replaces the
+    notify_data array wholesale, so the last one wins outright.
+    """
+    for shutdown, keep_warm, options in (
+        (False, False, "none"),
+        (True, False, "shutdown"),
+        (False, True, "keep_warm"),
+        (True, True, "shutdown,keep_warm"),
+        (True, True, "keep_warm,shutdown"),  # order is not significant
+    ):
+        control = dsa.read_control()
+        _timer_notify(shutdown=not shutdown, keep_warm=not keep_warm)(control)
+        control["timer"] = {"start": 0, "paused": 0, "end": 0}
+        dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+        c.SqliteQueue("queue_control_write").flush()
+
+        assert _start_with_options("600", options)["result"] == "OK"
+
+        queued = c.SqliteQueue("queue_control_write").list()
+        assert len(queued) == 1, f"options={options}"
+        entry = _timer_entry(queued[0])
+        assert entry["shutdown"] is shutdown, f"options={options}"
+        assert entry["keep_warm"] is keep_warm, f"options={options}"
+        assert entry["req"] is True
+        assert queued[0]["timer"]["end"] == FIXED_NOW + 600
+        # The flags are not merely queued -- they survive the json_patch apply.
+        dsa.execute_control_writes()
+        applied = _timer_entry(dsa.read_control())
+        assert (applied["shutdown"], applied["keep_warm"]) == (shutdown, keep_warm), f"options={options}"
+
+
+def test_timer_start_with_options_leaves_the_other_notifications_alone(seeded):
+    """notify_data goes back whole: json_patch replaces the array, so a partial
+    one would delete every probe notification the user has armed."""
+    control = dsa.read_control()
+    grill = next(obj for obj in control["notify_data"] if obj["label"] == "Grill" and obj["type"] == "probe")
+    grill["req"] = True
+    grill["target"] = 203
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    before = [dict(obj) for obj in control["notify_data"] if obj["type"] != "timer"]
+
+    assert _start_with_options("600", "shutdown,keep_warm")["result"] == "OK"
+    dsa.execute_control_writes()
+
+    after = [dict(obj) for obj in dsa.read_control()["notify_data"] if obj["type"] != "timer"]
+    assert after == before
+
+
+def test_timer_start_with_options_rejects_a_paused_timer(seeded):
+    """It does NOT unpause.
+
+    The 3-argument `start` doubles as the resume command and ignores its
+    seconds argument when paused. Doing that here would silently discard the
+    duration the caller asked for -- the same class of "asked for X, got Y"
+    that this form exists to prevent -- so a paused timer is refused outright
+    and nothing is written.
+    """
+    control = dsa.read_control()
+    control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    c.SqliteQueue("queue_control_write").flush()
+
+    result = _start_with_options("600", "shutdown")
+    assert result["result"] == "ERROR"
+    assert "paused" in result["message"]
+    assert c.SqliteQueue("queue_control_write").length() == 0
+    assert dsa.read_control()["timer"] == {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+
+
+def test_timer_start_with_options_rejects_bad_input_without_writing(seeded):
+    """No silent substitution: the 3-argument form turns a non-numeric duration
+    into 60 seconds, which is exactly how a user gets a timer they never asked
+    for. This form refuses instead -- as it does for a zero/negative duration
+    (already expired the moment it is armed) and for an unknown option name."""
+    for seconds, options in (
+        ("soon", "none"),  # not a number
+        ("0", "none"),  # already expired
+        ("0.5", "none"),  # truncates to 0
+        ("-600", "none"),  # negative
+        (None, "none"),  # missing
+        ("600", "shutdown,laser"),  # unknown flag
+        ("600", "Shutdown"),  # names are case-sensitive
+        ("600", ""),  # empty segment
+        ("600", "shutdown,shutdown"),  # repeated flag
+        ("600", "none,shutdown"),  # 'none' is not a member name
+    ):
+        control = dsa.read_control()
+        control["timer"] = {"start": 0, "paused": 0, "end": 0}
+        dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+        c.SqliteQueue("queue_control_write").flush()
+
+        result = _start_with_options(seconds, options)
+        assert result["result"] == "ERROR", f"seconds={seconds!r} options={options!r}"
+        assert c.SqliteQueue("queue_control_write").length() == 0, f"seconds={seconds!r} options={options!r}"
+        dsa.execute_control_writes()
+        assert dsa.read_control()["timer"]["end"] == 0, f"seconds={seconds!r} options={options!r}"
+
+
+def test_timer_start_with_options_records_origin_app_like_the_other_start(seeded):
+    """Wart #8 again: the start branch records 'app' whatever the caller says.
+    The new form is the same branch and must not diverge."""
+    c.SqliteQueue("queue_control_write").flush()
+    _start_with_options("600", "shutdown", origin="api")
+    assert [q["origin"] for q in c.SqliteQueue("queue_control_write").list()] == ["app"]
+
+
+def test_three_argument_timer_start_still_resumes_and_ignores_seconds(seeded):
+    """The pre-existing forms are untouched: no options segment means the old
+    behavior, unpause semantics included."""
+    control = dsa.read_control()
+    control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+
+    with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
+        result = api_commands.process_command(action="set", arglist=["timer", "start", "300"], origin="api")
+    assert result["result"] == "OK"
+    dsa.execute_control_writes()
+    timer = dsa.read_control()["timer"]
+    # Resume shifts the remaining 500s onto now; the 300 is ignored.
+    assert timer["end"] == FIXED_NOW + 500
+    assert timer["paused"] == 0
+
+
+def test_three_argument_timer_start_still_defaults_to_sixty_seconds(seeded):
+    """The silent 60s substitution is contract for the 3-argument form (the
+    Flask dashboard and mobile still use it). Only the 4-argument form refuses."""
+    with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
+        api_commands.process_command(action="set", arglist=["timer", "start", "soon"], origin="api")
+    dsa.execute_control_writes()
+    assert dsa.read_control()["timer"]["end"] == FIXED_NOW + 60
+
+
+def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
+    """Other clients still set the flags one at a time; those paths stay."""
+    for command, key in (("shutdown", "shutdown"), ("keep_warm", "keep_warm")):
+        for arg, expected in (("true", True), ("false", False)):
+            api_commands.process_command(action="set", arglist=["timer", command, arg], origin="api")
+            dsa.execute_control_writes()
+            assert _timer_entry(dsa.read_control())[key] is expected, f"{command}={arg}"
+
+
 def test_notify_target_in_celsius_writes_the_notify_target(seeded):
     """The 'C' path writes the notify object's target (kept a float, since
     Celsius targets can be fractional), leaving control['primary_setpoint']

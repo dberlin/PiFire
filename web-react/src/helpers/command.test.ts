@@ -119,97 +119,106 @@ describe("createCommand issues the right URLs", () => {
   });
 });
 
-// blueprints/api/routes.py _api_post_control answers {"result": "success"} --
-// lowercase, and a 201 -- where the command grammar answers {"result": "OK"}.
-// A refactor that routed this write through the grammar's response check would
-// report every successful timer start as a failure, silently.
-describe("timerStartWithOptions envelope handling", () => {
-  const CONTROL = {
-    notify_data: [{ label: "Timer", type: "timer", req: false, shutdown: false, keep_warm: false }],
-    timer: { start: 0, paused: 0, end: 0, shutdown: false },
-  };
-
-  function stubFetch(postBody: unknown, postOk = true) {
-    const fetchMock = rs.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "POST") {
-        return { ok: postOk, status: 500, headers: new Headers(), json: async () => postBody };
-      }
-      return { ok: true, headers: new Headers(), json: async () => ({ control: CONTROL }) };
-    });
+// timerStartWithOptions is a single command in the /api/set grammar:
+//
+//   /api/set/timer/start/{seconds}/{expiry options}
+//
+// The DURATION is what travels; the server (common/api_commands.py
+// _cmd_set_timer) computes control.timer.end from its OWN time.time(). The
+// control process judges expiry against that same clock, so a client clock
+// running behind the Pi's must not be able to arm an already-expired timer --
+// and an expired timer with "Shutdown Grill" ticked shuts the grill down
+// mid-cook. No timestamp is ever sent, so there is nothing to skew.
+describe("timerStartWithOptions", () => {
+  let fetchMock: ReturnType<typeof rs.fn>;
+  beforeEach(() => {
+    fetchMock = rs.fn(async () => ({
+      ok: true,
+      json: async () => ({ result: "OK", message: "Command was accepted successfully." }),
+    }));
     rs.stubGlobal("fetch", fetchMock);
-    return fetchMock;
-  }
+  });
   afterEach(() => {
     rs.unstubAllGlobals();
   });
 
   const opts = { shutdown: true, keepWarm: false };
 
-  it('treats lowercase "success" as a successful write', async () => {
-    stubFetch({ control: "success", result: "success", message: "Settings updated successfully." });
-    const r = await createCommand("").timerStartWithOptions(600, opts);
-    expect(r).toEqual({ ok: true, message: "Settings updated successfully." });
+  it("issues exactly ONE request, carrying the duration and both flags", async () => {
+    const r = await createCommand("http://pi:5000").timerStartWithOptions(600, {
+      shutdown: true,
+      keepWarm: true,
+    });
+    // One request. Anything that reads control first and writes it back can be
+    // clobbered: json_patch (RFC 7396) replaces the notify_data ARRAY wholesale
+    // and read_control() never sees the pending write queue.
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "http://pi:5000/api/set/timer/start/600/shutdown,keep_warm",
+    );
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("POST");
+    // A duration is the whole payload -- no client-computed end time.
+    expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined();
+    expect(r).toEqual({ ok: true, message: "Command was accepted successfully.", data: undefined });
   });
 
-  it('treats "error" as a failed write', async () => {
-    stubFetch({ control: "error", result: "error", message: "Settings update failed." });
-    const r = await createCommand("").timerStartWithOptions(600, opts);
-    expect(r).toEqual({ ok: false, message: "Settings update failed." });
+  it("encodes every flag combination as a named option segment", async () => {
+    const c = createCommand("");
+    await c.timerStartWithOptions(600, { shutdown: false, keepWarm: false });
+    await c.timerStartWithOptions(600, { shutdown: true, keepWarm: false });
+    await c.timerStartWithOptions(600, { shutdown: false, keepWarm: true });
+    await c.timerStartWithOptions(600, { shutdown: true, keepWarm: true });
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/set/timer/start/600/none",
+      "/api/set/timer/start/600/shutdown",
+      "/api/set/timer/start/600/keep_warm",
+      "/api/set/timer/start/600/shutdown,keep_warm",
+    ]);
   });
 
-  it("reports an HTTP failure on the write", async () => {
-    stubFetch({}, false);
+  it("sends a whole number of seconds", async () => {
+    await createCommand("").timerStartWithOptions(600.6, opts);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/set/timer/start/601/shutdown");
+  });
+
+  it("maps the grammar's ERROR envelope to ok:false", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        result: "ERROR",
+        message: "Timer is paused. Resume or stop it before starting a new timer.",
+      }),
+    });
+    const r = await createCommand("").timerStartWithOptions(600, opts);
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/paused/);
+  });
+
+  it("reports an HTTP failure", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) });
     const r = await createCommand("").timerStartWithOptions(600, opts);
     expect(r).toEqual({ ok: false, message: "HTTP 500" });
   });
 
-  it("reads control before writing, and writes exactly once", async () => {
-    const fetchMock = stubFetch({ result: "success", message: "" });
-    await createCommand("http://pi:5000").timerStartWithOptions(600, opts);
-    const calls = fetchMock.mock.calls;
-    expect(calls).toHaveLength(2);
-    expect(calls[0][0]).toBe("http://pi:5000/api/control");
-    expect(calls[0][1]?.method).toBe("GET");
-    expect(calls[1][0]).toBe("http://pi:5000/api/control");
-    expect(calls[1][1]?.method).toBe("POST");
+  // The modal closes on submit either way, so a start that never reached the Pi
+  // must at least come back as a failure rather than as a resolved promise.
+  it("reports a network error instead of throwing", async () => {
+    fetchMock.mockImplementationOnce(async () => {
+      throw new Error("Failed to fetch");
+    });
+    const r = await createCommand("").timerStartWithOptions(600, opts);
+    expect(r).toEqual({ ok: false, message: "Failed to fetch" });
   });
 
-  it("fails without writing when control has no timer notify entry", async () => {
-    const fetchMock = rs.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "POST") throw new Error("must not write");
-      return {
-        ok: true,
-        headers: new Headers(),
-        json: async () => ({ control: { notify_data: [{ label: "Grill", type: "probe" }] } }),
-      };
+  // POST /api/control answers {"result": "success"}; this command goes through
+  // the /api/set grammar, which answers {"result": "OK"}. Accepting "success"
+  // here would mean the write silently went somewhere else.
+  it('does NOT accept lowercase "success"', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ result: "success", message: "" }),
     });
-    rs.stubGlobal("fetch", fetchMock);
     const r = await createCommand("").timerStartWithOptions(600, opts);
     expect(r.ok).toBe(false);
-    expect(r.message).toMatch(/no timer entry/);
-    expect(fetchMock.mock.calls).toHaveLength(1);
-  });
-
-  it("fails without writing when the read fails", async () => {
-    const fetchMock = rs.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "POST") throw new Error("must not write");
-      return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) };
-    });
-    rs.stubGlobal("fetch", fetchMock);
-    const r = await createCommand("").timerStartWithOptions(600, opts);
-    expect(r.ok).toBe(false);
-    expect(r.message).toMatch(/HTTP 404/);
-    expect(fetchMock.mock.calls).toHaveLength(1);
-  });
-
-  it("falls back to the browser clock when the Date header is unreadable", async () => {
-    const fetchMock = stubFetch({ result: "success", message: "" });
-    const before = Math.floor(Date.now() / 1000);
-    await createCommand("").timerStartWithOptions(600, opts);
-    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)) as {
-      timer: { start: number; end: number };
-    };
-    expect(body.timer.start).toBeGreaterThanOrEqual(before);
-    expect(body.timer.end - body.timer.start).toBe(600);
   });
 });

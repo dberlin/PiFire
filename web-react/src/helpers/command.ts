@@ -40,10 +40,12 @@ export interface CommandClient {
   //    those flags must be re-sent after any stop.
   //  - A non-numeric `seconds` makes the backend silently substitute 60s.
   timerStart(seconds: number): Promise<CommandResult>;
-  // Arms a NEW timer together with its expiry flags in a single control write.
-  // The flags cannot be sent as their own /api/set/timer/... call -- see
-  // timerStartWithOptions below for why. Resuming a paused timer is still
-  // timerStart(): it carries no flags and is therefore a single write already.
+  // Arms a NEW timer for a DURATION, together with its expiry flags, in a
+  // single request that the server turns into a single control write -- see
+  // the block above createCommand for why neither half can be split out.
+  // Unlike timerStart this one does NOT unpause: the server rejects a paused
+  // timer rather than silently ignoring the duration. Resuming is still
+  // timerStart(), which carries no flags and is one write already.
   timerStartWithOptions(seconds: number, options: TimerOptions): Promise<CommandResult>;
   timerPause(): Promise<CommandResult>;
   timerStop(): Promise<CommandResult>;
@@ -74,125 +76,42 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
 }
 
 // --------------------------------------------------------------------------
-// Whole-control writes (POST /api/control).
+// Arming a timer: /api/set/timer/start/{seconds}/{options}
 //
-// blueprints/api/routes.py answers this route with {"result": "success"} --
-// LOWERCASE -- while the /api/set/... command grammar answers {"result": "OK"}.
-// Two envelopes from the same blueprint, so the control write gets its own
-// success predicate. post() above keeps requiring "OK" because every /api/set/
-// caller depends on that, and a route that answered "success" there would be a
-// genuine surprise worth reporting as a failure.
+// Two properties this shape buys, both of which the obvious alternative
+// (read control, patch it, write it back) does not:
+//
+//  1. The DURATION travels, never an absolute end time. The control process
+//     decides a timer has expired by comparing control.timer.end against its
+//     OWN time.time(), so an end computed here would be a value from a
+//     different clock -- a browser running behind the Pi would arm an
+//     already-expired timer, and an expired timer with "Shutdown Grill" ticked
+//     shuts the grill down mid-cook. The server does the arithmetic instead,
+//     which also removes the need to learn the server's clock from a response
+//     header (Date is not CORS-safelisted, so cross-origin it is unreadable).
+//
+//  2. ONE request, so ONE write_control() on the server. The flags live in
+//     control.notify_data (an array) and the countdown in control.timer, and
+//     every web-process write queues the WHOLE control dict
+//     (common/datastore_accessors.py write_control). read_control() reads only
+//     the persisted blob and never the pending queue, and only the control loop
+//     drains that queue -- so calls issued inside one control cycle all read
+//     the same stale blob, and execute_control_writes applies each with SQLite
+//     json_patch (RFC 7396), which REPLACES arrays wholesale. Split across
+//     requests, the last write's notify_data overwrites the flags the earlier
+//     ones set, every time.
 // --------------------------------------------------------------------------
-const CONTROL_WRITE_RESULT = "success";
 
-interface ControlNotifyEntry {
-  type?: string;
-  [k: string]: unknown;
-}
-
-interface ControlBlob {
-  notify_data?: ControlNotifyEntry[];
-  [k: string]: unknown;
-}
-
-type ControlRead =
-  | { ok: true; control: ControlBlob; serverNow: number }
-  | { ok: false; message: string };
-
-/**
- * Epoch seconds as the CONTROL PROCESS sees them.
- *
- * The control process decides a timer has expired by comparing control.timer.end
- * against its own time.time(), so an end computed from a browser clock running
- * behind the Pi's would arm an already-expired timer -- and an expired timer
- * with "Shutdown Grill" ticked shuts the grill down mid-cook. The response's
- * Date header is the server's own clock, so it is preferred. It is unreadable
- * cross-origin (Date is not on the CORS-safelist), and then the browser clock is
- * all that is left.
- */
-function serverNowSeconds(headers: Headers | undefined): number {
-  const raw = headers?.get("Date");
-  const parsed = raw === null || raw === undefined ? Number.NaN : Date.parse(raw);
-  return Math.floor((Number.isNaN(parsed) ? Date.now() : parsed) / 1000);
-}
-
-async function getControl(baseUrl: string): Promise<ControlRead> {
-  try {
-    const res = await fetch(`${baseUrl}/api/control`, { method: "GET" });
-    if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
-    const body = (await res.json()) as { control?: ControlBlob };
-    if (!body.control) return { ok: false, message: "no control in /api/control response" };
-    return { ok: true, control: body.control, serverNow: serverNowSeconds(res.headers) };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "network error" };
-  }
-}
-
-async function postControl(
-  baseUrl: string,
-  patch: Record<string, unknown>,
-): Promise<CommandResult> {
-  try {
-    const res = await fetch(`${baseUrl}/api/control`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    });
-    if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
-    const body = (await res.json()) as { result?: string; message?: string };
-    return { ok: body.result === CONTROL_WRITE_RESULT, message: body.message ?? "" };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "network error" };
-  }
-}
-
-/**
- * Arm a new timer and its expiry flags in ONE control write.
- *
- * Why not three tidy /api/set/timer/... calls: the flags live in
- * control.notify_data (an array) and the countdown in control.timer, and every
- * web-process write is a MERGE queued as the WHOLE control dict
- * (common/datastore_accessors.py write_control). read_control() reads only the
- * persisted blob and never the pending queue, and only the control loop drains
- * that queue. So calls issued inside one control cycle all read the same stale
- * blob, and execute_control_writes applies each with SQLite json_patch --
- * RFC 7396, which REPLACES arrays wholesale. The last write's notify_data
- * therefore overwrites the flags the earlier ones set, every time.
- *
- * Hence: read control once, patch the timer's notify entry and the timer block
- * in that snapshot, post it back as a single merge -- the shape the Flask
- * dashboard already uses for notification edits (dash_default.js). notify_data
- * goes back WHOLE for the same json_patch reason: a partial array would delete
- * every probe notification the user has armed.
- */
-async function timerStartWithOptions(
-  baseUrl: string,
-  seconds: number,
-  options: TimerOptions,
-): Promise<CommandResult> {
-  const read = await getControl(baseUrl);
-  if (!read.ok) return { ok: false, message: `timer start failed: ${read.message}` };
-
-  const notifyData = read.control.notify_data;
-  if (!Array.isArray(notifyData)) {
-    return { ok: false, message: "timer start failed: control.notify_data missing" };
-  }
-  const index = notifyData.findIndex((entry) => entry?.type === "timer");
-  if (index < 0) {
-    return { ok: false, message: "timer start failed: no timer entry in control.notify_data" };
-  }
-
-  const now = read.serverNow;
-  return postControl(baseUrl, {
-    notify_data: notifyData.map((entry, i) =>
-      i === index
-        ? { ...entry, req: true, shutdown: options.shutdown, keep_warm: options.keepWarm }
-        : entry,
-    ),
-    // Mirrors common/api_commands.py _cmd_set_timer's start branch. `paused` is
-    // reset explicitly: a timer armed from the modal is always a fresh one.
-    timer: { start: now, end: now + seconds, paused: 0 },
-  });
+/** Name the ticked flags for the option segment of the start command; 'none'
+ *  when neither is ticked. A path segment cannot be empty -- an empty one
+ *  collapses the URL to the 3-argument form, which leaves both flags at
+ *  whatever the previous cook set (see common/api_commands.py
+ *  _parse_timer_expiry_options). */
+function timerExpirySegment(options: TimerOptions): string {
+  const named: string[] = [];
+  if (options.shutdown) named.push("shutdown");
+  if (options.keepWarm) named.push("keep_warm");
+  return named.length > 0 ? named.join(",") : "none";
 }
 
 export function createCommand(baseUrl: string): CommandClient {
@@ -204,7 +123,11 @@ export function createCommand(baseUrl: string): CommandClient {
     prime: (grams, next) =>
       post(baseUrl, next ? ["set", "mode", "prime", grams, next] : ["set", "mode", "prime", grams]),
     timerStart: (seconds) => post(baseUrl, ["set", "timer", "start", seconds]),
-    timerStartWithOptions: (seconds, options) => timerStartWithOptions(baseUrl, seconds, options),
+    // Whole seconds: the backend parses this segment with is_float() and, on
+    // this form, rejects anything non-numeric or not greater than zero rather
+    // than substituting 60s the way the 3-argument form does.
+    timerStartWithOptions: (seconds, options) =>
+      post(baseUrl, ["set", "timer", "start", Math.round(seconds), timerExpirySegment(options)]),
     timerPause: () => post(baseUrl, ["set", "timer", "pause"]),
     timerStop: () => post(baseUrl, ["set", "timer", "stop"]),
     // The backend compares the raw path segment against the string "true"

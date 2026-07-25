@@ -191,25 +191,19 @@ describe("TimerModal", () => {
 // inside one control cycle both read the same stale blob and the second one's
 // notify_data array wins outright.
 //
-// That makes "how many control writes did this submission produce" the property
-// worth pinning, not the order of client-side calls: the flags and the start
-// must arrive in the SAME write or they are silently discarded.
+// That makes "how many requests did this submission produce" the property worth
+// pinning, not the order of client-side calls: the flags and the start must
+// arrive in the SAME control write or they are silently discarded. The single
+// request is /api/set/timer/start/{seconds}/{options}, which does exactly one
+// write_control() on the server (common/api_commands.py _cmd_set_timer).
+//
+// It carries a DURATION. The control process compares control.timer.end against
+// its OWN time.time(), so the end must be computed from that same clock: a
+// browser running behind the Pi would otherwise arm an already-expired timer,
+// and an expired timer with "Shutdown Grill" ticked shuts the grill down
+// mid-cook. Nothing in this request is a timestamp, so nothing can skew.
 // ---------------------------------------------------------------------------
 describe("TimerModal over the real command client", () => {
-  const SERVER_DATE = "Wed, 23 Jul 2026 18:00:00 GMT";
-  const SERVER_NOW = Math.floor(Date.parse(SERVER_DATE) / 1000);
-
-  /** A control blob shaped like common/defaults.py default_control(). */
-  const control = () => ({
-    notify_data: [
-      { label: "Grill", type: "probe", req: false, shutdown: false, keep_warm: false, target: 0 },
-      { label: "Probe1", type: "probe_limit_high", req: true, shutdown: true, target: 350 },
-      { label: "Timer", type: "timer", req: false, shutdown: false, keep_warm: false },
-      { label: "Hopper", type: "hopper", req: false, last_check: 0 },
-    ],
-    timer: { start: 0, paused: 0, end: 0, shutdown: false },
-  });
-
   let requests: { url: string; init: RequestInit | undefined }[];
 
   beforeEach(() => {
@@ -218,22 +212,10 @@ describe("TimerModal over the real command client", () => {
       "fetch",
       rs.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
-        if (init?.method === "POST") {
-          // blueprints/api/routes.py _api_post_control -- note "success", not "OK".
-          return {
-            ok: true,
-            headers: new Headers(),
-            json: async () => ({
-              control: "success",
-              result: "success",
-              message: "Settings updated successfully.",
-            }),
-          };
-        }
         return {
           ok: true,
-          headers: new Headers({ Date: SERVER_DATE }),
-          json: async () => ({ control: control() }),
+          headers: new Headers(),
+          json: async () => ({ result: "OK", message: "Command was accepted successfully." }),
         };
       }),
     );
@@ -241,13 +223,6 @@ describe("TimerModal over the real command client", () => {
   afterEach(() => {
     rs.unstubAllGlobals();
   });
-
-  const writes = () => requests.filter((r) => r.init?.method === "POST");
-  const writeBody = (i: number) =>
-    JSON.parse(String(writes()[i].init?.body)) as {
-      notify_data: { type: string; shutdown?: boolean; keep_warm?: boolean; req?: boolean }[];
-      timer: { start: number; end: number; paused: number };
-    };
 
   function start(over: Partial<Timer>, h: number, m: number, flags: string[]) {
     const onClose = rs.fn();
@@ -259,68 +234,54 @@ describe("TimerModal over the real command client", () => {
     return onClose;
   }
 
-  it("sends the expiry flags and the countdown as ONE control write", async () => {
+  it("sends the expiry flags and the countdown as ONE request", async () => {
     const onClose = start({}, 1, 30, ["Shutdown Grill", "Start Keep Warm"]);
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled();
     });
 
-    // One write. Three writes is the bug: each reads the same stale blob and the
-    // last one's notify_data array replaces the flags the earlier ones set.
-    expect(writes()).toHaveLength(1);
-
-    const body = writeBody(0);
-    const entry = body.notify_data.find((e) => e.type === "timer");
-    expect(entry).toEqual({
-      label: "Timer",
-      type: "timer",
-      req: true,
-      shutdown: true,
-      keep_warm: true,
-    });
-    expect(body.timer.end - body.timer.start).toBe(5400);
+    // One request. Three is the bug: each control write reads the same stale
+    // blob and the last one's notify_data array replaces the flags the earlier
+    // ones set.
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe("/api/set/timer/start/5400/shutdown,keep_warm");
+    expect(requests[0].init?.method).toBe("POST");
   });
 
-  it("posts the write to /api/control", async () => {
-    const onClose = start({}, 0, 5, []);
-    await waitFor(() => {
-      expect(onClose).toHaveBeenCalled();
-    });
-    expect(writes()[0].url).toBe("/api/control");
-    expect(writes()[0].init?.headers).toEqual({ "Content-Type": "application/json" });
-  });
-
-  // json_patch replaces arrays wholesale, so a partial notify_data would delete
-  // every probe notification the user has armed.
-  it("returns notify_data whole, leaving the other notifications untouched", async () => {
+  it("names only the flags that are ticked", async () => {
     const onClose = start({}, 0, 5, ["Start Keep Warm"]);
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled();
     });
-    const body = writeBody(0);
-    expect(body.notify_data).toHaveLength(4);
-    expect(body.notify_data.filter((e) => e.type !== "timer")).toEqual(
-      control().notify_data.filter((e) => e.type !== "timer"),
-    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe("/api/set/timer/start/300/keep_warm");
   });
 
-  // The control process decides a timer has expired by comparing timer.end
-  // against its OWN time.time(). A browser clock running behind the Pi's would
-  // arm an already-expired timer -- and an expired timer with "Shutdown Grill"
-  // ticked shuts the grill down mid-cook. The GET's Date header is the server's
-  // own clock, so the countdown is anchored to that.
-  it("anchors start/end to the server clock from the read", async () => {
+  it("says so explicitly when neither flag is ticked", async () => {
+    const onClose = start({}, 0, 5, []);
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalled();
+    });
+    // 'none' rather than an empty segment: an empty path segment collapses the
+    // URL to the 3-argument form, which leaves both flags at whatever a
+    // previous cook left behind.
+    expect(requests[0].url).toBe("/api/set/timer/start/300/none");
+  });
+
+  // The whole point of the server-side form: the request contains a duration
+  // and nothing that came off the browser clock.
+  it("sends a duration, never a timestamp", async () => {
     const onClose = start({}, 2, 0, []);
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled();
     });
-    const body = writeBody(0);
-    expect(body.timer.start).toBe(SERVER_NOW);
-    expect(body.timer.end).toBe(SERVER_NOW + 7200);
-    expect(body.timer.paused).toBe(0);
+    expect(requests[0].url).toBe("/api/set/timer/start/7200/none");
+    expect(requests[0].init?.body).toBeUndefined();
+    const nowSeconds = String(Math.floor(Date.now() / 1000)).slice(0, 6);
+    expect(requests[0].url).not.toContain(nowSeconds);
   });
 
-  it("still refuses 0h0m without reading or writing control", async () => {
+  it("still refuses 0h0m without issuing any request", async () => {
     const onClose = start({}, 0, 0, []);
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeTruthy();

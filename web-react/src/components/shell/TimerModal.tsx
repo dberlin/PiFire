@@ -35,19 +35,25 @@ export function TimerModal({
   if (rejected && seconds > 0) setRejected(false);
 
   async function submit() {
-    // A zero duration must never be sent. The backend parses the seconds
-    // segment with is_float() and substitutes 60 seconds for anything
-    // non-numeric, so a bad submission arms a timer the user never asked for.
+    // A zero duration must never be sent. The backend refuses one on this form
+    // (a timer that is already expired when armed fires its expiry action at
+    // once), so this is only about complaining where the user can see it.
     if (seconds <= 0) {
       setRejected(true);
       return;
     }
-    // One write, carrying the flags AND the countdown. Sending them as separate
-    // requests loses the flags: every web-process control write queues the whole
-    // control dict read from a blob that does not reflect the queue, and the
-    // queued patches are applied with json_patch (RFC 7396), which replaces the
-    // notify_data ARRAY wholesale. The start would therefore land last and undo
-    // the flags. See helpers/command.ts timerStartWithOptions.
+    // One request, carrying the flags AND the countdown, which the server turns
+    // into one control write. Sent separately the flags are lost: every
+    // web-process control write queues the whole control dict read from a blob
+    // that does not reflect the queue, and the queued patches are applied with
+    // json_patch (RFC 7396), which replaces the notify_data ARRAY wholesale --
+    // so the start would land last and undo the flags.
+    //
+    // What travels is a DURATION, not an end time: the control process judges
+    // expiry against its own clock and therefore computes the end itself, so a
+    // browser clock running behind the Pi's cannot arm an already-expired timer
+    // -- which, with "Shutdown Grill" ticked, would shut the grill down
+    // mid-cook. See helpers/command.ts timerStartWithOptions.
     await command.timerStartWithOptions(seconds, { shutdown, keepWarm });
     onClose();
   }
