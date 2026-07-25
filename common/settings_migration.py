@@ -36,9 +36,30 @@ from common.defaults import default_probe_config, default_settings
 
 def read_settings_file(filename="settings.json", init=False, retry_count=0):
     """
-    Read Settings from file
+    Read Settings from a JSON FILE (not SQLite).
+
+    Despite the name this is not unconditionally pure -- it has two write
+    paths, both deliberate. They are documented here because the name alone
+    does not admit them:
+
+    * ``init=True`` (opt-in, OFF by default) runs the version-overlay /
+      migration pipeline, which on an upgrade or downgrade calls
+      ``backup_settings()`` (writes a backup JSON + updates the backup
+      manifest) and ``write_warning()`` to tell the user their settings were
+      migrated. The three production callers all pass it deliberately:
+      ``common/datastore.py::_first_boot_import`` and the two settings-restore
+      handlers in ``blueprints/admin/routes.py``.
+    * Corruption recovery runs REGARDLESS of ``init``: if the file still fails
+      to parse after 5 retries, ``restore_settings()`` recovers from a backup
+      and persists the result via ``write_settings_store()``, then forces
+      ``init = True`` so the recovered tree is migrated forward. Pinned by
+      ``test_read_settings_file_retries_on_corrupt_json_then_restores``.
+
+    With ``init=False`` and a readable, well-formed file this is a pure read.
 
     :param filename: Filename to use (default settings.json)
+    :param init: Run the migration pipeline over the result (see above)
+    :param retry_count: Internal -- recursion guard for the ValueError retry
     """
 
     try:
