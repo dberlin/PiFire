@@ -14,6 +14,7 @@ from common.api_commands import process_command
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update
 from common.server_status import get_server_status
 from common.settings_schema import SettingsValidationError, validate_partial_settings
+from common.controller_deps import guard_controller_selection
 from . import api_bp
 
 
@@ -191,6 +192,15 @@ def _api_post_settings_update(settings, request_json):
 
     try:
         settings = deep_update(settings, delta)
+        # Layer 3: the selected controller must be constructible on THIS install.
+        # Evaluated on the MERGED tree (so it sees the selection the save would
+        # actually produce) and before any write, so a refusal leaves the store
+        # untouched exactly like the two layers above -- the controller currently
+        # running the user's cook is not disturbed. Kicks off the missing extra's
+        # background install; see common/controller_deps.py.
+        blocked = guard_controller_selection(settings)
+        if blocked:
+            return jsonify({"result": "error", "message": blocked, "data": {}}), 200
         control = read_control()
         save_settings_and_flag_update(settings, control, *flags, origin="api")
         return jsonify({"result": "success", "message": "Settings updated.", "data": settings}), 200

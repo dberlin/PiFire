@@ -213,3 +213,35 @@ def dependency_message(missing, started, detail=""):
     if detail:
         return f"{head} {detail} The controller is unchanged."
     return f"{head} The controller is unchanged."
+
+
+def guard_controller_selection(settings):
+    """Gate a settings save on the selected controller being constructible.
+
+    Returns None when the save may proceed, or the message to show the user when
+    it may not -- in which case an install of the missing extra has been kicked
+    off in the background.
+
+    REFUSING THE WHOLE SAVE is the deliberate choice. The alternative -- write
+    the selection and let the control loop deal with it -- means the stored
+    settings name a controller that cannot be built, which is precisely the state
+    this whole change exists to prevent. Refusing also matches the settings API's
+    existing contract: a rejected save leaves the store completely untouched, so
+    there is no half-applied state to reconcile and the previous controller keeps
+    running the user's cook.
+
+    Callers must apply this AFTER merging the delta, so it sees the selection the
+    save would actually produce.
+    """
+    try:
+        selected = settings["controller"]["selected"]
+        config = settings["controller"]["config"].get(selected, {})
+    except KeyError, TypeError, AttributeError:
+        return None
+    missing = check_controller_dependencies(selected, config)
+    if missing is None:
+        return None
+    if missing.extra is None:
+        return dependency_message(missing, started=False)
+    started, detail = install_extra_detached(missing.extra)
+    return dependency_message(missing, started=started, detail=detail)

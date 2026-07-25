@@ -5,6 +5,7 @@ from common.datastore_accessors import read_settings, read_control, write_settin
 from common.app import is_not_blank, is_checked, update_probe_config, save_settings_and_flag_update
 from common.defaults import DEFAULT_DASHBOARD
 from common.settings_schema import SettingsValidationError
+from common.controller_deps import guard_controller_selection
 
 from . import settings_bp
 
@@ -448,13 +449,30 @@ def _settings_cycle(settings, control, controller, event):
     _apply_smoke_plus_config(response, settings)
     _apply_keep_warm_config(response, settings)
 
-    if is_not_blank(response, "selectController"):
-        _apply_controller_config(response, settings, controller)
-        control["controller_update"] = True
-        # print(f'Controller Settings: {settings["controller"]["config"]}')
-
     event["type"] = "updated"
     event["text"] = "Successfully updated cycle settings."
+
+    if is_not_blank(response, "selectController"):
+        previous = settings["controller"]["selected"]
+        previous_config = settings["controller"]["config"].get(previous)
+        _apply_controller_config(response, settings, controller)
+        # The selected controller must be constructible on THIS install. On a
+        # refusal, roll the controller section back and leave it out of the save
+        # -- the rest of the cycle/smoke-plus/keep-warm form still applies, and
+        # `controller_update` is NOT set, so the control loop never re-reads a
+        # selection it cannot build. The missing extra installs in the
+        # background; see common/controller_deps.py.
+        blocked = guard_controller_selection(settings)
+        if blocked:
+            settings["controller"]["selected"] = previous
+            if previous_config is None:
+                settings["controller"]["config"].pop(previous, None)
+            else:
+                settings["controller"]["config"][previous] = previous_config
+            event["type"] = "error"
+            event["text"] = blocked
+        else:
+            control["controller_update"] = True
 
     save_settings_and_flag_update(settings, control, "settings_update", origin="app")
 
