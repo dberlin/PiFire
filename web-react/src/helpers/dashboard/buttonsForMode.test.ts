@@ -42,13 +42,10 @@ describe("buttonsForMode", () => {
       // command (see the startup-confirmation block below).
       const buttons = buttonsForMode(at(mode, { primeAmount: 25, startupCheck: false }));
       expect(buttons.map((b) => b.label)).toEqual(["Startup", "Prime", "Monitor", "Manual"]);
-      expect(buttons.every((b) => b.action.type === "command")).toBe(true);
+      // Startup / Monitor / Manual are bare commands; Prime opens a menu.
+      expect(buttons.map((b) => b.action.type)).toEqual(["command", "menu", "command", "command"]);
 
       const command = stubCommand();
-      const prime = buttons[1];
-      if (prime.action.type === "command") await prime.action.run(command);
-      expect(command.prime).toHaveBeenCalledWith(25, "startup");
-
       const monitor = buttons[2];
       if (monitor.action.type === "command") await monitor.action.run(command);
       expect(command.setMode).toHaveBeenCalledWith("monitor");
@@ -59,13 +56,49 @@ describe("buttonsForMode", () => {
     },
   );
 
-  it("Stop mode's Prime falls back to 10g when primeAmount is falsy", async () => {
-    const buttons = buttonsForMode(at("Stop", { primeAmount: 0 }));
-    const command = stubCommand();
-    const prime = buttons.find((b) => b.label === "Prime");
-    expect(prime).toBeDefined();
-    if (prime?.action.type === "command") await prime.action.run(command);
-    expect(command.prime).toHaveBeenCalledWith(10, "startup");
+  // I2: Flask offers six prime choices -- three amounts x two follow-on modes
+  // (_macro_control_panel.html:80-85). React had one button that always primed
+  // dash.primeAmount and always went on to Startup, so "prime and stop", the
+  // variant for loading a fresh bag, was unreachable.
+  describe("Stop mode's Prime menu", () => {
+    const primeAction = () => {
+      const prime = buttonsForMode(at("Stop")).find((b) => b.label === "Prime");
+      if (prime?.action.type !== "menu") throw new Error("Prime is not a menu action");
+      return prime.action;
+    };
+
+    it("offers exactly Flask's six items, in Flask's order", () => {
+      expect(primeAction().items.map((i) => i.label)).toEqual([
+        "Prime 10g",
+        "Prime 25g",
+        "Prime 50g",
+        "Prime 10g & Startup",
+        "Prime 25g & Startup",
+        "Prime 50g & Startup",
+      ]);
+    });
+
+    it("primes and stops for the first three", async () => {
+      const action = primeAction();
+      const command = stubCommand();
+      await action.run(command, action.items[1].value);
+      expect(command.prime).toHaveBeenCalledWith(25, "stop");
+    });
+
+    it("primes and starts up for the last three", async () => {
+      const action = primeAction();
+      const command = stubCommand();
+      await action.run(command, action.items[5].value);
+      expect(command.prime).toHaveBeenCalledWith(50, "startup");
+    });
+
+    it("ignores dash.primeAmount entirely -- the user picks", () => {
+      const prime = buttonsForMode(at("Stop", { primeAmount: 37 })).find(
+        (b) => b.label === "Prime",
+      );
+      if (prime?.action.type !== "menu") throw new Error("Prime is not a menu action");
+      expect(prime.action.items.map((i) => i.value)).not.toContain("37:stop");
+    });
   });
 
   it("Monitor mode renders Startup (command) / Stop (confirm, danger)", async () => {

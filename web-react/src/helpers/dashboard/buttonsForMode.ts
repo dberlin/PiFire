@@ -8,7 +8,20 @@ export type ButtonAction =
   // Ignition behind Flask's startup modal. WHICH of its two variants to show is
   // a presentation decision, so this carries only the intent.
   | { type: "startup" }
+  // A pick-one list (ActionMenu). `run` receives the picked item's value, so
+  // the menu itself stays a dumb list of labels.
+  | {
+      type: "menu";
+      title: string;
+      items: MenuItem[];
+      run(c: CommandClient, value: string): Promise<CommandResult>;
+    }
   | { type: "confirm"; title: string; run(c: CommandClient): Promise<CommandResult> };
+
+export interface MenuItem {
+  label: string;
+  value: string;
+}
 
 export interface ControlButton {
   label: string;
@@ -24,6 +37,32 @@ const confirm = (
   title: string,
   run: (c: CommandClient) => Promise<CommandResult>,
 ): ButtonAction => ({ type: "confirm", title, run });
+
+// Flask's Prime dropup: six items, three amounts x two follow-on modes
+// (_macro_control_panel.html:80-85, control_panel.js:65-73). React had reduced
+// this to a single button that always primed dash.primeAmount and always went
+// on to Startup -- so "prime and stop", the variant you use when loading a
+// fresh bag, was unreachable.
+const PRIME_GRAMS = [10, 25, 50];
+const PRIME_MENU: MenuItem[] = [
+  ...PRIME_GRAMS.map((g) => ({ label: `Prime ${g}g`, value: `${g}:stop` })),
+  ...PRIME_GRAMS.map((g) => ({ label: `Prime ${g}g & Startup`, value: `${g}:startup` })),
+];
+
+const PRIME: ControlButton = {
+  label: "Prime",
+  action: {
+    type: "menu",
+    title: "Prime",
+    items: PRIME_MENU,
+    run: (c, value) => {
+      const [grams, next] = value.split(":");
+      // GrillMode is lowercase (command.ts:5-12); Flask's next_mode is
+      // capitalised, and the API grammar takes the lowercase form.
+      return c.prime(Number(grams), next === "startup" ? "startup" : "stop");
+    },
+  },
+};
 
 const STOP: ControlButton = {
   label: "Stop",
@@ -73,7 +112,7 @@ export function buttonsForMode(dash: LiveState): ControlButton[] {
   if (mode === "Stop" || mode === "Error" || mode === "") {
     return [
       startupButton(dash),
-      { label: "Prime", action: cmd((c) => c.prime(dash.primeAmount || 10, "startup")) },
+      PRIME,
       { label: "Monitor", action: cmd((c) => c.setMode("monitor")) },
       { label: "Manual", action: cmd((c) => c.setMode("manual")) },
     ];

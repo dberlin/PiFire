@@ -1,8 +1,13 @@
 import { useState } from "react";
 import type { CommandClient, CommandResult } from "../../helpers/command";
-import { type ButtonAction, buttonsForMode } from "../../helpers/dashboard/buttonsForMode";
+import {
+  type ButtonAction,
+  buttonsForMode,
+  type MenuItem,
+} from "../../helpers/dashboard/buttonsForMode";
 import { applySettings } from "../../helpers/settings/settingsApi";
 import type { LiveState } from "../../helpers/types";
+import { ActionMenu } from "./ActionMenu";
 import { ConfirmAction } from "./ConfirmAction";
 import { PwmEntry } from "./PwmEntry";
 import { SetpointEntry } from "./SetpointEntry";
@@ -45,6 +50,11 @@ export function ControlButtons({
     run(c: CommandClient): Promise<CommandResult>;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState<{
+    title: string;
+    items: MenuItem[];
+    run(c: CommandClient, value: string): Promise<CommandResult>;
+  } | null>(null);
   // Derived when the button is pressed, never mirrored from `dash` in an effect.
   const [startupPrompt, setStartupPrompt] = useState<StartupPrompt>("none");
   const [startupError, setStartupError] = useState<string | null>(null);
@@ -62,6 +72,8 @@ export function ControlButtons({
     if (action.type === "command") fire(action.run);
     else if (action.type === "setpoint") setSetpointOpen(true);
     else if (action.type === "pwm") setPwmOpen(true);
+    else if (action.type === "menu")
+      setMenu({ title: action.title, items: action.items, run: action.run });
     else if (action.type === "startup") {
       // ONE modal with two Jinja-selected variants, and the hold prompt WINS
       // when both are configured (_macro_control_panel.html:214,224 test the
@@ -194,6 +206,17 @@ export function ControlButtons({
         onConfirm={() => {
           setStartupPrompt("none");
           fire((c) => c.setMode("startup"));
+        }}
+      />
+      <ActionMenu
+        open={menu !== null}
+        title={menu?.title ?? ""}
+        items={menu?.items ?? []}
+        onCancel={() => setMenu(null)}
+        onPick={(value) => {
+          const run = menu?.run;
+          setMenu(null);
+          if (run !== undefined) fire((c) => run(c, value));
         }}
       />
       <PwmEntry

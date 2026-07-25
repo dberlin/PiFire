@@ -383,3 +383,40 @@ describe("ControlButtons startup confirmation", () => {
     expect(screen.getByText("Change Hold Temp?")).toBeInTheDocument();
   });
 });
+
+describe("ControlButtons Prime menu", () => {
+  it("opens the six-item menu instead of priming immediately", () => {
+    const command = stubCommand();
+    render(<ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Prime" }));
+    expect(command.prime).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Prime 10g" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Prime 50g & Startup" })).toBeInTheDocument();
+  });
+
+  it("primes the picked amount with the picked follow-on mode", async () => {
+    const command = stubCommand();
+    render(<ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Prime" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prime 25g & Startup" }));
+    await waitFor(() => expect(command.prime).toHaveBeenCalledWith(25, "startup"));
+    expect(screen.queryByRole("button", { name: "Prime 10g" })).not.toBeInTheDocument();
+  });
+
+  it("primes and stops when that variant is picked", async () => {
+    const command = stubCommand();
+    render(<ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Prime" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prime 50g" }));
+    await waitFor(() => expect(command.prime).toHaveBeenCalledWith(50, "stop"));
+  });
+
+  it("cancelling primes nothing", () => {
+    const command = stubCommand();
+    render(<ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Prime" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(command.prime).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Prime 10g" })).not.toBeInTheDocument();
+  });
+});

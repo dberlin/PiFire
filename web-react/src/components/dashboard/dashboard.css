@@ -359,3 +359,18 @@
    with Banners.tsx: the strip is chrome for every page now, not part of the
    1280x720 stage. HistoryPage still borrows .pf-banner--error for its inline
    failure message, which keeps working -- every stylesheet here is global. */
+
+/* Pick-one list inside the shared .pf-modal shell (ActionMenu). Used by the
+   Prime amount menu and the P-Mode menu -- both of which are Flask dropups with
+   more choices than a confirmation can carry. */
+.pf-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.pf-menu-item {
+  text-align: center;
+  padding: 12px 18px;
+}
