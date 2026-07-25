@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useOutletContext } from "react-router";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
+import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { StringListField } from "../fields/StringListField";
@@ -44,6 +45,12 @@ function deviceStr(d: OneSignalDevice, key: keyof OneSignalDevice): string {
 }
 function devicesOf(o: NotifyService): Record<string, OneSignalDevice> {
   return (o.devices as Record<string, OneSignalDevice> | undefined) ?? {};
+}
+/** How Flask names a device in the delete modal (index.html:1659-1670): the
+    friendly name when set, the hardware device name otherwise. */
+function deviceLabel(d: OneSignalDevice | undefined): string {
+  if (!d) return "";
+  return deviceStr(d, "friendly_name") || deviceStr(d, "device_name");
 }
 
 export function NotificationsTab() {
@@ -95,6 +102,11 @@ export function NotificationsTab() {
         ns: { ...s.ns, onesignal: { ...onesignalSvc, devices } },
       };
     });
+
+  // The OneSignal device id awaiting confirmation; null when closed. Flask puts
+  // this delete behind a modal naming the device (index.html:1651-1678). One
+  // <ConfirmAction> for the whole table, not one per row.
+  const [pendingDevice, setPendingDevice] = useState<string | null>(null);
 
   const apprise = svc("apprise");
   const ifttt = svc("ifttt");
@@ -215,7 +227,7 @@ export function NotificationsTab() {
                     <button
                       type="button"
                       aria-label={`Delete ${deviceId}`}
-                      onClick={() => deleteDevice(deviceId)}
+                      onClick={() => setPendingDevice(deviceId)}
                     >
                       Delete
                     </button>
@@ -321,6 +333,19 @@ export function NotificationsTab() {
         />
       </Section>
 
+      <ConfirmAction
+        open={pendingDevice !== null}
+        // Flask branches on friendly_name vs device_name at :1659-1670.
+        title={`Delete Device ${
+          pendingDevice === null ? "" : deviceLabel(devicesOf(onesignal)[pendingDevice])
+        }`}
+        message="This device will stop receiving notifications. It can only be re-added by registering again from the PiFire Android app."
+        onConfirm={() => {
+          if (pendingDevice !== null) deleteDevice(pendingDevice);
+          setPendingDevice(null);
+        }}
+        onCancel={() => setPendingDevice(null)}
+      />
       <SaveBar onSave={onSave} saving={saving} status={status} />
     </>
   );

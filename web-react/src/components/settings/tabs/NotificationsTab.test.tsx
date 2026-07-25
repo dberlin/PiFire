@@ -398,6 +398,8 @@ describe("NotificationsTab", () => {
       renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES_WITH_DEVICES));
 
       fireEvent.click(screen.getByRole("button", { name: "Delete player-xyz" }));
+      // The delete is now behind a confirm (Flask index.html:1651-1678).
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -437,5 +439,71 @@ describe("NotificationsTab", () => {
     fireEvent.change(el, { target: { value: "99999" } });
     fireEvent.blur(el);
     expect(inputFor("WLED Notify Duration")).toHaveValue(3600);
+  });
+  // Flask puts the OneSignal delete behind a Bootstrap modal naming the device
+  // (index.html:1651-1678), branching on friendly_name vs device_name at
+  // :1659-1670. React deleted on the first click.
+  describe("OneSignal device delete confirmation (M15)", () => {
+    const deviceFixture = () => ({
+      settings: {
+        notify_services: {
+          onesignal: {
+            enabled: true,
+            devices: {
+              "player-1": {
+                friendly_name: "Kitchen Tablet",
+                device_name: "Pixel 7",
+                app_version: "1.2",
+              },
+              "player-2": { friendly_name: "", device_name: "iPhone 14", app_version: "1.3" },
+            },
+          },
+        },
+      },
+      mode: "Stop",
+    });
+
+    it("asks before deleting, naming the device by its friendly name", () => {
+      renderRoute(<NotificationsTab />, deviceFixture());
+
+      fireEvent.click(screen.getByRole("button", { name: "Delete player-1" }));
+      expect(document.querySelector(".pf-modal-title")).toHaveTextContent("Kitchen Tablet");
+      // The row is still there while the dialog is open.
+      expect(screen.getByRole("button", { name: "Delete player-1" })).toBeInTheDocument();
+    });
+
+    it("falls back to device_name when friendly_name is empty (index.html:1659-1670)", () => {
+      renderRoute(<NotificationsTab />, deviceFixture());
+
+      fireEvent.click(screen.getByRole("button", { name: "Delete player-2" }));
+      // The device name also appears in its table row, so scope to the dialog.
+      expect(document.querySelector(".pf-modal-title")).toHaveTextContent("iPhone 14");
+    });
+
+    it("keeps the row on Cancel", () => {
+      renderRoute(<NotificationsTab />, deviceFixture());
+
+      fireEvent.click(screen.getByRole("button", { name: "Delete player-1" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(screen.getByRole("button", { name: "Delete player-1" })).toBeInTheDocument();
+    });
+
+    it("removes the row on Confirm and drops it from the next save delta", async () => {
+      renderRoute(<NotificationsTab />, deviceFixture());
+
+      fireEvent.click(screen.getByRole("button", { name: "Delete player-1" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+      expect(screen.queryByRole("button", { name: "Delete player-1" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Delete player-2" })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const [delta] = saveMock.mock.calls[0];
+      expect(delta.notify_services.onesignal.devices["player-1"]).toBeUndefined();
+      expect(delta.notify_services.onesignal.devices["player-2"]).toBeDefined();
+    });
   });
 });
