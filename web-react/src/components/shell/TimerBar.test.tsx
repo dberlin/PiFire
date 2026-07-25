@@ -39,7 +39,6 @@ function stubCommand(): CommandClient {
     manualOutput: rs.fn(async () => OK),
     manualPwm: rs.fn(async () => OK),
     recipeNextStep: rs.fn(async () => OK),
-    hopperCheck: rs.fn(async () => OK),
   };
 }
 

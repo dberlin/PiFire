@@ -317,9 +317,7 @@ export function Dashboard({
                 hasDistanceSensor is on the wire (socket_io.py:270). That field
                 had zero consumers, so React showed a pellet gauge -- reading a
                 hard-coded level -- on grills with no sensor at all. */}
-            {dash.hasDistanceSensor && (
-              <HopperGauge h={view.hopper} onRefresh={() => command.hopperCheck()} />
-            )}
+            {dash.hasDistanceSensor && <HopperGauge h={view.hopper} />}
           </div>
         </div>
 

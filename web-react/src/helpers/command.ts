@@ -76,13 +76,11 @@ export interface CommandClient {
   setUnits(units: "F" | "C"): Promise<CommandResult>;
   manualOutput(output: ManualOutput, action?: "toggle" | "true" | "false"): Promise<CommandResult>;
   manualPwm(duty: number): Promise<CommandResult>;
-  // The two writes with no /api/set/... grammar behind them. Both go through
+  // The one write with no /api/set/... grammar behind it. It goes through
   // POST /api/control, which answers lowercase "success" rather than the "OK"
   // this module's post() tests for -- see controlPatch below.
   /** Advance a running recipe to its next step (control_panel.js:530). */
   recipeNextStep(): Promise<CommandResult>;
-  /** Ask the distance sensor to re-measure the hopper (dash_default.js:878-897). */
-  hopperCheck(): Promise<CommandResult>;
 }
 
 /** Bridge POST /api/control into this module's CommandResult envelope.
@@ -195,10 +193,11 @@ export function createCommand(baseUrl: string): CommandClient {
     // merges the whole posted object, so any extra key is a value patched back
     // over whatever the control loop set meanwhile.
     recipeNextStep: () => controlPatch(baseUrl, { updated: true }),
-    // Flask re-reads GET /api/hopper 500ms later (dash_default.js:891). Not
-    // needed here: the socket pushes hopperLevel on its own
-    // (socket_io.py:258), so posting the flag and letting the next frame carry
-    // the answer is both simpler and correct at any measurement latency.
-    hopperCheck: () => controlPatch(baseUrl, { hopper_check: true }),
+    // No hopperCheck here on purpose. Flask posts hopper_check and re-reads
+    // GET /api/hopper 500ms later (dash_default.js:878-897); this UI has no
+    // Refresh Status button to post it from, because the control loop refreshes
+    // the level every ~10s and the socket pushes hopperLevel with every frame
+    // (socket_io.py:258). The backend flag itself still exists for the attached
+    // display and the Flask pages -- see HopperGauge.tsx.
   };
 }

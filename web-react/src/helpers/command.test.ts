@@ -274,33 +274,14 @@ describe("createCommand.recipeNextStep", () => {
   });
 });
 
-describe("createCommand.hopperCheck", () => {
-  afterEach(() => {
-    rs.unstubAllGlobals();
-  });
-
-  it('POSTs /api/control with exactly {"hopper_check": true}', async () => {
-    const fetchMock: ReturnType<typeof rs.fn> = rs.fn(async () => ({
-      ok: true,
-      status: 201,
-      json: async () => ({ result: "success" }),
-    }));
-    rs.stubGlobal("fetch", fetchMock);
-
-    await expect(createCommand("").hopperCheck()).resolves.toEqual({ ok: true, message: "" });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/control");
-    expect(JSON.parse(String(init.body))).toEqual({ hopper_check: true });
-  });
-
-  // The landmine this endpoint carries: it answers lowercase "success", not the
-  // "OK" that post() tests for (blueprints/api/routes.py:211). Routing this
-  // through post() unchanged would report every successful refresh as a failure.
-  it("treats lowercase success as ok", async () => {
-    rs.stubGlobal(
-      "fetch",
-      rs.fn(async () => ({ ok: true, status: 201, json: async () => ({ result: "success" }) })),
-    );
-    expect((await createCommand("").hopperCheck()).ok).toBe(true);
+// createCommand no longer exposes hopperCheck. Its only caller was the hopper
+// card's Refresh Status button, removed once the control loop started
+// refreshing the level on a timer (distance/intervals.py) -- an exported
+// command with no caller is just an untested API surface. The backend
+// hopper_check flag is untouched: the attached display (_base_flex.py:1462) and
+// the Flask pellet pages still raise it, and the control loop still services it.
+describe("createCommand has no hopperCheck", () => {
+  it("does not expose one", () => {
+    expect("hopperCheck" in createCommand("")).toBe(false);
   });
 });

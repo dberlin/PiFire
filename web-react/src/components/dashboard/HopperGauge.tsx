@@ -1,27 +1,15 @@
-import { type CSSProperties, useState } from "react";
+import type { CSSProperties } from "react";
 import type { HopperView } from "../../helpers/dashboard/deriveView";
 
 // Vertical pellet-hopper level with a subtle pellet-texture overlay; color and
 // caption escalate as it drains (green -> amber -> red / REFILL PELLETS).
-export function HopperGauge({
-  h,
-  onRefresh,
-}: {
-  h: HopperView;
-  /** Asks the distance sensor to re-measure. Flask labels this "Refresh
-   *  Status" (_macro_dash_default.html:358). */
-  onRefresh(): Promise<unknown>;
-}) {
-  const [refreshing, setRefreshing] = useState(false);
-  const refresh = async () => {
-    setRefreshing(true);
-    try {
-      await onRefresh();
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
+//
+// There is deliberately no "Refresh Status" button here, though Flask has one
+// (_macro_dash_default.html:359). The control loop re-reads the hopper level
+// every ~10s on its own and the socket pushes hopperLevel with every frame
+// (socket_io.py:258), so this card is already live; a manual refresh would ask
+// for what is on its way regardless. See distance/intervals.py.
+export function HopperGauge({ h }: { h: HopperView }) {
   // Per-frame data from deriveView, handed to the stylesheet as custom
   // properties. The layout is in dashboard.css; only these values are inline.
   const vars = {
@@ -43,12 +31,6 @@ export function HopperGauge({
       </div>
       <div className="pf-dash-hopper-foot">
         <span className="pf-dash-hopper-label">{h.label}</span>
-        {/* The reading is only as fresh as the last measurement, and the
-            controller does not re-measure on demand otherwise. Sits in the
-            card's existing caption row so the card's box does not change. */}
-        <button className="pf-toggle" onClick={refresh} disabled={refreshing}>
-          Refresh Status
-        </button>
       </div>
     </div>
   );

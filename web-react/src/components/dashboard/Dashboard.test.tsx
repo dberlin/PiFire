@@ -31,7 +31,6 @@ function makeCommand(): CommandClient {
     manualOutput: rs.fn(async () => OK),
     manualPwm: rs.fn(async () => OK),
     recipeNextStep: rs.fn(async () => OK),
-    hopperCheck: rs.fn(async () => OK),
   };
 }
 
@@ -572,20 +571,20 @@ describe("Dashboard hopper card", () => {
   it("renders the hopper card when the grill has a distance sensor", () => {
     renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor: true });
     expect(screen.getByText("Hopper")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refresh Status" })).toBeInTheDocument();
+    expect(screen.getByText(`${FIXTURE_DASH.hopperLevel}%`)).toBeInTheDocument();
   });
 
   it("hides the whole card when the grill has none, exactly as Flask does", () => {
     renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor: false });
     expect(screen.queryByText("Hopper")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Refresh Status" })).not.toBeInTheDocument();
   });
 
-  it("asks the controller to re-measure", async () => {
-    const user = userEvent.setup();
-    const command = makeCommand();
-    renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor: true }, { command });
-    await user.click(screen.getByRole("button", { name: "Refresh Status" }));
-    await waitFor(() => expect(command.hopperCheck).toHaveBeenCalled());
+  // The card used to carry a Refresh Status button wired to command.hopperCheck.
+  // Both are gone: the control loop refreshes the level every ~10s on its own
+  // (distance/intervals.py) and the socket pushes it with every frame. A
+  // deliberate divergence from Flask, which keeps its button.
+  it("carries no refresh control, because the level refreshes itself", () => {
+    renderDashboard({ ...FIXTURE_DASH, hasDistanceSensor: true });
+    expect(screen.queryByRole("button", { name: "Refresh Status" })).not.toBeInTheDocument();
   });
 });
