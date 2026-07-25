@@ -61,8 +61,18 @@ class Process_Monitor:
             level=log_level,
         )
 
-        # Setup process monitoring thread
-        self.process_thread = threading.Thread(target=self._heartbeat_check)
+        # Setup process monitoring thread. Daemon, because a non-daemon one
+        # keeps the interpreter alive at shutdown: this loop only ends when
+        # stop_monitor() sets `kill`, and the one caller (ControlMode.run) sets
+        # it on its LAST line, after all teardown. Any exception escaping the
+        # work cycle therefore skipped it, and the control process could not
+        # exit -- it hung with a live thread that 30 seconds later ran
+        # `supervisorctl restart control` to recover itself. As a daemon it dies
+        # with the process instead, so a crash exits, and the supervisor sees
+        # the exit and restarts immediately. Monitoring is unaffected: what this
+        # thread guards is a control loop that HANGS without raising, and a
+        # hung process is not exiting for the daemon flag to matter to.
+        self.process_thread = threading.Thread(target=self._heartbeat_check, daemon=True)
         self.process_thread.start()
 
     def heartbeat(self):
