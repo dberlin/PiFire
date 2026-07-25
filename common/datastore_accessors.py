@@ -205,32 +205,55 @@ def read_metrics(all=False):
     return _metrics_row_to_dict(row) if row else default_metrics()
 
 
-def write_metrics(metrics=None, flush=False, new_metric=False):
+def flush_metrics():
     """
-    Write metrics to SQLite DB
+    Delete every metrics row.
 
-    :param metrics: Metrics Data
-    :param flush: True to clear metrics. False otherwise
-    :param new_metric:
+    Previously ``write_metrics(flush=True)``. The name was not lying about
+    mutation, but it bundled a table-wide DELETE together with an INSERT and an
+    UPDATE behind two booleans -- see :func:`append_metric` /
+    :func:`update_metrics`.
+    """
+    datastore.execute_write("DELETE FROM metrics")
+
+
+def append_metric(metrics=None):
+    """
+    INSERT a new metrics row, stamping a fresh ``starttime`` and ``id``.
+
+    This is "start recording a new cook segment". Previously
+    ``write_metrics(metrics, new_metric=True)`` -- one keyword away from
+    :func:`update_metrics`, which amends the CURRENT record instead of starting
+    a new one. That one-keyword gap between "insert" and "update" is the reason
+    this split exists.
+
+    Keys outside METRIC_COLUMNS are dropped; columns the caller omits are
+    stored as NULL (this is an INSERT -- there is no prior row to inherit from).
+
+    :param metrics: Metrics data; defaults to default_metrics().
     """
     if metrics is None:
         metrics = default_metrics()
+    metrics["starttime"] = time.time() * 1000
+    metrics["id"] = generate_uuid()
+    cols_sql = ", ".join(METRIC_COLUMNS)
+    placeholders = ", ".join(["?"] * len(METRIC_COLUMNS))
+    values = [metrics.get(k) for k in METRIC_COLUMNS]
+    datastore.execute_write(f"INSERT INTO metrics({cols_sql}) VALUES({placeholders})", values)
 
-    if flush:
-        datastore.execute_write("DELETE FROM metrics")
-        return
 
+def update_metrics(metrics):
+    """
+    Amend the CURRENT (last-written) metrics record in place.
+
+    Inserts instead when the table is empty, so the first update on a flushed
+    store is not silently dropped. Previously ``write_metrics(metrics)``.
+
+    :param metrics: Metrics data; a partial dict is allowed (see below).
+    """
     cols_sql = ", ".join(METRIC_COLUMNS)
     placeholders = ", ".join(["?"] * len(METRIC_COLUMNS))
 
-    if new_metric:
-        metrics["starttime"] = time.time() * 1000
-        metrics["id"] = generate_uuid()
-        values = [metrics.get(k) for k in METRIC_COLUMNS]
-        datastore.execute_write(f"INSERT INTO metrics({cols_sql}) VALUES({placeholders})", values)
-        return
-
-    # Replace the last record (or insert if the table is empty).
     with datastore.transaction() as conn:
         row = conn.execute("SELECT seq FROM metrics ORDER BY seq DESC LIMIT 1").fetchone()
         if row is None:
@@ -400,7 +423,7 @@ def flush_history():
     """
     datastore.execute_write("DELETE FROM history")
     flush_current()
-    write_metrics(flush=True)
+    flush_metrics()
 
 
 def read_history(num_items=0):

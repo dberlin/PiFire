@@ -2,7 +2,7 @@
 consumes `read_metrics(all=True)` rows directly, without the None guards
 `process_metrics()` gained (f3d5a83, extended into `guard_none_metric_field`
 in this fix wave) -- a poisoned row (None starttime, the same shape that DID
-exist in a real datastore -- see write_metrics' "replace last record"
+exist in a real datastore -- see update_metrics' "amend last record"
 partial-dict hazard, item 1 of this same fix wave) crashes the History page
 path on `metrics_data[index]["starttime"] > displayed_starttime` (comparing
 None to an int raises TypeError in Python 3).

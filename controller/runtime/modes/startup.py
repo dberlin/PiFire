@@ -53,12 +53,12 @@ class StartupMode(ControlMode):
         self.state.lid.open_detected = False
         self.state.lid.expires = 0
         # Stage p_mode/auger_cycle_time on self.state.metrics for later use, but
-        # do NOT write_metrics() here: setup() (this method's caller, also used by
+        # do NOT update_metrics() here: setup() (this method's caller, also used by
         # ReigniteMode via inheritance) runs BEFORE ControlMode.run() stamps a
-        # fresh metrics row (write_metrics(new_metric=True) + self.state.metrics =
+        # fresh metrics row (append_metric() + self.state.metrics =
         # read_metrics()), so self.state.metrics is still the freshly-constructed
         # WorkCycleState default ({}) at this point -- missing 'starttime' and
-        # every other column. write_metrics() would hit the "replace last record"
+        # every other column. update_metrics() would hit the "amend last record"
         # path and, via `metrics.get(k)` defaulting missing keys to None, silently
         # null out EVERY column (including starttime) of the PREVIOUS mode's
         # already-stamped row -- the root cause of a None-starttime row that later
@@ -102,7 +102,7 @@ class StartupMode(ControlMode):
             self.state.metrics["smart_start_profile"] = profile_selected
             self.state.metrics["startup_temp"] = self.control["smartstart"]["startuptemp"]
             self.state.metrics.update(_mbits)
-            self.ctx.store.write_metrics(self.state.metrics)
+            self.ctx.store.update_metrics(self.state.metrics)
 
         self._write_startup_timestamp()
 

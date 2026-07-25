@@ -7,16 +7,16 @@ def test_replace_last_matches_oracle(ds, oracle):
     exp = oracle("metrics_replace_last")
     m = defaults.default_metrics()
     m["mode"] = "Startup"
-    c.write_metrics(m, new_metric=True)
+    c.append_metric(m)
     m2 = defaults.default_metrics()
     m2["mode"] = "Hold"
-    c.write_metrics(m2, new_metric=False)
+    c.update_metrics(m2)
     assert c.read_metrics()["mode"] == exp["last"]["mode"] == "Hold"
     assert len(c.read_metrics(all=True)) == exp["all_len"] == 1
 
 
 def test_replace_last_partial_dict_preserves_other_columns(ds):
-    # Root hazard (partial-dict blast): write_metrics(metrics, new_metric=False)
+    # Root hazard (partial-dict blast): update_metrics(metrics)
     # with a dict that only sets a FEW keys must not null out every column the
     # caller didn't mention -- it should update only the keys present and leave
     # the rest of the last row untouched.
@@ -24,9 +24,9 @@ def test_replace_last_partial_dict_preserves_other_columns(ds):
     m["mode"] = "Startup"
     m["primary_setpoint"] = 225
     m["pellet_brand_type"] = "Generic-Alder"
-    c.write_metrics(m, new_metric=True)
+    c.append_metric(m)
 
-    c.write_metrics({"mode": "Hold"}, new_metric=False)
+    c.update_metrics({"mode": "Hold"})
 
     result = c.read_metrics()
     assert result["mode"] == "Hold"  # the key that was actually provided
@@ -41,12 +41,12 @@ def test_replace_last_full_dict_still_replaces_everything(ds):
     m = defaults.default_metrics()
     m["mode"] = "Startup"
     m["primary_setpoint"] = 225
-    c.write_metrics(m, new_metric=True)
+    c.append_metric(m)
 
     m2 = defaults.default_metrics()
     m2["mode"] = "Hold"
     m2["primary_setpoint"] = 0  # explicit reset, present in the full dict
-    c.write_metrics(m2, new_metric=False)
+    c.update_metrics(m2)
 
     result = c.read_metrics()
     assert result["mode"] == "Hold"
@@ -59,9 +59,9 @@ def test_replace_last_explicit_none_nulls_the_column(ds):
     m = defaults.default_metrics()
     m["mode"] = "Startup"
     m["pellet_brand_type"] = "Generic-Alder"
-    c.write_metrics(m, new_metric=True)
+    c.append_metric(m)
 
-    c.write_metrics({"pellet_brand_type": None}, new_metric=False)
+    c.update_metrics({"pellet_brand_type": None})
 
     result = c.read_metrics()
     assert result["pellet_brand_type"] is None
@@ -73,9 +73,9 @@ def test_replace_last_unknown_keys_ignored(ds):
     # behavior filtering through METRIC_COLUMNS).
     m = defaults.default_metrics()
     m["mode"] = "Startup"
-    c.write_metrics(m, new_metric=True)
+    c.append_metric(m)
 
-    c.write_metrics({"mode": "Hold", "not_a_real_column": "whatever"}, new_metric=False)
+    c.update_metrics({"mode": "Hold", "not_a_real_column": "whatever"})
 
     result = c.read_metrics()
     assert result["mode"] == "Hold"
@@ -83,7 +83,7 @@ def test_replace_last_unknown_keys_ignored(ds):
 
 
 def test_new_metric_without_existing_does_not_crash(ds):
-    c.write_metrics(new_metric=True)  # regression: no metrics yet
+    c.append_metric()  # regression: no metrics yet
     assert "starttime" in c.read_metrics()
 
 
@@ -91,7 +91,7 @@ def test_metrics_columns_queryable(ds):
     m = defaults.default_metrics()
     m["mode"] = "Startup"
     m["primary_setpoint"] = 225
-    c.write_metrics(m, new_metric=True)
+    c.append_metric(m)
 
     conn = datastore.connection()
     row = conn.execute("SELECT mode, primary_setpoint FROM metrics").fetchone()
@@ -123,7 +123,7 @@ def test_metrics_roundtrip_all_fields(ds):
     m["pellet_level_end"] = 92
     m["pellet_brand_type"] = "Generic-Alder"
 
-    c.write_metrics(m, new_metric=True)
+    c.append_metric(m)
     result = c.read_metrics()
 
     for key, _ in defaults.metrics_items:
@@ -144,7 +144,7 @@ def test_metrics_roundtrip_all_fields(ds):
     # A genuinely-float field must still come back as float.
     m2 = defaults.default_metrics()
     m2["auger_cycle_time"] = 0.3
-    c.write_metrics(m2, new_metric=True)
+    c.append_metric(m2)
     result2 = c.read_metrics()
     assert isinstance(result2["auger_cycle_time"], float)
     assert result2["auger_cycle_time"] == 0.3

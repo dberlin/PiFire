@@ -43,8 +43,8 @@ Per-page notes on seeding and interaction style:
   reason to exist afterward.
 - **metrics** (`metrics_page`): metrics live in the per-module
   temp-SQLite `metrics` table (`common.datastore_accessors.read_metrics`/
-  `write_metrics`), so seeding here IS properly test-isolated. Each
-  test flushes (`write_metrics(flush=True)`) before seeding so it does
+  `append_metric`/`update_metrics`), so seeding here IS properly test-isolated. Each
+  test flushes (`flush_metrics()`) before seeding so it does
   not depend on execution order relative to the others.
 - **manual** (`manual_page`): the page itself only renders a static
   shell (mode toggle button + the shared bottom control-panel
@@ -210,9 +210,9 @@ def test_logs_download_via_direct_post(live_server, page):
 
 
 def test_metrics_page_no_data_render(live_server, page):
-    from common.datastore_accessors import write_metrics
+    from common.datastore_accessors import append_metric, flush_metrics
 
-    write_metrics(flush=True)
+    flush_metrics()
 
     resp = page.goto(f"{live_server}/metrics/")
     assert resp.status == 200
@@ -221,19 +221,19 @@ def test_metrics_page_no_data_render(live_server, page):
 
 
 def test_metrics_page_renders_seeded_modes(live_server, page):
-    from common.datastore_accessors import write_metrics
+    from common.datastore_accessors import append_metric, flush_metrics
     from common.defaults import default_metrics
 
-    write_metrics(flush=True)
+    flush_metrics()
 
     hold_metric = default_metrics()
     hold_metric["mode"] = "Hold"
     hold_metric["primary_setpoint"] = 225
-    write_metrics(hold_metric, new_metric=True)
+    append_metric(hold_metric)
 
     manual_metric = default_metrics()
     manual_metric["mode"] = "Manual"
-    write_metrics(manual_metric, new_metric=True)
+    append_metric(manual_metric)
 
     resp = page.goto(f"{live_server}/metrics/")
     assert resp.status == 200
@@ -247,14 +247,14 @@ def test_metrics_export_via_direct_post(live_server, page):
     `common.app.prepare_metrics_csv` -- direct-GET it (matching the plain
     `<a href>` the page itself renders) and check the header row + a
     seeded value both landed in the body."""
-    from common.datastore_accessors import write_metrics
+    from common.datastore_accessors import append_metric, flush_metrics
     from common.defaults import default_metrics
 
-    write_metrics(flush=True)
+    flush_metrics()
     metric = default_metrics()
     metric["mode"] = "Smoke"
     metric["augerontime"] = 42
-    write_metrics(metric, new_metric=True)
+    append_metric(metric)
 
     resp = page.request.get(f"{live_server}/metrics/export")
     assert resp.status == 200

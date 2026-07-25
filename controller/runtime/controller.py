@@ -365,10 +365,10 @@ class Controller:
                 # Register Stop Mode in Metrics DB if this is not initial stop-mode on startup (i.e. DB is empty)
                 metrics_list = store.read_metrics(all=True)
                 if len(metrics_list) != 0:
-                    store.write_metrics(new_metric=True)
+                    store.append_metric()
                     metrics = store.read_metrics()
                     metrics["mode"] = Mode.STOP
-                    store.write_metrics(metrics)
+                    store.update_metrics(metrics)
                     if metrics_list[-1]["mode"] != Mode.PRIME:
                         # A failed cookfile write must not take down grill control --
                         # on a real grill an uncaught exception here kills the whole

@@ -284,7 +284,7 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     # A non-empty metrics list with a non-Prime last mode is what makes tick()
     # reach the create_cookfile() call at all (controller.py's `if len(
     # metrics_list) != 0: ... if metrics_list[-1]["mode"] != Mode.PRIME:`).
-    store.write_metrics(dict(default_metrics(), mode="Smoke"), new_metric=True)
+    store.append_metric(dict(default_metrics(), mode="Smoke"))
 
     # Neutralize check_notify/send_notifications/os.system as usual, but let
     # create_cookfile raise instead of the no-op spy.

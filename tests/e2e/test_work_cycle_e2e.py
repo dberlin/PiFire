@@ -73,7 +73,7 @@ def run_sqlite_scenario(
     store.system_commands().flush()
     store.system_output().flush()
     store.display_commands().flush()
-    store.write_metrics(flush=True)
+    store.flush_metrics()
     store.write_control(control_data, WriteKind.OVERWRITE)
     store.write_pellet_db(pellet_db)
 

@@ -51,7 +51,7 @@ import pytest
 
 import file_mgmt.cookfile as cookfile_mod
 from common.common import epoch_to_time, process_metrics
-from common.datastore_accessors import read_history, read_metrics, write_history, write_metrics
+from common.datastore_accessors import append_metric, read_history, read_metrics, update_metrics, write_history
 from common.defaults import default_metrics
 from file_mgmt.cookfile import create_cookfile, prepare_chartdata, read_cookfile, upgrade_cookfile
 from file_mgmt.downsample import max_interpolation_error
@@ -860,8 +860,8 @@ def test_create_cookfile_writes_pifire_archive_with_seeded_history_and_metrics(d
     _seed_history_row(primary_label, food_labels, 100, 90)
     _seed_history_row(primary_label, food_labels, 110, 95)
 
-    write_metrics(dict(default_metrics(), id=0, mode="Smoke", augerontime=120), new_metric=True)
-    write_metrics(dict(default_metrics(), id=1, mode="Stop", augerontime=30), new_metric=True)
+    append_metric(dict(default_metrics(), id=0, mode="Smoke", augerontime=120))
+    append_metric(dict(default_metrics(), id=1, mode="Stop", augerontime=30))
 
     create_cookfile()
 
@@ -908,11 +908,11 @@ def test_create_cookfile_writes_pifire_archive_with_seeded_history_and_metrics(d
 #
 # Root cause (fixed at the source in this same commit): SmokeMode.setup()/
 # StartupMode.setup() (controller/runtime/modes/smoke.py & startup.py,
-# `_init_smoke_cycle`) called `ctx.store.write_metrics(self.state.metrics)`
+# `_init_smoke_cycle`) called `ctx.store.update_metrics(self.state.metrics)`
 # while `self.state.metrics` was still the freshly-constructed WorkCycleState
 # default `{}` (setup() runs BEFORE ControlMode.run() stamps a fresh metrics
 # row -- see base.py's `self.setup()` at line ~573 vs. the
-# `write_metrics(new_metric=True)` stamp two lines later). write_metrics()'s
+# `append_metric()` stamp two lines later). update_metrics()'s
 # "replace last record" path builds `[metrics.get(k) for k in METRIC_COLUMNS]`,
 # so a dict missing 'starttime' silently NULLs that column (and every other
 # column not in the small dict) on the PREVIOUS mode's already-stamped row.
@@ -988,14 +988,14 @@ def test_create_cookfile_survives_poisoned_none_starttime_row(ds, isolated_histo
     primary_label, food_labels = _default_probe_labels(settings)
     _seed_history_row(primary_label, food_labels, 100, 90)
 
-    write_metrics(dict(default_metrics(), id=0, mode="Smoke", augerontime=120), new_metric=True)
-    # write_metrics(..., new_metric=True) always force-stamps 'starttime' (see
+    append_metric(dict(default_metrics(), id=0, mode="Smoke", augerontime=120))
+    # append_metric(...) always force-stamps 'starttime' (see
     # common/datastore_accessors.py), so a None starttime can only reach the DB
     # via the "replace last record" path (new_metric=False) -- exactly how the
     # real corruption happens (a dict missing/None on 'starttime' overwrites the
     # last row wholesale). Poison the row just written the same way.
-    write_metrics(dict(default_metrics(), id=0, mode="Smoke", augerontime=120, starttime=None), new_metric=False)
-    write_metrics(dict(default_metrics(), id=1, mode="Stop", augerontime=30), new_metric=True)
+    update_metrics(dict(default_metrics(), id=0, mode="Smoke", augerontime=120, starttime=None))
+    append_metric(dict(default_metrics(), id=1, mode="Stop", augerontime=30))
 
     assert read_metrics(all=True)[0]["starttime"] is None  # sanity: poisoned as expected
 

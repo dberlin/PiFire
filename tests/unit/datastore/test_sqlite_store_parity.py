@@ -25,12 +25,12 @@ def test_sqlite_display_queue_roundtrip(store):
     assert store.display_commands().drain() == [["text", "ERROR"]]
 
 
-def test_sqlite_write_metrics_new_metric_without_metrics_does_not_crash(store):
-    # Regression: write_metrics(new_metric=True) with no metrics must defer to
+def test_sqlite_append_metric_without_metrics_does_not_crash(store):
+    # Regression: append_metric() with no metrics must defer to
     # common's default_metrics() (passing None crashed on metrics['starttime']).
     # The control loop calls this at the start of every work cycle.
-    store.write_metrics(flush=True)  # reset metrics list
-    store.write_metrics(new_metric=True)  # must NOT raise
+    store.flush_metrics()  # reset metrics list
+    store.append_metric()  # must NOT raise
     current = store.read_metrics()
     assert isinstance(current, dict)
     assert "starttime" in current  # populated from default_metrics() + starttime
@@ -78,13 +78,41 @@ def test_control_merge_null_handling_parity(store):
         assert st.read_control() == expected
 
 
-def test_sqlite_write_metrics_replace_last_parity(store):
-    # write_metrics(metrics) with new_metric=False replaces the last record,
-    # matching InMemoryStore's replace-last behavior.
-    store.write_metrics(flush=True)
-    store.write_metrics(new_metric=True)
+def test_sqlite_update_metrics_amend_last_parity(store):
+    # update_metrics(metrics) amends the last record in place rather than
+    # appending, matching InMemoryStore's update behavior.
+    store.flush_metrics()
+    store.append_metric()
     metrics = store.read_metrics()
     metrics["mode"] = "Hold"
-    store.write_metrics(metrics)
+    store.update_metrics(metrics)
     assert store.read_metrics()["mode"] == "Hold"
     assert len(store.read_metrics(all=True)) == 1  # replaced, not appended
+
+
+def test_update_metrics_partial_dict_parity(store):
+    # Presence, not truthiness, decides which columns move -- and BOTH backends
+    # must agree, because the controller writes metrics through whichever Store
+    # it was handed. InMemoryStore used to REPLACE the last record wholesale, so
+    # a partial dict left the fake holding a one-key row while SqliteStore kept
+    # every unmentioned column's prior value; a test could pass against the fake
+    # and still be wrong about production. Pins the seam in both directions:
+    # unmentioned columns survive, an explicit None still nulls.
+    from controller.runtime.store import InMemoryStore
+
+    mem = InMemoryStore()
+    for st in (store, mem):
+        st.flush_metrics()
+        st.append_metric()
+        st.update_metrics({"mode": "Startup", "primary_setpoint": 225, "pellet_brand_type": "Generic-Alder"})
+
+        st.update_metrics({"mode": "Hold"})
+        row = st.read_metrics()
+        assert row["mode"] == "Hold"  # provided key applied
+        assert row["primary_setpoint"] == 225  # unmentioned column survives
+        assert row["pellet_brand_type"] == "Generic-Alder"
+
+        st.update_metrics({"pellet_brand_type": None})  # explicit null still nulls
+        assert st.read_metrics()["pellet_brand_type"] is None
+        assert st.read_metrics()["mode"] == "Hold"  # still untouched
+        assert len(st.read_metrics(all=True)) == 1  # amended, never appended

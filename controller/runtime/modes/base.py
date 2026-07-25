@@ -127,7 +127,7 @@ class ControlMode:
                 self.grill.auger_off()
                 # Add auger ON time to the metrics
                 self.state.metrics["augerontime"] += now - self.state.timers.auger_toggle
-                self.ctx.store.write_metrics(self.state.metrics)
+                self.ctx.store.update_metrics(self.state.metrics)
                 # Set current last toggle time to now
                 self.state.timers.auger_toggle = now
                 _control.eventLogger.debug("Cycle Event: Auger Off")
@@ -284,7 +284,7 @@ class ControlMode:
                 self.state.startup.timer = startup_timer
                 # Write Metrics (note these will overwrite the previous value)
                 self.state.metrics.update(_mbits)
-                self.ctx.store.write_metrics(self.state.metrics)
+                self.ctx.store.update_metrics(self.state.metrics)
                 return
 
         _ct = smoke_cycle_times(settings["cycle_data"])
@@ -296,7 +296,7 @@ class ControlMode:
         # Write Metrics (note these will overwrite the previous value)
         self.state.metrics["p_mode"] = settings["cycle_data"]["PMode"]
         self.state.metrics["auger_cycle_time"] = settings["cycle_data"]["SmokeOnCycleTime"]
-        self.ctx.store.write_metrics(self.state.metrics)
+        self.ctx.store.update_metrics(self.state.metrics)
 
     def _setup_recipe_triggers(self, control):
         """Pre-loop recipe trigger setup (extracted from run()). Mutates control
@@ -572,7 +572,7 @@ class ControlMode:
         # ---- mode-specific pre-loop setup ----
         self.setup()
 
-        ctx.store.write_metrics(new_metric=True)
+        ctx.store.append_metric()
         self.state.metrics = ctx.store.read_metrics()
         self.state.metrics["mode"] = mode
         self.state.metrics["smokeplus"] = control["s_plus"]
@@ -582,7 +582,7 @@ class ControlMode:
         pellet_brand = pelletdb["archive"][current_pellet_id]["brand"]
         pellet_type = pelletdb["archive"][current_pellet_id]["wood"]
         self.state.metrics["pellet_brand_type"] = f"{pellet_brand} {pellet_type}"
-        ctx.store.write_metrics(self.state.metrics)
+        ctx.store.update_metrics(self.state.metrics)
 
         # Get initial probe sensor data, temperatures
         sensor_data = probe_complex.read_probes()
@@ -766,7 +766,7 @@ class ControlMode:
         # Log the end time
         self.state.metrics["endtime"] = ctx.clock.now() * 1000
         self.state.metrics["pellet_level_end"] = pelletdb["current"]["hopper_level"]
-        ctx.store.write_metrics(self.state.metrics)
+        ctx.store.update_metrics(self.state.metrics)
 
         monitor.stop_monitor()
 

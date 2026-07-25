@@ -29,7 +29,6 @@ from common.datastore_accessors import (
     read_history,
     flush_history,
     read_metrics,
-    write_metrics,
 )
 from common.defaults import default_probe_config
 from file_mgmt.common import read_json_file_data, update_json_file_data
@@ -165,7 +164,7 @@ def create_cookfile():
         os.system(command)
 
     # Erase history, current and metrics now the cook is saved to a file.
-    # (The separate write_metrics(flush=True) that used to follow this line was
+    # (The separate flush_metrics() that used to follow this line was
     # redundant -- flush_history does it -- but that was invisible while the
     # call was spelled read_history(flushhistory=True).)
     flush_history()

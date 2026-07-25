@@ -489,8 +489,8 @@ def guard_none_metric_field(metrics_data, index, field, caller, default=0):
     """Read metrics_data[index][field], substituting (and writing back) `default`
     if it's None, and warn-logging that substitution.
 
-    Shared None-guard for metrics rows that can be poisoned by write_metrics'
-    "replace last record" path when handed a partial dict missing `field` --
+    Shared None-guard for metrics rows that can be poisoned by update_metrics'
+    "amend last record" path when handed a partial dict missing `field` --
     the row keeps whatever value that column already held; if it was never
     populated (or was itself nulled), a consumer that does arithmetic/ordering
     on the field would otherwise crash. Reused by every metrics consumer that

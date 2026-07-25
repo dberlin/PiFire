@@ -48,10 +48,9 @@ def test_write_history_accepts_maxsizelines():
     assert s.read_history() == [{"x": 1}]
 
 
-def test_write_metrics_positional_flush_matches_common_order():
+def test_flush_metrics_empties_the_list():
     s = InMemoryStore(metrics={"a": 1})
-    # positional 2nd arg is flush (matching common.common order)
-    s.write_metrics(None, True)
+    s.flush_metrics()
     assert s.read_metrics(all=True) == []
 
 

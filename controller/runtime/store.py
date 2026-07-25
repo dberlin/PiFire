@@ -2,11 +2,12 @@
 global SQLite-backed funcs; InMemoryStore is the hermetic test double."""
 
 import copy
+import time
 from abc import ABC, abstractmethod
 from collections import deque
 
-from common.common import WriteKind, deep_update, strip_null_members
-from common.defaults import default_control, default_metrics
+from common.common import WriteKind, deep_update, generate_uuid, strip_null_members
+from common.defaults import METRIC_COLUMNS, default_control, default_metrics
 
 
 class Queue(ABC):
@@ -81,7 +82,11 @@ class Store(ABC):
     @abstractmethod
     def read_metrics(self, all=False): ...
     @abstractmethod
-    def write_metrics(self, metrics=None, flush=False, new_metric=False): ...
+    def flush_metrics(self): ...
+    @abstractmethod
+    def append_metric(self, metrics=None): ...
+    @abstractmethod
+    def update_metrics(self, metrics): ...
     @abstractmethod
     def write_tr(self, tr): ...
     # --- pellet/errors/misc ---
@@ -197,7 +202,7 @@ class InMemoryStore(Store):
         # production would have cleared.
         self._history = []
         self.flush_current()
-        self.write_metrics(flush=True)
+        self.flush_metrics()
 
     def write_history(self, in_data, maxsizelines=28800, ext_data=False):
         self._history.append(copy.deepcopy(in_data))
@@ -209,17 +214,36 @@ class InMemoryStore(Store):
             return list(self._metrics_list)
         return copy.deepcopy(self._metrics_list[-1]) if self._metrics_list else {}
 
-    def write_metrics(self, metrics=None, flush=False, new_metric=False):
-        if flush:
-            self._metrics_list = []
-        elif new_metric:
-            # Mirrors common.write_metrics's default arg (metrics=default_metrics()):
-            # a fresh metric record starts pre-populated with all known keys, not {}.
-            self._metrics_list.append(metrics if metrics is not None else default_metrics())
-        elif metrics is not None:
-            if not self._metrics_list:
-                self._metrics_list.append({})
-            self._metrics_list[-1] = copy.deepcopy(metrics)
+    def flush_metrics(self):
+        self._metrics_list = []
+
+    def append_metric(self, metrics=None):
+        # Mirror common.datastore_accessors.append_metric: a fresh record starts
+        # from default_metrics() when none is given, is projected onto
+        # METRIC_COLUMNS (unknown keys dropped, omitted columns None -- it is an
+        # INSERT, there is no prior row to inherit from), and gets a stamped
+        # starttime/id. The old fake stamped neither, so it could not reproduce
+        # the None-starttime rows that crashed process_metrics in production.
+        if metrics is None:
+            metrics = default_metrics()
+        row = {k: copy.deepcopy(metrics.get(k)) for k in METRIC_COLUMNS}
+        row["starttime"] = time.time() * 1000
+        row["id"] = generate_uuid()
+        self._metrics_list.append(row)
+
+    def update_metrics(self, metrics):
+        # Mirror common.datastore_accessors.update_metrics: presence, not
+        # truthiness, decides which columns move, and an explicit {"col": None}
+        # still nulls it. The old fake REPLACED the last record wholesale, so a
+        # partial dict left the fake holding a one-key row while production kept
+        # every unmentioned column's prior value.
+        if not self._metrics_list:
+            self._metrics_list.append({k: copy.deepcopy(metrics.get(k)) for k in METRIC_COLUMNS})
+            return
+        last = self._metrics_list[-1]
+        for k in METRIC_COLUMNS:
+            if k in metrics:
+                last[k] = copy.deepcopy(metrics[k])
 
     def write_tr(self, tr):
         self._tr.append(copy.deepcopy(tr))
@@ -331,14 +355,16 @@ class SqliteStore(Store):
     def read_metrics(self, all=False):
         return _c.read_metrics(all=all)
 
-    def write_metrics(self, metrics=None, flush=False, new_metric=False):
-        # When metrics is None, defer to common.write_metrics's own
-        # default_metrics() default rather than overriding it with None
-        # (passing None would crash the new_metric path on metrics['starttime']).
-        if metrics is None:
-            _c.write_metrics(flush=flush, new_metric=new_metric)
-        else:
-            _c.write_metrics(metrics=metrics, flush=flush, new_metric=new_metric)
+    def flush_metrics(self):
+        _c.flush_metrics()
+
+    def append_metric(self, metrics=None):
+        # metrics=None is passed straight through: append_metric() supplies its
+        # own default_metrics() (handing it None would crash on metrics['starttime']).
+        _c.append_metric(metrics)
+
+    def update_metrics(self, metrics):
+        _c.update_metrics(metrics)
 
     def write_tr(self, tr):
         _c.write_tr(tr)

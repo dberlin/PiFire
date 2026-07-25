@@ -103,7 +103,7 @@ def prepare_annotations(displayed_starttime, metrics_data=[]):
     # Process Additional Metrics Information for Display
     for index in range(0, len(metrics_data)):
         # Guard against a poisoned row (None starttime) the same way
-        # process_metrics does -- write_metrics' "replace last record" path can
+        # process_metrics does -- update_metrics' "amend last record" path can
         # leave a row with a None starttime, which crashes the `>` comparison
         # below (TypeError: unsupported between NoneType and int/float).
         starttime = guard_none_metric_field(metrics_data, index, "starttime", "prepare_annotations")

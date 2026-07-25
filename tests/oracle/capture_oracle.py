@@ -50,10 +50,10 @@ def scenario_metrics_replace_last():
     c.cmdsts.delete("metrics:general")
     m = defaults.default_metrics()
     m["mode"] = "Startup"
-    datastore_accessors.write_metrics(m, new_metric=True)
+    datastore_accessors.append_metric(m)
     m2 = defaults.default_metrics()
     m2["mode"] = "Hold"
-    datastore_accessors.write_metrics(m2, new_metric=False)
+    datastore_accessors.update_metrics(m2)
     return {"last": datastore_accessors.read_metrics(), "all_len": len(datastore_accessors.read_metrics(all=True))}
 
 
