@@ -47,6 +47,7 @@ const command = {
   setPMode: rs.fn(),
   prime: rs.fn(),
   timerStart: rs.fn(),
+  timerStartWithOptions: rs.fn(),
   timerPause: rs.fn(),
   timerStop: rs.fn(),
   timerShutdown: rs.fn(),

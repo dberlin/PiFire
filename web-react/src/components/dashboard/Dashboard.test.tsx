@@ -20,6 +20,7 @@ function makeCommand(): CommandClient {
     setPMode: rs.fn(async () => OK),
     prime: rs.fn(async () => OK),
     timerStart: rs.fn(async () => OK),
+    timerStartWithOptions: rs.fn(async () => OK),
     timerPause: rs.fn(async () => OK),
     timerStop: rs.fn(async () => OK),
     timerShutdown: rs.fn(async () => OK),

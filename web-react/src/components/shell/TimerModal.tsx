@@ -42,11 +42,13 @@ export function TimerModal({
       setRejected(true);
       return;
     }
-    // Flags first: /api/set/timer/start does not touch shutdown/keep_warm, so
-    // setting them before starting is safe and makes them live from t=0.
-    await command.timerShutdown(shutdown);
-    await command.timerKeepWarm(keepWarm);
-    await command.timerStart(seconds);
+    // One write, carrying the flags AND the countdown. Sending them as separate
+    // requests loses the flags: every web-process control write queues the whole
+    // control dict read from a blob that does not reflect the queue, and the
+    // queued patches are applied with json_patch (RFC 7396), which replaces the
+    // notify_data ARRAY wholesale. The start would therefore land last and undo
+    // the flags. See helpers/command.ts timerStartWithOptions.
+    await command.timerStartWithOptions(seconds, { shutdown, keepWarm });
     onClose();
   }
 

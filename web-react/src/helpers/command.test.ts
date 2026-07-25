@@ -105,4 +105,111 @@ describe("createCommand issues the right URLs", () => {
     const r = await createCommand("").setMode("stop");
     expect(r).toEqual({ ok: false, message: "bad", data: {} });
   });
+
+  // The /api/set/... grammar answers "OK". Only POST /api/control answers
+  // "success", and loosening this predicate to accept both would hide a real
+  // surprise from every command that goes through the grammar.
+  it('does NOT accept lowercase "success" from the /api/set grammar', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ result: "success", message: "", data: {} }),
+    });
+    const r = await createCommand("").setMode("stop");
+    expect(r.ok).toBe(false);
+  });
+});
+
+// blueprints/api/routes.py _api_post_control answers {"result": "success"} --
+// lowercase, and a 201 -- where the command grammar answers {"result": "OK"}.
+// A refactor that routed this write through the grammar's response check would
+// report every successful timer start as a failure, silently.
+describe("timerStartWithOptions envelope handling", () => {
+  const CONTROL = {
+    notify_data: [{ label: "Timer", type: "timer", req: false, shutdown: false, keep_warm: false }],
+    timer: { start: 0, paused: 0, end: 0, shutdown: false },
+  };
+
+  function stubFetch(postBody: unknown, postOk = true) {
+    const fetchMock = rs.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return { ok: postOk, status: 500, headers: new Headers(), json: async () => postBody };
+      }
+      return { ok: true, headers: new Headers(), json: async () => ({ control: CONTROL }) };
+    });
+    rs.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  const opts = { shutdown: true, keepWarm: false };
+
+  it('treats lowercase "success" as a successful write', async () => {
+    stubFetch({ control: "success", result: "success", message: "Settings updated successfully." });
+    const r = await createCommand("").timerStartWithOptions(600, opts);
+    expect(r).toEqual({ ok: true, message: "Settings updated successfully." });
+  });
+
+  it('treats "error" as a failed write', async () => {
+    stubFetch({ control: "error", result: "error", message: "Settings update failed." });
+    const r = await createCommand("").timerStartWithOptions(600, opts);
+    expect(r).toEqual({ ok: false, message: "Settings update failed." });
+  });
+
+  it("reports an HTTP failure on the write", async () => {
+    stubFetch({}, false);
+    const r = await createCommand("").timerStartWithOptions(600, opts);
+    expect(r).toEqual({ ok: false, message: "HTTP 500" });
+  });
+
+  it("reads control before writing, and writes exactly once", async () => {
+    const fetchMock = stubFetch({ result: "success", message: "" });
+    await createCommand("http://pi:5000").timerStartWithOptions(600, opts);
+    const calls = fetchMock.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0]).toBe("http://pi:5000/api/control");
+    expect(calls[0][1]?.method).toBe("GET");
+    expect(calls[1][0]).toBe("http://pi:5000/api/control");
+    expect(calls[1][1]?.method).toBe("POST");
+  });
+
+  it("fails without writing when control has no timer notify entry", async () => {
+    const fetchMock = rs.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") throw new Error("must not write");
+      return {
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({ control: { notify_data: [{ label: "Grill", type: "probe" }] } }),
+      };
+    });
+    rs.stubGlobal("fetch", fetchMock);
+    const r = await createCommand("").timerStartWithOptions(600, opts);
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/no timer entry/);
+    expect(fetchMock.mock.calls).toHaveLength(1);
+  });
+
+  it("fails without writing when the read fails", async () => {
+    const fetchMock = rs.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") throw new Error("must not write");
+      return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) };
+    });
+    rs.stubGlobal("fetch", fetchMock);
+    const r = await createCommand("").timerStartWithOptions(600, opts);
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/HTTP 404/);
+    expect(fetchMock.mock.calls).toHaveLength(1);
+  });
+
+  it("falls back to the browser clock when the Date header is unreadable", async () => {
+    const fetchMock = stubFetch({ result: "success", message: "" });
+    const before = Math.floor(Date.now() / 1000);
+    await createCommand("").timerStartWithOptions(600, opts);
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)) as {
+      timer: { start: number; end: number };
+    };
+    expect(body.timer.start).toBeGreaterThanOrEqual(before);
+    expect(body.timer.end - body.timer.start).toBe(600);
+  });
 });

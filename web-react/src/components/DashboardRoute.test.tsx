@@ -32,6 +32,7 @@ function stubCommand(): CommandClient {
     setPMode: rs.fn(ok),
     prime: rs.fn(ok),
     timerStart: rs.fn(ok),
+    timerStartWithOptions: rs.fn(ok),
     timerPause: rs.fn(ok),
     timerStop: rs.fn(ok),
     timerShutdown: rs.fn(ok),
