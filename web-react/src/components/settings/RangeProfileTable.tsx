@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { clampToBounds } from "../../helpers/settings/bounds";
+
 export interface RangeProfileColumn {
   key: string;
   label: string;
@@ -14,11 +17,35 @@ function rangeLabel(rowIndex: number, boundaries: number[]): string {
   return `${boundaries[rowIndex - 1]} – ${boundaries[rowIndex] - 1}°`;
 }
 
-function clamp(value: number, min: number | undefined, max: number | undefined): number {
-  let v = value;
-  if (min !== undefined && v < min) v = min;
-  if (max !== undefined && v > max) v = max;
-  return v;
+/**
+ * The strictly-monotonic window a single boundary may occupy.
+ *
+ * The list must stay sorted: neither PwmSettings._check_profiles nor
+ * SmartStart._check_profile_count checks ordering, so an inverted
+ * temp_range_list SAVES successfully and then
+ * controller/runtime/logic/smartstart.py:8-12 silently makes every profile
+ * after the inversion unreachable. Flask guards this in settings.js:195-244.
+ *
+ * Either end may be undefined: the first boundary's floor and the last one's
+ * ceiling come from the optional boundaryMin/boundaryMax props.
+ */
+function boundaryLimits(
+  index: number,
+  boundaries: number[],
+  boundaryMin: number | undefined,
+  boundaryMax: number | undefined,
+): { lower: number | undefined; upper: number | undefined } {
+  return {
+    lower: index > 0 ? boundaries[index - 1] + 1 : boundaryMin,
+    upper: index < boundaries.length - 1 ? boundaries[index + 1] - 1 : boundaryMax,
+  };
+}
+
+function limitsText(lower: number | undefined, upper: number | undefined): string {
+  if (lower !== undefined && upper !== undefined) return `between ${lower} and ${upper}`;
+  if (lower !== undefined) return `at least ${lower}`;
+  if (upper !== undefined) return `at most ${upper}`;
+  return "a number";
 }
 
 export function RangeProfileTable({
@@ -28,6 +55,8 @@ export function RangeProfileTable({
   rangeHeader,
   unit,
   onChange,
+  boundaryMin,
+  boundaryMax,
 }: {
   boundaries: number[];
   profiles: Record<string, number>[];
@@ -35,17 +64,53 @@ export function RangeProfileTable({
   rangeHeader: string;
   unit: string;
   onChange: (boundaries: number[], profiles: Record<string, number>[]) => void;
+  boundaryMin?: number;
+  boundaryMax?: number;
 }) {
   const canRemove = profiles.length > 2;
+  // An out-of-order keystroke is held here instead of being pushed up, so
+  // `onChange` is never called with an unsorted array while multi-digit entry
+  // still works ("9" on its way to "95" is momentarily out of range).
+  const [draft, setDraft] = useState<{ index: number; text: string } | null>(null);
+  const [boundaryError, setBoundaryError] = useState<string | null>(null);
 
-  const handleBoundaryChange = (rowIndex: number, raw: string) => {
+  const emitBoundary = (rowIndex: number, value: number) => {
     const next = boundaries.slice();
-    next[rowIndex] = Number(raw);
+    next[rowIndex] = value;
     onChange(next, profiles);
   };
 
+  const handleBoundaryChange = (rowIndex: number, raw: string) => {
+    const { lower, upper } = boundaryLimits(rowIndex, boundaries, boundaryMin, boundaryMax);
+    const typed = Number(raw);
+    if (raw !== "" && !Number.isNaN(typed) && clampToBounds(typed, lower, upper) === typed) {
+      setDraft(null);
+      setBoundaryError(null);
+      emitBoundary(rowIndex, typed);
+      return;
+    }
+    setDraft({ index: rowIndex, text: raw });
+    setBoundaryError(`Range boundary ${rowIndex + 1} must be ${limitsText(lower, upper)}.`);
+  };
+
+  // Clamp when the edit is FINISHED, matching NumberField: clamping on change
+  // would make a bounded field untypeable.
+  const handleBoundaryBlur = (rowIndex: number) => {
+    if (draft?.index !== rowIndex) return;
+    const { lower, upper } = boundaryLimits(rowIndex, boundaries, boundaryMin, boundaryMax);
+    const typed = Number(draft.text);
+    const clamped = clampToBounds(
+      draft.text === "" || Number.isNaN(typed) ? boundaries[rowIndex] : typed,
+      lower,
+      upper,
+    );
+    setDraft(null);
+    setBoundaryError(null);
+    if (clamped !== boundaries[rowIndex]) emitBoundary(rowIndex, clamped);
+  };
+
   const handleCellChange = (rowIndex: number, column: RangeProfileColumn, raw: string) => {
-    const val = clamp(Number(raw), column.min, column.max);
+    const val = clampToBounds(Number(raw), column.min, column.max);
     const next = profiles.map((row, i) => (i === rowIndex ? { ...row, [column.key]: val } : row));
     onChange(boundaries, next);
   };
@@ -88,15 +153,27 @@ export function RangeProfileTable({
             <tr key={rowIndex}>
               <td className="pf-rpt-range">
                 <span className="pf-rpt-range-label">{rangeLabel(rowIndex, boundaries)}</span>
-                {rowIndex < boundaries.length && (
-                  <input
-                    type="number"
-                    className="pf-input pf-rpt-boundary-input"
-                    aria-label={`Boundary ${rowIndex + 1}`}
-                    value={boundaries[rowIndex]}
-                    onChange={(e) => handleBoundaryChange(rowIndex, e.target.value)}
-                  />
-                )}
+                {rowIndex < boundaries.length &&
+                  (() => {
+                    const { lower, upper } = boundaryLimits(
+                      rowIndex,
+                      boundaries,
+                      boundaryMin,
+                      boundaryMax,
+                    );
+                    return (
+                      <input
+                        type="number"
+                        className="pf-input pf-rpt-boundary-input"
+                        aria-label={`Boundary ${rowIndex + 1}`}
+                        min={lower}
+                        max={upper}
+                        value={draft?.index === rowIndex ? draft.text : boundaries[rowIndex]}
+                        onChange={(e) => handleBoundaryChange(rowIndex, e.target.value)}
+                        onBlur={() => handleBoundaryBlur(rowIndex)}
+                      />
+                    );
+                  })()}
               </td>
               {columns.map((col) => (
                 <td key={col.key} className="pf-rpt-cell">
@@ -127,6 +204,11 @@ export function RangeProfileTable({
           ))}
         </tbody>
       </table>
+      {boundaryError && (
+        <p className="pf-settings-error-text" role="alert">
+          {boundaryError}
+        </p>
+      )}
       <button type="button" className="pf-rpt-add" onClick={handleAdd}>
         + Add
       </button>

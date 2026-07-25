@@ -233,6 +233,9 @@ export function StartupTab() {
           columns={SMARTSTART_COLUMNS}
           rangeHeader="Range"
           unit={units}
+          // index.html:932, 978
+          boundaryMin={0}
+          boundaryMax={200}
           onChange={(boundaries, profiles) =>
             setV((s) => ({ ...s, smartstartTemps: boundaries, smartstartProfiles: profiles }))
           }

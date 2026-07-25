@@ -186,6 +186,9 @@ export function PwmTab() {
         columns={DUTY_COLUMNS}
         rangeHeader="ΔT range"
         unit={units}
+        // index.html:932, 978
+        boundaryMin={0}
+        boundaryMax={200}
         onChange={(temp_range_list, profiles) =>
           setPwm((s) => ({ ...s, temp_range_list, profiles }))
         }
