@@ -11,7 +11,7 @@
 #
 # curl https://raw.githubusercontent.com/dberlin/pifire/massive-reworks-and-new-ui/auto-install/pifire-dietpi.sh | bash
 #
-# Pre-Requisites: 
+# Pre-Requisites:
 #       Do not run as ROOT (or with SUDO)
 #       Enable WiFi or Ethernet
 #       Complete initial OS installation
@@ -37,19 +37,19 @@ echo "** Warning! This script is experimental! Use at your own risk.  *********"
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
 
 # Must be root to install
-if [[ $EUID -eq 0 ]];then
-    echo " + You are root." | tee -a ~/logs/pifire_install.log
+if [[ $EUID -eq 0 ]]; then
+	echo " + You are root." | tee -a ~/logs/pifire_install.log
 else
-    echo " + SUDO will be used for the install." | tee -a ~/logs/pifire_install.log
-    # Check if it is actually installed
-    # If it isn't, exit because the install cannot complete
-    if [[ $(dpkg-query -s sudo) ]];then
-        export SUDO="sudo"
-        export SUDOE="sudo -E"
-    else
-        echo " !! Installation Failed, 'sudo' not found. Please install sudo.  Exiting" | tee -a ~/logs/pifire_install.log
-        exit 1
-    fi
+	echo " + SUDO will be used for the install." | tee -a ~/logs/pifire_install.log
+	# Check if it is actually installed
+	# If it isn't, exit because the install cannot complete
+	if [[ $(dpkg-query -s sudo) ]]; then
+		export SUDO="sudo"
+		export SUDOE="sudo -E"
+	else
+		echo " !! Installation Failed, 'sudo' not found. Please install sudo.  Exiting" | tee -a ~/logs/pifire_install.log
+		exit 1
+	fi
 fi
 
 # Find the rows and columns. Will default to 80x24 if it can not be detected.
@@ -57,33 +57,33 @@ screen_size=$(stty size 2>/dev/null || echo 24 80)
 rows=$(echo $screen_size | awk '{print $1}')
 columns=$(echo $screen_size | awk '{print $2}')
 # Divide by two so the dialogs take up half of the screen.
-r=$(( rows / 2 ))
-c=$(( columns / 2 ))
+r=$((rows / 2))
+c=$((columns / 2))
 # If the screen is small, modify defaults
-r=$(( r < 20 ? 20 : r ))
-c=$(( c < 70 ? 70 : c ))
+r=$((r < 20 ? 20 : r))
+c=$((c < 70 ? 70 : c))
 
 # Detect OS architecture
 ARCH=$(uname -m)
 echo " + Detecting system architecture: $ARCH" | tee -a ~/logs/pifire_install.log
 
 case $ARCH in
-    aarch64)
-        echo " + 64-bit ARM OS detected" | tee -a ~/logs/pifire_install.log
-        OS_BITS="64"
-        ;;
-    armv7l|armv6l)
-        echo " + 32-bit ARM OS detected" | tee -a ~/logs/pifire_install.log
-        OS_BITS="32"
-        ;;
-    *)
-        echo " !! Warning: Non-standard Raspberry Pi architecture detected: $ARCH" | tee -a ~/logs/pifire_install.log
-        echo " !! This script is designed for Raspberry Pi systems" | tee -a ~/logs/pifire_install.log
-        if ! whiptail --backtitle "Architecture Warning" --title "Non-standard Architecture" --yesno "This script is designed for Raspberry Pi systems but detected architecture: $ARCH\n\nDo you want to continue anyway?" 12 60; then
-            echo " !! Installation cancelled by user" | tee -a ~/logs/pifire_install.log
-            exit 1
-        fi
-        ;;
+aarch64)
+	echo " + 64-bit ARM OS detected" | tee -a ~/logs/pifire_install.log
+	OS_BITS="64"
+	;;
+armv7l | armv6l)
+	echo " + 32-bit ARM OS detected" | tee -a ~/logs/pifire_install.log
+	OS_BITS="32"
+	;;
+*)
+	echo " !! Warning: Non-standard Raspberry Pi architecture detected: $ARCH" | tee -a ~/logs/pifire_install.log
+	echo " !! This script is designed for Raspberry Pi systems" | tee -a ~/logs/pifire_install.log
+	if ! whiptail --backtitle "Architecture Warning" --title "Non-standard Architecture" --yesno "This script is designed for Raspberry Pi systems but detected architecture: $ARCH\n\nDo you want to continue anyway?" 12 60; then
+		echo " !! Installation cancelled by user" | tee -a ~/logs/pifire_install.log
+		exit 1
+	fi
+	;;
 esac
 echo " + System architecture set to: $OS_BITS-bit" | tee -a ~/logs/pifire_install.log
 sleep 2
@@ -94,12 +94,12 @@ whiptail --msgbox --backtitle "Welcome" --title "PiFire Automated Installer" "Th
 # Supervisor WebUI Settings
 SVISOR=$(whiptail --title "Would you like to enable the supervisor WebUI?" --radiolist "This allows you to check the status of the supervised processes via a web browser, and also allows those processes to be restarted directly from this interface. (Recommended)" 20 78 2 "ENABLE_SVISOR" "Enable the WebUI" ON "DISABLE_SVISOR" "Disable the WebUI" OFF 3>&1 1>&2 2>&3)
 
-if [[ $SVISOR = "ENABLE_SVISOR" ]];then
-   USERNAME=$(whiptail --inputbox "Choose a username [default: user]" 8 78 user --title "Choose Username" 3>&1 1>&2 2>&3)
-   PASSWORD=$(whiptail --passwordbox "Enter your password" 8 78 --title "Choose Password" 3>&1 1>&2 2>&3)
-   whiptail --msgbox --backtitle "Supervisor WebUI Setup" --title "Supervisor Configured" "After this installation is completed, you should be able to access the Supervisor WebUI at http://your.ip.address.here:9001 with the username and password you have chosen." ${r} ${c}
+if [[ $SVISOR = "ENABLE_SVISOR" ]]; then
+	USERNAME=$(whiptail --inputbox "Choose a username [default: user]" 8 78 user --title "Choose Username" 3>&1 1>&2 2>&3)
+	PASSWORD=$(whiptail --passwordbox "Enter your password" 8 78 --title "Choose Password" 3>&1 1>&2 2>&3)
+	whiptail --msgbox --backtitle "Supervisor WebUI Setup" --title "Supervisor Configured" "After this installation is completed, you should be able to access the Supervisor WebUI at http://your.ip.address.here:9001 with the username and password you have chosen." ${r} ${c}
 else
-    echo "No Supervisor WebUI Setup." | tee -a ~/logs/pifire_install.log
+	echo "No Supervisor WebUI Setup." | tee -a ~/logs/pifire_install.log
 fi
 
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
@@ -115,8 +115,8 @@ echo "**      Running Apt Upgrade... (This could take several minutes)       **"
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
 $SUDO DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
-    -o Dpkg::Options::=--force-confdef \
-    -o Dpkg::Options::=--force-confold 2>&1 | tee -a ~/logs/pifire_install.log
+	-o Dpkg::Options::=--force-confdef \
+	-o Dpkg::Options::=--force-confold 2>&1 | tee -a ~/logs/pifire_install.log
 
 # Install APT dependencies
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
@@ -136,13 +136,13 @@ cd /usr/local/bin
 
 # Check if -dev option is used
 if [ "$1" = "-dev" ]; then
-    echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log
-    # Replace the below command to fetch development branch
-    $SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a ~/logs/pifire_install.log
+	echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log
+	# Replace the below command to fetch development branch
+	$SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a ~/logs/pifire_install.log
 else
-    echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log 2>&1 | tee -a ~/logs/pifire_install.log
-    # Use a shallow clone to reduce download size
-    $SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire
+	echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log 2>&1 | tee -a ~/logs/pifire_install.log
+	# Use a shallow clone to reduce download size
+	$SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire
 fi
 
 # Setup Python VENV & Install Python dependencies
@@ -155,12 +155,12 @@ echo "*************************************************************************"
 echo ""
 echo " + Setting Up PiFire Group"
 cd /usr/local/bin
-$SUDO groupadd pifire 
-$SUDO usermod -a -G pifire $USER 
-$SUDO usermod -a -G pifire root 
-# Change ownership to group=pifire for all files/directories in pifire 
-$SUDO chown -R $USER:pifire pifire 
-# Change ability for pifire group to read/write/execute 
+$SUDO groupadd pifire
+$SUDO usermod -a -G pifire $USER
+$SUDO usermod -a -G pifire root
+# Change ownership to group=pifire for all files/directories in pifire
+$SUDO chown -R $USER:pifire pifire
+# Change ability for pifire group to read/write/execute
 $SUDO chmod -R 777 /usr/local/bin
 
 echo " + Setting permissions for interfaces"
@@ -172,94 +172,53 @@ $SUDO adduser $USER i2c
 # Seat access for the sway Wayland compositor (QtQuick displays).
 $SUDO systemctl enable --now seatd 2>&1 | tee -a ~/logs/pifire_install.log
 for grp in video input render seat; do
-    $SUDO usermod -a -G "$grp" $USER 2>/dev/null || true
-    $SUDO usermod -a -G "$grp" root 2>/dev/null || true
+	$SUDO usermod -a -G "$grp" $USER 2>/dev/null || true
+	$SUDO usermod -a -G "$grp" root 2>/dev/null || true
 done
 
 $SUDO " + Enabling and Starting Bluetooth service"
-$SUDO systemctl enable bluetooth.service 
-$SUDO systemctl start bluetooth.service 
+$SUDO systemctl enable bluetooth.service
+$SUDO systemctl start bluetooth.service
 
-# Install UV (Universal Virtualenv) for Python 3.11+
-if [ "$OS_BITS" = "64" ]; then
-    echo " + Setting up 64-bit specific configurations" | tee -a ~/logs/pifire_install.log
-    # Add any 64-bit specific configurations here if needed
-    echo " + Installing UV" | tee -a ~/logs/pifire_install.log
-    if ! /bin/curl -LsSf https://astral.sh/uv/install.sh | $SUDO env UV_INSTALL_DIR="/usr/local/bin" /bin/sh; then
-        echo " ! Failed to download or install UV. Exiting." | tee -a ~/logs/pifire_install.log
-        exit 1
-    fi
+# --- Python venv (uv) + modules -------------------------------------------
+# pyproject.toml + uv.lock are the single source of truth for Python
+# dependencies. The old auto-install/requirements.txt has been removed rather
+# than re-synced by hand -- it had drifted from pyproject.toml in both
+# directions -- and with it the separate 32-bit vanilla-venv/pip path, since
+# uv installs from pyproject on every architecture. The influxdb [ciso] extra
+# that used to be applied here now lives in pyproject.
+echo " + Installing UV" | tee -a ~/logs/pifire_install.log
+if ! /bin/curl -LsSf https://astral.sh/uv/install.sh | $SUDO env UV_INSTALL_DIR="/usr/local/bin" /bin/sh; then
+	echo " ! Failed to download or install UV. Exiting." | tee -a ~/logs/pifire_install.log
+	exit 1
+fi
 
-    echo " + Setting up VENV" | tee -a ~/logs/pifire_install.log
-    # Setup VENV
-    cd /usr/local/bin/pifire
-    uv venv --system-site-packages
+echo " + Setting up VENV" | tee -a ~/logs/pifire_install.log
+cd /usr/local/bin/pifire
+uv venv --system-site-packages
 
-    # Activate VENV
-    source .venv/bin/activate
+# Activate VENV
+source .venv/bin/activate
 
-    # Installing module dependencies
-    echo " - Installing module dependencies... " | tee -a ~/logs/pifire_install.log
+echo " - Installing module dependencies from pyproject.toml... " | tee -a ~/logs/pifire_install.log
+if ! uv sync --no-dev --inexact 2>&1 | tee -a ~/logs/pifire_install.log; then
+	echo " !! Failed to install Python dependencies. Installation cannot continue." | tee -a ~/logs/pifire_install.log
+	exit 1
+fi
+echo " + Python dependency installation complete." | tee -a ~/logs/pifire_install.log
 
-    if ! uv pip install "influxdb_client[ciso]==1.48.0" 2>&1 | tee -a ~/logs/pifire_install.log; then
-        echo " !! Failed to install influxdb_client. Installation cannot continue." | tee -a ~/logs/pifire_install.log
-        exit 1
-    fi
+# Find all bluepy-helper executables in various possible locations
+BLUEPY_HELPERS=$(find /usr/local/bin/pifire/.venv/lib/ -path "*/bluepy/bluepy-helper" 2>/dev/null)
 
-    echo " + Installing requirements.txt... " | tee -a ~/logs/pifire_install.log      
-    if ! uv pip install -r /usr/local/bin/pifire/auto-install/requirements.txt 2>&1 | tee -a ~/logs/pifire_install.log; then
-        echo " !! Failed to install requirements.txt. Installation cannot continue." | tee -a ~/logs/pifire_install.log
-        exit 1
-    fi
-    # Find all bluepy-helper executables in various possible locations
-        BLUEPY_HELPERS=$(find /usr/local/bin/pifire/.venv/lib/ -path "*/bluepy/bluepy-helper" 2>/dev/null)
-
-    if [ -z "$BLUEPY_HELPERS" ]; then
-        echo " ! No bluepy-helper found in the standard Python library locations" | tee -a ~/logs/pifire_install.log
-    else
-        # Apply capabilities to each found bluepy-helper
-        for helper in $BLUEPY_HELPERS; do
-            echo " + Setting capabilities for $helper" | tee -a ~/logs/pifire_install.log
-            $SUDO setcap "cap_net_raw,cap_net_admin+eip" "$helper"
-        done
-        echo " + All bluepy-helper executables have been configured" | tee -a ~/logs/pifire_install.log
-    fi
+if [ -z "$BLUEPY_HELPERS" ]; then
+	echo " ! No bluepy-helper found in the standard Python library locations" | tee -a ~/logs/pifire_install.log
 else
-    echo " + Setting up 32-bit specific configurations" | tee -a ~/logs/pifire_install.log
-    # Add any 32-bit specific configurations here if needed
-    echo " + Setting up VENV" | tee -a ~/logs/pifire_install.log
-    # Setup VENV
-    cd /usr/local/bin
-    /bin/python -m venv --system-site-packages pifire
-    cd /usr/local/bin/pifire
-    source bin/activate
-    if ! /bin/python -c "import sys; assert sys.version_info[:2] >= (3,11)" > /dev/null 2>&1; then
-        echo " + System is running a python version lower than 3.11." | tee -a ~/logs/pifire_install.log;
-        python -m pip install "influxdb_client==1.48.0" 2>&1 | tee -a ~/logs/pifire_install.log
-    else
-        echo " + System is running a python version 3.11 or higher." | tee -a ~/logs/pifire_install.log
-        python -m pip install "influxdb_client[ciso]==1.48.0" 2>&1 | tee -a ~/logs/pifire_install.log
-    fi
-    # Installing module dependencies from requirements.txt
-    echo " + Installing requirements.txt... " | tee -a ~/logs/pifire_install.log
-    python -m pip install -r /usr/local/bin/pifire/auto-install/requirements.txt
-    # Find all bluepy-helper executables in various possible locations
-    BLUEPY_HELPERS=$(find /usr/local/bin/pifire/lib/ -path "*/bluepy/bluepy-helper" 2>/dev/null)
-
-    if [ -z "$BLUEPY_HELPERS" ]; then
-        echo " ! No bluepy-helper found in the standard Python library locations" | tee -a ~/logs/pifire_install.log
-    else
-        # Apply capabilities to each found bluepy-helper
-        for helper in $BLUEPY_HELPERS; do
-            echo " + Setting capabilities for $helper" | tee -a ~/logs/pifire_install.log
-            $SUDO setcap "cap_net_raw,cap_net_admin+eip" "$helper"
-        done
-        echo " + All bluepy-helper executables have been configured" | tee -a ~/logs/pifire_install.log
-    fi
-
-    # Get PIP List into JSON file
-    echo " - Setting Legacy VENV flag in settings.json" | tee -a ~/logs/pifire_install.log
-    python updater.py --legacyvenv 2>&1 | tee -a ~/logs/pifire_install.log
+	# Apply capabilities to each found bluepy-helper
+	for helper in $BLUEPY_HELPERS; do
+		echo " + Setting capabilities for $helper" | tee -a ~/logs/pifire_install.log
+		$SUDO setcap "cap_net_raw,cap_net_admin+eip" "$helper"
+	done
+	echo " + All bluepy-helper executables have been configured" | tee -a ~/logs/pifire_install.log
 fi
 
 # Get PIP List into JSON file
@@ -301,27 +260,25 @@ echo "**      Configuring Supervisord...                                     **"
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
 
-# Copy configuration files (control.conf, webapp.conf) to supervisor config directory
-if [ "$OS_BITS" = "64" ]; then
-    cd /usr/local/bin/pifire/auto-install/supervisor
-else
-    cd /usr/local/bin/pifire/auto-install/supervisor/legacy
-fi
+# Copy configuration files (control.conf, webapp.conf) to supervisor config
+# directory. The supervisor/legacy/ variant pointed at the vanilla venv's
+# python; with the uv venv the only interpreter is .venv/bin/python.
+cd /usr/local/bin/pifire/auto-install/supervisor
 
-# Add the current username to the configuration files 
-echo "user=$USER" | tee -a control.conf > /dev/null
-echo "user=$USER" | tee -a webapp.conf > /dev/null
+# Add the current username to the configuration files
+echo "user=$USER" | tee -a control.conf >/dev/null
+echo "user=$USER" | tee -a webapp.conf >/dev/null
 
 $SUDO cp *.conf /etc/supervisor/conf.d/
 
-if [[ $SVISOR = "ENABLE_SVISOR" ]];then
-   echo " " | sudo tee -a /etc/supervisor/supervisord.conf > /dev/null
-   echo "[inet_http_server]" | sudo tee -a /etc/supervisor/supervisord.conf > /dev/null
-   echo "port = 9001" | sudo tee -a /etc/supervisor/supervisord.conf > /dev/null
-   echo "username = " $USERNAME | sudo tee -a /etc/supervisor/supervisord.conf > /dev/null
-   echo "password = " $PASSWORD | sudo tee -a /etc/supervisor/supervisord.conf > /dev/null
+if [[ $SVISOR = "ENABLE_SVISOR" ]]; then
+	echo " " | sudo tee -a /etc/supervisor/supervisord.conf >/dev/null
+	echo "[inet_http_server]" | sudo tee -a /etc/supervisor/supervisord.conf >/dev/null
+	echo "port = 9001" | sudo tee -a /etc/supervisor/supervisord.conf >/dev/null
+	echo "username = " $USERNAME | sudo tee -a /etc/supervisor/supervisord.conf >/dev/null
+	echo "password = " $PASSWORD | sudo tee -a /etc/supervisor/supervisord.conf >/dev/null
 else
-   echo "No WebUI Setup." | tee -a ~/logs/pifire_install.log
+	echo "No WebUI Setup." | tee -a ~/logs/pifire_install.log
 fi
 
 # If supervisor isn't already running, startup Supervisor
@@ -332,12 +289,11 @@ echo "+ Installation completed at $(date '+%Y-%m-%d %H:%M:%S')" | tee -a ~/logs/
 
 # Ask user if they want to reboot
 if whiptail --backtitle "Install Complete" --title "Installation Completed" --yesno "Congratulations, the installation is complete.\n\nIt's recommended to reboot your system now for all changes to take effect. On first boot, the wizard will guide you through the remaining setup steps.\n\nYou should be able to access your application by opening a browser on your PC or other device and using the IP address (or http://[hostname].local) for this device.\n\nWould you like to reboot now?" ${r} ${c}; then
-    echo "Rebooting system..." | tee -a ~/logs/pifire_install.log
-    $SUDO cp ~/logs/pifire_install.log /usr/local/bin/pifire/logs/pifire_install_$(date '+%Y%m%d_%H%M%S').log
-    $SUDO reboot
+	echo "Rebooting system..." | tee -a ~/logs/pifire_install.log
+	$SUDO cp ~/logs/pifire_install.log /usr/local/bin/pifire/logs/pifire_install_$(date '+%Y%m%d_%H%M%S').log
+	$SUDO reboot
 else
-    echo "Reboot skipped. Please reboot manually when convenient." | tee -a ~/logs/pifire_install.log
-    $SUDO cp ~/logs/pifire_install.log /usr/local/bin/pifire/logs/pifire_install_$(date '+%Y%m%d_%H%M%S').log
-    exit 0
+	echo "Reboot skipped. Please reboot manually when convenient." | tee -a ~/logs/pifire_install.log
+	$SUDO cp ~/logs/pifire_install.log /usr/local/bin/pifire/logs/pifire_install_$(date '+%Y%m%d_%H%M%S').log
+	exit 0
 fi
-

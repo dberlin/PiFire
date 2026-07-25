@@ -558,6 +558,22 @@ wheels = [
 ]
 
 [[package]]
+name = "ciso8601"
+version = "2.3.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/8a/075724aea06c98626109bfd670c27c248c87b9ba33e637f069bf46e8c4c3/ciso8601-2.3.3.tar.gz", hash = "sha256:db5d78d9fb0de8686fbad1c1c2d168ed52efb6e8bf8774ae26226e5034a46dae", size = 31909, upload-time = "2025-08-20T16:31:33.51Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/3a/54ad0ae2257870076b4990545a8f16221470fecea0aa7a4e1f39506db8c5/ciso8601-2.3.3-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:82db4047d74d8b1d129e7a8da578518729912c3bd19cb71541b147e41f426381", size = 16115, upload-time = "2025-08-20T16:30:54.971Z" },
+    { url = "https://files.pythonhosted.org/packages/23/fb/9fe767d44520691e2b706769466852fbdeb44a82dc294c2766bce1049d22/ciso8601-2.3.3-cp314-cp314-macosx_11_0_universal2.whl", hash = "sha256:a553f3fc03a2ed5ca6f5716de0b314fa166461df01b45d8b36043ccac3a5e79f", size = 24214, upload-time = "2025-08-20T16:30:56.359Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/ac/984fd3948f372c46c436a2b48da43f4fb7bc6f156a6f4bc858adaab79d42/ciso8601-2.3.3-cp314-cp314-macosx_11_0_x86_64.whl", hash = "sha256:ff59c26083b7bef6df4f0d96e4b649b484806d3d7bcc2de14ad43147c3aafb04", size = 15929, upload-time = "2025-08-20T16:30:58.352Z" },
+    { url = "https://files.pythonhosted.org/packages/de/3a/5572917d4e0bec2c1ef0eda8652f9dc8d1850d29d3eef9e5e82ffe5d6791/ciso8601-2.3.3-cp314-cp314-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:99a1fa5a730790431d0bfcd1f3a6387f60cddc6853d8dcc5c2e140cd4d67a928", size = 41578, upload-time = "2025-08-20T16:30:59.351Z" },
+    { url = "https://files.pythonhosted.org/packages/5e/cf/07321ce5cf099b98de0c02cd4bab4818610da69743003e94c8fb6e8a59cb/ciso8601-2.3.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c35265c1b0bd2ac30ed29b49818dd38b0d1dfda43086af605d8b91722727dec0", size = 42085, upload-time = "2025-08-20T16:31:00.338Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/c7/3c521d6779ee433d9596eb3fcded79549bbe371843f25e62006c04f74dc9/ciso8601-2.3.3-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:aa9df2f84ab25454f14df92b2dd4f9aae03dbfa581565a716b3e89b8e2110c03", size = 41313, upload-time = "2025-08-20T16:31:01.313Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/93/efd40db0d6b512be1cbe4e7e750882c2e88f580e17f35b3e9cc9c23004b5/ciso8601-2.3.3-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:32e06a35eb251cfc4bbe01a858c598da0a160e4ad7f42ff52477157ceaf48061", size = 41443, upload-time = "2025-08-20T16:31:02.357Z" },
+    { url = "https://files.pythonhosted.org/packages/21/8e/515f9404faa39af8df5e2b899cafbca5dbe7cd2ffe5cc124ef393ffdaf1c/ciso8601-2.3.3-cp314-cp314-win_amd64.whl", hash = "sha256:7657ba9730dc1340d73b9e61eca14f341c41dd308128c808b8b084d2b85bc03e", size = 17977, upload-time = "2025-08-20T16:31:03.429Z" },
+]
+
+[[package]]
 name = "click"
 version = "8.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1188,6 +1204,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/07/23/77a945465a556a8067917ba84bac04e312cee2a4fe03d41198fe79ed9c84/influxdb_client-1.50.0.tar.gz", hash = "sha256:c2a4906573097103fa6f9a2ab08efe2eb48c2fed60b8129a3e320affde445743", size = 386749, upload-time = "2026-01-23T09:39:39.322Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7f/ec/6b120b4a86f6fadc7ddb1d7c7cdcb15bcfb332deb022ab60df51bcd4494c/influxdb_client-1.50.0-py3-none-any.whl", hash = "sha256:f172975cf7f0c95bfe74f288b31273393b164d2c58a948de55497d9956ab49be", size = 746289, upload-time = "2026-01-23T09:39:37.377Z" },
+]
+
+[package.optional-dependencies]
+ciso = [
+    { name = "ciso8601" },
 ]
 
 [[package]]
@@ -1867,7 +1888,7 @@ dependencies = [
     { name = "gpiozero" },
     { name = "gunicorn" },
     { name = "hidapi" },
-    { name = "influxdb-client" },
+    { name = "influxdb-client", extra = ["ciso"] },
     { name = "netifaces" },
     { name = "paho-mqtt" },
     { name = "pillow" },
@@ -1879,6 +1900,7 @@ dependencies = [
     { name = "pyserial" },
     { name = "pyside6" },
     { name = "ratelimitingfilter" },
+    { name = "rpi-hardware-pwm" },
     { name = "scikit-fuzzy" },
     { name = "scikit-learn" },
     { name = "thermoworks-cloud" },
@@ -1917,7 +1939,7 @@ requires-dist = [
     { name = "gpiozero", specifier = ">=2.0.1" },
     { name = "gunicorn", specifier = ">=26.0.0" },
     { name = "hidapi", specifier = ">=0.14.0" },
-    { name = "influxdb-client", specifier = ">=1.50.0" },
+    { name = "influxdb-client", extras = ["ciso"], specifier = ">=1.50.0" },
     { name = "netifaces", specifier = ">=0.11.0" },
     { name = "paho-mqtt", specifier = ">=2.1.0" },
     { name = "pillow", specifier = ">=12.2.0" },
@@ -1929,6 +1951,7 @@ requires-dist = [
     { name = "pyserial", specifier = ">=3.5" },
     { name = "pyside6", specifier = ">=6.11.1" },
     { name = "ratelimitingfilter", specifier = ">=1.5" },
+    { name = "rpi-hardware-pwm", specifier = ">=0.2.2" },
     { name = "scikit-fuzzy", specifier = ">=0.5.0" },
     { name = "scikit-learn", specifier = ">=1.9.0" },
     { name = "thermoworks-cloud", specifier = ">=0.1.13" },
@@ -2645,6 +2668,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/42/f2/05f29bc3913aea15eb670be136045bf5c5bbf4b99ecb839da9b422bb2c85/requests-oauthlib-2.0.0.tar.gz", hash = "sha256:b3dffaebd884d8cd778494369603a9e7b58d29111bf6b41bdc2dcd87203af4e9", size = 55650, upload-time = "2024-03-22T20:32:29.939Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/5d/63d4ae3b9daea098d5d6f5da83984853c1bbacd5dc826764b249fe119d24/requests_oauthlib-2.0.0-py2.py3-none-any.whl", hash = "sha256:7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36", size = 24179, upload-time = "2024-03-22T20:32:28.055Z" },
+]
+
+[[package]]
+name = "rpi-hardware-pwm"
+version = "0.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/32/ecd3e230a806c7894a13780a1c7d614f0d316d85cde7a2256626e2af2c45/rpi_hardware_pwm-0.3.1.tar.gz", hash = "sha256:dcb2627ab1248a9c532c86e013914416c55f11bd70976dd6ec6ecfd1109b0fe8", size = 5261, upload-time = "2026-02-09T17:10:41.757Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/17/c8d4d2efa5bb1af38644a6202c26e4d990d30cf6124ace32f33e7c488e9e/rpi_hardware_pwm-0.3.1-py3-none-any.whl", hash = "sha256:ad0f7f3e8ec83dd76a552cff92ea1dbb1bf773210316519ea66e3e85d3ac9ae0", size = 5112, upload-time = "2026-02-09T17:10:41.003Z" },
 ]
 
 [[package]]

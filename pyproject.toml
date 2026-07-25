@@ -14,7 +14,10 @@ dependencies = [
     "flask-socketio>=5.6.1",
     "gunicorn>=26.0.0",
     "hidapi>=0.14.0",
-    "influxdb-client>=1.50.0",
+    # [ciso] pulls ciso8601 for fast timestamp parsing. The extra used to be
+    # applied by each installer's own `uv pip install influxdb_client[ciso]`
+    # line; it lives here now so there is one place that decides it.
+    "influxdb-client[ciso]>=1.50.0",
     "netifaces>=0.11.0",
     "paho-mqtt>=2.1.0",
     "pyftdi>=0.55.0",
@@ -24,6 +27,10 @@ dependencies = [
     "pydantic>=2.13",
     "pydantic-partial>=0.11",
     "ratelimitingfilter>=1.5",
+    # Imported unconditionally by grillplat/raspberry_pi_all.py. It was only
+    # ever in auto-install/requirements.txt, so the dev venv never had it --
+    # the platform tests stub the module, which is why nothing noticed.
+    "rpi-hardware-pwm>=0.2.2",
     "scikit-fuzzy>=0.5.0",
     "scikit-learn>=1.9.0",
     "thermoworks-cloud>=0.1.13",
