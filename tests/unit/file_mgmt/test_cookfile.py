@@ -43,6 +43,7 @@ assertion; each has been flipped to assert the corrected behavior):
 """
 
 import json
+import math
 import pathlib
 import zipfile
 
@@ -391,6 +392,61 @@ def test_prepare_chartdata_multiple_primary_probes_all_get_setpoint_data():
         {"x": 1000, "y": 225},
         {"x": 2000, "y": 230},
     ]
+
+
+def test_prepare_chartdata_reduce_true_carries_null_probe_readings_through():
+    """CRITICAL regression: an unplugged / open-circuit / badly-read probe
+    stores Python `None` (`probes/base.py:251-253` returns `(None, 0)` and
+    the Kalman stage at `:374` deliberately passes it through), which
+    round-trips as JSON `null` through `write_history`/`unpack_history` into
+    `history["P"][label]`. The old every-Nth decimation only INDEXED, so a
+    `None` was carried straight into `{"x": ts, "y": null}` -- rendered as a
+    gap by Chart.js (`spanGaps: False`) and by uPlot (which
+    `historyAdapter.ts` documents and pads for, typing `HistoryPoint.y` as
+    `number | null`). The fidelity selection replaced that with value
+    ARITHMETIC and raised `TypeError` on the first `None`, i.e. a 500 on both
+    `GET /api/history/chart` and the legacy `POST /history/refresh` for any
+    window above the gate.
+
+    Pinned here end to end, above the 10000-sample gate so the reduce path is
+    genuinely entered, with both shapes: an isolated dropped read and a run
+    long enough to swallow whole LTTB buckets.
+    """
+    n = 12000
+    grill = [200.0 + 20.0 * math.sin(2 * math.pi * i / 3000.0) for i in range(n)]
+    food = [90.0] * n
+    food[4321] = None  # one bad read
+    for i in range(7000, 9000):  # probe pulled out mid-cook
+        food[i] = None
+    history = {
+        "T": [1700000000000 + i * 3000 for i in range(n)],
+        "PSP": [225.0] * n,
+        "P": {"grill1": grill},
+        "F": {"probe1": food},
+        "NT": {"grill1": [225.0] * n, "probe1": [165.0] * n},
+    }
+
+    result = prepare_chartdata(_PROBE_CONFIG, num_items=n, reduce=True, data_points=10000, history=history)
+
+    pm = result["probe_mapper"]
+    food_points = result["chart_data"][pm["probes"]["probe1"]]["data"]
+    index_of = {ts: i for i, ts in enumerate(history["T"])}
+
+    # Every emitted point is the raw sample verbatim -- so a dropped read
+    # arrives as `null`, never as a fabricated 0 F reading (the failure mode
+    # commit 1d8a67a9 removed from the empty-history branch) and never
+    # silently dropped (which would desynchronise it from `time_labels`).
+    assert food_points
+    for point in food_points:
+        assert point["y"] == food[index_of[point["x"]]] or (point["y"] is None and food[index_of[point["x"]]] is None)
+    assert any(point["y"] is None for point in food_points)
+    assert 0 not in [point["y"] for point in food_points]
+
+    # The grill series is unaffected by its neighbour's dropout, and every
+    # dataset stays in lockstep with time_labels.
+    grill_points = result["chart_data"][pm["probes"]["grill1"]]["data"]
+    assert len(grill_points) == len(food_points) == len(result["time_labels"])
+    assert all(point["y"] is not None for point in grill_points)
 
 
 # ---------------------------------------------------------------------------

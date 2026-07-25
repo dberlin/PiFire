@@ -5,6 +5,27 @@ The chart used to keep every Nth sample, which silently erases short events
 width. This selects points by Largest-Triangle-Three-Buckets instead, and
 grows the budget until the drawn curve is within a stated tolerance of the
 true curve -- a shape target rather than a point count.
+
+Two properties of real history data every function here has to respect:
+
+`None` is a legitimate reading. A probe that is unplugged, open-circuit or
+reads badly stores Python `None` (`probes/base.py:251-253` returns
+`(None, 0)`; the Kalman stage at `:374` deliberately passes it through), which
+round-trips as JSON `null` all the way into `history["P"][label]`. Both
+consumers render it as a GAP -- Chart.js via `spanGaps: False`, uPlot
+natively -- so a dropped sample has no drawn position and therefore no error
+to measure. Every value-touching site below skips it. It is never coerced to
+0: a temperature nobody took, drawn as if real, is a worse bug than the crash.
+
+Samples are not evenly spaced in time. `write_history` only fires inside a
+work cycle, every ~3 s, and nothing at all is written in STOP; meanwhile
+`read_history(num_items)` selects by ROW COUNT, not wall clock. So a
+Monitor -> Stop -> idle -> Monitor sequence leaves an arbitrary time gap in
+the middle of a window whose pre-gap rows are still retained. Both charts draw
+straight lines in TIME space, so the tolerance -- the thing that enforces the
+user's "within N degrees of the truth" -- must be measured there too. Measured
+in index space it once reported 0.00 degrees on a window whose drawn line was
+18 degrees off.
 """
 
 
@@ -22,6 +43,16 @@ def lttb_indices(values, times, budget):
     budget would defeat the point of asking for one. `n` of 0 or 1 has no
     "two endpoints" to speak of, so it returns whatever indices exist (`[]`
     or `[0]`).
+
+    Dropped readings (`None`) are excluded from the bucket average and from
+    the triangle-area search: they have no y position, so they can neither
+    contribute to nor win the "which sample most defines the shape" contest.
+    When a whole bucket is `None` (a probe unplugged for a stretch), or the
+    previously-kept point is, there is no triangle to compute for that bucket
+    at all -- it falls back to the bucket's first index, which is exactly what
+    the area search already returns when no candidate beats the initial
+    `best_area` of -1.0. Note that means `values[a]` may itself be `None` on
+    the next iteration; that is handled, not assumed away.
     """
     n = len(values)
     if n <= 1:
@@ -40,16 +71,26 @@ def lttb_indices(values, times, budget):
         next_start = int((i + 1) * bucket_size) + 1
         next_end = min(int((i + 2) * bucket_size) + 1, n)
         count = max(1, next_end - next_start)
-        avg_x = sum(times[next_start:next_end]) / count if next_end > next_start else times[-1]
-        avg_y = sum(values[next_start:next_end]) / count if next_end > next_start else values[-1]
+        if next_end > next_start:
+            avg_x = sum(times[next_start:next_end]) / count
+            present = [v for v in values[next_start:next_end] if v is not None]
+            avg_y = sum(present) / len(present) if present else None
+        else:
+            avg_x = times[-1]
+            avg_y = values[-1]
 
         range_start = int(i * bucket_size) + 1
         range_end = min(int((i + 1) * bucket_size) + 1, n)
         best, best_area = range_start, -1.0
-        for j in range(range_start, range_end):
-            area = abs((times[a] - avg_x) * (values[j] - values[a]) - (times[a] - times[j]) * (avg_y - values[a]))
-            if area > best_area:
-                best_area, best = area, j
+        y_a = values[a]
+        if avg_y is not None and y_a is not None:
+            for j in range(range_start, range_end):
+                y_j = values[j]
+                if y_j is None:
+                    continue
+                area = abs((times[a] - avg_x) * (y_j - y_a) - (times[a] - times[j]) * (avg_y - y_a))
+                if area > best_area:
+                    best_area, best = area, j
         kept.append(best)
         a = best
 
@@ -57,31 +98,53 @@ def lttb_indices(values, times, budget):
     return kept
 
 
-def max_interpolation_error(values, indices):
+def max_interpolation_error(values, indices, times=None):
     """Worst absolute gap between the drawn curve and the true one.
 
     The chart draws straight lines between kept samples, so the error at a
     dropped sample is the distance from it to that line. This is the number
     the tolerance is expressed in (degrees, same units as the probe).
+
+    `times` is the x-axis the line is drawn against. Pass it: both consumers
+    plot against wall clock, and history is not evenly spaced (see the module
+    docstring), so index-space distance is the wrong ruler on any window
+    holding a gap. It defaults to `None` -- meaning "assume unit spacing" --
+    only because this function is separately exported and asserted directly
+    by tests that build their own uniform x-axis; on evenly spaced samples
+    the two agree exactly (the `dt` cancels: `((i-i0)*dt)/((i1-i0)*dt)`), so
+    the default is a true statement about a uniform series rather than a
+    silent fallback that means something different. The production caller
+    (`select_indices`) always passes real timestamps.
+
+    Samples whose value is `None` are skipped, and a segment with a `None` at
+    either end is skipped whole: nothing is drawn there, so there is no error.
     """
     if len(indices) < 2:
         return float("inf")
     worst = 0.0
     for k in range(len(indices) - 1):
         i0, i1 = indices[k], indices[k + 1]
-        y0, y1 = values[i0], values[i1]
-        span = i1 - i0
-        if span <= 1:
+        if i1 - i0 <= 1:
             continue
+        y0, y1 = values[i0], values[i1]
+        if y0 is None or y1 is None:
+            continue
+        x0 = i0 if times is None else times[i0]
+        span = (i1 - i0) if times is None else (times[i1] - x0)
         for i in range(i0 + 1, i1):
-            approx = y0 + (y1 - y0) * ((i - i0) / span)
-            err = abs(approx - values[i])
+            value = values[i]
+            if value is None:
+                continue
+            # A zero-width span means coincident timestamps: the drawn
+            # segment is vertical, so every sample on it sits at y0.
+            approx = y0 if span == 0 else y0 + (y1 - y0) * (((i if times is None else times[i]) - x0) / span)
+            err = abs(approx - value)
             if err > worst:
                 worst = err
     return worst
 
 
-def exceeds_tolerance(values, indices, tolerance):
+def exceeds_tolerance(values, indices, tolerance, times=None):
     """Same segment walk as `max_interpolation_error`, but answers only the
     yes/no question `select_indices` actually needs -- does ANY dropped
     sample's error exceed `tolerance` -- and stops at the first violation
@@ -94,23 +157,30 @@ def exceeds_tolerance(values, indices, tolerance):
     anyway is where a synchronous, single-core, JIT-less request handler
     (a Raspberry Pi Zero) spends most of its time on this path.
 
-    `max_interpolation_error` stays untouched and separately exported -- it
-    expresses the tolerance contract in degrees, which several tests assert
-    directly, whereas this only ever answers "worse than tolerance or not".
-    The two must always agree: `exceeds_tolerance(v, i, t) ==
-    (max_interpolation_error(v, i) > t)`.
+    `max_interpolation_error` stays separately exported -- it expresses the
+    tolerance contract in degrees, which several tests assert directly,
+    whereas this only ever answers "worse than tolerance or not". The two
+    must always agree, for the same `times`: `exceeds_tolerance(v, i, t, x)
+    == (max_interpolation_error(v, i, x) > t)`. `times` and the `None`
+    handling carry the same meaning here as there.
     """
     if len(indices) < 2:
         return True  # mirrors max_interpolation_error's float("inf") here: inf > any t
     for k in range(len(indices) - 1):
         i0, i1 = indices[k], indices[k + 1]
-        y0, y1 = values[i0], values[i1]
-        span = i1 - i0
-        if span <= 1:
+        if i1 - i0 <= 1:
             continue
+        y0, y1 = values[i0], values[i1]
+        if y0 is None or y1 is None:
+            continue
+        x0 = i0 if times is None else times[i0]
+        span = (i1 - i0) if times is None else (times[i1] - x0)
         for i in range(i0 + 1, i1):
-            approx = y0 + (y1 - y0) * ((i - i0) / span)
-            if abs(approx - values[i]) > tolerance:
+            value = values[i]
+            if value is None:
+                continue
+            approx = y0 if span == 0 else y0 + (y1 - y0) * (((i if times is None else times[i]) - x0) / span)
+            if abs(approx - value) > tolerance:
                 return True
     return False
 
@@ -156,7 +226,9 @@ def select_indices(series, times, *, tolerance=2.0, min_points=10000, max_points
     that the payload is small enough that downsampling only loses information.
     Above it, grow the LTTB budget until the UNION of every series' own LTTB
     selection is within `tolerance` for all of them, optionally capped at
-    `max_points`.
+    `max_points`. `times` is forwarded to the tolerance check, not just used
+    for LTTB's triangle areas: the guarantee is about the line the chart
+    DRAWS, which is drawn against wall clock.
 
     Each series is downsampled independently at the shared `budget`, then the
     kept indices are merged -- so `budget` is no longer the returned point
@@ -189,7 +261,7 @@ def select_indices(series, times, *, tolerance=2.0, min_points=10000, max_points
     budget = 1000
     while budget < ceiling:
         union = _union_indices(series, times, budget)
-        if not any(exceeds_tolerance(s, union, tolerance) for s in series):
+        if not any(exceeds_tolerance(s, union, tolerance, times) for s in series):
             return _trim_to_cap(union, max_points) if max_points else union
         budget *= 2
 

@@ -377,3 +377,200 @@ def test_short_circuit_optimisation_does_not_change_selection_for_the_dip_fixtur
         hashlib.sha256(json.dumps(idx).encode()).hexdigest()
         == "fd56e78cca22efa65cc2c0cbe6ee3b49c71d98c22713321e4c90b33e1aea461a"
     )
+
+
+# ---------------------------------------------------------------------------
+# Fix pass 4: `None` readings, and measuring error in TIME space.
+#
+# Two defects found by the final merge-readiness review, both of which only
+# bite ABOVE the `min_points` gate (below it `select_indices` returns
+# `list(range(n))` without ever touching a value or a timestamp, which is why
+# every test above missed them):
+#
+# 1. A probe that is unplugged / open-circuit / reads badly stores Python
+#    `None` -- `probes/base.py:251-253` returns `(None, 0)` and the Kalman
+#    stage at `:374` deliberately passes it through, so it round-trips via
+#    JSON `null` into `history["P"][label]`. The OLD every-Nth decimation only
+#    INDEXED (`range(start, stop, step)`), so nulls flowed through untouched
+#    and were emitted as `{"x": ts, "y": null}` -- a gap on both charts. This
+#    module does value ARITHMETIC (bucket averages, triangle areas,
+#    interpolation error) and raised `TypeError` on the first `None`, i.e. a
+#    500 on both `GET /api/history/chart` and the legacy `POST
+#    /history/refresh`. A dropped sample must be skipped, never coerced to 0
+#    -- a fabricated 0 F reading drawn as if real is exactly what commit
+#    1d8a67a9 removed from the empty-history branch.
+#
+# 2. The tolerance checkers interpolated in INDEX space (`(i - i0) / (i1 -
+#    i0)`) while both charts draw straight lines in TIME space. History is
+#    genuinely not evenly spaced: `write_history` only fires inside a work
+#    cycle every ~3 s, nothing is written in STOP, and `read_history` selects
+#    by ROW COUNT not wall clock -- so Monitor -> Stop -> idle -> Monitor
+#    leaves an arbitrary time gap inside a retained window. The gate then
+#    reports an error against a curve nobody draws.
+# ---------------------------------------------------------------------------
+
+
+def _drawn_curve_error(values, indices, times):
+    """Independent oracle: the worst distance between the polyline the chart
+    actually DRAWS (straight lines in TIME space between kept samples) and
+    the true samples.
+
+    Deliberately not `max_interpolation_error` -- it is the thing under test,
+    so measuring it with itself would prove nothing.
+    """
+    worst = 0.0
+    for k in range(len(indices) - 1):
+        i0, i1 = indices[k], indices[k + 1]
+        y0, y1 = values[i0], values[i1]
+        if y0 is None or y1 is None:
+            continue
+        x0, x1 = times[i0], times[i1]
+        for i in range(i0 + 1, i1):
+            if values[i] is None:
+                continue
+            approx = y0 if x1 == x0 else y0 + (y1 - y0) * ((times[i] - x0) / (x1 - x0))
+            worst = max(worst, abs(approx - values[i]))
+    return worst
+
+
+def _gapped_ramp(n=12000, gap_after=6006, gap_ms=7200000, cadence_ms=3000):
+    """12000 samples at the real 3 s write cadence with one 2-hour gap, and a
+    ramp 70 -> 270 F straddling the gap (linear in INDEX across indices
+    6000..6012, so index-space interpolation sees a perfectly even climb
+    while the drawn line jumps almost vertically at the gap)."""
+    times = []
+    t = 1700000000000.0
+    for i in range(n):
+        times.append(t)
+        t += cadence_ms + (gap_ms if i == gap_after else 0)
+    values = []
+    for i in range(n):
+        if i < 6000:
+            values.append(70.0)
+        elif i <= 6012:
+            values.append(70.0 + 200.0 * (i - 6000) / 12.0)
+        else:
+            values.append(270.0)
+    return values, times
+
+
+def test_select_indices_survives_none_readings_above_the_gate():
+    """CRITICAL regression: one unplugged probe sample anywhere in a series
+    above the 10000-sample gate crashed the whole reduce path with
+    `TypeError: unsupported operand type(s) for +: 'float' and 'NoneType'`
+    (the bucket average in `lttb_indices`). At the ~3 s write cadence 10000
+    samples is ~8.3 hours -- an ordinary brisket -- so this is not exotic.
+
+    Covers both shapes the review asked for: an ISOLATED `None` (a single
+    bad read) and a `None` RUN long enough to span an entire LTTB bucket at
+    every budget the doubling search tries (bucket size at budget 1000 over
+    n=12000 is ~12 samples; a 2000-sample run swallows ~166 of them), so the
+    "whole bucket is null" fallback is genuinely exercised and not just the
+    partial-bucket path.
+    """
+    n = 12000
+    times = [1700000000000.0 + i * 3000.0 for i in range(n)]
+    values = [200.0 + 20.0 * math.sin(2 * math.pi * i / 3000.0) for i in range(n)]
+    values[5000] = None  # isolated bad read
+    for i in range(8000, 10000):  # probe unplugged for ~100 minutes
+        values[i] = None
+
+    idx = select_indices([values], times, tolerance=2.0, min_points=10000)
+
+    assert idx == sorted(set(idx))
+    assert idx[0] == 0 and idx[-1] == n - 1
+    assert len(idx) < n, "a smooth trace with gaps should still downsample, not fall through to every point"
+    # The nulls are carried, not repaired: nothing invented a reading.
+    assert any(values[i] is None for i in idx)
+    # And the fidelity guarantee still holds over the samples that DO exist.
+    assert _drawn_curve_error(values, idx, times) <= 2.0
+
+
+def test_null_tolerant_helpers_never_fabricate_a_reading():
+    """The three exported helpers must each survive `None` on their own --
+    they are independently exported and `select_indices` is not the only way
+    to reach them. A `None` sample has no reading, therefore no error to
+    measure: it must be skipped, not read as 0 (which would report a
+    200-degree error against a 200 F hold and drag a budget search out to
+    full fidelity for no reason)."""
+    values = [200.0] * 50
+    values[10] = None
+    values[25] = None
+    times = [float(i) for i in range(50)]
+
+    assert lttb_indices(values, times, 10)  # does not raise
+    # Flat 200 F with two dropped reads: the drawn line is exactly the truth
+    # everywhere a truth exists, so the error is 0 -- NOT 200 (0-coercion).
+    assert max_interpolation_error(values, [0, 49], times=times) == 0.0
+    assert exceeds_tolerance(values, [0, 49], 2.0, times=times) is False
+
+    # A kept endpoint that is itself `None` has no drawn segment at all
+    # (both charts render null as a gap), so that segment is unmeasurable
+    # rather than infinitely bad.
+    endpoint_null = [200.0, 201.0, None, 202.0, 203.0]
+    endpoint_times = [0.0, 1.0, 2.0, 3.0, 4.0]
+    assert max_interpolation_error(endpoint_null, [0, 2, 4], times=endpoint_times) == 0.0
+    assert exceeds_tolerance(endpoint_null, [0, 2, 4], 2.0, times=endpoint_times) is False
+
+
+def test_tolerance_is_measured_against_the_curve_the_chart_actually_draws():
+    """IMPORTANT regression: the 2 F guarantee was checked in INDEX space
+    while uPlot (`HistoryChart.tsx`) and Chart.js (`history.js`) both draw
+    straight lines in TIME space. On a window holding a real time gap --
+    Monitor -> Stop -> idle -> Monitor, with the pre-gap rows still retained
+    because `read_history` selects by row count -- the two diverge wildly.
+
+    On this fixture the shipped code reported an index-space error of 0.00
+    against a tolerance of 2.0 while the line the user actually sees was
+    18.17 F away from the truth: between two kept indices straddling the gap,
+    every pre-gap sample sits at ~0% of the TIME span and every post-gap one
+    at ~100%, so the drawn segment jumps almost vertically at the gap while
+    index-space math believes it ramps evenly across all 12 samples.
+    """
+    values, times = _gapped_ramp()
+
+    idx = select_indices([values], times, tolerance=2.0, min_points=10000)
+
+    assert _drawn_curve_error(values, idx, times) <= 2.0
+
+
+def test_max_interpolation_error_reports_the_drawn_error_not_the_index_error():
+    """The exported degrees-valued contract must agree with the chart too --
+    `exceeds_tolerance` short-circuiting off a corrected metric while
+    `max_interpolation_error` still reported the index-space one would leave
+    the two disagreeing, breaking the invariant their docstrings assert."""
+    values, times = _gapped_ramp()
+    # The two kept samples that straddle the gap, plus the ramp's own ends.
+    indices = [0, 6000, 6012, len(values) - 1]
+
+    drawn = _drawn_curve_error(values, indices, times)
+    assert drawn > 10.0, "fixture must actually exhibit the divergence"
+
+    assert max_interpolation_error(values, indices, times=times) == drawn
+    assert exceeds_tolerance(values, indices, 2.0, times=times) is True
+    # ... and it still agrees with the boolean checker on the same inputs.
+    assert exceeds_tolerance(values, indices, drawn, times=times) is False
+
+
+def test_evenly_spaced_data_selects_the_same_indices_whatever_the_cadence():
+    """Guard on the time-space fix: on evenly-spaced samples the `dt` cancels
+    algebraically -- `((i - i0)*dt) / ((i1 - i0)*dt) == (i - i0) / (i1 - i0)`
+    -- so a corrected checker must return byte-identical selections to the
+    index-space one for every well-behaved window. Asserted here by holding
+    the shape fixed and varying only the epoch origin and the cadence: 3 s
+    real-cadence milliseconds and bare 0,1,2,... must select the same points,
+    and both must match the hash this fixture was already pinned to before
+    the fix.
+    """
+    values, unit_times = _cook_with_dip(n=30000)
+    baseline = select_indices([values], unit_times, tolerance=2.0, min_points=10000)
+
+    for origin, cadence in ((1700000000000.0, 3000.0), (0.0, 0.5), (-5000.0, 1.0)):
+        shifted = [origin + i * cadence for i in range(len(values))]
+        assert select_indices([values], shifted, tolerance=2.0, min_points=10000) == baseline
+
+    # The pre-fix fingerprint for this fixture, unchanged.
+    assert (
+        hashlib.sha256(json.dumps(baseline).encode()).hexdigest()
+        == "fd56e78cca22efa65cc2c0cbe6ee3b49c71d98c22713321e4c90b33e1aea461a"
+    )
