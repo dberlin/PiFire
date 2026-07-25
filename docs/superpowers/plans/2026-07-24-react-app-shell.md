@@ -155,6 +155,39 @@ Pure rename, no behaviour change. 57 references across 18 files (counted, not es
 - [ ] **Step 3: Implement.** Resume calls `timerStart` again (the backend unpauses; the seconds argument is ignored — comment this, it looks wrong otherwise). Live tick via an interval that is cleared on unmount; the *displayed* remaining is derived at render from `dash.timer` + a ticking `now`, never mirrored into state.
 - [ ] **Step 4: Run, confirm pass. Commit.**
 
+### Task 4c: FIX — the timer modal silently drops shutdown/keep-warm
+
+**This plan's Task 4 specified a sequence that does not work.** It said to call
+`timerShutdown`/`timerKeepWarm` **then** `timerStart`. That loses both flags.
+
+Verified mechanism:
+- `common/datastore_accessors.py:55-61` — `read_control()` reads only the
+  persisted blob; it **never sees the pending write queue**.
+- The queue drains only in the **control loop**
+  (`controller/runtime/controller.py:282`, `modes/base.py:637`,
+  `transitions.py:128`) — never in the web process.
+- `execute_control_writes` applies each queued partial with
+  `json_patch(value, ?)` (`datastore_accessors.py:120-122`). SQLite's
+  `json_patch` is RFC 7396, which **replaces arrays wholesale**.
+- `write_control(..., WriteKind.MERGE)` queues the **entire control dict**.
+- The timer's `shutdown`/`keep_warm` live in `control["notify_data"]` — an
+  ARRAY — at `common/api_commands.py:588-599`, while `start` writes
+  `control["timer"]`.
+
+So three sequential calls inside one ~50 ms control cycle each queue a stale
+full snapshot, and the last one's `notify_data` replaces the earlier ones'.
+The checkboxes are dropped every time.
+
+**Fix:** one write, not three — `POST /api/control` carrying the whole
+`notify_data` array, exactly as the Flask dashboard does
+(`static/js/dash_default.js:784-799`).
+
+**Trap:** `POST /api/control` answers `{"result": "success"}` — lowercase — not
+the `"OK"` that `command.ts:49` tests for. Reusing the existing `post()` helper
+unchanged would report every successful write as a failure.
+
+Pin it with a test that fails against the sequential-call version.
+
 ### Task 5: AppShell + route restructure + Banners move
 
 **Files:** Create `AppShell.tsx` + `.test.tsx`; move `Banners.tsx`; modify `App.tsx`, `Dashboard.tsx`
