@@ -420,3 +420,56 @@
   width: 96px;
   align-self: flex-start;
 }
+
+/* ---- discovery results (I2C / USB-serial / Bluetooth scans) ---- */
+.pf-discovery-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: var(--inset);
+}
+.pf-discovery-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pf-discovery-group-title {
+  margin: 0;
+  color: var(--text-dim);
+  font: 600 11px "Barlow";
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+/* Standalone in BluetoothPicker as well as inside .pf-discovery-panel, so no
+   wrapper is assumed. */
+.pf-discovery-group-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Each item is a bare <button type="button"> whose whole job is to be clicked
+   to fill the field above it (DiscoveryPanel, BluetoothPicker). Pills, because
+   the labels are short device identifiers. */
+.pf-discovery-group-items button {
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--pill-radius);
+  background: var(--card);
+  color: var(--text);
+  font: 600 13px "Barlow";
+  text-align: left;
+  cursor: pointer;
+}
+.pf-discovery-group-items button:hover {
+  border-color: var(--accent);
+  color: var(--accent-1);
+}
+/* BluetoothPicker puts the result row directly in the field stack, with no
+   .pf-discovery-panel to supply the spacing. */
+.pf-wizard .pf-field-column > .pf-discovery-group-items {
+  margin-top: 8px;
+}

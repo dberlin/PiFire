@@ -55,6 +55,13 @@ const MODULE_CARD = [
 
 const PROBES = ["pf-probes-table", "pf-port-form", "pf-device-form"];
 
+const DISCOVERY = [
+  "pf-discovery-panel",
+  "pf-discovery-group",
+  "pf-discovery-group-title",
+  "pf-discovery-group-items",
+];
+
 describe("wizard stylesheet — chrome layer", () => {
   it("is imported by WizardShell.tsx", () => {
     const src = readFileSync(join(WIZARD_DIR, "WizardShell.tsx"), "utf8");
@@ -74,6 +81,11 @@ describe("wizard stylesheet — chrome layer", () => {
   it("declares a non-empty rule for every probes-step class", () => {
     const declared = declaredClasses(readFileSync(WIZARD_CSS, "utf8"));
     expect(PROBES.filter((c) => !declared.has(c))).toEqual([]);
+  });
+
+  it("declares a non-empty rule for every discovery class", () => {
+    const declared = declaredClasses(readFileSync(WIZARD_CSS, "utf8"));
+    expect(DISCOVERY.filter((c) => !declared.has(c))).toEqual([]);
   });
 
   // settings.css owns `.pf-probes-card { position: relative }` (it is the
