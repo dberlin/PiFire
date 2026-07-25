@@ -1041,18 +1041,44 @@ button.pf-dash-pill {
   }
   .pf-dash-body {
     flex-direction: column;
+    /* The tablet breakpoint above also matches here, and its flex-wrap: wrap
+       is not just redundant on a column that is already stacking -- a wrapping
+       column container sizes its line from the items' content contributions,
+       and the control grid's is three rows wide. That reserved a 68px void
+       under the Stop button. Measured: the centre column reported 534px
+       against 466px of content, and 534 is exactly the three-row arithmetic. */
+    flex-wrap: nowrap;
   }
   /* Gauge and controls first: what you reach for on a phone is the
      temperature and the Stop button, not the probe list. */
   .pf-dash-centercol {
     order: 1;
+    /* flex: none, like the other two columns: the desktop rule is flex: 1,
+       which in a column-direction body would grow this column into whatever
+       height is going.
+
+       min-height: 0 goes with it: a flex item defaults to min-height: auto,
+       i.e. its MIN-CONTENT height, and the control grid's min-content height
+       is three rows rather than two. Belt and braces against the same class of
+       floor that flex-wrap produced above. */
+    flex: none;
+    min-height: 0;
   }
   .pf-dash-probecol {
     order: 2;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* auto-fit, not a hard 1fr 1fr: at 390px two columns leave each probe card
+       about 170px, which wraps the probe name onto two lines and crowds the
+       target against the bell. One column on a phone, two as soon as there is
+       room for them. */
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     width: auto;
     flex: none;
+  }
+  /* The section heading is a heading, not a card: it spans the grid rather
+     than sitting in the first cell with a probe card beside it. */
+  .pf-dash-coltitle {
+    grid-column: 1 / -1;
   }
   .pf-dash-rightcol {
     order: 3;
@@ -1064,6 +1090,12 @@ button.pf-dash-pill {
   .pf-dash-controls {
     grid-auto-flow: row;
     grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    /* grid-auto-ROWS, not height: once the buttons wrap, the container's
+       height is the sum of its rows, and it is each ROW that has to be a
+       touch target. Setting --pf-btn-h on the container alone left the
+       buttons at their 26px content height -- which only a browser could
+       tell us, and dashboard-reflow.spec.ts did. */
+    grid-auto-rows: var(--pf-btn-h);
     height: auto;
     flex: none;
   }

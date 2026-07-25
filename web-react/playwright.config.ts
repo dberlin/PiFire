@@ -51,5 +51,13 @@ export default defineConfig({
       testMatch: /dashboard-fidelity\.spec\.ts/,
       use: { baseURL: "http://localhost:5174", viewport: { width: 1280, height: 720 } },
     },
+    // The other half of the reflow gate. @media queries prove nothing on their
+    // own: a breakpoint that declares the wrong thing, or that no element
+    // consumes, is still a breakpoint.
+    {
+      name: "reflow",
+      testMatch: /dashboard-reflow\.spec\.ts/,
+      use: { baseURL: "http://localhost:5174", viewport: { width: 390, height: 844 } },
+    },
   ],
 });

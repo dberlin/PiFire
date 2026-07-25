@@ -20,6 +20,20 @@ test("startup then hold round-trips through the live socket", async ({ page, req
   const startup = page.getByRole("button", { name: "Startup" });
   if (await startup.isVisible().catch(() => false)) {
     await startup.click();
+    // Ignition is gated behind Flask's startup modal whenever
+    // safety.startup_check is set, or the hold prompt is configured for Hold
+    // (_macro_control_panel.html:89-90). This backend has startup_check on.
+    // Written to tolerate either configuration -- and neither -- so the spec
+    // does not depend on the instance's settings.
+    const confirm = page.getByRole("button", { name: "Confirm" });
+    const holdPrompt = page.getByText("Change Hold Temp?");
+    if (await confirm.isVisible().catch(() => false)) {
+      await confirm.click();
+    } else if (await holdPrompt.isVisible().catch(() => false)) {
+      // The hold variant's submit carries Flask's label, "Startup" -- the same
+      // name as the button that opened it, so match the modal button by class.
+      await page.locator(".pf-modal-btn.accent").click();
+    }
     await expect(page.getByRole("button", { name: "Hold" })).toBeVisible({ timeout: 15_000 });
   }
 
