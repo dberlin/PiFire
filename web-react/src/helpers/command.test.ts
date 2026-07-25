@@ -43,6 +43,27 @@ describe("createCommand issues the right URLs", () => {
     await createCommand("").timerStart(600);
     expect(url()).toBe("/api/set/timer/start/600");
   });
+  it("timerShutdown → literal true/false segment", async () => {
+    const c = createCommand("");
+    await c.timerShutdown(true);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/set/timer/shutdown/true");
+    await c.timerShutdown(false);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/set/timer/shutdown/false");
+  });
+  it("timerKeepWarm → literal true/false segment", async () => {
+    const c = createCommand("");
+    await c.timerKeepWarm(false);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/set/timer/keep_warm/false");
+    await c.timerKeepWarm(true);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/set/timer/keep_warm/true");
+  });
+  it("timerPause and timerStop take no argument segment", async () => {
+    const c = createCommand("");
+    await c.timerPause();
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/set/timer/pause");
+    await c.timerStop();
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/set/timer/stop");
+  });
   it("prime → grams and next mode", async () => {
     await createCommand("").prime(20, "smoke");
     expect(url()).toBe("/api/set/mode/prime/20/smoke");

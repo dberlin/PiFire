@@ -16,6 +16,8 @@ function stubCommand(): CommandClient {
     timerStart: rs.fn(async () => OK),
     timerPause: rs.fn(async () => OK),
     timerStop: rs.fn(async () => OK),
+    timerShutdown: rs.fn(async () => OK),
+    timerKeepWarm: rs.fn(async () => OK),
     system: rs.fn(async () => OK),
     setUnits: rs.fn(async () => OK),
     manualOutput: rs.fn(async () => OK),

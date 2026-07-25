@@ -25,9 +25,19 @@ export interface CommandClient {
   setSmokePlus(on: boolean): Promise<CommandResult>;
   setPMode(n: number): Promise<CommandResult>;
   prime(grams: number, next?: GrillMode): Promise<CommandResult>;
+  // NOTE (verified against common/api_commands.py _cmd_set_timer):
+  //  - timerStart is ALSO the unpause command: when control.timer.paused != 0
+  //    the backend ignores `seconds` and just shifts the existing end time.
+  //  - timerPause CLEARS the whole timer (and the shutdown/keep_warm flags)
+  //    when the timer was never started (timer.start == 0).
+  //  - timerStop clears the timer AND resets shutdown/keep_warm to False, so
+  //    those flags must be re-sent after any stop.
+  //  - A non-numeric `seconds` makes the backend silently substitute 60s.
   timerStart(seconds: number): Promise<CommandResult>;
   timerPause(): Promise<CommandResult>;
   timerStop(): Promise<CommandResult>;
+  timerShutdown(on: boolean): Promise<CommandResult>;
+  timerKeepWarm(on: boolean): Promise<CommandResult>;
   system(cmd: SystemCmd): Promise<CommandResult>;
   setUnits(units: "F" | "C"): Promise<CommandResult>;
   manualOutput(output: ManualOutput, action?: "toggle" | "true" | "false"): Promise<CommandResult>;
@@ -63,6 +73,10 @@ export function createCommand(baseUrl: string): CommandClient {
     timerStart: (seconds) => post(baseUrl, ["set", "timer", "start", seconds]),
     timerPause: () => post(baseUrl, ["set", "timer", "pause"]),
     timerStop: () => post(baseUrl, ["set", "timer", "stop"]),
+    // The backend compares the raw path segment against the string "true"
+    // (arglist[2] == "true"), so booleans must serialize as literal true/false.
+    timerShutdown: (on) => post(baseUrl, ["set", "timer", "shutdown", on ? "true" : "false"]),
+    timerKeepWarm: (on) => post(baseUrl, ["set", "timer", "keep_warm", on ? "true" : "false"]),
     system: (cmd) => post(baseUrl, ["cmd", cmd]),
     setUnits: (units) => post(baseUrl, ["set", "units", units]),
     manualOutput: (output, action = "toggle") => post(baseUrl, ["set", "manual", output, action]),
