@@ -27,6 +27,7 @@ from common.common import (
 from common.datastore_accessors import (
     read_settings,
     read_history,
+    flush_history,
     read_metrics,
     write_metrics,
 )
@@ -163,10 +164,11 @@ def create_cookfile():
         command = f"rm -rf {cook_file_path}"
         os.system(command)
 
-    # Delete datastore entries for history / current
-    read_history(0, flushhistory=True)
-    # Flush metrics DB for tracking certain metrics
-    write_metrics(flush=True)
+    # Erase history, current and metrics now the cook is saved to a file.
+    # (The separate write_metrics(flush=True) that used to follow this line was
+    # redundant -- flush_history does it -- but that was invisible while the
+    # call was spelled read_history(flushhistory=True).)
+    flush_history()
 
 
 def read_cookfile(filename):

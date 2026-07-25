@@ -53,6 +53,7 @@ from common.datastore_accessors import (
     read_connected_users,
     read_control,
     read_current,
+    flush_current,
     read_errors,
     read_pellets_store,
     read_settings,
@@ -240,7 +241,7 @@ def test_dash_data_exposes_manual_power_and_pwm(sio):
     # pattern as test_get_dash_data_and_probe_data_full_structure), otherwise
     # a fresh empty datastore raises KeyError before we ever reach the
     # outputs/manualPwm keys this test cares about.
-    read_current(zero_out=True)
+    flush_current()
     dash = sio.mod._get_dash_data(read_settings(), read_pellets_store())
 
     assert set(dash["outputs"]) == {"fan", "auger", "igniter", "power"}
@@ -1123,8 +1124,8 @@ def test_get_dash_data_and_probe_data_full_structure(sio):
 
     # Seed `current` the way the control-loop does at startup (read_current()
     # with no init returns a bare {} -- KeyError otherwise; see
-    # read_current(zero_out=True) in common/datastore_accessors.py).
-    current = read_current(zero_out=True)
+    # flush_current() in common/datastore_accessors.py).
+    current = flush_current()
     current["P"]["Grill"] = 225
     current["F"]["Probe1"] = 150
     current["PSP"] = 225

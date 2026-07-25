@@ -2,7 +2,7 @@ import os
 import time
 from flask import render_template, request, current_app, jsonify, send_file, redirect
 from common.modes import Mode
-from common.datastore_accessors import read_settings, read_control, read_current, write_settings
+from common.datastore_accessors import read_settings, read_control, read_current, flush_current, write_settings
 from common.app import (
     create_ui_hash,
     prepare_annotations,
@@ -40,7 +40,7 @@ def _history_stream(settings, control, HISTORY_FOLDER, errors):
     control = read_control()
     json_response = {}
     if control["mode"] in [Mode.STOP, Mode.ERROR]:
-        json_response["current"] = read_current(zero_out=True)  # Probe Temps Zero'd Out
+        json_response["current"] = flush_current()  # Probe Temps Zero'd Out
     else:
         json_response["current"] = read_current()  # Probe Temps Zero'd Out
 

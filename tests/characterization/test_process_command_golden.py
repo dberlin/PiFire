@@ -729,7 +729,7 @@ def _run_case(case):
         _deep_merge(status, case["status_patch"])
         dsa.write_status(status)
 
-    dsa.read_current(zero_out=True)
+    dsa.flush_current()
     if case.get("current_patch"):
         current = dsa.read_current()
         _deep_merge(current, case["current_patch"])
@@ -820,7 +820,7 @@ def seeded(ds):
     dsa.write_settings_store(_canonical_settings())
     c.datastore.set_blob("pellets:general", json.dumps(_canonical_pelletdb()))
     dsa.read_status(init=True)
-    dsa.read_current(zero_out=True)
+    dsa.flush_current()
     return ds
 
 

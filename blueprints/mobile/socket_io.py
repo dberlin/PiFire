@@ -41,7 +41,7 @@ from common.datastore_accessors import (
     read_warnings,
     read_generic_key,
     write_control,
-    read_history,
+    flush_history,
     write_pellet_db,
     write_connected_user,
     read_connected_users,
@@ -417,7 +417,7 @@ def _post_app_data_update(settings, type, request):
 def _post_app_data_admin(settings, type, request):
     if type == "clear_history":
         write_log("Clearing History Log.")
-        read_history(0, flushhistory=True)
+        flush_history()
         return _response(result="OK")
     elif type == "clear_events":
         write_log("Clearing Events Log.")
@@ -434,7 +434,7 @@ def _post_app_data_admin(settings, type, request):
         write_log("Clearing Pellet Database Log.")
         return _response(result="OK")
     elif type == "factory_defaults":
-        read_history(0, flushhistory=True)
+        flush_history()
         read_control(flush=True)
         os.system("rm settings.json")
         settings = default_settings()

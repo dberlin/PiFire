@@ -25,7 +25,7 @@ Description: This script starts at boot, initializes the datastore and
 import logging
 import atexit
 from common.common import create_logger  # Common Module for WebUI and Control Program
-from common.datastore_accessors import read_settings, read_control, read_history, write_metrics, read_errors
+from common.datastore_accessors import read_settings, read_control, flush_history, write_metrics, read_errors
 from common import datastore
 from controller.runtime.context import ControllerContext
 from controller.runtime.devices import build_devices
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     # Flush datastore and create JSON structure
     control = read_control(flush=True)
     # Delete datastore entries for history / current
-    read_history(0, flushhistory=True)
+    flush_history()
     # Flush metrics DB for tracking certain metrics
     write_metrics(flush=True)
     # Create/Flush errors list

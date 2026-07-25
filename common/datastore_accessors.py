@@ -355,20 +355,31 @@ def write_pellets_store(pelletdb):
     _write_json_blob("pellets:general", pelletdb)
 
 
-def read_history(num_items=0, flushhistory=False):
+def flush_history():
+    """
+    Erase all history: the history rows, the current probe values, and metrics.
+
+    Used when stored history would no longer mean what it says -- a units
+    change (the temperatures are recorded in whatever unit was active), a new
+    cook starting, or an explicit wipe from the admin page.
+
+    This was previously reachable only as ``read_history(flushhistory=True)``,
+    inherited from upstream PiFire's Redis implementation. That spelling hid a
+    three-table delete behind a name that reads as a query, so call sites like
+    a units-change handler gave no hint that they destroyed the history store.
+    """
+    datastore.execute_write("DELETE FROM history")
+    flush_current()
+    write_metrics(flush=True)
+
+
+def read_history(num_items=0):
     """
     Read history from the datastore and populate a list of data
 
     :param num_items: Items from end of the history (set to 0 for all items)
-    :param flushhistory: True=flush history & current, False=normal history read
     :return: List of history dictionaries (each list item is timestamped 'T')
     """
-    if flushhistory:
-        datastore.execute_write("DELETE FROM history")  # deletes the history
-        read_current(zero_out=True)  # zero-out current data
-        write_metrics(flush=True)
-        return []
-
     sql = "SELECT ts,psp,primary_temps,food_temps,aux_temps,notify_targets,ext_data FROM history ORDER BY id"
     rows = datastore.connection().execute(sql).fetchall()
     if num_items > 0:
@@ -434,29 +445,43 @@ def write_current(in_data):
     _write_json_blob("control:current", current)
 
 
-def read_current(zero_out=False):
+def flush_current():
+    """
+    Reset the current probe values to a zeroed structure and return it.
+
+    Rebuilt from the configured probe_map rather than blanked in place, so a
+    probe added or removed since the last write is reflected.
+
+    Previously reachable only as ``read_current(zero_out=True)`` -- see
+    :func:`flush_history` for why that spelling was a problem. Unlike
+    flush_history this one does return the new state, because callers
+    legitimately want to hand the zeroed structure straight to a client.
+
+    :return: Zeroed current probe temps structure
+    """
+    settings = read_settings()
+    current = {"P": {}, "F": {}, "PSP": 0, "NT": {}, "AUX": {}}
+
+    for probe in settings["probe_settings"]["probe_map"]["probe_info"]:
+        if probe["type"] == "Primary":
+            current["P"][probe["label"]] = 0
+        if probe["type"] == "Food":
+            current["F"][probe["label"]] = 0
+        if probe["type"] == "Aux":
+            current["AUX"][probe["label"]] = 0
+        current["NT"][probe["label"]] = 0
+
+    datastore.set_blob("control:current", json.dumps(current))
+
+    return _read_json_blob("control:current", dict)
+
+
+def read_current():
     """
     Read current.log and populate a list of data
 
-    :param zero_out: True to zero out current. False otherwise
     :return: Current probe temps structure
     """
-    if zero_out:
-        """ Build Probe Structure """
-        settings = read_settings()
-        current = {"P": {}, "F": {}, "PSP": 0, "NT": {}, "AUX": {}}
-
-        for probe in settings["probe_settings"]["probe_map"]["probe_info"]:
-            if probe["type"] == "Primary":
-                current["P"][probe["label"]] = 0
-            if probe["type"] == "Food":
-                current["F"][probe["label"]] = 0
-            if probe["type"] == "Aux":
-                current["AUX"][probe["label"]] = 0
-            current["NT"][probe["label"]] = 0
-
-        datastore.set_blob("control:current", json.dumps(current))
-
     return _read_json_blob("control:current", dict)
 
 

@@ -12,7 +12,7 @@ from common.datastore_accessors import (
     write_control,
     read_pellet_db,
     write_pellet_db,
-    read_history,
+    flush_history,
 )
 from common.settings_migration import read_settings_file
 from common.backups import read_pellet_db_file, backup_settings, backup_pellet_db
@@ -96,7 +96,7 @@ def _admin_setting_clearhistory(ctx):
     response = request.form
     if response["clearhistory"] == "true":
         write_log("Clearing History Log.")
-        read_history(0, flushhistory=True)
+        flush_history()
 
 
 def _admin_setting_clearevents(ctx):
@@ -126,7 +126,7 @@ def _admin_setting_factorydefaults(ctx):
     response = request.form
     if response["factorydefaults"] == "true":
         write_log("Resetting Settings, Control and History to factory defaults.")
-        read_history(0, flushhistory=True)
+        flush_history()
         read_control(flush=True)
         os.system("rm settings.json")
         os.system("rm pelletdb.json")

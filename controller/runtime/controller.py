@@ -350,7 +350,7 @@ class Controller:
                 self.probe_complex.update_units(settings["globals"]["units"])
                 self.control["mode"] = Mode.STOP  # Stop any activity
                 self.control["units_change"] = False
-                store.read_history(0, flushhistory=True)  # Clear history data
+                store.flush_history()  # Clear history data
                 # No need to write control, as it should be written by the 'Stop' mode change
 
             # Check if there was an Error flagged in Monitor Mode - If no, then change status to active
@@ -444,7 +444,7 @@ class Controller:
                     ctx.clock.sleep(3)
                     store.display_commands().push(("clear", None))
 
-                store.read_current(zero_out=True)  # Zero out the current values
+                store.flush_current()  # Zero out the current values
 
             else:
                 # Per-mode work cycle dispatch (Prime/Startup/Smoke/Hold/Shutdown/
@@ -494,7 +494,7 @@ class Controller:
         self.settings = settings = store.read_settings()
         # Clear History (in the case it wasn't already cleared fromt he last run)
         self.eventLogger.debug("Clearing History and Current Log on Startup Mode.")
-        store.read_history(0, flushhistory=True)  # Clear all history
+        store.flush_history()  # Clear all history
         # Check if Prime on Startup is selected
         if settings["startup"]["prime_on_startup"] > 0:
             self.control["prime_amount"] = settings["startup"]["prime_on_startup"]

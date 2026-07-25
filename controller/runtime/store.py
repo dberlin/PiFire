@@ -64,12 +64,16 @@ class Store(ABC):
     @abstractmethod
     def write_status(self, status): ...
     @abstractmethod
-    def read_current(self, zero_out=False): ...
+    def read_current(self): ...
+    @abstractmethod
+    def flush_current(self): ...
     @abstractmethod
     def write_current(self, in_data): ...
     # --- history/metrics ---
     @abstractmethod
-    def read_history(self, num_items=0, flushhistory=False): ...
+    def read_history(self, num_items=0): ...
+    @abstractmethod
+    def flush_history(self): ...
     @abstractmethod
     def write_history(self, in_data, maxsizelines=28800, ext_data=False): ...
     @abstractmethod
@@ -151,16 +155,43 @@ class InMemoryStore(Store):
     def write_status(self, status):
         self._status = copy.deepcopy(status)
 
-    def read_current(self, zero_out=False):
+    def read_current(self):
+        return copy.deepcopy(self._current)
+
+    def flush_current(self):
+        # Mirror common.datastore_accessors.flush_current: rebuild a zeroed
+        # structure from the configured probe_map rather than blanking in
+        # place, so a probe added or removed since the last write is
+        # reflected. (The old read_current(zero_out=True) on this fake ignored
+        # the flag entirely -- a fidelity gap that let tests pass here while
+        # production zeroed.)
+        current = {"P": {}, "F": {}, "PSP": 0, "NT": {}, "AUX": {}}
+        probe_info = self._settings.get("probe_settings", {}).get("probe_map", {}).get("probe_info", [])
+        for probe in probe_info:
+            if probe["type"] == "Primary":
+                current["P"][probe["label"]] = 0
+            if probe["type"] == "Food":
+                current["F"][probe["label"]] = 0
+            if probe["type"] == "Aux":
+                current["AUX"][probe["label"]] = 0
+            current["NT"][probe["label"]] = 0
+        self._current = current
         return copy.deepcopy(self._current)
 
     def write_current(self, in_data):
         self._current = copy.deepcopy(in_data)
 
-    def read_history(self, num_items=0, flushhistory=False):
-        if flushhistory:
-            self._history = []
+    def read_history(self, num_items=0):
         return list(self._history)
+
+    def flush_history(self):
+        # Mirror common.datastore_accessors.flush_history: history, current and
+        # metrics all go. The old read_history(flushhistory=True) on this fake
+        # dropped only history, so a test could see stale current/metrics that
+        # production would have cleared.
+        self._history = []
+        self.flush_current()
+        self.write_metrics(flush=True)
 
     def write_history(self, in_data, maxsizelines=28800, ext_data=False):
         self._history.append(copy.deepcopy(in_data))
@@ -265,14 +296,20 @@ class SqliteStore(Store):
     def write_status(self, status):
         _c.write_status(status)
 
-    def read_current(self, zero_out=False):
-        return _c.read_current(zero_out=zero_out)
+    def read_current(self):
+        return _c.read_current()
+
+    def flush_current(self):
+        return _c.flush_current()
 
     def write_current(self, in_data):
         _c.write_current(in_data)
 
-    def read_history(self, num_items=0, flushhistory=False):
-        return _c.read_history(num_items, flushhistory=flushhistory)
+    def read_history(self, num_items=0):
+        return _c.read_history(num_items)
+
+    def flush_history(self):
+        _c.flush_history()
 
     def write_history(self, in_data, maxsizelines=28800, ext_data=False):
         _c.write_history(in_data, maxsizelines=maxsizelines, ext_data=ext_data)
