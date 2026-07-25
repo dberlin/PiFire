@@ -45,6 +45,7 @@ export function ControlButtons({
 
   return (
     <div
+      data-pf="controls"
       style={{
         display: "grid",
         gridAutoFlow: "column",

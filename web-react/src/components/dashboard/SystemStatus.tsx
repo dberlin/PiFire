@@ -17,6 +17,7 @@ export function SystemStatus({
 }) {
   return (
     <div
+      data-pf="system"
       style={{
         background: "#2c231a",
         border: "1px solid rgba(255,255,255,0.13)",

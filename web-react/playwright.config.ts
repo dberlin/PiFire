@@ -20,11 +20,36 @@ export default defineConfig({
   // this, roundtrip.spec.ts already failed intermittently on exactly that
   // shared-mode race. The cost is roughly ten seconds of wall clock.
   workers: 1,
-  use: { baseURL: "http://localhost:5173", headless: true, viewport: { width: 1280, height: 720 } },
-  webServer: {
-    command: "bun run dev",
-    url: "http://localhost:5173",
-    reuseExistingServer: true,
-    timeout: 60_000,
-  },
+  use: { headless: true, viewport: { width: 1280, height: 720 } },
+  webServer: [
+    {
+      command: "bun run dev",
+      url: "http://localhost:5173",
+      reuseExistingServer: true,
+      timeout: 60_000,
+    },
+    // Demo mode: no socket at all (helpers/useLiveState.ts), so this server is
+    // independent of the shared PiFire instance the other specs mutate, and
+    // demoDashAt makes the DOM shape identical on every machine. PUBLIC_DEMO is
+    // read at BUILD time, which is why the fidelity/reflow projects need their
+    // own server rather than a query parameter.
+    {
+      command: "PORT=5174 bun run demo",
+      url: "http://localhost:5174",
+      reuseExistingServer: true,
+      timeout: 60_000,
+    },
+  ],
+  projects: [
+    {
+      name: "app",
+      testIgnore: /dashboard-(fidelity|reflow)\.spec\.ts/,
+      use: { baseURL: "http://localhost:5173" },
+    },
+    {
+      name: "fidelity",
+      testMatch: /dashboard-fidelity\.spec\.ts/,
+      use: { baseURL: "http://localhost:5174", viewport: { width: 1280, height: 720 } },
+    },
+  ],
 });

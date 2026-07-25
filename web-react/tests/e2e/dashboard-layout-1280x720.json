@@ -1,0 +1,146 @@
+{
+  "stage": {
+    "x": 0,
+    "y": 0,
+    "w": 1280,
+    "h": 720,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "header": {
+    "x": 0,
+    "y": 0,
+    "w": 1280,
+    "h": 58,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "brand": {
+    "x": 22,
+    "y": 17,
+    "w": 309,
+    "h": 24,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "status": {
+    "x": 932,
+    "y": 21,
+    "w": 37,
+    "h": 16,
+    "fontSize": "13px",
+    "fontWeight": "600"
+  },
+  "clock": {
+    "x": 987,
+    "y": 15,
+    "w": 81,
+    "h": 26,
+    "fontSize": "22px",
+    "fontWeight": "600"
+  },
+  "body": {
+    "x": 0,
+    "y": 58,
+    "w": 1280,
+    "h": 662,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "probeCol": {
+    "x": 18,
+    "y": 74,
+    "w": 298,
+    "h": 628,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "probeColTitle": {
+    "x": 18,
+    "y": 74,
+    "w": 298,
+    "h": 16,
+    "fontSize": "13px",
+    "fontWeight": "600"
+  },
+  "probeCard0": {
+    "x": 18,
+    "y": 102,
+    "w": 298,
+    "h": 600,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "centerCol": {
+    "x": 332,
+    "y": 74,
+    "w": 614,
+    "h": 628,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "gauge": {
+    "x": 332,
+    "y": 74,
+    "w": 614,
+    "h": 466,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "cookRow": {
+    "x": 332,
+    "y": 554,
+    "w": 614,
+    "h": 52,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "cookCard": {
+    "x": 332,
+    "y": 554,
+    "w": 548,
+    "h": 52,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "controls": {
+    "x": 332,
+    "y": 620,
+    "w": 614,
+    "h": 82,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "rightCol": {
+    "x": 962,
+    "y": 74,
+    "w": 300,
+    "h": 628,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "system": {
+    "x": 962,
+    "y": 74,
+    "w": 300,
+    "h": 272,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "pills": {
+    "x": 962,
+    "y": 360,
+    "w": 300,
+    "h": 64,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  },
+  "hopper": {
+    "x": 962,
+    "y": 438,
+    "w": 300,
+    "h": 264,
+    "fontSize": "16px",
+    "fontWeight": "400"
+  }
+}

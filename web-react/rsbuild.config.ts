@@ -12,7 +12,11 @@ export default defineConfig({
   html: { template: "./index.html" },
   source: { entry: { index: "./src/main.tsx" } },
   server: {
-    port: 5173,
+    // Playwright's fidelity/reflow projects run a SECOND dev server in demo
+    // mode on its own port -- PUBLIC_DEMO is read at build time
+    // (helpers/useLiveState.ts), so it cannot be a query parameter. The default
+    // stays 5173 because playwright.config.ts's main webServer pins it.
+    port: Number(process.env.PORT) || 5173,
     proxy: {
       "/socket.io": { target, ws: true, changeOrigin: true },
       "/api": { target, changeOrigin: true },

@@ -12,5 +12,8 @@ dist/
 # Generated istanbul coverage output (bun run test:coverage)
 coverage/
 
-# Playwright review artifacts (screenshots are for humans, not gates)
+# Playwright review artifacts: wizard step captures plus the dashboard
+# fidelity/reflow pair. Regenerated on every run and kept as a human reference
+# (before.png vs the fresh capture) -- never asserted against, since the fonts
+# load from the network and pixels are host-dependent.
 tests/e2e/artifacts/

@@ -112,6 +112,7 @@ export function Dashboard({
     <div className="pf-fit" ref={fitRef}>
       <div
         className="pf-stage"
+        data-pf="stage"
         data-animate={animate ? "true" : "false"}
         style={{ transform: `translate(-50%, -50%) scale(${scale})` }}
       >
@@ -137,6 +138,7 @@ export function Dashboard({
 
         {/* Header */}
         <div
+          data-pf="header"
           style={{
             height: 58,
             flex: "0 0 58px",
@@ -149,7 +151,7 @@ export function Dashboard({
             zIndex: 2,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div data-pf="brand" style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div
               style={{
                 width: 12,
@@ -179,6 +181,7 @@ export function Dashboard({
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
             <span
+              data-pf="status"
               style={{
                 font: "600 13px 'Barlow'",
                 letterSpacing: 1,
@@ -188,6 +191,7 @@ export function Dashboard({
               {phase === "demo" ? "DEMO" : controlAlive ? "LIVE" : "CTRL OFFLINE"}
             </span>
             <span
+              data-pf="clock"
               style={{
                 font: "600 22px 'Barlow Semi Condensed'",
                 color: "#cfc6b8",
@@ -225,6 +229,7 @@ export function Dashboard({
 
         {/* Body */}
         <div
+          data-pf="body"
           style={{
             flex: 1,
             display: "flex",
@@ -238,6 +243,7 @@ export function Dashboard({
           {/* Left: food probes */}
           {view.hasProbes && (
             <div
+              data-pf="probeCol"
               style={{
                 width: 298,
                 flex: "0 0 298px",
@@ -248,6 +254,7 @@ export function Dashboard({
               }}
             >
               <div
+                data-pf="probeColTitle"
                 style={{
                   font: "600 13px 'Barlow'",
                   letterSpacing: 2.5,
@@ -265,7 +272,10 @@ export function Dashboard({
           )}
 
           {/* Center: gauge + cook time + controls */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+          <div
+            data-pf="centerCol"
+            style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}
+          >
             <GrillGauge
               temp={dash.primaryProbe.temp}
               setpoint={dash.primaryProbe.setTemp}
@@ -278,8 +288,12 @@ export function Dashboard({
               animate={animate}
             />
 
-            <div style={{ display: "flex", gap: 14, height: 52, flex: "0 0 52px" }}>
+            <div
+              data-pf="cookRow"
+              style={{ display: "flex", gap: 14, height: 52, flex: "0 0 52px" }}
+            >
               <div
+                data-pf="cookCard"
                 style={{
                   flex: 1,
                   background: "#2c231a",
@@ -359,6 +373,7 @@ export function Dashboard({
 
           {/* Right: system + pills + hopper */}
           <div
+            data-pf="rightCol"
             style={{
               width: 300,
               flex: "0 0 300px",
@@ -374,7 +389,7 @@ export function Dashboard({
               igniter={view.igniter}
               animate={animate}
             />
-            <div style={{ display: "flex", gap: 14, height: 64, flex: "0 0 64px" }}>
+            <div data-pf="pills" style={{ display: "flex", gap: 14, height: 64, flex: "0 0 64px" }}>
               <Pill p={view.pillL} />
               <Pill p={view.pillR} />
             </div>

@@ -15,6 +15,7 @@ export function ProbeCard({
 }) {
   return (
     <div
+      data-pf="probeCard"
       style={{
         background: "#2c231a",
         border: "1px solid rgba(255,255,255,0.13)",

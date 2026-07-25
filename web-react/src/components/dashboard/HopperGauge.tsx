@@ -5,6 +5,7 @@ import type { HopperView } from "../../helpers/dashboard/deriveView";
 export function HopperGauge({ h }: { h: HopperView }) {
   return (
     <div
+      data-pf="hopper"
       style={{
         flex: 1,
         background: "#2c231a",
