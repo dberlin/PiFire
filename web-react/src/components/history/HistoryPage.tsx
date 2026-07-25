@@ -12,12 +12,19 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 // echoes back as `minutes`.
 const PLACEHOLDER_MINUTES = 60;
 
-// How the most recent request finished, tagged with the window it was for.
-// The tag is what makes "loading" a *derived* value below (a request is in
-// flight exactly while no outcome for the current window has arrived yet)
-// instead of a second piece of state set from inside the effect.
+// How the most recent request finished, tagged with a monotonic request id
+// (see requestId below) rather than the window it was for. The tag is what
+// makes "loading" a *derived* value below (a request is in flight exactly
+// while no outcome for the latest request has arrived yet) instead of a
+// second piece of state set from inside the effect.
+//
+// A window-value tag isn't enough: cycling the window back to a value it
+// already visited (say 120 -> 60 -> 120) makes that value collide with an
+// Outcome from an *earlier* settle of the same window, even though a brand
+// new request for that window is still in flight -- an id, unique per
+// request, can't collide the way a window value can repeat.
 interface Outcome {
-  forMinutes: number | undefined;
+  id: number;
   failed: boolean;
 }
 
@@ -34,24 +41,42 @@ export function HistoryPage() {
   // Bumped by Reset zoom to remount the chart -- see chartKey below.
   const [resetNonce, setResetNonce] = useState(0);
 
+  // The id of the request the current window wants. Bumped synchronously
+  // during render whenever `minutes` changes -- the same render-phase
+  // pattern SetpointEntry/SafetyTab use to reseed local state from a prop
+  // change, applied here to a request counter instead. This (not a
+  // `useRef` counter written from the effect) is what lets `loading` below
+  // read the id at render time: `react-hooks/refs` forbids reading a ref
+  // during render, and the id has to be current in the very same render
+  // that changes `minutes`, not one render later once the effect has run --
+  // otherwise a window change would read as "settled" for one frame,
+  // reusing whatever the previous window's Outcome was.
+  const [requestId, setRequestId] = useState(0);
+  const [minutesForRequestId, setMinutesForRequestId] = useState(minutes);
+  if (minutes !== minutesForRequestId) {
+    setMinutesForRequestId(minutes);
+    setRequestId((n) => n + 1);
+  }
+
   useEffect(() => {
     let cancelled = false;
+    const id = requestId;
     fetchHistoryChart(BASE_URL, minutes)
       .then((fresh) => {
         if (cancelled) return;
         setData(fresh);
-        setOutcome({ forMinutes: minutes, failed: false });
+        setOutcome({ id, failed: false });
       })
       .catch(() => {
-        if (!cancelled) setOutcome({ forMinutes: minutes, failed: true });
+        if (!cancelled) setOutcome({ id, failed: true });
       });
     return () => {
       cancelled = true;
     };
-  }, [minutes]);
+  }, [minutes, requestId]);
 
   // Plain render-time computation from state -- no effect, no mirrored state.
-  const loading = outcome === null || outcome.forMinutes !== minutes;
+  const loading = outcome === null || outcome.id !== requestId;
   const failed = !loading && outcome !== null && outcome.failed;
   const shownMinutes = minutes ?? data?.minutes ?? PLACEHOLDER_MINUTES;
   const chart = data && hasPlottableHistory(data) ? toChartInput(data) : null;

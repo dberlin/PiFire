@@ -200,6 +200,64 @@ describe("HistoryPage", () => {
     expect(screen.queryByText(/couldn't load/i)).not.toBeInTheDocument();
   });
 
+  // Deferred requests, so the test controls exactly when each settles instead
+  // of relying on mock resolution order.
+  type Deferred = { promise: Promise<HistoryChartData>; resolve: (v: HistoryChartData) => void };
+  function deferred(): Deferred {
+    let resolve!: (v: HistoryChartData) => void;
+    const promise = new Promise<HistoryChartData>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  it("does not read a stale same-window outcome as settled after 120 -> 60 -> 120", async () => {
+    // Pins the exact collision the forMinutes-only tag used to miss: request
+    // A (minutes=120) settles and is shown. The window flips to 60 (request
+    // B, never resolved here) and back to 120 (request C) *before* B settles.
+    // C is a brand new request -- distinct from A -- but it asks for the same
+    // window A already answered. A window-value-only tag can't tell "the
+    // outcome on file is for this window and is current" from "the outcome on
+    // file happens to carry this window's number, but a newer request for it
+    // is still in flight": both compare equal. The page must show loading
+    // (not A's older snapshot) until C -- not A -- resolves, and then render
+    // C's payload.
+    const reqs: { minutes: number | undefined; d: Deferred }[] = [];
+    fetchHistoryChartMock.mockReset();
+    fetchHistoryChartMock.mockImplementation((_base: string, minutes: number | undefined) => {
+      const d = deferred();
+      reqs.push({ minutes, d });
+      return d.promise;
+    });
+
+    render(<HistoryPage />);
+    await waitFor(() => expect(reqs.length).toBe(1));
+    reqs[0].d.resolve({ ...PAYLOAD, minutes: 60 }); // initial load, unrelated window
+    await waitFor(() => expect(screen.getByTestId("chart")).toBeInTheDocument());
+
+    const input = screen.getByLabelText(/minutes/i);
+
+    fireEvent.change(input, { target: { value: "120" } }); // request A
+    await waitFor(() => expect(reqs.length).toBe(2));
+    reqs[1].d.resolve({ ...PAYLOAD, minutes: 120, time_labels: [111] }); // A settles: an older 120 snapshot
+    await waitFor(() => expect(screen.queryByText(/loading history/i)).not.toBeInTheDocument());
+
+    fireEvent.change(input, { target: { value: "60" } }); // request B
+    await waitFor(() => expect(reqs.length).toBe(3));
+    // B is left pending -- flip straight back to 120 before it ever settles.
+    fireEvent.change(input, { target: { value: "120" } }); // request C
+    await waitFor(() => expect(reqs.length).toBe(4));
+
+    // C is still in flight. The only Outcome on file is A's (also tagged
+    // 120), which a window-value-only comparison would read as "settled".
+    expect(screen.queryByText(/loading history/i)).toBeInTheDocument();
+    expect(screen.getByTestId("chart").getAttribute("data-times")).toBe("0.111"); // still A's payload
+
+    reqs[3].d.resolve({ ...PAYLOAD, minutes: 120, time_labels: [222] }); // C settles: the current snapshot
+    await waitFor(() => expect(screen.queryByText(/loading history/i)).not.toBeInTheDocument());
+    expect(screen.getByTestId("chart").getAttribute("data-times")).toBe("0.222");
+  });
+
   it("links Export CSV at the legacy CSV route", async () => {
     await renderLoaded();
 
