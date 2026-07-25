@@ -4,7 +4,17 @@ import type { LiveState } from "../../helpers/types";
 import "./shell.css";
 
 // Ported from templates/_macro_timer.html:31-67 -- hours 0-23, minutes 0-59,
-// and the two "when the timer expires" flags.
+// and what happens when the timer expires. Flask offers that last part as two
+// independent checkboxes; this offers one choice, because the backend only
+// honours one (see the note on `action` below).
+
+type TimerAction = "none" | "shutdown" | "keepWarm";
+
+const TIMER_ACTIONS: { value: TimerAction; label: string }[] = [
+  { value: "none", label: "Nothing" },
+  { value: "shutdown", label: "Shutdown Grill" },
+  { value: "keepWarm", label: "Start Keep Warm" },
+];
 
 export function TimerModal({
   timer,
@@ -17,15 +27,20 @@ export function TimerModal({
 }) {
   const [hours, setHours] = useState(0);
   const [minutes, setMinutes] = useState(0);
-  const [shutdown, setShutdown] = useState(timer.shutdown);
-  const [keepWarm, setKeepWarm] = useState(timer.keepWarm);
+  // One choice, not two independent flags: the backend runs
+  // `if shutdown: ... elif keep_warm: ...` (notify/notifications.py:141-159), so
+  // arming both silently drops keep-warm. A user who ticked "Start Keep Warm"
+  // expecting their food held at temperature would get the grill shut down
+  // instead. ProbeNotifyModal models the same backend rule the same way.
+  const [action, setAction] = useState<TimerAction>(
+    timer.shutdown ? "shutdown" : timer.keepWarm ? "keepWarm" : "none",
+  );
   const [rejected, setRejected] = useState(false);
 
   const ids = useId();
   const hoursId = `${ids}-hours`;
   const minutesId = `${ids}-minutes`;
-  const shutdownId = `${ids}-shutdown`;
-  const keepWarmId = `${ids}-keep-warm`;
+  const actionName = `${ids}-expiry-action`;
 
   const seconds = hours * 3600 + minutes * 60;
 
@@ -54,7 +69,10 @@ export function TimerModal({
     // browser clock running behind the Pi's cannot arm an already-expired timer
     // -- which, with "Shutdown Grill" ticked, would shut the grill down
     // mid-cook. See helpers/command.ts timerStartWithOptions.
-    await command.timerStartWithOptions(seconds, { shutdown, keepWarm });
+    await command.timerStartWithOptions(seconds, {
+      shutdown: action === "shutdown",
+      keepWarm: action === "keepWarm",
+    });
     onClose();
   }
 
@@ -98,24 +116,22 @@ export function TimerModal({
           </div>
 
           <p className="pf-timer-expiry">When the timer expires:</p>
-          <div className="pf-timer-check">
-            <input
-              id={shutdownId}
-              type="checkbox"
-              checked={shutdown}
-              onChange={(e) => setShutdown(e.target.checked)}
-            />
-            <label htmlFor={shutdownId}>Shutdown Grill</label>
-          </div>
-          <div className="pf-timer-check">
-            <input
-              id={keepWarmId}
-              type="checkbox"
-              checked={keepWarm}
-              onChange={(e) => setKeepWarm(e.target.checked)}
-            />
-            <label htmlFor={keepWarmId}>Start Keep Warm</label>
-          </div>
+          {TIMER_ACTIONS.map((a) => {
+            const id = `${actionName}-${a.value}`;
+            return (
+              <div className="pf-timer-check" key={a.value}>
+                <input
+                  id={id}
+                  type="radio"
+                  name={actionName}
+                  value={a.value}
+                  checked={action === a.value}
+                  onChange={() => setAction(a.value)}
+                />
+                <label htmlFor={id}>{a.label}</label>
+              </div>
+            );
+          })}
 
           {rejected ? (
             <p className="pf-timer-error" role="alert">

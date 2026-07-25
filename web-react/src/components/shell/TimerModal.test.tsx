@@ -137,10 +137,34 @@ describe("TimerModal", () => {
     expect(calls).toEqual(["start:300:shutdown=false:keep_warm=true"]);
   });
 
-  it("seeds the checkboxes from the flags already set on the control process", () => {
+  it("seeds the choice from the flag already set on the control process", () => {
+    open({ shutdown: false, keepWarm: true });
+    expect((screen.getByLabelText("Start Keep Warm") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Shutdown Grill") as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByLabelText("Nothing") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("resolves a control process carrying BOTH flags to shutdown, as the backend does", () => {
+    // notify/notifications.py:141-159 is `if shutdown: ... elif keep_warm: ...`,
+    // so shutdown wins and keep-warm never runs. Showing both as selected would
+    // promise an outcome the grill will not deliver.
     open({ shutdown: true, keepWarm: true });
     expect((screen.getByLabelText("Shutdown Grill") as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByLabelText("Start Keep Warm") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Start Keep Warm") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("cannot arm shutdown and keep warm together", async () => {
+    // The whole point of the single choice: picking one clears the other, so no
+    // gesture can produce the both-armed state the backend silently collapses.
+    const { calls } = open();
+    fireEvent.change(minutes(), { target: { value: "5" } });
+    fireEvent.click(screen.getByLabelText("Shutdown Grill"));
+    fireEvent.click(screen.getByLabelText("Start Keep Warm"));
+    await fireEvent.click(startButton());
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual(["start:300:shutdown=false:keep_warm=true"]);
   });
 
   // A 0h0m submission must never reach the backend: /api/set/timer/start/0
@@ -234,8 +258,8 @@ describe("TimerModal over the real command client", () => {
     return onClose;
   }
 
-  it("sends the expiry flags and the countdown as ONE request", async () => {
-    const onClose = start({}, 1, 30, ["Shutdown Grill", "Start Keep Warm"]);
+  it("sends the expiry choice and the countdown as ONE request", async () => {
+    const onClose = start({}, 1, 30, ["Shutdown Grill"]);
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled();
     });
@@ -244,7 +268,7 @@ describe("TimerModal over the real command client", () => {
     // blob and the last one's notify_data array replaces the flags the earlier
     // ones set.
     expect(requests).toHaveLength(1);
-    expect(requests[0].url).toBe("/api/set/timer/start/5400/shutdown,keep_warm");
+    expect(requests[0].url).toBe("/api/set/timer/start/5400/shutdown");
     expect(requests[0].init?.method).toBe("POST");
   });
 
