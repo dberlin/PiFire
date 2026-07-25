@@ -152,6 +152,33 @@ describe("remaining dispatch branches", () => {
     expect(onChange).toHaveBeenCalledWith("i2c_bus_num", "3");
   });
 
+  it("carries an i2c_bus_num field's manifest default into the picker as a free-text placeholder", () => {
+    // 5 probe modules ship an i2c_bus_num field and none of them carries an
+    // option list, so the control has to be fillable free text or a fresh
+    // install cannot configure its ADC at all.
+    const f: ProbeConfigField = {
+      ...base,
+      label: "i2c_bus_num",
+      friendly_name: "I2C Bus",
+      type: "i2c_bus_num",
+      default: "CP2112",
+    };
+    const { container } = render(
+      <DeviceConfigField
+        field={f}
+        value={undefined}
+        allValues={{ i2c_bus_kind: "extended" }}
+        availableProbes={[]}
+        baseUrl=""
+        onChange={rs.fn()}
+      />,
+    );
+    const input = screen.getByLabelText("I2C Bus");
+    expect(input.tagName).toBe("INPUT");
+    expect(input).toHaveAttribute("placeholder", "CP2112");
+    expect(container.querySelector("select")).toBeNull();
+  });
+
   it("renders bt_address via BluetoothPicker", () => {
     const f: ProbeConfigField = { ...base, label: "bt_address", type: "bt_address" };
     render(

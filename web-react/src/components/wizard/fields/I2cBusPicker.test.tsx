@@ -17,7 +17,86 @@ const dep: SettingsDependency = {
   settings: ["i2c_bus_num"],
 };
 
+// The real manifest shape: all 8 grillplatform i2c_bus_num deps (and all 5 on
+// the probes side) carry a `default` and NO `options` key at all.
+const optionlessDep: SettingsDependency = {
+  friendly_name: "Distance Sensor Extended I2C Bus",
+  description: "'CP2112' or 'MCP2221' auto-discovers the bridge by adapter name.",
+  type: "i2c_bus_num",
+  default: "CP2112",
+  settings: ["platform", "devices", "distance", "i2c_bus_num"],
+};
+
 describe("I2cBusPicker", () => {
+  it("renders a text input, not a select, so a manifest dep with no options is still fillable", () => {
+    const { container } = render(
+      <I2cBusPicker
+        dep={optionlessDep}
+        value="CP2112"
+        kindValue="extended"
+        onChange={rs.fn()}
+        onScan={() => scan("", { kind: "extended" })}
+      />,
+    );
+    const input = screen.getByLabelText("Distance Sensor Extended I2C Bus");
+    expect(input.tagName).toBe("INPUT");
+    expect(input).toHaveValue("CP2112");
+    expect(container.querySelector("select")).toBeNull();
+  });
+
+  it("typing an arbitrary bus value calls onChange", () => {
+    const onChange = rs.fn();
+    render(
+      <I2cBusPicker
+        dep={optionlessDep}
+        value=""
+        kindValue="extended"
+        onChange={onChange}
+        onScan={() => scan("", { kind: "extended" })}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Distance Sensor Extended I2C Bus"), {
+      target: { value: "serial:0123ABC" },
+    });
+    expect(onChange).toHaveBeenCalledWith("serial:0123ABC");
+  });
+
+  it("renders the dep description, the only place the CP2112 / serial: syntax is documented", () => {
+    render(
+      <I2cBusPicker
+        dep={optionlessDep}
+        value=""
+        kindValue="extended"
+        onChange={rs.fn()}
+        onScan={() => scan("", { kind: "extended" })}
+      />,
+    );
+    expect(
+      screen.getByText("'CP2112' or 'MCP2221' auto-discovers the bridge by adapter name."),
+    ).toBeInTheDocument();
+  });
+
+  it("offers manifest options as non-binding datalist suggestions when present", () => {
+    const { container } = render(
+      <I2cBusPicker
+        dep={dep}
+        value="1"
+        kindValue="mcp23017"
+        onChange={rs.fn()}
+        onScan={() => scan("", { kind: "mcp23017" })}
+      />,
+    );
+    const input = screen.getByLabelText("I2C Bus");
+    const listId = input.getAttribute("list");
+    expect(listId).toBeTruthy();
+    const datalist = container.querySelector(`datalist[id="${listId}"]`);
+    expect(datalist).not.toBeNull();
+    const optionValues = Array.from(datalist!.querySelectorAll("option"), (o) => o.value);
+    expect(optionValues).toEqual(["1", "2"]);
+    expect(datalist!.textContent).toContain("Bus 1");
+    expect(datalist!.textContent).toContain("Bus 2");
+  });
+
   it("renders the field and the current kind value", () => {
     render(
       <I2cBusPicker

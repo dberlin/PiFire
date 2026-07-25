@@ -1,5 +1,6 @@
 import type { ProbeConfigField } from "../../../helpers/wizard/probeTypes";
 import { scan } from "../../../helpers/wizard/wizardApi";
+import type { SettingsDependency } from "../../../helpers/wizard/wizardTypes";
 import { I2cBusPicker } from "../fields/I2cBusPicker";
 import { SelectField } from "../fields/SelectField";
 import { UsbSerialPicker } from "../fields/UsbSerialPicker";
@@ -43,10 +44,16 @@ export function DeviceConfigField({
   }
   if (field.hidden) return null;
 
-  const dep = {
+  // The pickers take a SettingsDependency; a probe device's ProbeConfigField is
+  // the same information under different key names. `default` must be carried
+  // across or the picker loses its placeholder ("CP2112") -- 5 probe modules
+  // (ads1115_adafruit, ads1015_adafruit, mcp9600_adafruit, prototype, ads1115)
+  // ship an i2c_bus_num field and NONE of them carries an option list.
+  const dep: SettingsDependency = {
     friendly_name: field.friendly_name,
     description: field.description,
-    settings: [] as string[],
+    default: typeof field.default === "string" ? field.default : undefined,
+    settings: [],
   };
 
   switch (field.type) {

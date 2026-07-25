@@ -6,6 +6,8 @@ export interface SettingsDependency {
   description?: string;
   type?: "i2c_bus_num" | "usb_serial_device";
   options?: Record<string, string>;
+  /** Manifest fallback (e.g. "CP2112"). Present on every i2c_bus_num dep. */
+  default?: string;
   hidden?: boolean;
   settings: string[];
 }
