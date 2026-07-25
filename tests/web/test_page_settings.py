@@ -678,9 +678,16 @@ def test_dashboard_config_current_also_invalid_falls_back_to_first(live_server, 
     try:
         resp = page.request.post(f"{live_server}/settings/dashboard_config", form={"selected": ""})
         assert resp.status == 200
-        # The first dashboard in default_settings()'s dashboards dict
-        # ("Default") is the second-fallback target; its screenshot path is
-        # served from /dash/static/default/img/screenshot.png.
+        # The NAMED default (common.defaults.DEFAULT_DASHBOARD == "Default")
+        # is the second-fallback target; its screenshot is served from
+        # /dash/static/default/img/screenshot.png.
+        #
+        # This used to say "the first dashboard in the dashboards dict", and
+        # that was the bug: the dict is built by iterating os.listdir(), which
+        # is unordered, so "first" differed between two copies of the same
+        # tree -- this very assertion passed in one checkout and failed in a
+        # freshly-created jj workspace, which returned Basic first. The
+        # fallback is by name now, so the assertion holds on any filesystem.
         assert "default/img/screenshot.png" in resp.text()
     finally:
         apply_settings(lambda s: s["dashboard"].__setitem__("current", "Default"))

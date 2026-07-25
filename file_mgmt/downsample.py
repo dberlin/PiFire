@@ -47,12 +47,24 @@ def lttb_indices(values, times, budget):
     Dropped readings (`None`) are excluded from the bucket average and from
     the triangle-area search: they have no y position, so they can neither
     contribute to nor win the "which sample most defines the shape" contest.
-    When a whole bucket is `None` (a probe unplugged for a stretch), or the
-    previously-kept point is, there is no triangle to compute for that bucket
-    at all -- it falls back to the bucket's first index, which is exactly what
-    the area search already returns when no candidate beats the initial
-    `best_area` of -1.0. Note that means `values[a]` may itself be `None` on
-    the next iteration; that is handled, not assumed away.
+    When a whole bucket is `None` (a probe unplugged for a stretch) there is
+    no triangle to compute for it at all -- it falls back to the bucket's
+    first index, which is exactly what the area search already returns when
+    no candidate beats the initial `best_area` of -1.0, and which keeps the
+    `None` itself so the chart still shows the dropout.
+
+    The triangle is anchored on the last kept point that HAS a reading, not
+    simply on the last kept point. Those differ for exactly one bucket either
+    side of a dropout, and the difference mattered: anchoring on a `None`
+    left no triangle to compute, so the bucket straddling the end of a
+    dropout fell back to its first index -- itself usually another `None` --
+    and the first real samples after the probe came back were silently
+    dropped. The last real point is also the vertex the CHART draws its next
+    line from (a `None` has no drawn position), so it is the honest anchor.
+    Same reason for the third vertex: when the whole next bucket is `None`
+    its average is unusable, and the triangle degenerates to the anchor's own
+    height, which ranks candidates by how far they deviate from it -- the
+    right choice when what follows is a gap.
     """
     n = len(values)
     if n <= 1:
@@ -64,7 +76,7 @@ def lttb_indices(values, times, budget):
 
     kept = [0]  # always keep the first point
     bucket_size = (n - 2) / (budget - 2)
-    a = 0  # previously kept index
+    anchor = 0 if values[0] is not None else None  # last kept index with a reading
 
     for i in range(budget - 2):
         # Average of the NEXT bucket = the triangle's third vertex.
@@ -82,20 +94,61 @@ def lttb_indices(values, times, budget):
         range_start = int(i * bucket_size) + 1
         range_end = min(int((i + 1) * bucket_size) + 1, n)
         best, best_area = range_start, -1.0
-        y_a = values[a]
-        if avg_y is not None and y_a is not None:
+        if anchor is not None:
+            x_a, y_a = times[anchor], values[anchor]
+            third_y = y_a if avg_y is None else avg_y
             for j in range(range_start, range_end):
                 y_j = values[j]
                 if y_j is None:
                     continue
-                area = abs((times[a] - avg_x) * (y_j - y_a) - (times[a] - times[j]) * (avg_y - y_a))
+                area = abs((x_a - avg_x) * (y_j - y_a) - (x_a - times[j]) * (third_y - y_a))
                 if area > best_area:
                     best_area, best = area, j
+        else:
+            # Nothing has been kept with a reading yet (the window opens on a
+            # dropout), so there is no anchor to form a triangle with: keep
+            # the bucket's first actual reading, so the trace starts where
+            # the data does rather than one bucket late.
+            for j in range(range_start, range_end):
+                if values[j] is not None:
+                    best = j
+                    break
         kept.append(best)
-        a = best
+        if values[best] is not None:
+            anchor = best
 
     kept.append(n - 1)  # always keep the last point
     return kept
+
+
+def _run_boundary_indices(values):
+    """First and last index of every maximal run of consecutive readings.
+
+    These are the samples where a series starts and stops existing. Keeping
+    them is what makes the tolerance checkers' "a segment with a `None` at
+    either end is skipped whole" rule lossless instead of a blind spot: if
+    both boundaries of every run are kept, then no reading can lie strictly
+    between two consecutive kept points that have a `None` endpoint (a
+    boundary would have to sit there, and it is itself kept), so every
+    reading is either sent or lies on a drawn line whose error IS measured.
+
+    Costs at most two indices per dropout. A probe unplugged once adds two
+    points to a thousand; a probe flapping every other sample degenerates
+    towards full fidelity, which is the honest answer for data that is half
+    dropouts.
+    """
+    boundaries = set()
+    previous = None
+    for i, value in enumerate(values):
+        if value is None:
+            if previous is not None:
+                boundaries.add(i - 1)
+        elif previous is None:
+            boundaries.add(i)
+        previous = value
+    if previous is not None:
+        boundaries.add(len(values) - 1)
+    return boundaries
 
 
 def max_interpolation_error(values, indices, times=None):
@@ -118,6 +171,18 @@ def max_interpolation_error(values, indices, times=None):
 
     Samples whose value is `None` are skipped, and a segment with a `None` at
     either end is skipped whole: nothing is drawn there, so there is no error.
+
+    That skip is a true statement about what the chart draws, but on its own
+    it is not a fidelity guarantee: a REAL sample sitting inside such a
+    segment is neither drawn nor measured, which is how a 60-degree excursion
+    right after a dropout once passed the gate at 0.00 degrees. Closing that
+    is the SELECTION's job, not this function's -- there is no honest number
+    of degrees for a curve the chart never draws, and calling it infinite
+    would only push every window holding a dropout to full fidelity.
+    `_union_indices` therefore always keeps every run's boundary samples,
+    which makes the skip provably lossless: no reading can lie inside a
+    skipped segment. Callers passing their own `indices` (this is separately
+    exported) get the honest-about-drawing reading, not that guarantee.
     """
     if len(indices) < 2:
         return float("inf")
@@ -162,7 +227,9 @@ def exceeds_tolerance(values, indices, tolerance, times=None):
     whereas this only ever answers "worse than tolerance or not". The two
     must always agree, for the same `times`: `exceeds_tolerance(v, i, t, x)
     == (max_interpolation_error(v, i, x) > t)`. `times` and the `None`
-    handling carry the same meaning here as there.
+    handling -- including why skipping `None`-ended segments is lossless for
+    the indices `select_indices` builds -- carry the same meaning here as
+    there.
     """
     if len(indices) < 2:
         return True  # mirrors max_interpolation_error's float("inf") here: inf > any t
@@ -212,10 +279,20 @@ def _union_indices(series, times, budget):
     survive without dictating where points land on a smooth trace sharing its
     x-axis, and vice versa. Sorted and deduped since series overlap heavily
     where their shapes agree (e.g. both flat).
+
+    Every series' run boundaries (`_run_boundary_indices`) go in on top of
+    its LTTB picks, at every budget, so the tolerance gate `select_indices`
+    runs against this union can never be silently exempted from a stretch of
+    real readings. Without them the gate's segment skipping and LTTB's
+    handling of dropouts compounded: real data next to a dropout was dropped
+    from the payload AND excluded from the check, so a 60-degree excursion
+    18 seconds after a probe was plugged back in was neither sent nor drawn
+    while the gate reported "within tolerance".
     """
     kept = set()
     for s in series:
         kept.update(lttb_indices(s, times, budget))
+        kept.update(_run_boundary_indices(s))
     return sorted(kept)
 
 
@@ -251,6 +328,13 @@ def select_indices(series, times, *, tolerance=2.0, min_points=10000, max_points
     to the cap itself if the union overshoots it (`_trim_to_cap`: an evenly
     spaced subset of the union, endpoints kept, so `max_points` is always a
     hard ceiling on the returned count).
+
+    One consequence of that trimming: `_union_indices` guarantees every
+    series' run boundaries are kept -- which is what stops a dropout from
+    exempting the readings beside it from the tolerance check -- and
+    `_trim_to_cap` can drop some of them again. That is the same accepted
+    degradation as the tolerance itself, and only reachable via `max_points`,
+    which no production caller sets today.
     """
     n = len(times)
     if n <= min_points or not series:

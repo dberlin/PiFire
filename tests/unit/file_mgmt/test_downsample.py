@@ -555,16 +555,40 @@ def test_max_interpolation_error_reports_the_drawn_error_not_the_index_error():
 def test_evenly_spaced_data_selects_the_same_indices_whatever_the_cadence():
     """Guard on the time-space fix: on evenly-spaced samples the `dt` cancels
     algebraically -- `((i - i0)*dt) / ((i1 - i0)*dt) == (i - i0) / (i1 - i0)`
-    -- so a corrected checker must return byte-identical selections to the
-    index-space one for every well-behaved window. Asserted here by holding
-    the shape fixed and varying only the epoch origin and the cadence: 3 s
-    real-cadence milliseconds and bare 0,1,2,... must select the same points,
-    and both must match the hash this fixture was already pinned to before
-    the fix.
+    -- so a corrected checker must return byte-identical results to the
+    index-space one for every well-behaved window, whatever the epoch origin
+    and cadence.
+
+    The cancellation is asserted DIRECTLY, in degrees, on a selection that
+    actually has error to measure: `max_interpolation_error(..., times=t)`
+    must equal `max_interpolation_error(...)` (the unit-spacing default) for
+    every cadence, and `exceeds_tolerance` must agree with it either side of
+    that error. Asserting only "every cadence agrees with every other
+    cadence" would not be falsifying -- a checker that got the span wrong in
+    a cadence-independent way (e.g. `span = times[i1 - 1] - x0`, one sample
+    short) is equally wrong at every cadence and passes such a check, and
+    passes the fingerprint below too, since it happens to converge on the
+    same budget for this fixture. Comparing the time path against the index
+    path pins the actual algebra.
     """
     values, unit_times = _cook_with_dip(n=30000)
-    baseline = select_indices([values], unit_times, tolerance=2.0, min_points=10000)
 
+    # A selection cutting into the dip, so the drawn segments both miss the
+    # truth by a lot AND have unequal endpoints -- a segment whose two ends
+    # sit at the same value interpolates to that value for any span at all,
+    # so it could not tell a wrong span from a right one.
+    straddling = [0, 15030, 15130, 29999]
+    index_space_error = max_interpolation_error(values, straddling)
+    assert index_space_error > 20.0, "fixture must have real error to measure"
+
+    for origin, cadence in ((1700000000000.0, 3000.0), (0.0, 0.5), (-5000.0, 1.0)):
+        shifted = [origin + i * cadence for i in range(len(values))]
+        assert max_interpolation_error(values, straddling, times=shifted) == index_space_error
+        assert exceeds_tolerance(values, straddling, index_space_error * 0.999, times=shifted) is True
+        assert exceeds_tolerance(values, straddling, index_space_error, times=shifted) is False
+
+    # ... and therefore the whole selection is cadence-invariant too.
+    baseline = select_indices([values], unit_times, tolerance=2.0, min_points=10000)
     for origin, cadence in ((1700000000000.0, 3000.0), (0.0, 0.5), (-5000.0, 1.0)):
         shifted = [origin + i * cadence for i in range(len(values))]
         assert select_indices([values], shifted, tolerance=2.0, min_points=10000) == baseline
@@ -574,3 +598,194 @@ def test_evenly_spaced_data_selects_the_same_indices_whatever_the_cadence():
         hashlib.sha256(json.dumps(baseline).encode()).hexdigest()
         == "fd56e78cca22efa65cc2c0cbe6ee3b49c71d98c22713321e4c90b33e1aea461a"
     )
+
+
+def test_coincident_timestamps_do_not_divide_by_zero():
+    """`write_history` stamps `int(time.time() * 1000)`, so two rows written
+    inside the same millisecond carry the SAME timestamp -- and a cookfile
+    can be assembled from any timestamps at all. A kept pair straddling such
+    a block has a zero-width time span, which is a division by zero in the
+    interpolation both checkers do (`(times[i] - x0) / span`) unless the
+    `span == 0` guard is there.
+
+    Nothing is drawn ACROSS a zero-width segment -- it is a vertical line at
+    a single instant -- so every sample on it sits at `y0`, which is what the
+    guard returns. Deleting the guard turns this into `ZeroDivisionError`.
+    """
+    # Three samples sharing one millisecond, with the middle one far away in
+    # value so the reported error is unambiguous.
+    values = [200.0, 260.0, 200.0]
+    times = [1700000000000.0, 1700000000000.0, 1700000000000.0]
+
+    assert max_interpolation_error(values, [0, 2], times=times) == 60.0
+    assert exceeds_tolerance(values, [0, 2], 2.0, times=times) is True
+    assert exceeds_tolerance(values, [0, 2], 60.0, times=times) is False
+
+    # And end to end, above the gate: a stalled clock in the middle of a
+    # window must not 500 the chart request.
+    n = 12000
+    stalled = []
+    t = 1700000000000.0
+    for i in range(n):
+        stalled.append(t)
+        if not 5000 <= i < 5200:  # 200 rows land inside the same millisecond
+            t += 3000.0
+    series = [200.0 + 20.0 * math.sin(2 * math.pi * i / 300.0) for i in range(n)]
+
+    idx = select_indices([series], stalled, tolerance=2.0, min_points=10000)
+
+    assert idx[0] == 0 and idx[-1] == n - 1
+    assert _drawn_curve_error(series, idx, stalled) <= 2.0
+
+
+# ---------------------------------------------------------------------------
+# Fix pass 5: the fidelity guarantee across a probe dropout.
+#
+# Two behaviours compounded to suspend the 2 F guarantee for one bucket
+# either side of every dropout:
+#
+# 1. `lttb_indices` abandoned the triangle search whenever the PREVIOUSLY
+#    KEPT point was `None`, falling back to the bucket's first index -- which
+#    for the bucket straddling the end of a dropout is itself usually a
+#    `None`. So the first real samples after a probe is plugged back in were
+#    never selected.
+# 2. The tolerance checkers skip any segment with a `None` at either end --
+#    correctly, nothing is DRAWN there -- which meant those same unselected
+#    real samples were also excluded from the check.
+#
+# Together: real data next to a dropout was neither sent nor drawn, and the
+# gate reported "within 2 F" anyway. Measured on a 12000-sample window with a
+# 61-sample dropout followed immediately by a 6-sample 60 F excursion, the
+# excursion was dropped entirely and `exceeds_tolerance` returned False.
+#
+# The fix is in the SELECTION, not the metric: the metric's rule is a true
+# statement about what the chart draws, and making it punish undrawn samples
+# would only push every window holding a dropout to full fidelity. Instead
+# `lttb_indices` anchors its triangle on the last non-`None` kept point, and
+# the union always includes the first and last sample of every maximal
+# non-`None` run -- which makes "skip segments with a `None` endpoint"
+# provably lossless, because no real sample can then lie inside one.
+# ---------------------------------------------------------------------------
+
+
+def _readings_the_chart_never_draws(values, indices):
+    """Independent oracle: real samples the payload neither sends nor draws.
+
+    A sample is invisible if it is not itself kept AND it lies between two
+    kept points that are not joined by a line -- i.e. one of them is `None`,
+    which both charts render as a gap (`spanGaps: False` / uPlot native).
+    `max_interpolation_error` cannot see these: it skips exactly those
+    segments, which is what let the tolerance gate pass on a chart that was
+    hiding a 60 F excursion.
+    """
+    missing = [i for i in range(indices[0]) if values[i] is not None]
+    for k in range(len(indices) - 1):
+        i0, i1 = indices[k], indices[k + 1]
+        if values[i0] is not None and values[i1] is not None:
+            continue
+        missing.extend(i for i in range(i0 + 1, i1) if values[i] is not None)
+    missing.extend(i for i in range(indices[-1] + 1, len(values)) if values[i] is not None)
+    return missing
+
+
+def _dropout_then_excursion(n=12000, drop=(6000, 6061), spike=(6061, 6067), base=200.0, spike_value=260.0):
+    """12000 samples at the real 3 s cadence: a flat 200 F hold, the probe
+    unplugged for 61 samples (~3 minutes), then a 60 F excursion over the 6
+    samples (18 s) immediately after it is plugged back in."""
+    times = [1700000000000.0 + i * 3000.0 for i in range(n)]
+    values = [base] * n
+    for i in range(*drop):
+        values[i] = None
+    for i in range(*spike):
+        values[i] = spike_value
+    return values, times
+
+
+def test_an_excursion_right_after_a_dropout_is_still_sent_and_drawn():
+    """IMPORTANT regression: the 60 F excursion in the 6 samples following a
+    dropout was dropped from the payload entirely (`excursion indices kept:
+    []`) while `exceeds_tolerance` reported False -- the chart showed a gap
+    WIDER than the actual dropout, and the gate called it within 2 F.
+
+    The excursion is 18 seconds long. Every-Nth would have missed it too, but
+    "no worse than the code we replaced" is not this module's bar: the bar is
+    that the drawn curve does not lie.
+    """
+    values, times = _dropout_then_excursion()
+
+    idx = select_indices([values], times, tolerance=2.0, min_points=10000)
+
+    assert [i for i in idx if 6061 <= i < 6067], "the excursion was never sent"
+    assert _readings_the_chart_never_draws(values, idx) == [], "real samples neither sent nor drawn"
+    assert _drawn_curve_error(values, idx, times) <= 2.0
+    # The nulls still reach the payload, so the chart shows the dropout.
+    assert any(values[i] is None for i in idx)
+    assert len(idx) < len(values), "a flat hold with one dropout must still downsample"
+
+
+def test_lttb_anchors_its_triangle_on_the_last_real_reading_not_a_dropped_one():
+    """Unit-level cause of the above: with the previously-kept point `None`,
+    `lttb_indices` skipped the triangle search for the whole bucket and kept
+    the bucket's first index instead -- and for the bucket straddling the end
+    of a dropout that first index is itself a `None`. The last non-`None`
+    kept point is the vertex the chart actually draws from, so that is what
+    the triangle must be anchored on.
+    """
+    n = 600
+    times = [float(i) for i in range(n)]
+    values = [200.0] * n
+    for i in range(300, 331):
+        values[i] = None
+    values[331] = 260.0  # the first reading back is a big one
+
+    idx = lttb_indices(values, times, 60)
+
+    assert 331 in idx, "the first reading after the dropout was dropped"
+
+
+def test_every_non_null_run_keeps_its_own_first_and_last_sample():
+    """The invariant that makes "skip segments with a `None` endpoint"
+    lossless rather than a blind spot: if the first and last sample of every
+    maximal non-`None` run are kept, then no real sample can ever fall
+    strictly inside a segment that has a `None` endpoint (the run boundary
+    would have to be a kept point between two consecutive kept points), so
+    every real sample is either sent or sits on a drawn line.
+
+    Exercised with the three shapes real history produces: isolated bad
+    reads, a long unplugged stretch, and a dropout that reaches the very end
+    of the window.
+    """
+    n = 12000
+    times = [1700000000000.0 + i * 3000.0 for i in range(n)]
+    values = [200.0 + 20.0 * math.sin(2 * math.pi * i / 1500.0) for i in range(n)]
+    values[137] = None  # isolated bad read
+    values[4000] = None  # another, mid-cook
+    values[4001] = None
+    for i in range(7000, 9000):  # probe pulled out for ~100 minutes
+        values[i] = None
+    for i in range(11900, n):  # ... and again right at the end
+        values[i] = None
+
+    idx = select_indices([values], times, tolerance=2.0, min_points=10000)
+    kept = set(idx)
+
+    runs = []
+    start = None
+    for i, v in enumerate(values):
+        if v is None:
+            if start is not None:
+                runs.append((start, i - 1))
+                start = None
+        elif start is None:
+            start = i
+    if start is not None:
+        runs.append((start, len(values) - 1))
+
+    assert len(runs) == 4
+    for first, last in runs:
+        assert first in kept, f"run starting at {first} lost its first reading"
+        assert last in kept, f"run ending at {last} lost its last reading"
+
+    assert _readings_the_chart_never_draws(values, idx) == []
+    assert _drawn_curve_error(values, idx, times) <= 2.0
+    assert any(values[i] is None for i in idx), "nulls must still be carried"

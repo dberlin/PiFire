@@ -240,16 +240,27 @@ def default_settings():
     return settings
 
 
+"""Name of the dashboard a fresh install starts on, and the one anything falls
+back to when a configured dashboard no longer exists. Must match the "name"
+field in dashboard/default.json."""
+DEFAULT_DASHBOARD = "Default"
+
+
 def _default_dashboard():
     """
     Generate default dashboard settings by getting metadata from each json file in the /dashboard folder
     """
-    dash_data = {"current": "Default", "dashboards": {}}
+    dash_data = {"current": DEFAULT_DASHBOARD, "dashboards": {}}
     # Define the folder path
     folder_path = "./dashboard"
 
-    # Loop through files in the folder
-    for filename in os.listdir(folder_path):
+    # Loop through files in the folder. SORTED: os.listdir() returns entries in
+    # filesystem order, which differs between two copies of the same tree, and
+    # this dict's insertion order used to decide which dashboard a user fell
+    # back to. Sorting makes the ordering reproducible across installs; the
+    # fallback itself is by name (see DEFAULT_DASHBOARD) and no longer
+    # positional.
+    for filename in sorted(os.listdir(folder_path)):
         # Check if the file is a JSON file
         if filename.endswith(".json"):
             dash_metadata = read_generic_json(os.path.join(folder_path, filename))

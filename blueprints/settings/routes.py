@@ -3,6 +3,7 @@ from common.common import WriteKind, read_generic_json, generate_uuid
 from common.modes import Mode
 from common.datastore_accessors import read_settings, read_control, write_settings, write_control
 from common.app import is_not_blank, is_checked, update_probe_config, save_settings_and_flag_update
+from common.defaults import DEFAULT_DASHBOARD
 from common.settings_schema import SettingsValidationError
 
 from . import settings_bp
@@ -19,14 +20,36 @@ def _settings_display(settings, control, controller, event):
     write_settings(settings)
 
 
+def resolve_dashboard(requested, current, dashboards):
+    """Pick which dashboard to show: the requested one, else the configured
+    `current`, else the NAMED default.
+
+    Extracted as a pure function so the fallback order is testable without a
+    live server -- the defect it fixes was invisible precisely because it could
+    only be observed through a full page render, in one filesystem ordering.
+
+    The last step used to be `next(iter(dashboards))`. `dashboards` is built by
+    iterating `os.listdir("./dashboard")` (common/defaults.py), which returns
+    entries in filesystem order, so "first" differed between two copies of the
+    same tree -- the same checkout in a fresh path flipped from Default to
+    Basic. Falling back by NAME makes it independent of ordering, and
+    DEFAULT_DASHBOARD is the same name defaults.py seeds `current` with, so it
+    agrees with a fresh install.
+    """
+    for candidate in (requested, current, DEFAULT_DASHBOARD):
+        if candidate in dashboards:
+            return candidate
+    # Only reachable if dashboard/default.json is missing or renamed.
+    return next(iter(dashboards), "")
+
+
 def _settings_dashboard_config(settings, control, controller, event):
     response = request.form
-    selected = response.get("selected", "")
-    dashboards = settings["dashboard"]["dashboards"]
-    if selected not in dashboards:
-        selected = settings["dashboard"].get("current", "")
-    if selected not in dashboards:
-        selected = next(iter(dashboards), "")
+    selected = resolve_dashboard(
+        response.get("selected", ""),
+        settings["dashboard"].get("current", ""),
+        settings["dashboard"]["dashboards"],
+    )
     render_string = "{% from 'settings/_macro_settings.html' import render_dash_settings %}{{ render_dash_settings(selected, settings) }}"
     return render_template_string(render_string, selected=selected, settings=settings)
 
