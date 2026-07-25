@@ -1,6 +1,9 @@
 import type { ProbeCardView } from "../../helpers/dashboard/deriveView";
 import { NotifyBell } from "./NotifyBell";
 
+/** Flask's four battery icons, as text: empty / half / three-quarters / full. */
+const BATTERY_GLYPH = ["\u25AB", "\u25E7", "\u25E8", "\u25AA"] as const;
+
 // A single food-probe card: name, target, big current temp, and a progress bar
 // toward target (green when within 1° of done). The bell opens the per-probe
 // target-notification modal, mirroring the Flask probe card
@@ -42,6 +45,19 @@ export function ProbeCard({
           {p.name}
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Bluetooth-only badges. Both are null for a wired ADC probe, and
+              they render NOTHING at all then -- not an empty span, which would
+              still take gap space and move the card. */}
+          {p.conn !== null && (
+            <span className={`pf-badge pf-badge-${p.conn.tone}`} title={p.conn.label}>
+              {p.conn.tone === "ok" ? "\u21c4" : "\u2298"}
+            </span>
+          )}
+          {p.battery !== null && (
+            <span className={`pf-badge pf-badge-${p.battery.tone}`} title={p.battery.text}>
+              {BATTERY_GLYPH[p.battery.level]}
+            </span>
+          )}
           <span style={{ font: "600 15px 'Barlow'", color: p.tgtColor }}>{p.targetStr}</span>
           <NotifyBell
             probeName={p.name}

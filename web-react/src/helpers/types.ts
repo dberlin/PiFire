@@ -4,7 +4,10 @@
 
 export interface ProbeStatus {
   batteryCharging?: boolean;
-  batteryPercentage?: number;
+  /** null is a real value here: the driver reports the key but has no reading
+   *  (probes/bt_ibbq.py, probes/bt_meater.py). Absent means the probe has no
+   *  battery at all. */
+  batteryPercentage?: number | null;
   batteryVoltage?: number;
   connected?: boolean;
   error?: boolean | null; // real capture emits `null` when no error is present

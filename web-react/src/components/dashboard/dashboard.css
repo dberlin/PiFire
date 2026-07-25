@@ -374,3 +374,37 @@
   text-align: center;
   padding: 12px 18px;
 }
+
+/* Per-probe status badges (connected / battery). Fixed height so a card whose
+   probe reports neither -- every wired ADC probe -- measures the same as one
+   that reports both. */
+.pf-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #1d1813;
+  color: #8a7f70;
+  font: 600 11px "Barlow";
+  line-height: 1;
+}
+.pf-badge-ok {
+  color: #8fe09a;
+  border-color: color-mix(in srgb, #5ec96f 45%, transparent);
+}
+.pf-badge-warn {
+  color: #ffce6a;
+  border-color: color-mix(in srgb, #ffb020 45%, transparent);
+}
+.pf-badge-danger {
+  color: #ff8b82;
+  border-color: #ff5a4d;
+}
+.pf-badge-off,
+.pf-badge-unknown {
+  color: #7d7264;
+}

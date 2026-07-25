@@ -1,4 +1,10 @@
 import type { LiveState } from "../types";
+import {
+  type BatteryBadge,
+  batteryBadge,
+  type ConnectionBadge,
+  connectionBadge,
+} from "./probeStatus";
 
 // Pure presentation logic for the PiFire Dashboard (port of the design's
 // renderVals(), but driven by the REAL socket_dash_data contract instead of the
@@ -48,6 +54,10 @@ export interface ProbeCardView {
   notifyOn: boolean;
   /** Formatted time-to-target, or null when there is nothing to show. */
   etaStr: string | null;
+  /** Bluetooth link state, or null for a probe that has no such concept. */
+  conn: ConnectionBadge | null;
+  /** Battery level, or null for a probe that has no battery. */
+  battery: BatteryBadge | null;
 }
 
 export interface OutputView {
@@ -129,6 +139,8 @@ function probeCard(fp: LiveState["foodProbes"][number], units: "F" | "C"): Probe
     // also allows a string. Matches the Flask ETA button, which is rendered only
     // while the notification is requested (_macro_dash_default.html:123-131).
     etaStr: fp.targetReq && typeof fp.eta === "number" ? fmtDuration(fp.eta) : null,
+    conn: connectionBadge(fp.status),
+    battery: batteryBadge(fp.status),
   };
 }
 

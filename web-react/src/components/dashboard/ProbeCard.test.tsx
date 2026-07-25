@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { deriveView } from "../../helpers/dashboard/deriveView";
+import { deriveView, type ProbeCardView } from "../../helpers/dashboard/deriveView";
 import { FIXTURE_DASH } from "../../helpers/fixture";
 import { ProbeCard } from "./ProbeCard";
 
@@ -114,5 +114,72 @@ describe("ProbeCard", () => {
     });
     render(<ProbeCard p={noEta.probes[0]} onOpenNotify={rs.fn()} />);
     expect(screen.queryByText(/^ETA/)).not.toBeInTheDocument();
+  });
+});
+
+// M6: the connected/battery badges were declared in the types and read by
+// nothing. Both are Bluetooth-only -- socket_io.py:858-859 copies each key only
+// if the driver set it -- so a wired ADC probe must show neither.
+describe("ProbeCard status badges", () => {
+  // The demo fixture's probes are wired ADC ones: no `connected` key and no
+  // `batteryPercentage` key, so deriveView leaves both badges null.
+  const BASE: ProbeCardView = deriveView(FIXTURE_DASH).probes[0];
+  const withBadges = (over: Partial<ProbeCardView>): ProbeCardView => ({ ...BASE, ...over });
+
+  it("renders no badge element at all for a probe that reports neither", () => {
+    const { container } = render(
+      <ProbeCard p={withBadges({ conn: null, battery: null })} onOpenNotify={rs.fn()} />,
+    );
+    // Not an empty span: an empty one still takes gap space and would move the
+    // card, which the 1280x720 fidelity gate would catch.
+    expect(container.querySelectorAll(".pf-badge")).toHaveLength(0);
+  });
+
+  it("renders the link badge with its tone and tooltip", () => {
+    const { container } = render(
+      <ProbeCard
+        p={withBadges({ conn: { label: "Connected", tone: "ok" } })}
+        onOpenNotify={rs.fn()}
+      />,
+    );
+    const badge = container.querySelector(".pf-badge");
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveClass("pf-badge-ok");
+    expect(badge).toHaveAttribute("title", "Connected");
+  });
+
+  it("renders a disconnected probe in the off tone", () => {
+    const { container } = render(
+      <ProbeCard
+        p={withBadges({ conn: { label: "Disconnected", tone: "off" } })}
+        onOpenNotify={rs.fn()}
+      />,
+    );
+    expect(container.querySelector(".pf-badge")).toHaveClass("pf-badge-off");
+  });
+
+  it("renders the battery badge with its percentage as the tooltip", () => {
+    const { container } = render(
+      <ProbeCard
+        p={withBadges({ battery: { text: "35%", tone: "warn", level: 1 } })}
+        onOpenNotify={rs.fn()}
+      />,
+    );
+    const badge = container.querySelector(".pf-badge");
+    expect(badge).toHaveClass("pf-badge-warn");
+    expect(badge).toHaveAttribute("title", "35%");
+  });
+
+  it("renders both badges when the probe reports both", () => {
+    const { container } = render(
+      <ProbeCard
+        p={withBadges({
+          conn: { label: "Connected", tone: "ok" },
+          battery: { text: "0%", tone: "danger", level: 0 },
+        })}
+        onOpenNotify={rs.fn()}
+      />,
+    );
+    expect(container.querySelectorAll(".pf-badge")).toHaveLength(2);
   });
 });
