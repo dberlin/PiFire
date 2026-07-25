@@ -1,5 +1,15 @@
 # React Manual Output Control Implementation Plan
 
+> **SHIPPED.** Verified against live code 2026-07-25: `buttonsForMode.ts:56` has
+> the `Manual` branch returning the four output toggles, `PwmEntry.tsx` exists,
+> and `roundtrip.spec.ts`'s "manual mode exposes the output relays and toggles
+> one end to end" drives a real relay through the API and passes.
+>
+> The step checkboxes below were never ticked, so this read as outstanding work
+> and the migration backlog listed `manual` as un-migrated for a day longer than
+> it should have. The boxes are left as they are rather than back-filled — this
+> banner is the accurate record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Migrate PiFire's manual output control (power / igniter / auger / fan relays + DC-fan PWM duty) into the React dashboard, replacing the Flask `manual` page and its site-wide control-panel buttons.

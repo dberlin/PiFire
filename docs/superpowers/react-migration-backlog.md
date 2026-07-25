@@ -55,7 +55,17 @@ it by path and line number; those citations point here.
   gating, PWM min/max guard with dependent clamps, Startup conditional
   structure, monotonic range boundaries, delete confirmations.
 - **Timer** — server-computed end time, so a skewed browser clock cannot arm an
-  already-expired timer; options and start sent as one control write.
+  already-expired timer; options and start sent as one control write. The
+  expiry action is one choice, not two flags: the backend runs
+  `if shutdown … elif keep_warm`, so offering both silently dropped keep-warm.
+- **Manual output control** — power / igniter / auger / fan relays plus DC-fan
+  duty. It is NOT a page: `buttonsForMode` gains a `Manual` branch that turns
+  the dashboard's mode-button row into the output panel, with a `PwmEntry`
+  overlay for duty cycle. That also settles the loose end the one-dashboard
+  decision created — `Basic`'s click-to-toggle outputs now have a home. Driven
+  end to end against real relays by `roundtrip.spec.ts`. This sat in the
+  un-migrated list until 2026-07-25 purely because its plan's checkboxes were
+  never ticked; the code had shipped.
 
 ### Bugs found and fixed this cycle
 
@@ -137,8 +147,6 @@ socketio both call it, so whichever polls first consumes the other's warnings.
 
 Roughly ordered by daily-use value:
 
-- [ ] **manual** — manual output control (core function; also inherits `Basic`'s
-      click-to-toggle outputs, per the one-dashboard decision)
 - [ ] **pellets** — pellet inventory manager (distinct from the Pellets settings tab)
 - [ ] **admin** — restart/reboot/shutdown, backups
 - [ ] **recipes** + **cookfile** — recipe editor and cook-file browser (share a
