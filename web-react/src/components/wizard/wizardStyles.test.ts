@@ -41,6 +41,18 @@ const CHROME = [
   "pf-btn-primary",
 ];
 
+const MODULE_CARD = [
+  "pf-module-card",
+  "pf-module-details",
+  "pf-module-image",
+  "pf-module-name",
+  "pf-module-description",
+  "pf-module-notes",
+  "pf-module-deps",
+  "pf-module-config",
+  "pf-form-actions",
+];
+
 describe("wizard stylesheet — chrome layer", () => {
   it("is imported by WizardShell.tsx", () => {
     const src = readFileSync(join(WIZARD_DIR, "WizardShell.tsx"), "utf8");
@@ -50,5 +62,10 @@ describe("wizard stylesheet — chrome layer", () => {
   it("declares a non-empty rule for every chrome class", () => {
     const declared = declaredClasses(readFileSync(WIZARD_CSS, "utf8"));
     expect(CHROME.filter((c) => !declared.has(c))).toEqual([]);
+  });
+
+  it("declares a non-empty rule for every module-card class", () => {
+    const declared = declaredClasses(readFileSync(WIZARD_CSS, "utf8"));
+    expect(MODULE_CARD.filter((c) => !declared.has(c))).toEqual([]);
   });
 });

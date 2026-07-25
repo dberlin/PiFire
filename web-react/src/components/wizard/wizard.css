@@ -203,3 +203,99 @@
   font: 600 16px "Barlow";
   text-align: center;
 }
+
+/* ---- module card (ModuleCard.tsx: grill platform, display, distance) ---- */
+.pf-module-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--card-radius);
+  background: var(--card);
+}
+/* Flask's media object (_macro_wizard_card.html): vendor photo on the left,
+   everything else stacked on the right. The photo is the wizard's
+   component-IDENTIFICATION mechanism -- a user matches the PCB in their hand to
+   it -- so it stays prominent rather than becoming a thumbnail. The children
+   are a variable-length sibling list (image? name, description?, notes?, deps?,
+   config?), so the image is placed explicitly and everything else is swept into
+   column 2. */
+.pf-module-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 18px;
+  row-gap: 10px;
+  align-items: start;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pf-module-details > :not(.pf-module-image) {
+  grid-column: 2;
+}
+/* moduleImageUrl() returns "" for a module with no photo, and ModuleCard then
+   renders no <img> at all. Collapse to one column so the text does not sit
+   behind an 18px gutter of nothing. */
+.pf-module-details:not(:has(.pf-module-image)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.pf-module-details:not(:has(.pf-module-image)) > * {
+  grid-column: 1;
+}
+.pf-module-image {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  width: 132px;
+  height: auto;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--inset);
+}
+.pf-module-name {
+  margin: 0;
+  color: var(--text);
+  font: 700 18px "Barlow";
+}
+.pf-module-description {
+  margin: 0;
+  color: var(--text-dim);
+  font: 500 14px "Barlow";
+  line-height: 1.6;
+}
+/* Flask badged this: <span class="badge badge-warning">NOTE:</span> then the
+   text in <i class="small"> (_macro_wizard_card.html). ::before content is not
+   part of textContent, so no testing-library or Playwright text assertion sees
+   it. */
+.pf-module-notes {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 176, 32, 0.1);
+  color: #ffce6a;
+  font: 500 13px "Barlow";
+  line-height: 1.6;
+}
+.pf-module-notes::before {
+  content: "NOTE: ";
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+/* Flask rendered these as a 3-column Setting/Options/Description table
+   (_macro_wizard_card.html). React already emits label + control as a .pf-field
+   row with the description as a sibling .pf-field-hint, so this is a stack of
+   those rows -- a deliberate divergence, and one that needs no markup change. */
+.pf-module-deps,
+.pf-module-config {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+/* Cancel/Save row shared by PortForm and DeviceForm. */
+.pf-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
