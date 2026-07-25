@@ -44,38 +44,55 @@ control.controlLogger = logging.getLogger("characterization")
 
 
 class _RecordingDistance(FakeDistance):
-    """FakeDistance that records get_level / update_distances calls."""
+    """FakeDistance that records get_level / request_sample / update_distances."""
 
     def __init__(self, level=100):
         super().__init__(level)
         self.get_level_calls = 0
-        self.overrides = []  # the override flag of every get_level call, in order
         self.update_distances_calls = []
 
-    def get_level(self, override=False):
+    def get_level(self):
         self.get_level_calls += 1
-        self.overrides.append(override)
         return self._level
 
     def update_distances(self, empty, full):
         self.update_distances_calls.append((empty, full))
 
 
-class _BlockingDistance(_RecordingDistance):
-    """A real distance sensor, faithfully. `get_level(override=True)` sets the
-    sampling thread's override flag and then waits on it for up to 3 SECONDS
-    (distance/_sampled_base.py's get_level); the cached read returns instantly.
+class _HostileDistance(_RecordingDistance):
+    """A distance sensor that punishes any attempt to wait on it.
 
-    This models the wall clock, not the injected ManualClock, on purpose: the
-    hazard is that the control loop's own thread stops running, which no
-    amount of fake time would reveal."""
+    `get_level()` is instant, exactly as the real drivers' cached read is.
+    Everything else a caller might reach for in the hope of a fresh reading --
+    `request_sample()` here, and any future re-addition of a measure-and-wait
+    call -- sleeps for 3 REAL SECONDS, the same budget the deleted
+    `get_level(override=True)` used to burn.
+
+    So a control loop that merely reads the cache is fast, and a control loop
+    that waits on a measurement by ANY route is caught. The assertions are
+    against the wall clock rather than the injected ManualClock on purpose: the
+    hazard is that the loop's own thread stops running, which no amount of fake
+    time would reveal.
+    """
 
     block_seconds = 3.0
 
-    def get_level(self, override=False):
-        if override:
+    def request_sample(self):
+        time.sleep(self.block_seconds)
+        return super().request_sample()
+
+    def __getattr__(self, name):
+        # Any measure-and-wait method someone reintroduces later -- under
+        # whatever name -- resolves to something slow rather than an
+        # AttributeError that a test might mistake for "the loop did not call
+        # it".
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        def _slow(*args, **kwargs):
             time.sleep(self.block_seconds)
-        return super().get_level(override=override)
+
+        return _slow
 
 
 def make_controller(settings, control_data, pellet_db, *, grill=None, dist=None, clock=None):
@@ -402,7 +419,14 @@ def test_tick_timer_expiry_sends_notification(monkeypatch):
     assert control["timer"]["end"] == 0
 
 
-def test_tick_hopper_check_reads_and_clears(monkeypatch):
+def test_tick_hopper_check_requests_a_sample_and_clears(monkeypatch):
+    """`hopper_check` is now a REQUEST, not a measurement.
+
+    It used to force a fresh reading and block the loop up to 3s waiting for
+    it. The loop now asks the sampling thread and carries on; the requested
+    reading reaches the datastore via the timed refresh. The flag itself is
+    unchanged and still serviced -- the attached display (_base_flex.py:1462)
+    and the Flask pellet pages raise it."""
     _neutralize_externals(monkeypatch)
     settings = base_settings()
     control_data = base_control(mode="Stop")
@@ -412,15 +436,32 @@ def test_tick_hopper_check_reads_and_clears(monkeypatch):
     c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db(), dist=dist)
     _spy_dispatch(c)
     c.setup()
-    dist.get_level_calls = 0  # ignore the setup() boot-time read
-    dist.overrides.clear()
+    dist.sample_requests = 0
     c.tick()
-    assert dist.get_level_calls == 1
-    # The EXPLICIT path still forces a fresh measurement: something asked for a
-    # reading and is waiting on the answer, so paying the block is correct.
-    assert dist.overrides == [True]
-    assert store.read_pellet_db()["current"]["hopper_level"] == 42
+    assert dist.sample_requests == 1
     assert store.read_control()["hopper_check"] is False
+
+
+def test_tick_hopper_check_does_not_delay_the_next_refresh(monkeypatch):
+    """The requested reading is published by the timed refresh, so servicing a
+    request must NOT restamp the refresh timer -- doing so would delay the very
+    sample that was just asked for by a whole interval."""
+    _neutralize_externals(monkeypatch)
+    settings = base_settings()
+    control_data = base_control(mode="Stop")
+    control_data["updated"] = False
+    control_data["hopper_check"] = True
+    clock = ManualClock(start=1000)
+    dist = _RecordingDistance(level=42)
+    c, ctx, store, grill, dist, notifier = make_controller(
+        settings, control_data, base_pellet_db(), dist=dist, clock=clock
+    )
+    _spy_dispatch(c)
+    c.setup()
+    clock.advance(HOPPER_LEVEL_REFRESH_INTERVAL + 1)
+    c.tick()  # services the request AND the due refresh, in the same tick
+    assert dist.sample_requests == 1
+    assert store.read_pellet_db()["current"]["hopper_level"] == 42
 
 
 # --------------------------------------------------------------------------
@@ -448,7 +489,6 @@ def test_tick_refreshes_hopper_level_on_a_timer(monkeypatch):
     _spy_dispatch(c)
     c.setup()
     dist.get_level_calls = 0  # ignore the setup() boot-time read
-    dist.overrides.clear()
 
     # Well inside the interval: nothing happens. The timer is not a free-running
     # "read every tick" -- ticks run ten times a second.
@@ -466,57 +506,33 @@ def test_tick_refreshes_hopper_level_on_a_timer(monkeypatch):
     assert store.read_control()["hopper_check"] is False
 
 
-def test_timed_hopper_refresh_never_asks_the_sensor_to_re_measure(monkeypatch):
-    """THE RISK THIS WHOLE CHANGE CARRIES.
+def test_the_control_loop_never_waits_on_a_hopper_reading(monkeypatch):
+    """THE RISK THIS WHOLE CHANGE CARRIES, AND THE OWNER'S BINDING REQUIREMENT:
+    the hopper refresh must never make the control loop wait. Not 3 seconds,
+    not 300ms, not "briefly on the first read".
 
-    `get_level(override=True)` blocks its caller for up to 3s while the
-    sampling thread takes a fresh reading. On a 10s timer that is ~30% of a
-    loop whose job is timing the auger and igniter. The automatic refresh must
-    read the cache -- override=False -- every time."""
+    _HostileDistance serves the cache instantly and makes EVERY other call --
+    request_sample, and any measure-and-wait method reintroduced later under
+    any name -- sleep 3 real seconds. So this catches a blocking read no matter
+    which route it comes back by, not just `override=True` specifically.
+
+    Covers boot (setup) and steady state (five due refreshes) in one run,
+    against the WALL clock: the hazard is the loop's own thread stopping, which
+    fake time cannot reveal."""
     _neutralize_externals(monkeypatch)
     settings = base_settings()
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
     control_data["hopper_check"] = False
     clock = ManualClock(start=1000)
-    dist = _RecordingDistance()
+    dist = _HostileDistance()
     c, ctx, store, grill, dist, notifier = make_controller(
         settings, control_data, base_pellet_db(), dist=dist, clock=clock
     )
     _spy_dispatch(c)
-    c.setup()
-    dist.overrides.clear()
 
-    for _ in range(5):
-        clock.advance(HOPPER_LEVEL_REFRESH_INTERVAL + 1)
-        c.tick()
-
-    assert dist.overrides == [False] * 5
-
-
-def test_timed_hopper_refresh_does_not_block_the_control_loop(monkeypatch):
-    """The same property, asserted against the WALL clock rather than the
-    override flag -- because "the loop keeps running" is the thing that
-    actually matters, and a future refactor could reintroduce a blocking read
-    by some route other than the override argument.
-
-    _BlockingDistance sleeps 3s on an override read, exactly as a real ToF
-    sensor's get_level does. Five refreshes would cost 15 seconds."""
-    _neutralize_externals(monkeypatch)
-    settings = base_settings()
-    control_data = base_control(mode="Stop")
-    control_data["updated"] = False
-    control_data["hopper_check"] = False
-    clock = ManualClock(start=1000)
-    dist = _BlockingDistance()
-    c, ctx, store, grill, dist, notifier = make_controller(
-        settings, control_data, base_pellet_db(), dist=dist, clock=clock
-    )
-    _spy_dispatch(c)
-    c.setup()  # the boot-time read IS an override read, and IS allowed to block
-
-    dist.get_level_calls = 0  # ignore the setup() boot-time read
     started = time.monotonic()
+    c.setup()  # startup must not wait for a first sample either
     for _ in range(5):
         clock.advance(HOPPER_LEVEL_REFRESH_INTERVAL + 1)
         c.tick()
@@ -525,31 +541,36 @@ def test_timed_hopper_refresh_does_not_block_the_control_loop(monkeypatch):
     # Both halves matter. Without the first, a loop that simply never refreshes
     # (which is what the code did before this change) would pass the timing
     # assertion trivially.
-    assert dist.get_level_calls == 5, "the loop did not refresh the hopper at all"
-    assert elapsed < 1.0, f"the timed hopper refresh blocked the control loop for {elapsed:.1f}s"
+    assert dist.get_level_calls == 6, "the loop did not publish the hopper level"
+    assert elapsed < 1.0, f"the control loop waited {elapsed:.1f}s on a hopper reading"
 
 
-def test_explicit_hopper_check_resets_the_refresh_timer(monkeypatch):
-    """A user-requested check is a refresh. Not restamping the timer would
-    have the loop re-read the sensor again a moment later, for nothing."""
+def test_servicing_a_hopper_check_does_not_wait_either(monkeypatch):
+    """The on-demand path is held to the same rule. It used to be the ONE place
+    a 3s block was considered acceptable ("someone asked and is waiting"); the
+    owner's requirement admits no such exception, so it asks and returns."""
     _neutralize_externals(monkeypatch)
     settings = base_settings()
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
     control_data["hopper_check"] = True
     clock = ManualClock(start=1000)
-    dist = _RecordingDistance()
+    # NOT hostile on request_sample: the loop is SUPPOSED to call it. Hostile on
+    # everything else, so a wait bolted onto the request is still caught.
+    dist = _HostileDistance()
+    dist.request_sample = lambda: None
     c, ctx, store, grill, dist, notifier = make_controller(
         settings, control_data, base_pellet_db(), dist=dist, clock=clock
     )
     _spy_dispatch(c)
     c.setup()
-    clock.advance(HOPPER_LEVEL_REFRESH_INTERVAL + 1)
-    c.tick()  # services the explicit check
-    dist.get_level_calls = 0
-    clock.advance(1)
+
+    started = time.monotonic()
     c.tick()
-    assert dist.get_level_calls == 0  # timer was restamped by the explicit check
+    elapsed = time.monotonic() - started
+
+    assert store.read_control()["hopper_check"] is False, "the request was not serviced"
+    assert elapsed < 1.0, f"servicing hopper_check waited {elapsed:.1f}s"
 
 
 def test_tick_distance_update_updates_distances_and_clears(monkeypatch):

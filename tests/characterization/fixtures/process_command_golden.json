@@ -182,9 +182,7 @@
       "result": "OK"
     },
     "settings_diff": {},
-    "sleeps": [
-      3
-    ],
+    "sleeps": [],
     "systemq": []
   },
   "get_mode": {

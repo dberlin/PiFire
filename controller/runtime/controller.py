@@ -221,11 +221,15 @@ class Controller:
         """One-time initialization run before the main loop starts."""
         store = self.ctx.store
 
-        # Initial hopper-level check on boot. Without this, `pelletdb` is unbound
-        # the first time the loop calls check_notify, and the boot-time hopper
-        # read never happens.
+        # Initial hopper-level publish on boot. Without this, `pelletdb` is
+        # unbound the first time the loop calls check_notify.
+        #
+        # Reads the CACHE. On a threaded sensor the first sample may not have
+        # landed yet, in which case this publishes the last known/default level
+        # and startup proceeds -- the control process must not wait on a
+        # distance sensor to come up.
         self.pelletdb = store.read_pellet_db()
-        self.pelletdb["current"]["hopper_level"] = self.dist_device.get_level(override=True)
+        self.pelletdb["current"]["hopper_level"] = self.dist_device.get_level()
         store.write_pellet_db(self.pelletdb)
         self.eventLogger.info(f"Hopper Level Checked @ {self.pelletdb['current']['hopper_level']}%")
         # Start the automatic-refresh timer from the boot-time reading, so the
@@ -324,31 +328,30 @@ class Controller:
             store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
 
         if self.control["hopper_check"]:
-            self.pelletdb = store.read_pellet_db()
-            # Get current hopper level and save it to the current pellet information.
-            # override=True forces a fresh measurement and blocks here for up to
-            # 3s -- acceptable ONLY because something explicitly asked for a
-            # reading and is waiting on the answer.
-            self.pelletdb["current"]["hopper_level"] = self.dist_device.get_level(override=True)
-            store.write_pellet_db(self.pelletdb)
-            self.eventLogger.info("Hopper Level Checked @ " + str(self.pelletdb["current"]["hopper_level"]) + "%")
+            # Something asked for a fresh reading (the attached display, the
+            # Flask pellet pages, the socket.io API). ASK, then carry on: the
+            # request is a flag the sampling thread is already watching, and
+            # returns immediately. The reading it produces reaches the datastore
+            # via the timed refresh below, which is deliberately NOT restamped
+            # here -- restamping it would delay publishing the very sample that
+            # was just requested.
+            self.dist_device.request_sample()
             self.control["hopper_check"] = False
             store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
-            self._hopper_refresh_time = ctx.clock.now()
-        elif (ctx.clock.now() - self._hopper_refresh_time) > HOPPER_LEVEL_REFRESH_INTERVAL:
-            # Automatic refresh. This is what keeps the dashboard's hopper
-            # reading current now that there is no Refresh Status button; in
-            # Stop mode it is the ONLY thing that does (the per-mode work cycle
-            # has its own copy of this timer, and does not run outside a cook).
+            self.eventLogger.info("Hopper Level Check requested.")
+        if (ctx.clock.now() - self._hopper_refresh_time) > HOPPER_LEVEL_REFRESH_INTERVAL:
+            # Automatic refresh: the only thing that publishes a hopper level
+            # after boot. There is no Refresh Status button any more, and in
+            # Stop mode nothing else runs (the per-mode work cycle has its own
+            # copy of this timer, and does not run outside a cook).
             #
-            # NO override: get_level() returns the sensor's cached percentage
-            # immediately. Passing override=True here would block this loop for
-            # up to 3s every interval while it is timing the auger and igniter.
-            # The sampling thread keeps that cache fresh on its own
-            # (distance/intervals.py).
+            # This reads a value the sampling thread already produced, and can
+            # never wait for one -- get_level() takes no arguments and has no
+            # blocking path. That is the whole safety property: this loop is
+            # timing the auger and the igniter.
             #
             # Deliberately not logged -- once per interval, forever, would bury
-            # the event log that the explicit checks above are visible in.
+            # the event log that the explicit requests above are visible in.
             self.pelletdb = store.read_pellet_db()
             self.pelletdb["current"]["hopper_level"] = self.dist_device.get_level()
             store.write_pellet_db(self.pelletdb)

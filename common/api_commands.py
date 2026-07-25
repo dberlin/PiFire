@@ -95,10 +95,21 @@ def _cmd_get_hopper(data, control, settings, arglist, origin, kind):
     {
         'hopper' : <level>
     }
+
+    Answers immediately, from the stored level. The control loop refreshes that
+    every HOPPER_LEVEL_REFRESH_INTERVAL seconds (distance/intervals.py), so it
+    is never more than a few seconds old.
+
+    This used to raise hopper_check and then `time.sleep(3)` before reading --
+    3 seconds being exactly how long the control loop would block forcing a
+    fresh measurement, so the answer was ready by the time it read. Neither
+    half of that arrangement exists any more: the loop never blocks on a
+    sensor, so the sleep no longer buys a fresher reading, it just held a web
+    worker hostage for 3 seconds per call. The flag is still raised, so a fresh
+    sample is requested for the next refresh and for whoever reads next.
     """
     control["hopper_check"] = True
     write_control(control, kind, origin=origin)
-    time.sleep(3)
     pelletdb = read_pellet_db()
     data["data"]["hopper"] = pelletdb["current"]["hopper_level"]
 

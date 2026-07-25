@@ -2,6 +2,8 @@ from unittest import mock
 
 import pytest
 
+import time as _real_time
+
 import distance._sampled_base as sampled_base
 
 
@@ -79,6 +81,21 @@ def _stop(hopper):
     hopper.sensor_thread.join(timeout=2)
 
 
+def _await_sample(hopper, count=1, timeout=2.0):
+    """Wait until the sampling thread has completed `count` samples.
+
+    Polls `sample_count` rather than waiting on the driver, because the driver
+    deliberately offers NO way to wait for a measurement -- that blocking
+    primitive was removed so the control loop cannot reacquire it. Tests are
+    allowed to wait; the control loop is not."""
+    deadline = _real_time.monotonic() + timeout
+    while hopper.sample_count < count:
+        if _real_time.monotonic() > deadline:
+            raise AssertionError(f"sampling thread produced {hopper.sample_count} samples, wanted {count}")
+        _real_time.sleep(0.005)
+    return hopper.get_level()
+
+
 def test_open_serial_port_delegates_to_pyserial(serial_tof_mod):
     hopper = _make_hopper(serial_tof_mod, dev_pins={"distance": {"device": "/dev/ttyACM3"}})
     try:
@@ -116,7 +133,7 @@ def test_invalid_empty_full_forces_defaults(serial_tof_mod):
 def test_reading_at_or_below_full_is_100_percent(serial_tof_mod):
     hopper = _make_hopper(serial_tof_mod, reading_mm=40, empty=22, full=4)  # 4.0cm == full
     try:
-        assert hopper.get_level(override=True) == 100
+        assert _await_sample(hopper) == 100
     finally:
         _stop(hopper)
 
@@ -124,7 +141,7 @@ def test_reading_at_or_below_full_is_100_percent(serial_tof_mod):
 def test_reading_at_empty_is_0_percent(serial_tof_mod):
     hopper = _make_hopper(serial_tof_mod, reading_mm=220, empty=22, full=4)  # 22.0cm == empty
     try:
-        assert hopper.get_level(override=True) == 0
+        assert _await_sample(hopper) == 0
     finally:
         _stop(hopper)
 
@@ -132,7 +149,7 @@ def test_reading_at_empty_is_0_percent(serial_tof_mod):
 def test_reading_between_full_and_empty_is_interpolated(serial_tof_mod):
     hopper = _make_hopper(serial_tof_mod, reading_mm=50, empty=22, full=4)  # 5.0cm
     try:
-        assert hopper.get_level(override=True) == 94
+        assert _await_sample(hopper) == 94
     finally:
         _stop(hopper)
 
@@ -140,7 +157,7 @@ def test_reading_between_full_and_empty_is_interpolated(serial_tof_mod):
 def test_slow_read_cycle_reinitializes_sensor(serial_tof_mod):
     hopper = _make_hopper(serial_tof_mod, reading_mm=100, read_delay=0.2)  # 3 * 0.2s > 0.5s threshold
     try:
-        hopper.get_level(override=True)
+        _await_sample(hopper)
         assert hopper.open_calls == 2
     finally:
         _stop(hopper)
@@ -157,14 +174,17 @@ def test_slow_read_cycle_survives_failed_reinit(serial_tof_mod):
     try:
         # First slow cycle: the re-init attempt (open call #2) raises, but the
         # loop must survive it.
-        hopper.get_level(override=True)
+        _await_sample(hopper)
         assert hopper.open_calls == 2
         assert hopper.sensor_thread.is_alive()
         assert hopper.sensor_thread_active is True
 
         # Second slow cycle: the thread is still polling and retries the
-        # re-init -- this time it succeeds, proving genuine recovery.
-        hopper.get_level(override=True)
+        # re-init -- this time it succeeds, proving genuine recovery. Asked for
+        # explicitly, because the fake clock only advances inside a read, so the
+        # interval-driven path would never come round on its own here.
+        hopper.request_sample()
+        _await_sample(hopper, 2)
         assert hopper.open_calls == 3
         assert hopper.sensor_thread.is_alive()
         assert hopper.sensor_thread_active is True
@@ -190,7 +210,7 @@ def test_reinit_closes_previous_serial_port(monkeypatch):
     ):
         hopper = _make_hopper(mod, reading_mm=100, read_delay=0.2)  # forces a re-init every cycle
         try:
-            hopper.get_level(override=True)  # triggers the slow-cycle re-init
+            _await_sample(hopper)  # triggers the slow-cycle re-init
             assert len(opened_ports) >= 2
             first_port, second_port = opened_ports[0], opened_ports[1]
             first_port.close.assert_called_once()

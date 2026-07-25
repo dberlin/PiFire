@@ -277,9 +277,13 @@ def build_devices(settings, *, errors, event_log, control_log):
         event_log.error(error_event)
         control_log.error(error_event)
 
-    # Get current hopper level and save it to the current pellet information
+    # Publish the hopper level into the current pellet information. This is
+    # process startup, so a threaded sensor has very likely not finished its
+    # first reading yet -- publish the last known/default value and move on
+    # rather than blocking device construction on a measurement. The control
+    # loop's timed refresh replaces it with a real reading within seconds.
     pelletdb = read_pellet_db()
-    pelletdb["current"]["hopper_level"] = dist_device.get_level(override=True)
+    pelletdb["current"]["hopper_level"] = dist_device.get_level()
     write_pellet_db(pelletdb)
     event_log.info(f"Hopper Level Checked @ {pelletdb['current']['hopper_level']}%")
 

@@ -35,10 +35,19 @@ class SampledHopperLevel:
     """Samples a distance sensor on a background thread and serves the last
     result from cache.
 
-    `get_level()` is free and instant: it returns the cached percentage. The
-    control loop polls it on a timer and must never pay for a measurement.
-    `get_level(override=True)` still forces a fresh sample and blocks the
-    caller for up to 3 seconds, for the on-demand `hopper_check` path only.
+    THERE IS NO WAY TO WAIT FOR A MEASUREMENT FROM HERE, BY DESIGN. `get_level()`
+    returns the cached percentage and returns now; `request_sample()` asks the
+    sampling thread for a fresh reading and returns now. A caller reads a value
+    some other thread already produced, or it reads nothing -- it never blocks.
+
+    This used to be one method, `get_level(override=True)`, which set the
+    request flag and then waited on a `threading.Event` for up to 3 SECONDS. Its
+    only reason to exist was that nothing refreshed the hopper level on its own,
+    so an on-demand check had to both ask and wait. The control loop now
+    refreshes on a timer (distance/intervals.py), so the wait has no reason left
+    -- and a 3s wait inside a loop that is timing the auger and igniter was
+    never something to keep as a convenience. Asking and observing are separate
+    operations now, and only the asking half is callable.
     """
 
     # Number of `_read_distance_mm()` readings averaged into one sample.
@@ -57,9 +66,14 @@ class SampledHopperLevel:
         self.empty = empty  # Empty is greater than distance measured for empty
         self.full = full  # Full is less than or equal to the minimum full distance.
         self.debug = debug
+        # The value every read serves until the sampling thread has produced a
+        # real one. A fresh process publishes this and moves on rather than
+        # waiting for the first sample.
         self.distance_read = 100
-
-        self.event = threading.Event()
+        # Number of samples completed since construction. Nothing in the
+        # control path reads it; it exists so a caller (or a test) can observe
+        # sampling progress WITHOUT a blocking wait primitive being available.
+        self.sample_count = 0
 
         if self.empty <= self.full:
             event = "ERROR: Invalid Hopper Level Configuration Empty Level <= Full Level (forcing defaults)"
@@ -73,7 +87,7 @@ class SampledHopperLevel:
         end of __init__, once the sensor is open and readable."""
         self.sensor_thread_active = True
         self.sensor_thread_read_interval = SENSOR_SAMPLE_INTERVAL
-        self.sensor_thread_override = True  # Allow override to do direct reads
+        self.sample_requested = True  # take one immediately on startup
         self.sensor_thread = threading.Thread(target=self._sensing_loop)
         self.sensor_thread.start()
 
@@ -108,7 +122,13 @@ class SampledHopperLevel:
         sample_time = time.time()
         while self.sensor_thread_active:
             now = time.time()
-            if self.sensor_thread_override or (now > sample_time + self.sensor_thread_read_interval):
+            if self.sample_requested or (now > sample_time + self.sensor_thread_read_interval):
+                # Clear the request BEFORE reading, not after. A request that
+                # arrives while this cycle is in flight then survives into the
+                # next iteration and gets its own fresh reading, instead of
+                # being silently swallowed by the cycle it just missed.
+                self.sample_requested = False
+
                 # Read the sensor multiple times and average the result
                 avg_dist = 0
                 start_time = time.time()
@@ -138,9 +158,11 @@ class SampledHopperLevel:
                     )
                     self.logger.info(event)
                     self._restart_sensor()  # Attempt re-init of sensor
-                if self.sensor_thread_override:
-                    self.event.set()
-                    self.sensor_thread_override = False
+
+                # Counted LAST, so an observer that waits for the count to rise
+                # sees a fully finished cycle -- reading published and any
+                # re-init already done -- rather than a half-completed one.
+                self.sample_count += 1
                 sample_time = time.time()
             time.sleep(1)
 
@@ -160,15 +182,16 @@ class SampledHopperLevel:
         levels["full"] = self.full
         return levels
 
-    def get_level(self, override=False):
-        """Return the cached hopper level.
+    def request_sample(self):
+        """Ask the sampling thread to take a fresh reading, and return NOW.
 
-        The default path costs nothing and never blocks -- the control loop
-        polls it on a timer. If override is selected, force the sensor thread
-        to update and wait (up to 3s) for the fresh sample.
-        """
-        if override:
-            self.sensor_thread_override = True
-            self.event.wait(3)  # Wait 3 seconds for sensor to update
-            self.event.clear()  # Clear event flag
+        The reading lands in the cache within a second or so, and reaches the
+        datastore on the control loop's next timed refresh. Nothing waits: this
+        sets a flag the sampling thread is already watching."""
+        self.sample_requested = True
+
+    def get_level(self):
+        """Return the cached hopper level. Costs nothing and never blocks.
+
+        Takes no `override` argument on purpose -- see the class docstring."""
         return self.distance_read

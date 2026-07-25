@@ -44,7 +44,8 @@ restart_scripts/reboot_system/shutdown_system with recording mocks. Never run
 these cases without those patches in place.
 
 DETERMINISM: `time.time` is frozen (the timer branches stamp it into control)
-and `time.sleep` is neutralized (get/hopper sleeps 3s). `data['ui_hash']` is
+and `time.sleep` is neutralized (nothing sleeps now; get/hopper used to).
+`data['ui_hash']` is
 normalized to a sentinel -- it is `hash()` of a str, so PYTHONHASHSEED makes it
 differ on every interpreter run (see NON-OBVIOUS BEHAVIORS #1).
 
@@ -117,7 +118,16 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_g
 
 # SHA-256 of the golden fixture. Pinned so the contract cannot be regenerated
 # without an obvious, reviewable edit to this line. See module docstring.
-GOLDEN_SHA256 = "20d1c03b3c0df4244099ac9e4c27e247e59d8240ff6042c32ca149270cd4523f"
+#
+# CHANGED ONCE, DELIBERATELY, for a BEHAVIOR change rather than a refactor:
+# get/hopper's `sleeps` went from [3] to []. That `time.sleep(3)` was sized to
+# the control loop's old blocking hopper read (`get_level(override=True)` waited
+# on a threading.Event for the same 3 seconds), so the endpoint slept just long
+# enough for the forced measurement to land. The loop no longer blocks on a
+# sensor at all -- it refreshes the stored level on a timer -- so the sleep
+# stopped buying a fresher reading and only held a web worker for 3s per call.
+# See common/api_commands.py::_cmd_get_hopper and distance/intervals.py.
+GOLDEN_SHA256 = "5a3702a7f538317fba9f618f3e64b17e025308528ebaaf6c8a71d22b6aff8349"
 
 # Frozen wall clock. The set/timer branches stamp time.time() into control.
 FIXED_NOW = 1700000000.0
@@ -166,7 +176,7 @@ CANONICAL_HOPPER_LEVEL = 42
 # | get    | mode        | -                                   | get_mode                       |
 # | get    | uuid        | -                                   | get_uuid                       |
 # | get    | versions    | -                                   | get_versions                   |
-# | get    | hopper      | writes hopper_check, sleeps, reads  | get_hopper                     |
+# | get    | hopper      | writes hopper_check, reads (no wait)| get_hopper                     |
 # | get    | timer       | -                                   | get_timer / get_timer_inverted |
 # | get    | notify      | -                                   | get_notify                     |
 # | get    | status      | -                                   | get_status / get_status_inverted|

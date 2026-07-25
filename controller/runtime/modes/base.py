@@ -364,27 +364,27 @@ class ControlMode:
             control["distance_update"] = False
             ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
 
-        # Check hopper level when requested, or automatically every
-        # HOPPER_LEVEL_REFRESH_INTERVAL seconds. (The literal here used to be
-        # 60, under a comment claiming 300.)
-        if control["hopper_check"] or (now - self.state.timers.hopper_toggle) > HOPPER_LEVEL_REFRESH_INTERVAL:
+        # A requested check ASKS the sampling thread for a fresh reading and
+        # returns immediately -- mid-cook, this loop is timing the auger and
+        # igniter and must not wait on a sensor for any length of time. The
+        # requested reading is published by the timed refresh below, which is
+        # deliberately not restamped here.
+        if control["hopper_check"]:
+            control["hopper_check"] = False
+            ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
+            dist_device.request_sample()
+            _control.eventLogger.info("Hopper Level Check requested.")
+
+        # Automatic refresh every HOPPER_LEVEL_REFRESH_INTERVAL seconds. (The
+        # literal here used to be 60, under a comment claiming 300.) Reads a
+        # value the sampling thread already produced; get_level() has no
+        # blocking path. Not logged -- several times a minute, for a whole cook,
+        # would bury the event log the requests above are visible in.
+        if (now - self.state.timers.hopper_toggle) > HOPPER_LEVEL_REFRESH_INTERVAL:
             pelletdb = ctx.store.read_pellet_db()
-            override = False
-            if control["hopper_check"]:
-                control["hopper_check"] = False
-                ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
-                override = True
-            # override only on the explicit path: it blocks this loop for up to
-            # 3s waiting on the sampling thread, which the timed refresh -- now
-            # running several times a minute, mid-cook -- must never do. The
-            # plain call reads the sensor's cache and returns immediately.
-            pelletdb["current"]["hopper_level"] = dist_device.get_level(override=override)
+            pelletdb["current"]["hopper_level"] = dist_device.get_level()
             ctx.store.write_pellet_db(pelletdb)
             self.state.timers.hopper_toggle = now
-            if override:
-                # Only the explicit check is logged; the timed refresh would
-                # otherwise fill the event log several times a minute.
-                _control.eventLogger.info("Hopper Level Checked @ " + str(pelletdb["current"]["hopper_level"]) + "%")
 
         # Check for update in ON/OFF Switch
         if not self.settings["platform"]["standalone"] and last != grill_platform.get_input_status():

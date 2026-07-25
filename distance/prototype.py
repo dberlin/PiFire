@@ -40,7 +40,13 @@ class HopperLevel:
         levels["full"] = self.full
         return levels
 
-    def get_level(self, override=False):
+    def request_sample(self):
+        # No sampling thread and no measurement to take: every read is
+        # already instant. Present so that callers never have to ask
+        # which distance module they happen to be holding.
+        return ()
+
+    def get_level(self):
         if self.random:
             return random.randint(10, 100)
         else:
