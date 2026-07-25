@@ -9,8 +9,8 @@ the two plain functions directly against a fresh temp-SQLite datastore
 envelope AND the resulting settings/control/pellet writes, for every
 ``action`` x ``type`` branch reachable without real hardware.
 
-Intent: lock down current behavior BEFORE the Task 9 decomposition into
-per-action handlers + dispatch maps, so the refactor is provably
+Intent: lock down current behavior BEFORE decomposing these into
+per-action handlers + dispatch maps, so that refactor is provably
 behavior-preserving. This includes pinning latent quirks verbatim (they
 are NOT bugs to fix here):
 
@@ -140,8 +140,8 @@ def test_get_settings_data(sio):
 def test_get_dash_data(sio):
     # _get_app_data("dash_data") wraps _get_dash_data(settings, pelletdb) in an
     # OK envelope. Pin that dispatch/wrapping with a sentinel; the _get_dash_data
-    # internals (probe assembly) are out of Task 9's decomposition scope and
-    # need a fully control-runtime-seeded `current`, which this harness lacks.
+    # internals (probe assembly) need a fully control-runtime-seeded `current`,
+    # which this harness lacks, so they are mocked out here.
     sentinel = {"grillName": "sentinel-dash"}
     with mock.patch.object(sio.mod, "_get_dash_data", return_value=sentinel) as m_dash:
         resp = sio.mod._get_app_data("dash_data")
@@ -291,7 +291,7 @@ def test_post_update_settings_unknown_key(sio):
 
 
 def test_post_update_settings_invalid_tree_rejected_no_crash(sio):
-    """S2 Task 5 boundary catch: _post_app_data() wraps every handler
+    """Boundary catch: _post_app_data() wraps every handler
     dispatch, so write_settings()'s now-strict gate rejecting an invalid
     delta comes back as this module's normal {"result": "Error", ...}
     envelope -- not an unhandled SettingsValidationError crashing the
@@ -1378,11 +1378,51 @@ def test_listen_app_data_starts_background_task_once_then_dedupes(sio):
 
 def test_handle_connect_registers_user_and_triggers_listener(sio):
     with mock.patch.object(sio.mod, "listen_app_data") as m_listen:
-        with flask_app.test_request_context():
-            flask_request.sid = "sid-connect-1"
-            sio.mod.handle_connect()
+        with mock.patch.object(sio.mod, "_emit_app_data_to") as m_emit:
+            with flask_app.test_request_context():
+                flask_request.sid = "sid-connect-1"
+                sio.mod.handle_connect()
     m_listen.assert_called_once_with(force=True)
+    m_emit.assert_called_once_with("sid-connect-1")
     assert "sid-connect-1" in read_connected_users()
+
+
+def test_handle_connect_sends_current_data_to_that_client_alone(sio):
+    """Every connect delivers a first payload addressed to the new client.
+
+    Without this, a client that connects after the broadcast loop is already
+    running gets nothing: `listen_app_data` starts the loop at most once, so
+    the force_refresh flag of every later connect is discarded, and the loop
+    itself re-emits only when a payload changes. On a stopped, idle grill
+    nothing changes, so the wait is unbounded.
+
+    `to=` is asserted because a broadcast would be wrong in the other
+    direction -- it would replay stale-but-unchanged data at every other
+    connected client on each new connection.
+    """
+    emitted = []
+
+    with (
+        mock.patch.object(sio.mod, "listen_app_data"),
+        mock.patch.object(sio.mod, "_get_dash_data", return_value={"sentinel": "dash"}),
+        mock.patch.object(
+            sio.mod.socketio,
+            "emit",
+            side_effect=lambda name, data, to=None: emitted.append((name, to, data)),
+        ),
+        flask_app.test_request_context(),
+    ):
+        flask_request.sid = "sid-late-join"
+        sio.mod.handle_connect()
+
+    assert [(name, to) for name, to, _ in emitted] == [
+        ("socket_event_data", "sid-late-join"),
+        ("socket_pellet_data", "sid-late-join"),
+        ("socket_dash_data", "sid-late-join"),
+    ]
+    # The dash payload is the current one, not a placeholder: it is whatever
+    # _get_dash_data produced at connect time.
+    assert emitted[2][2] == {"sentinel": "dash"}
 
 
 def test_handle_disconnect_other_users_remain_no_join(sio):

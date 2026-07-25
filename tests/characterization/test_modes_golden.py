@@ -3,9 +3,9 @@
 METHOD: RUN-THEN-FREEZE. Each scenario seeds inputs, runs `run_mode(...)`
 once, and asserts against captured behavior that was verified by actually
 running the current code (not against what we expect it "should" do). These
-are the equivalence oracle for the Phase 5-7 decomposition -- if a refactor
-changes any of these captured behaviors, that's a regression to investigate,
-not necessarily a bug in this test.
+are the equivalence oracle for the work-cycle decomposition refactor -- if a
+refactor changes any of these captured behaviors, that's a regression to
+investigate, not necessarily a bug in this test.
 
 TERMINATION SAFETY: every scenario either (a) relies on a natural loop exit
 already present in control.py (max-temp safety, flameout safety check,

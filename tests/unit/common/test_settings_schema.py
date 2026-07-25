@@ -608,19 +608,19 @@ def test_one_wire_key_is_now_a_real_field():
 
 
 def test_partial_schema_accepts_one_wire_by_alias_strict():
-    # CRITICAL re-verify (Task 2 brief): the recursive partial model has
-    # never been exercised with a Field(alias=...) before -- confirm it still
-    # populates correctly by alias under strict=True.
+    # CRITICAL re-verify: the recursive partial model has never been
+    # exercised with a Field(alias=...) before -- confirm it still populates
+    # correctly by alias under strict=True.
     PartialSettingsSchema.model_validate({"platform": {"system": {"1WIRE": 4}}}, strict=True)
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 Task 2b: base flip to extra="forbid" + self-healing repair wrapper.
+# extra="forbid" self-healing repair behavior.
 #
-# _Section.model_config is now ConfigDict(extra="forbid") -- raw
+# _Section.model_config is ConfigDict(extra="forbid") -- raw
 # model_validate() rejects any unmodeled key (see
 # test_extra_keys_rejected_by_raw_model_validate above). But validate_settings_tree()
-# (the S2 write_settings() gate, common/datastore_accessors.py:262) wraps that
+# (the write_settings() gate, common/datastore_accessors.py:262) wraps that
 # with a repair pass: if EVERY error a failed validation produces is
 # "extra_forbidden", it strips exactly those dotted paths from a COPY of the
 # input, logs each stripped path via common.common.write_log, and retries

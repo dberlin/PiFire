@@ -103,6 +103,7 @@ def handle_connect():
     write_connected_user(client_id)
     connected_users = read_connected_users()
     listen_app_data(force=True)
+    _emit_app_data_to(client_id)
     print(f"User {client_id} connected. Current connected users: {connected_users}")
 
 
@@ -198,6 +199,30 @@ def _emit_app_data(event, force_refresh):
     finally:
         event.clear()
         thread = None
+
+
+def _emit_app_data_to(client_id):
+    """Send the current app data straight to one freshly-connected client.
+
+    The broadcast loop is a single process-wide background task that re-emits
+    a payload only when it differs from the last one it sent, and its
+    force_refresh argument is consumed on the tick that starts the loop --
+    `listen_app_data` starts the task at most once, so a client connecting
+    while it is already running contributes a force flag that is discarded. On
+    an idle grill nothing in the payload changes, so such a client can wait
+    indefinitely for its first data.
+
+    The Jinja pages hide this: they render the current values into the HTML,
+    so the socket only ever has to deliver updates. A client that renders
+    purely from the socket sits on its placeholder state instead.
+    """
+    settings = read_settings_store()
+    pelletdb = read_pellets_store()
+    uuid = settings["server_info"]["uuid"]
+
+    socketio.emit("socket_event_data", {"uuid": uuid, "events": read_events_records()}, to=client_id)
+    socketio.emit("socket_pellet_data", {"uuid": uuid, "pellets": pelletdb}, to=client_id)
+    socketio.emit("socket_dash_data", _get_dash_data(settings, pelletdb), to=client_id)
 
 
 def _get_dash_data(settings, pelletdb):
@@ -791,8 +816,8 @@ def _post_app_data(action=None, type=None, json_data=None):
         return handler(settings, type, request)
     except SettingsValidationError as exc:
         # Single choke point for every _write_settings()/
-        # save_settings_and_flag_update() call reachable from this dispatcher
-        # (S2 Task 5): the settings tree failed strict validation and was NOT
+        # save_settings_and_flag_update() call reachable from this dispatcher:
+        # the settings tree failed strict validation and was NOT
         # persisted. Same {"result": "Error", "message": ...} envelope every
         # other failure path in this module already returns -- no crash back
         # to the socket.io client.
@@ -1018,7 +1043,7 @@ def _check_control_status():
             write_errors(errors)
 
 
-# `_response` relocated to `common/app.py` as `api_response` (Phase D, Task 5).
+# `_response` relocated to `common/app.py` as `api_response`.
 # Kept as a thin local alias so the 67 call sites in this module don't churn.
 _response = api_response
 
