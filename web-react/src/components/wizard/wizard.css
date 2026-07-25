@@ -217,39 +217,55 @@
 /* Flask's media object (_macro_wizard_card.html): vendor photo on the left,
    everything else stacked on the right. The photo is the wizard's
    component-IDENTIFICATION mechanism -- a user matches the PCB in their hand to
-   it -- so it stays prominent rather than becoming a thumbnail. The children
-   are a variable-length sibling list (image? name, description?, notes?, deps?,
-   config?), so the image is placed explicitly and everything else is swept into
-   column 2. */
+   it -- so it stays prominent rather than becoming a thumbnail.
+
+   NOT a two-column grid with the photo at `grid-row: 1 / -1`. That is the
+   obvious encoding of a media object and it renders wrong here: a grid item
+   spanning several intrinsically-sized rows has its height DISTRIBUTED across
+   those rows, so a 132px photo inflates the module-name row and opens a ~140px
+   void between the name and its description. A float is no better -- block
+   children are not narrowed beside a float, only their line boxes are, so
+   .pf-module-notes' amber panel would slide under the photo.
+
+   So: a plain stack with a fixed left gutter, and the photo taken out of flow
+   into that gutter. The children are a variable-length sibling list (image?,
+   name, description?, notes?, deps?, config?) and this handles any of them
+   without placement rules. The photo is boxed to a fixed 132px square with
+   object-fit: contain, which is what makes min-height exact rather than a guess
+   about vendor photo aspect ratios. */
 .pf-module-details {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 18px;
-  row-gap: 10px;
-  align-items: start;
-  padding-top: 14px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 0 0 150px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-.pf-module-details > :not(.pf-module-image) {
-  grid-column: 2;
+  min-height: 146px;
 }
 /* moduleImageUrl() returns "" for a module with no photo, and ModuleCard then
-   renders no <img> at all. Collapse to one column so the text does not sit
-   behind an 18px gutter of nothing. */
+   renders no <img> at all. Drop the gutter so the text does not sit behind
+   150px of nothing. */
 .pf-module-details:not(:has(.pf-module-image)) {
-  grid-template-columns: minmax(0, 1fr);
+  padding-left: 0;
+  min-height: 0;
 }
-.pf-module-details:not(:has(.pf-module-image)) > * {
-  grid-column: 1;
-}
+/* The tile itself, shared with DeviceForm. */
 .pf-module-image {
-  grid-column: 1;
-  grid-row: 1 / -1;
   width: 132px;
   height: auto;
   padding: 6px;
   border-radius: 12px;
   background: var(--inset);
+}
+/* Scoped to this container: DeviceForm reuses .pf-module-image inside a plain
+   flex column (.pf-device-form) where there is no gutter to absolutely position
+   into. */
+.pf-module-details > .pf-module-image {
+  position: absolute;
+  top: 14px;
+  left: 0;
+  height: 132px;
+  object-fit: contain;
 }
 .pf-module-name {
   margin: 0;
