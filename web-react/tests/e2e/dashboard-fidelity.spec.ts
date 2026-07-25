@@ -39,10 +39,21 @@ test("dashboard layout at 1280x720 matches the committed baseline", async ({ pag
   console.log(`[fidelity] stage scale = ${scale.toFixed(4)}`);
 
   mkdirSync(ARTIFACTS, { recursive: true });
+  // What a user actually sees in a 1280x720 window, scrolled to the top. Since
+  // the reflow the dashboard is a full 1280x720 tall board sitting UNDER the
+  // app shell's navbar, so the last ~56px is below the fold here.
   await page.locator('[data-pf="stage"]').screenshot({
     path: `${ARTIFACTS}/dashboard-1280x720.png`,
     animations: "disabled",
   });
+  // The whole board, for comparing the layout itself. Only the HEIGHT changes;
+  // both breakpoints are width-based, so this is the same layout as above.
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await page.locator('[data-pf="stage"]').screenshot({
+    path: `${ARTIFACTS}/dashboard-1280-full.png`,
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   // The authored constants, asserted directly so a wholesale baseline
   // replacement cannot quietly relax them.

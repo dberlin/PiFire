@@ -5,7 +5,7 @@ import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
 import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";
 import { deriveView, type PillView } from "../../helpers/dashboard/deriveView";
-import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
+import { useClock } from "../../helpers/dashboard/hooks";
 import { readTargetEdit, saveTargetEdit, type TargetEdit } from "../../helpers/notify/notifyState";
 import type { AccentName, LiveState, ProbeData } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
@@ -46,9 +46,12 @@ interface DashboardProps {
   setAnimate: (v: boolean) => void;
 }
 
-// The full 1280x720 PiFire controller dashboard (port of PiFire Dashboard.dc.html),
-// driven by the live socket_dash_data contract. Scaled to fit the browser
-// viewport; on-device it renders 1:1 on the touchscreen.
+// The PiFire controller dashboard (port of PiFire Dashboard.dc.html), driven by
+// the live socket_dash_data contract. Authored at 1280x720 and IDENTICAL at
+// that size, but it reflows below it -- see the breakpoints in dashboard.css.
+// It used to be a fixed 1280x720 board scaled uniformly with transform:
+// scale(), which is why the 800x480 on-device panel rendered 66px probe
+// temperatures at about 20px.
 export function Dashboard({
   dash,
   command,
@@ -64,9 +67,6 @@ export function Dashboard({
   const navigate = useNavigate();
   const now = useClock();
   const health = useControlHealth(controlAlive, apiBase);
-  // `fitRef` goes on the .pf-fit box below: inside the app shell that box is
-  // the area left under the navbar, not the whole viewport.
-  const { scale, ref: fitRef } = useFitScale(1280, 720);
 
   // Elapsed cook time comes from the CONTROLLER's startup_timestamp
   // (blueprints/mobile/socket_io.py:234, epoch seconds), not from when this
@@ -128,13 +128,8 @@ export function Dashboard({
   };
 
   return (
-    <div className="pf-fit" ref={fitRef}>
-      <div
-        className="pf-stage"
-        data-pf="stage"
-        data-animate={animate ? "true" : "false"}
-        style={{ transform: `translate(-50%, -50%) scale(${scale})` }}
-      >
+    <div className="pf-dash-root">
+      <div className="pf-dash" data-pf="stage" data-animate={animate ? "true" : "false"}>
         <div className="pf-dash-glow" />
 
         {/* The error/warning banners used to float here, over the stage. They

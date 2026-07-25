@@ -244,3 +244,84 @@ describe("size tokens never sit inside a shorthand", () => {
     expect(offenders, offenders.join("\n")).toEqual([]);
   });
 });
+
+// C8: the fixed 1280x720 stage, scaled uniformly with transform: scale(), is
+// reversed. NONE of these assertions claims the dashboard reflows -- jsdom does
+// no layout, so it cannot see that. They assert the MECHANISM: no transform,
+// no useFitScale, and every responsive override sealed inside a media query
+// that is false at 1280px. Whether the reflow looks right is
+// tests/e2e/dashboard-reflow.spec.ts's job, and a human's.
+describe("the fixed scaled stage is gone", () => {
+  it("renders no transform on the dashboard root", () => {
+    const { container } = renderDash();
+    const root = container.querySelector('[data-pf="stage"]') as HTMLElement;
+    expect(root).not.toBeNull();
+    expect(root.style.transform).toBe("");
+    expect(root.className).toContain("pf-dash");
+    expect(root.className).not.toContain("pf-stage");
+  });
+
+  it("no longer exports useFitScale, and useClock is untouched", async () => {
+    const hooks = await import("../../helpers/dashboard/hooks");
+    expect(Object.keys(hooks)).toEqual(["useClock"]);
+  });
+
+  it("leaves .pf-fit alone for its four other consumers", () => {
+    const css = readFileSync("src/components/dashboard/dashboard.css", "utf8");
+    expect(css).toMatch(/\.pf-fit\s*\{[^}]*position:\s*fixed/);
+    expect(css).toMatch(/\.pf-fit\s*\{[^}]*inset:\s*0/);
+  });
+
+  it("keeps overflow hidden on the root so the decorative glow cannot bleed", () => {
+    const css = readFileSync("src/components/dashboard/dashboard.css", "utf8");
+    const rule = css.slice(css.indexOf(".pf-dash {"), css.indexOf("}", css.indexOf(".pf-dash {")));
+    expect(rule).toContain("overflow: hidden");
+    // The glow and the modal scrim are position: absolute and used to be
+    // contained by the absolutely-positioned stage.
+    expect(rule).toContain("position: relative");
+  });
+});
+
+describe("every responsive rule is sealed behind a breakpoint", () => {
+  const css = readFileSync("src/components/dashboard/dashboard.css", "utf8");
+
+  it("declares the two breakpoints", () => {
+    expect(css).toContain("@media (max-width: 1279px)");
+    expect(css).toContain("@media (max-width: 719px)");
+  });
+
+  // The mechanical guarantee that desktop is untouched: each token is declared
+  // exactly ONCE outside a media query -- its desktop default -- and every
+  // other declaration of it is inside a breakpoint that 1280px does not match.
+  it("declares each size token exactly once outside a media query", () => {
+    const TOKEN =
+      /^(--pf-(?:header-h|probecol-w|col-w|gauge-[\w-]+|probe-[\w-]+|btn-[\w-]+|cook-val|pill-val|hopper-val))\s*:/;
+    const outside = new Map<string, number>();
+    let depth = 0;
+    let mediaDepth: number | null = null;
+    for (const rawLine of css.split("\n")) {
+      const line = rawLine.trim();
+      if (line.startsWith("@media")) mediaDepth = depth;
+      const m = TOKEN.exec(line);
+      if (m !== null && mediaDepth === null) {
+        outside.set(m[1], (outside.get(m[1]) ?? 0) + 1);
+      }
+      depth += (line.match(/\{/g) ?? []).length;
+      const closes = (line.match(/\}/g) ?? []).length;
+      for (let i = 0; i < closes; i++) {
+        depth--;
+        if (mediaDepth !== null && depth <= mediaDepth) mediaDepth = null;
+      }
+    }
+    const duplicated = [...outside.entries()]
+      .filter(([, n]) => n !== 1)
+      .map(([k, n]) => `${k} x${n}`);
+    expect(duplicated, `overridden outside a breakpoint: ${duplicated.join(", ")}`).toEqual([]);
+    expect(outside.size).toBe(15);
+  });
+
+  it("gives phone control buttons a touch-sized target", () => {
+    const phone = css.slice(css.indexOf("@media (max-width: 719px)"));
+    expect(phone).toMatch(/--pf-btn-h:\s*(4[4-9]|[5-9]\d)px/);
+  });
+});

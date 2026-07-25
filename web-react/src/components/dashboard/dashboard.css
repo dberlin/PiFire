@@ -81,7 +81,11 @@
   }
 }
 
-/* Fit-to-viewport stage: authored at 1280x720, scaled uniformly to fit. */
+/* .pf-fit is SHARED CHROME -- App.tsx's HydrateFallback, DashboardRoute's
+   ConnectionStatus, SettingsError and WizardShell all use it, and all four
+   still want a viewport-filling centred box. The dashboard used to be a fifth
+   consumer; it is not any more (see .pf-dash-root below). Do not repurpose
+   this rule. */
 .pf-fit {
   position: fixed;
   inset: 0;
@@ -90,27 +94,46 @@
   overflow: hidden;
   background: #0c0a09;
 }
-.pf-stage {
-  width: 1280px;
-  height: 720px;
-  /* Center-and-scale independent of viewport size: absolute + translate(-50%,-50%)
-     centers the element's own 1280x720 box, then scale() (set inline) sizes it to
-     fit. Grid place-items:center on .pf-fit does NOT reliably center a child whose
-     layout box is wider than the viewport (it pins to start and clips right on
-     sub-1280px screens like the 800x480 touchscreen); this idiom fits at any size. */
-  position: absolute;
-  top: 50%;
-  left: 50%;
+/* ==========================================================================
+   The dashboard root, post-reflow.
+
+   This replaces a fixed 1280x720 box that was scaled uniformly with
+   transform: scale() to fit whatever space it was given. That approach made
+   the on-device 800x480 panel render 66px probe temperatures at ~20px and a
+   phone render them at ~14px, because "smaller" was the only response it had
+   to a smaller screen.
+
+   At >=1280px wide this lays out IDENTICALLY to the old fixed box: same width,
+   same fixed row heights, same column widths. Every responsive rule lives
+   inside a @media query whose condition is FALSE at 1280px, so desktop
+   fidelity is preserved by construction rather than by care.
+   ========================================================================== */
+.pf-dash-root {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  background: #0c0a09;
+}
+.pf-dash {
+  width: 100%;
+  max-width: 1280px;
+  min-height: 720px;
+  display: flex;
+  flex-direction: column;
+  /* Containing block for the decorative glow and for .pf-modal-scrim, both of
+     which are position: absolute. The old .pf-stage got this from being
+     absolutely positioned itself. */
+  position: relative;
+  /* KEEP. The glow sits at bottom: -160px and relies on this to stay inside
+     the dashboard; without it the glow bleeds over the rest of the page. What
+     goes away is .pf-fit's letterbox clipping, not this. */
   overflow: hidden;
   background: radial-gradient(120% 90% at 50% 118%, #241a12 0%, #16110d 42%, #0d0b09 100%);
   font-family: "Barlow", system-ui, sans-serif;
   color: #f4ede2;
-  display: flex;
-  flex-direction: column;
-  transform-origin: center center;
 }
 /* Animate toggle: kill @keyframes animations, leave transitions intact. */
-.pf-stage[data-animate="false"] * {
+.pf-dash[data-animate="false"] * {
   animation: none !important;
 }
 
@@ -430,7 +453,7 @@
    tokens are what let a phone get relatively LARGER type in some places and
    smaller in others.
    ========================================================================== */
-.pf-stage {
+.pf-dash {
   --pf-header-h: 58px; /* was Dashboard.tsx header height */
   --pf-probecol-w: 298px; /* was Dashboard.tsx probe column width */
   --pf-col-w: 300px; /* was Dashboard.tsx right column width */
@@ -967,4 +990,99 @@ button.pf-dash-pill {
   letter-spacing: 2px;
   color: var(--pf-hopper-label-color);
   text-transform: uppercase;
+}
+
+/* ==========================================================================
+   Breakpoints.
+
+   Every rule below is inside a @media whose condition is FALSE at 1280px wide.
+   That is the mechanism by which "1280x720 does not change" is guaranteed:
+   there is no responsive declaration the desktop rendering can reach.
+
+   The values are a starting point derived from the authored constants, not
+   measurements. Nobody has looked at them on a real phone yet.
+   ========================================================================== */
+
+/* ---- tablet / the 800x480 on-device panel ----
+   The three columns stop being three fixed columns. The probe and right
+   columns become flexible and wrap; the gauge shrinks to leave them room. */
+@media (max-width: 1279px) {
+  .pf-dash {
+    --pf-gauge-size: 320px;
+    --pf-gauge-ring: 292px;
+    --pf-gauge-num: 88px;
+  }
+  .pf-dash-body {
+    flex-wrap: wrap;
+  }
+  .pf-dash-probecol,
+  .pf-dash-rightcol {
+    flex: 1 1 260px;
+    width: auto;
+  }
+}
+
+/* ---- phone ---- */
+@media (max-width: 719px) {
+  .pf-dash {
+    min-height: 0;
+    --pf-gauge-size: 260px;
+    --pf-gauge-ring: 236px;
+    --pf-gauge-num: 64px;
+    --pf-gauge-unit: 24px;
+    --pf-probe-temp: 44px;
+    --pf-probe-unit: 18px;
+    --pf-btn-font: 17px;
+    /* >= 44px, the minimum comfortable touch target. */
+    --pf-btn-h: 56px;
+    --pf-cook-val: 20px;
+    --pf-pill-val: 20px;
+    --pf-hopper-val: 26px;
+  }
+  .pf-dash-body {
+    flex-direction: column;
+  }
+  /* Gauge and controls first: what you reach for on a phone is the
+     temperature and the Stop button, not the probe list. */
+  .pf-dash-centercol {
+    order: 1;
+  }
+  .pf-dash-probecol {
+    order: 2;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: auto;
+    flex: none;
+  }
+  .pf-dash-rightcol {
+    order: 3;
+    width: auto;
+    flex: none;
+  }
+  /* grid-auto-flow: column forces N equal columns in one row; five 25px
+     buttons across a phone is unreadable, so let them wrap instead. */
+  .pf-dash-controls {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    height: auto;
+    flex: none;
+  }
+  .pf-dash-header {
+    flex-wrap: wrap;
+    height: auto;
+    flex: none;
+    padding: 8px 12px;
+  }
+  /* The gauge is a fixed square on a column that is now full width. */
+  .pf-dash-gauge {
+    flex: none;
+    min-height: var(--pf-gauge-size);
+  }
+  .pf-dash-probecard {
+    flex: none;
+  }
+  .pf-dash-hopper {
+    flex: none;
+    min-height: 180px;
+  }
 }
