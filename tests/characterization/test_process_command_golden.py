@@ -1247,12 +1247,110 @@ def test_three_argument_timer_start_still_defaults_to_sixty_seconds(seeded):
 
 
 def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
-    """Other clients still set the flags one at a time; those paths stay."""
+    """Other clients still set the flags one at a time; those paths stay.
+
+    Note the `execute_control_writes()` inside the loop: each command is given a
+    control cycle of its own. That is the only way these paths are safe -- see
+    the two tests below.
+    """
     for command, key in (("shutdown", "shutdown"), ("keep_warm", "keep_warm")):
         for arg, expected in (("true", True), ("false", False)):
             api_commands.process_command(action="set", arglist=["timer", command, arg], origin="api")
             dsa.execute_control_writes()
             assert _timer_entry(dsa.read_control())[key] is expected, f"{command}={arg}"
+
+
+# ---------------------------------------------------------------------------
+# The seam these tests pin: TWO control writes inside ONE cycle, and what the
+# second does to the first.
+#
+# This is CURRENT BEHAVIOR and is not being changed -- it falls out of the
+# write model itself (write_control queues the WHOLE control dict,
+# read_control() serves the persisted blob and never the queue, and the drain
+# applies each partial with json_patch). Fixing it here would mean redesigning
+# the drain. It is pinned instead so that clients are written to the constraint
+# it implies: ONE control write per user operation, carrying every field that
+# operation needs. That constraint is why /api/set/timer/start/{seconds}/{options}
+# exists, and why web-react's timer bar refuses a second write until the socket
+# has republished the first (web-react/src/components/shell/TimerBar.tsx).
+# ---------------------------------------------------------------------------
+
+
+def test_a_flag_write_after_a_start_in_one_cycle_destroys_the_timer(seeded):
+    """start + shutdown, undrained: the timer is not merely un-flagged, it is GONE.
+
+    The shutdown command reads the pre-start blob, so its partial carries
+    timer.start/paused/end as ZEROS and is queued second -- and control['timer']
+    is a JSON object whose three keys the partial all supplies, so json_patch
+    overwrites every one of them. The user asked for a 10-minute timer that
+    shuts the grill down and got a `shutdown` flag on no timer at all.
+    """
+    control = dsa.read_control()
+    control["timer"] = {"start": 0, "paused": 0, "end": 0}
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    c.SqliteQueue("queue_control_write").flush()
+
+    with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
+        api_commands.process_command(action="set", arglist=["timer", "start", "600"], origin="api")
+        api_commands.process_command(action="set", arglist=["timer", "shutdown", "true"], origin="api")
+    dsa.execute_control_writes()
+
+    after = dsa.read_control()
+    assert after["timer"] == {"start": 0, "paused": 0, "end": 0}
+    assert _timer_entry(after)["shutdown"] is True  # the flag landed; the timer did not
+    assert _timer_entry(after)["req"] is False  # ...and the start's own req was undone
+
+    # The 4-argument form is the fix: same intent, one write, both halves survive.
+    c.SqliteQueue("queue_control_write").flush()
+    _start_with_options("600", "shutdown")
+    dsa.execute_control_writes()
+    after = dsa.read_control()
+    assert after["timer"]["end"] == FIXED_NOW + 600
+    assert _timer_entry(after)["shutdown"] is True
+    assert _timer_entry(after)["req"] is True
+
+
+def test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer(seeded):
+    """stop + pause, undrained: the stopped timer comes back, still armed.
+
+    The pause command reads the pre-stop blob, sees start != 0, and therefore
+    queues that blob's start/end plus the OLD notify_data -- so the stop's zeros
+    AND its clearing of shutdown/keep_warm are both undone. A timer the user
+    stopped returns paused with `shutdown` set, and shuts the grill down when it
+    later expires. Both buttons are on screen together in every timer UI, which
+    is what makes this reachable rather than theoretical.
+    """
+    control = dsa.read_control()
+    control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
+    _timer_notify(shutdown=True, keep_warm=False)(control)
+    _timer_entry(control)["req"] = True
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    c.SqliteQueue("queue_control_write").flush()
+
+    with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
+        api_commands.process_command(action="set", arglist=["timer", "stop"], origin="api")
+        api_commands.process_command(action="set", arglist=["timer", "pause"], origin="api")
+    dsa.execute_control_writes()
+
+    after = dsa.read_control()
+    assert after["timer"] == {"start": 1000.0, "paused": FIXED_NOW, "end": 2000.0}
+    assert _timer_entry(after)["shutdown"] is True
+
+    # Drained between the two commands -- the same clicks, one cycle apart --
+    # the pause reads the stopped blob and the timer stays stopped.
+    control = dsa.read_control()
+    control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
+    _timer_notify(shutdown=True, keep_warm=False)(control)
+    dsa.write_control(control, WriteKind.OVERWRITE, origin="seed")
+    with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
+        api_commands.process_command(action="set", arglist=["timer", "stop"], origin="api")
+        dsa.execute_control_writes()
+        api_commands.process_command(action="set", arglist=["timer", "pause"], origin="api")
+        dsa.execute_control_writes()
+
+    after = dsa.read_control()
+    assert after["timer"] == {"start": 0, "paused": 0, "end": 0}
+    assert _timer_entry(after)["shutdown"] is False
 
 
 def test_notify_target_in_celsius_writes_the_notify_target(seeded):
