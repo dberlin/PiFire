@@ -6,7 +6,7 @@ test drives exactly ONE iteration deterministically by making the loop's
 own `time.sleep` call raise a sentinel exception on its first invocation,
 then asserts what that one iteration actually did.
 
-This is the "after" side of Phase B Task 5, which reconciled the two
+This is the "after" side of the loop reconciliation that merged the two
 divergent loops into ONE: _base_fixed now carries the richer (former
 240x240) loop for every resolution -- a `self.monitor_display` flag,
 distinct `self.loop_delay` / `self.clear_delay` sleeps, a `continue`
@@ -98,7 +98,7 @@ def _drive_one_iteration(base):
 
 # (short_name, module, expected_sleep_seconds)
 #
-# After Task 5 all three run the SAME richer loop: each renders once via the
+# All three now run the SAME richer loop: each renders once via the
 # `elif ... display_active` branch, nulls in_data/status_data, and -- since
 # monitor_display starts False -- flips it True and sleeps `clear_delay` on
 # this first full render. clear_delay == the shim's `min_transition_delay`,

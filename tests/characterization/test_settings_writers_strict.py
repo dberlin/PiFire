@@ -1,10 +1,10 @@
 """Every settings-blueprint writer must produce a strictly-valid tree.
 
-Pre-enforcement matrix (S2 Task 3): write_settings() does not yet validate;
-these tests call validate_settings_tree() on the store's tree after each
-`_SETTINGS_DISPATCH` handler runs, so handler bugs surface BEFORE the
-Task-5 gate flips validation on for real. Enforcement is NOT flipped here --
-validate_settings_tree() is used purely as a test oracle.
+These tests call validate_settings_tree() on the store's tree after each
+`_SETTINGS_DISPATCH` handler runs, independently of write_settings()'s own
+enforcement gate (see tests/unit/common/test_write_settings_strict.py), so
+handler bugs surface here directly -- validate_settings_tree() is used
+purely as a test oracle in this file.
 
 Harness choice: the plain `flask_app.test_client()` + `ds` (tests/conftest.py,
 function-scoped temp-SQLite datastore) pattern already proven by
@@ -46,10 +46,9 @@ def _assert_store_strict(read_settings_fn):
 #
 # dashboard_config / probe_select / probe_config / controller_card never
 # mutate the settings tree -- they just re-render a fragment from the
-# request. Covered here anyway (S2 Task 3 Step 2 asks for every dispatch
-# entry): a broken render (KeyError/IndexError) would still be a handler
-# bug worth pinning, and confirming the store is untouched-but-still-strict
-# closes out the dispatch table.
+# request. Covered here anyway: a broken render (KeyError/IndexError) would
+# still be a handler bug worth pinning, and confirming the store is
+# untouched-but-still-strict closes out the dispatch table.
 
 
 def test_settings_dashboard_config_post_leaves_store_strict(client_and_store):
@@ -286,8 +285,10 @@ def test_settings_startup_post_writes_strict(client_and_store):
 
 def test_settings_startup_prime_on_startup_out_of_range_still_clamps_valid(client_and_store):
     """routes.py:479-483 silently zeroes prime_on_startup outside [0, 200]
-    (legacy pre-S2 clamp) instead of rejecting -- that pre-write clamp still
-    lands a value the S2 schema accepts, so this stays green pre-enforcement.
+    (a legacy clamp that predates the strict schema) instead of rejecting --
+    that pre-write clamp still lands a value the schema accepts, so this
+    stays green here even though write_settings()'s own enforcement gate
+    isn't exercised by this test.
     """
     client, read_settings = client_and_store
     client.post(
@@ -396,9 +397,9 @@ def test_settings_pwm_duty_cycle_post_writes_strict(client_and_store):
     _assert_store_strict(read_settings)
 
 
-# --- Boundary error handling (S2 Task 5) ----------------------------------
+# --- Boundary error handling ----------------------------------------------
 #
-# write_settings() is now hard-strict (raises SettingsValidationError instead
+# write_settings() is hard-strict (raises SettingsValidationError instead
 # of silently persisting). settings_page()'s dispatch wraps every handler
 # call in a single try/except: JSON-body handlers (below: smartstart,
 # pwm_duty_cycle) get the same {"result": ...} envelope they already return

@@ -76,13 +76,12 @@ def _flex_obj(name, obj_type, position, size, **extra):
 
 
 def _dashboard_1280x720():
-    """Bespoke ember-style profile_1.dash for the 1280x720 DSI display (Task 25),
-    built from the new flexobject types (Tasks 17-23) wired up by
-    display/_base_flex.py (Task 24). Decoupled from the 800x480 scaler used by
-    every other resolution/profile.
+    """Bespoke ember-style profile_1.dash for the 1280x720 DSI display, built
+    from the ember flexobject types wired up by display/_base_flex.py.
+    Decoupled from the 800x480 scaler used by every other resolution/profile.
 
-    Layout (see .superpowers/sdd/progress.md "pygame flexobject data
-    contracts" for the per-type data shapes):
+    Layout (see the per-type FlexObject classes in display/flexobject.py for
+    the per-type data shapes):
       - header_bar spans the full width at the top.
       - Left column: 5 stacked probe_card_N food-probe cards.
       - Center column: the big gauge_ember primary gauge, the full-width

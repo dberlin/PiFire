@@ -1,4 +1,4 @@
-"""Task 4 (bugfix-latent-bugs) route-level companion to
+"""Route-level companion to
 `tests/unit/common/test_prepare_csv.py`: drives `GET /history/export`
 (`blueprints/history/routes.py`'s `history_page` `export` action) through a
 real Flask test client against an isolated, empty datastore, proving the

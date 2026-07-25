@@ -1,4 +1,4 @@
-"""Task 4 (bugfix-latent-bugs): `common/app.py::prepare_csv()` crashes when
+"""`common/app.py::prepare_csv()` crashes when
 history is empty (fresh install / after a history clear).
 
 `blueprints/history/routes.py`'s `export` action calls `prepare_csv()` with

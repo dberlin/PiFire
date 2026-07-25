@@ -1,5 +1,5 @@
 """
-Coverage-floor tests for display/flexobject.py (Task 6, Harness B).
+Coverage-floor tests for display/flexobject.py.
 
 Follows the construction/render style of test_flex_gauge_ember.py,
 test_flex_status_icon_smokeplus.py and test_flexobject_accent.py: build a

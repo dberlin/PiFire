@@ -1,4 +1,4 @@
-"""Smoke tests for the common-package split (Phase A, Task 9).
+"""Smoke tests for the common-package split.
 
 After the hard split, every public name lives in a dedicated submodule and
 common.common no longer re-exports the moved names (the temporary facade, and

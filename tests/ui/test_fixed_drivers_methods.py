@@ -1,4 +1,4 @@
-"""Task 7: cover the five standalone/legacy display drivers that are not part
+"""Cover the five standalone/legacy display drivers that are not part
 of the _base_fixed shim family exercised by test_fixed_base_drivers_load.py:
 
   ssd1306b.py, ssd1306.py, st7789p.py, prototype.py   -- fully standalone
@@ -40,8 +40,7 @@ in this file.
 `os.system` is neutralized the same way as the _base_fixed harness: only
 `display/_base_flex.py` (ili9341f's parent) and `display/_base_fixed.py`
 actually call `os.system("... sudo reboot ...")`, but the patch is applied
-unconditionally for every driver as a blanket safety measure, matching the
-brief's "for EVERY driver" instruction.
+unconditionally for every driver as a blanket safety measure.
 
 `display._base_flex.DisplayBase.__init__` reads `common.system.is_real_hardware()`
 (-> `settings.json["platform"]["real_hw"]`) to set `self.real_hardware`. This

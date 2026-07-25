@@ -599,11 +599,10 @@ class ControlMode:
         start_time = ctx.clock.now()
         self.state.timers.start_time = start_time
 
-        # ---- declarative pre_loop guards (empty until Tasks 15-16; then the
-        # flameout edges live here instead of in setup_safety). A fired guard
-        # aborts the loop exactly as setup_safety returning "Inactive" does. This
-        # reuses start_time (no extra clock read) -- the pre_loop flameout guards
-        # do not use `now`. ----
+        # ---- declarative pre_loop guards: the flameout edges live here instead
+        # of in setup_safety. A fired guard aborts the loop exactly as
+        # setup_safety returning "Inactive" does. This reuses start_time (no
+        # extra clock read) -- the pre_loop flameout guards do not use `now`. ----
         if evaluate_phase(self, ctx, "pre_loop", start_time, ptemp):
             status = "Inactive"
 

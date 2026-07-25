@@ -41,12 +41,12 @@ These module-attribute patches are observed by `live_server`'s background
 thread because it runs in THIS process against the SAME imported module objects
 (see conftest.py's "thread-shared datastore" docs).
 
-*** IMPORTANT FOR THE TASK-7b DISPATCH REFACTOR ***
+*** IMPORTANT FOR ANY FUTURE DISPATCH REFACTOR OF THIS MODULE ***
 The discovery / os.system patch targets above are anchored on
-`blueprints.wizard.routes`. 7b MUST keep these handlers INLINE in that module
-and keep ``import os`` (+ ``os.system``) and the discovery ``from ... import``
-bindings at module level in `blueprints.wizard.routes`, or these mocks disarm
-and a test run could spawn the real installer.
+`blueprints.wizard.routes`. Any such refactor MUST keep these handlers INLINE
+in that module and keep ``import os`` (+ ``os.system``) and the discovery
+``from ... import`` bindings at module level in `blueprints.wizard.routes`,
+or these mocks disarm and a test run could spawn the real installer.
 
 Actions covered: base GET render, `installstatus`, `cancel`, `finish`
 (success / bus-conflict / blocked-when-active), `modulecard` (valid + invalid
@@ -199,7 +199,7 @@ def test_finish_success_starts_install_and_renders_finish_page(live_server, page
     the whole-config bus check. Exercises the REAL prepare_wizard_data /
     store_wizard_install_info / set_wizard_install_status path; only
     validate_bus_kinds is stubbed to a no-op so the success branch is
-    deterministic (as permitted by the task brief)."""
+    deterministic."""
     apply_control(lambda c: c.__setitem__("mode", "Stop"))
     _seed_wizard_install_info(live_server, page)
     neutralize_wizard.monkeypatch.setattr(neutralize_wizard.wr, "validate_bus_kinds", lambda kinds: None)
@@ -240,7 +240,7 @@ def test_finish_blocked_when_system_active_falls_through(live_server, page, neut
     """control mode != STOP skips the whole finish block and falls through to
     the default wizard.html render carrying the 'cannot be run while the system
     is active' error, with NO os.system call. (This fall-through is behavior
-    the 7b dispatch refactor must preserve -- pinned here.)"""
+    any future dispatch refactor must preserve -- pinned here.)"""
     apply_control(lambda c: c.__setitem__("mode", "Startup"))
     try:
         resp = page.request.post(f"{live_server}/wizard/finish", form=_VALID_FINISH_FORM)

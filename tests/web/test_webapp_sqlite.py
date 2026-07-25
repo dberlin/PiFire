@@ -1,4 +1,4 @@
-"""Task 18 (T6): webapp / blueprint free-function path reads+writes SQLite, no Valkey.
+"""webapp / blueprint free-function path reads+writes SQLite, no Valkey.
 
 The blueprints (blueprints/api, blueprints/dash, common/app.py, etc.) call
 `common.common` free functions directly -- they never go through the
@@ -393,8 +393,8 @@ def test_wizard_finish_blocks_unworkable_bus_combo():
 
 
 # --- Goal 3 (always exercised): the common.common free-function path -------
-# This is the essential T6 assertion -- it does not depend on the app
-# booting, and proves the blueprint-facing read/write functions work
+# This is the essential assertion for this module -- it does not depend on
+# the app booting, and proves the blueprint-facing read/write functions work
 # against SQLite with no Valkey client involved.
 
 
@@ -455,7 +455,7 @@ def test_no_pifire_valkey_module_imported():
     #
     # The two modules that are actually PiFire's own Valkey KV-store client
     # code (common/valkey_queue.py, common/valkey_handler.py) are dead code
-    # slated for removal in Task 19 and are not imported by anything on the
+    # slated for removal and are not imported by anything on the
     # webapp/blueprint path exercised above. That's the meaningful
     # assertion for "no Valkey present" here: PiFire's own code never
     # reaches for a Valkey client.

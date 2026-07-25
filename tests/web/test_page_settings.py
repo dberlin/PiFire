@@ -639,11 +639,10 @@ def test_smartstart_via_direct_post(live_server, page):
 
 
 # ---------------------------------------------------------------------------
-# Round 2: branch coverage for the remaining (method, action) branches the
-# tests above don't reach. The tests above were written against the "happy
-# path" real UI / representative direct-POST per action; branch coverage
-# (`--cov-report=term-missing` with `--cov-branch`) showed 122 still-missing
-# branches concentrated in: (a) the empty/unmatched-selection fallback path
+# Round 2: covers the remaining (method, action) branches the tests above
+# don't reach -- the tests above were written against the "happy path" real
+# UI / representative direct-POST per action, leaving branches concentrated
+# in: (a) the empty/unmatched-selection fallback path
 # of probe_select/probe_config/dashboard_config, (b) every notification
 # service in `notify` OTHER than the ifttt/mqtt pair driven above (each
 # service's enabled-checkbox True arm, and every optional field's

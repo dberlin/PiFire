@@ -351,8 +351,8 @@ def admin_page(action=None):
             result = handler(ctx)
         except SettingsValidationError as exc:
             # Single choke point for every write_settings() call this
-            # blueprint makes (S2 Task 5): the settings tree failed strict
-            # validation and was NOT persisted. Route to this blueprint's
+            # blueprint makes: the settings tree failed strict validation and
+            # was NOT persisted. Route to this blueprint's
             # existing error-list style (ctx.errors, rendered on
             # admin/index.html) instead of a 500 -- realistically only
             # reachable via restoresettings (an uploaded/local backup file

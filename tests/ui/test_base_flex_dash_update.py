@@ -1,14 +1,15 @@
 """
-Tests for Task 24: wiring live data + accent into the new "ember" pygame
-flexobjects (probe_card, gauge_ember, system_card, duty_pill, hopper_vertical,
+Tests for wiring live data + accent into the "ember" pygame flexobjects
+(probe_card, gauge_ember, system_card, duty_pill, hopper_vertical,
 header_bar, button_row) in display/_base_flex.py.
 
-The bespoke 1280x720 ember layout JSON does not exist yet (Task 25), so this
-builds a minimal in-memory layout containing just the new-type objects (using
-the placeholder names Task 25 is expected to use) and drives a real
-DisplayBase subclass through _configure_dash/_build_objects/_build_dash_map/
-_update_dash_objects. The pure per-object computations are also unit tested
-directly as staticmethods, independent of the DisplayBase plumbing.
+The bespoke 1280x720 ember layout JSON does not exist yet, so this builds a
+minimal in-memory layout containing just the new-type objects (using the
+placeholder names the eventual bespoke layout is expected to use) and drives
+a real DisplayBase subclass through _configure_dash/_build_objects/
+_build_dash_map/_update_dash_objects. The pure per-object computations are
+also unit tested directly as staticmethods, independent of the DisplayBase
+plumbing.
 """
 
 import json

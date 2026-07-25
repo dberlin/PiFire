@@ -72,8 +72,8 @@ def test_dash_screen_declares_menu_and_input_signals():
 
 
 def test_dash_screen_assembles_new_ember_components_with_no_qml_warnings():
-    # Task 15: DashScreen is rebuilt from the header + 3-column ember layout,
-    # composed from the real components built in Tasks 8-14 (not the retired
+    # DashScreen is rebuilt from the header + 3-column ember layout, composed
+    # from the real ember components (not the retired
     # ModeBar/TimerCard/StatusIcon/PModeControl/SmokePlusControl/MenuButton
     # set). Assert each new component actually landed in the tree (via
     # objectNames those components already expose) and that assembling them
@@ -203,7 +203,7 @@ def test_gauge_loads_with_setpoint_marker_and_mode_pill():
 
 def test_probe_card_loads_with_name_temp_target_and_tapped_signal():
     # ProbeCard.qml: self-contained food-probe card (name/temp/target/maxTemp/units
-    # props, tapped() signal). Consumed by DashScreen's food-probe Repeater (Task 15).
+    # props, tapped() signal). Consumed by DashScreen's food-probe Repeater.
     _app()
     backend = _stub_backend()
     engine = _engine_with_backend(backend)
@@ -268,7 +268,7 @@ def test_igniter_icon_loads_with_active_prop():
 def test_system_card_loads_with_rows_bound_to_backend():
     # SystemCard.qml: fan/auger/igniter rows, each with an icon bound to
     # backend.fanOn/augerOn/igniterOn, and a tap toggles the matching backend
-    # command. Consumed by DashScreen (Task 15).
+    # command. Consumed by DashScreen.
     _app()
     backend = _stub_backend(
         in_data={"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}},
@@ -306,9 +306,9 @@ def test_header_bar_loads_with_menu_signal_and_clock():
 
 def test_hopper_card_loads_and_visible_follows_hopper_enabled():
     # HopperCard.qml: vertical-fill hopper level card bound to
-    # backend.hopperLevel/backend.hopperEnabled, exposes checkRequested() (Task 15
-    # wires it to backend.hopperCheck()). The whole card is hidden when the pellet
-    # sensor is disabled (D1). Uses two separately-constructed backends (rather than
+    # backend.hopperLevel/backend.hopperEnabled, exposes checkRequested() (wired
+    # to backend.hopperCheck()). The whole card is hidden when the pellet
+    # sensor is disabled. Uses two separately-constructed backends (rather than
     # mutating+re-signalling one already-created root item) because a QQuickItem
     # created standalone via QQmlComponent.create() with no window does not re-run
     # its `visible` binding on a later notify signal — that's an offscreen/no-window
@@ -338,7 +338,7 @@ def test_hopper_card_loads_and_visible_follows_hopper_enabled():
 
 
 def test_cook_time_bar_shows_elapsed_when_no_timer_running():
-    # CookTimeBar.qml (Task 14, D2): with no active timer (backend.timerText == ""),
+    # CookTimeBar.qml: with no active timer (backend.timerText == ""),
     # shows the "COOK TIME" label and backend.cookElapsedText as the value.
     _app()
     backend = _stub_backend(status={"mode": "Hold", "units": "F", "outpins": {}})
@@ -357,7 +357,7 @@ def test_cook_time_bar_shows_elapsed_when_no_timer_running():
 
 
 def test_cook_time_bar_shows_countdown_when_timer_running():
-    # CookTimeBar.qml (Task 14, D2): when a timer is active (backend.timerText
+    # CookTimeBar.qml: when a timer is active (backend.timerText
     # non-empty), shows backend.timerLabel / backend.timerText instead.
     _app()
     backend = _stub_backend(status={"mode": "Hold", "units": "F", "outpins": {}})
@@ -375,7 +375,7 @@ def test_cook_time_bar_shows_countdown_when_timer_running():
 
 
 def test_alert_pill_has_fixed_width_and_keeps_message_shown_props():
-    # Alert.qml (Task 14 restyle): keeps its message/shown public props, is a
+    # Alert.qml: keeps its message/shown public props, is a
     # fixed-width pill (Layout.preferredWidth: 210) so DashScreen's cook-time bar
     # can reflow to fill the space when the alert is hidden. Wrapped in a real
     # RowLayout so the Layout.preferredWidth attached property actually applies
@@ -404,7 +404,7 @@ def test_alert_pill_has_fixed_width_and_keeps_message_shown_props():
 
 
 def test_control_panel_loads_and_preserves_wiring():
-    # ControlPanel.qml (Task 14 restyle): visuals change but the Repeater model,
+    # ControlPanel.qml: visuals change but the Repeater model,
     # Actions.activate wiring, and openMenu/openInput signals are unchanged.
     _app()
     backend = _stub_backend(status={"mode": "Hold", "units": "F", "outpins": {}})
@@ -423,7 +423,7 @@ def test_control_panel_loads_and_preserves_wiring():
 
 def test_duty_pill_loads_with_label_value_highlighted():
     # DutyPill.qml: presentational pill with label/value/highlighted props.
-    # Used by DashScreen (Task 15) to show duty cycles and status.
+    # Used by DashScreen to show duty cycles and status.
     _app()
     backend = _stub_backend()
     engine = _engine_with_backend(backend)

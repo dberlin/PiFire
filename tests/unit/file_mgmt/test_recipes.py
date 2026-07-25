@@ -1,6 +1,6 @@
 """Unit coverage for file_mgmt/recipes.py's `create_recipefile`.
 
-Latent bug (task 6 of the bugfix plan): unlike its cookfile counterpart
+Latent bug: unlike its cookfile counterpart
 (file_mgmt/cookfile.py's `create_cookfile`, which loops appending
 `-1`/`-2`/... on a title collision), `create_recipefile()` derived its title
 from `datetime.now().strftime("%Y-%m-%d--%H%M")` (minute resolution) with NO

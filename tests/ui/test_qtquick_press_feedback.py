@@ -47,8 +47,8 @@ def test_press_overlay_defaults():
     assert fx.property("opacity") == 0
 
 
-# Every component that had press feedback wired in — loading each guards
-# against a QML syntax slip in the edits.
+# Components with press feedback wired in; loading each guards against a
+# QML syntax slip in that wiring.
 @pytest.mark.parametrize(
     "qml_file",
     [

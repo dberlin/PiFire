@@ -408,7 +408,7 @@ def test_hold_controller_fan_duty_sticky_latch_suppresses_temp_profile():
     # re-enable the temp-profile path for the rest of this _work_cycle
     # invocation -- it stays latched at the last MPC duty rather than
     # reverting to (or ever computing) a temp-profile value.
-    # re-frozen: capability now holds from tick 1 (Task 4), so the runner must
+    # re-frozen: capability now holds from tick 1, so the runner must
     # declare commands_fan=True to represent "this is a fan-owning MPC" --
     # suppression is no longer a runtime latch that only engages after the
     # first fan command arrives.
@@ -680,7 +680,6 @@ def test_hold_controller_receives_current_tick_ptemp():
     # submitted only at each gate-fire, and used the PREVIOUS iteration's
     # probe value (self.state.ptemp, stashed by check_safety at the end of
     # the prior tick) rather than this tick's fresh ptemp -- empirically
-    # verified (pre-sense->safety->act commit a68b3bb) to produce [205, 210]
-    # under this exact setup: one entry short and one step behind the
-    # sequence below.
+    # verified to produce [205, 210] under this exact setup: one entry short
+    # and one step behind the sequence below.
     assert runner.submitted_temps == [205, 210, 215]

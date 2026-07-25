@@ -473,7 +473,7 @@ class DisplayBase:
         self.display_data[self.display_profile]["dash"] = display_data_dash_list
 
     """
-    ============== Ember Dashboard Helpers (Task 24) =============
+    ============== Ember Dashboard Helpers =============
 
     Pure(ish) helpers that compute the live-data payload for the new ember
     flex objects. Kept as staticmethods so they can be unit-tested directly
@@ -567,19 +567,19 @@ class DisplayBase:
 
     @staticmethod
     def _cook_time_data(status_data, now):
-        """Returns {'label':..., 'value':...} for the cook_time object (D2):
+        """Returns {'label':..., 'value':...} for the cook_time object:
         the active countdown (mm:ss) when a timer is running, else the
         elapsed cook time (H:MM:SS) computed from startup_timestamp, mirroring
         display/qtbackend.py's _update_timer_text/_update_cook_elapsed.
 
-        NOTE: Task 25 (the bespoke 1280x720 layout, not yet written as of this
-        task) has not yet defined the FlexObject type/contract for the
-        'cook_time' object name. This shape (data.label/data.value) matches
-        the duty_pill contract as the closest existing analog; if Task 25
-        instead reuses the 'timer' type (TimerStatus), that widget reads
-        top-level 'label' and data['seconds'] rather than data['value'], so
-        _update_dash_objects also mirrors 'label' at the top level for
-        compatibility. This should be revisited once Task 25 lands.
+        NOTE: the not-yet-built 1280x720 bespoke layout has not yet defined
+        the FlexObject type/contract for the 'cook_time' object name. This
+        shape (data.label/data.value) matches the duty_pill contract as the
+        closest existing analog; if that layout instead reuses the 'timer'
+        type (TimerStatus), that widget reads top-level 'label' and
+        data['seconds'] rather than data['value'], so _update_dash_objects
+        also mirrors 'label' at the top level for compatibility. This should
+        be revisited once that layout lands.
         """
         seconds, label = DisplayBase._timer_seconds_and_label(status_data, now)
         if seconds > 0:
@@ -891,7 +891,7 @@ class DisplayBase:
                 self.display_object_list[self.dash_map["timer"]].update_object_data(object_data)
 
     def _update_cook_time(self):
-        """Update Cook Time (ember dash, D2) - active countdown, else elapsed cook time"""
+        """Update Cook Time (ember dash) - active countdown, else elapsed cook time"""
         if "cook_time" in self.dash_map.keys():
             object_data = self.display_object_list[self.dash_map["cook_time"]].get_object_data()
             new_data = self._cook_time_data(self.status_data, time.time())

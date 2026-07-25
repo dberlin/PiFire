@@ -1,9 +1,9 @@
 """Frozen pixel-hash baseline for the three legacy fixed DisplayBase classes.
 
-This is the golden contract for the _base_fixed merge (Phase B, Tasks 4-5):
-every case here must render to the exact same pixel hash on the merged base
-as it does today on the three separate, unmodified bases (with the sole,
-explicitly documented exception of the Task 5 240x240 re-baseline).
+This is the golden contract for the _base_fixed merge: every case here must
+render to the exact same pixel hash on the merged base as it does today on
+the three separate, unmodified bases (with the sole, explicitly documented
+exception of the 240x240 re-baseline).
 
 CAPTURE_GOLDEN=1 must NEVER be used again after this file's initial commit,
 except for that documented re-baseline.

@@ -1,4 +1,4 @@
-"""Task 2 (phase2a settings foundation): `POST /api/settings_update`
+"""`POST /api/settings_update`
 (`blueprints/api/routes.py`'s `_api_post_settings_update` action).
 
 Uses the same lightweight `app.test_client()` pattern as
@@ -77,9 +77,9 @@ def test_settings_update_rejects_unknown_flag(client):
 
 
 # ---------------------------------------------------------------------------
-# S2 Task 5: two-layer rejection. Layer 1 (PartialSettingsSchema, on the raw
+# Two-layer rejection. Layer 1 (PartialSettingsSchema, on the raw
 # delta) catches a structurally- or type-bad delta before anything is
-# touched. Layer 2 (write_settings()'s now-strict gate, on the merged tree)
+# touched. Layer 2 (write_settings()'s strict gate, on the merged tree)
 # catches anything the sparse delta alone couldn't evaluate. Both layers
 # leave the store untouched and return the same {"result": "error", ...}
 # envelope shape as every other failure path in this action -- no 500.
@@ -87,7 +87,7 @@ def test_settings_update_rejects_unknown_flag(client):
 
 
 def test_settings_update_rejects_bad_field_type_layer2_full_tree(client):
-    """Brief's canonical pin: a bad scalar nested two levels deep. Also
+    """Canonical pin: a bad scalar nested two levels deep. Also
     layer-1-catchable (maxtemp is typed on PartialSettingsSchema too), but
     pinned here as the full round-trip: envelope + untouched store."""
     before = read_settings()
@@ -119,7 +119,7 @@ def test_settings_update_rejects_structurally_bad_delta_layer1(client):
 
 
 # ---------------------------------------------------------------------------
-# Final-review fix: Layer 1's PartialSettingsSchema.model_validate(...,
+# Layer 1's PartialSettingsSchema.model_validate(...,
 # strict=True) inherits SettingsSchema's cross-field model_validators
 # (PwmSettings._check_profiles, SmartStart._check_profile_count,
 # SettingsSchema._check_startup_pwm_duty_cycle). On a sparse delta those ran
@@ -134,12 +134,13 @@ def test_settings_update_rejects_structurally_bad_delta_layer1(client):
 
 
 def test_settings_update_accepts_sparse_delta_valid_against_store_not_defaults(client):
-    """Proven-reachable repro (final review): pwm.min_duty_cycle=10 in the
+    """Proven-reachable repro: pwm.min_duty_cycle=10 in the
     store (legitimately settable via PwmTab; schema has no `ge` floor on it),
     then StartupTab's sparse delta {"startup": {"pwm_duty_cycle": 15}}. 15 is
     within the STORE's [10, 100] but below the schema DEFAULT's min of 20 --
     pre-fix, Layer 1 falsely rejected this against the default; Layer 2 (the
-    merged, real tree) has always accepted it. Pre-S2 this save worked."""
+    merged, real tree) has always accepted it. Before the strict schema
+    existed, this save worked."""
     settings = read_settings()
     settings["pwm"]["min_duty_cycle"] = 10
     write_settings(settings)

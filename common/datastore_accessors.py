@@ -298,7 +298,7 @@ def write_settings(settings):
     """
     Write all settings to SQLite DB (source of truth at runtime).
 
-    Strict-validates the tree first (S2 Task 5): validate_settings_tree()
+    Strict-validates the tree first: validate_settings_tree()
     raises SettingsValidationError on any schema violation, BEFORE
     lastupdated.time is stamped or anything is persisted -- a rejected write
     leaves the store untouched (atomic). The normalized dump it returns
@@ -341,7 +341,7 @@ def read_settings_store():
     # etc.) assume read_settings() always returns a fully-populated dict.
     # Before this SQLite source-of-truth split, that guarantee came from the
     # settings.json file always existing; now it must come from here until
-    # the first-boot import (Task 13) seeds settings:general at startup.
+    # the first-boot import seeds settings:general at startup.
     return _read_json_blob("settings:general", default_settings)
 
 

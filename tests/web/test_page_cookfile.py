@@ -19,8 +19,8 @@ below hand-builds a minimal-but-valid `.pifire` zip directly matching the
 schema `_default_cookfilestruct()`/`create_cookfile()` produce, using the
 live server's own `settings["versions"]["cookfile"]` value so
 `read_cookfile()`'s version-gate (file version >= settings version) passes.
-Two latent crashers were found while sizing the minimum viable content (see
-task report): `prepare_event_totals()` (common/app.py) does `events[-1]`/
+Two latent crashers were found while sizing the minimum viable content:
+`prepare_event_totals()` (common/app.py) does `events[-1]`/
 `events[0]`/`events[-2]` unconditionally -- an empty or single-entry
 `events.json` throws IndexError -- and `prepare_csv()` does
 `data[0].keys()` unconditionally -- an empty `raw_data.json` does too. Both
@@ -539,7 +539,7 @@ def test_cookfile_update_comments_full_lifecycle_via_direct_post(live_server, pa
     # to read_json_file_data(), so the caller (real JS) always sends the
     # FULL path. A bare filename here silently no-ops (read_json_file_data
     # can't find the zip relative to cwd, returns status != "OK") rather
-    # than 404ing -- discovered while writing this test; see task report.
+    # than 404ing.
     cookfilepath = history_dir + filename
 
     new_resp = page.request.post(
@@ -672,7 +672,7 @@ def test_cookfile_update_bare_get_returns_error(live_server, page):
 
 
 def test_cookfile_update_media_bare_filename_returns_error(live_server, page, _isolated_history_folder):
-    """Task 11: `media` branch reads `read_json_file_data(filename, "comments")`
+    """The `media` branch reads `read_json_file_data(filename, "comments")`
     without checking `status`. For a bare/nonexistent filename that read
     fails and returns `({}, "Error: Unspecified")`, but the branch inits
     `result = "OK"` and loops `for index in range(0, len(comments))` --
@@ -694,7 +694,7 @@ def test_cookfile_update_media_bare_filename_returns_error(live_server, page, _i
 
 
 def test_cookfile_update_comments_commentnew_bare_filename_returns_error(live_server, page, _isolated_history_folder):
-    """Task 11: `comments` branch reads `cookfiledata, status =
+    """The `comments` branch reads `cookfiledata, status =
     read_json_file_data(...)` but never checks `status` before the
     `commentnew` sub-branch does `cookfiledata.append(...)`. For a bare/
     nonexistent filename the read fails and returns `{}` (a dict, not a

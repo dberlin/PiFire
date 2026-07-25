@@ -32,8 +32,8 @@ def test_dash_background_is_bespoke_ember_background():
 
 
 def test_profile_1_dash_is_bespoke_ember_layout():
-    """Task 25: profile_1.dash is a bespoke layout built from the new ember
-    flexobject types (Tasks 17-23), not a scaled copy of the 800x480 source."""
+    """profile_1.dash is a bespoke layout built from the new ember
+    flexobject types, not a scaled copy of the 800x480 source."""
     d = load_json(OUT)
     dash = d["profile_1"]["dash"]
     names = [obj["name"] for obj in dash]
@@ -64,8 +64,8 @@ def test_profile_1_dash_objects_have_common_flexobject_keys():
 
 
 def test_profile_2_dash_is_untouched_scaled_layout():
-    """profile_2 (portrait) is not part of Task 25 - it stays the scaled
-    800x480-derived layout used by every other resolution."""
+    """profile_2 (portrait) is not part of the bespoke 1280x720 ember layout -
+    it stays the scaled 800x480-derived layout used by every other resolution."""
     d = load_json(OUT)
     names = [obj["name"] for obj in d["profile_2"]["dash"]]
     assert "primary_gauge" in names
@@ -83,10 +83,11 @@ def _assert_scaled(so, oo, xoff, yoff):
 
 
 def test_transform_matches_source_for_still_scaled_sections():
-    """Task 25 only replaces profile_1.dash and metadata.dash_background.
-    profile_1's home/menus/input and everything in profile_2 (home/dash/
-    menus/input) remain uniformly scaled from the 800x480 source, exactly
-    like every other resolution this generator produces."""
+    """The bespoke 1280x720 ember layout only replaces profile_1.dash and
+    metadata.dash_background. profile_1's home/menus/input and everything in
+    profile_2 (home/dash/menus/input) remain uniformly scaled from the
+    800x480 source, exactly like every other resolution this generator
+    produces."""
     src = load_json(SRC)
     out = load_json(OUT)
     for profile, (xoff, yoff) in OFFSETS.items():

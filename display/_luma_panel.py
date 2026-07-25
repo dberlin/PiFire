@@ -17,9 +17,9 @@ PiFire Display Interface Library
    Each driver sets `_LUMA_PANEL_CLASS` to its own luma.lcd.device panel
    class and imports that class itself -- this mixin does not hard-import
    any specific panel. Width/height are read from the shim's
-   `_NOMINAL_WIDTH`/`_NOMINAL_HEIGHT` class attributes (Phase B), which
-   equal the literals the drivers used to hardcode (ili9341: 320/240,
-   ili9488: 480/320).
+   `_NOMINAL_WIDTH`/`_NOMINAL_HEIGHT` class attributes, which equal the
+   literals the drivers used to hardcode (ili9341: 320/240, ili9488:
+   480/320).
 
    The `em` variants (ili9341em, ili9488em) additionally pass an explicit
    `spidev.SpiDev()` instance into `spi(...)`; those two drivers set
@@ -49,8 +49,7 @@ PiFire Display Interface Library
    are not byte-identical either (extra rotation handling, no
    .clear()/.hide()/.show()). st7789e keeps its own inline methods.
 
-   Phase C, Task 4. No behavior change: see
-   tests/ui/test_fixed_base_drivers_load.py.
+   No behavior change: see tests/ui/test_fixed_base_drivers_load.py.
 
 *****************************************
 """

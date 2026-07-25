@@ -14,8 +14,7 @@ PiFire Display Interface Library
    Unlike the rotary-encoder mixins in _encoder_input.py, this _event_detect
    has no `input_counter` gate.
 
-   Phase C, Task 3. No behavior change: see
-   tests/ui/test_driver_input_behavior.py.
+   No behavior change: see tests/ui/test_driver_input_behavior.py.
 
 *****************************************
 """

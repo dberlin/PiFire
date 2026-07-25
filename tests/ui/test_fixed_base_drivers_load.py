@@ -1,6 +1,6 @@
-"""Task 6 (Phase B): prove the _base_240x240/_base_240x320/_base_320x480 shims
-are transparent to every one of the 16 legacy display driver subclasses, and
-that the wizard's display driver manifest still resolves all of them.
+"""Prove the _base_240x240/_base_240x320/_base_320x480 shims are transparent
+to every one of the 16 legacy display driver subclasses, and that the
+wizard's display driver manifest still resolves all of them.
 
 Each driver imports a real hardware library that is not installed in this
 dev/CI environment (luma, ST7789 (Pimoroni), gpiozero, pyky040, spidev). None
@@ -28,11 +28,11 @@ common, which it imports at module scope) must already be imported for real
 BEFORE any hardware-stub overlay is installed. If a driver is imported for
 the first time while sys.modules already contains the fake luma/pyky040/etc.
 entries, `_init_background`'s call to `PIL.Image.open` on a perfectly valid
-JPEG asset intermittently raises `UnidentifiedImageError` (empirically
-confirmed while writing this test: instantiating st7789e first through the
-overlay failed there 100% of the time; pre-warming `display._base_fixed`
-before installing any overlay fixed it every time). Pre-warming below avoids
-that whole hazard rather than chasing it further.
+JPEG asset intermittently raises `UnidentifiedImageError` (confirmed
+empirically: instantiating st7789e first through the overlay fails there
+100% of the time; pre-warming `display._base_fixed` before installing any
+overlay fixes it every time). Pre-warming below avoids that whole hazard
+rather than chasing it further.
 """
 
 import importlib
@@ -60,7 +60,7 @@ EXPECTED_DIMENSIONS = {
     "320x480": (480, 320),  # landscape
 }
 
-# Expected min_transition_delay per shim (Task 5): the one place the unified
+# Expected min_transition_delay per shim: the one place the unified
 # _base_fixed loop still varies per resolution.
 EXPECTED_DELAY = {
     "240x240": 1.0,
@@ -181,8 +181,8 @@ def test_driver_imports_and_instantiates(case):
     assert (d.WIDTH, d.HEIGHT) == EXPECTED_DIMENSIONS[resolution], (
         f"{module_path}: expected {EXPECTED_DIMENSIONS[resolution]} at rotation 0, got {(d.WIDTH, d.HEIGHT)}"
     )
-    # Task 5 added min_transition_delay as a class attribute on the shim;
-    # this proves it reaches every driver subclass unchanged.
+    # min_transition_delay is a class attribute on the shim; this proves it
+    # reaches every driver subclass unchanged.
     assert d.min_transition_delay == EXPECTED_DELAY[resolution], (
         f"{module_path}: expected min_transition_delay {EXPECTED_DELAY[resolution]}, got {d.min_transition_delay}"
     )

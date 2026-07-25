@@ -1,20 +1,19 @@
-"""Task 1 (Phase C): characterize the rotary-encoder and button INPUT
-behavior of the fixed-base display drivers before it is extracted into
-shared mixins.
+"""Characterize the rotary-encoder and button INPUT behavior of the
+fixed-base display drivers before it is extracted into shared mixins.
 
 No test exercises `_inc_callback`/`_dec_callback`/`_click_callback`/
 `_up_callback`/`_down_callback`/`_enter_callback`/`_event_detect` today --
-Phase B's `test_fixed_base_drivers_load.py` only proves the drivers
-construct; it never drives a single callback. This file is the
-characterization net: it pins CURRENT behavior (quirks included, not
-"fixed") for the four input shapes found across the 16 drivers:
+`test_fixed_base_drivers_load.py` only proves the drivers construct; it
+never drives a single callback. This file is the characterization net: it
+pins CURRENT behavior (quirks included, not "fixed") for the four input
+shapes found across the 16 drivers:
 
   * Group A: debounced rotary encoder (6 of the 7 `*e`/`*em` drivers),
     represented here by `ili9341e`.
   * Group A with a divergence: `st7789e`'s `_event_detect` additionally
     nulls `in_data`/`status_data` and sets `monitor_display = False` --
-    a 3-line difference from the other 6 encoder drivers that the Phase C
-    mixin extraction must preserve, not silently unify away.
+    a 3-line difference from the other 6 encoder drivers that the mixin
+    extraction must preserve, not silently unify away.
   * Group B: trivial rotary encoder (no debounce state at all), represented
     here by `st7789_240x320e`.
   * Button input (`gpiozero.Button`), represented here by `ili9341b`,
@@ -186,8 +185,8 @@ def test_group_a_click_callback_sets_enter_event_and_flag(group_a_driver):
 
 
 def test_group_a_enter_received_cancels_a_pending_up(group_a_driver):
-    """Pin the quirk described in the Phase C brief: once enter_received is
-    True, a subsequent _inc_callback does NOT set input_event/input_counter
+    """Pin this quirk: once enter_received is True, a subsequent
+    _inc_callback does NOT set input_event/input_counter
     (the `if not self.enter_received:` guard suppresses it) -- and the
     callback consumes/clears enter_received on its way out, because the
     `time.time() - self.last_movement_time < 0.3` branch reads as
@@ -515,7 +514,7 @@ def test_st7789e_event_detect_also_nulls_in_data_and_status_data(st7789e_driver)
     # The 3-line divergence from the other 6 encoder drivers (ili9341e,
     # ili9341em, ili9488e, ili9488em, st7789_240x320e/st7789v_240x320e's
     # shared shape): st7789e's _event_detect additionally sets in_data and
-    # status_data to None and monitor_display to False. Task 2's mixin
+    # status_data to None and monitor_display to False. The mixin
     # extraction must preserve this as a driver-specific override, not
     # silently drop it during unification.
     d = st7789e_driver

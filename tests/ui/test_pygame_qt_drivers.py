@@ -1,4 +1,4 @@
-"""Task 8: cover the pygame/Qt/DSI display drivers not exercised elsewhere:
+"""Cover the pygame/Qt/DSI display drivers not exercised elsewhere:
 
   pygame_64x128.py    -- standalone Display class (no _base_fixed/_base_flex
                           parent), tiny 128x64 debug panel.
@@ -737,11 +737,8 @@ def test_dsi_base_input_always_enabled_even_when_input_types_none(monkeypatch):
     config with an empty (or "none") `input_types_supported` list ends up
     with `input_enabled is True` on every _base_dsi-derived driver.
 
-    This behavior was previously pinned by the removed protoflex module's
-    `test_protoflex_no_input_types_disables_nothing_input_enabled_flag`; that
-    test was deleted along with the module, leaving this quirk -- now shared
-    by 5 modules instead of 1 -- with zero coverage. This test restores it
-    against the shared engine directly."""
+    This quirk is shared by all 5 _base_dsi-derived modules, so this test
+    pins it directly against the shared engine."""
     d = _make_dsi(monkeypatch, input_types_supported=[])
     assert d.input_button is False
     assert d.input_encoder is False

@@ -1,11 +1,12 @@
 """Every writer OUTSIDE the settings blueprint must produce a strictly-valid
 settings tree.
 
-Pre-enforcement matrix (S2 Task 4): write_settings() does not yet validate;
-these tests call validate_settings_tree() on the store's tree (or on the
-value about to be persisted) after each writer runs, so handler bugs surface
-BEFORE the Task-5 gate flips validation on for real. validate_settings_tree()
-is used purely as a test oracle -- enforcement is NOT flipped here.
+These tests call validate_settings_tree() on the store's tree (or on the
+value about to be persisted) after each writer runs, independently of
+write_settings()'s own enforcement gate (see
+tests/unit/common/test_write_settings_strict.py), so handler bugs surface
+here directly -- validate_settings_tree() is used purely as a test oracle in
+this file.
 
 Scope: blueprints/admin/routes.py, blueprints/mobile/socket_io.py,
 common/api_commands.py, blueprints/history/routes.py, blueprints/dash/routes.py,
@@ -13,9 +14,9 @@ blueprints/wizard/routes.py, blueprints/api/routes.py, common/app.py,
 notify/notifications.py, display/_base_flex.py, updater.py, wizard.py, plus
 the settings-migration matrix (common/settings_migration.py).
 
-Harness: reuses Task 3's `ds` (tests/conftest.py, function-scoped temp-SQLite
-datastore) + plain `flask_app.test_client()` pattern for every HTTP-routed
-writer (proven by tests/characterization/test_settings_writers_strict.py and
+Harness: reuses the shared `ds` fixture (tests/conftest.py, function-scoped
+temp-SQLite datastore) + plain `flask_app.test_client()` pattern for every
+HTTP-routed writer (proven by tests/characterization/test_settings_writers_strict.py and
 tests/web/test_api_settings_update.py) -- real Flask app, real routes.py
 dispatch, real write_settings()/SQLite round-trip, no Playwright/Chromium
 (agent envs skip [chromium] tests, per project convention). Socket.IO
@@ -23,13 +24,13 @@ handlers are driven directly as plain functions (they are not HTTP routes),
 mirroring tests/web/test_socketio_app_data.py's `sio` fixture. `ds`'s "fresh"
 datastore is seeded from cwd `./settings.json` (untracked/gitignored,
 developer-machine-specific) -- see that module's docstring. Sections that
-only assert "still strict after this write" tolerate that seeding as-is
-(matches Task 3); sections that assert exact round-tripped VALUES (units
+only assert "still strict after this write" tolerate that seeding as-is;
+sections that assert exact round-tripped VALUES (units
 conversion, migration matrix) explicitly reseed a canonical
 `default_settings()` first, so they never depend on the local machine's file.
 
-SAFETY (grepped before writing a single test in this file -- see the report
-for the full grep transcript):
+SAFETY (grepped for os.system/subprocess/reboot/shutdown across every module
+this file exercises):
   - blueprints/admin/routes.py: os.system() at 4 sites (clearevents,
     clearpelletdb x2 in factorydefaults, delete_logs) + reboot_system()/
     shutdown_system()/restart_scripts(). The `admin_client` fixture below
@@ -50,7 +51,7 @@ for the full grep transcript):
     `False` (wizard.py, via the same `no_install` fixture
     tests/unit/wizard/test_wizard_run_no_probes.py already uses) or simply
     never reached (updater.py's `-v`/`-l` flags do not call subprocess at
-    all -- confirmed by reading the source before writing the runpy test).
+    all, confirmed by reading the source).
   - common/api_commands.py, blueprints/history/routes.py,
     blueprints/dash/routes.py, blueprints/api/routes.py, common/app.py,
     notify/notifications.py, display/_base_flex.py: no os.system/subprocess
@@ -81,9 +82,9 @@ def _assert_strict(settings=None):
 
 @pytest.fixture
 def client_and_store(ds):
-    """Same fixture as tests/characterization/test_settings_writers_strict.py
-    (Task 3) -- duplicated here (rather than imported) so ruff doesn't flag a
-    cross-module fixture-as-parameter import as an unused redefinition."""
+    """Same fixture as tests/characterization/test_settings_writers_strict.py --
+    duplicated here (rather than imported) so ruff doesn't flag a cross-module
+    fixture-as-parameter import as an unused redefinition."""
     from app import app as flask_app
 
     flask_app.config.update(TESTING=True)
@@ -214,11 +215,11 @@ def test_admin_restoresettings_uploaded_file_upgrades_and_writes_strict(admin_cl
 
 
 def test_admin_restoresettings_invalid_backup_rejected_no_crash(admin_client):
-    """S2 Task 5 boundary catch: admin_page()'s dispatch wraps every handler
-    call, so write_settings()'s now-strict gate rejecting a bad uploaded
-    backup comes back as this blueprint's existing ctx.errors/index.html
-    render -- not an unhandled SettingsValidationError/500. The store is
-    left untouched (the pre-restore tree, not the bad upload)."""
+    """Boundary catch: admin_page()'s dispatch wraps every handler call, so
+    write_settings()'s strict gate rejecting a bad uploaded backup comes back
+    as this blueprint's existing ctx.errors/index.html render -- not an
+    unhandled SettingsValidationError/500. The store is left untouched (the
+    pre-restore tree, not the bad upload)."""
     before = read_settings()
     bad_backup = default_settings()
     bad_backup["safety"]["maxtemp"] = "nope"
@@ -665,10 +666,10 @@ def test_run_wizard_writes_strict(ds, no_install):
 # versions.cookfile/recipe on a fixture built from an old `versions` shape).
 # common/datastore.py's real startup path (_first_boot_import) calls
 # read_settings_file(init=True) directly and persists ITS result -- so
-# read_settings_file(init=True) is the actual reachable "writer" the S2
-# gate will eventually validate, not the bare intermediate helper. (Calling
-# upgrade_settings() alone on these fixtures does NOT pass validate_settings_tree
-# for several of them -- by design, not a bug: see the report.)
+# read_settings_file(init=True) is the actual reachable "writer" the
+# strict-validation gate cares about, not the bare intermediate helper.
+# (Calling upgrade_settings() alone on these fixtures does NOT pass
+# validate_settings_tree for several of them -- by design, not a bug.)
 # =====================================================================
 
 

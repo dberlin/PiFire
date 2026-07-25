@@ -1,7 +1,7 @@
 """Golden-master characterization for the six PID variants' update() output.
 
 Pins each variant's update() series for a fixed input under a controlled clock,
-so the PIDControllerBase refactor + dead-API removal (Phase I) are provably
+so the PIDControllerBase refactor + dead-API removal are provably
 behavior-preserving. METHOD: run-then-freeze -- the GOLDEN dict below was captured
 from the CURRENT (pre-refactor) code and must not change when methods move into
 PIDControllerBase or when the dead dispatch surface is deleted.
@@ -56,10 +56,10 @@ def _run_variant(module_name, monkeypatch):
     return out
 
 
-# GOLDEN: captured from pre-refactor code on THIS machine (see step 2 -- the plan's
-# pasted values differed beyond the 6th decimal for 5/6 variants, so per the plan's
-# own instruction ("use the machine's value"), these were regenerated here and verified
-# by hand against pid_clamping's first-update arithmetic). Do NOT hand-edit after capture.
+# GOLDEN: captured from pre-refactor code, run on THIS machine (floating-point
+# results differ beyond the 6th decimal for 5/6 variants across machines/library
+# versions, so these values are machine-specific) and verified by hand against
+# pid_clamping's first-update arithmetic. Do NOT hand-edit after capture.
 GOLDEN = {
     "pid": [1.796296, 1.365741, 0.731481, 0.435185, 0.94213, 0.877315, 0.803241, 0.831944, 0.836111, 0.855093],
     "pid_clamping": [2.352778, 0.441667, 0.061111, -0.116667, 0.1875, 0.148611, 0.104167, 0.121389, 0.123889, 0.135278],

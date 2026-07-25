@@ -37,7 +37,7 @@ Given all of the above, EVERY test in this module runs under the
 `no_real_subprocess` autouse fixture below, which monkeypatches
 `subprocess.run` (used by updater.py) and `os.system` (used directly by
 this route) to recording fakes -- for the GET-render path too, not just
-the POST actions the task brief called out. Nothing in this module ever
+the POST actions. Nothing in this module ever
 spawns a real subprocess or hits the network. Each fake git subprocess.run
 call returns a small deterministic stdout so the route's parsing logic
 (which branch is current, how many commits behind, etc.) has something
@@ -258,7 +258,7 @@ def test_show_log_action_via_direct_post(live_server, page, no_real_subprocess):
     assert ["git", "log", "origin/main", "-5", '--pretty="%h - %cr : %s"'] in no_real_subprocess.subprocess_calls
 
 
-# --- Non-hardware gate tests (Task 5) -----------------------------------
+# --- Non-hardware gate tests ---------------------------------------------
 #
 # The three update kick-offs (change_branch / do_update / do_upgrade) are
 # gated behind is_real_hardware(), mirroring update_remote_branches. The

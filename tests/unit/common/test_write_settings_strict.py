@@ -1,11 +1,11 @@
-"""S2 Task 5: write_settings() is the hard-strict enforcement gate.
+"""write_settings() is the hard-strict enforcement gate.
 
-Pre-flip (Task 3/4), the writer matrix used validate_settings_tree() as a
-test ORACLE on the side -- write_settings() itself never validated. This
-module pins the flip itself: write_settings() now calls
-validate_settings_tree() as its first statement, raising
-SettingsValidationError (and leaving the store untouched) on any invalid
-tree, both for a normal write and the flush/factory-reset path.
+Before this gate existed, the writer matrix used validate_settings_tree() as
+a test ORACLE on the side -- write_settings() itself never validated. This
+module pins the enforcement: write_settings() calls validate_settings_tree()
+as its first statement, raising SettingsValidationError (and leaving the
+store untouched) on any invalid tree, both for a normal write and the
+flush/factory-reset path.
 """
 
 import copy

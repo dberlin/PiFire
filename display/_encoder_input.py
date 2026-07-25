@@ -18,8 +18,7 @@ PiFire Display Interface Library
    extracted verbatim from st7789_240x320e.py, byte-identical to
    st7789v_240x320e.
 
-   Phase C, Task 2. No behavior change: see
-   tests/ui/test_driver_input_behavior.py.
+   No behavior change: see tests/ui/test_driver_input_behavior.py.
 
 *****************************************
 """
