@@ -23,6 +23,12 @@ const EDGE = "rgba(255,255,255,0.13)";
 // is treated as not-cooking.
 const COOKING_MODES = new Set(["Startup", "Smoke", "Hold", "Prime", "Reheat"]);
 
+// Modes in which Flask shows #pmode_group, its P-Mode control
+// (dash_default.js:248-293). Notably NOT Hold: the PID owns the cycle there, so
+// the P-Mode value is displayed but not adjustable. The badge itself is shown
+// in every mode; only the control comes and goes.
+const PMODE_EDITABLE_MODES = new Set(["Prime", "Shutdown", "Startup", "Reignite", "Smoke"]);
+
 // A soft accent tint that still tracks the active [data-accent] theme.
 const accentMix = (pct: number) => `color-mix(in srgb, var(--accent) ${pct}%, transparent)`;
 
@@ -88,6 +94,8 @@ export interface DashView {
   pillR: PillView;
   hopper: HopperView;
   lidOpen: boolean;
+  /** Whether the P-MODE pill is a control right now, or a read-only readout. */
+  pModeEditable: boolean;
 }
 
 function outputView(on: boolean, onColor: string, onStatus: string): OutputView {
@@ -188,6 +196,9 @@ export function deriveView(dash: LiveState): DashView {
     pillR,
     hopper: hopperView(dash.hopperLevel),
     lidOpen: dash.lidOpenDetected,
+    // A recipe drives the mode itself, and Flask hides the whole control panel
+    // during one -- so the pill stays read-only however the sub-mode reads.
+    pModeEditable: !dash.recipeStatus?.recipeMode && PMODE_EDITABLE_MODES.has(mode),
   };
 }
 

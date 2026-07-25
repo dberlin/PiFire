@@ -512,3 +512,54 @@ describe("Dashboard status readouts", () => {
     expect(screen.queryByText(/Recipe \|/)).not.toBeInTheDocument();
   });
 });
+
+// I1: the P-Mode value was displayed and could not be changed, while
+// command.setPMode sat there with no caller. Flask offers the control in five
+// modes and shows the badge in all of them (dash_default.js:248-293).
+describe("Dashboard P-Mode control", () => {
+  it("is a plain readout in Hold, where the PID owns the cycle", () => {
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Hold", pMode: 2 });
+    expect(screen.getByText("P-2")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /P-MODE/ })).not.toBeInTheDocument();
+  });
+
+  it("is a plain readout in Stop", () => {
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Stop", pMode: 2 });
+    expect(screen.getByText("P-2")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /P-MODE/ })).not.toBeInTheDocument();
+  });
+
+  it("becomes a button in Smoke and opens a ten-item menu", async () => {
+    const user = userEvent.setup();
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", pMode: 2 });
+    const pill = screen.getByRole("button", { name: /P-MODE/ });
+    await user.click(pill);
+
+    expect(screen.getByText("P-Mode")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "0 - Off" })).toBeInTheDocument();
+    for (let n = 1; n <= 9; n++) {
+      expect(screen.getByRole("button", { name: String(n) })).toBeInTheDocument();
+    }
+  });
+
+  it("sends the picked value through setPMode", async () => {
+    const user = userEvent.setup();
+    const command = makeCommand();
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Startup", pMode: 2 }, { command });
+    await user.click(screen.getByRole("button", { name: /P-MODE/ }));
+    await user.click(screen.getByRole("button", { name: "7" }));
+    await waitFor(() => expect(command.setPMode).toHaveBeenCalledWith(7));
+  });
+
+  // pMode is settings["cycle_data"]["PMode"] on the wire (socket_io.py:257) and
+  // comes back on the next frame. A local mirror would fight it.
+  it("keeps rendering the payload's value after a pick, with no local mirror", async () => {
+    const user = userEvent.setup();
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", pMode: 2 });
+    await user.click(screen.getByRole("button", { name: /P-MODE/ }));
+    await user.click(screen.getByRole("button", { name: "7" }));
+    await waitFor(() => expect(screen.queryByText("P-Mode")).not.toBeInTheDocument());
+    expect(screen.getByText("P-2")).toBeInTheDocument();
+    expect(screen.queryByText("P-7")).not.toBeInTheDocument();
+  });
+});

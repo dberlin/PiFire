@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { FIXTURE_DASH } from "../fixture";
-import type { ProbeData } from "../types";
+import type { LiveState, ProbeData } from "../types";
 import { deriveView } from "./deriveView";
 
 // probeCard()'s existing fields (targetStr / tgtColor / barPct / barColor) are
@@ -61,5 +61,39 @@ describe("probeCard etaStr", () => {
   // has been seen carrying a string; only a number is formattable.
   it("is null for a non-numeric eta", () => {
     expect(card({ targetReq: true, target: 203, eta: "--" }).etaStr).toBeNull();
+  });
+});
+
+// I1: the P-Mode badge is shown in every mode, but Flask offers the CONTROL
+// only in the five modes where the value is actually in play
+// (dash_default.js:248-293).
+describe("deriveView.pModeEditable", () => {
+  const at = (over: Partial<LiveState>): LiveState => ({ ...FIXTURE_DASH, ...over });
+
+  it("is editable in Prime, Shutdown, Startup, Reignite and Smoke", () => {
+    for (const mode of ["Prime", "Shutdown", "Startup", "Reignite", "Smoke"]) {
+      expect(deriveView(at({ currentMode: mode })).pModeEditable).toBe(true);
+    }
+  });
+
+  it("is NOT editable in Hold, where the PID owns the cycle", () => {
+    expect(deriveView(at({ currentMode: "Hold" })).pModeEditable).toBe(false);
+  });
+
+  it("is NOT editable in Stop, Monitor, Manual or Error", () => {
+    for (const mode of ["Stop", "Monitor", "Manual", "Error", ""]) {
+      expect(deriveView(at({ currentMode: mode })).pModeEditable).toBe(false);
+    }
+  });
+
+  it("is NOT editable during a recipe, whatever the sub-mode reads", () => {
+    expect(
+      deriveView(
+        at({
+          currentMode: "Smoke",
+          recipeStatus: { ...FIXTURE_DASH.recipeStatus, recipeMode: true },
+        }),
+      ).pModeEditable,
+    ).toBe(false);
   });
 });

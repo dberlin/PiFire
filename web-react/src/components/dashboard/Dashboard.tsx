@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
@@ -9,6 +9,7 @@ import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
 import { readTargetEdit, saveTargetEdit, type TargetEdit } from "../../helpers/notify/notifyState";
 import type { AccentName, LiveState, ProbeData } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
+import { ActionMenu, type MenuItem } from "./ActionMenu";
 import { ControlButtons } from "./ControlButtons";
 import { GrillGauge } from "./GrillGauge";
 import { HopperGauge } from "./HopperGauge";
@@ -19,6 +20,13 @@ import { SystemStatus } from "./SystemStatus";
 
 const ACCENTS: AccentName[] = ["ember", "ice", "crimson"];
 const SWATCH: Record<AccentName, string> = { ember: "#ff8a2b", ice: "#3cc7d0", crimson: "#ff6a5a" };
+
+// Flask's P-Mode dropup: ten items, 0 labelled "0 - Off"
+// (_macro_dash_default.html:95-104).
+const PMODE_ITEMS: MenuItem[] = Array.from({ length: 10 }, (_, n) => ({
+  label: n === 0 ? "0 - Off" : String(n),
+  value: String(n),
+}));
 
 interface DashboardProps {
   dash: LiveState;
@@ -86,6 +94,8 @@ export function Dashboard({
   // mirrored locally. That matters because the backend clears req/target/eta by
   // itself the moment the target is reached (notify/notifications.py:109-111) --
   // a local copy would fight it.
+  const [pModeOpen, setPModeOpen] = useState(false);
+
   const [notifyLabel, setNotifyLabel] = useState<string | null>(null);
   const [notifySaving, setNotifySaving] = useState(false);
   const [notifyError, setNotifyError] = useState<string | null>(null);
@@ -447,7 +457,10 @@ export function Dashboard({
               animate={animate}
             />
             <div data-pf="pills" style={{ display: "flex", gap: 14, height: 64, flex: "0 0 64px" }}>
-              <Pill p={view.pillL} />
+              <Pill
+                p={view.pillL}
+                onClick={view.pModeEditable ? () => setPModeOpen(true) : undefined}
+              />
               <Pill p={view.pillR} />
             </div>
             <HopperGauge h={view.hopper} />
@@ -456,6 +469,20 @@ export function Dashboard({
 
         {/* Inside the stage: .pf-modal-scrim is position:absolute, so it covers
             the 1280x720 board rather than the whole viewport. */}
+        {/* One POST, not Flask's two chained ones: /api/set/pmode/{n} writes
+            cycle_data.PMode AND sets control["settings_update"] in one merge,
+            and range-checks 0 <= n < 10 server-side
+            (common/api_commands.py:377-383). */}
+        <ActionMenu
+          open={pModeOpen}
+          title="P-Mode"
+          items={PMODE_ITEMS}
+          onCancel={() => setPModeOpen(false)}
+          onPick={(value) => {
+            setPModeOpen(false);
+            void command.setPMode(Number(value));
+          }}
+        />
         {notifyProbe !== null && (
           <ProbeNotifyModal
             open
@@ -474,21 +501,44 @@ export function Dashboard({
   );
 }
 
-function Pill({ p }: { p: PillView }) {
+function Pill({ p, onClick }: { p: PillView; onClick?: () => void }) {
+  // A <button> defaults to a different font, padding, border and background
+  // than a <div>, so every one of those is reset explicitly here -- the two
+  // variants must measure identically, which is exactly what the fidelity gate
+  // checks.
+  const box: CSSProperties = {
+    flex: 1,
+    borderRadius: 14,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 1,
+    background: p.bg,
+    border: `1.5px solid ${p.border}`,
+    font: "inherit",
+    padding: 0,
+    margin: 0,
+    textAlign: "center",
+    appearance: "none",
+  };
+  if (onClick !== undefined) {
+    return (
+      <button type="button" style={{ ...box, cursor: "pointer" }} onClick={onClick}>
+        <PillBody p={p} />
+      </button>
+    );
+  }
   return (
-    <div
-      style={{
-        flex: 1,
-        borderRadius: 14,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 1,
-        background: p.bg,
-        border: `1.5px solid ${p.border}`,
-      }}
-    >
+    <div style={box}>
+      <PillBody p={p} />
+    </div>
+  );
+}
+
+function PillBody({ p }: { p: PillView }) {
+  return (
+    <>
       <span
         style={{
           font: "600 10px 'Barlow'",
@@ -509,6 +559,6 @@ function Pill({ p }: { p: PillView }) {
       >
         {p.value}
       </span>
-    </div>
+    </>
   );
 }
