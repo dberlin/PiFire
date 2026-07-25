@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
+import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { deriveView, fmtDuration, type PillView } from "../../helpers/dashboard/deriveView";
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
 import { readTargetEdit, saveTargetEdit, type TargetEdit } from "../../helpers/notify/notifyState";
@@ -52,6 +53,7 @@ export function Dashboard({
   const view = deriveView(dash);
   const navigate = useNavigate();
   const now = useClock();
+  const health = useControlHealth(controlAlive, apiBase);
   // `fitRef` goes on the .pf-fit box below: inside the app shell that box is
   // the area left under the navbar, not the whole viewport.
   const { scale, ref: fitRef } = useFitScale(1280, 720);
@@ -185,11 +187,21 @@ export function Dashboard({
               style={{
                 font: "600 13px 'Barlow'",
                 letterSpacing: 1,
-                color: phase === "demo" ? "#7d7264" : controlAlive ? "#8fe09a" : "#ff8b82",
+                color: phase === "demo" ? "#7d7264" : health.alive ? "#8fe09a" : "#ff8b82",
               }}
             >
-              {phase === "demo" ? "DEMO" : controlAlive ? "LIVE" : "CTRL OFFLINE"}
+              {phase === "demo" ? "DEMO" : health.alive ? "LIVE" : "CTRL OFFLINE"}
             </span>
+            {/* The offline signal is a blob nothing can clear (see
+                helpers/dashboard/controlHealth.ts), so offer to ask the control
+                process directly rather than leaving the user staring at a
+                verdict from up to 30 seconds ago. Not rendered in demo mode:
+                there is no backend to ask. */}
+            {!health.alive && phase !== "demo" && (
+              <button className="pf-toggle" onClick={health.recheck} disabled={health.rechecking}>
+                Recheck
+              </button>
+            )}
             <span
               data-pf="clock"
               style={{
@@ -368,7 +380,7 @@ export function Dashboard({
               )}
             </div>
 
-            <ControlButtons dash={dash} command={command} disabled={!controlAlive} />
+            <ControlButtons dash={dash} command={command} disabled={!health.alive} />
           </div>
 
           {/* Right: system + pills + hopper */}

@@ -6,6 +6,9 @@ import { ConfirmAction } from "./ConfirmAction";
 import { PwmEntry } from "./PwmEntry";
 import { SetpointEntry } from "./SetpointEntry";
 
+/** The two ways out of a running cook. These are never withheld. */
+const SAFETY_LABELS = new Set(["Stop", "Shutdown"]);
+
 // Mode-driven control row, styled to the design's button grid. Each press
 // dispatches a `ButtonAction` (command / setpoint / confirm) against the REST
 // `CommandClient` (see buttonsForMode.ts / command.ts).
@@ -65,11 +68,20 @@ export function ControlButtons({
             ? "color-mix(in srgb, var(--accent) 16%, transparent)"
             : "#1d1813";
         const color = danger ? "#ff8b82" : "#e8dfd1";
+        // `disabled` means "the control process is unreachable" -- which is
+        // exactly when a user most needs to stop the grill, and a state this
+        // flag can be stuck in on a HEALTHY system (see
+        // helpers/dashboard/controlHealth.ts). Flask never disables anything
+        // here: it shows a dismissible banner and leaves every button live
+        // (templates/base.html:117-125). Keep the dimming as a signal, never
+        // withhold the exits. `busy` still gates everything -- that one is a
+        // real in-flight request, not a guess about the backend.
+        const off = (disabled && !SAFETY_LABELS.has(b.label)) || busy;
         return (
           <button
             key={b.label}
             className="pf-btn"
-            disabled={disabled || busy}
+            disabled={off}
             style={{
               borderColor: border,
               background: bg,

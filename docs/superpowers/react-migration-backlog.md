@@ -131,19 +131,43 @@ be re-sent after `timerStop`. Two writes inside one control cycle is exactly the
 clobber the original fix addressed: the drain applies queued partials with
 `json_patch`, which replaces arrays wholesale, so the last write wins outright.
 
-### 4. Remaining audit findings
+### 4. The errors blob is write-only from the web tier
+
+`read_errors()` (`common/datastore_accessors.py:126-132`) is a plain,
+non-destructive JSON read — unlike `warnings` on the very same payload, which
+drains and self-heals frame to frame. Its only clearer, `flush_errors()`, has
+exactly one production caller: `control.py:107-109`, at boot. So once
+`_check_control_status` (`blueprints/mobile/socket_io.py:1009-1019`) appends
+"The control process did not respond…", that string is on every
+`socket_dash_data` frame until `control.py` restarts. No HTTP route, socket
+action or API command clears it.
+
+Worse, it can be written on a **healthy** system: `get_system_command_output`
+(`common/app.py:31-44`) pops the shared `queue_systemo` and discards every entry
+whose command does not match, so any of its seven consumers can eat the
+`check_alive` reply, the 1 s timeout expires, and the sticky error lands anyway.
+Same class as triage Slice 9 item 1, which already owns
+`get_system_command_output`.
+
+The frontend has done what it can: it no longer withholds Stop/Shutdown on this
+signal, and offers a **Recheck** that asks `GET /api/sys/check_alive` directly
+(`web-react/src/helpers/dashboard/controlHealth.ts`). The backend half — an
+endpoint that clears the error, or a liveness signal that is not sticky — is
+still open.
+
+### 5. Remaining audit findings
 
 `docs/superpowers/audits/2026-07-25-audit-triage.md` — roughly 40 findings in 10
 slices. Slices for save-failure, notifications, guards, and the dashboard have
 been written and executed or planned; the rest are untouched.
 
-### 5. Accessor rename WAVE 2
+### 6. Accessor rename WAVE 2
 
 Four remaining items, including `read_warnings()` → `drain_warnings()`. That one
 is a genuine cross-consumer bug, not just a naming problem: the dash routes and
 socketio both call it, so whichever polls first consumes the other's warnings.
 
-### 6. Un-migrated Flask pages
+### 7. Un-migrated Flask pages
 
 Roughly ordered by daily-use value:
 

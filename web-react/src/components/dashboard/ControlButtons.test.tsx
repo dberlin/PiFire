@@ -149,3 +149,35 @@ describe("ControlButtons", () => {
     await waitFor(() => expect(command.manualPwm).toHaveBeenCalledWith(75));
   });
 });
+
+// D1: `disabled` is set from controlAlive, which is derived from the errors
+// blob -- a blob that never clears without a control.py restart and that a
+// queue race can write on a perfectly healthy system. Withholding the exits in
+// exactly that state is React's own invention; Flask leaves every button live
+// and shows a dismissible banner (templates/base.html:117-125).
+describe("ControlButtons never withholds the exits", () => {
+  it("keeps Stop and Shutdown live while dimming the rest", () => {
+    render(<ControlButtons dash={at("Hold")} command={stubCommand()} disabled={true} />);
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Shutdown" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Smoke" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Hold" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Smoke+" })).toBeDisabled();
+  });
+
+  it("keeps Stop live in Manual mode too", () => {
+    render(
+      <ControlButtons dash={at("Manual", { hasDcFan: false })} command={stubCommand()} disabled />,
+    );
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Power" })).toBeDisabled();
+  });
+
+  it("still lets a disabled-but-safety button run its command", async () => {
+    const command = stubCommand();
+    render(<ControlButtons dash={at("Hold")} command={command} disabled={true} />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(await screen.findByRole("button", { name: /confirm/i }));
+    await waitFor(() => expect(command.setMode).toHaveBeenCalledWith("stop"));
+  });
+});

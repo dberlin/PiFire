@@ -405,3 +405,64 @@ describe("Dashboard target notifications", () => {
     expect(fetchMock.mock.calls).toHaveLength(0);
   });
 });
+
+// D1: the CTRL OFFLINE signal comes from the errors blob, which never clears
+// without a control.py restart (common/datastore_accessors.py:126-132) and can
+// be written on a healthy system by a queue race (common/app.py:31-44). The
+// frontend cannot clear the blob -- no route does -- so it offers to ask the
+// same question directly instead.
+describe("Dashboard control-health recheck", () => {
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  it("offers a Recheck beside CTRL OFFLINE when the payload says the control process is down", () => {
+    renderDashboard(FIXTURE_DASH, { phase: "live", controlAlive: false });
+    expect(screen.getByText("CTRL OFFLINE")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Recheck" })).toBeInTheDocument();
+  });
+
+  it("offers no Recheck while the control process is reported alive", () => {
+    renderDashboard(FIXTURE_DASH, { phase: "live", controlAlive: true });
+    expect(screen.queryByRole("button", { name: "Recheck" })).not.toBeInTheDocument();
+  });
+
+  it("offers no Recheck in demo mode, where there is no backend to ask", () => {
+    renderDashboard(FIXTURE_DASH, { phase: "demo", controlAlive: false });
+    expect(screen.queryByRole("button", { name: "Recheck" })).not.toBeInTheDocument();
+  });
+
+  it("asks /api/sys/check_alive and believes an OK over the stale blob", async () => {
+    const user = userEvent.setup();
+    const fetchMock: ReturnType<typeof rs.fn> = rs.fn(async () => ({
+      ok: true,
+      json: async () => ({ result: "OK" }),
+    }));
+    rs.stubGlobal("fetch", fetchMock);
+    renderDashboard(FIXTURE_DASH, { phase: "live", controlAlive: false });
+
+    await user.click(screen.getByRole("button", { name: "Recheck" }));
+    await waitFor(() => expect(screen.getByText("LIVE")).toBeInTheDocument());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/sys/check_alive");
+    expect(screen.queryByRole("button", { name: "Recheck" })).not.toBeInTheDocument();
+  });
+
+  it("stays offline when the recheck says the control process really is down", async () => {
+    const user = userEvent.setup();
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => ({ ok: true, json: async () => ({ result: "ERROR" }) })),
+    );
+    renderDashboard(FIXTURE_DASH, { phase: "live", controlAlive: false });
+
+    await user.click(screen.getByRole("button", { name: "Recheck" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Recheck" })).toBeEnabled());
+    expect(screen.getByText("CTRL OFFLINE")).toBeInTheDocument();
+  });
+
+  it("leaves Stop reachable while the control process is reported down", () => {
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Hold" }, { controlAlive: false });
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Smoke" })).toBeDisabled();
+  });
+});
