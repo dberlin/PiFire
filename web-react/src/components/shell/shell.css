@@ -1,0 +1,124 @@
+/* App shell: navbar + timer strip. Ported from templates/base.html and
+   _macro_timer.html, restyled onto the existing theme tokens (theme.css) and
+   the pf-* class vocabulary already used by the settings and dashboard
+   surfaces. No second visual language. */
+
+/* ---- navbar ---- */
+.pf-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: var(--inset);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+.pf-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  text-decoration: none;
+  font: 700 18px "Barlow";
+  min-width: 0;
+}
+.pf-nav-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: linear-gradient(160deg, var(--accent-1), var(--accent-2));
+  box-shadow: 0 0 10px var(--glow);
+  flex: 0 0 auto;
+}
+.pf-nav-fire {
+  color: var(--accent);
+  font-style: normal;
+}
+.pf-nav-grill {
+  color: var(--text-dim);
+  font: 600 13px "Barlow";
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 210px;
+}
+.pf-nav-grill::before {
+  content: "| ";
+}
+.pf-nav-toggle {
+  margin-left: auto;
+  display: none;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.pf-nav-bars,
+.pf-nav-bars::before,
+.pf-nav-bars::after {
+  display: block;
+  width: 16px;
+  height: 2px;
+  background: var(--text);
+  border-radius: 2px;
+}
+.pf-nav-bars::before,
+.pf-nav-bars::after {
+  content: "";
+  position: relative;
+}
+.pf-nav-bars::before {
+  top: -5px;
+}
+.pf-nav-bars::after {
+  top: 3px;
+}
+.pf-nav-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pf-nav-item {
+  display: block;
+}
+.pf-nav-link {
+  display: block;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font: 600 15px "Barlow";
+}
+.pf-nav-link:hover:not(.disabled) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+.pf-nav-link.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+}
+.pf-nav-link.disabled {
+  color: color-mix(in srgb, var(--text-dim) 55%, transparent);
+  cursor: not-allowed;
+}
+
+@media (max-width: 720px) {
+  .pf-nav-toggle {
+    display: block;
+  }
+  .pf-nav-list {
+    display: none;
+    flex-basis: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+  .pf-nav-list.open {
+    display: flex;
+  }
+}
