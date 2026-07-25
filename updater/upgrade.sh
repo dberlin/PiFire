@@ -89,7 +89,11 @@ source .venv/bin/activate
 # --inexact so a conditionally-installed extra (e.g. rpi.gpio, which is skipped
 # on a Pi 5 and so is deliberately not a pyproject dependency) is not pruned.
 echo " + Installing module dependencies from pyproject.toml... " | tee -a /usr/local/bin/pifire/logs/upgrade.log
-if ! uv sync --no-dev --inexact 2>&1 | tee -a /usr/local/bin/pifire/logs/upgrade.log; then
+uv sync --no-dev --inexact 2>&1 | tee -a /usr/local/bin/pifire/logs/upgrade.log
+# PIPESTATUS, not `if !`: no `set -o pipefail` here, so the pipeline status is
+# tee's and a failed sync would be swallowed -- leaving an upgraded checkout
+# pointed at a venv that never got its dependencies.
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
 	echo " !! Failed to install Python dependencies. Upgrade cannot continue." | tee -a /usr/local/bin/pifire/logs/upgrade.log
 	exit 1
 fi

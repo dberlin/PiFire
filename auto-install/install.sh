@@ -329,7 +329,11 @@ source .venv/bin/activate
 # a pyproject dependency, because it has to be skipped on a Pi 5. A default
 # `uv sync` prunes everything outside the lockfile and would remove it again.
 echo " - Installing module dependencies from pyproject.toml... " | tee -a ~/logs/pifire_install.log
-if ! uv sync --no-dev --inexact 2>&1 | tee -a ~/logs/pifire_install.log; then
+uv sync --no-dev --inexact 2>&1 | tee -a ~/logs/pifire_install.log
+# PIPESTATUS, not `if !`: this script does not set -o pipefail, so the exit
+# status of the pipeline is tee's (always 0) and a failed sync would sail on
+# to "Installation completed" with an empty venv.
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
 	echo " !! Failed to install Python dependencies. Installation cannot continue." | tee -a ~/logs/pifire_install.log
 	exit 1
 fi

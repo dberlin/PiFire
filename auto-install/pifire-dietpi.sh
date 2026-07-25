@@ -201,7 +201,10 @@ uv venv --system-site-packages
 source .venv/bin/activate
 
 echo " - Installing module dependencies from pyproject.toml... " | tee -a ~/logs/pifire_install.log
-if ! uv sync --no-dev --inexact 2>&1 | tee -a ~/logs/pifire_install.log; then
+uv sync --no-dev --inexact 2>&1 | tee -a ~/logs/pifire_install.log
+# PIPESTATUS, not `if !`: no `set -o pipefail` here, so the pipeline status is
+# tee's and a failed sync would be swallowed.
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
 	echo " !! Failed to install Python dependencies. Installation cannot continue." | tee -a ~/logs/pifire_install.log
 	exit 1
 fi
