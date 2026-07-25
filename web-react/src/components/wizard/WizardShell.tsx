@@ -9,6 +9,7 @@ import { DisplayStep } from "./steps/DisplayStep";
 import { DistanceStep } from "./steps/DistanceStep";
 import { GrillPlatformStep } from "./steps/GrillPlatformStep";
 import { ProbesStep } from "./steps/ProbesStep";
+import "./wizard.css";
 
 export const STEPS = [
   "welcome",

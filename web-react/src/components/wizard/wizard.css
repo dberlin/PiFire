@@ -1,0 +1,205 @@
+/* PiFire Setup Wizard.
+   The wizard is the one route mounted OUTSIDE AppShell (App.tsx) -- no navbar,
+   no timer strip, no banners -- so .pf-wizard is the whole page and owns the
+   viewport itself.
+
+   Everything here is built from src/theme.css's tokens and the recipes already
+   in dashboard.css / settings.css / shell.css. theme.css declares ONE dark
+   palette and swaps only the accent via :root[data-accent]; there is no light
+   mode anywhere in this app, so there is none here either.
+
+   CASCADE RULE: this file is imported from WizardShell.tsx while settings.css
+   and dashboard.css come in through main.tsx, and the injection order between
+   those two is a bundler detail, not a contract. Every rule below that
+   OVERRIDES one of theirs is therefore scoped under .pf-wizard so it wins on
+   specificity (0,2,0 vs 0,1,0), never on source order. */
+
+/* ---- root ---- */
+.pf-wizard {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--page);
+  color: var(--text);
+  font-family: "Barlow", system-ui, sans-serif;
+}
+
+/* ---- header chrome: title, step strip, exit ---- */
+/* flex: 0 0 auto on the header and footer plus a min-height: 0 scroller between
+   them is what keeps the chrome put at 1280x720 while a long step scrolls. */
+.pf-wizard-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 20px;
+  background: var(--inset);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pf-wizard-title {
+  font: 700 18px "Barlow";
+  color: var(--text);
+  white-space: nowrap;
+}
+.pf-wizard-steps {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+/* The six labels are adjacent inline <span>s in the markup (WizardShell.tsx):
+   with no rule they render as one run-on string. Pills with their own padding
+   and a gap are what separates them. */
+.pf-wizard-step-indicator {
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--pill-radius);
+  color: var(--text-dim);
+  font: 600 13px "Barlow";
+  white-space: nowrap;
+}
+.pf-wizard-step-indicator.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--text);
+}
+.pf-wizard-exit {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* ---- content: the only scrolling region ---- */
+.pf-wizard-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 28px 28px;
+}
+.pf-wizard-step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 880px;
+  margin: 0 auto;
+}
+.pf-wizard-step-title {
+  margin: 0;
+  font: 700 24px "Barlow";
+  color: var(--text);
+}
+/* Body copy only. :not([class]) keeps this off .pf-wizard-finish-note and
+   .pf-wizard-finish-error, which are also direct <p> children of the step and
+   have their own treatment below. */
+.pf-wizard-step > p:not([class]) {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--text-dim);
+  font: 500 15px "Barlow";
+  line-height: 1.7;
+}
+.pf-wizard-step > p:not([class]) strong {
+  color: var(--text);
+}
+/* Both of these steps are short; a floor stops the footer jumping up the page
+   as the user moves between a one-paragraph step and a full module card. */
+.pf-wizard-step-placeholder,
+.pf-wizard-step-finish {
+  min-height: 220px;
+}
+.pf-wizard-placeholder-message {
+  margin: 0;
+  color: var(--text-dim);
+  font: 500 15px "Barlow";
+  line-height: 1.7;
+}
+.pf-wizard-finish-note {
+  margin: 0;
+  padding: 10px 14px;
+  border-left: 3px solid #ffb020;
+  border-radius: 0 10px 10px 0;
+  background: rgba(255, 176, 32, 0.1);
+  color: #ffce6a;
+  font: 600 14px "Barlow";
+  line-height: 1.6;
+}
+/* Also used for the module-switch failures in DisplayStep/DistanceStep/
+   GrillPlatformStep and, in WizardShell, for the exit error -- which is a
+   direct child of .pf-wizard, outside the padded content box. */
+.pf-wizard-finish-error {
+  margin: 0;
+  color: #ff8b82;
+  font: 600 14px "Barlow";
+}
+.pf-wizard > .pf-wizard-finish-error {
+  padding: 10px 28px 0;
+}
+
+/* ---- footer chrome ---- */
+.pf-wizard-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 28px;
+  background: var(--inset);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ---- buttons ---- */
+/* dashboard.css's .pf-btn is a bare shell: 25px bold text, a 2px currentColor
+   border, no padding, no background -- the dashboard's control buttons supply
+   the rest inline, and nothing in the wizard does. This is the complete
+   treatment, matched to shell.css's .pf-timer-btn and dashboard.css's
+   .pf-modal-btn so it reads as the same object family. */
+.pf-wizard .pf-btn {
+  display: inline-flex;
+  border-width: 1px;
+  border-color: rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 9px 18px;
+  background: #1d1813;
+  color: #e8dfd1;
+  font: 700 15px "Barlow";
+  letter-spacing: 0.3px;
+  text-decoration: none;
+}
+/* A flex item stretches on the cross axis whatever its own `display` is, so
+   inline-flex alone does NOT stop a button filling the width of a flex COLUMN
+   -- align-self does. .pf-wizard-step is such a column (the Finish button is a
+   direct child); the header, footer and .pf-form-actions are rows and are left
+   alone. */
+.pf-wizard-step > .pf-btn {
+  align-self: flex-start;
+}
+.pf-wizard .pf-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--text);
+}
+.pf-wizard .pf-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.pf-wizard .pf-btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #1a0f04;
+}
+.pf-wizard .pf-btn-primary:hover:not(:disabled) {
+  background: var(--accent-1);
+  color: #1a0f04;
+}
+
+/* ---- route-level error ---- */
+/* WizardShell's WizardError renders this on .pf-fit, OUTSIDE .pf-wizard: the
+   loader failed, so the shell never existed. It must NOT be scoped under
+   .pf-wizard. */
+.pf-wizard-error {
+  padding: 24px;
+  color: var(--text-dim);
+  font: 600 16px "Barlow";
+  text-align: center;
+}
