@@ -186,6 +186,14 @@
   color: #ff8b82;
   font: 600 14px "Barlow";
 }
+/* Per-field helper copy: NumberField's `hint`, and ControllerTab's option
+   descriptions, which have been rendering unstyled. Same tokens as
+   .pf-settings-hint — no new palette. */
+.pf-field-hint {
+  color: var(--text-dim);
+  font: 500 13px "Barlow";
+  line-height: 1.6;
+}
 
 /* HistoryTab: Chart Colors section (per-probe color/flag cards) */
 .pf-probe-card {
