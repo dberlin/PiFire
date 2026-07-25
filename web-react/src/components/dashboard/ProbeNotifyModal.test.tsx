@@ -99,7 +99,7 @@ describe("ProbeNotifyModal", () => {
     await user.clear(number());
     await user.type(number(), "203");
     await user.click(screen.getByRole("radio", { name: /keep warm/i }));
-    await user.click(screen.getByRole("button", { name: /^set/i }));
+    await user.click(screen.getByRole("button", { name: "Set" }));
     expect(props.onSubmit).toHaveBeenCalledWith({
       enabled: true,
       target: 203,
@@ -114,7 +114,7 @@ describe("ProbeNotifyModal", () => {
   it("refuses to arm a target of 0 and says why", async () => {
     const user = userEvent.setup();
     const { props } = renderModal({ initial: { enabled: true, target: 0, action: "none" } });
-    await user.click(screen.getByRole("button", { name: /^set/i }));
+    await user.click(screen.getByRole("button", { name: "Set" }));
     expect(props.onSubmit).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent(/above 0/i);
   });
@@ -122,7 +122,7 @@ describe("ProbeNotifyModal", () => {
   it("submits a disabled edit even with a target of 0 -- that is how you turn it off", async () => {
     const user = userEvent.setup();
     const { props } = renderModal({ initial: { enabled: false, target: 0, action: "none" } });
-    await user.click(screen.getByRole("button", { name: /^set/i }));
+    await user.click(screen.getByRole("button", { name: "Set" }));
     expect(props.onSubmit).toHaveBeenCalledWith({ enabled: false, target: 0, action: "none" });
   });
 

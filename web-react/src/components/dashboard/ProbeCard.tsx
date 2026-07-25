@@ -1,8 +1,18 @@
 import type { ProbeCardView } from "../../helpers/dashboard/deriveView";
+import { NotifyBell } from "./NotifyBell";
 
 // A single food-probe card: name, target, big current temp, and a progress bar
-// toward target (green when within 1° of done).
-export function ProbeCard({ p }: { p: ProbeCardView }) {
+// toward target (green when within 1° of done). The bell opens the per-probe
+// target-notification modal, mirroring the Flask probe card
+// (_macro_dash_default.html:108-134), which carries the bell and the ETA
+// readout in the same place.
+export function ProbeCard({
+  p,
+  onOpenNotify,
+}: {
+  p: ProbeCardView;
+  onOpenNotify(label: string): void;
+}) {
   return (
     <div
       style={{
@@ -30,7 +40,16 @@ export function ProbeCard({ p }: { p: ProbeCardView }) {
         >
           {p.name}
         </span>
-        <span style={{ font: "600 15px 'Barlow'", color: p.tgtColor }}>{p.targetStr}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ font: "600 15px 'Barlow'", color: p.tgtColor }}>{p.targetStr}</span>
+          <NotifyBell
+            probeName={p.name}
+            on={p.notifyOn}
+            // The LABEL, not the title: the write is addressed by label and the
+            // title is free text the user can rename.
+            onClick={() => onOpenNotify(p.label)}
+          />
+        </span>
       </div>
       <div
         style={{
@@ -65,6 +84,10 @@ export function ProbeCard({ p }: { p: ProbeCardView }) {
           }}
         />
       </div>
+      {/* Estimated time to target. Shown only while the notification is armed
+          and the backend has produced a number, exactly like the Flask ETA
+          button (_macro_dash_default.html:123-131). */}
+      {p.etaStr !== null && <div className="pf-notify-eta">ETA {p.etaStr}</div>}
     </div>
   );
 }

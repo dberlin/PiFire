@@ -252,6 +252,34 @@
   cursor: default;
 }
 
+/* The bell that opens a probe's target-notification modal, and the ETA line
+   the armed notification puts under the probe card's progress bar. */
+.pf-notify-bell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #1d1813;
+  color: #7d7264;
+  cursor: pointer;
+  padding: 0;
+}
+.pf-notify-bell.on {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+.pf-notify-eta {
+  font: 600 12px "Barlow";
+  letter-spacing: 1.5px;
+  color: #8a7f70;
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+
 /* Per-probe target-notification modal (ProbeNotifyModal). It sits inside the
    shared .pf-modal shell above; these rules only style its body. */
 .pf-notify-switch,

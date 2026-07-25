@@ -3,12 +3,15 @@ import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
 import { deriveView, fmtDuration, type PillView } from "../../helpers/dashboard/deriveView";
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
-import type { AccentName, LiveState } from "../../helpers/types";
+import { readTargetEdit, saveTargetEdit, type TargetEdit } from "../../helpers/notify/notifyState";
+import type { AccentName, LiveState, ProbeData } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
 import { ControlButtons } from "./ControlButtons";
 import { GrillGauge } from "./GrillGauge";
 import { HopperGauge } from "./HopperGauge";
+import { NotifyBell } from "./NotifyBell";
 import { ProbeCard } from "./ProbeCard";
+import { ProbeNotifyModal } from "./ProbeNotifyModal";
 import { SystemStatus } from "./SystemStatus";
 
 const ACCENTS: AccentName[] = ["ember", "ice", "crimson"];
@@ -17,6 +20,9 @@ const SWATCH: Record<AccentName, string> = { ember: "#ff8a2b", ice: "#3cc7d0", c
 interface DashboardProps {
   dash: LiveState;
   command: CommandClient;
+  /** Base URL for the REST writes that do not go through CommandClient --
+   *  currently just the notify round trip, which needs a GET as well as a POST. */
+  targetUrl: string;
   phase: ConnectionPhase;
   controlAlive: boolean;
   accent: AccentName;
@@ -31,6 +37,7 @@ interface DashboardProps {
 export function Dashboard({
   dash,
   command,
+  targetUrl,
   phase,
   controlAlive,
   accent,
@@ -59,6 +66,43 @@ export function Dashboard({
   }
   const cookTime = fmtDuration(cookStart != null ? (now.getTime() - cookStart) / 1000 : 0);
   const clock = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  // Per-probe target notifications. Only the LABEL of the probe being edited is
+  // held here; the probe itself is re-resolved from `dash` on every render, so
+  // the modal keeps tracking the socket payload while it is open and nothing is
+  // mirrored locally. That matters because the backend clears req/target/eta by
+  // itself the moment the target is reached (notify/notifications.py:109-111) --
+  // a local copy would fight it.
+  const [notifyLabel, setNotifyLabel] = useState<string | null>(null);
+  const [notifySaving, setNotifySaving] = useState(false);
+  const [notifyError, setNotifyError] = useState<string | null>(null);
+  const notifyProbe: ProbeData | null =
+    notifyLabel === null
+      ? null
+      : dash.primaryProbe.label === notifyLabel
+        ? dash.primaryProbe
+        : (dash.foodProbes?.find((f) => f.label === notifyLabel) ?? null);
+
+  const openNotify = (label: string) => {
+    setNotifyError(null);
+    setNotifyLabel(label);
+  };
+  const submitNotify = async (edit: TargetEdit) => {
+    if (notifyLabel === null) return;
+    setNotifySaving(true);
+    setNotifyError(null);
+    try {
+      await saveTargetEdit(targetUrl, notifyLabel, edit);
+      setNotifyLabel(null);
+    } catch (e) {
+      // Stay open on failure. This write is not echoed back until the control
+      // loop drains the queue (~110 ms), so closing on an error would be
+      // indistinguishable from a save that worked.
+      setNotifyError(e instanceof Error ? e.message : "could not save notification");
+    } finally {
+      setNotifySaving(false);
+    }
+  };
 
   return (
     <div className="pf-fit" ref={fitRef}>
@@ -211,7 +255,7 @@ export function Dashboard({
                 Food Probes
               </div>
               {view.probes.map((p, i) => (
-                <ProbeCard key={`${p.name}-${i}`} p={p} />
+                <ProbeCard key={`${p.name}-${i}`} p={p} onOpenNotify={openNotify} />
               ))}
             </div>
           )}
@@ -263,6 +307,28 @@ export function Dashboard({
                   {cookTime}
                 </span>
               </div>
+              {/* The primary probe gets a bell too: the Flask dashboard renders
+                  the notify modal for probe_status['P'] as well as ['F']
+                  (dash_default.html:36,53), so a target on the grill probe is
+                  not a food-probe-only feature. The gauge column has no card
+                  header to hang it on, so it sits beside the Cook Time card. */}
+              <div
+                style={{
+                  flex: "0 0 52px",
+                  background: "#2c231a",
+                  border: "1px solid rgba(255,255,255,0.13)",
+                  borderRadius: 14,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <NotifyBell
+                  probeName={dash.primaryProbe.title}
+                  on={dash.primaryProbe.targetReq}
+                  onClick={() => openNotify(dash.primaryProbe.label)}
+                />
+              </div>
               {view.lidOpen && (
                 <div
                   style={{
@@ -311,6 +377,22 @@ export function Dashboard({
             <HopperGauge h={view.hopper} />
           </div>
         </div>
+
+        {/* Inside the stage: .pf-modal-scrim is position:absolute, so it covers
+            the 1280x720 board rather than the whole viewport. */}
+        {notifyProbe !== null && (
+          <ProbeNotifyModal
+            open
+            probeName={notifyProbe.title}
+            isPrimary={notifyProbe.label === dash.primaryProbe.label}
+            units={view.units}
+            initial={readTargetEdit(notifyProbe)}
+            saving={notifySaving}
+            error={notifyError}
+            onSubmit={submitNotify}
+            onCancel={() => setNotifyLabel(null)}
+          />
+        )}
       </div>
     </div>
   );

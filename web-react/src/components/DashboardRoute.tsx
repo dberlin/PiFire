@@ -48,6 +48,9 @@ export function DashboardRoute() {
     <Dashboard
       dash={live}
       command={command}
+      // The notify write is a GET + POST pair rather than a CommandClient call,
+      // so the dashboard needs the base URL as well as the command client.
+      targetUrl={targetUrl}
       phase={phase}
       controlAlive={controlAlive}
       accent={accent}
