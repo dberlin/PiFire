@@ -247,12 +247,12 @@ def test_admin_restoresettings_invalid_backup_rejected_no_crash(admin_client):
 @pytest.fixture
 def sio(ds):
     write_settings_store(default_settings())
-    from common.datastore_accessors import write_control, write_pellet_db, write_status, read_status
+    from common.datastore_accessors import write_control, write_pellet_db, init_status
     from common.defaults import default_pellets
 
     write_control(default_control(), WriteKind.OVERWRITE, origin="test-writer-matrix")
     write_pellet_db(default_pellets())
-    write_status(read_status(init=True))
+    init_status()
 
     import blueprints.mobile.socket_io as socket_io
 

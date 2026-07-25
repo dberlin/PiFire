@@ -90,16 +90,15 @@ requires_chromium = pytest.mark.skipif(
 def _seed_fresh_db(db_path, grill_name):
     """Point the datastore singleton at a fresh temp-SQLite file and seed it
     with the standard default_settings/default_control/default_pellets +
-    write_status baseline every live_server needs before app.py can even be
+    init_status baseline every live_server needs before app.py can even be
     imported (app.py reads settings at import time for log-level setup)."""
     from common import datastore
     from common.common import WriteKind
     from common.datastore_accessors import (
-        read_status,
+        init_status,
         write_control,
         write_pellets_store,
         write_settings_store,
-        write_status,
     )
     from common.defaults import default_control, default_pellets, default_settings
 
@@ -112,7 +111,7 @@ def _seed_fresh_db(db_path, grill_name):
     settings["globals"]["first_time_setup"] = False
     write_settings_store(settings)
     write_pellets_store(default_pellets())
-    write_status(read_status(init=True))
+    init_status()
     write_control(default_control(), WriteKind.OVERWRITE, origin="test-web-e2e")
 
 

@@ -210,7 +210,7 @@ def test_logs_download_via_direct_post(live_server, page):
 
 
 def test_metrics_page_no_data_render(live_server, page):
-    from common.datastore_accessors import append_metric, flush_metrics
+    from common.datastore_accessors import flush_metrics
 
     flush_metrics()
 

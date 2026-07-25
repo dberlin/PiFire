@@ -26,6 +26,7 @@ from common.datastore_accessors import (
     execute_control_writes,
     read_control,
     read_settings,
+    init_status,
     read_status,
     write_control,
     write_settings_store,
@@ -44,7 +45,7 @@ def isolated_store():
     datastore.init()
     write_settings_store(default_settings())
     write_control(default_control(), WriteKind.OVERWRITE, origin="test")
-    write_status(read_status(init=True))
+    init_status()
     yield
     datastore._reset_for_tests(None)
 

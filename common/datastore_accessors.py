@@ -305,11 +305,27 @@ def write_settings(settings):
     write_settings_store(settings)
 
 
-def read_settings_store(init=False):
-    if init:
-        settings = read_settings()
-        datastore.set_blob("settings:general", json.dumps(settings))
+def seed_settings_store():
+    """
+    Materialize settings:general in the datastore and return it.
 
+    read_settings_store() self-heals a missing blob by *returning*
+    default_settings() without persisting it; this writes that value back so the
+    blob actually exists. On an already-seeded store it rewrites the current
+    value unchanged.
+
+    Previously ``read_settings_store(init=True)`` -- a ``read_`` name whose flag
+    turned it into a write. Same defect as the old ``read_history(flushhistory=True)``
+    (see :func:`flush_history`), just with a different word.
+
+    :return: The settings dictionary now persisted.
+    """
+    settings = read_settings()
+    datastore.set_blob("settings:general", json.dumps(settings))
+    return settings
+
+
+def read_settings_store():
     # Self-heal like read_control()/default_control(): callers throughout the
     # codebase (is_real_hardware(), default_control(), the mobile blueprint,
     # etc.) assume read_settings() always returns a fully-populated dict.
@@ -390,11 +406,20 @@ def write_pellet_db(pelletdb):
     write_pellets_store(pelletdb)
 
 
-def read_pellets_store(init=False):
-    if init:
-        pelletdb = read_pellet_db()
-        datastore.set_blob("pellets:general", json.dumps(pelletdb))
+def seed_pellets_store():
+    """
+    Materialize pellets:general in the datastore and return it.
 
+    See :func:`seed_settings_store` -- same shape, same reason for the rename.
+
+    :return: The pellet database now persisted.
+    """
+    pelletdb = read_pellet_db()
+    datastore.set_blob("pellets:general", json.dumps(pelletdb))
+    return pelletdb
+
+
+def read_pellets_store():
     # Self-heal like read_settings_store(); see comment there.
     return _read_json_blob("pellets:general", default_pellets)
 
@@ -693,43 +718,54 @@ def write_status(status):
     _write_json_blob("control:status", status)
 
 
-def read_status(init=False):
+def init_status():
+    """
+    Build a fresh status dictionary from settings/pellets, persist it, return it.
+
+    Previously ``read_status(init=True)`` -- a ``read_`` name whose flag turned
+    it into a write (it calls write_status()). Same defect as the old
+    ``read_history(flushhistory=True)``; see :func:`flush_history`.
+
+    :return: The status dictionary now persisted.
+    """
+    settings = read_settings()
+    pellet_db = read_pellet_db()
+    hopper_level_enabled = False if settings["modules"]["dist"] == "none" else True
+    status = {
+        "s_plus": False,
+        "hopper_level_enabled": hopper_level_enabled,
+        "hopper_level": pellet_db["current"]["hopper_level"],
+        "units": settings["globals"]["units"],
+        "mode": "Stop",
+        "recipe": False,
+        "startup_timestamp": 0,
+        "start_time": 0,
+        "start_duration": 0,
+        "shutdown_duration": 0,
+        "prime_duration": 0,
+        "prime_amount": 0,
+        "lid_open_detected": False,
+        "lid_open_endtime": 0,
+        "p_mode": 0,
+        "recipe_paused": False,
+        "outpins": {"auger": False, "fan": False, "igniter": False, "power": False},
+        "cycle_ratio": 0,
+        "fan_duty": 0,
+    }
+    write_status(status)
+    return status
+
+
+def read_status():
     """
     Read Status dictionary from SQLite DB
     """
-    if init:
-        settings = read_settings()
-        pellet_db = read_pellet_db()
-        hopper_level_enabled = False if settings["modules"]["dist"] == "none" else True
-        status = {
-            "s_plus": False,
-            "hopper_level_enabled": hopper_level_enabled,
-            "hopper_level": pellet_db["current"]["hopper_level"],
-            "units": settings["globals"]["units"],
-            "mode": "Stop",
-            "recipe": False,
-            "startup_timestamp": 0,
-            "start_time": 0,
-            "start_duration": 0,
-            "shutdown_duration": 0,
-            "prime_duration": 0,
-            "prime_amount": 0,
-            "lid_open_detected": False,
-            "lid_open_endtime": 0,
-            "p_mode": 0,
-            "recipe_paused": False,
-            "outpins": {"auger": False, "fan": False, "igniter": False, "power": False},
-            "cycle_ratio": 0,
-            "fan_duty": 0,
-        }
-        write_status(status)
-    else:
-        # Match InMemoryStore semantics: absent status reads back as {} (falsy),
-        # not a crash. In production the controller seeds status via init=True
-        # before any init=False reader runs; this guards the pre-seed/fresh-DB case.
-        status = _read_json_blob("control:status", dict)
-
-    return status
+    # Match InMemoryStore semantics: absent status reads back as {} (falsy),
+    # not a crash. In production the controller seeds status via init_status()
+    # before any read_status() caller runs; this guards the pre-seed/fresh-DB
+    # case. Now that the two are separate functions that ordering constraint is
+    # a caller-visible contract rather than a branch, but it is no less required.
+    return _read_json_blob("control:status", dict)
 
 
 def read_generic_key(key):

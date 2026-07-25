@@ -54,8 +54,7 @@ def live_server():
         write_control,
         write_pellets_store,
         write_settings_store,
-        write_status,
-        read_status,
+        init_status,
     )
     from common.defaults import default_control, default_pellets, default_settings
 
@@ -70,7 +69,7 @@ def live_server():
     settings["globals"]["first_time_setup"] = False
     write_settings_store(settings)
     write_pellets_store(default_pellets())
-    write_status(read_status(init=True))
+    init_status()
     write_control(default_control(), WriteKind.OVERWRITE, origin="test-wizard-modal-e2e")
 
     from app import app as flask_app

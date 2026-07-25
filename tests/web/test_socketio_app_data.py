@@ -57,6 +57,7 @@ from common.datastore_accessors import (
     read_errors,
     read_pellets_store,
     read_settings,
+    init_status,
     read_status,
     write_connected_user,
     write_control,
@@ -64,7 +65,6 @@ from common.datastore_accessors import (
     write_generic_key,
     write_pellet_db,
     write_settings_store,
-    write_status,
 )
 from common.defaults import default_control, default_pellets, default_settings
 
@@ -95,7 +95,7 @@ def sio(ds):
     write_settings_store(default_settings())
     write_control(default_control(), WriteKind.OVERWRITE, origin="test-socketio")
     write_pellet_db(default_pellets())
-    write_status(read_status(init=True))
+    init_status()
     # dash_data reads this generic key (normally written by the control
     # runtime); seed an empty map so _get_probe_data has something to read.
     write_generic_key("probe_device_info", {})

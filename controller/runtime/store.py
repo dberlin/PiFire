@@ -63,7 +63,9 @@ class Store(ABC):
     @abstractmethod
     def read_settings(self): ...
     @abstractmethod
-    def read_status(self, init=False): ...
+    def read_status(self): ...
+    @abstractmethod
+    def init_status(self): ...
     @abstractmethod
     def write_status(self, status): ...
     @abstractmethod
@@ -160,8 +162,39 @@ class InMemoryStore(Store):
     def read_settings(self):
         return copy.deepcopy(self._settings)
 
-    def read_status(self, init=False):
+    def read_status(self):
         return copy.deepcopy(self._status)
+
+    def init_status(self):
+        # Mirror common.datastore_accessors.init_status: build a fresh status
+        # dict, PERSIST it, and return it. The old read_status(init=True) on
+        # this fake ignored the flag and returned whatever was already there,
+        # so a test never saw the seeded-from-settings shape production writes.
+        settings = self._settings
+        pellet_db = self._pellet
+        status = {
+            "s_plus": False,
+            "hopper_level_enabled": settings.get("modules", {}).get("dist", "none") != "none",
+            "hopper_level": pellet_db.get("current", {}).get("hopper_level", 100),
+            "units": settings.get("globals", {}).get("units", "F"),
+            "mode": "Stop",
+            "recipe": False,
+            "startup_timestamp": 0,
+            "start_time": 0,
+            "start_duration": 0,
+            "shutdown_duration": 0,
+            "prime_duration": 0,
+            "prime_amount": 0,
+            "lid_open_detected": False,
+            "lid_open_endtime": 0,
+            "p_mode": 0,
+            "recipe_paused": False,
+            "outpins": {"auger": False, "fan": False, "igniter": False, "power": False},
+            "cycle_ratio": 0,
+            "fan_duty": 0,
+        }
+        self.write_status(status)
+        return copy.deepcopy(status)
 
     def write_status(self, status):
         self._status = copy.deepcopy(status)
@@ -328,8 +361,11 @@ class SqliteStore(Store):
     def read_settings(self):
         return _c.read_settings()
 
-    def read_status(self, init=False):
-        return _c.read_status(init=init)
+    def read_status(self):
+        return _c.read_status()
+
+    def init_status(self):
+        return _c.init_status()
 
     def write_status(self, status):
         _c.write_status(status)

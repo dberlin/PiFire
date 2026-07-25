@@ -234,7 +234,7 @@ class Controller:
             store.write_control(control, WriteKind.OVERWRITE, origin="control")
 
         """ Initialize the status data on first run. """
-        self.status = store.read_status(init=True)
+        self.status = store.init_status()
 
         # Bind `control` before the loop so the iteration-1 switch check has it
         # (the entry point already flushed control; boot_to_monitor may have just

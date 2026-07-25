@@ -712,7 +712,7 @@ def _run_case(case):
     # --- seed -----------------------------------------------------------
     # Overwrite whatever _first_boot_import() imported from the machine's
     # ./settings.json and ./pelletdb.json with the canonical baseline. This
-    # must happen FIRST: default_control() and read_status(init=True) both
+    # must happen FIRST: default_control() and init_status() both
     # derive from settings/pelletdb.
     settings = _canonical_settings()
     if case.get("settings_patch"):
@@ -723,7 +723,7 @@ def _run_case(case):
     dsa.write_settings_store(settings)
     c.datastore.set_blob("pellets:general", json.dumps(_canonical_pelletdb()))
 
-    dsa.read_status(init=True)
+    dsa.init_status()
     if case.get("status_patch"):
         status = dsa.read_status()
         _deep_merge(status, case["status_patch"])
@@ -819,7 +819,7 @@ def seeded(ds):
     """
     dsa.write_settings_store(_canonical_settings())
     c.datastore.set_blob("pellets:general", json.dumps(_canonical_pelletdb()))
-    dsa.read_status(init=True)
+    dsa.init_status()
     dsa.flush_current()
     return ds
 

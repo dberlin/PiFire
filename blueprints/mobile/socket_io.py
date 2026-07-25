@@ -34,7 +34,9 @@ from common.common import (
 )
 from common.datastore_accessors import (
     read_settings_store,
+    seed_settings_store,
     read_pellets_store,
+    seed_pellets_store,
     read_control,
     flush_control,
     read_status,
@@ -81,8 +83,8 @@ thread = None
  Flush datastore and create Settings / PelletDB / Connected Users / Events
 ==============================================================================
 """
-read_settings_store(init=True)
-read_pellets_store(init=True)
+seed_settings_store()
+seed_pellets_store()
 flush_connected_users()
 flush_events_records()
 

@@ -29,7 +29,7 @@ from common.datastore_accessors import (  # noqa: E402
     read_history,
     read_settings,
     store_wizard_install_info,
-    read_status,
+    init_status,
     remove_connected_user,
     write_connected_user,
     write_control,
@@ -38,7 +38,6 @@ from common.datastore_accessors import (  # noqa: E402
     write_history,
     write_pellets_store,
     write_settings_store,
-    write_status,
 )
 from common.defaults import default_control, default_pellets, default_settings  # noqa: E402
 
@@ -50,7 +49,7 @@ _seed_settings = default_settings()
 _seed_settings["globals"]["grill_name"] = _SEEDED_GRILL_NAME
 write_settings_store(_seed_settings)
 write_pellets_store(default_pellets())
-write_status(read_status(init=True))
+init_status()
 write_control(default_control(), WriteKind.OVERWRITE, origin="test")
 # read_probe_status() (used by the /api/current route) reads this generic
 # key; in production it's populated by the control loop's probe discovery.
