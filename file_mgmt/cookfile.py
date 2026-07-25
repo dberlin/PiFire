@@ -32,6 +32,7 @@ from common.datastore_accessors import (
 )
 from common.defaults import default_probe_config
 from file_mgmt.common import read_json_file_data, update_json_file_data
+from file_mgmt.downsample import select_indices
 
 HISTORY_FOLDER = "./history/"  # Path to historical cook files
 
@@ -306,7 +307,16 @@ def upgrade_cookfile(cookfilename, repair=False):
     return (cookfilestruct, status)
 
 
-def prepare_chartdata(probe_config, chart_info={}, num_items=10, reduce=True, data_points=60, history=None):
+def prepare_chartdata(
+    probe_config,
+    chart_info={},
+    num_items=10,
+    reduce=True,
+    data_points=10000,
+    history=None,
+    tolerance=2.0,
+    max_points=None,
+):
     """Build Probe Mapper and Chart Data Struct"""
     chart_data = []
 
@@ -403,19 +413,37 @@ def prepare_chartdata(probe_config, chart_info={}, num_items=10, reduce=True, da
     if (list_length < num_items) and (list_length > 0):
         num_items = list_length
 
-    if reduce and (num_items > data_points):
-        step = int(num_items / data_points)
-    else:
-        step = 1
-
     if num_items == 0:
         num_items = list_length
 
     time_labels = []
 
     if list_length > 0:
+        window_start = max(0, list_length - num_items)
+        window = list(range(window_start, list_length))
+        if reduce and window:
+            # Fidelity-driven: keep the shape within `data_points`-gated tolerance
+            # rather than keeping every Nth sample (which erased short events).
+            # NT (targets) and PSP (primary setpoint) are step functions just
+            # like P/F -- they share this same `window`, so they must share
+            # the same fidelity check or a step edge can be smoothed into a
+            # ramp that never happened. Guard each source for being absent
+            # or empty (an all-Food probe_config has no PSP series to speak
+            # of, e.g.) and drop any resulting empty slice before handing the
+            # list to select_indices.
+            series = [list(v[window_start:list_length]) for v in history["P"].values()]
+            series += [list(v[window_start:list_length]) for v in history["F"].values()]
+            series += [list(v[window_start:list_length]) for v in history.get("NT", {}).values()]
+            psp = history.get("PSP") or []
+            if psp:
+                series.append(list(psp[window_start:list_length]))
+            series = [s for s in series if s]
+            times = [float(t) for t in history["T"][window_start:list_length]]
+            chosen = select_indices(series, times, tolerance=tolerance, min_points=data_points, max_points=max_points)
+            window = [window_start + i for i in chosen]
+
         # Build all lists from file data
-        for index in range(list_length - num_items, list_length, step):
+        for index in window:
             for key, value in history["P"].items():
                 chart_data[probe_mapper["probes"][key]]["data"].append(
                     {"x": history["T"][index], "y": history["P"][key][index]}

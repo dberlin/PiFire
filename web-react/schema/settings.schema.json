@@ -265,9 +265,14 @@
           "type": "boolean"
         },
         "datapoints": {
-          "default": 60,
+          "default": 10000,
           "title": "Datapoints",
           "type": "integer"
+        },
+        "fidelity_degrees": {
+          "default": 2.0,
+          "title": "Fidelity Degrees",
+          "type": "number"
         },
         "minutes": {
           "default": 15,
@@ -1966,7 +1971,8 @@
       "default": {
         "autorefresh": "on",
         "clearhistoryonstart": true,
-        "datapoints": 60,
+        "datapoints": 10000,
+        "fidelity_degrees": 2.0,
         "minutes": 15,
         "probe_config": {}
       }

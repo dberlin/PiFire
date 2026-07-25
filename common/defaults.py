@@ -228,7 +228,8 @@ def default_settings():
         "minutes": 15,  # Sets default number of minutes to show in history
         "clearhistoryonstart": True,  # Clear history when StartUp Mode selected
         "autorefresh": "on",  # Sets history graph to auto refresh ('live' graph)
-        "datapoints": 60,  # Number of data points to show on the history chart
+        "datapoints": 10000,  # Downsample only above this many samples in the window
+        "fidelity_degrees": 2.0,  # Drawn curve stays within this many degrees of the true curve
         "probe_config": {},  # Empty probe config
     }
     settings["history_page"]["probe_config"] = default_probe_config(settings)

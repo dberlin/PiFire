@@ -53,6 +53,7 @@ from common.common import epoch_to_time, process_metrics
 from common.datastore_accessors import read_history, read_metrics, write_history, write_metrics
 from common.defaults import default_metrics
 from file_mgmt.cookfile import create_cookfile, prepare_chartdata, read_cookfile, upgrade_cookfile
+from file_mgmt.downsample import max_interpolation_error
 
 
 class _FrozenDateTime:
@@ -226,27 +227,74 @@ def test_prepare_chartdata_clamps_num_items_to_available_history_length():
     assert result["time_labels"] == [1000, 2000, 3000]
 
 
-def test_prepare_chartdata_reduce_true_downsamples_by_step(ds):
-    """`reduce=True` with `num_items > data_points` takes the `step =
-    int(num_items / data_points)` branch (cookfile.py:398-399) -- downsamples
-    by keeping every `step`-th point instead of all of them. 6 real history
-    rows, `data_points=2` -> `step = int(6/2) = 3` -> only indices 0 and 3
-    are kept, not all 6."""
-    for i in range(6):
-        write_history(
-            {
-                "probe_history": {"primary": {"grill1": 100 + i}, "food": {"probe1": 90}, "aux": {}},
-                "primary_setpoint": 225,
-                "notify_targets": {"grill1": 225, "probe1": 165},
-            }
-        )
+def test_prepare_chartdata_reduce_true_downsamples_by_fidelity():
+    """`reduce=True` with the window bigger than `data_points` (now the
+    "downsample above this many samples" threshold, not a target point
+    count) selects points via `file_mgmt.downsample.select_indices`
+    (LTTB against a fidelity target) instead of the old every-Nth
+    `step = int(num_items / data_points)` decimation. Every-Nth could step
+    straight over a short dip; LTTB keeps whatever it takes to stay within
+    tolerance, so a narrow event inside a big flat window survives."""
+    n = 20000
+    dip_at, dip_len = 10000, 40
+    grill = [200.0] * n
+    for i in range(dip_at, dip_at + dip_len):
+        grill[i] = 150.0
+    history = {
+        "T": list(range(n)),
+        "PSP": [225] * n,
+        "P": {"grill1": grill},
+        "F": {"probe1": [90.0] * n},
+        "NT": {"grill1": [225] * n, "probe1": [165] * n},
+    }
 
-    result = prepare_chartdata(_PROBE_CONFIG, num_items=6, reduce=True, data_points=2)
+    result = prepare_chartdata(_PROBE_CONFIG, num_items=n, reduce=True, data_points=1000, history=history)
 
     pm = result["probe_mapper"]
     grill_values = [pt["y"] for pt in result["chart_data"][pm["probes"]["grill1"]]["data"]]
-    assert grill_values == [100, 103]
-    assert len(result["time_labels"]) == 2
+    assert len(grill_values) < n  # fewer points than raw samples -- downsampled
+    assert grill_values[0] == 200.0 and grill_values[-1] == 200.0  # endpoints always kept
+    assert 150.0 in grill_values  # the dip survives LTTB where every-Nth could miss it
+
+
+def test_prepare_chartdata_reduce_true_preserves_psp_step_change():
+    """CRITICAL regression: `prepare_chartdata`'s `series` fed to
+    `select_indices` (cookfile.py:427-428, pre-fix) was built from only
+    `history["P"]` and `history["F"]` -- but the single `window` computed
+    from that fidelity check is then used to plot `history["NT"]` (targets)
+    and `history["PSP"]` (primary setpoint) too. NT and PSP are STEP
+    functions: dropping the sample at a step makes the chart draw a ramp
+    that never happened -- e.g. a setpoint bumped from 200 to 240 mid-cook
+    would render as a gradual climb instead of the instant change it was.
+
+    This pins the fix at the `prepare_chartdata` level: a >10000-sample
+    window (the downsample gate) holding a single PSP step change must
+    still resolve that step within `tolerance` once selected, exactly like
+    a probe series would."""
+    n = 20000
+    step_idx = 12345
+    psp = [200.0] * step_idx + [240.0] * (n - step_idx)
+    history = {
+        "T": list(range(n)),
+        "PSP": psp,
+        "P": {"grill1": [200.0] * n},  # flat -- NOT the most dynamic series
+        "F": {"probe1": [90.0] * n},
+        "NT": {"grill1": [225.0] * n, "probe1": [165.0] * n},
+    }
+
+    result = prepare_chartdata(_PROBE_CONFIG, num_items=n, reduce=True, data_points=10000, history=history)
+
+    pm = result["probe_mapper"]
+    psp_points = result["chart_data"][pm["primarysp"]["grill1"]]["data"]
+    selected = [pt["x"] for pt in psp_points]  # x == raw index here (T == range(n))
+
+    # The step itself must be resolvable from the selected samples alone --
+    # not smeared into a multi-thousand-sample ramp by the drawn line.
+    assert max_interpolation_error(psp, selected) <= 2.0
+    # And the jump is still an instant 200 -> 240 in the returned series,
+    # not something in between.
+    values_at_selected = [pt["y"] for pt in psp_points]
+    assert set(values_at_selected) <= {200.0, 240.0}
 
 
 def test_prepare_chartdata_food_only_probe_config_skips_primarysp_loop():

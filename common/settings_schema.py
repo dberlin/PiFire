@@ -550,7 +550,8 @@ class HistoryPage(_Section):
     minutes: int = 15
     clearhistoryonstart: bool = True
     autorefresh: Literal["on", "off"] = "on"
-    datapoints: int = 60
+    datapoints: int = 10000
+    fidelity_degrees: float = 2.0
     probe_config: dict[str, ProbeChartConfig] = {}
 
 
