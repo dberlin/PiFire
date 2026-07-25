@@ -125,6 +125,33 @@ armv7l | armv6l)
 esac
 echo " + System architecture set to: $OS_BITS-bit" | tee -a ~/logs/pifire_install.log
 
+# 32-bit is not supported: pyproject.toml sets requires-python = ">=3.14" and no
+# 32-bit Raspberry Pi OS ships a 3.14, while the pip/`bin/` venv path that used
+# to serve armv7 has been removed. Fail here, before the first apt/git/groupadd,
+# so a 32-bit box is left exactly as it was found rather than part-provisioned.
+# Only the log directory (~/logs) has been created at this point.
+if [ "$OS_BITS" = "32" ]; then
+	echo "" | tee -a ~/logs/pifire_install.log
+	echo " !! =====================================================================" | tee -a ~/logs/pifire_install.log
+	echo " !! INSTALL STOPPED: PiFire requires a 64-bit operating system." | tee -a ~/logs/pifire_install.log
+	echo " !! =====================================================================" | tee -a ~/logs/pifire_install.log
+	echo " !! Detected architecture: $ARCH (32-bit)." | tee -a ~/logs/pifire_install.log
+	echo " !! PiFire requires Python 3.14 or newer, which no 32-bit Raspberry Pi" | tee -a ~/logs/pifire_install.log
+	echo " !! OS release provides, so its Python dependencies cannot be installed" | tee -a ~/logs/pifire_install.log
+	echo " !! on this system." | tee -a ~/logs/pifire_install.log
+	echo " !!" | tee -a ~/logs/pifire_install.log
+	echo " !! Nothing has been installed and no system files have been changed." | tee -a ~/logs/pifire_install.log
+	echo " !!" | tee -a ~/logs/pifire_install.log
+	echo " !! What to do:" | tee -a ~/logs/pifire_install.log
+	echo " !!   * Re-image this SD card with the 64-bit build of Raspberry Pi OS" | tee -a ~/logs/pifire_install.log
+	echo " !!     Lite and run this installer again. 64-bit is supported on the" | tee -a ~/logs/pifire_install.log
+	echo " !!     Pi 3, Pi 4, Pi 5 and Pi Zero 2 W." | tee -a ~/logs/pifire_install.log
+	echo " !!   * A 32-bit-only board (Pi 2, Pi Zero W, Pi 1) cannot run a 64-bit" | tee -a ~/logs/pifire_install.log
+	echo " !!     OS and needs replacing with a Pi Zero 2 W or newer." | tee -a ~/logs/pifire_install.log
+	echo " !! =====================================================================" | tee -a ~/logs/pifire_install.log
+	exit 1
+fi
+
 # Determine OS version number
 if [ -f /etc/os-release ]; then
 	. /etc/os-release

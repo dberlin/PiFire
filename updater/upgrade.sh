@@ -44,6 +44,42 @@ armv7l | armv6l)
 esac
 echo " + System architecture set to: $OS_BITS-bit" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 
+# 32-bit is not supported and cannot be made to work here: pyproject.toml sets
+# requires-python = ">=3.14" and no 32-bit Raspberry Pi OS ships a 3.14, while
+# the pip/`bin/` venv path that used to serve armv7 has been removed. Bail out
+# *now*, before the groupadd/usermod/chown/chmod below: this script is run
+# unattended by the web updater (see updater/updater_manifest.json, build 34),
+# and continuing would fail at `uv sync` only after a supervisor config had
+# already been written pointing at a venv that was never populated -- i.e. a
+# half-upgraded, non-booting install.
+if [ "$OS_BITS" = "32" ]; then
+	echo "" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! =====================================================================" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! UPGRADE STOPPED: PiFire no longer supports 32-bit operating systems." | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! =====================================================================" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! Detected architecture: $ARCH (32-bit)." | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! This version of PiFire requires Python 3.14 or newer, which no" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! 32-bit Raspberry Pi OS release provides, so its Python dependencies" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! cannot be installed on this system." | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! NOTHING HAS BEEN CHANGED. Your existing PiFire installation is" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! untouched and will keep running as before." | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! Your options:" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!   1. Move to a 64-bit OS. Back up /usr/local/bin/pifire (at minimum" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!      settings.json and the cookfiles/ directory), re-image the SD" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!      card with 64-bit Raspberry Pi OS -- supported on Pi 3, Pi 4," | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!      Pi 5 and Pi Zero 2 W -- run auto-install/install.sh, then" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!      restore your backup." | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!   2. Stay where you are. Decline this upgrade and keep running your" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!      current PiFire version, which continues to work on 32-bit." | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! A 32-bit-only board (Pi 2, Pi Zero W) cannot run a 64-bit OS and" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! would need replacing with a Pi Zero 2 W or newer to move forward." | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! =====================================================================" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	exit 1
+fi
+
 #export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 if ! command -v /bin/curl >/dev/null 2>&1; then
