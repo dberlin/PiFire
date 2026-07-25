@@ -37,9 +37,13 @@ def test_sync_runner_float_output_has_no_fan():
 class _RecordingLogger:
     def __init__(self):
         self.exceptions = []
+        self.errors = []
 
     def exception(self, msg):
         self.exceptions.append(msg)
+
+    def error(self, msg):
+        self.errors.append(msg)
 
 
 def test_build_runner_logs_on_load_failure_when_logger_given():
@@ -51,8 +55,15 @@ def test_build_runner_logs_on_load_failure_when_logger_given():
 
     assert runner is None
     assert status == "Inactive"
-    assert len(logger.exceptions) == 1
-    assert "Error occurred loading controller module" in logger.exceptions[0]
+    # Two exceptions, not one: build_runner now ALSO attempts the fallback
+    # controller before giving up. This settings dict has no "pid" config
+    # either, so the fallback fails too and the cycle really is Inactive.
+    assert [
+        "Error occurred loading controller module. Trace dump: ",
+        "Error occurred building the [pid] controller. Trace dump: ",
+    ] == logger.exceptions
+    # And the user is told, rather than only the log.
+    assert any("neither could the fallback" in msg for msg in logger.errors)
 
 
 def test_build_runner_does_not_require_logger():

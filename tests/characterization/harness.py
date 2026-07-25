@@ -22,9 +22,12 @@ Other pitfalls handled here (see task brief):
   1. `control.eventLogger` / `control.controlLogger` are only bound inside
      control.py's `if __name__ == '__main__':` block, but `_work_cycle` calls
      them directly. We bind them to stdlib loggers before running.
-  2. `Process_Monitor` spawns a heartbeat thread and shells out to
-     `supervisorctl` on timeout. We monkeypatch `control.Process_Monitor` to
-     a no-op stand-in for the duration of `run_mode`.
+  2. `Process_Monitor` spawns a NON-DAEMON heartbeat thread and, 30s after a
+     missed heartbeat, writes a critical_error and shells out to
+     `supervisorctl restart control` -- for real, since `is_real_hw` reads
+     settings['platform']['real_hw'], which DEFAULTS TO TRUE (base_settings()
+     does not protect you). See the note below `make_ctx` for why nothing
+     patches it any more.
 """
 
 import logging
@@ -47,10 +50,19 @@ control.eventLogger = logging.getLogger("characterization")
 control.controlLogger = logging.getLogger("characterization")
 
 
-# --- Pitfall 2: Process_Monitor spawns a heartbeat thread + shells out to
-# supervisorctl. It is neutralized globally for all tests by the autouse
-# `_neutralize_process_monitor` fixture in tests/conftest.py (which no-ops the
-# shared class's methods), so nothing here needs to patch it. ---
+# --- Pitfall 2: Process_Monitor. There USED to be an autouse
+# `_neutralize_process_monitor` fixture in tests/conftest.py that no-oped
+# _heartbeat_check. It was deliberately deleted once stop_monitor() was fixed to
+# actually terminate the thread (`fix(process-mon): stop_monitor terminates the
+# heartbeat thread`) -- do not reinstate it; that would re-hide the real bug it
+# replaced.
+#
+# What that leaves: base.run() ends with monitor.stop_monitor(), which is NOT in
+# a `finally`. So any test that deliberately drives an exception out of
+# base.run() leaks a live non-daemon monitor thread -- pytest then hangs at exit
+# and, 30 seconds in, that thread runs `supervisorctl restart control` against
+# the real machine. A test doing that must neutralize Process_Monitor itself.
+# Tests whose work cycle completes normally (i.e. all of them) need nothing. ---
 
 
 @dataclass
@@ -140,8 +152,8 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
         probes = _CappedProbes(probes, ctx.store, probe_cap)
         ctx.devices.probe_complex = probes
 
-    # Process_Monitor is neutralized globally by the autouse fixture in
-    # tests/conftest.py, so we only need to (optionally) inject a fake runner.
+    # Process_Monitor needs no patching here -- see the Pitfall 2 note above --
+    # so we only need to (optionally) inject a fake runner.
     prev_runtime_build_runner = controller.runtime.runner.build_runner
     if runner is not None:
         fake_build_runner = lambda *a, **k: (runner, "Active")
