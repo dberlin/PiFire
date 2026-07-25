@@ -149,9 +149,8 @@ describe("timerStartWithOptions", () => {
       shutdown: true,
       keepWarm: true,
     });
-    // One request. Anything that reads control first and writes it back can be
-    // clobbered: json_patch (RFC 7396) replaces the notify_data ARRAY wholesale
-    // and read_control() never sees the pending write queue.
+    // One request: the server computes the end from its own clock and validates
+    // the duration, neither of which a client-side read-modify-write does.
     expect(fetchMock.mock.calls).toHaveLength(1);
     expect(fetchMock.mock.calls[0][0]).toBe(
       "http://pi:5000/api/set/timer/start/600/shutdown,keep_warm",

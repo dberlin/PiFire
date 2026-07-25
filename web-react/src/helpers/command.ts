@@ -39,30 +39,36 @@ export interface CommandClient {
   //  - timerPause CLEARS the whole timer (and the shutdown/keep_warm flags)
   //    when the timer was never started (timer.start == 0).
   //  - timerStop clears the timer AND resets shutdown/keep_warm to False. Do
-  //    NOT "restore" them afterwards with timerShutdown/timerKeepWarm: that
-  //    second write is the clobber (see the block above createCommand), and
-  //    nothing needs restoring -- the next arm carries both flags itself.
+  //    NOT "restore" them afterwards with timerShutdown/timerKeepWarm: nothing
+  //    needs restoring -- the next arm carries both flags itself -- and a
+  //    standalone flag write only arms an expiry action on a stopped timer.
   //  - A non-numeric `seconds` makes the backend silently substitute 60s.
-  //  - Every one of these is ONE control write, and no UI flow may issue two of
-  //    them before the socket republishes. components/shell/TimerBar.tsx holds
-  //    that line for the bar's buttons.
+  //  - Each of these is ONE control write. Two of them in one control cycle no
+  //    longer clobber each other in general (the drain three-way merges), but
+  //    two that BOTH compute a timer state still do: control["timer"] is merged
+  //    as one coupled unit, so stop-then-pause and stop-then-resume resurrect a
+  //    stopped countdown. components/shell/TimerBar.tsx holds that line for the
+  //    bar's buttons, and explains it in full.
   timerStart(seconds: number): Promise<CommandResult>;
   // Arms a NEW timer for a DURATION, together with its expiry flags, in a
-  // single request that the server turns into a single control write -- see
-  // the block above createCommand for why neither half can be split out.
-  // Unlike timerStart this one does NOT unpause: the server rejects a paused
-  // timer rather than silently ignoring the duration. Resuming is still
-  // timerStart(), which carries no flags and is one write already.
+  // single request -- see the block above createCommand for the two properties
+  // that buys (a server-computed end, and rejections the bare form does not
+  // make). Unlike timerStart this one does NOT unpause: the server rejects a
+  // paused timer rather than silently ignoring the duration. Resuming is still
+  // timerStart(), which carries no flags.
   timerStartWithOptions(seconds: number, options: TimerOptions): Promise<CommandResult>;
   timerPause(): Promise<CommandResult>;
   timerStop(): Promise<CommandResult>;
   // Standalone flag writes. NOTHING in this app calls them, and nothing should:
-  // on their own they set a flag on a timer that is not armed, and next to any
-  // other timer write they are the clobber -- verified against the backend,
+  // on their own they set an expiry action on a timer that is not armed. They
+  // used to be actively destructive next to another timer write --
   // /api/set/timer/start/600 followed by /api/set/timer/shutdown/true inside one
-  // control cycle leaves start/paused/end all ZERO, i.e. no timer at all. Use
-  // timerStartWithOptions. They stay on the interface because the REST paths
-  // stay (the Flask dashboard and mobile still use them) and command.ts is this
+  // control cycle left start/paused/end all ZERO -- which the drain's three-way
+  // merge fixed (tests/characterization/test_process_command_golden.py::
+  // test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer).
+  // Use timerStartWithOptions anyway: one gesture, one write, and the server
+  // computes the end. They stay on the interface because the REST paths stay
+  // (the Flask dashboard and mobile still use them) and command.ts is this
   // app's map of that grammar.
   timerShutdown(on: boolean): Promise<CommandResult>;
   timerKeepWarm(on: boolean): Promise<CommandResult>;
@@ -82,7 +88,7 @@ export interface CommandClient {
 /** Bridge POST /api/control into this module's CommandResult envelope.
  *  The fetch itself lives in helpers/notify/notifyApi.ts, which already carries
  *  the two landmines that path has: the response says lowercase "success", and
- *  the server merges the WHOLE posted object with RFC 7396 json_patch. One
+ *  the server queues the WHOLE posted object as a merge patch. One
  *  implementation, not two. */
 async function controlPatch(
   baseUrl: string,
@@ -117,8 +123,8 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
 // --------------------------------------------------------------------------
 // Arming a timer: /api/set/timer/start/{seconds}/{options}
 //
-// Two properties this shape buys, both of which the obvious alternative
-// (read control, patch it, write it back) does not:
+// Two properties this shape buys, neither of which the obvious alternative
+// (read control, patch it, write it back) does:
 //
 //  1. The DURATION travels, never an absolute end time. The control process
 //     decides a timer has expired by comparing control.timer.end against its
@@ -129,16 +135,19 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
 //     which also removes the need to learn the server's clock from a response
 //     header (Date is not CORS-safelisted, so cross-origin it is unreadable).
 //
-//  2. ONE request, so ONE write_control() on the server. The flags live in
-//     control.notify_data (an array) and the countdown in control.timer, and
-//     every web-process write queues the WHOLE control dict
-//     (common/datastore_accessors.py write_control). read_control() reads only
-//     the persisted blob and never the pending queue, and only the control loop
-//     drains that queue -- so calls issued inside one control cycle all read
-//     the same stale blob, and execute_control_writes applies each with SQLite
-//     json_patch (RFC 7396), which REPLACES arrays wholesale. Split across
-//     requests, the last write's notify_data overwrites the flags the earlier
-//     ones set, every time.
+//  2. The server validates what the bare `start` form does not: a non-numeric
+//     duration is rejected rather than silently substituted with 60s, zero and
+//     negative durations are rejected (an already-expired timer fires its
+//     expiry action the moment it is armed), and a paused timer is rejected
+//     rather than unpaused with the duration thrown away.
+//
+// It was ALSO built to force ONE write_control() on the server, because the
+// countdown (control.timer) and the flags (control.notify_data) split across
+// two requests in one control cycle used to lose the first. That reason is
+// gone: the drain three-way merges each queued patch against the blob as it
+// stood when it began (common/common.py reduce_control_patch,
+// merge_notify_data). The form is kept on the two reasons above, which have
+// nothing to do with the write seam.
 // --------------------------------------------------------------------------
 
 /** Name the ticked flags for the option segment of the start command; 'none'

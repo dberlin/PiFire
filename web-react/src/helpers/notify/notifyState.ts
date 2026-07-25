@@ -37,7 +37,8 @@ export function readTargetEdit(probe: ProbeData): TargetEdit {
 // a label (common/defaults.py:512-538) -- probe, probe_limit_high,
 // probe_limit_low -- and the limit pair is a separate feature. Everything else
 // in the array comes back untouched because the caller posts the WHOLE array,
-// and json_patch replaces it wholesale.
+// and an entry the posted array omits is read as a DELETION rather than as
+// silence (common/common.py::merge_notify_data).
 export function applyTargetEdit(
   entries: NotifyEntry[],
   label: string,

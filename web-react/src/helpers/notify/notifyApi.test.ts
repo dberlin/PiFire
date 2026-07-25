@@ -38,9 +38,10 @@ describe("getNotifyData", () => {
   });
 
   // Every one of these MUST throw rather than fall back to []: the caller posts
-  // the returned array straight back with POST /api/control, and an empty array
-  // would replace notify_data wholesale -- wiping every notification on the
-  // grill, including any high/low limit alerts the user is relying on.
+  // the returned array straight back with POST /api/control, and an entry the
+  // posted array omits is read as a DELETION -- so an empty array wipes every
+  // notification on the grill, including any high/low limit alerts the user is
+  // relying on.
   it("throws on an ERROR envelope", async () => {
     respond({ result: "ERROR", message: "nope" });
     await expect(getNotifyData("")).rejects.toThrow(/no notify_data/);

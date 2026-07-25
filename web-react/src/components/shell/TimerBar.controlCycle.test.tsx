@@ -9,21 +9,30 @@ import { TimerBar } from "./TimerBar";
 // judged by what the control process ends up holding rather than by which
 // fetches were issued.
 //
-// The three properties modelled here are the ones that make a second write
-// destructive, and all three are real (verified against the Python in a
-// throwaway pytest run before this file was written):
+// The properties modelled here are real (ported from the Python, and pinned at
+// that end in tests/characterization/test_process_command_golden.py and
+// tests/characterization/test_control_writes_cross_writer.py):
 //
 //  1. A web-process write queues the WHOLE control dict, not a diff
 //     (common/datastore_accessors.py write_control, WriteKind.MERGE).
 //  2. read_control() serves the PERSISTED blob and never the pending queue,
 //     so two commands issued inside one control cycle both read pre-write state.
-//  3. execute_control_writes applies each queued dict with SQLite json_patch --
-//     RFC 7396, which merges objects key-by-key but REPLACES arrays wholesale.
+//  3. execute_control_writes drains the queue against the blob as it stood when
+//     the drain began -- the ancestor every writer in that cycle read. Each
+//     patch is REDUCED against it, so a member the writer left identical to the
+//     ancestor is dropped rather than imposed (common/common.py
+//     reduce_control_patch), and `notify_data` is additionally merged
+//     element-wise, field by field (::merge_notify_data).
+//  4. `timer` is the exception: it is reduced as ONE COUPLED UNIT
+//     (CONTROL_COUPLED_MEMBERS), because start/paused/end describe a single
+//     countdown the backend branches on in combination. So two writers that
+//     each computed a timer state still resolve LAST-WINS on the whole object.
 //
-// Together: whichever write is queued LAST wins outright, including for keys it
-// never meant to touch. `notify_data` is an array, so the timer's expiry flags
-// are replaced; `timer` is an object, but every partial carries all three of its
-// keys, so it is effectively replaced too.
+// (3) is why a second write is no longer destructive in general -- the expiry
+// flags in particular survive. (4) is why it still is for the timer bar's own
+// buttons, and therefore why the bar allows one write per gesture. The
+// `seedControl` -> `drain` model below exercises exactly that, in
+// "the seam this guard exists for".
 // ---------------------------------------------------------------------------
 
 const NOW = 1_700_000_000;
@@ -54,14 +63,35 @@ function seedControl(
   };
 }
 
-/** json_patch(blob, partial) for the two keys the timer commands write.
- *  `timer` is a JSON object -> merged key by key. `notify_data` is a JSON ARRAY
- *  -> replaced outright, which is the whole reason a second write clobbers. */
-function applyPatch(blob: Control, partial: Control): Control {
-  return {
-    timer: { ...blob.timer, ...partial.timer },
-    notify_data: structuredClone(partial.notify_data),
+/** One queued patch through the drain, for the two keys the timer commands
+ *  write. `base` is the blob as it stood when the drain began -- the ancestor
+ *  every writer in this cycle read.
+ *
+ *  `timer` is COUPLED: taken whole if the writer computed any part of it,
+ *  dropped entirely if identical to the ancestor. `notify_data` is merged
+ *  element-wise on (label, type), field by field: a field the writer left equal
+ *  to the ancestor expresses no intent and is not imposed. (The Python also
+ *  handles entries added or removed relative to the ancestor; the timer
+ *  commands never do that, so the model does not.) */
+function applyPatch(base: Control, blob: Control, patch: Control): Control {
+  const next: Control = {
+    timer: { ...blob.timer },
+    notify_data: structuredClone(blob.notify_data),
   };
+  if (JSON.stringify(patch.timer) !== JSON.stringify(base.timer)) {
+    next.timer = { ...patch.timer };
+  }
+  const find = (entries: TimerNotify[], e: TimerNotify) =>
+    entries.find((x) => x.label === e.label && x.type === e.type);
+  for (const incoming of patch.notify_data) {
+    const ancestor = find(base.notify_data, incoming);
+    const target = find(next.notify_data, incoming);
+    if (ancestor === undefined || target === undefined) continue;
+    for (const key of ["req", "shutdown", "keep_warm"] as const) {
+      if (incoming[key] !== ancestor[key]) target[key] = incoming[key];
+    }
+  }
+  return next;
 }
 
 class ControlProcess {
@@ -133,9 +163,17 @@ class ControlProcess {
     return { result: "OK", message: "", data: {} };
   }
 
-  /** One turn of the control loop. */
+  /** A writer that reads control and queues the whole dict back without
+   *  computing a timer state -- common/system.py gather_system_info's shape. */
+  postWholeStaleDict(): void {
+    this.queue.push(structuredClone(this.blob));
+  }
+
+  /** One turn of the control loop. The ancestor is captured ONCE, before the
+   *  loop, exactly as execute_control_writes does. */
   drain(): void {
-    for (const partial of this.queue) this.blob = applyPatch(this.blob, partial);
+    const base = structuredClone(this.blob);
+    for (const patch of this.queue) this.blob = applyPatch(base, this.blob, patch);
     this.queue = [];
   }
 
@@ -208,7 +246,8 @@ describe("TimerBar across one control cycle", () => {
   // bar re-renders only when the socket republishes -- which cannot happen until
   // the control loop drains. So a second click inside that window is an ordinary
   // thing for a user to do, and it reads the pre-stop blob: the pause write
-  // carries the timer's OLD start/end and the OLD expiry flags, and lands last.
+  // carries the timer's OLD start/end and lands last. See the seam tests at the
+  // bottom of this file for what that costs when the guard is not there.
   it("keeps a stopped timer stopped when the next click lands in the same cycle", async () => {
     const cp = new ControlProcess(
       seedControl({ start: NOW - 60, end: NOW + 600 }, { req: true, shutdown: true }),
@@ -286,5 +325,63 @@ describe("TimerBar across one control cycle", () => {
     republish();
     expect(cp.blob.timer).toEqual({ start: 0, paused: 0, end: 0 });
     expect(screen.getByRole("button", { name: /start timer/i })).toBeTruthy();
+  });
+});
+
+// The guard's justification as an executable fact rather than a comment. These
+// drive the model directly, with no UI, because the guard is precisely what
+// stops the bar from producing these sequences -- so removing the guard would
+// make these the bar's behaviour. Both are pinned against the real backend in
+// tests/characterization/test_process_command_golden.py
+// (test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer and
+// test_a_resume_after_a_stop_in_one_cycle_resurrects_the_timer).
+describe("the control-write seam this guard exists for", () => {
+  it("resurrects a stopped countdown when a pause lands in the same cycle", () => {
+    const cp = new ControlProcess(
+      seedControl({ start: NOW - 60, end: NOW + 600 }, { req: true, shutdown: true }),
+    );
+
+    cp.post("/api/set/timer/stop");
+    cp.post("/api/set/timer/pause");
+    cp.drain();
+
+    // The stop's zeros are gone: `timer` is coupled, so the pause's whole
+    // (pre-stop) object is taken and lands last.
+    expect(cp.blob.timer).toEqual({ start: NOW - 60, paused: NOW, end: NOW + 600 });
+    // What does NOT come back is the expiry action -- the pause never touched
+    // shutdown, so its stale copy is not imposed. That half the seam fix closed,
+    // and it is the half that would otherwise shut the grill down on expiry.
+    expect(cp.timerEntry().shutdown).toBe(false);
+  });
+
+  it("resurrects a stopped countdown when a resume lands in the same cycle", () => {
+    const cp = new ControlProcess(
+      seedControl(
+        { start: NOW - 600, paused: NOW - 10, end: NOW + 590 },
+        { req: true, shutdown: true },
+      ),
+    );
+
+    cp.post("/api/set/timer/stop");
+    cp.post("/api/set/timer/start/590");
+    cp.drain();
+
+    // Resume is the bare start form, which unpauses: it shifts `end` forward
+    // from the pre-stop blob and clears `paused`.
+    expect(cp.blob.timer).toEqual({ start: NOW - 600, paused: 0, end: NOW + 600 });
+    expect(cp.timerEntry().shutdown).toBe(false);
+  });
+
+  it("keeps an unrelated writer from reverting a timer it never touched", () => {
+    const cp = new ControlProcess(seedControl({ start: NOW - 60, end: NOW + 600 }, { req: true }));
+
+    cp.post("/api/set/timer/pause");
+    // A writer that queues the whole control dict without computing a timer
+    // state -- the shape of every background write. Its `timer` is identical to
+    // the ancestor, so it carries no evidence it touched one and is dropped.
+    cp.postWholeStaleDict();
+    cp.drain();
+
+    expect(cp.blob.timer.paused).toBe(NOW);
   });
 });

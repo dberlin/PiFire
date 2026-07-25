@@ -90,9 +90,9 @@ describe("TimerModal", () => {
     expect(screen.getByText("30")).toBeTruthy();
   });
 
-  // The flags cannot be sent as their own requests -- a later control write
-  // clobbers them (see the cross-process pin at the bottom of this file), so
-  // they must travel with the start.
+  // The flags travel WITH the start rather than as their own requests -- see
+  // the cross-process pin at the bottom of this file for why that shape is
+  // kept now that a split write would no longer lose them.
   it("sends the expiry flags WITH the start, in a single command", async () => {
     const { command, calls, onClose } = open();
     fireEvent.change(hours(), { target: { value: "1" } });
@@ -209,25 +209,26 @@ describe("TimerModal", () => {
 // ---------------------------------------------------------------------------
 // Cross-process pin: what actually reaches the control process.
 //
-// The expiry flags (notify_data[timer].shutdown / .keep_warm) and the countdown
-// (control.timer) live in ONE control blob, and every MERGE write queues the
-// WHOLE blob to be applied with SQLite json_patch -- RFC 7396, which REPLACES
-// arrays rather than merging their elements. read_control() also never sees the
-// pending queue, and only the control loop drains it. So two writes issued
-// inside one control cycle both read the same stale blob and the second one's
-// notify_data array wins outright.
+// The single request is /api/set/timer/start/{seconds}/{options}, which does
+// exactly one write_control() on the server (common/api_commands.py
+// _cmd_set_timer). Splitting it into a start plus two flag writes used to lose
+// the flags -- every MERGE write queues the WHOLE control blob, read_control()
+// never sees the pending queue, and the last patch of a control cycle imposed
+// its stale array on the rest. The drain now three-way merges each patch
+// against the blob as it stood when it began (common/common.py
+// reduce_control_patch, merge_notify_data), so a split write would survive.
 //
-// That makes "how many requests did this submission produce" the property worth
-// pinning, not the order of client-side calls: the flags and the start must
-// arrive in the SAME control write or they are silently discarded. The single
-// request is /api/set/timer/start/{seconds}/{options}, which does exactly one
-// write_control() on the server (common/api_commands.py _cmd_set_timer).
-//
-// It carries a DURATION. The control process compares control.timer.end against
-// its OWN time.time(), so the end must be computed from that same clock: a
+// The form is kept, and this pin with it, for reasons independent of that seam.
+// It carries a DURATION: the control process compares control.timer.end against
+// its OWN time.time(), so the end must be computed from that same clock -- a
 // browser running behind the Pi would otherwise arm an already-expired timer,
 // and an expired timer with "Shutdown Grill" ticked shuts the grill down
-// mid-cook. Nothing in this request is a timestamp, so nothing can skew.
+// mid-cook. Nothing in this request is a timestamp, so nothing can skew. The
+// form also refuses a zero, negative or non-numeric duration and a paused
+// timer, where the bare start command substitutes 60s or silently unpauses.
+//
+// So "how many requests did this submission produce" is still the property
+// worth pinning: one gesture, one request, one write, no client-computed clock.
 // ---------------------------------------------------------------------------
 describe("TimerModal over the real command client", () => {
   let requests: { url: string; init: RequestInit | undefined }[];
@@ -266,9 +267,8 @@ describe("TimerModal over the real command client", () => {
       expect(onClose).toHaveBeenCalled();
     });
 
-    // One request. Three is the bug: each control write reads the same stale
-    // blob and the last one's notify_data array replaces the flags the earlier
-    // ones set.
+    // One request, not three: one gesture, one write, and an end the server
+    // computed from its own clock.
     expect(requests).toHaveLength(1);
     expect(requests[0].url).toBe("/api/set/timer/start/5400/shutdown");
     expect(requests[0].init?.method).toBe("POST");

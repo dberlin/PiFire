@@ -57,18 +57,14 @@ export function TimerModal({
       setRejected(true);
       return;
     }
-    // One request, carrying the flags AND the countdown, which the server turns
-    // into one control write. Sent separately the flags are lost: every
-    // web-process control write queues the whole control dict read from a blob
-    // that does not reflect the queue, and the queued patches are applied with
-    // json_patch (RFC 7396), which replaces the notify_data ARRAY wholesale --
-    // so the start would land last and undo the flags.
-    //
-    // What travels is a DURATION, not an end time: the control process judges
-    // expiry against its own clock and therefore computes the end itself, so a
-    // browser clock running behind the Pi's cannot arm an already-expired timer
-    // -- which, with "Shutdown Grill" ticked, would shut the grill down
-    // mid-cook. See helpers/command.ts timerStartWithOptions.
+    // One request, carrying the flags AND the countdown. What travels is a
+    // DURATION, not an end time: the control process judges expiry against its
+    // own clock and therefore computes the end itself, so a browser clock
+    // running behind the Pi's cannot arm an already-expired timer -- which,
+    // with "Shutdown Grill" ticked, would shut the grill down mid-cook. That,
+    // plus this form's refusal of a zero/negative/non-numeric duration and of a
+    // paused timer, is why it is used rather than the bare start command plus
+    // two flag writes. See helpers/command.ts timerStartWithOptions.
     await command.timerStartWithOptions(seconds, {
       shutdown: action === "shutdown",
       keepWarm: action === "keepWarm",

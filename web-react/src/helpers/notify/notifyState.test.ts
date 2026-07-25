@@ -261,7 +261,9 @@ describe("saveTargetEdit", () => {
     await saveTargetEdit("", "Probe1", ON);
 
     // Exactly two round trips: one GET, one POST. A per-field REST grammar would
-    // be four POSTs, and inside one control cycle they would clobber each other.
+    // be four POSTs for one user gesture, with a window in which the target is
+    // set but its action is not. (Those four would no longer eat each other --
+    // the drain merges notify_data element-wise -- but they are still four.)
     expect(fetchMock.mock.calls).toHaveLength(2);
     expect(fetchMock.mock.calls[0][0]).toBe("/api/get/notify");
     expect(fetchMock.mock.calls[1][0]).toBe("/api/control");
