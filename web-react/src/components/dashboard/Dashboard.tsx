@@ -5,7 +5,7 @@ import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
 import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";
 import { deriveView, type PillView } from "../../helpers/dashboard/deriveView";
-import { useClock } from "../../helpers/dashboard/hooks";
+import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
 import { readTargetEdit, saveTargetEdit, type TargetEdit } from "../../helpers/notify/notifyState";
 import type { AccentName, LiveState, ProbeData } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
@@ -47,11 +47,17 @@ interface DashboardProps {
 }
 
 // The PiFire controller dashboard (port of PiFire Dashboard.dc.html), driven by
-// the live socket_dash_data contract. Authored at 1280x720 and IDENTICAL at
-// that size, but it reflows below it -- see the breakpoints in dashboard.css.
-// It used to be a fixed 1280x720 board scaled uniformly with transform:
-// scale(), which is why the 800x480 on-device panel rendered 66px probe
-// temperatures at about 20px.
+// the live socket_dash_data contract.
+//
+// Two layouts, split at 1280px. Below it the dashboard REFLOWS: columns stack,
+// the control row wraps, type is re-sized per element. That is the whole point
+// of C8 -- the old build scaled the board uniformly at every size, so the
+// 800x480 on-device panel rendered 66px probe temperatures at about 20px and a
+// phone at about 14px.
+//
+// At 1280px and up it keeps the original fixed board scaled to fit, because
+// the reference resolution has to look unchanged and an unscaled 720px board
+// does not fit under the shell's navbar in a 720px window.
 export function Dashboard({
   dash,
   command,
@@ -67,6 +73,12 @@ export function Dashboard({
   const navigate = useNavigate();
   const now = useClock();
   const health = useControlHealth(controlAlive, apiBase);
+  // Desktop only. Below 1280px this is inert and the breakpoints in
+  // dashboard.css do the work; at 1280px and up the board is fixed and scaled,
+  // which is what keeps a literal 1280x720 window from clipping the control
+  // row off the bottom. `fitRef` goes on .pf-dash-root -- inside the app shell
+  // that box is the area left under the navbar, not the whole viewport.
+  const { scale, fitted, ref: fitRef } = useFitScale(1280, 720);
 
   // Elapsed cook time comes from the CONTROLLER's startup_timestamp
   // (blueprints/mobile/socket_io.py:234, epoch seconds), not from when this
@@ -128,8 +140,16 @@ export function Dashboard({
   };
 
   return (
-    <div className="pf-dash-root">
-      <div className="pf-dash" data-pf="stage" data-animate={animate ? "true" : "false"}>
+    <div className="pf-dash-root" ref={fitRef}>
+      <div
+        className="pf-dash"
+        data-pf="stage"
+        data-animate={animate ? "true" : "false"}
+        // Always paired with the CSS above: the board is pinned at top/left 50%
+        // there, so the translate is what centres it and the scale is what fits
+        // it. Absent entirely on the reflow branch.
+        style={fitted ? { transform: `translate(-50%, -50%) scale(${scale})` } : undefined}
+      >
         <div className="pf-dash-glow" />
 
         {/* The error/warning banners used to float here, over the stage. They

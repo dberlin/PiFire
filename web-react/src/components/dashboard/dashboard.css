@@ -1118,3 +1118,32 @@ button.pf-dash-pill {
     min-height: 180px;
   }
 }
+
+/* ---- desktop: the fixed 1280x720 board, scaled to fit ----
+   The reflow governs everything BELOW this width. At 1280px and up the board
+   goes back to being a fixed 1280x720 rectangle scaled uniformly into whatever
+   the app shell leaves it, because that is what "do not change how it looks at
+   1280x720" turned out to require: in a literal 1280x720 window the navbar
+   takes ~56px, and an unscaled board pushes its control row off the bottom
+   edge. A transform does not shrink a layout box, so the board also has to
+   leave the flow -- hence position: absolute, exactly as the pre-reflow stage
+   did. The scale itself is set inline by useFitScale. */
+@media (min-width: 1280px) {
+  .pf-dash-root {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+  .pf-dash {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 1280px;
+    max-width: none;
+    height: 720px;
+    min-height: 0;
+    transform-origin: center center;
+  }
+}

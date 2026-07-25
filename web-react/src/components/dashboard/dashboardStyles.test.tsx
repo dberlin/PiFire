@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import type { CommandClient, CommandResult } from "../../helpers/command";
+import { FIT_QUERY } from "../../helpers/dashboard/hooks";
 import { FIXTURE_DASH } from "../../helpers/fixture";
 import type { LiveState } from "../../helpers/types";
 import { Dashboard } from "./Dashboard";
@@ -251,8 +252,12 @@ describe("size tokens never sit inside a shorthand", () => {
 // no useFitScale, and every responsive override sealed inside a media query
 // that is false at 1280px. Whether the reflow looks right is
 // tests/e2e/dashboard-reflow.spec.ts's job, and a human's.
-describe("the fixed scaled stage is gone", () => {
-  it("renders no transform on the dashboard root", () => {
+describe("the scaled stage is confined to desktop", () => {
+  // jsdom evaluates width media queries against a 1024px window, so this is
+  // the REFLOW branch -- which is the branch that must never carry a
+  // transform. At 1280px and up the board is deliberately still scaled; that
+  // half is asserted in the browser, by the fidelity spec's overflow gate.
+  it("renders no transform below the desktop breakpoint", () => {
     const { container } = renderDash();
     const root = container.querySelector('[data-pf="stage"]') as HTMLElement;
     expect(root).not.toBeNull();
@@ -261,9 +266,13 @@ describe("the fixed scaled stage is gone", () => {
     expect(root.className).not.toContain("pf-stage");
   });
 
-  it("no longer exports useFitScale, and useClock is untouched", async () => {
-    const hooks = await import("../../helpers/dashboard/hooks");
-    expect(Object.keys(hooks)).toEqual(["useClock"]);
+  it("keeps useFitScale gated on the same width the stylesheet splits at", () => {
+    const css = readFileSync("src/components/dashboard/dashboard.css", "utf8");
+    // The hook decides WHETHER to drive the transform; the stylesheet decides
+    // the geometry it drives. If the two widths drift apart the board gets a
+    // scale with no fixed box, or a fixed box with no scale.
+    expect(FIT_QUERY).toBe("(min-width: 1280px)");
+    expect(css).toContain("@media (min-width: 1280px)");
   });
 
   it("leaves .pf-fit alone for its four other consumers", () => {
