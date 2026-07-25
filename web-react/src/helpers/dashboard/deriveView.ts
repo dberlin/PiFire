@@ -28,12 +28,20 @@ const accentMix = (pct: number) => `color-mix(in srgb, var(--accent) ${pct}%, tr
 
 export interface ProbeCardView {
   name: string;
+  /** The probe's `label`, not its display title: every notify write is
+   *  addressed by label (common/api_commands.py:441-449), and the title is a
+   *  free-text name the user can change. */
+  label: string;
   tempInt: number;
   unit: "F" | "C";
   targetStr: string;
   tgtColor: string;
   barPct: number;
   barColor: string;
+  /** Whether a TARGET notification is armed on this probe. */
+  notifyOn: boolean;
+  /** Formatted time-to-target, or null when there is nothing to show. */
+  etaStr: string | null;
 }
 
 export interface OutputView {
@@ -97,12 +105,22 @@ function probeCard(fp: LiveState["foodProbes"][number], units: "F" | "C"): Probe
   const done = hasTarget && fp.temp >= fp.target - 1;
   return {
     name: fp.title,
+    label: fp.label,
     tempInt: Math.round(fp.temp),
     unit: units,
     targetStr: hasTarget ? `→ ${Math.round(fp.target)}°` : "AMBIENT",
     tgtColor: hasTarget ? (done ? OK : YELLOW) : DIM,
     barPct: hasTarget ? Math.max(2, Math.min(100, (fp.temp / fp.target) * 100)) : 0,
     barColor: done ? OK : "var(--accent)",
+    // targetReq, NOT hasNotifications: the latter is also true when only a
+    // high/low LIMIT alert is armed (blueprints/mobile/socket_io.py:832-848),
+    // which the bell on this card does not control.
+    notifyOn: fp.targetReq,
+    // The backend recomputes eta each control pass for armed target entries and
+    // writes back seconds or None (notify/notifications.py:81-99); the wire type
+    // also allows a string. Matches the Flask ETA button, which is rendered only
+    // while the notification is requested (_macro_dash_default.html:123-131).
+    etaStr: fp.targetReq && typeof fp.eta === "number" ? fmtDuration(fp.eta) : null,
   };
 }
 

@@ -1,0 +1,65 @@
+import { describe, expect, it } from "@rstest/core";
+import { FIXTURE_DASH } from "../fixture";
+import type { ProbeData } from "../types";
+import { deriveView } from "./deriveView";
+
+// probeCard()'s existing fields (targetStr / tgtColor / barPct / barColor) are
+// covered through components/dashboard/ProbeCard.test.tsx, which renders them.
+// These cases cover the fields the card cannot show by itself: the write
+// identity and the ETA readout.
+const card = (over: Partial<ProbeData>) =>
+  deriveView({ ...FIXTURE_DASH, foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], ...over }] })
+    .probes[0];
+
+describe("probeCard identity", () => {
+  // `label` is the key every notify write is addressed by
+  // (common/api_commands.py:441-449). ProbeCardView previously exposed only
+  // `name` (the display title), so there was no way to say which probe a card
+  // meant.
+  it("carries the probe's label, distinct from its display title", () => {
+    const v = card({ title: "Brisket", label: "Probe1" });
+    expect(v.label).toBe("Probe1");
+    expect(v.name).toBe("Brisket");
+  });
+});
+
+describe("probeCard notifyOn", () => {
+  // targetReq, NOT hasNotifications: socket_io.py:832-848 sets
+  // hasNotifications when ANY of the probe's three notify entries is armed,
+  // including a high/low LIMIT alert, which this bell does not control.
+  it("is targetReq", () => {
+    expect(card({ targetReq: true, target: 203 }).notifyOn).toBe(true);
+    expect(card({ targetReq: false, target: 203 }).notifyOn).toBe(false);
+  });
+
+  it("ignores hasNotifications, which a limit alert also sets", () => {
+    expect(card({ targetReq: false, hasNotifications: true, highLimitReq: true }).notifyOn).toBe(
+      false,
+    );
+  });
+});
+
+describe("probeCard etaStr", () => {
+  // The Flask ETA button is rendered only while the probe notification is
+  // requested (_macro_dash_default.html:123-131) and shows a spinner until the
+  // backend has computed one (dash_default.js:632-636); null here is that
+  // "nothing to show" state.
+  it("formats a numeric eta while the notification is armed", () => {
+    expect(card({ targetReq: true, target: 203, eta: 3661 }).etaStr).toBe("1:01:01");
+    expect(card({ targetReq: true, target: 203, eta: 65 }).etaStr).toBe("01:05");
+  });
+
+  it("is null when the notification is not armed", () => {
+    expect(card({ targetReq: false, target: 203, eta: 3661 }).etaStr).toBeNull();
+  });
+
+  it("is null when the backend has no eta yet", () => {
+    expect(card({ targetReq: true, target: 203, eta: null }).etaStr).toBeNull();
+  });
+
+  // types.ts:17 types eta as `number | string | null` because the real capture
+  // has been seen carrying a string; only a number is formattable.
+  it("is null for a non-numeric eta", () => {
+    expect(card({ targetReq: true, target: 203, eta: "--" }).etaStr).toBeNull();
+  });
+});
