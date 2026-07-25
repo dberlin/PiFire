@@ -1879,7 +1879,6 @@ dependencies = [
     { name = "apprise" },
     { name = "bleak" },
     { name = "bluepy" },
-    { name = "do-mpc", extra = ["full"] },
     { name = "easymcp2221" },
     { name = "flask" },
     { name = "flask-mobility" },
@@ -1908,9 +1907,15 @@ dependencies = [
     { name = "zeroconf" },
 ]
 
+[package.optional-dependencies]
+mpc = [
+    { name = "do-mpc", extra = ["full"] },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "diff-cover" },
+    { name = "do-mpc", extra = ["full"] },
     { name = "ipython" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -1930,7 +1935,7 @@ requires-dist = [
     { name = "apprise", specifier = ">=1.11.0" },
     { name = "bleak", specifier = ">=3.0.2" },
     { name = "bluepy", specifier = ">=1.3.0" },
-    { name = "do-mpc", extras = ["full"], specifier = ">=5.1.1" },
+    { name = "do-mpc", extras = ["full"], marker = "extra == 'mpc'", specifier = ">=5.1.1" },
     { name = "easymcp2221", specifier = ">=1.8.4" },
     { name = "flask", specifier = ">=3.1.3" },
     { name = "flask-mobility", specifier = ">=2.0.1" },
@@ -1958,10 +1963,12 @@ requires-dist = [
     { name = "uuid", specifier = ">=1.30" },
     { name = "zeroconf", specifier = ">=0.149.17" },
 ]
+provides-extras = ["mpc"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "diff-cover", specifier = ">=9.0.0" },
+    { name = "do-mpc", extras = ["full"], specifier = ">=5.1.1" },
     { name = "ipython", specifier = ">=9.14.1" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-cov", specifier = ">=5.0.0" },

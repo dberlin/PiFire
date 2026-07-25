@@ -36,7 +36,6 @@ dependencies = [
     "thermoworks-cloud>=0.1.13",
     "uuid>=1.30",
     "zeroconf>=0.149.17",
-    "do-mpc[full]>=5.1.1",
     "adafruit-extended-bus>=1.0.2",
     "adafruit-circuitpython-emc2101>=1.0.0",
     "adafruit-circuitpython-busdevice>=5.0.0",
@@ -50,8 +49,21 @@ dependencies = [
     "easymcp2221>=1.8.4",
 ]
 
+[project.optional-dependencies]
+# do-mpc drags in CasADi, which publishes no Linux-ARM wheel and so builds from
+# source -- minutes of compilation and a C++ toolchain on every Pi. Only the MPC
+# controller needs it, and only on its default 'nlp' policy (the 'net' policy is
+# pure numpy/scipy). Every import of it is lazy (controller/mpc.py:191,
+# controller/mpc_model.py:112,342), so an install without this extra runs fine
+# until someone selects MPC. Installed on demand when that happens.
+mpc = ["do-mpc[full]>=5.1.1"]
+
 [dependency-groups]
 dev = [
+    # Mirrors the `mpc` extra above. A dev machine always has it, so
+    # tests/unit/mpc/ can exercise do-mpc for real; `uv sync --no-dev`, which is
+    # what the installers run, leaves it out and skips the CasADi source build.
+    "do-mpc[full]>=5.1.1",
     "diff-cover>=9.0.0",
     "ipython>=9.14.1",
     "pytest>=8.0.0",
