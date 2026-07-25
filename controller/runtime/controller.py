@@ -31,6 +31,8 @@ from file_mgmt.recipes import convert_recipe_units
 from file_mgmt.common import read_json_file_data
 from os.path import exists
 
+from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
+
 from controller.runtime.state import WorkCycleState
 from controller.runtime.system_commands import process_system_commands
 from controller.runtime.transitions import request_transition, should_keep_power_on, TransitionKind
@@ -81,6 +83,9 @@ class Controller:
         self.status = None
         self.pelletdb = None
         self.last = None
+        # Last time the hopper level was written to pelletdb, by either the
+        # automatic refresh or an explicit hopper_check. setup() re-stamps it.
+        self._hopper_refresh_time = ctx.clock.now()
 
     # --- work-cycle dispatch helpers ---
 
@@ -223,6 +228,9 @@ class Controller:
         self.pelletdb["current"]["hopper_level"] = self.dist_device.get_level(override=True)
         store.write_pellet_db(self.pelletdb)
         self.eventLogger.info(f"Hopper Level Checked @ {self.pelletdb['current']['hopper_level']}%")
+        # Start the automatic-refresh timer from the boot-time reading, so the
+        # first timed refresh is a full interval after it rather than immediate.
+        self._hopper_refresh_time = self.ctx.clock.now()
 
         self.last = self.grill_platform.get_input_status()
 
@@ -317,12 +325,34 @@ class Controller:
 
         if self.control["hopper_check"]:
             self.pelletdb = store.read_pellet_db()
-            # Get current hopper level and save it to the current pellet information
+            # Get current hopper level and save it to the current pellet information.
+            # override=True forces a fresh measurement and blocks here for up to
+            # 3s -- acceptable ONLY because something explicitly asked for a
+            # reading and is waiting on the answer.
             self.pelletdb["current"]["hopper_level"] = self.dist_device.get_level(override=True)
             store.write_pellet_db(self.pelletdb)
             self.eventLogger.info("Hopper Level Checked @ " + str(self.pelletdb["current"]["hopper_level"]) + "%")
             self.control["hopper_check"] = False
             store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            self._hopper_refresh_time = ctx.clock.now()
+        elif (ctx.clock.now() - self._hopper_refresh_time) > HOPPER_LEVEL_REFRESH_INTERVAL:
+            # Automatic refresh. This is what keeps the dashboard's hopper
+            # reading current now that there is no Refresh Status button; in
+            # Stop mode it is the ONLY thing that does (the per-mode work cycle
+            # has its own copy of this timer, and does not run outside a cook).
+            #
+            # NO override: get_level() returns the sensor's cached percentage
+            # immediately. Passing override=True here would block this loop for
+            # up to 3s every interval while it is timing the auger and igniter.
+            # The sampling thread keeps that cache fresh on its own
+            # (distance/intervals.py).
+            #
+            # Deliberately not logged -- once per interval, forever, would bury
+            # the event log that the explicit checks above are visible in.
+            self.pelletdb = store.read_pellet_db()
+            self.pelletdb["current"]["hopper_level"] = self.dist_device.get_level()
+            store.write_pellet_db(self.pelletdb)
+            self._hopper_refresh_time = ctx.clock.now()
 
         # Grab current probe profiles if they have changed since the last loop.
         if self.control["probe_profile_update"]:

@@ -20,12 +20,14 @@ boot-time hopper level was never read). See Controller.setup().
 """
 
 import logging
+import time
 
 import controller.runtime.controller as controller_mod
 from controller.runtime.controller import Controller
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
+from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 from common.defaults import default_metrics
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.fakes.grill import FakeGrillPlatform
@@ -47,14 +49,33 @@ class _RecordingDistance(FakeDistance):
     def __init__(self, level=100):
         super().__init__(level)
         self.get_level_calls = 0
+        self.overrides = []  # the override flag of every get_level call, in order
         self.update_distances_calls = []
 
     def get_level(self, override=False):
         self.get_level_calls += 1
+        self.overrides.append(override)
         return self._level
 
     def update_distances(self, empty, full):
         self.update_distances_calls.append((empty, full))
+
+
+class _BlockingDistance(_RecordingDistance):
+    """A real distance sensor, faithfully. `get_level(override=True)` sets the
+    sampling thread's override flag and then waits on it for up to 3 SECONDS
+    (distance/_sampled_base.py's get_level); the cached read returns instantly.
+
+    This models the wall clock, not the injected ManualClock, on purpose: the
+    hazard is that the control loop's own thread stops running, which no
+    amount of fake time would reveal."""
+
+    block_seconds = 3.0
+
+    def get_level(self, override=False):
+        if override:
+            time.sleep(self.block_seconds)
+        return super().get_level(override=override)
 
 
 def make_controller(settings, control_data, pellet_db, *, grill=None, dist=None, clock=None):
@@ -392,10 +413,143 @@ def test_tick_hopper_check_reads_and_clears(monkeypatch):
     _spy_dispatch(c)
     c.setup()
     dist.get_level_calls = 0  # ignore the setup() boot-time read
+    dist.overrides.clear()
     c.tick()
     assert dist.get_level_calls == 1
+    # The EXPLICIT path still forces a fresh measurement: something asked for a
+    # reading and is waiting on the answer, so paying the block is correct.
+    assert dist.overrides == [True]
     assert store.read_pellet_db()["current"]["hopper_level"] == 42
     assert store.read_control()["hopper_check"] is False
+
+
+# --------------------------------------------------------------------------
+# Automatic hopper refresh
+#
+# The dashboard's "Refresh Status" button is gone -- the repo owner's call:
+# poll automatically at a reasonable speed instead. That makes the loop below
+# the only thing that keeps the hopper reading current outside an active cook,
+# and makes HOW it reads the sensor a control-loop safety property rather than
+# a UI detail. See distance/intervals.py.
+# --------------------------------------------------------------------------
+
+
+def test_tick_refreshes_hopper_level_on_a_timer(monkeypatch):
+    _neutralize_externals(monkeypatch)
+    settings = base_settings()
+    control_data = base_control(mode="Stop")
+    control_data["updated"] = False
+    control_data["hopper_check"] = False
+    clock = ManualClock(start=1000)
+    dist = _RecordingDistance(level=77)
+    c, ctx, store, grill, dist, notifier = make_controller(
+        settings, control_data, base_pellet_db(), dist=dist, clock=clock
+    )
+    _spy_dispatch(c)
+    c.setup()
+    dist.get_level_calls = 0  # ignore the setup() boot-time read
+    dist.overrides.clear()
+
+    # Well inside the interval: nothing happens. The timer is not a free-running
+    # "read every tick" -- ticks run ten times a second.
+    clock.advance(HOPPER_LEVEL_REFRESH_INTERVAL - 1)
+    c.tick()
+    assert dist.get_level_calls == 0
+
+    # Past it: the level is re-read and persisted, with no hopper_check flag in
+    # sight. Against the pre-change loop this is 0 calls -- it only ever read
+    # the sensor when a user pressed a button.
+    clock.advance(2)
+    c.tick()
+    assert dist.get_level_calls == 1
+    assert store.read_pellet_db()["current"]["hopper_level"] == 77
+    assert store.read_control()["hopper_check"] is False
+
+
+def test_timed_hopper_refresh_never_asks_the_sensor_to_re_measure(monkeypatch):
+    """THE RISK THIS WHOLE CHANGE CARRIES.
+
+    `get_level(override=True)` blocks its caller for up to 3s while the
+    sampling thread takes a fresh reading. On a 10s timer that is ~30% of a
+    loop whose job is timing the auger and igniter. The automatic refresh must
+    read the cache -- override=False -- every time."""
+    _neutralize_externals(monkeypatch)
+    settings = base_settings()
+    control_data = base_control(mode="Stop")
+    control_data["updated"] = False
+    control_data["hopper_check"] = False
+    clock = ManualClock(start=1000)
+    dist = _RecordingDistance()
+    c, ctx, store, grill, dist, notifier = make_controller(
+        settings, control_data, base_pellet_db(), dist=dist, clock=clock
+    )
+    _spy_dispatch(c)
+    c.setup()
+    dist.overrides.clear()
+
+    for _ in range(5):
+        clock.advance(HOPPER_LEVEL_REFRESH_INTERVAL + 1)
+        c.tick()
+
+    assert dist.overrides == [False] * 5
+
+
+def test_timed_hopper_refresh_does_not_block_the_control_loop(monkeypatch):
+    """The same property, asserted against the WALL clock rather than the
+    override flag -- because "the loop keeps running" is the thing that
+    actually matters, and a future refactor could reintroduce a blocking read
+    by some route other than the override argument.
+
+    _BlockingDistance sleeps 3s on an override read, exactly as a real ToF
+    sensor's get_level does. Five refreshes would cost 15 seconds."""
+    _neutralize_externals(monkeypatch)
+    settings = base_settings()
+    control_data = base_control(mode="Stop")
+    control_data["updated"] = False
+    control_data["hopper_check"] = False
+    clock = ManualClock(start=1000)
+    dist = _BlockingDistance()
+    c, ctx, store, grill, dist, notifier = make_controller(
+        settings, control_data, base_pellet_db(), dist=dist, clock=clock
+    )
+    _spy_dispatch(c)
+    c.setup()  # the boot-time read IS an override read, and IS allowed to block
+
+    dist.get_level_calls = 0  # ignore the setup() boot-time read
+    started = time.monotonic()
+    for _ in range(5):
+        clock.advance(HOPPER_LEVEL_REFRESH_INTERVAL + 1)
+        c.tick()
+    elapsed = time.monotonic() - started
+
+    # Both halves matter. Without the first, a loop that simply never refreshes
+    # (which is what the code did before this change) would pass the timing
+    # assertion trivially.
+    assert dist.get_level_calls == 5, "the loop did not refresh the hopper at all"
+    assert elapsed < 1.0, f"the timed hopper refresh blocked the control loop for {elapsed:.1f}s"
+
+
+def test_explicit_hopper_check_resets_the_refresh_timer(monkeypatch):
+    """A user-requested check is a refresh. Not restamping the timer would
+    have the loop re-read the sensor again a moment later, for nothing."""
+    _neutralize_externals(monkeypatch)
+    settings = base_settings()
+    control_data = base_control(mode="Stop")
+    control_data["updated"] = False
+    control_data["hopper_check"] = True
+    clock = ManualClock(start=1000)
+    dist = _RecordingDistance()
+    c, ctx, store, grill, dist, notifier = make_controller(
+        settings, control_data, base_pellet_db(), dist=dist, clock=clock
+    )
+    _spy_dispatch(c)
+    c.setup()
+    clock.advance(HOPPER_LEVEL_REFRESH_INTERVAL + 1)
+    c.tick()  # services the explicit check
+    dist.get_level_calls = 0
+    clock.advance(1)
+    c.tick()
+    assert dist.get_level_calls == 0  # timer was restamped by the explicit check
 
 
 def test_tick_distance_update_updates_distances_and_clears(monkeypatch):

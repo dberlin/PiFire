@@ -16,6 +16,7 @@ import logging
 from common.common import WriteKind
 from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
+from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
@@ -363,18 +364,27 @@ class ControlMode:
             control["distance_update"] = False
             ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
 
-        # Check hopper level when requested or every 300 seconds
-        if control["hopper_check"] or (now - self.state.timers.hopper_toggle) > 60:
+        # Check hopper level when requested, or automatically every
+        # HOPPER_LEVEL_REFRESH_INTERVAL seconds. (The literal here used to be
+        # 60, under a comment claiming 300.)
+        if control["hopper_check"] or (now - self.state.timers.hopper_toggle) > HOPPER_LEVEL_REFRESH_INTERVAL:
             pelletdb = ctx.store.read_pellet_db()
             override = False
             if control["hopper_check"]:
                 control["hopper_check"] = False
                 ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")
                 override = True
+            # override only on the explicit path: it blocks this loop for up to
+            # 3s waiting on the sampling thread, which the timed refresh -- now
+            # running several times a minute, mid-cook -- must never do. The
+            # plain call reads the sensor's cache and returns immediately.
             pelletdb["current"]["hopper_level"] = dist_device.get_level(override=override)
             ctx.store.write_pellet_db(pelletdb)
             self.state.timers.hopper_toggle = now
-            _control.eventLogger.info("Hopper Level Checked @ " + str(pelletdb["current"]["hopper_level"]) + "%")
+            if override:
+                # Only the explicit check is logged; the timed refresh would
+                # otherwise fill the event log several times a minute.
+                _control.eventLogger.info("Hopper Level Checked @ " + str(pelletdb["current"]["hopper_level"]) + "%")
 
         # Check for update in ON/OFF Switch
         if not self.settings["platform"]["standalone"] and last != grill_platform.get_input_status():
