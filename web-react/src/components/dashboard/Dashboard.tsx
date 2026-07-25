@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import type { CommandClient } from "../../helpers/command";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
+import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";
 import { deriveView, type PillView } from "../../helpers/dashboard/deriveView";
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
 import { readTargetEdit, saveTargetEdit, type TargetEdit } from "../../helpers/notify/notifyState";
@@ -68,6 +69,16 @@ export function Dashboard({
   // counting from the original ignition -- which is what Flask has always done.
   const cookTime = fmtElapsed(cookElapsed(dash.startupTimestamp, now.getTime() / 1000));
   const clock = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  // Status readouts Flask carries and this port had dropped. All three render
+  // INSIDE existing boxes -- no new rows -- so the 1280x720 geometry is
+  // unchanged when they are absent, which is every frame in the demo fixture.
+  const nowSeconds = now.getTime() / 1000;
+  const modeLeft = modeCountdown(dash, nowSeconds);
+  const lidLeft = lidCountdown(dash, nowSeconds);
+  // A running recipe replaces the gauge's mode badge outright, matching Flask's
+  // "Recipe | <step mode>" status header (dash_default.js:297-300).
+  const modeLabel = recipeLabel(dash) ?? view.modeLabel;
 
   // Per-probe target notifications. Only the LABEL of the probe being edited is
   // held here; the probe itself is re-resolved from `dash` on every render, so
@@ -290,7 +301,7 @@ export function Dashboard({
               maxTemp={view.maxTemp}
               frac={view.gaugeFrac}
               hasSetpoint={view.hasSetpoint}
-              modeLabel={view.modeLabel}
+              modeLabel={modeLabel}
               units={view.units}
               cooking={view.cooking}
               animate={animate}
@@ -313,16 +324,35 @@ export function Dashboard({
                   padding: "0 20px",
                 }}
               >
-                <span
-                  style={{
-                    font: "600 12px 'Barlow'",
-                    letterSpacing: 2,
-                    color: "#7d7264",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Cook Time
-                </span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span
+                    style={{
+                      font: "600 12px 'Barlow'",
+                      letterSpacing: 2,
+                      color: "#7d7264",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Cook Time
+                  </span>
+                  {/* Flask's literal string, `s` suffix included
+                      (_macro_dash_default.html:373). No MM:SS -- only the
+                      integer is injected there. Rendered as a second line in
+                      this card's existing label column so the 52px row keeps
+                      its height. */}
+                  {modeLeft !== null && (
+                    <span
+                      style={{
+                        font: "600 12px 'Barlow'",
+                        letterSpacing: 1,
+                        color: "#8fe09a",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Time Left in Mode: {modeLeft}s
+                    </span>
+                  )}
+                </div>
                 <span
                   style={{
                     font: "700 26px 'Barlow Semi Condensed'",
@@ -365,13 +395,27 @@ export function Dashboard({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    font: "700 20px 'Barlow'",
-                    letterSpacing: 2,
+                    flexDirection: "column",
+                    gap: 1,
                     color: "#ff8b82",
                     animation: "pf-blink 1s ease-in-out infinite",
                   }}
                 >
-                  LID OPEN
+                  <span style={{ font: "700 16px 'Barlow'", letterSpacing: 2 }}>LID OPEN</span>
+                  {/* Flask: "Lid Open Detected: PID Paused Ns"
+                      (dash_default.js:397). Two lines inside the SAME 210x52
+                      box -- the box is not widened. */}
+                  {lidLeft !== null && (
+                    <span
+                      style={{
+                        font: "600 12px 'Barlow'",
+                        letterSpacing: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      PID Paused {lidLeft}s
+                    </span>
+                  )}
                 </div>
               )}
             </div>

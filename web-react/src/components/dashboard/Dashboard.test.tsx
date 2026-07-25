@@ -455,3 +455,60 @@ describe("Dashboard control-health recheck", () => {
     expect(screen.getByRole("button", { name: "Smoke" })).toBeDisabled();
   });
 });
+
+// I4b: three readouts Flask has always carried and this port dropped. Each
+// renders INSIDE an existing box -- no new rows -- so the 1280x720 geometry is
+// unchanged whenever they are absent.
+describe("Dashboard status readouts", () => {
+  const secondsAgo = (n: number) => Math.floor(Date.now() / 1000) - n;
+  const secondsAhead = (n: number) => Math.floor(Date.now() / 1000) + n;
+
+  it("shows the time left in a timed mode, with Flask's literal wording", () => {
+    renderDashboard({
+      ...FIXTURE_DASH,
+      currentMode: "Startup",
+      startDuration: 240,
+      modeStartTime: secondsAgo(60),
+    });
+    expect(screen.getByText(/Time Left in Mode: 1(79|80)s/)).toBeInTheDocument();
+  });
+
+  it("shows no mode countdown in a mode that has no duration", () => {
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Hold" });
+    expect(screen.queryByText(/Time Left in Mode/)).not.toBeInTheDocument();
+  });
+
+  it("shows the PID-paused countdown beside LID OPEN, in Hold", () => {
+    renderDashboard({
+      ...FIXTURE_DASH,
+      currentMode: "Hold",
+      lidOpenDetected: true,
+      lidOpenEndTime: secondsAhead(45),
+    });
+    expect(screen.getByText("LID OPEN")).toBeInTheDocument();
+    expect(screen.getByText(/PID Paused 4[45]s/)).toBeInTheDocument();
+  });
+
+  it("shows no lid readout when no lid is open", () => {
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Hold", lidOpenDetected: false });
+    expect(screen.queryByText("LID OPEN")).not.toBeInTheDocument();
+    expect(screen.queryByText(/PID Paused/)).not.toBeInTheDocument();
+  });
+
+  it("replaces the gauge's mode badge with the recipe step while a recipe runs", () => {
+    renderDashboard({
+      ...FIXTURE_DASH,
+      currentMode: "Recipe",
+      displayMode: "Hold",
+      recipeStatus: { ...FIXTURE_DASH.recipeStatus, recipeMode: true },
+    });
+    expect(screen.getByText("Recipe | Hold")).toBeInTheDocument();
+    expect(screen.queryByText("RECIPE")).not.toBeInTheDocument();
+  });
+
+  it("keeps the plain mode badge when no recipe is running", () => {
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke" });
+    expect(screen.getByText("SMOKE")).toBeInTheDocument();
+    expect(screen.queryByText(/Recipe \|/)).not.toBeInTheDocument();
+  });
+});
