@@ -209,7 +209,7 @@
   text-align: center;
 }
 .pf-timer-btn {
-  background: #1d1813;
+  background: var(--inset);
   color: #e8dfd1;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
@@ -247,7 +247,7 @@
 }
 .pf-timer-readout {
   font: 800 40px "Barlow Semi Condensed";
-  color: #f8f2e8;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 .pf-timer-unit {

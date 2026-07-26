@@ -11,9 +11,11 @@ import type { ChartSeries } from "./HistoryChart";
  */
 export const MS_PER_SECOND = 1000;
 
-/** Fallback stroke for a dataset with no `borderColor` (--text-dim's value;
- * canvas strokes can't read CSS custom properties). */
-const FALLBACK_COLOR = "#a89a86";
+/** Fallback stroke for a dataset with no `borderColor`. This is the ONE place a
+ * palette value is duplicated outside theme.css: uPlot strokes a canvas, and
+ * canvas strokes cannot read CSS custom properties. It must stay equal to
+ * `--text-dim` / `Theme.dim`, and src/themeTokens.test.ts fails if it does not. */
+const FALLBACK_COLOR = "#8a7f70";
 
 export interface ChartInput {
   /** Epoch SECONDS. */

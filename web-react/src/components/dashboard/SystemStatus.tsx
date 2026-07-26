@@ -65,7 +65,8 @@ function FanIcon({ color, spin }: { color: string; spin: boolean }) {
         <path d="M50 50 Q 78 42 92 58 Q 88 76 50 50 Z" fill={color} />
         <path d="M50 50 Q 44 78 24 84 Q 10 72 50 50 Z" fill={color} />
       </g>
-      <circle cx={50} cy={50} r={8} fill="#14100c" stroke={color} strokeWidth={3} />
+      {/* Qt paints this hub with Theme.inset (FanIcon.qml). */}
+      <circle cx={50} cy={50} r={8} fill="var(--inset)" stroke={color} strokeWidth={3} />
     </svg>
   );
 }

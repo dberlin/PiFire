@@ -45,8 +45,10 @@ export function GrillGauge({
       <svg className="pf-dash-gauge-svg" viewBox="0 0 220 220">
         <defs>
           <linearGradient id="pfGauge" x1="0" y1="1" x2="1" y2="0">
+            {/* Theme.arcStop0 / arcStop1 / arcStop2. The middle stop is its own
+                Qt token, not accentColor: they coincide only for Ember. */}
             <stop offset="0" stopColor="var(--accent-2)" />
-            <stop offset="0.55" stopColor="var(--accent)" />
+            <stop offset="0.55" stopColor="var(--accent-mid)" />
             <stop offset="1" stopColor="var(--accent-1)" />
           </linearGradient>
         </defs>

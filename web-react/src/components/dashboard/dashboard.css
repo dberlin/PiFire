@@ -174,7 +174,7 @@
   border-color: var(--text);
 }
 .pf-toggle {
-  background: #1d1813;
+  background: var(--inset);
   color: var(--label);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
@@ -229,7 +229,7 @@
   font-weight: 800;
   font-size: 56px;
   font-family: "Barlow Semi Condensed";
-  color: #f8f2e8;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 .pf-setpoint-val span {
@@ -259,7 +259,7 @@
   flex: 1;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: #1d1813;
+  background: var(--inset);
   color: #e8dfd1;
   font: 700 16px "Barlow";
   padding: 12px;
@@ -290,7 +290,7 @@
   height: 30px;
   border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: #1d1813;
+  background: var(--inset);
   color: var(--label);
   cursor: pointer;
   padding: 0;
@@ -341,7 +341,7 @@
 }
 .pf-notify-num input {
   width: 140px;
-  background: #1d1813;
+  background: var(--inset);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 12px;
   padding: 6px 12px;
@@ -349,7 +349,7 @@
   font-size: 34px;
   font-family: "Barlow Semi Condensed";
   font-variant-numeric: tabular-nums;
-  color: #f8f2e8;
+  color: var(--text);
   text-align: right;
 }
 .pf-notify-num input:disabled {
@@ -417,7 +417,7 @@
   padding: 0 5px;
   border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: #1d1813;
+  background: var(--inset);
   color: var(--text-dim);
   font: 600 11px "Barlow";
   line-height: 1;
@@ -811,7 +811,7 @@
 .pf-dash-gauge-temp {
   font-size: var(--pf-gauge-num);
   font-weight: 800;
-  color: #f8f2e8;
+  color: var(--text);
 }
 .pf-dash-gauge-unit {
   font-size: var(--pf-gauge-unit);

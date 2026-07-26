@@ -90,7 +90,9 @@ describe("toChartInput", () => {
       chart_data: [{ label: "Grill", data: POPULATED.chart_data[0].data }],
     };
 
-    expect(toChartInput(noColor).series[0].color).toBe("#a89a86");
+    // Theme.dim / --text-dim. themeTokens.test.ts is what keeps this literal
+    // and the token in step; this test only pins that the fallback is used.
+    expect(toChartInput(noColor).series[0].color).toBe("#8a7f70");
   });
 
   it("drops hidden datasets (a probe disabled in Settings)", () => {

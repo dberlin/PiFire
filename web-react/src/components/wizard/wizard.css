@@ -161,7 +161,7 @@
   border-color: rgba(255, 255, 255, 0.14);
   border-radius: 12px;
   padding: 9px 18px;
-  background: #1d1813;
+  background: var(--inset);
   color: #e8dfd1;
   font: 700 15px "Barlow";
   letter-spacing: 0.3px;
