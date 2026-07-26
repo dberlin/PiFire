@@ -18,7 +18,8 @@ only /socket.io, /api and /static/img (web-react/rsbuild.config.ts:27-37), so a
 
 import os
 
-from flask import current_app, jsonify, request
+from flask import current_app, jsonify, request, send_file
+from werkzeug.exceptions import BadRequest
 
 from common.app import api_response
 from common.file_browser import browse_files, resolve_managed_file
@@ -80,6 +81,19 @@ def require_file(name, *, must_exist=True):
     return path, None
 
 
+def json_body():
+    """request.json, or {} for a body that is absent or not JSON.
+
+    A form-encoded body is deliberately not supported by these routes: one
+    shape, one parser, so there is no second path a client can reach a write
+    through.
+    """
+    try:
+        return request.get_json(silent=True) or {}
+    except BadRequest:
+        return {}
+
+
 def _load_cookfile(name):
     """require_file + read_cookfile. Returns (struct, path, None) or
     (None, None, response)."""
@@ -126,3 +140,50 @@ def cookfile_chart():
     if err:
         return err
     return jsonify(cookfile_api.chart_payload(struct)), 200
+
+
+@api_files_bp.route("/cookfiles/download", methods=["GET"])
+def cookfile_download():
+    path, err = require_file(request.args.get("file", ""))
+    if err:
+        return err
+    return send_file(path, as_attachment=True, max_age=0)
+
+
+@api_files_bp.route("/cookfiles/export", methods=["GET"])
+def cookfile_export():
+    name = request.args.get("file", "")
+    kind = request.args.get("kind", "")
+    if kind not in ("data", "events"):
+        return error("bad_request", 400, field="kind")
+    path, err = require_file(name)
+    if err:
+        return err
+    csv_path, status = cookfile_api.build_export(path, name, kind)
+    if status != "OK":
+        return cookfile_api.unreadable(status, error)
+    return send_file(csv_path, as_attachment=True, max_age=0)
+
+
+@api_files_bp.route("/cookfiles/upload", methods=["POST"])
+def cookfile_upload():
+    storage = request.files.get("file")
+    safe_name, problem = cookfile_api.save_upload(storage)
+    if problem:
+        return error(problem, 400, field="file")
+    #  Re-contain the FLATTENED name: secure_filename is a character filter,
+    #  resolve_managed_file is the containment proof, and this is a write.
+    path, err = require_file(safe_name, must_exist=False)
+    if err:
+        return err
+    storage.save(path)
+    return jsonify(api_response("OK", None, {"filename": safe_name})), 200
+
+
+@api_files_bp.route("/cookfiles/delete", methods=["POST"])
+def cookfile_delete():
+    path, err = require_file(json_body().get("file", ""))
+    if err:
+        return err
+    os.remove(path)
+    return jsonify(api_response("OK")), 200

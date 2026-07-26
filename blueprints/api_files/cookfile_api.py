@@ -6,9 +6,20 @@ blueprints/cookfile/routes.py.
 """
 
 import copy
+import os
 
-from common.app import classify_cookfile_error, prepare_annotations, prepare_event_totals
+from werkzeug.utils import secure_filename
+
+from common.app import (
+    allowed_file,
+    classify_cookfile_error,
+    prepare_annotations,
+    prepare_csv,
+    prepare_event_totals,
+    prepare_metrics_csv,
+)
 from common.common import epoch_to_time
+from file_mgmt.common import read_json_file_data
 from file_mgmt.cookfile import read_cookfile
 
 
@@ -86,3 +97,50 @@ def chart_payload(struct):
         "probe_mapper": struct["graph_data"]["probe_mapper"],
         "annotations": prepare_annotations(0, struct["events"]),
     }
+
+
+def build_export(path, name, kind):
+    """Produce a CSV on disk and return (csv_path, status).
+
+    `os.path.basename(name)` is what goes to the builders, NOT the full path:
+    prepare_csv/prepare_metrics_csv both compose their output as
+    `"/tmp/" + filename + ".csv"` after a `.replace("./history/", "")` that
+    only matches the DEFAULT folder (common/app.py:175, :210). Handing them an
+    absolute path under any other folder composes a /tmp path with embedded
+    directories that do not exist, and open() raises. Passing the bare name
+    makes this correct for every folder without touching common/app.py, which
+    the legacy routes still call.
+    """
+    stem = os.path.basename(name)
+    if kind == "data":
+        struct, status = read_cookfile(path)
+        if status != "OK":
+            return None, status
+        return prepare_csv(struct["raw_data"], stem), "OK"
+    events, status = read_json_file_data(path, "events")
+    if status != "OK":
+        return None, status
+    return prepare_metrics_csv(events, stem), "OK"
+
+
+def save_upload(storage):
+    """Vet an uploaded archive's filename.
+
+    TWO guards, both required and neither sufficient alone:
+      1. allowed_file() gates the extension against config.py's
+         ALLOWED_EXTENSIONS -- the same gate the legacy route uses.
+      2. secure_filename() flattens the name, and the CALLER then re-resolves
+         the flattened name through resolve_managed_file. secure_filename alone
+         is a character-set filter, not a containment proof, and this is a
+         write: a name that survives it but still escapes would create a file
+         outside the folder.
+    Returns (safe_name, None) or (None, error_message).
+    """
+    if storage is None or not storage.filename:
+        return None, "bad_request"
+    if not allowed_file(storage.filename):
+        return None, "disallowed_file"
+    safe_name = secure_filename(storage.filename)
+    if not safe_name:
+        return None, "bad_request"
+    return safe_name, None

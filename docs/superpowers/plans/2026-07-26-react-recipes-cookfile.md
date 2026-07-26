@@ -1358,9 +1358,14 @@ jj desc -m "feat(api-files): cook-file detail and chart endpoints with path cont
 - `POST /api/files/cookfiles/upload`, multipart field `file` → `{result:"OK", data:{filename}}`; 400 `disallowed_file` / `bad_request`.
 - `POST /api/files/cookfiles/delete`, JSON `{file}` → `{result:"OK"}`; 404.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
-Create `tests/web/test_api_files_cookfile_write.py` (copy the `_isolated_folders` + `_write_cookfile` block again), plus:
+Create `tests/web/test_api_files_cookfile_write.py`. **CORRECTED:** nothing is copied --
+the fixtures are `api_files_client` / `api_files_folders` from `tests/web/conftest.py`
+and the builders come from `tests/web/archive_builders.py`. Playwright calls translate
+as in Task 3; `multipart={...}` becomes
+`data={"file": (io.BytesIO(b"..."), name)}, content_type="multipart/form-data"` and
+`data={"file": name}` becomes `json={"file": name}`.
 
 ```python
 def test_download_streams_the_archive_bytes(live_server, page, _isolated_folders):
@@ -1510,7 +1515,7 @@ def test_delete_refuses_traversal_and_unknown_names(live_server, page, _isolated
 
 Add `import os`, `import shutil`, `import pytest` to the module imports.
 
-- [ ] **Step 2: Implement in `cookfile_api.py`**
+- [x] **Step 2: Implement in `cookfile_api.py`**
 
 ```python
 import os
@@ -1548,7 +1553,7 @@ def build_export(path, name, kind):
     return prepare_metrics_csv(events, stem), "OK"
 
 
-def save_upload(folder, storage):
+def save_upload(storage):  # CORRECTED: `folder` was unused
     """Save an uploaded archive into `folder`.
 
     TWO guards, both required and neither sufficient alone:
@@ -1571,7 +1576,7 @@ def save_upload(folder, storage):
     return safe_name, None
 ```
 
-- [ ] **Step 3: Register the four routes**
+- [x] **Step 3: Register the four routes**
 
 In `blueprints/api_files/routes.py`:
 
@@ -1615,7 +1620,7 @@ def cookfile_export():
 
 @api_files_bp.route("/cookfiles/upload", methods=["POST"])
 def cookfile_upload():
-    safe_name, problem = cookfile_api.save_upload(cookfile_folder(), request.files.get("file"))
+    safe_name, problem = cookfile_api.save_upload(request.files.get("file"))
     if problem:
         return error(problem, 400, field="file")
     #  Re-contain the FLATTENED name: secure_filename is a character filter,
@@ -1636,7 +1641,7 @@ def cookfile_delete():
     return jsonify(api_response("OK")), 200
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit** (22 passed)
 
 ```bash
 QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/test_api_files_cookfile_write.py -q
