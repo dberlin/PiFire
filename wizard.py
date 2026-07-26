@@ -194,7 +194,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 
     percent = 5
     status = "Setting Up Modules..."
-    output = " - Adding selected modules to the settings.json file. "
+    output = " - Adding selected modules to the settings. "
     logger.info(status)
     logger.info(output)
     set_wizard_install_status(percent, status, output)
@@ -231,7 +231,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 
     percent = 10
     status = "Updating Settings..."
-    output = " - Adding selected settings to the settings.json file."
+    output = " - Adding selected settings."
     logger.info(status)
     logger.info(output)
     set_wizard_install_status(percent, status, output)
@@ -281,7 +281,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
                     set_wizard_install_status(percent, status, f"   - Skipped unknown setting {setting}")
                     continue
                 settings = set_nested_key_value(settings, dependency["settings"], selected_setting)
-            output = f"   + Set {setting} in settings.json"
+            output = f"   + Set {setting}"
             set_wizard_install_status(percent, status, output)
         if module == "display":
             selected = WizardInstallInfo["modules"][module]["profile_selected"][0]

@@ -565,11 +565,9 @@ if __name__ == "__main__":
         "-p", "--piplist", action="store_true", required=False, help="Output PIP List packages to JSON file."
     )
     parser.add_argument(
-        "-v", "--uv", action="store_true", required=False, help="Set uv flag and clear venv flag in settings.json"
+        "-v", "--uv", action="store_true", required=False, help="Set uv flag and clear venv flag in settings"
     )
-    parser.add_argument(
-        "-l", "--legacyvenv", action="store_true", required=False, help="Set venv flag in settings.json"
-    )
+    parser.add_argument("-l", "--legacyvenv", action="store_true", required=False, help="Set venv flag in settings")
     parser.add_argument("-d", "--debug", action="store_true", required=False, help="Enable Debug Mode")
     parser.add_argument(
         "-i",

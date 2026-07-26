@@ -3,7 +3,7 @@
  PiFire Board Configuration Tool
 ==============================================================================
 
- Description: Tool to configure the board settings based on the settings.json
+ Description: Tool to configure the board settings based on the stored settings
   configuration.  Currently supports only Raspberry Pi based platforms.
 
 ==============================================================================
@@ -47,7 +47,7 @@ def set_pwm_gpio():
         pin = settings["platform"]["outputs"]["pwm"]
         system_type = settings["platform"]["system_type"]
     except:
-        result += "FAILED (error getting settings.json data) "
+        result += "FAILED (error getting settings data) "
         return result, changed
 
     try:
@@ -72,7 +72,7 @@ def set_onewire_gpio():
         pin = settings["platform"]["system"]["1WIRE"]
         system_type = settings["platform"]["system_type"]
     except:
-        result += "FAILED (error getting settings.json data) "
+        result += "FAILED (error getting settings data) "
         return result, changed
 
     try:
@@ -97,7 +97,7 @@ def set_backlight():
         settings = read_settings()
         system_type = settings["platform"]["system_type"]
     except:
-        result += "FAILED (error getting settings.json data) "
+        result += "FAILED (error getting settings data) "
         return result, changed
 
     try:
@@ -120,7 +120,7 @@ def enable_spi():
         settings = read_settings()
         system_type = settings["platform"]["system_type"]
     except:
-        result += "FAILED (error getting settings.json data) "
+        result += "FAILED (error getting settings data) "
         return result, changed
 
     try:
@@ -143,7 +143,7 @@ def enable_i2c():
         settings = read_settings()
         system_type = settings["platform"]["system_type"]
     except:
-        result += "FAILED (error getting settings.json data) "
+        result += "FAILED (error getting settings data) "
         return result, changed
 
     try:
@@ -171,7 +171,7 @@ def set_i2c_speed(baud=100000):
         settings = read_settings()
         system_type = settings["platform"]["system_type"]
     except:
-        result += "FAILED (error getting settings.json data) "
+        result += "FAILED (error getting settings data) "
         return result, changed
 
     try:
@@ -196,7 +196,7 @@ def enable_gpio_shutdown():
         pin = settings["platform"]["inputs"]["shutdown"]
         system_type = settings["platform"]["system_type"]
     except:
-        result += "FAILED (error getting settings.json data) "
+        result += "FAILED (error getting settings data) "
         return result, changed
 
     try:
@@ -533,7 +533,7 @@ if __name__ == "__main__":
     print(" --help, -h for command details\n")
 
     parser = argparse.ArgumentParser(
-        description="This tool performs board specific configuration for certain system level features.  Use the below options to enable/disable and configure these features.  System settings are read from the settings.json file."
+        description="This tool performs board specific configuration for certain system level features.  Use the below options to enable/disable and configure these features.  System settings are read from the PiFire datastore."
     )
     parser.add_argument("-pwm", "--pwm", action="store_true", required=False, help="Set PWM GPIO.")
     parser.add_argument("-ow", "--onewire", action="store_true", required=False, help="Set 1Wire GPIO.")

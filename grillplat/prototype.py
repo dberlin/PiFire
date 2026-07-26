@@ -40,7 +40,7 @@ class GrillPlatform(SystemCommandsMixin):
             self.standalone = config.get("standalone", True)  # Save configured state for Standalone
             self.current = {}
         except:
-            self.logger.error("Error parsing platform configuration.  Check your settings.json file.")
+            self.logger.error("Error parsing platform configuration.  Check your platform settings.")
             raise
 
         if self.dc_fan:
