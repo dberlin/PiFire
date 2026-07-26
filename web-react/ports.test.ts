@@ -14,10 +14,38 @@ test("a second workspace gets an entirely disjoint set of origins", () => {
   const p = resolvePorts({
     PORT: "5273",
     DEMO_PORT: "5274",
-    PUBLIC_PIFIRE_URL: "http://localhost:5100",
+    PIFIRE_BACKEND_URL: "http://localhost:5100",
   });
   expect(p.appUrl).toBe("http://localhost:5273");
   expect(p.demoUrl).toBe("http://localhost:5274");
+  expect(p.pifireUrl).toBe("http://localhost:5100");
+});
+
+test("the backend URL is taken from a variable rsbuild will NOT inject into the bundle", () => {
+  // The regression this pins: `PUBLIC_*` names are injected into the browser
+  // bundle by rsbuild, and eight modules read `import.meta.env.PUBLIC_PIFIRE_URL`
+  // as their fetch base. Naming the workspace variable `PUBLIC_PIFIRE_URL` made
+  // every request absolute and cross-origin, bypassing the dev proxy; Flask
+  // sends no CORS headers, so the browser blocked them and every loader threw.
+  // A workspace must be able to aim the PROXY somewhere without moving the
+  // BROWSER's origin.
+  const p = resolvePorts({ PIFIRE_BACKEND_URL: "http://localhost:5100" });
+  expect(p.pifireUrl).toBe("http://localhost:5100");
+  expect("PIFIRE_BACKEND_URL".startsWith("PUBLIC_")).toBe(false);
+});
+
+test("PUBLIC_PIFIRE_URL still works alone, for pointing a single checkout at a real grill", () => {
+  // There the browser and the proxy SHOULD agree on one absolute origin.
+  expect(resolvePorts({ PUBLIC_PIFIRE_URL: "http://grill.local:5000" }).pifireUrl).toBe(
+    "http://grill.local:5000",
+  );
+});
+
+test("PIFIRE_BACKEND_URL wins when both are set", () => {
+  const p = resolvePorts({
+    PIFIRE_BACKEND_URL: "http://localhost:5100",
+    PUBLIC_PIFIRE_URL: "http://grill.local:5000",
+  });
   expect(p.pifireUrl).toBe("http://localhost:5100");
 });
 

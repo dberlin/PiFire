@@ -11,7 +11,17 @@ const target = ports.pifireUrl;
 export default defineConfig({
   plugins: [pluginReact({ reactCompiler: true })],
   html: { template: "./index.html" },
-  source: { entry: { index: "./src/main.tsx" } },
+  source: {
+    entry: { index: "./src/main.tsx" },
+    // DISPLAY ONLY -- never a fetch base. The backend origin is deliberately
+    // kept out of the bundle (see ./ports) so requests stay same-origin and go
+    // through the proxy above. But ConnectionStatus has to be able to NAME the
+    // backend it is waiting on, and without this it would print a hardcoded
+    // localhost:5000 while actually talking to whatever `target` is -- a
+    // diagnostic that misleads precisely when someone is debugging why nothing
+    // connects.
+    define: { "import.meta.env.PUBLIC_PIFIRE_TARGET": JSON.stringify(target) },
+  },
   server: {
     port: ports.appPort,
     proxy: {

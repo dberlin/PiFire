@@ -60,5 +60,16 @@ export function useLiveState(): LiveStateResult {
   const command = useMemo(() => createCommand(TARGET_URL), []);
   const controlAlive = phase === "demo" ? true : deriveControlAlive(live);
 
-  return { live, phase, controlAlive, targetUrl: TARGET_URL || "http://localhost:5000", command };
+  // `targetUrl` is for DISPLAY (ConnectionStatus), not for fetching -- the
+  // fetch base is TARGET_URL, which is empty in dev on purpose so requests stay
+  // same-origin and hit the proxy. When it is empty we still want to name the
+  // backend truthfully, so fall back to the proxy's target rather than to a
+  // hardcoded 5000 that lies in any workspace running its own backend.
+  return {
+    live,
+    phase,
+    controlAlive,
+    targetUrl: TARGET_URL || import.meta.env.PUBLIC_PIFIRE_TARGET || "http://localhost:5000",
+    command,
+  };
 }

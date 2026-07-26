@@ -237,12 +237,22 @@ Roughly ordered by daily-use value:
   is globally destructive to whichever backend it reaches:
 
   ```sh
-  export PORT=5273 DEMO_PORT=5274                 # this checkout's dev servers
-  export PUBLIC_PIFIRE_URL=http://localhost:5100  # this checkout's backend
-  export PIFIRE_DB_PATH="$PWD/pifire.db"          # and its own datastore
+  export PORT=5273 DEMO_PORT=5274                   # this checkout's dev servers
+  export PIFIRE_BACKEND_URL=http://localhost:5100   # this checkout's backend
+  export PIFIRE_DB_PATH="$PWD/pifire.db"            # and its own datastore
   uv run python control.py &
   uv run gunicorn -k gthread --threads 25 -b 0.0.0.0:5100 -w 1 app:app &
   ```
+
+  **`PIFIRE_BACKEND_URL`, never `PUBLIC_PIFIRE_URL`.** rsbuild injects every
+  `PUBLIC_*` variable into the browser bundle, and eight modules read
+  `import.meta.env.PUBLIC_PIFIRE_URL` as their fetch base. Setting that turns
+  every same-origin request into an absolute cross-origin one that skips the dev
+  proxy — and Flask sends no CORS headers, so the browser blocks it and every
+  loader throws. The first version of this scheme did exactly that and made the
+  e2e suite unrunnable in every secondary workspace. `PUBLIC_PIFIRE_URL` remains
+  correct for the other job: pointing a single checkout's browser at a real
+  grill, where the browser and the proxy should agree on one absolute origin.
 
   Sharing any one of them reintroduces the failure this replaced: two
   workspaces both served `:5173`, and Playwright's `reuseExistingServer`

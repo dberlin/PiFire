@@ -12,17 +12,32 @@
  * Defaults reproduce the single-checkout setup exactly, so the main checkout
  * needs no environment at all. To run a second one, give it three values:
  *
- *     PORT=5273 DEMO_PORT=5274 PUBLIC_PIFIRE_URL=http://localhost:5100
+ *     PORT=5273 DEMO_PORT=5274 PIFIRE_BACKEND_URL=http://localhost:5100
  *
- * `PUBLIC_PIFIRE_URL` is also what rsbuild proxies /api and /socket.io to, and
- * it is read by the browser bundle, so it must name the backend that workspace
- * runs -- one started with a matching `PIFIRE_DB_PATH`, or the two checkouts
- * share a datastore and race over grill mode.
+ * plus a matching `PIFIRE_DB_PATH` on the backend it starts, or the two
+ * checkouts share a datastore and race over grill mode.
+ *
+ * `PIFIRE_BACKEND_URL`, deliberately NOT `PUBLIC_PIFIRE_URL`. rsbuild injects
+ * every `PUBLIC_*` variable into the browser bundle, and eight modules read
+ * `import.meta.env.PUBLIC_PIFIRE_URL` as their fetch base. Setting it here
+ * would turn every same-origin request into an absolute cross-origin one that
+ * bypasses the dev proxy entirely -- and Flask sends no CORS headers, so the
+ * browser blocks it and every loader throws. That is not hypothetical: the
+ * first version of this file used `PUBLIC_PIFIRE_URL` and made the whole e2e
+ * suite unrunnable in every secondary workspace.
  */
 
 export type PortEnv = {
   PORT?: string;
   DEMO_PORT?: string;
+  /** Where the dev server proxies to, and where node-side e2e code calls. Does
+   *  NOT reach the browser bundle -- that is the whole point of the name. */
+  PIFIRE_BACKEND_URL?: string;
+  /** Legacy/remote-host escape hatch. rsbuild injects every `PUBLIC_*` variable
+   *  into the bundle, so eight modules read this as their fetch base
+   *  (useLiveState, historyApi, wizardRoutes, settingsRoutes, useSaveSettings,
+   *  HistoryPage, DashboardRoute, ConnectionStatus). Set it ONLY when you want
+   *  the browser itself to call an absolute origin. */
   PUBLIC_PIFIRE_URL?: string;
 };
 
@@ -54,8 +69,15 @@ export function resolvePorts(env: PortEnv = {}): Ports {
     demoPort,
     appUrl: `http://localhost:${appPort}`,
     demoUrl: `http://localhost:${demoPort}`,
+    // PUBLIC_PIFIRE_URL is honoured as a fallback so the single-checkout
+    // "point dev at a real grill" workflow keeps working: there, the browser
+    // and the proxy SHOULD agree on one absolute origin. A workspace sets only
+    // PIFIRE_BACKEND_URL, leaving the bundle same-origin and the proxy in play.
     // Trailing slashes would double up when callers append "/api/...".
-    pifireUrl: (env.PUBLIC_PIFIRE_URL || DEFAULT_PIFIRE_URL).replace(/\/+$/, ""),
+    pifireUrl: (env.PIFIRE_BACKEND_URL || env.PUBLIC_PIFIRE_URL || DEFAULT_PIFIRE_URL).replace(
+      /\/+$/,
+      "",
+    ),
   };
 }
 
