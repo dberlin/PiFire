@@ -80,7 +80,15 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",
     "pytest-playwright>=0.7.1",
-    "ruff>=0.8.0",
+    # Held below 0.16 deliberately. 0.16 promotes new rules to the default set
+    # and extends the formatter to Python code blocks inside Markdown, which
+    # takes this repo from "ruff check . passes, 550 files formatted" to 1422
+    # errors and 64 files reformatted -- almost all of it docs and legacy code
+    # untouched by any current change. `ruff check .` is a merge gate
+    # (see ruff.toml), so adopting 0.16 is a repo-wide cleanup commit of its
+    # own, not a side effect of `uv lock --upgrade`. Raise this ceiling in that
+    # commit.
+    "ruff>=0.8.0,<0.16",
 ]
 
 [tool.coverage.run]
