@@ -19,7 +19,7 @@ from common.app import (
 )
 from file_mgmt.cookfile import read_cookfile, upgrade_cookfile
 from file_mgmt.common import fixup_assets, read_json_file_data, update_json_file_data, remove_assets
-from file_mgmt.media import add_asset, set_thumbnail
+from file_mgmt.media import add_asset, set_thumbnail, set_thumbnail_checked
 
 from . import cookfile_bp
 
@@ -206,8 +206,17 @@ def _cf_form_thumbselected(settings, HISTORY_FOLDER, errors):
     cookfilename = HISTORY_FOLDER + filename
     cookfilestruct, status = read_cookfile(cookfilename)
     if status == "OK":
-        cookfilestruct["metadata"]["thumbnail"] = thumbnail
-        update_json_file_data(cookfilestruct["metadata"], HISTORY_FOLDER + filename, "metadata")
+        # This used to write `thumbnail` straight into the metadata. The only
+        # widget that produces one is a picker over the file's own assets, so
+        # any other value is a stale view or a hand-made POST -- and an
+        # unresolvable name leaves a permanently broken <img> in the cook-file
+        # list with no UI path back. set_thumbnail_checked() is the same guard
+        # /api/files/cookfiles/thumbnail uses; it also does the metadata write.
+        thumb_status = set_thumbnail_checked(cookfilename, thumbnail)
+        if thumb_status != "OK":
+            errors.append(f"Cannot set thumbnail: this cook file has no asset named '{thumbnail}'.")
+        else:
+            cookfilestruct["metadata"]["thumbnail"] = thumbnail
         return render_cookfile_page(cookfilestruct, settings, cookfilename, filename, errors)
     return None
 

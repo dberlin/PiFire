@@ -30,7 +30,7 @@ from file_mgmt.common import (
     update_json_file_data,
 )
 from file_mgmt.cookfile import read_cookfile, upgrade_cookfile
-from file_mgmt.media import add_asset, set_thumbnail
+from file_mgmt.media import add_asset, set_thumbnail_checked
 
 
 def load(path):
@@ -345,14 +345,8 @@ def delete_assets(path, assets):
 def apply_thumbnail(path, asset_filename):
     """Set metadata.thumbnail, but only to an asset the file actually holds.
 
-    Flask writes whatever string it is handed (routes.py:202-210), so a stale
-    or hostile client can point the thumbnail at a file that does not exist and
-    the list renders a broken image forever.
+    The check lives in file_mgmt/media.py so the legacy `thumbSelected` form
+    branch in blueprints/cookfile/routes.py shares it -- that door used to
+    write whatever string it was handed.
     """
-    assets, status = read_json_file_data(path, "assets", unpackassets=False)
-    if status != "OK":
-        return status
-    if asset_filename not in {asset["filename"] for asset in assets}:
-        return "unknown_asset"
-    set_thumbnail(path, asset_filename)
-    return "OK"
+    return set_thumbnail_checked(path, asset_filename)

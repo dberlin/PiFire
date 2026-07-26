@@ -162,6 +162,28 @@ def set_thumbnail(filename, thumbfilename):
         update_json_file_data(metadata, filename, "metadata")
 
 
+def set_thumbnail_checked(filename, thumbfilename):
+    """set_thumbnail(), but only for an asset the archive actually holds.
+
+    Both doors that record a thumbnail take the asset name from a client, and
+    the only widget that produces one is a picker over the file's existing
+    assets -- so any other value is a stale view or a hand-made request. Left
+    unchecked it writes a name nothing can resolve, and the cook-file list
+    renders a permanently broken <img> with no UI path back to a valid one.
+
+    Returns "OK", "unknown_asset", or the read status on a corrupt archive.
+    `unpackassets=False` because this only needs the manifest; unpacking would
+    also extract every image to the tmp asset base as a side effect.
+    """
+    assets, status = read_json_file_data(filename, "assets", unpackassets=False)
+    if status != "OK":
+        return status
+    if thumbfilename not in {asset["filename"] for asset in assets}:
+        return "unknown_asset"
+    set_thumbnail(filename, thumbfilename)
+    return "OK"
+
+
 def unpack_thumb(thumbname, filename, tmp_id):
     try:
         with zipfile.ZipFile(filename, mode="r") as archive:

@@ -319,16 +319,61 @@ def test_navimage_via_direct_post(live_server, page, _isolated_history_folder):
     assert resp_prev.json() == {"result": "OK", "mediafilename": "a3.png"}
 
 
-def test_thumbselected_via_direct_post(live_server, page, _isolated_history_folder):
+def _upload_one_asset(live_server, page, filename, name="media1.png"):
+    """Put one real asset into the archive via the media-upload branch and
+    return its recorded `assets[].filename`."""
+    png_buffer = io.BytesIO()
+    Image.new("RGB", (16, 16), (0, 255, 0)).save(png_buffer, format="PNG")
+    resp = page.request.post(
+        f"{live_server}/cookfile/",
+        multipart={
+            "ulmediafn": filename,
+            "ulmedia": {"name": name, "mimeType": "image/png", "buffer": png_buffer.getvalue()},
+        },
+    )
+    assert resp.status == 200
+    return resp
+
+
+def test_thumbselected_accepts_an_asset_the_file_actually_holds(
+    live_server, page, _isolated_history_folder, _static_img_tmp_cleanup
+):
     history_dir = _isolated_history_folder
     filename = _write_cookfile(history_dir, "E2E-Thumb")
+    _upload_one_asset(live_server, page, filename)
+    asset_name = _read_cookfile_json(history_dir, filename, "assets")[0]["filename"]
 
-    resp = page.request.post(f"{live_server}/cookfile/", form={"thumbSelected": "asset123.png", "filename": filename})
+    resp = page.request.post(f"{live_server}/cookfile/", form={"thumbSelected": asset_name, "filename": filename})
     assert resp.status == 200
     assert "Comments" in resp.text()
 
     metadata = _read_cookfile_json(history_dir, filename, "metadata")
-    assert metadata["thumbnail"] == "asset123.png"
+    assert metadata["thumbnail"] == asset_name
+
+
+def test_thumbselected_rejects_an_asset_the_file_does_not_hold(
+    live_server, page, _isolated_history_folder, _static_img_tmp_cleanup
+):
+    """`_cf_form_thumbselected` wrote whatever string it was handed straight
+    into metadata.thumbnail. A stale tab (or anyone posting the form) could
+    therefore point the thumbnail at an asset that was never in the archive,
+    and the cook-file list would render a permanently broken <img> with no UI
+    path back -- the only widget that sets a thumbnail is the picker, which
+    offers existing assets only. `/api/files/cookfiles/thumbnail` already
+    validated this; the legacy form now shares that check."""
+    history_dir = _isolated_history_folder
+    filename = _write_cookfile(history_dir, "E2E-ThumbBogus")
+    _upload_one_asset(live_server, page, filename)
+    good = _read_cookfile_json(history_dir, filename, "assets")[0]["filename"]
+    page.request.post(f"{live_server}/cookfile/", form={"thumbSelected": good, "filename": filename})
+
+    resp = page.request.post(
+        f"{live_server}/cookfile/", form={"thumbSelected": "never-uploaded.png", "filename": filename}
+    )
+
+    assert resp.status == 200
+    metadata = _read_cookfile_json(history_dir, filename, "metadata")
+    assert metadata["thumbnail"] == good, "a thumbnail the archive does not hold must not be recorded"
 
 
 def test_dl_cookfile_downloads_the_raw_archive(live_server, page, _isolated_history_folder):
