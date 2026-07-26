@@ -102,9 +102,80 @@ describe("GeneralTab", () => {
           grill_name: "New Name",
           page_theme: "light",
         },
+        // Written unconditionally, like PwmTab's cross-section
+        // startup.pwm_duty_cycle: this fixture has no `display`, so the
+        // 300 default round-trips. Harmless, and it keeps onSave branch-free.
+        display: {
+          sleep_timeout: 300,
+        },
       },
       [],
     );
+  });
+
+  // Ruling 4, 2026-07-26 (docs/superpowers/react-migration-backlog.md).
+  // Flask put this field on its Display pane (settings/index.html:1080); the
+  // React app has no Display tab, and General is where it belongs. It is not
+  // decoration: the display process re-reads display.sleep_timeout once a
+  // second (display/qtapp.py's _timeout_fn -> PiFireBackend.TIMEOUT ->
+  // asleep -> ScreenPowerController's `swaymsg output * dpms off`), and the
+  // web-to-display seam is pinned in tests/web/test_api_settings_update.py.
+  it("renders the screen sleep timeout with the loaded value", () => {
+    const context = {
+      settings: {
+        globals: { grill_name: "G", page_theme: "light" },
+        display: { sleep_timeout: 45 },
+      },
+      mode: "Stop",
+    };
+
+    renderRoute(<GeneralTab />, context);
+
+    expect(screen.getByDisplayValue("45")).toBeInTheDocument();
+  });
+
+  it("falls back to the 300s default when display.sleep_timeout is absent", () => {
+    renderRoute(<GeneralTab />, { settings: { globals: { grill_name: "G" } }, mode: "Stop" });
+
+    expect(screen.getByDisplayValue("300")).toBeInTheDocument();
+  });
+
+  it("saves an edited sleep timeout into the delta", async () => {
+    const context = {
+      settings: {
+        globals: { grill_name: "G", page_theme: "light" },
+        display: { sleep_timeout: 300 },
+      },
+      mode: "Stop",
+    };
+
+    renderRoute(<GeneralTab />, context);
+    fireEvent.change(screen.getByDisplayValue("300"), { target: { value: "60" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const [delta, flags] = saveMock.mock.calls[0];
+    expect(delta.display.sleep_timeout).toBe(60);
+    // Flask's _settings_display does a bare write_settings with no control
+    // flag; the display process polls the store itself.
+    expect(flags).toEqual([]);
+  });
+
+  it("keeps 0 (never sleep) rather than treating it as empty", async () => {
+    const context = {
+      settings: {
+        globals: { grill_name: "G", page_theme: "light" },
+        display: { sleep_timeout: 300 },
+      },
+      mode: "Stop",
+    };
+
+    renderRoute(<GeneralTab />, context);
+    fireEvent.change(screen.getByDisplayValue("300"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(saveMock.mock.calls[0][0].display.sleep_timeout).toBe(0);
   });
 
   it("resyncs displayed values when the settings object changes on re-render", () => {

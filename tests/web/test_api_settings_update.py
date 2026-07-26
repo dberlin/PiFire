@@ -20,6 +20,7 @@ import json
 import pytest
 
 from common.common import WriteKind
+from common.common import display_sleep_timeout
 from common.datastore_accessors import (
     execute_control_writes,
     read_control,
@@ -170,4 +171,49 @@ def test_settings_update_layer2_still_rejects_delta_invalid_against_merged_tree(
     assert payload["result"] == "error"
     assert "startup.pwm_duty_cycle" in payload["message"]
 
+    assert read_settings() == before
+
+
+# ---------------------------------------------------------------------------
+# The React General tab's screen-sleep control (ruling 4, 2026-07-26,
+# docs/superpowers/react-migration-backlog.md): it must actually drive the
+# DPMS behaviour, so this pins the seam between the two processes. The web
+# process writes settings["display"]["sleep_timeout"]; the display process
+# re-reads it through common.common.display_sleep_timeout() once a second
+# (display/qtapp.py's _timeout_fn -> PiFireBackend.TIMEOUT ->
+# _update_idle -> asleep -> ScreenPowerController's `swaymsg output * dpms`).
+# Every other hop of that path already has a test; this is the one that
+# crosses the process boundary, and a control the display cannot see would be
+# worse than no control.
+# ---------------------------------------------------------------------------
+
+
+def test_settings_update_sleep_timeout_is_what_the_display_reads(client):
+    body = {"settings": {"display": {"sleep_timeout": 45}}, "flags": []}
+    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+
+    assert resp.get_json()["result"] == "success"
+    assert display_sleep_timeout(read_settings()) == 45
+
+
+def test_settings_update_sleep_timeout_zero_reaches_the_display_as_never(client):
+    """0 is not "unset": it is the value that disables sleeping entirely
+    (qtbackend._update_idle wakes an already-asleep screen on it), so it has
+    to survive the round trip as 0 rather than fall back to the 300 default."""
+    body = {"settings": {"display": {"sleep_timeout": 0}}, "flags": []}
+    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+
+    assert resp.get_json()["result"] == "success"
+    assert display_sleep_timeout(read_settings()) == 0
+
+
+def test_settings_update_rejects_a_negative_sleep_timeout(client):
+    """The schema bound (settings_schema.py: ge=0) is what the React field's
+    min=0 mirrors; a client that ignores it must not be able to store one."""
+    before = read_settings()
+
+    body = {"settings": {"display": {"sleep_timeout": -1}}, "flags": []}
+    resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+
+    assert resp.get_json()["result"] == "error"
     assert read_settings() == before
