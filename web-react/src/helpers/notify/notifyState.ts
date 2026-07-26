@@ -50,16 +50,6 @@ export function targetEditFields(edit: TargetEdit): Record<string, unknown> {
   };
 }
 
-// One POST naming one entry and four fields -- no read first, because nothing
-// here depends on the array's current contents, and a read-modify-write of the
-// whole array would revert whatever another writer changed in the same control
-// cycle. The result is NOT echoed back immediately: the write is queued and
-// drained by the control loop (~110 ms in Stop mode, measured), so callers must
-// render from the socket payload rather than mirroring the new value locally.
-export function saveTargetEdit(baseUrl: string, label: string, edit: TargetEdit): Promise<void> {
-  return postNotifyUpdates(baseUrl, [{ label, type: "probe", fields: targetEditFields(edit) }]);
-}
-
 // ---------------------------------------------------------------------------
 // High / low limit alerts. A THIRD and FOURTH entry share the probe's label
 // (common/defaults.py:540-550): probe_limit_high, condition "equal_above", and
@@ -198,9 +188,14 @@ export function notifyEditUpdates(
   ];
 }
 
-/** One POST carrying all three entries. Still no read: each patch names the
- *  entry it means and the fields it sets, so the drain applies it against live
- *  state and every entry this probe does not own survives untouched. */
+/** One POST carrying all three entries -- no read first, because nothing here
+ *  depends on the array's current contents, and a read-modify-write of the whole
+ *  array would revert whatever another writer changed in the same control cycle.
+ *  Each patch names the entry it means and the fields it sets, so the drain
+ *  applies it against live state and every entry this probe does not own
+ *  survives untouched. The result is NOT echoed back immediately: the write is
+ *  queued and drained by the control loop (~110 ms in Stop mode, measured), so
+ *  callers must render from the socket payload rather than mirroring locally. */
 export function saveNotifyEdit(
   baseUrl: string,
   label: string,

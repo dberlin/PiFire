@@ -6,7 +6,7 @@ import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
 import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";
 import { deriveView, type PillView } from "../../helpers/dashboard/deriveView";
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
-import { readTargetEdit, saveTargetEdit, type TargetEdit } from "../../helpers/notify/notifyState";
+import { type NotifyEdit, readNotifyEdit, saveNotifyEdit } from "../../helpers/notify/notifyState";
 import type { AccentName, LiveState, ProbeData } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
 import { ActionMenu, type MenuItem } from "./ActionMenu";
@@ -107,12 +107,13 @@ export function Dashboard({
   // "Recipe | <step mode>" status header (dash_default.js:297-300).
   const modeLabel = recipeLabel(dash) ?? view.modeLabel;
 
-  // Per-probe target notifications. Only the LABEL of the probe being edited is
-  // held here; the probe itself is re-resolved from `dash` on every render, so
-  // the modal keeps tracking the socket payload while it is open and nothing is
-  // mirrored locally. That matters because the backend clears req/target/eta by
-  // itself the moment the target is reached (notify/notifications.py:109-111) --
-  // a local copy would fight it.
+  // Per-probe notifications: the target and both limit alerts. Only the LABEL of
+  // the probe being edited is held here; the probe itself is re-resolved from
+  // `dash` on every render, so the modal keeps tracking the socket payload while
+  // it is open and nothing is mirrored locally. That matters because the backend
+  // edits these entries by itself -- it clears req/target/eta the moment a target
+  // is reached and flips a limit's `triggered` as the temperature crosses
+  // (notify/notifications.py:109-117) -- so a local copy would fight it.
   const [pModeOpen, setPModeOpen] = useState(false);
 
   const [notifyLabel, setNotifyLabel] = useState<string | null>(null);
@@ -129,12 +130,15 @@ export function Dashboard({
     setNotifyError(null);
     setNotifyLabel(label);
   };
-  const submitNotify = async (edit: TargetEdit) => {
-    if (notifyLabel === null) return;
+  const submitNotify = async (edit: NotifyEdit) => {
+    if (notifyLabel === null || notifyProbe === null) return;
     setNotifySaving(true);
     setNotifyError(null);
     try {
-      await saveTargetEdit(apiBase, notifyLabel, edit);
+      // The probe's CURRENT reading goes with the write: it is what pre-arms
+      // each limit's `triggered` latch, so an alert saved while the temperature
+      // is already out of range stays quiet until it leaves and comes back.
+      await saveNotifyEdit(apiBase, notifyLabel, edit, notifyProbe.temp);
       setNotifyLabel(null);
     } catch (e) {
       // Stay open on failure. This write is not echoed back until the control
@@ -354,7 +358,7 @@ export function Dashboard({
             probeName={notifyProbe.title}
             isPrimary={notifyProbe.label === dash.primaryProbe.label}
             units={view.units}
-            initial={readTargetEdit(notifyProbe)}
+            initial={readNotifyEdit(notifyProbe)}
             saving={notifySaving}
             error={notifyError}
             onSubmit={submitNotify}

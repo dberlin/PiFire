@@ -241,15 +241,16 @@ describe("Dashboard target notifications", () => {
     });
     await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
     expect(screen.getByText("Brisket Notifications")).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /notify/i })).toBeChecked();
-    expect(screen.getByRole("spinbutton", { name: /target/i })).toHaveValue(203);
+    expect(screen.getByRole("checkbox", { name: /target temperature/i })).toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: /^target/i })).toHaveValue(203);
     expect(screen.getByRole("radio", { name: /keep warm/i })).toBeChecked();
   });
 
   // dash_default.html:36,53 renders the notify modal for probe_status['P'] as
   // well as ['F'], so a target on the grill probe is not a food-probe-only
-  // feature. The Primary probe gets no action checkboxes (:188-198) and the
-  // wider 0-600F range (:174-186).
+  // feature. The Primary probe gets no TARGET action choice (:188-198) -- and is
+  // the only probe that gets the LIMIT action choices (:238-244, :284-308) --
+  // plus the wider 0-600F range (:174-186).
   it("exposes a bell for the primary probe, opening it as primary", async () => {
     const user = userEvent.setup();
     renderDashboard(FIXTURE_DASH);
@@ -259,8 +260,12 @@ describe("Dashboard target notifications", () => {
     expect(
       screen.getByText(`${FIXTURE_DASH.primaryProbe.title} Notifications`),
     ).toBeInTheDocument();
-    expect(screen.queryAllByRole("radio")).toHaveLength(0);
-    expect(screen.getByRole("slider", { name: /target/i })).toHaveAttribute("max", "600");
+    expect(screen.queryAllByRole("group", { name: /when it is reached/i })).toHaveLength(0);
+    expect(screen.getByRole("group", { name: /above the high limit/i })).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: /^target temperature/i })).toHaveAttribute(
+      "max",
+      "600",
+    );
   });
 
   it("saves a food probe's target as ONE addressed post", async () => {
@@ -271,28 +276,67 @@ describe("Dashboard target notifications", () => {
       foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" }],
     });
     await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
-    await user.click(screen.getByRole("checkbox", { name: /notify/i }));
-    await user.clear(screen.getByRole("spinbutton", { name: /target/i }));
-    await user.type(screen.getByRole("spinbutton", { name: /target/i }), "203");
+    await user.click(screen.getByRole("checkbox", { name: /target temperature/i }));
+    await user.clear(screen.getByRole("spinbutton", { name: /^target/i }));
+    await user.type(screen.getByRole("spinbutton", { name: /^target/i }), "203");
     await user.click(screen.getByRole("radio", { name: /keep warm/i }));
     await user.click(screen.getByRole("button", { name: "Set" }));
 
     await waitFor(() =>
       expect(screen.queryByText("Brisket Notifications")).not.toBeInTheDocument(),
     );
-    // ONE request, not a read followed by a write.
+    // ONE request, not a read followed by a write, and not one request per
+    // entry: the three entries this modal owns travel as three ADDRESSED
+    // updates in a single POST.
     expect(fetchMock.mock.calls).toHaveLength(1);
-    // The (label, type) pair is what keeps the two limit alerts sharing this
-    // label out of the write, and naming only these four fields is what leaves
-    // every other field of this entry to whatever the control loop holds when
-    // the queue drains.
-    expect(postedNotifyUpdates(fetchMock)).toEqual([
-      {
-        label: "Probe1",
-        type: "probe",
-        fields: { req: true, target: 203, keep_warm: true, shutdown: false },
-      },
+    // The (label, type) pair is what tells the three entries sharing this label
+    // apart, and naming only these four fields on the `probe` entry is what
+    // leaves every other field of it to whatever the control loop holds when the
+    // queue drains.
+    expect(postedNotifyUpdates(fetchMock).map((u) => [u.label, u.type])).toEqual([
+      ["Probe1", "probe"],
+      ["Probe1", "probe_limit_high"],
+      ["Probe1", "probe_limit_low"],
     ]);
+    expect(postedNotifyUpdates(fetchMock)[0].fields).toEqual({
+      req: true,
+      target: 203,
+      keep_warm: true,
+      shutdown: false,
+    });
+  });
+
+  // The cross-process seam this slice adds: the probe's LIVE reading decides the
+  // `triggered` latch the backend then reads. Saved without pre-arming, a limit
+  // the temperature has already passed sounds its alarm on the very next control
+  // pass (notify/notifications.py:112) -- and the REST grammar cannot set
+  // `triggered` at all (common/api_commands.py:544-551), which is why this write
+  // is a POST /api/control.
+  it("pre-arms a limit against the probe's live temperature", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubNotifyFetch();
+    renderDashboard({
+      ...FIXTURE_DASH,
+      foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1", temp: 250 }],
+    });
+    await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
+    await user.click(screen.getByRole("checkbox", { name: /high limit/i }));
+    await user.clear(screen.getByRole("spinbutton", { name: /^high limit/i }));
+    await user.type(screen.getByRole("spinbutton", { name: /^high limit/i }), "200");
+    await user.click(screen.getByRole("button", { name: "Set" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(1));
+    expect(
+      postedNotifyUpdates(fetchMock).find((u) => u.type === "probe_limit_high")?.fields,
+    ).toEqual({
+      req: true,
+      target: 200,
+      triggered: true, // already at 250 -- stay quiet until it comes back down
+      shutdown: false,
+      keep_warm: false,
+      reignite: false,
+      condition: "equal_above",
+    });
   });
 
   it("saves the primary probe's target against its own label", async () => {
@@ -302,9 +346,9 @@ describe("Dashboard target notifications", () => {
     await user.click(
       screen.getByRole("button", { name: `Notifications for ${FIXTURE_DASH.primaryProbe.title}` }),
     );
-    await user.click(screen.getByRole("checkbox", { name: /notify/i }));
-    await user.clear(screen.getByRole("spinbutton", { name: /target/i }));
-    await user.type(screen.getByRole("spinbutton", { name: /target/i }), "225");
+    await user.click(screen.getByRole("checkbox", { name: /target temperature/i }));
+    await user.clear(screen.getByRole("spinbutton", { name: /^target/i }));
+    await user.type(screen.getByRole("spinbutton", { name: /^target/i }), "225");
     await user.click(screen.getByRole("button", { name: "Set" }));
 
     await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(1));
@@ -323,9 +367,9 @@ describe("Dashboard target notifications", () => {
       foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" }],
     });
     await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
-    await user.click(screen.getByRole("checkbox", { name: /notify/i }));
-    await user.clear(screen.getByRole("spinbutton", { name: /target/i }));
-    await user.type(screen.getByRole("spinbutton", { name: /target/i }), "203");
+    await user.click(screen.getByRole("checkbox", { name: /target temperature/i }));
+    await user.clear(screen.getByRole("spinbutton", { name: /^target/i }));
+    await user.type(screen.getByRole("spinbutton", { name: /^target/i }), "203");
     await user.click(screen.getByRole("button", { name: "Set" }));
 
     // Closing on failure would be indistinguishable from success: the write is
@@ -346,9 +390,9 @@ describe("Dashboard target notifications", () => {
       foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], title: "Brisket", label: "Probe1" }],
     });
     await user.click(screen.getByRole("button", { name: "Notifications for Brisket" }));
-    await user.click(screen.getByRole("checkbox", { name: /notify/i }));
-    await user.clear(screen.getByRole("spinbutton", { name: /target/i }));
-    await user.type(screen.getByRole("spinbutton", { name: /target/i }), "203");
+    await user.click(screen.getByRole("checkbox", { name: /target temperature/i }));
+    await user.clear(screen.getByRole("spinbutton", { name: /^target/i }));
+    await user.type(screen.getByRole("spinbutton", { name: /^target/i }), "203");
     await user.click(screen.getByRole("button", { name: "Set" }));
 
     await waitFor(() =>

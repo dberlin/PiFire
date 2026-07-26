@@ -31,9 +31,6 @@ const SURFACES = [
 // one thing the Tailwind migration may not do. The list is asserted for EXACT
 // equality below, so fixing one -- or introducing a new one -- fails here.
 //
-//   pf-notify-action      ProbeNotifyModal.tsx:133 -- a radio group's `name`
-//                         attribute, not a class at all. The scanner cannot
-//                         tell the difference from a string literal.
 //   pf-settings-tab       PlatformTab.tsx:41  -- wrapper div; only that one tab
 //   pf-section-note       PlatformTab.tsx:43     uses any of these four, and
 //   pf-kv                 PlatformTab.tsx:50     none of them is styled.
@@ -48,7 +45,6 @@ const UNSTYLED = [
   "pf-devices-table-btn",
   "pf-kv",
   "pf-kv-row",
-  "pf-notify-action",
   "pf-pellets-load",
   "pf-rpt-range-label",
   "pf-section-note",

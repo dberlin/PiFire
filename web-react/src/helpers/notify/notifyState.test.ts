@@ -10,7 +10,6 @@ import {
   readNotifyEdit,
   readTargetEdit,
   saveNotifyEdit,
-  saveTargetEdit,
   type TargetEdit,
   targetEditFields,
   targetRange,
@@ -334,32 +333,6 @@ describe("notifyEditUpdates", () => {
   it("pre-arms each limit against the temperature passed in", () => {
     expect(notifyEditUpdates("Probe1", EDIT, 560)[1].fields.triggered).toBe(true);
     expect(notifyEditUpdates("Probe1", EDIT, 250)[1].fields.triggered).toBe(false);
-  });
-});
-
-describe("saveTargetEdit", () => {
-  afterEach(() => {
-    rs.unstubAllGlobals();
-  });
-
-  it("still posts the one target update it always did", async () => {
-    const fetchMock: ReturnType<typeof rs.fn> = rs.fn(async () => ({
-      ok: true,
-      status: 201,
-      json: async () => ({ result: "success" }),
-    }));
-    rs.stubGlobal("fetch", fetchMock);
-    await saveTargetEdit("", "Probe1", ON);
-    const sent = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as {
-      notify_updates: NotifyUpdate[];
-    };
-    expect(sent.notify_updates).toEqual([
-      {
-        label: "Probe1",
-        type: "probe",
-        fields: { req: true, target: 203, shutdown: false, keep_warm: true },
-      },
-    ]);
   });
 });
 

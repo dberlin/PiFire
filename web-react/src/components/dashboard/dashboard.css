@@ -308,8 +308,30 @@
   text-transform: uppercase;
 }
 
-/* Per-probe target-notification modal (ProbeNotifyModal). It sits inside the
-   shared .pf-modal shell above; these rules only style its body. */
+/* Per-probe notification modal (ProbeNotifyModal). It sits inside the shared
+   .pf-modal shell above; these rules only style its body. */
+
+/* Three sections -- target, high limit, low limit -- do not fit in a 720px
+   stage the way one did, and .pf-modal-scrim is position: absolute inside that
+   stage, so an over-tall modal is clipped rather than scrolled by the page.
+   Cap it against the scrim and let the body scroll instead. */
+.pf-notify-modal {
+  max-height: 88%;
+  overflow-y: auto;
+}
+/* A rule, not a gap: the divider is what tells the three master switches apart
+   at a glance, since each section repeats the same three controls. */
+.pf-notify-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 16px;
+}
+.pf-notify-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
 .pf-notify-switch,
 .pf-notify-actions label {
   display: flex;

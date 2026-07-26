@@ -111,15 +111,18 @@ test("a probe target set in the UI reaches the backend and comes back over the s
   const logBefore = nullStripCount();
 
   // Pre-arm this probe's HIGH LIMIT entry directly. Three notify entries share
-  // one label (common/defaults.py:512-538); the point of writing the target as
-  // ONE addressed update naming (label, "probe") is that the other two survive
-  // untouched -- the drain applies it against live state instead of against
-  // whatever array this page last saw.
+  // one label (common/defaults.py:512-538). The modal owns all three and states
+  // all three on Set, so the high limit's req/target must come back UNCHANGED --
+  // it is read off the socket payload and written straight back -- while the
+  // entries the modal never names (every other probe, the Timer) are untouched
+  // because the drain applies addressed updates against live state instead of
+  // against whatever array this page last saw.
   const armed = baseline.map((e) =>
     e.label === label && e.type === "probe_limit_high"
       ? { ...e, req: true, target: 555, triggered: true, shutdown: false, keep_warm: false }
       : e,
   );
+  const timerBefore = entryFor(baseline, "Timer", "timer");
   await postNotify(request, armed);
   await expect
     .poll(async () => entryFor(await getNotify(request), label, "probe_limit_high")?.target, {
@@ -133,8 +136,8 @@ test("a probe target set in the UI reaches the backend and comes back over the s
   await page.getByRole("button", { name: `Notifications for ${name}` }).click();
   await expect(page.getByText(`${name} Notifications`)).toBeVisible();
 
-  await page.getByRole("checkbox", { name: /notify/i }).check();
-  await page.getByRole("spinbutton", { name: /target/i }).fill("203");
+  await page.getByRole("checkbox", { name: /target temperature/i }).check();
+  await page.getByRole("spinbutton", { name: /^target/i }).fill("203");
   await page.getByRole("radio", { name: /keep warm/i }).check();
   // exact: the dashboard's settings gear is aria-label="settings", which a
   // substring match on "Set" also selects.
@@ -153,9 +156,18 @@ test("a probe target set in the UI reaches the backend and comes back over the s
     )
     .toEqual({ req: true, target: 203, keep_warm: true });
 
-  // The high-limit entry for the SAME label is untouched. This is the assertion
+  // The high-limit entry for the SAME label keeps the alert it was carrying: the
+  // modal seeds it from the socket payload and writes it back verbatim. Only
+  // `triggered` may move, and only to whatever the live temperature says --
+  // which is what the backend itself would compute on its next pass.
+  const limitAfter = entryFor(await getNotify(request), label, "probe_limit_high");
+  expect({ req: limitAfter?.req, target: limitAfter?.target }).toEqual({
+    req: limitBefore?.req,
+    target: limitBefore?.target,
+  });
+  // And the entry the modal never names is byte-identical. This is the assertion
   // that would have caught the clobbering landmine.
-  expect(entryFor(await getNotify(request), label, "probe_limit_high")).toEqual(limitBefore);
+  expect(entryFor(await getNotify(request), "Timer", "timer")).toEqual(timerBefore);
 
   // And the real cross-process seam: the card re-renders the new target from the
   // socket echo, not from anything the modal kept locally.
@@ -194,7 +206,7 @@ test("turning the notification off clears the target and still leaves the limits
 
   await page.goto("/");
   await page.getByRole("button", { name: `Notifications for ${name}` }).click();
-  await page.getByRole("checkbox", { name: /notify/i }).uncheck();
+  await page.getByRole("checkbox", { name: /target temperature/i }).uncheck();
   // exact: the dashboard's settings gear is aria-label="settings", which a
   // substring match on "Set" also selects.
   await page.getByRole("button", { name: "Set", exact: true }).click();
@@ -210,11 +222,46 @@ test("turning the notification off clears the target and still leaves the limits
     .toEqual({ req: false, target: 0 });
 
   // Flask's Cancel button wipes the limit entries too (dash_default.js:807-813).
-  // This deliberately does not.
-  expect(entryFor(await getNotify(request), label, "probe_limit_high")).toEqual(limitBefore);
+  // Turning the TARGET off here is one master switch of three: the high limit is
+  // written back exactly as the modal read it, still armed at 555.
+  const limitAfter = entryFor(await getNotify(request), label, "probe_limit_high");
+  expect({ req: limitAfter?.req, target: limitAfter?.target }).toEqual({
+    req: limitBefore?.req,
+    target: limitBefore?.target,
+  });
 });
 
-test("the primary probe has a bell, with no shutdown/keep-warm choice", async ({
+// The pre-arm, end to end. A limit saved with triggered:false while the probe
+// has ALREADY passed it sounds its alarm on the very next control pass
+// (notify/notifications.py:112). Arming a high limit of 1 degree -- which every
+// probe is already above -- is the cheapest way to make the client's pre-arm the
+// only thing standing between the save and an immediate alarm.
+//
+// SAFETY: no action is chosen, so this writes shutdown:false. A `triggered`
+// high limit with "Shutdown PiFire" would stop the grill.
+test("a high limit the probe has already passed is saved pre-armed", async ({ page, request }) => {
+  const { label, name } = await firstFoodProbe(request);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: `Notifications for ${name}` }).click();
+  await page.getByRole("checkbox", { name: /high limit/i }).check();
+  await page.getByRole("spinbutton", { name: /^high limit/i }).fill("1");
+  // exact: the dashboard's settings gear is aria-label="settings", which a
+  // substring match on "Set" also selects.
+  await page.getByRole("button", { name: "Set", exact: true }).click();
+
+  await expect
+    .poll(
+      async () => {
+        const e = entryFor(await getNotify(request), label, "probe_limit_high");
+        return e ? { req: e.req, target: e.target, triggered: e.triggered } : null;
+      },
+      { timeout: 20_000, message: "the high-limit write never reached control.notify_data" },
+    )
+    .toEqual({ req: true, target: 1, triggered: true });
+});
+
+test("the primary probe has a bell, with the limit actions but no target action", async ({
   page,
   request,
 }) => {
@@ -227,12 +274,15 @@ test("the primary probe has a bell, with no shutdown/keep-warm choice", async ({
   await page.goto("/");
   await page.getByRole("button", { name: `Notifications for ${name}` }).click();
   await expect(page.getByText(`${name} Notifications`)).toBeVisible();
-  // _macro_dash_default.html:188-198 hides the action controls for the Primary
-  // probe, and :174-186 gives it the wider range (600 F / 300 C). Read the unit
-  // off the control rather than assuming F -- settings.spec.ts can leave this
-  // shared instance in Celsius.
-  await expect(page.getByRole("radio")).toHaveCount(0);
-  const slider = page.getByRole("slider", { name: /target/i });
+  // _macro_dash_default.html:188-198 hides the TARGET action controls for the
+  // Primary probe, and :238-244/:284-308 show the LIMIT ones for it alone --
+  // acting on the fire is a primary-probe decision. :174-186 gives it the wider
+  // range (600 F / 300 C). Read the unit off the control rather than assuming F
+  // -- settings.spec.ts can leave this shared instance in Celsius.
+  await expect(page.getByRole("group", { name: /when it is reached/i })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: /above the high limit/i })).toBeVisible();
+  await expect(page.getByRole("group", { name: /below the low limit/i })).toBeVisible();
+  const slider = page.getByRole("slider", { name: /^target temperature/i });
   const inCelsius = ((await slider.getAttribute("aria-label")) ?? "").includes("°C");
   await expect(slider).toHaveAttribute("max", inCelsius ? "300" : "600");
   await page.getByRole("button", { name: "Cancel" }).click();
