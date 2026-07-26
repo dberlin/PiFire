@@ -329,7 +329,7 @@ Every file this plan creates or modifies, and its single responsibility.
 - Modify: `file_mgmt/recipes.py` (lines 192-193, 220-250)
 - Modify: `file_mgmt/cookfile.py` (lines 163-164)
 - Modify: `blueprints/cookfile/routes.py` (lines 609-641)
-- Modify: `tests/web/test_page_recipes.py` (module docstring, lines 53-63)
+- Modify: `tests/web/test_page_recipes.py` (module docstring, lines 47-59 -- CORRECTED, the plan said 53-63)
 
 **Interfaces:**
 - Produces:
@@ -344,7 +344,7 @@ Every file this plan creates or modifies, and its single responsibility.
   `thumbnail` is the value `unpack_thumb` returns — a **relative** `"{parent_id}/{name}"` to be prefixed with `/static/img/tmp/` — or `""`.
 - Consumes: `common.app.paginate_list`, `file_mgmt.common.read_json_file_data`, `file_mgmt.media.unpack_thumb`.
 
-- [ ] **Step 1: Neutralize the shell-outs BEFORE running anything**
+- [x] **Step 1: Neutralize the shell-outs BEFORE running anything**
 
 Two live `os.system("rm -rf …")` calls sit in code this task's tests execute. Confirm they are still there, then remove them — do not test around them.
 
@@ -361,7 +361,7 @@ file_mgmt/cookfile.py:164:        os.system(command)
 
 Expected after Step 2: **no hits at all.**
 
-- [ ] **Step 2: Replace both with `shutil.rmtree`**
+- [x] **Step 2: Replace both with `shutil.rmtree`**
 
 In `file_mgmt/recipes.py`, add `import shutil` beside the existing `import os` (line 15) and replace lines 191-194:
 
@@ -380,7 +380,7 @@ In `file_mgmt/cookfile.py`, add `import shutil` beside `import os` (line 15) and
 
 Rationale to put in neither file (it is obvious from the diff): a title is user-controlled and reaches the shell unquoted; `rm -rf` on a crafted title is a live command-injection and a live data-loss primitive. `shutil.rmtree` cannot be injected into.
 
-- [ ] **Step 3: Write the failing containment/listing tests**
+- [x] **Step 3: Write the failing containment/listing tests**
 
 Create `tests/unit/common/test_file_browser.py`:
 
@@ -520,7 +520,7 @@ Run it — every test must fail with `ModuleNotFoundError: No module named 'comm
 QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/test_file_browser.py -q
 ```
 
-- [ ] **Step 4: Write `common/file_browser.py`**
+- [x] **Step 4: Write `common/file_browser.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -581,7 +581,7 @@ def list_managed_files(folder, extension):
     return [name for name in os.listdir(folder) if name.endswith(extension)]
 
 
-def _details(folder, filenames):
+def file_details(folder, filenames):
     """Read each archive's metadata.json for its title and unpack its thumbnail.
 
     A file that will not open reports title "ERROR" and no thumbnail rather than
@@ -606,14 +606,14 @@ def browse_files(folder, extension, *, page=1, per_page=10, reverse=True):
     """Paginated listing of a managed folder.
 
     Only the requested page's archives are opened -- paginate_list slices first,
-    then _details reads. That is the existing behaviour and it matters: a
+    then file_details reads. That is the existing behaviour and it matters: a
     hundred-cook folder would otherwise unzip a hundred archives per request.
     """
     names = [{"filename": name} for name in list_managed_files(folder, extension)]
     total = len(names)
     pagination = paginate_list(names, "filename", reverse, per_page, page)
     return {
-        "items": _details(folder, [item["filename"] for item in pagination["displaydata"]]),
+        "items": file_details(folder, [item["filename"] for item in pagination["displaydata"]]),
         "page": pagination["curpage"],
         "last_page": pagination["lastpage"],
         "per_page": pagination["itemspage"],
@@ -630,7 +630,7 @@ QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/unit/common/
 
 Expected: `16 passed`.
 
-- [ ] **Step 5: Delegate the two legacy listing pairs**
+- [x] **Step 5: Delegate the two legacy listing pairs**
 
 In `file_mgmt/recipes.py`, replace `get_recipefilelist` / `get_recipefilelist_details` (lines 220-250) with:
 
@@ -645,16 +645,16 @@ def get_recipefilelist_details(recipefilelist):
     #  RECIPE_FOLDER, not current_app.config: this is the module constant the
     #  original read, and tests/web/test_page_recipes.py patches BOTH. Changing
     #  which one is read here would silently move that fixture's target.
-    return _details(RECIPE_FOLDER, [item["filename"] for item in recipefilelist])
+    return file_details(RECIPE_FOLDER, [item["filename"] for item in recipefilelist])
 ```
 
-with `from common.file_browser import _details, list_managed_files` added to the imports. Drop the now-unused `read_json_file_data` / `unpack_thumb` imports if nothing else in the module uses them (check first — `read_json_file_data` IS still used by `read_recipefile`).
+with `from common.file_browser import file_details, list_managed_files` added to the imports. (CORRECTED: the helper is exported as `file_details`, not `_details` -- importing a leading-underscore name across modules is not something to ship.) Drop the now-unused `read_json_file_data` / `unpack_thumb` imports if nothing else in the module uses them (check first — `read_json_file_data` IS still used by `read_recipefile`).
 
 In `blueprints/cookfile/routes.py`, replace `_get_cookfilelist` / `_get_cookfilelist_details` (lines 609-641) with the same two-liner shape against `.pifire` and `current_app.config["HISTORY_FOLDER"]`.
 
-- [ ] **Step 6: Fix the stale docstring**
+- [x] **Step 6: Fix the stale docstring**
 
-In `tests/web/test_page_recipes.py`, replace the "Latent bug: `create_recipefile()` has no same-title dedup" paragraph (lines 53-63) with:
+In `tests/web/test_page_recipes.py`, replace the "Latent bug: `create_recipefile()` has no same-title dedup" paragraph (lines 47-59) with:
 
 ```
 Same-title collisions (FIXED, pinned elsewhere)
@@ -663,13 +663,13 @@ Same-title collisions (FIXED, pinned elsewhere)
 `datetime.now().strftime("%Y-%m-%d--%H%M")` (minute resolution). It used to
 have no collision check, so two recipes created in the same clock-minute
 silently truncated each other. It now disambiguates with a `-N` suffix
-(file_mgmt/recipes.py:166-169), pinned by
+(file_mgmt/recipes.py:166-170), pinned by
 tests/unit/file_mgmt/test_recipes.py. `_create_recipe()` below still picks
 the most-recently-modified `.pfrecipe` rather than assuming a name, which
 stays correct either way.
 ```
 
-- [ ] **Step 7: Verify nothing regressed, then commit**
+- [x] **Step 7: Verify nothing regressed, then commit**
 
 ```bash
 grep -rn "os.system" file_mgmt/ ; echo "exit=$?"

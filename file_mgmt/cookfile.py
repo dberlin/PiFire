@@ -14,6 +14,7 @@ Imported Modules
 import datetime
 import os
 import json
+import shutil
 import zipfile
 import pathlib
 
@@ -160,8 +161,7 @@ def create_cookfile():
         eventLogger.debug(f"Wrote {cook_file_name} to {HISTORY_FOLDER}.")
 
         # 4. Cleanup temporary files
-        command = f"rm -rf {cook_file_path}"
-        os.system(command)
+        shutil.rmtree(cook_file_path, ignore_errors=True)
 
     # Erase history, current and metrics now the cook is saved to a file.
     # (The separate flush_metrics() that used to follow this line was

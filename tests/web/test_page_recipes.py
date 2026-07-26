@@ -44,18 +44,16 @@ NOT covered (see task report for details):
   predictable `/tmp/pifire/{id}` staging path exists any more -- see
   `test_uploadassets_via_direct_post`.
 
-Latent bug: `create_recipefile()` has no same-title dedup
------------------------------------------------------------
-Unlike its cookfile counterpart (`file_mgmt/cookfile.py`'s
-`create_cookfile()`, which loops appending `-1`/`-2`/... on a title
-collision), `file_mgmt/recipes.py`'s `create_recipefile()` derives its
-title from `datetime.now().strftime("%Y-%m-%d--%H%M")` (minute resolution)
-with NO collision check: `zipfile.ZipFile(filename, "w", ...)` silently
-truncates and overwrites any `.pfrecipe` that already has that exact title,
-losing its content, if two new recipes are created within the same
-clock-minute. `_create_recipe()` below works around this in the tests
-(picks the most-recently-modified `.pfrecipe`, not "the new one") rather
-than assuming distinct filenames across calls.
+Same-title collisions (FIXED, pinned elsewhere)
+------------------------------------------------
+`create_recipefile()` derives its title from
+`datetime.now().strftime("%Y-%m-%d--%H%M")` (minute resolution). It used to
+have no collision check, so two recipes created in the same clock-minute
+silently truncated each other. It now disambiguates with a `-N` suffix
+(file_mgmt/recipes.py:166-170), pinned by
+tests/unit/file_mgmt/test_recipes.py. `_create_recipe()` below still picks
+the most-recently-modified `.pfrecipe` rather than assuming a name, which
+stays correct either way.
 """
 
 import io

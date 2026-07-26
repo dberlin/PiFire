@@ -6,6 +6,7 @@ from flask import render_template, request, current_app, jsonify, redirect, send
 from werkzeug.utils import secure_filename
 from common.common import generate_uuid
 from common.datastore_accessors import read_settings
+from common.file_browser import file_details, list_managed_files
 from common.app import (
     prepare_annotations,
     prepare_metrics_csv,
@@ -18,7 +19,7 @@ from common.app import (
 )
 from file_mgmt.cookfile import read_cookfile, upgrade_cookfile
 from file_mgmt.common import fixup_assets, read_json_file_data, update_json_file_data, remove_assets
-from file_mgmt.media import add_asset, set_thumbnail, unpack_thumb
+from file_mgmt.media import add_asset, set_thumbnail
 
 from . import cookfile_bp
 
@@ -611,31 +612,8 @@ def _get_cookfilelist(folder=None):
         folder = current_app.config["HISTORY_FOLDER"]
 
     # Grab list of Historical Cook Files
-    if not os.path.exists(folder):
-        os.mkdir(folder)
-    dirfiles = os.listdir(folder)
-    cookfiles = []
-    for file in dirfiles:
-        if file.endswith(".pifire"):
-            cookfiles.append(file)
-    return cookfiles
+    return list_managed_files(folder, ".pifire")
 
 
 def _get_cookfilelist_details(cookfilelist):
-    HISTORY_FOLDER = current_app.config["HISTORY_FOLDER"]
-    cookfiledetails = []
-    for item in cookfilelist:
-        filename = HISTORY_FOLDER + item["filename"]
-        cookfiledata, status = read_json_file_data(filename, "metadata")
-        if status == "OK":
-            thumbnail = (
-                unpack_thumb(cookfiledata["thumbnail"], filename, cookfiledata["id"])
-                if ("thumbnail" in cookfiledata)
-                else ""
-            )
-            cookfiledetails.append(
-                {"filename": item["filename"], "title": cookfiledata["title"], "thumbnail": thumbnail}
-            )
-        else:
-            cookfiledetails.append({"filename": item["filename"], "title": "ERROR", "thumbnail": ""})
-    return cookfiledetails
+    return file_details(current_app.config["HISTORY_FOLDER"], [item["filename"] for item in cookfilelist])

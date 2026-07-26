@@ -14,14 +14,15 @@ Imported Modules
 import datetime
 import os
 import json
+import shutil
 import zipfile
 import pathlib
 
 from flask import current_app
 from common.common import generate_uuid, convert_temp
 from common.datastore_accessors import read_settings
+from common.file_browser import file_details, list_managed_files
 from file_mgmt.common import read_json_file_data
-from file_mgmt.media import unpack_thumb
 
 RECIPE_FOLDER = "./recipes/"  # Path to recipe files
 
@@ -189,8 +190,7 @@ def create_recipefile():
             archive.write(file_path, arcname=file_path.relative_to(directory))
 
     # 4. Cleanup temporary files
-    command = f"rm -rf {recipe_file_path}"
-    os.system(command)
+    shutil.rmtree(recipe_file_path, ignore_errors=True)
     return filename
 
 
@@ -221,30 +221,11 @@ def get_recipefilelist(folder=None):
     if folder is None:
         folder = current_app.config["RECIPE_FOLDER"]
     # Grab list of Recipe Files
-    if not os.path.exists(folder):
-        os.mkdir(folder)
-    dirfiles = os.listdir(folder)
-    recipefiles = []
-    for file in dirfiles:
-        if file.endswith(".pfrecipe"):
-            recipefiles.append(file)
-    return recipefiles
+    return list_managed_files(folder, ".pfrecipe")
 
 
 def get_recipefilelist_details(recipefilelist):
-    recipefiledetails = []
-    for item in recipefilelist:
-        filename = RECIPE_FOLDER + item["filename"]
-        recipefiledata, status = read_json_file_data(filename, "metadata")
-        if status == "OK":
-            thumbnail = (
-                unpack_thumb(recipefiledata["thumbnail"], filename, recipefiledata["id"])
-                if ("thumbnail" in recipefiledata)
-                else ""
-            )
-            recipefiledetails.append(
-                {"filename": item["filename"], "title": recipefiledata["title"], "thumbnail": thumbnail}
-            )
-        else:
-            recipefiledetails.append({"filename": item["filename"], "title": "ERROR", "thumbnail": ""})
-    return recipefiledetails
+    #  RECIPE_FOLDER, not current_app.config: this is the module constant the
+    #  original read, and tests/web/test_page_recipes.py patches BOTH. Changing
+    #  which one is read here would silently move that fixture's target.
+    return file_details(RECIPE_FOLDER, [item["filename"] for item in recipefilelist])
