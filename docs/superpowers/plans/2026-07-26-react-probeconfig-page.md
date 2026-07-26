@@ -502,7 +502,7 @@ Modify `blueprints/api/routes.py`
 
 **Steps:**
 
-- [ ] **Step 1: Neutralization sweep before writing a line of test.** This endpoint reads a JSON
+- [x] **Step 1: Neutralization sweep before writing a line of test.** This endpoint reads a JSON
       manifest and nothing else, but the rule is the rule:
       ```sh
       rg -n "os\.system|subprocess|sudo|reboot|shutdown|restart_scripts" \
@@ -512,7 +512,7 @@ Modify `blueprints/api/routes.py`
       itself has none. If this prints a hit inside a function Task 1 touches, stop and neutralize
       it at its import site before continuing.
 
-- [ ] **Step 2: Write the failing test.** Create `tests/web/test_api_probe_map.py` using the
+- [x] **Step 2: Write the failing test.** Create `tests/web/test_api_probe_map.py` using the
       `ds` + `client` fixtures copied from `tests/web/test_api_wizard.py:10-14`:
       ```python
       import pytest
@@ -564,14 +564,14 @@ Modify `blueprints/api/routes.py`
           assert set(req) == set(body["data"]["modules"])
       ```
 
-- [ ] **Step 3: Run, confirm they fail** with 404 and the body
+- [x] **Step 3: Run, confirm they fail** with 404 and the body
       `{"Error": "Received GET request, without valid action"}` (`api/routes.py:394`):
       ```sh
       QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
         tests/web/test_api_probe_map.py -q
       ```
 
-- [ ] **Step 4: Create `blueprints/api/probe_map_actions.py`** with the module-level docstring
+- [x] **Step 4: Create `blueprints/api/probe_map_actions.py`** with the module-level docstring
       and the first helper. Flask-free on purpose so Task 2's guards are unit-testable without a
       request context:
       ```python
@@ -609,7 +609,7 @@ Modify `blueprints/api/routes.py`
           )
       ```
 
-- [ ] **Step 5: Add the route.** In `blueprints/api/routes.py`, add the import beside the
+- [x] **Step 5: Add the route.** In `blueprints/api/routes.py`, add the import beside the
       existing `from common.pellets_actions import PELLETS_DISPATCH` line (`:16`):
       ```python
       from blueprints.api.probe_map_actions import module_requires_install
@@ -642,7 +642,7 @@ Modify `blueprints/api/routes.py`
           "probe_modules": _api_get_probe_modules,
       ```
 
-- [ ] **Step 6: Run, confirm pass**, then the whole web suite to prove the new dispatch entry
+- [x] **Step 6: Run, confirm pass**, then the whole web suite to prove the new dispatch entry
       disturbed nothing:
       ```sh
       QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web -q
@@ -651,7 +651,7 @@ Modify `blueprints/api/routes.py`
       `tests/web/test_api_wizard.py` unchanged (chromium-marked ones may SKIP in a worktree —
       re-run in the main checkout before merge).
 
-- [ ] **Step 7: Format and commit.**
+- [x] **Step 7: Format and commit.**
       ```sh
       .venv/bin/ruff format blueprints/api/probe_map_actions.py blueprints/api/routes.py \
         tests/web/test_api_probe_map.py

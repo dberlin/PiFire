@@ -1,5 +1,5 @@
 from flask import request, jsonify, abort
-from common.common import WriteKind, write_log, deep_update, read_generic_json
+from common.common import WriteKind, write_log, deep_update, read_generic_json, read_wizard
 from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
 from common.datastore_accessors import (
     read_settings,
@@ -14,6 +14,7 @@ from common.datastore_accessors import (
 from common.api_commands import process_command
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update, api_response
 from common.pellets_actions import PELLETS_DISPATCH
+from blueprints.api.probe_map_actions import module_requires_install
 from common.server_status import get_server_status
 from common.settings_schema import SettingsValidationError, validate_partial_settings
 from common.controller_deps import guard_controller_selection
@@ -124,6 +125,27 @@ def _api_get_controller_metadata(settings, server_status):
     return jsonify(read_generic_json("./controller/controllers.json")), 201
 
 
+def _api_get_probe_modules(settings, server_status):
+    """The probes section of wizard/wizard_manifest.json, plus a per-module
+    "would this need the wizard's installer?" flag.
+
+    GET /api/wizard/state ships the same manifest slice (api_wizard/routes.py:133)
+    but also computes draft resumption, board reseed maps and first_time_setup,
+    and its probe_map is the DRAFT map -- the wrong source for an editor that
+    edits LIVE settings. This route is the manifest and nothing else.
+    """
+    modules = read_wizard().get("modules", {}).get("probes", {})
+    return jsonify(
+        api_response(
+            result="OK",
+            data={
+                "modules": modules,
+                "requires_install": {key: module_requires_install(mod) for key, mod in modules.items()},
+            },
+        )
+    ), 200
+
+
 _API_GET_ACTIONS = {
     "settings": _api_get_settings,
     "server": _api_get_server,
@@ -133,6 +155,7 @@ _API_GET_ACTIONS = {
     "pellets": _api_get_pellets,
     "wled_discover": _api_get_wled_discover,
     "controller_metadata": _api_get_controller_metadata,
+    "probe_modules": _api_get_probe_modules,
 }
 
 
