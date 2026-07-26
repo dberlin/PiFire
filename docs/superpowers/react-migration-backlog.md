@@ -39,6 +39,26 @@ it by path and line number; those citations point here.
   before. The page is socket-driven off `socket_pellet_data`, which
   `useLiveState` now subscribes to, so it needs no polling and no refetch after
   a write.
+- **Probe configuration** (`/settings/probes`) — the live probe map: devices,
+  ports, all five hardware-discovery flows. The editing surface is the wizard's
+  shipped `probeReducer` + `DevicesCard`/`PortsCard`/`DeviceForm`/`PortForm` and
+  every discovery picker, reused **in place** — no move, no rename, no new
+  editing logic. What was new is the delivery path. Two REST endpoints were
+  added because none existed with the right semantics: `GET /api/probe_modules`
+  (the probes slice of `wizard_manifest.json` plus a per-module
+  `requires_install` flag) and `POST /api/probe_map`, which applies a whole map
+  behind four guards — shape (400), `mode == Stop` (409), a module whose
+  dependencies only the wizard's installer can install (422), and a full
+  cross-subsystem I2C bus-kind check against LIVE settings (422). On success it
+  regenerates `history_page.probe_config` exactly as `wizard.py:230` does and
+  raises a new `probe_map_update` control flag, which makes the running
+  controller rebuild its probe devices in place through
+  `ProbesMain.update_probe_map()` — an existing method with zero callers until
+  now. Deliberately no `restart_scripts()` anywhere: an in-process rebuild
+  keeps the whole `os.system`/`subprocess` neutralization burden out of every
+  test that can reach a settings tab. `wizard.css`'s probe-editing vocabulary
+  was extracted to `components/wizard/probes/probes.css`, imported by the two
+  cards so it travels to any surface that renders them.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
   polling, and an Exit control. Functionally complete; styling is being
@@ -316,18 +336,19 @@ Roughly ordered by daily-use value:
 - [ ] **recipes** + **cookfile** — recipe editor and cook-file browser (share a
       data model and need a JSON listing endpoint that does not exist yet)
 - [ ] **events** + **logs** — event feed and log viewer
-- [ ] **probeconfig** — **PLANNED 2026-07-26:**
-      `plans/2026-07-26-react-probeconfig-page.md`, 9 tasks. Two corrections to
-      what this line used to say: it is **not a standalone page** — the Flask
-      route never calls `render_template`, only `render_template_string` over
-      two macros, and its only consumer is the wizard, which loads those
-      fragments by AJAX. And the reuse is real but lopsided: 100% of the
-      *editing* behaviour is reuse (the shipped `probeReducer`, both cards,
-      every picker, all five discovery flows) and ~0% of the *delivery* path
-      is. Ships as `/settings/probes`, matching Flask's own IA. Needs two new
-      REST endpoints and one refactor the "cheap" framing did not anticipate:
-      `wizard.css` is imported only by `WizardShell`, so the probe editor
-      rendered anywhere else is unstyled.
+- [x] **probeconfig** — SHIPPED 2026-07-26 as the `/settings/probes` tab
+      (`plans/2026-07-26-react-probeconfig-page.md`, 9 tasks). Both corrections
+      this line already carried held up against live code: it is **not a
+      standalone page** (the Flask route never calls `render_template`, only
+      `render_template_string` over two macros, and its only consumer is the
+      wizard loading those fragments by AJAX), and the reuse really is lopsided
+      — 100% of the *editing* behaviour was reused verbatim, unmoved and
+      unrenamed, while ~0% of the *delivery* path existed. What was missing was
+      never the editor; it was a way to edit the **LIVE** probe map without
+      re-running the wizard. `blueprints/probeconfig/` is untouched and stays:
+      it is load-bearing for the Flask wizard, still the only installer UI, and
+      `tests/web/test_page_probeconfig.py` remains its characterization net.
+      See the SHIPPED section for what landed.
 - [ ] **tuner** — probe tuning tool
 - [ ] **update** — software updater (shells out; `is_real_hardware()`-gated)
 - [ ] **metrics** — metrics/stats page
@@ -386,6 +407,37 @@ Still open and still true:
   state the backend will not honour. Reuse that pattern rather than porting
   Flask's two-checkboxes-that-uncheck-each-other, which is the weaker form of
   the same idea and is what the fixed bug hid behind.
+
+### 9a. Live probe-map editing — three gaps disclosed by the probeconfig slice
+
+`/settings/probes` shipped 2026-07-26. Three things it deliberately does NOT do,
+recorded here rather than left in the plan document, per the standing rule below.
+
+1. **Derived blobs other than `history_page.probe_config` are not regenerated.**
+   `apply_probe_map` regenerates the history chart config, matching
+   `wizard.py:230`, but leaves `control["notify_data"]` and
+   `settings["recipe"]["probe_map"]` alone — because `run_wizard` leaves them
+   alone too (`wizard.py:227-231` regenerates only the one). Matching the
+   installer exactly was the conservative choice; diverging from it is a
+   deliberate decision that deserves its own change. **Consequence: renaming a
+   probe here leaves a stale notify entry pointing at the old label.**
+
+2. **Rebuilding probe devices does not close the old ones.**
+   `ProbesMain._setup_probe_devices` rebinds `self.probe_device_list` to a fresh
+   list and lets the previous instances fall out of scope, so a Bluetooth or
+   USB-HID device holding an OS handle releases it at GC, not at rebuild — and
+   may fail to re-open the same hardware. Mitigated, not fixed: the endpoint
+   gates on `mode == Stop`, where no cook depends on the next read, and
+   `_setup_probe_devices` already degrades to `probes.disabled` on any
+   import/construct failure rather than crashing the control loop.
+
+3. **Last write wins between the two probe editors.** The Flask settings page
+   still edits individual `probe_info` entries in place via
+   `update_probe_config` (`common/app.py:346-390`). Two humans editing probes
+   simultaneously there and in the React tab, both in Stop mode, within one
+   page lifetime, is unmitigated. Not papered over with a `lastupdated.time`
+   compare-and-swap: that race is datastore-wide and pre-existing, and a
+   point fix here would imply a guarantee the rest of the store does not make.
 
 ### 10. Deferred-work inventory — 103 open items pulled out of plan documents
 

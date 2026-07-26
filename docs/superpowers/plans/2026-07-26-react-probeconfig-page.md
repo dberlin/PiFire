@@ -2222,7 +2222,12 @@ repeats the mistake.
 
 **Steps:**
 
-- [ ] **Step 1: Replace the `probeconfig` bullet** (`:289-290`) with the corrected facts:
+- [x] **Step 1: Replace the `probeconfig` bullet** (`:289-290`) with the corrected facts.
+      **NOTE 2026-07-26:** by the time this task ran, the backlog bullet had ALREADY been
+      corrected — it read "PLANNED 2026-07-26" and carried both corrections, so the
+      "READ THIS FIRST" section at the top of this plan describes a wrong sentence that no
+      longer exists in the backlog. The bullet was flipped from PLANNED to SHIPPED instead of
+      being rewritten, and both of its claims were re-checked against live code and held.
       ```markdown
       - [x] **probeconfig** — SHIPPED 2026-07-26 as the `/settings/probes` tab
             (`plans/2026-07-26-react-probeconfig-page.md`, 9 tasks). **The old entry here was
@@ -2237,11 +2242,11 @@ repeats the mistake.
             to edit the **live** probe map without re-running the wizard. That is what shipped.
       ```
 
-- [ ] **Step 2: Add the SHIPPED-section entry**, matching the style of the pellets entry, naming
+- [x] **Step 2: Add the SHIPPED-section entry**, matching the style of the pellets entry, naming
       the two new endpoints (`GET /api/probe_modules`, `POST /api/probe_map`), the new control
       flag (`probe_map_update`), and the revived `ProbesMain.update_probe_map()`.
 
-- [ ] **Step 3: Record the three disclosed gaps** in the backlog's OPEN section — copied from
+- [x] **Step 3: Record the three disclosed gaps** in the backlog's OPEN section — copied from
       "Out of scope" below, not summarized away:
       1. `control["notify_data"]` and `settings["recipe"]["probe_map"]` are not regenerated when
          the probe map changes (matching `run_wizard`, which does not either). A probe renamed
@@ -2251,11 +2256,11 @@ repeats the mistake.
       3. Two humans editing probes simultaneously in the Flask settings page and the React tab,
          both in Stop mode, is last-write-wins.
 
-- [ ] **Step 4: Do NOT delete `blueprints/probeconfig/`.** It is load-bearing for the Flask
+- [x] **Step 4: Do NOT delete `blueprints/probeconfig/`.** It is load-bearing for the Flask
       wizard, which is still the only installer UI. `tests/web/test_page_probeconfig.py` stays as
       the characterization net.
 
-- [ ] **Step 5: Commit.** **Deliverable:** the backlog no longer claims probeconfig is a
+- [x] **Step 5: Commit.** **Deliverable:** the backlog no longer claims probeconfig is a
       standalone page.
 
 ---
