@@ -13,16 +13,23 @@ export function SaveBar({
   onSave,
   saving,
   status,
+  dirty = false,
 }: {
   onSave: () => void | Promise<void>;
   saving: boolean;
   status: SaveStatus;
+  /** This tab holds an edit that has not been committed yet. Kept visible
+   *  because the edit now outlives the tab: it survives a switch to another
+   *  pill (helpers/settings/settingsDrafts.ts), so "still on screen" no longer
+   *  implies "already saved". */
+  dirty?: boolean;
 }) {
   return (
     <div className="pf-settings-actions">
       <button className="pf-modal-btn accent" disabled={saving} onClick={onSave}>
         {saving ? "Saving…" : "Save"}
       </button>
+      {dirty && !saving && <span className="pf-settings-unsaved-text">Unsaved changes</span>}
       {status.kind === "saved" && <span className="pf-settings-saved">Saved ✓</span>}
       {status.kind === "error" && (
         <p className="pf-settings-error-text" role="alert">

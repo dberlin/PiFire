@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useCallback } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import type { ControllerMetadata, Settings } from "../../../helpers/settings/settingsApi";
+import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
@@ -61,18 +62,22 @@ export function ControllerTab() {
   }>();
   const { save, saving, status } = useSaveSettings();
 
-  const [selected, setSelected] = useState(() => readSelected(settings, controllerMeta));
-  const [values, setValues] = useState<ControllerValues>(() =>
-    deriveValues(readSelected(settings, controllerMeta), settings, controllerMeta),
+  // Held on SettingsShell, so an unfinished edit survives a trip to another
+  // tab. `selected` and `values` are ONE draft because they are one choice: the
+  // config fields on screen are the fields the selected controller declares, so
+  // changing the selection re-derives them in the same update rather than in a
+  // second render-phase adjustment.
+  const read = useCallback(
+    (s: Settings) => {
+      const selected = readSelected(s, controllerMeta);
+      return { selected, values: deriveValues(selected, s, controllerMeta) };
+    },
+    [controllerMeta],
   );
-  const [prevSettings, setPrevSettings] = useState(settings);
-  const [prevSelected, setPrevSelected] = useState(selected);
-
-  if (settings !== prevSettings || selected !== prevSelected) {
-    setPrevSettings(settings);
-    setPrevSelected(selected);
-    setValues(deriveValues(selected, settings, controllerMeta));
-  }
+  const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("controller", read);
+  const { selected, values } = v;
+  const setSelected = (next: string) =>
+    setV({ selected: next, values: deriveValues(next, settings, controllerMeta) });
 
   if (!controllerMeta) {
     return (
@@ -84,7 +89,7 @@ export function ControllerTab() {
 
   const entry = controllerMeta.metadata[selected];
   const set = (name: string, val: number | boolean | string) =>
-    setValues((v) => ({ ...v, [name]: val }));
+    setV((d) => ({ ...d, values: { ...d.values, [name]: val } }));
 
   const onSave = async () => {
     let d: object = {};
@@ -106,7 +111,7 @@ export function ControllerTab() {
       } else if (opt.option_type === "string") rebuilt[opt.option_name] = String(v ?? "");
     }
     d = setPath(d, `controller.config.${selected}`, rebuilt);
-    await save(d, ["controller_update"]);
+    if (await save(d, ["controller_update"])) markSaved();
   };
 
   return (
@@ -176,7 +181,7 @@ export function ControllerTab() {
         }
         return null;
       })}
-      <SaveBar onSave={onSave} saving={saving} status={status} />
+      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
     </Section>
   );
 }

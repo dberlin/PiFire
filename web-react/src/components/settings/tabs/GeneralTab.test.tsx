@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router";
+import { useSettingsDraftStore } from "../../../helpers/settings/settingsDrafts";
 import { renderRoute } from "../../../test-utils";
 import { GeneralTab } from "./GeneralTab";
 
@@ -32,13 +33,16 @@ let setOutletContext: ((ctx: unknown) => void) | null = null;
 
 function ContextHolder({ initial }: { initial: unknown }) {
   const [ctx, setCtx] = useState(initial);
+  // Also stands in for SettingsShell's draft store, which is where the tab's
+  // in-progress edit now lives (helpers/settings/settingsDrafts.ts).
+  const store = useSettingsDraftStore((ctx as { settings?: unknown })?.settings);
   // Publishing the setter is a side effect (module-level mutable ref used
   // only by the test below to drive a re-render), so it belongs in an
   // effect, not directly in the render body.
   useEffect(() => {
     setOutletContext = setCtx;
   }, []);
-  return <Outlet context={ctx} />;
+  return <Outlet context={{ ...(ctx as object), ...store }} />;
 }
 
 function renderResyncHarness(initial: unknown) {

@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLoaderData, useNavigate } from "react-router";
 import { hasDcFan } from "../../helpers/settings/platform";
 import type { ControllerMetadata, Settings } from "../../helpers/settings/settingsApi";
+import { useSettingsDraftStore } from "../../helpers/settings/settingsDrafts";
 
 const SETTINGS_TABS = [
   { path: "general", label: "General" },
@@ -26,6 +27,9 @@ export function SettingsShell() {
     controllerMeta: ControllerMetadata | null;
   };
   const navigate = useNavigate();
+  // The shell outlives the tabs, so it is where an in-progress edit waits while
+  // the user is on another pill (helpers/settings/settingsDrafts.ts).
+  const draftStore = useSettingsDraftStore(settings);
   // Flask hides the PWM pill on an AC-fan build (settings/index.html:63-65).
   // Only the PILL goes; the /settings/pwm route stays registered in App.tsx so
   // a bookmarked URL still resolves, and PwmTab explains why it is inert.
@@ -44,11 +48,24 @@ export function SettingsShell() {
             className={({ isActive }) => `pf-settings-link ${isActive ? "active" : ""}`}
           >
             {t.label}
+            {/* The only thing still on screen once the user navigates away
+                from the tab holding the edit -- without it, "preserved across
+                the switch" would be indistinguishable from "discarded". */}
+            {draftStore.drafts[t.path]?.saved === false && (
+              <span
+                className="pf-settings-unsaved"
+                role="img"
+                aria-label="Unsaved changes"
+                title="Unsaved changes"
+              >
+                •
+              </span>
+            )}
           </NavLink>
         ))}
       </aside>
       <main className="pf-settings-content">
-        <Outlet context={{ settings, mode, controllerMeta }} />
+        <Outlet context={{ settings, mode, controllerMeta, ...draftStore }} />
       </main>
     </div>
   );

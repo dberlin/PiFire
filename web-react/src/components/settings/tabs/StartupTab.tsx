@@ -1,8 +1,8 @@
-import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
@@ -79,12 +79,8 @@ function readStartup(s: Settings): Startup {
 export function StartupTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving, status } = useSaveSettings();
-  const [v, setV] = useState<Startup>(() => readStartup(settings));
-  const [prev, setPrev] = useState(settings);
-  if (settings !== prev) {
-    setPrev(settings);
-    setV(readStartup(settings));
-  }
+  // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
+  const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("startup", readStartup);
 
   const set = <K extends keyof Startup>(k: K, val: Startup[K]) => setV((s) => ({ ...s, [k]: val }));
   const units = settings.globals?.units === "C" ? "°C" : "°F";
@@ -139,7 +135,7 @@ export function StartupTab() {
     d = setPath(d, "startup.start_to_mode.primary_setpoint", v.primary_setpoint);
     d = setPath(d, "startup.start_to_mode.start_to_hold_prompt", v.start_to_hold_prompt);
 
-    await save(d, ["settings_update"]);
+    if (await save(d, ["settings_update"])) markSaved();
   };
 
   const modeOptions = [
@@ -271,7 +267,7 @@ export function StartupTab() {
             />
           </>
         )}
-        <SaveBar onSave={onSave} saving={saving} status={status} />
+        <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
       </Section>
     </>
   );

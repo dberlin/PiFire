@@ -1,7 +1,6 @@
-import { useState } from "react";
-import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
@@ -31,20 +30,16 @@ function readSafety(s: Settings): Safety {
 }
 
 export function SafetyTab() {
-  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving, status } = useSaveSettings();
-  const [v, setV] = useState<Safety>(() => readSafety(settings));
-  const [prev, setPrev] = useState(settings);
-  if (settings !== prev) {
-    setPrev(settings);
-    setV(readSafety(settings));
-  }
+  // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
+  const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("safety", readSafety);
   const set = <K extends keyof Safety>(k: K, val: Safety[K]) => setV((s) => ({ ...s, [k]: val }));
 
   const onSave = async () => {
     let d: object = {};
     for (const [k, val] of Object.entries(v)) d = setPath(d, `safety.${k}`, val);
-    await save(d, []); // _settings_safety does a bare write — no control flag
+    // _settings_safety does a bare write — no control flag
+    if (await save(d, [])) markSaved();
   };
 
   return (
@@ -98,7 +93,7 @@ export function SafetyTab() {
         checked={v.allow_manual_changes}
         onChange={(b) => set("allow_manual_changes", b)}
       />
-      <SaveBar onSave={onSave} saving={saving} status={status} />
+      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
     </Section>
   );
 }

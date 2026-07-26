@@ -1,7 +1,7 @@
-import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { ProbeChartConfig } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { ColorField } from "../fields/ColorField";
@@ -87,14 +87,10 @@ function readHistory(s: Settings): History {
 }
 
 export function HistoryTab() {
-  const { settings, mode } = useOutletContext<{ settings: Settings; mode: string }>();
+  const { mode } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving, status } = useSaveSettings();
-  const [v, setV] = useState<History>(() => readHistory(settings));
-  const [prev, setPrev] = useState(settings);
-  if (settings !== prev) {
-    setPrev(settings);
-    setV(readHistory(settings));
-  }
+  // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
+  const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("history", readHistory);
   const set = <K extends keyof History>(k: K, val: History[K]) => setV((s) => ({ ...s, [k]: val }));
   const setProbe = <K extends keyof ProbeColorConfig>(
     label: string,
@@ -115,7 +111,8 @@ export function HistoryTab() {
     d = setPath(d, "history_page.autorefresh", v.autorefresh ? "on" : "off");
     d = setPath(d, "history_page.probe_config", v.probeConfig);
     d = setPath(d, "globals.ext_data", v.ext_data);
-    await save(d, []); // bare write — no control flag
+    // bare write — no control flag
+    if (await save(d, [])) markSaved();
   };
 
   // Extended-data logging changes the history schema, so it is gated to a
@@ -237,7 +234,7 @@ export function HistoryTab() {
             );
           })
         )}
-        <SaveBar onSave={onSave} saving={saving} status={status} />
+        <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
       </Section>
     </>
   );

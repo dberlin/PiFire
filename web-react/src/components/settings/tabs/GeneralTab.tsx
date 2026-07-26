@@ -1,7 +1,6 @@
-import { useState } from "react";
-import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";
@@ -13,30 +12,41 @@ const THEMES = [
   { value: "dark", label: "Dark" },
 ];
 
-export function GeneralTab() {
-  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving, status } = useSaveSettings();
-  const [name, setName] = useState<string>(settings.globals?.grill_name ?? "");
-  const [theme, setTheme] = useState<string>(settings.globals?.page_theme ?? "light");
+type General = {
+  grill_name: string;
+  page_theme: string;
+};
 
-  const [prevSettings, setPrevSettings] = useState(settings);
-  if (settings !== prevSettings) {
-    setPrevSettings(settings);
-    setName(settings.globals?.grill_name ?? "");
-    setTheme(settings.globals?.page_theme ?? "light");
-  }
+function readGeneral(s: Settings): General {
+  return {
+    grill_name: s.globals?.grill_name ?? "",
+    page_theme: s.globals?.page_theme ?? "light",
+  };
+}
+
+export function GeneralTab() {
+  const { save, saving, status } = useSaveSettings();
+  // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
+  const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("general", readGeneral);
+  const set = <K extends keyof General>(k: K, val: General[K]) => setV((s) => ({ ...s, [k]: val }));
 
   const onSave = async () => {
-    let delta = setPath({}, "globals.grill_name", name);
-    delta = setPath(delta, "globals.page_theme", theme);
-    await save(delta, []); // display-only: no control flag
+    let delta = setPath({}, "globals.grill_name", v.grill_name);
+    delta = setPath(delta, "globals.page_theme", v.page_theme);
+    // display-only: no control flag
+    if (await save(delta, [])) markSaved();
   };
 
   return (
     <Section title="General">
-      <TextField label="Grill Name" value={name} onChange={setName} />
-      <Select label="Theme" value={theme} options={THEMES} onChange={setTheme} />
-      <SaveBar onSave={onSave} saving={saving} status={status} />
+      <TextField label="Grill Name" value={v.grill_name} onChange={(x) => set("grill_name", x)} />
+      <Select
+        label="Theme"
+        value={v.page_theme}
+        options={THEMES}
+        onChange={(x) => set("page_theme", x)}
+      />
+      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
     </Section>
   );
 }

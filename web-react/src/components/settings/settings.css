@@ -177,6 +177,20 @@
   color: var(--ok);
   font: 600 14px "Barlow";
 }
+/* An edit now outlives the tab that made it (helpers/settings/settingsDrafts.ts),
+   so both of these say "held, not stored": the text sits beside the Save button
+   the user is looking at, the dot rides the nav pill they left behind. */
+.pf-settings-unsaved-text {
+  color: var(--text-dim);
+  font: 600 14px "Barlow";
+}
+.pf-settings-unsaved {
+  color: #f0c674;
+  font-size: 18px;
+  line-height: 1;
+  margin-left: 6px;
+  vertical-align: middle;
+}
 .pf-settings-hint {
   color: var(--text-dim);
   font: 500 13px "Barlow";

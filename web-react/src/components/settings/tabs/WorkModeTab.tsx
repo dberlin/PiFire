@@ -1,8 +1,8 @@
-import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
@@ -73,12 +73,13 @@ function readWorkMode(s: Settings): WorkMode {
 export function WorkModeTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving, status } = useSaveSettings();
-  const [v, setV] = useState<WorkMode>(() => readWorkMode(settings));
-  const [prev, setPrev] = useState(settings);
-  if (settings !== prev) {
-    setPrev(settings);
-    setV(readWorkMode(settings));
-  }
+  // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
+  const {
+    value: v,
+    setValue: setV,
+    dirty,
+    markSaved,
+  } = useSettingsDraft("work-mode", readWorkMode);
 
   const setCycleData = <K extends keyof WorkMode["cycle_data"]>(
     k: K,
@@ -102,7 +103,7 @@ export function WorkModeTab() {
     for (const [k, val] of Object.entries(v.cycle_data)) d = setPath(d, `cycle_data.${k}`, val);
     for (const [k, val] of Object.entries(v.smoke_plus)) d = setPath(d, `smoke_plus.${k}`, val);
     for (const [k, val] of Object.entries(v.keep_warm)) d = setPath(d, `keep_warm.${k}`, val);
-    await save(d, ["settings_update"]);
+    if (await save(d, ["settings_update"])) markSaved();
   };
 
   return (
@@ -256,7 +257,7 @@ export function WorkModeTab() {
           checked={v.keep_warm.s_plus}
           onChange={(b) => setKeepWarm("s_plus", b)}
         />
-        <SaveBar onSave={onSave} saving={saving} status={status} />
+        <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
       </Section>
     </>
   );

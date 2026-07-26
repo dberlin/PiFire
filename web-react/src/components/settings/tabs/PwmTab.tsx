@@ -4,6 +4,7 @@ import { clampToBounds } from "../../../helpers/settings/bounds";
 import { setPath } from "../../../helpers/settings/delta";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
@@ -49,21 +50,12 @@ function readPwm(settings: Settings): Pwm {
 export function PwmTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving, status } = useSaveSettings();
-  const [pwm, setPwm] = useState<Pwm>(() => readPwm(settings));
+  // Held on SettingsShell, so an unfinished table edit survives a trip to
+  // another tab; re-read from the loader whenever there is no draft.
+  const { value: pwm, setValue: setPwm, dirty, markSaved } = useSettingsDraft("pwm", readPwm);
   // Client-side and pre-flight, so it is deliberately NOT routed through
   // SaveBar's `status` — that channel carries the server's verdict.
   const [boundsError, setBoundsError] = useState<string | null>(null);
-
-  // Re-sync from the loader on revalidation via render-phase adjustment (the
-  // repo's house style — NOT a useEffect; the React Compiler lint rule
-  // `react-hooks/set-state-in-effect` rejects setState-in-effect, and the
-  // Dashboard cook-timer established this `prev`-compare pattern. Do NOT
-  // suppress.)
-  const [prevSettings, setPrevSettings] = useState(settings);
-  if (settings !== prevSettings) {
-    setPrevSettings(settings);
-    setPwm(readPwm(settings));
-  }
 
   const set = <K extends keyof Pwm>(k: K, v: Pwm[K]) => setPwm((s) => ({ ...s, [k]: v }));
 
@@ -128,7 +120,7 @@ export function PwmTab() {
         pwm.max_duty_cycle,
       ),
     );
-    await save(d, ["settings_update"]); // control loop must re-read pwm
+    if (await save(d, ["settings_update"])) markSaved(); // control loop must re-read pwm
   };
 
   if (!dcFan) {
@@ -198,7 +190,7 @@ export function PwmTab() {
           {boundsError}
         </p>
       )}
-      <SaveBar onSave={onSave} saving={saving} status={status} />
+      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
     </Section>
   );
 }

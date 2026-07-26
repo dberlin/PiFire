@@ -27,6 +27,7 @@ rs.mock("../../../helpers/probes/probeMapApi", () => ({
 }));
 
 import { applyProbeMap } from "../../../helpers/probes/probeMapApi";
+import { useSettingsDraftStore } from "../../../helpers/settings/settingsDrafts";
 
 const applyMock = applyProbeMap as ReturnType<typeof rs.fn>;
 
@@ -35,11 +36,17 @@ const applyMock = applyProbeMap as ReturnType<typeof rs.fn>;
 // child so useLoaderData() resolves exactly as it does under App.tsx's
 // /settings/probes route.
 function renderTab(ui: ReactElement, context: unknown, catalog: ProbeModuleCatalog) {
+  // Also stands in for SettingsShell's draft store, which is where the working
+  // probe map now lives (helpers/settings/settingsDrafts.ts).
+  function Host() {
+    const store = useSettingsDraftStore((context as { settings?: unknown })?.settings);
+    return <Outlet context={{ ...(context as object), ...store }} />;
+  }
   const router = createMemoryRouter(
     [
       {
         path: "/",
-        element: <Outlet context={context} />,
+        element: <Host />,
         children: [
           { index: true, element: ui, loader: () => catalog, HydrateFallback: () => null },
         ],

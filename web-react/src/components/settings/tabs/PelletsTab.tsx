@@ -1,7 +1,7 @@
-import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import type { Settings, SettingsFlag } from "../../../helpers/settings/settingsApi";
+import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
@@ -35,13 +35,8 @@ function readPellets(s: Settings): Pellets {
 export function PelletsTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving, status } = useSaveSettings();
-  const [v, setV] = useState<Pellets>(() => readPellets(settings));
-  const [prev, setPrev] = useState(settings);
-
-  if (settings !== prev) {
-    setPrev(settings);
-    setV(readPellets(settings));
-  }
+  // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
+  const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("pellets", readPellets);
 
   const set = <K extends keyof Pellets>(k: K, val: Pellets[K]) => setV((s) => ({ ...s, [k]: val }));
 
@@ -66,7 +61,7 @@ export function PelletsTab() {
       flags.push("distance_update");
     }
 
-    await save(d, flags);
+    if (await save(d, flags)) markSaved();
   };
 
   return (
@@ -130,7 +125,7 @@ export function PelletsTab() {
         fan enabled. This feature will only turn on the igniter if Prime &amp; Startup is selected;
         otherwise, priming without startup will not utilize the igniter.
       </p>
-      <SaveBar onSave={onSave} saving={saving} status={status} />
+      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
     </Section>
   );
 }

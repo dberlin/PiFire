@@ -7,6 +7,7 @@ import {
 } from "../../../helpers/probes/probeMapApi";
 import type { ProbeModuleCatalog } from "../../../helpers/probes/probeMapTypes";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { ProbeMap } from "../../../helpers/wizard/probeTypes";
 import { DevicesCard } from "../../wizard/probes/DevicesCard";
 import { PortsCard } from "../../wizard/probes/PortsCard";
@@ -41,7 +42,14 @@ export function ProbesTab() {
   const revalidator = useRevalidator();
 
   const live = readLiveProbeMap(settings);
-  const [working, setWorking] = useState<ProbeMap>(live);
+  // Held on SettingsShell, so a half-built probe map survives a trip to another
+  // tab -- the most expensive edit on this whole surface to have to redo.
+  const {
+    value: working,
+    setValue: setWorking,
+    markSaved,
+    clear: discard,
+  } = useSettingsDraft("probes", readLiveProbeMap);
   const [prev, setPrev] = useState(settings);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,11 +57,11 @@ export function ProbesTab() {
 
   // Render-phase adjustment, NOT an effect: the React Compiler is active and
   // setState-in-useEffect for derived state is banned. Same idiom as
-  // SafetyTab.tsx:36-40. A successful save calls revalidate(), which hands
-  // back a NEW settings object -- so this is also what clears `dirty`.
+  // SafetyTab.tsx:36-40. The map itself needs no re-sync -- the draft store
+  // drops an applied draft when fresh settings arrive -- but the last
+  // rejection message is about the map that has just been superseded.
   if (settings !== prev) {
     setPrev(settings);
-    setWorking(readLiveProbeMap(settings));
     setError(null);
   }
 
@@ -72,6 +80,7 @@ export function ProbesTab() {
     setSaving(false);
     if (r.ok) {
       setSaved(true);
+      markSaved(); // the draft is spent; the next loader result supersedes it
       revalidator.revalidate(); // re-runs settingsLoader AND probeModulesLoader
     } else {
       // Deliberately keeps `working` -- the store is untouched on every
@@ -118,7 +127,7 @@ export function ProbesTab() {
             type="button"
             className="pf-modal-btn"
             disabled={!dirty || saving}
-            onClick={() => setWorking(live)}
+            onClick={discard}
           >
             Discard changes
           </button>

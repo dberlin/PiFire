@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useOutletContext } from "react-router";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { NumberField } from "../fields/NumberField";
@@ -54,14 +54,14 @@ function deviceLabel(d: OneSignalDevice | undefined): string {
 }
 
 export function NotificationsTab() {
-  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
   const { save, saving, status } = useSaveSettings();
-  const [v, setV] = useState(() => readNotify(settings));
-  const [prev, setPrev] = useState(settings);
-  if (settings !== prev) {
-    setPrev(settings);
-    setV(readNotify(settings));
-  }
+  // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
+  const {
+    value: v,
+    setValue: setV,
+    dirty,
+    markSaved,
+  } = useSettingsDraft("notifications", readNotify);
 
   const { ns } = v;
   const svc = (name: string): NotifyService => ns[name] ?? {};
@@ -72,7 +72,7 @@ export function NotificationsTab() {
     }));
 
   const onSave = async () => {
-    await save({ notify_services: v.ns }, ["settings_update"]);
+    if (await save({ notify_services: v.ns }, ["settings_update"])) markSaved();
   };
 
   const setDeviceField = (deviceId: string, key: keyof OneSignalDevice, val: string) =>
@@ -346,7 +346,7 @@ export function NotificationsTab() {
         }}
         onCancel={() => setPendingDevice(null)}
       />
-      <SaveBar onSave={onSave} saving={saving} status={status} />
+      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
     </>
   );
 }
