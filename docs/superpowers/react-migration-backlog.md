@@ -60,6 +60,21 @@ it by path and line number; those citations point here.
 - **Per-probe notifications (slice 1)** — bell per probe card, target modal,
   arm/disable, single-write non-clobber against the other two notify entries
   sharing each label.
+- **Notify writes are addressed per entry** (2026-07-26) — closes the one
+  regression the control-write delta conversion flagged and accepted. Posting a
+  whole `notify_data` array is applied as `notify.replace`, so a client that
+  built it from a queue-blind read reverts every entry it did not mean to touch
+  — a timer armed from the shell while a target modal was open, most visibly. A
+  whole array cannot say WHICH fields its writer meant, so the drain cannot tell
+  an intentional deletion from an omission. `POST /api/control` now also takes
+  `notify_updates`: a list of `{label, type, fields}` mapped 1:1 onto the
+  `notify.set` ops the drain applies against live state, shared by the REST and
+  Socket.IO doors via `notify_ops_from_post()` so they cannot drift, with a 400
+  naming a malformed payload instead of the generic 201. Every in-repo client
+  converted: `saveTargetEdit` (was GET-edit-POST, now ONE post and no read),
+  `dash_default.js` + `dash_basic.js` `setNotify`/`cancelNotify`, and
+  `socket_io.py::_update_notify_data` — which already received per-entry intent
+  from the mobile app and threw it away by rebuilding the array.
 - **Settings guards sweep** — `NumberField` bounds enforced on blur, `dc_fan`
   gating, PWM min/max guard with dependent clamps, Startup conditional
   structure, monotonic range boundaries, delete confirmations.
@@ -173,13 +188,25 @@ click-to-toggle manual outputs now have no home in React — that capability
 belongs to the **manual** page item below. This does not retire the Flask
 picker; it only says React will not grow one.
 
-### 3. Timer clobber is only half fixed
+### 3. Timer clobber — DONE (closed at the source by control-write deltas)
 
-`timerStartWithOptions` closed the arm path, but `timerShutdown` and
-`timerKeepWarm` remain separate calls, and `command.ts` documents that they must
-be re-sent after `timerStop`. Two writes inside one control cycle is exactly the
-clobber the original fix addressed: the drain applies queued partials with
-`json_patch`, which replaces arrays wholesale, so the last write wins outright.
+Every writer now queues an intent DELTA — named members, or an ordered OP the
+drain evaluates against live state — instead of the whole control snapshot it
+happened to read (`common/control_delta.py`). `control["timer"]` and
+`control["notify_data"]` are expressible ONLY as ops, which is what stopped the
+drain guessing: `timer.start_or_resume`, `timer.clear`, `notify.set`.
+
+- stop-then-pause in one cycle leaves the timer stopped, and a flag write after
+  a start no longer zeroes it (`test_control_delta_seam.py`,
+  `test_process_command_golden.py`).
+- `TimerBar`'s client-side guard against that pair is deleted — the workaround
+  went with the fix.
+- The whole-`notify_data` clobber is closed too, on both UIs: see
+  "Notify writes are addressed per entry" under SHIPPED.
+
+Remaining: `POST /api/control` still ACCEPTS a whole `notify_data` array and
+applies it as `notify.replace`, because third-party clients speak it. No
+in-repo client does. Documented as lossy at both doors.
 
 ### 4. The errors blob is write-only from the web tier
 
@@ -205,7 +232,7 @@ signal, and offers a **Recheck** that asks `GET /api/sys/check_alive` directly
 endpoint that clears the error, or a liveness signal that is not sticky — is
 still open.
 
-### 5. Tailwind v4 migration — SPEC WRITTEN, BLOCKED
+### 5. Tailwind v4 migration — SPEC WRITTEN, UNBLOCKED
 
 Spec: `docs/superpowers/specs/2026-07-25-tailwind-v4-migration-design.md`.
 Ratified: token bridge (`@theme` + `@apply`, `pf-*` names and JSX survive), gate
@@ -228,9 +255,10 @@ loads Barlow from `fonts.googleapis.com`, so pixels depend on the network and
 the host font stack, and masking the volatile regions would mask exactly the
 typography the gate exists to protect.
 
-Blocked on the wizard-styling and dashboard-reflow slices landing first — both
-are rewriting the two largest stylesheets right now, and this would collide with
-both.
+**Unblocked 2026-07-26.** The wizard-styling and dashboard-reflow slices — which
+were rewriting the two largest stylesheets and would have collided with this —
+are both merged. Re-measure the line counts above before starting; they were
+taken before those two landed.
 
 ### 6. Remaining audit findings
 
@@ -248,15 +276,13 @@ socketio both call it, so whichever polls first consumes the other's warnings.
 
 Roughly ordered by daily-use value:
 
-- [ ] **pellets** — pellet inventory manager (distinct from the Pellets settings
-      tab, which covers level thresholds only). **Planned:**
-      `plans/2026-07-25-react-pellets-page.md`, 13 tasks. Needs two new REST
-      endpoints — no path reads or writes the pellet archive today. The eight
-      actions already exist as Socket.IO handlers and get extracted so both
-      transports share one implementation, and the backend already broadcasts
-      the whole pellet DB as `socket_pellet_data`, which `useLiveState` does not
-      yet subscribe to.
-- [ ] **admin** — restart/reboot/shutdown, backups
+- [x] **pellets** — SHIPPED 2026-07-25 (`plans/2026-07-25-react-pellets-page.md`,
+      13 tasks). Listed here as open until 2026-07-26 purely because this entry
+      was never struck; see the SHIPPED section for what landed.
+- [ ] **admin** — restart/reboot/shutdown, backups. Every action shells out, so
+      the tests for it MUST neutralize `os.system`/`subprocess` before anything
+      runs — an `is_real_hardware()` flag is not enough, and this repo has
+      really rebooted the developer's machine twice that way.
 - [ ] **recipes** + **cookfile** — recipe editor and cook-file browser (share a
       data model and need a JSON listing endpoint that does not exist yet)
 - [ ] **events** + **logs** — event feed and log viewer
@@ -318,6 +344,24 @@ Roughly ordered by daily-use value:
   page's migration.
 - `api` / `api_wizard` are the JSON backends the React app consumes, not pages
   to migrate.
+
+### Two dependency pins that are deliberate, not neglect
+
+Both survived a `bun update --latest` / `uv lock --upgrade` sweep on 2026-07-26.
+Bumping either is its own piece of work, not a lockfile refresh.
+
+- **`typescript` stays on `^5.9.3`.** It exists only as
+  `@typescript-eslint/parser@8.65.0`'s peer. Typechecking runs against
+  `typescript7` (`npm:typescript@7.0.2`), aliased so the two coexist. `bun
+  outdated` will keep offering `typescript 5.9.3 → 7.0.2`; taking it breaks the
+  ESLint parser and nothing else gains.
+- **`ruff` is capped `<0.16`.** 0.16 promotes new rules to the default set and
+  extends the formatter to Python code blocks inside Markdown. Measured on this
+  tree: 0.15.22 gives `All checks passed` and 550 files formatted; 0.16.0 gives
+  **1422 errors and 64 files reformatted**, almost all of it docs and legacy
+  code no current change touches. `ruff check .` is a merge gate (`ruff.toml`
+  says so outright), so adopting 0.16 is a repo-wide cleanup commit. Raise the
+  ceiling in that commit; the rationale is on the pin in `pyproject.toml`.
 
 ## Lessons this backlog has already paid for
 

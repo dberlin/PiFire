@@ -43,12 +43,14 @@ export interface CommandClient {
   //    needs restoring -- the next arm carries both flags itself -- and a
   //    standalone flag write only arms an expiry action on a stopped timer.
   //  - A non-numeric `seconds` makes the backend silently substitute 60s.
-  //  - Each of these is ONE control write. Two of them in one control cycle no
-  //    longer clobber each other in general (the drain three-way merges), but
-  //    two that BOTH compute a timer state still do: control["timer"] is merged
-  //    as one coupled unit, so stop-then-pause and stop-then-resume resurrect a
-  //    stopped countdown. components/shell/TimerBar.tsx holds that line for the
-  //    bar's buttons, and explains it in full.
+  //  - Each of these is ONE control write, and two of them in one control cycle
+  //    compose. They queue an intent OP the drain evaluates against live state
+  //    rather than a timer value computed from a read that cannot see the
+  //    queue (common/control_delta.py), so stop-then-pause leaves the timer
+  //    stopped instead of resurrecting the countdown
+  //    (tests/characterization/test_control_delta_seam.py::
+  //    test_stop_then_pause_in_one_cycle_leaves_the_timer_stopped). TimerBar
+  //    used to guard its buttons against that pair; it no longer needs to.
   timerStart(seconds: number): Promise<CommandResult>;
   // Arms a NEW timer for a DURATION, together with its expiry flags, in a
   // single request -- see the block above createCommand for the two properties
