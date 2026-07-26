@@ -234,10 +234,78 @@ def _op_notify_replace(control, op, log):
     control["notify_data"] = copy.deepcopy(list(op["entries"]))
 
 
+def _timer_notify_index(control):
+    """_cmd_set_timer locates the timer entry by TYPE alone
+    (common/api_commands.py:649-651), not by label. Match that."""
+    for index, entry in enumerate(control.get("notify_data", ())):
+        if isinstance(entry, Mapping) and entry.get("type") == "timer":
+            return index
+    return None
+
+
+def _op_timer_clear(control, op, log):
+    control["timer"]["start"] = 0
+    control["timer"]["end"] = 0
+    control["timer"]["paused"] = 0
+    index = _timer_notify_index(control)
+    if index is not None:
+        entry = control["notify_data"][index]
+        entry["req"] = False
+        entry["shutdown"] = False
+        entry["keep_warm"] = False
+
+
+def _op_timer_pause(control, op, log):
+    if control["timer"]["start"] == 0:
+        # _cmd_set_timer's own start == 0 branch is a full clear, not a pause.
+        _op_timer_clear(control, op, log)
+        return
+    index = _timer_notify_index(control)
+    if index is not None:
+        control["notify_data"][index]["req"] = False
+    control["timer"]["paused"] = op["at"]
+
+
+def _op_timer_start_or_resume(control, op, log):
+    index = _timer_notify_index(control)
+    if index is not None:
+        # Set BEFORE the branch, matching common/api_commands.py:665.
+        control["notify_data"][index]["req"] = True
+    if control["timer"]["paused"] == 0:
+        seconds = op["seconds"] if op["seconds"] is not None else 60
+        control["timer"]["start"] = op["at"]
+        control["timer"]["end"] = op["at"] + seconds
+    else:
+        control["timer"]["end"] = (control["timer"]["end"] - control["timer"]["paused"]) + op["at"]
+        control["timer"]["paused"] = 0
+
+
+def _op_timer_start_with_options(control, op, log):
+    if control["timer"]["paused"] != 0:
+        log.error(
+            "apply_control_delta: dropping timer.start_with_options -- the timer is paused at drain time. "
+            "The 4-argument REST form rejects a paused timer at request time, so another writer paused it "
+            "inside this control cycle. Resume or stop it first."
+        )
+        return
+    index = _timer_notify_index(control)
+    if index is not None:
+        entry = control["notify_data"][index]
+        entry["req"] = True
+        entry["shutdown"] = op["shutdown"]
+        entry["keep_warm"] = op["keep_warm"]
+    control["timer"]["start"] = op["at"]
+    control["timer"]["end"] = op["at"] + op["seconds"]
+
+
 #: op name -> applier. Every name here must also appear in _OP_FIELDS, which is
 #: what the validator checks against, so an op can never be pushed that the
 #: drain cannot apply.
 _OP_APPLIERS = {
+    "timer.clear": _op_timer_clear,
+    "timer.pause": _op_timer_pause,
+    "timer.start_or_resume": _op_timer_start_or_resume,
+    "timer.start_with_options": _op_timer_start_with_options,
     "notify.set": _op_notify_set,
     "notify.delete": _op_notify_delete,
     "notify.replace": _op_notify_replace,
