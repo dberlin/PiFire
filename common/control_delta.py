@@ -16,6 +16,7 @@ Description: The queued-control-write payload that states a writer's INTENT
 """
 
 import copy
+import logging
 from collections.abc import Mapping
 
 CONTROL_DELTA_KEY = "__control_delta__"
@@ -145,3 +146,66 @@ def _validate_op_types(ops):
             isinstance(op["seconds"], int) and not isinstance(op["seconds"], bool) and op["seconds"] > 0
         ):
             raise ControlDeltaError("timer.start_with_options 'seconds' must be an int greater than zero")
+
+
+def apply_control_delta(control, envelope, log=None):
+    """Apply a delta envelope to `control` IN PLACE and return it.
+
+    Order is `set` -> `ops` -> `delete`. `set` and `ops` have disjoint domains by
+    construction (validation forbids `timer`/`notify_data` under `set`), so their
+    relative order is not observable; `delete` runs last so a writer can assign
+    and then remove within one envelope.
+
+    An envelope whose version this build does not understand is DROPPED and
+    logged at ERROR. It is never partially applied: the half we can parse is not
+    evidence about the half we cannot. See the upgrade analysis in
+    docs/superpowers/plans/2026-07-25-control-write-deltas.md.
+    """
+    log = log or logging.getLogger("control")
+    version = envelope.get(CONTROL_DELTA_KEY)
+    if version != CONTROL_DELTA_VERSION:
+        log.error(
+            "apply_control_delta: unsupported control delta version %r (this build understands %r); "
+            "dropping the envelope from origin=%r. A newer PiFire queued this write.",
+            version,
+            CONTROL_DELTA_VERSION,
+            envelope.get("origin"),
+        )
+        return control
+
+    if "set" in envelope:
+        _deep_assign(control, copy.deepcopy(envelope["set"]))
+    for op in envelope.get("ops", ()):
+        _apply_op(control, op, log)
+    for path in envelope.get("delete", ()):
+        _delete_path(control, path)
+    return control
+
+
+def _deep_assign(target, values):
+    """deep_update without importing common.common (which imports this module's
+    siblings). Mapping values recurse; everything else assigns."""
+    for key, value in values.items():
+        if isinstance(value, Mapping) and isinstance(target.get(key), Mapping):
+            _deep_assign(target[key], value)
+        else:
+            target[key] = value
+    return target
+
+
+def _delete_path(target, path):
+    node = target
+    for key in path[:-1]:
+        node = node.get(key) if isinstance(node, Mapping) else None
+        if not isinstance(node, Mapping):
+            return
+    if isinstance(node, Mapping):
+        node.pop(path[-1], None)
+
+
+def _apply_op(control, op, log):
+    _OP_APPLIERS[op["op"]](control, op, log)
+
+
+#: op name -> applier. Populated below as each op family is defined.
+_OP_APPLIERS = {}
