@@ -1020,6 +1020,41 @@ button.pf-dash-pill {
     flex: 1 1 260px;
     width: auto;
   }
+  /* The centre column holds the gauge, the cook row and the five control
+     buttons: it is the one column that must not be squeezed. Its desktop rule
+     is `flex: 1`, i.e. flex-basis 0, which loses every negotiation against two
+     siblings asking for 260px each -- so all three fit on one line and the
+     wrap this breakpoint exists to cause never happens. Measured at 800x480:
+     probeCol 331px, rightCol 331px, centreCol 71px, a 320px gauge rendered
+     into a 69px svg, and control buttons 91px wide inside a 71px container.
+     A real flex-basis is what makes the line overflow and the columns wrap. */
+  .pf-dash-centercol {
+    flex: 1 1 380px;
+    /* Below this a gauge and a five-button row stop being usable, so the
+       column wraps onto its own line instead of shrinking further. */
+    min-width: 320px;
+  }
+  /* `grid-auto-flow: column` puts all five buttons in one row whatever the
+     width, and a grid track does not shrink content below its minimum -- so
+     the row simply overflows its column, and `.pf-dash` clips the overflow
+     with no scrollbar to recover it. Measured at 800x480: Smoke/Hold/Smoke+/
+     Shutdown/Stop wanted 510px of a 434px column, which put STOP at x
+     791..858 in an 800px viewport. Nine pixels of the emergency control were
+     on screen. Letting the row wrap is what makes every button reachable, and
+     it applies from here down rather than only on a phone because 800px is
+     where the squeeze actually bites. */
+  .pf-dash-controls {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    /* grid-auto-ROWS, not height: once the buttons wrap, the container's
+       height is the sum of its rows, and it is each ROW that has to be a
+       touch target. Setting --pf-btn-h on the container alone left the
+       buttons at their 26px content height -- which only a browser could
+       tell us, and dashboard-reflow.spec.ts did. */
+    grid-auto-rows: var(--pf-btn-h);
+    height: auto;
+    flex: none;
+  }
 }
 
 /* ---- phone ---- */
@@ -1083,20 +1118,6 @@ button.pf-dash-pill {
   .pf-dash-rightcol {
     order: 3;
     width: auto;
-    flex: none;
-  }
-  /* grid-auto-flow: column forces N equal columns in one row; five 25px
-     buttons across a phone is unreadable, so let them wrap instead. */
-  .pf-dash-controls {
-    grid-auto-flow: row;
-    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-    /* grid-auto-ROWS, not height: once the buttons wrap, the container's
-       height is the sum of its rows, and it is each ROW that has to be a
-       touch target. Setting --pf-btn-h on the container alone left the
-       buttons at their 26px content height -- which only a browser could
-       tell us, and dashboard-reflow.spec.ts did. */
-    grid-auto-rows: var(--pf-btn-h);
-    height: auto;
     flex: none;
   }
   .pf-dash-header {

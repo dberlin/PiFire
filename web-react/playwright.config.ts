@@ -48,7 +48,7 @@ export default defineConfig({
   projects: [
     {
       name: "app",
-      testIgnore: /dashboard-(fidelity|reflow)\.spec\.ts/,
+      testIgnore: /dashboard-(fidelity|reflow|panel)\.spec\.ts/,
       use: { baseURL: ports.appUrl },
     },
     {
@@ -63,6 +63,17 @@ export default defineConfig({
       name: "reflow",
       testMatch: /dashboard-reflow\.spec\.ts/,
       use: { baseURL: ports.demoUrl, viewport: { width: 390, height: 844 } },
+    },
+    // The width the grill's own screen runs at. Between the phone breakpoint
+    // (max-width: 719px) and the desktop one (min-width: 1280px) sits the
+    // tablet branch, and nothing drove it: the reflow shipped with its
+    // 800x480 layout -- the only one an actual PiFire device renders -- backed
+    // by no assertion whatsoever. 480px tall is also the shortest viewport the
+    // dashboard has to survive, which no other project exercises either.
+    {
+      name: "panel",
+      testMatch: /dashboard-panel\.spec\.ts/,
+      use: { baseURL: ports.demoUrl, viewport: { width: 800, height: 480 } },
     },
   ],
 });
