@@ -196,6 +196,23 @@ Roughly ordered by daily-use value:
 
 ## Test-harness notes
 
+- **Running several checkouts at once needs four variables.** Ports and origins
+  all come from `web-react/ports.ts`; nothing else may hardcode one. A second
+  workspace needs its own dev servers *and* its own PiFire, because the suite
+  is globally destructive to whichever backend it reaches:
+
+  ```sh
+  export PORT=5273 DEMO_PORT=5274                 # this checkout's dev servers
+  export PUBLIC_PIFIRE_URL=http://localhost:5100  # this checkout's backend
+  export PIFIRE_DB_PATH="$PWD/pifire.db"          # and its own datastore
+  uv run python control.py &
+  uv run gunicorn -k gthread --threads 25 -b 0.0.0.0:5100 -w 1 app:app &
+  ```
+
+  Sharing any one of them reintroduces the failure this replaced: two
+  workspaces both served `:5173`, and Playwright's `reuseExistingServer`
+  attached to whichever started first, so a suite silently reported results for
+  a tree nobody was looking at.
 - **Running e2e from a jj workspace needs `PIFIRE_DB_PATH`.** `common/datastore.py`
   resolves `DB_PATH` relative to its own checkout, so `history.spec.ts`'s seed
   script writes to that workspace's `pifire.db` while the backend serves the

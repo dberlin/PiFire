@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { APIRequestContext } from "@playwright/test";
 import { expect, test } from "@playwright/test";
-import { ensureStopped } from "./helpers";
+import { API, ensureStopped } from "./helpers";
 
 // Requires the prototype backend running: `uv run python control.py` + `uv run
 // python app.py`.
@@ -12,8 +12,6 @@ import { ensureStopped } from "./helpers";
 // target, so every test here restores the array it captured before it ran, in
 // an afterEach that runs even when the assertions fail. Nothing in this file
 // ever writes `shutdown: true`.
-
-const API = "http://localhost:5000";
 
 interface NotifyEntry {
   label: string;

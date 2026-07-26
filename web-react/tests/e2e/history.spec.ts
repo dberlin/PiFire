@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { API } from "./helpers";
 
 // Requires the prototype backend running (control.py + gunicorn on :5000).
 //
@@ -98,7 +99,7 @@ test.beforeAll(async ({ request }) => {
   // checkout and the rows land in a different database entirely: every test
   // below then fails on a missing chart, which reads like a broken chart rather
   // than a misdirected write. Fail here instead, with the fix.
-  const res = await request.get("http://localhost:5000/api/history/chart?minutes=40");
+  const res = await request.get(`${API}/api/history/chart?minutes=40`);
   const body = (await res.json()) as { time_labels?: unknown[] };
   expect(
     body.time_labels?.length ?? 0,
@@ -274,7 +275,7 @@ test("the cursor tooltip renders a row per visible series with real values", asy
   page,
   request,
 }) => {
-  const res = await request.get(`http://localhost:5000/api/history/chart?minutes=${WIDE_MINUTES}`);
+  const res = await request.get(`${API}/api/history/chart?minutes=${WIDE_MINUTES}`);
   expect(res.ok()).toBeTruthy();
   const body = (await res.json()) as {
     chart_data: { label: string; hidden: boolean; data: unknown[] }[];

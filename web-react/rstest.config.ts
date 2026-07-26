@@ -34,5 +34,9 @@ export default defineConfig({
   projects: [
     { ...shared, name: "unit-node", include: ["src/**/*.test.ts"], testEnvironment: "node" },
     { ...shared, name: "unit-jsdom", include: ["src/**/*.test.tsx"], testEnvironment: "jsdom" },
+    // Config modules live at the package root, not under src/, because they are
+    // read by rsbuild/playwright rather than bundled into the app. Without this
+    // project their tests match no glob and are silently never run.
+    { ...shared, name: "unit-config", include: ["*.test.ts"], testEnvironment: "node" },
   ],
 });

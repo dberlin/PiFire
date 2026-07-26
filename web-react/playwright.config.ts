@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { ports } from "./ports";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -24,7 +25,11 @@ export default defineConfig({
   webServer: [
     {
       command: "bun run dev",
-      url: "http://localhost:5173",
+      url: ports.appUrl,
+      // Safe to reuse only because the port is per-checkout (see ./ports). When
+      // it was the literal 5173, a second workspace's suite silently attached
+      // to whichever dev server started first and reported results for a tree
+      // nobody was looking at.
       reuseExistingServer: true,
       timeout: 60_000,
     },
@@ -34,8 +39,8 @@ export default defineConfig({
     // read at BUILD time, which is why the fidelity/reflow projects need their
     // own server rather than a query parameter.
     {
-      command: "PORT=5174 bun run demo",
-      url: "http://localhost:5174",
+      command: `PORT=${ports.demoPort} bun run demo`,
+      url: ports.demoUrl,
       reuseExistingServer: true,
       timeout: 60_000,
     },
@@ -44,12 +49,12 @@ export default defineConfig({
     {
       name: "app",
       testIgnore: /dashboard-(fidelity|reflow)\.spec\.ts/,
-      use: { baseURL: "http://localhost:5173" },
+      use: { baseURL: ports.appUrl },
     },
     {
       name: "fidelity",
       testMatch: /dashboard-fidelity\.spec\.ts/,
-      use: { baseURL: "http://localhost:5174", viewport: { width: 1280, height: 720 } },
+      use: { baseURL: ports.demoUrl, viewport: { width: 1280, height: 720 } },
     },
     // The other half of the reflow gate. @media queries prove nothing on their
     // own: a breakpoint that declares the wrong thing, or that no element
@@ -57,7 +62,7 @@ export default defineConfig({
     {
       name: "reflow",
       testMatch: /dashboard-reflow\.spec\.ts/,
-      use: { baseURL: "http://localhost:5174", viewport: { width: 390, height: 844 } },
+      use: { baseURL: ports.demoUrl, viewport: { width: 390, height: 844 } },
     },
   ],
 });

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ensureStopped } from "./helpers";
+import { API, ensureStopped } from "./helpers";
 
 // Requires the prototype backend running: `uv run python control.py` + `uv run python app.py`.
 test("startup then hold round-trips through the live socket", async ({ page, request }) => {
@@ -62,7 +62,7 @@ test("startup then hold round-trips through the live socket", async ({ page, req
   await expect
     .poll(
       async () => {
-        const res = await request.get("http://localhost:5000/api/get/status");
+        const res = await request.get(`${API}/api/get/status`);
         const mode = ((await res.json()) as { data?: { mode?: string } }).data?.mode ?? "";
         if (!mode || mode === "Stop") return `controller reports ${mode || "nothing"}`;
         const shown = await page.getByText(mode.toUpperCase(), { exact: true }).count();
@@ -82,7 +82,6 @@ test("manual mode exposes the output relays and toggles one end to end", async (
   page,
   request,
 }) => {
-  const api = "http://localhost:5000";
   await ensureStopped(request);
   await page.goto("/");
 
@@ -102,7 +101,7 @@ test("manual mode exposes the output relays and toggles one end to end", async (
   await expect
     .poll(
       async () => {
-        const res = await request.get(`${api}/api/get/status`);
+        const res = await request.get(`${API}/api/get/status`);
         const body = (await res.json()) as { data?: { outpins?: Record<string, boolean> } };
         return body.data?.outpins?.auger ?? null;
       },
@@ -115,7 +114,7 @@ test("manual mode exposes the output relays and toggles one end to end", async (
   await expect
     .poll(
       async () => {
-        const res = await request.get(`${api}/api/get/status`);
+        const res = await request.get(`${API}/api/get/status`);
         const body = (await res.json()) as { data?: { outpins?: Record<string, boolean> } };
         return body.data?.outpins?.auger ?? null;
       },

@@ -1,4 +1,10 @@
 import type { APIRequestContext } from "@playwright/test";
+import { ports } from "../../ports";
+
+/** Origin of the PiFire backend these specs drive. Never hardcode it: several
+ *  checkouts run their own backend at once, and a literal here would aim every
+ *  workspace's suite at one shared grill. */
+export const API = ports.pifireUrl;
 
 /**
  * Ensures the grill is in Stop mode before running tests.
@@ -6,7 +12,7 @@ import type { APIRequestContext } from "@playwright/test";
  * POSTs to /api/set/mode/stop and polls until the mode is "Stop" (up to 10s).
  */
 export async function ensureStopped(request: APIRequestContext): Promise<void> {
-  const baseUrl = "http://localhost:5000";
+  const baseUrl = API;
   const maxWaitMs = 10000;
   const pollIntervalMs = 200;
   const startTime = Date.now();

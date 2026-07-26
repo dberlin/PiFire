@@ -1,22 +1,19 @@
 import { defineConfig } from "@rsbuild/core";
 import { pluginReact } from "@rsbuild/plugin-react";
+import { ports } from "./ports";
 
-// The React app talks to a running PiFire instance. Point PUBLIC_PIFIRE_URL at
-// that host (default http://localhost:5000). In dev we proxy /socket.io and
-// /api so the browser connects same-origin without CORS. Port pinned to 5173
-// (playwright.config.ts webServer expects it).
-const target = process.env.PUBLIC_PIFIRE_URL || "http://localhost:5000";
+// The React app talks to a running PiFire instance. In dev we proxy /socket.io
+// and /api so the browser connects same-origin without CORS. Which instance,
+// and which port this server binds, come from ./ports -- see that file for how
+// to run several checkouts at once.
+const target = ports.pifireUrl;
 
 export default defineConfig({
   plugins: [pluginReact({ reactCompiler: true })],
   html: { template: "./index.html" },
   source: { entry: { index: "./src/main.tsx" } },
   server: {
-    // Playwright's fidelity/reflow projects run a SECOND dev server in demo
-    // mode on its own port -- PUBLIC_DEMO is read at build time
-    // (helpers/useLiveState.ts), so it cannot be a query parameter. The default
-    // stays 5173 because playwright.config.ts's main webServer pins it.
-    port: Number(process.env.PORT) || 5173,
+    port: ports.appPort,
     proxy: {
       "/socket.io": { target, ws: true, changeOrigin: true },
       "/api": { target, changeOrigin: true },
