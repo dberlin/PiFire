@@ -1798,7 +1798,7 @@ assertion about behaviour** — only where rules live and what they are scoped t
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests** `ProbesTab.test.tsx` (`.tsx` → jsdom). Render inside a
+- [x] **Step 1: Write the failing tests** `ProbesTab.test.tsx` (`.tsx` → jsdom). Render inside a
       memory router that supplies both the outlet context and the loader data — copy the harness
       shape from an existing tab test (`rg -n "createMemoryRouter|MemoryRouter" src/components/settings/tabs/*.test.tsx`)
       and add `loader` to the route. Assert:
@@ -1824,9 +1824,9 @@ assertion about behaviour** — only where rules live and what they are scoped t
         edits must not be thrown away on a refusal — same rule as `SaveBar.tsx:8-10`).
       - **Discard restores**: after an edit, Discard puts the live probe name back.
 
-- [ ] **Step 2: Run, confirm all fail.** `bun run test src/components/settings/tabs/ProbesTab.test.tsx`
+- [x] **Step 2: Run, confirm all fail.** `bun run test src/components/settings/tabs/ProbesTab.test.tsx`
 
-- [ ] **Step 3: Implement.** The whole component, with the load-bearing parts spelled out:
+- [x] **Step 3: Implement.** The whole component, with the load-bearing parts spelled out:
       ```tsx
       import { useState } from "react";
       import { useLoaderData, useOutletContext, useRevalidator } from "react-router";
@@ -1959,13 +1959,13 @@ assertion about behaviour** — only where rules live and what they are scoped t
       - **`readLiveProfiles(settings)` is called in the render body, not memoized.** It is
         `Object.values` over a handful of profiles; a `useMemo` here would be noise.
 
-- [ ] **Step 4: Run, confirm pass.** Then confirm nothing else moved:
+- [x] **Step 4: Run, confirm pass.** Then confirm nothing else moved:
       `bun run test src/components/wizard src/components/settings`
 
-- [ ] **Step 5: Full gate.**
+- [x] **Step 5: Full gate.**
       `bun run typecheck && bun run lint && bun run test && bun run gen:types:check`
 
-- [ ] **Step 6: Commit.** **Deliverable:** `ProbesTab.test.tsx` green, including the
+- [x] **Step 6: Commit.** **Deliverable:** `ProbesTab.test.tsx` green, including the
       dependency-guard case driven through the real `DevicesCard` add flow.
 
 ---
