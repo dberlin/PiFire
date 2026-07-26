@@ -26,6 +26,20 @@ rs.mock("../helpers/settings/settingsApi", () => ({
   buildSettingsUrl: (baseUrl: string, path: string) => `${baseUrl}/api/${path}`,
 }));
 
+// /settings/probes is the only settings child with its OWN loader, so the route
+// tree cannot be driven without stubbing the catalog fetch. Only
+// getProbeModules is replaced: readLiveProbeMap/readLiveProfiles are the pure
+// narrowing functions ProbesTab seeds from, and stubbing those would hide the
+// very wiring this test exists to check. rstest needs a sync factory, hence the
+// import attribute.
+import * as realProbeMapApi from "../helpers/probes/probeMapApi" with { rstest: "importActual" };
+
+const getProbeModulesMock = rs.fn().mockResolvedValue({ modules: {}, requires_install: {} });
+rs.mock("../helpers/probes/probeMapApi", () => ({
+  ...realProbeMapApi,
+  getProbeModules: (...args: unknown[]) => getProbeModulesMock(...args),
+}));
+
 const getWizardStateMock = rs.fn();
 rs.mock("../helpers/wizard/wizardApi", () => ({
   getWizardState: (...args: unknown[]) => getWizardStateMock(...args),
@@ -105,6 +119,21 @@ describe("App routing", () => {
     expect(screen.getByDisplayValue("Backyard Smoker")).toBeInTheDocument();
     expect(getSettingsMock).toHaveBeenCalled();
     expect(getModeMock).toHaveBeenCalled();
+  });
+
+  it("renders the Probes settings tab at /settings/probes", async () => {
+    getSettingsMock.mockResolvedValue({
+      globals: { grill_name: "Backyard Smoker", page_theme: "dark" },
+      probe_settings: { probe_profiles: {}, probe_map: { probe_devices: [], probe_info: [] } },
+    });
+    getModeMock.mockResolvedValue("Stop");
+
+    renderApp("/settings/probes");
+
+    expect(await screen.findByRole("region", { name: "Probe devices" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Probe ports" })).toBeInTheDocument();
+    // The tab's own loader ran -- it is the only settings child that has one.
+    expect(getProbeModulesMock).toHaveBeenCalled();
   });
 
   it("renders the wizard shell at /wizard", async () => {

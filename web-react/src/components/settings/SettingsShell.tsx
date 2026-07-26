@@ -14,6 +14,9 @@ const SETTINGS_TABS = [
   { path: "notifications", label: "Notifications" },
   { path: "units", label: "Units" },
   { path: "platform", label: "Platform" },
+  // Last deliberately: it is the most destructive tab in the group, and `tabs`
+  // below is a .filter() over this array, so order here is display order.
+  { path: "probes", label: "Probes" },
 ];
 
 export function SettingsShell() {

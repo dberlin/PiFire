@@ -44,6 +44,7 @@ const TAB_LABELS = [
   "Notifications",
   "Units",
   "Platform",
+  "Probes",
 ];
 
 describe("SettingsShell", () => {
@@ -73,6 +74,19 @@ describe("SettingsShell", () => {
     }
     const rendered = screen.getAllByRole("link").map((a) => a.textContent);
     expect(rendered).toEqual(TAB_LABELS.filter((l) => l !== "PWM Fan"));
+  });
+
+  // A string `name` is a FULL accessible-name match, so this cannot start
+  // silently matching "Probe Profiles" the day this sub-project's second half
+  // adds that tab. (ByRoleOptions has no `exact` member -- that belongs to the
+  // ByText queries, and typescript7 rejects it here.)
+  it("links the Probes pill at the probes child route, last in the strip", async () => {
+    renderShell();
+    await screen.findByRole("link", { name: "General" });
+
+    const probes = screen.getByRole("link", { name: "Probes" });
+    expect(probes).toHaveAttribute("href", "/settings/probes");
+    expect(screen.getAllByRole("link").at(-1)).toBe(probes);
   });
 
   it("navigates back to the dashboard when the back button is clicked", async () => {

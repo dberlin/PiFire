@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
+import { probeModulesLoader } from "../helpers/probes/probeMapRoutes";
 import { settingsLoader } from "../helpers/settings/settingsRoutes";
 import { wizardLoader } from "../helpers/wizard/wizardRoutes";
 import { AppPrefsProvider } from "./AppPrefs";
@@ -13,6 +14,7 @@ import { HistoryTab } from "./settings/tabs/HistoryTab";
 import { NotificationsTab } from "./settings/tabs/NotificationsTab";
 import { PelletsTab } from "./settings/tabs/PelletsTab";
 import { PlatformTab } from "./settings/tabs/PlatformTab";
+import { ProbesTab } from "./settings/tabs/ProbesTab";
 import { PwmTab } from "./settings/tabs/PwmTab";
 import { SafetyTab } from "./settings/tabs/SafetyTab";
 import { StartupTab } from "./settings/tabs/StartupTab";
@@ -84,6 +86,12 @@ export const routes = [
           { path: "notifications", element: <NotificationsTab /> },
           { path: "units", element: <UnitsTab /> },
           { path: "platform", element: <PlatformTab /> },
+          // The only settings child with its own loader: the probes MODULE
+          // MANIFEST (18 entries with per-field config metadata and vendor
+          // photos) is nothing settingsLoader fetches, and inlining it there
+          // would make every other tab pay for it. Running as a sibling loader
+          // also means useSaveSettings' revalidate() refreshes both.
+          { path: "probes", element: <ProbesTab />, loader: probeModulesLoader },
         ],
       },
     ],

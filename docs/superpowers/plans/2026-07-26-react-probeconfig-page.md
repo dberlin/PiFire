@@ -1984,7 +1984,7 @@ assertion about behaviour** — only where rules live and what they are scoped t
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing route test.** `App.test.tsx` already drives the exported
+- [x] **Step 1: Write the failing route test.** `App.test.tsx` already drives the exported
       `routes` array through `createMemoryRouter` (`App.tsx:34-36` explains why `routes` is
       exported). Add a case there — check the existing mocks first
       (`rg -n "rs.mock|getSettings" src/components/App.test.tsx`), because the settings loader is
@@ -2000,10 +2000,10 @@ assertion about behaviour** — only where rules live and what they are scoped t
       pointing at `probes`. **Use `exact: true`** — `"Probes"` would otherwise match
       `"Probe Profiles"` if that tab is ever added.
 
-- [ ] **Step 2: Run, confirm fail.**
+- [x] **Step 2: Run, confirm fail.**
       `bun run test src/components/App.test.tsx src/components/settings/SettingsShell.test.tsx`
 
-- [ ] **Step 3: Add the route.** In `App.tsx`, import
+- [x] **Step 3: Add the route.** In `App.tsx`, import
       `import { probeModulesLoader } from "../helpers/probes/probeMapRoutes";` and
       `import { ProbesTab } from "./settings/tabs/ProbesTab";` (keep the import block's existing
       alphabetical grouping), then add the child **after `platform`** in the `/settings` children
@@ -2022,7 +2022,7 @@ assertion about behaviour** — only where rules live and what they are scoped t
                 // active child loaders too, so a save still refreshes both halves.
       ```
 
-- [ ] **Step 4: Add the pill.** In `SettingsShell.tsx`'s `SETTINGS_TABS` (`:4-17`), after
+- [x] **Step 4: Add the pill.** In `SettingsShell.tsx`'s `SETTINGS_TABS` (`:4-17`), after
       `{ path: "platform", label: "Platform" }`:
       ```ts
         { path: "probes", label: "Probes" },
@@ -2030,16 +2030,16 @@ assertion about behaviour** — only where rules live and what they are scoped t
       Place it last deliberately: it is the most destructive tab in the group, and the `tabs`
       filter at `:28` is a `.filter()` over this array, so order here is display order.
 
-- [ ] **Step 5: Run, confirm pass**, then the whole suite: `bun run test`.
+- [x] **Step 5: Run, confirm pass**, then the whole suite: `bun run test`.
 
-- [ ] **Step 6: Drive it in a browser.** Backend up, `bun run dev` up:
+- [x] **Step 6: Drive it in a browser.** Backend up, `bun run dev` up:
       navigate to `/settings/probes`, confirm the two cards render **styled** (this is where a
       missed rule in Task 5 shows), the module photos load (not 404 — `moduleImageUrl` +
       the `/static/img` dev proxy), a Discover button returns something or a friendly error, and
       the page fits **1280×720 without page scroll**. If the backend is not reachable, say so
       rather than marking this done.
 
-- [ ] **Step 7: Full gate + commit.**
+- [x] **Step 7: Full gate + commit.**
       `bun run typecheck && bun run lint && bun run test && bun run gen:types:check && bun run build`
       **Deliverable:** `/settings/probes` is reachable by clicking, from a cold load.
 
