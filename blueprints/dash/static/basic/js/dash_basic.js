@@ -497,11 +497,15 @@ function setNotify(probe_label) {
 		var current_temp = document.getElementById(probe_label+"_temp").innerHTML;
 		pushNotifyUpdate(updates, probe_label, 'probe_limit_low', {
 			'shutdown' : $("#"+probe_label +"_low_limit_shutdown").is(':checked'),
-			// PRESERVED AS-IS: reignite has always read the _low_limit_shutdown
-			// checkbox, never the _low_limit_reignite one the modal renders
-			// (_macro_dash_basic.html:238). Not changed here -- that is a
-			// behaviour fix, not part of routing this write per-entry.
-			'reignite' : $("#"+probe_label +"_low_limit_shutdown").is(':checked'),
+			// _low_limit_reignite, NOT _low_limit_shutdown. Both of these read
+			// the shutdown box until 2026-07-26, and the two boxes are mutually
+			// exclusive (_macro_dash_basic.html:240-253), so the bug made
+			// re-ignite unreachable from this page in both directions: ticking
+			// "Attempt Re-ignite" sent reignite:false, and ticking "Shutdown
+			// PiFire" armed reignite as a side effect. The backend runs
+			// `if shutdown ... elif keep_warm ... elif reignite`
+			// (notify/notifications.py:141-167), so shutdown won either way.
+			'reignite' : $("#"+probe_label +"_low_limit_reignite").is(':checked'),
 			'target' : parseInt(target_temp),
 			'req' : true,
 			// Mark as already triggered if the target value is less than the current value
