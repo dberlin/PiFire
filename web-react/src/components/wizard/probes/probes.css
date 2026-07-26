@@ -88,7 +88,7 @@
   padding: 8px 12px;
   border-radius: 10px;
   background: color-mix(in srgb, var(--warn) 10%, transparent);
-  color: #ffce6a;
+  color: var(--warn);
   font: 500 13px "Barlow";
   line-height: 1.6;
 }
@@ -135,7 +135,7 @@
 .pf-device-form [role="alert"],
 .pf-probes-surface .pf-probes-card > [role="alert"] {
   margin: 0;
-  color: #ff8b82;
+  color: var(--danger);
   font: 600 14px "Barlow";
 }
 /* Same cross-axis stretch problem as the Finish button: "Add Probe" / "Add

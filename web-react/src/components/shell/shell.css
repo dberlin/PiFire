@@ -280,7 +280,7 @@
   height: 16px;
 }
 .pf-timer-error {
-  color: #ff8b82;
+  color: var(--danger);
   font: 600 14px "Barlow";
   margin: 10px 0 0;
 }
@@ -304,12 +304,12 @@
 .pf-banner--warning {
   background: color-mix(in srgb, var(--warn) 14%, transparent);
   border: 1px solid var(--warn);
-  color: #ffce6a;
+  color: var(--warn);
 }
 .pf-banner--error {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   border: 1px solid var(--danger);
-  color: #ff8b82;
+  color: var(--danger);
 }
 .pf-banner--critical {
   background: color-mix(in srgb, var(--danger) 24%, transparent);

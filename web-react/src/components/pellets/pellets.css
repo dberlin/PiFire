@@ -77,13 +77,13 @@
   transition: width 0.9s ease;
 }
 .pf-pellets-meter--ok > span {
-  background: #6cc070;
+  background: var(--ok);
 }
 .pf-pellets-meter--warn > span {
-  background: #e0a44a;
+  background: var(--warn);
 }
 .pf-pellets-meter--low > span {
-  background: #d05a4e;
+  background: var(--danger);
 }
 .pf-pellets-level-text {
   font: 600 14px "Barlow";
@@ -99,7 +99,7 @@
   color: var(--text-dim);
 }
 .pf-pellets-star {
-  color: #e0a44a;
+  color: var(--warn);
 }
 .pf-pellets-load-name {
   font: 700 18px "Barlow";

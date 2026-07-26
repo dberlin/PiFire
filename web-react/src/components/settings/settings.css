@@ -125,7 +125,7 @@
   flex-shrink: 0;
 }
 .pf-stringlist-row button:hover {
-  color: #ff8b82;
+  color: var(--danger);
   background: rgba(255, 139, 130, 0.12);
 }
 .pf-field-column > button {
@@ -174,7 +174,7 @@
   margin-top: 8px;
 }
 .pf-settings-saved {
-  color: #8fe09a;
+  color: var(--ok);
   font: 600 14px "Barlow";
 }
 .pf-settings-hint {
@@ -183,7 +183,7 @@
   line-height: 1.6;
 }
 .pf-settings-error-text {
-  color: #ff8b82;
+  color: var(--danger);
   font: 600 14px "Barlow";
 }
 /* Per-field helper copy: NumberField's `hint`, and ControllerTab's option
@@ -286,7 +286,7 @@
   border-radius: 8px;
 }
 .pf-rpt-remove:hover:not(:disabled) {
-  color: #ff8b82;
+  color: var(--danger);
   background: rgba(255, 139, 130, 0.12);
 }
 .pf-rpt-remove:disabled {

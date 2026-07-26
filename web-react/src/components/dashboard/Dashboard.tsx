@@ -182,7 +182,11 @@ export function Dashboard({
               style={
                 {
                   "--pf-status-color":
-                    phase === "demo" ? "var(--label)" : health.alive ? "#8fe09a" : "#ff8b82",
+                    phase === "demo"
+                      ? "var(--label)"
+                      : health.alive
+                        ? "var(--ok)"
+                        : "var(--danger)",
                 } as CSSProperties
               }
             >

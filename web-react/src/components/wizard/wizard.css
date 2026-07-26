@@ -121,7 +121,7 @@
   border-left: 3px solid var(--warn);
   border-radius: 0 10px 10px 0;
   background: color-mix(in srgb, var(--warn) 10%, transparent);
-  color: #ffce6a;
+  color: var(--warn);
   font: 600 14px "Barlow";
   line-height: 1.6;
 }
@@ -130,7 +130,7 @@
    direct child of .pf-wizard, outside the padded content box. */
 .pf-wizard-finish-error {
   margin: 0;
-  color: #ff8b82;
+  color: var(--danger);
   font: 600 14px "Barlow";
 }
 .pf-wizard > .pf-wizard-finish-error {

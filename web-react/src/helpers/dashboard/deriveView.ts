@@ -11,12 +11,13 @@ import {
 // design's internal simulator). Kept side-effect free so it's unit-testable —
 // every color / label / geometry input the widgets need comes out of here.
 
+// One constant per semantic, all of them Theme.qml tokens. The lighter
+// companions (OK2/AMBER2/DANGER2) that used to sit beside these were a
+// React-only ramp with no Qt counterpart; the 2026-07-26 ruling replaced them
+// with the tokens themselves.
 const OK = "var(--ok)";
-const OK2 = "#8fe09a";
 const AMBER = "var(--warn)";
-const AMBER2 = "#ffce6a";
 const DANGER = "var(--danger)";
-const DANGER2 = "#ff8b82";
 const IDLE = "var(--icon-idle)";
 const GRAY = "var(--dot-idle)";
 const YELLOW = "var(--cooking)";
@@ -79,8 +80,9 @@ export interface PillView {
 
 export interface HopperView {
   pct: number;
+  /** The level colour. The hopper fill's gradient derives its own lighter stop
+   *  from this in CSS, so there is no second colour to carry. */
   color: string;
-  color2: string;
   label: string;
   labelColor: string;
 }
@@ -151,9 +153,8 @@ function hopperView(level: number): HopperView {
   return {
     pct,
     color: low ? DANGER : mid ? AMBER : OK,
-    color2: low ? DANGER2 : mid ? AMBER2 : OK2,
     label: low ? "REFILL PELLETS" : mid ? "RUNNING LOW" : "LEVEL OK",
-    labelColor: low ? DANGER2 : mid ? AMBER2 : DIM,
+    labelColor: low ? DANGER : mid ? AMBER : DIM,
   };
 }
 
@@ -179,10 +180,10 @@ export function deriveView(dash: LiveState): DashView {
     ? {
         label: "SMOKE+",
         value: "ON",
-        valColor: OK2,
+        valColor: OK,
         bg: "color-mix(in srgb, var(--ok) 14%, transparent)",
         border: OK,
-        labelColor: OK2,
+        labelColor: OK,
       }
     : { label: "SMOKE+", value: "OFF", valColor: DIM, bg: SURFACE, border: EDGE, labelColor: DIM };
 

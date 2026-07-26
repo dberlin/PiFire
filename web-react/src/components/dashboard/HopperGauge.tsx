@@ -26,7 +26,6 @@ export function HopperGauge({ h }: { h: HopperView }) {
   const vars = {
     "--pf-hopper-pct": `${h.pct}%`,
     "--pf-hopper-color": h.color,
-    "--pf-hopper-color2": h.color2,
     "--pf-hopper-label-color": h.labelColor,
   } as CSSProperties;
 

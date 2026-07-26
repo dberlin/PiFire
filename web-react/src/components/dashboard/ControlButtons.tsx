@@ -133,7 +133,7 @@ export function ControlButtons({
           : accent
             ? "color-mix(in srgb, var(--accent) 16%, transparent)"
             : "var(--inset)";
-        const color = danger ? "#ff8b82" : "#e8dfd1";
+        const color = danger ? "var(--danger)" : "#e8dfd1";
         // `disabled` means "the control process is unreachable" -- which is
         // exactly when a user most needs to stop the grill, and a state this
         // flag can be stuck in on a HEALTHY system (see

@@ -273,7 +273,7 @@
 .pf-modal-btn.danger {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   border-color: var(--danger);
-  color: #ff8b82;
+  color: var(--danger);
 }
 .pf-modal-btn:disabled {
   opacity: 0.55;
@@ -380,7 +380,7 @@
 }
 .pf-notify-alert {
   font: 600 14px "Barlow";
-  color: #ff8b82;
+  color: var(--danger);
   text-align: center;
   max-width: 34ch;
 }
@@ -423,15 +423,15 @@
   line-height: 1;
 }
 .pf-badge-ok {
-  color: #8fe09a;
+  color: var(--ok);
   border-color: color-mix(in srgb, var(--ok) 45%, transparent);
 }
 .pf-badge-warn {
-  color: #ffce6a;
+  color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }
 .pf-badge-danger {
-  color: #ff8b82;
+  color: var(--danger);
   border-color: var(--danger);
 }
 .pf-badge-off,
@@ -643,7 +643,7 @@
 .pf-dash-modeleft {
   font: 600 12px "Barlow";
   letter-spacing: 1px;
-  color: #8fe09a;
+  color: var(--ok);
   white-space: nowrap;
 }
 .pf-dash-cookval {
@@ -675,7 +675,7 @@
   justify-content: center;
   flex-direction: column;
   gap: 1px;
-  color: #ff8b82;
+  color: var(--danger);
   animation: pf-blink 1s ease-in-out infinite;
 }
 .pf-dash-lid-title {
@@ -968,7 +968,15 @@ button.pf-dash-pill {
   transition: height 0.9s ease;
 }
 .pf-dash-hopper-fill {
-  background: linear-gradient(180deg, var(--pf-hopper-color2), var(--pf-hopper-color));
+  /* The light stop is derived here rather than passed in as a second colour:
+     the ruling of 2026-07-26 made Theme.qml the only source for these hues, so
+     the level colour arrives as one token and the gradient lightens it in
+     place. --pf-hopper-color2 (the old hand-picked light ramp) is gone. */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pf-hopper-color) 74%, #fff),
+    var(--pf-hopper-color)
+  );
 }
 .pf-dash-hopper-tex {
   background-image: radial-gradient(
