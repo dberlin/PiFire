@@ -70,14 +70,19 @@ test("the app and demo servers never collide by default", () => {
   expect(p.appPort).not.toBe(p.demoPort);
 });
 
-test("a unit test run never sees the shell's PUBLIC_PIFIRE_URL", () => {
-  // The seam this pins: `ports.ts` reads process.env, but the twelve app
-  // modules that pick a backend origin read `import.meta.env.PUBLIC_PIFIRE_URL`,
-  // which Rsbuild INLINES from the ambient shell at build time. Every parallel
-  // workspace is told to export that variable to reach its own backend, so
-  // without the `source.define` in rstest.config.ts the suite asserted against
-  // whichever port the developer's shell happened to name -- useLiveState's
-  // fallback test failed with `http://localhost:5300` in exactly the setup the
-  // docs prescribe. Tests must always exercise the unset case.
+test("a unit test run never sees the shell's PUBLIC_* backend origins", () => {
+  // The seam this pins: `ports.ts` reads process.env, but the app modules that
+  // pick a backend origin read `import.meta.env.PUBLIC_PIFIRE_URL`, which
+  // rsbuild INLINES from the ambient shell at build time -- and useLiveState
+  // falls back through PUBLIC_PIFIRE_TARGET as well. With either exported,
+  // useLiveState.test.tsx stops exercising the in-code fallback and asserts
+  // against the developer's shell instead. Measured before rstest.config.ts
+  // defined them away: "expected http://localhost:5000, received
+  // http://localhost:5300".
+  //
+  // PIFIRE_BACKEND_URL, which is what a workspace sets today, is intentionally
+  // not a PUBLIC_ name and so never reaches the bundle. These two still do,
+  // and both remain supported for pointing one checkout at a real grill.
   expect(import.meta.env.PUBLIC_PIFIRE_URL).toBe("");
+  expect(import.meta.env.PUBLIC_PIFIRE_TARGET).toBe("");
 });

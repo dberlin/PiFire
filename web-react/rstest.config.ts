@@ -9,21 +9,33 @@ import { defineConfig } from "@rstest/core";
 // esbuild's automatic JSX runtime out of the box via Vite). Without the React
 // plugin, .tsx test files fail at runtime with "React is not defined" because
 // nothing configures the automatic JSX transform for rstest's Rspack build.
-// Rsbuild inlines every PUBLIC_* variable from the ambient shell at build time,
-// and a dozen modules read `import.meta.env.PUBLIC_PIFIRE_URL` to choose the
-// backend origin (useLiveState.ts, DashboardRoute.tsx, historyApi.ts,
-// settingsRoutes.ts, wizardRoutes.ts, useSaveSettings.ts, UnitsTab.tsx). That is
-// right for a dev server and wrong for a test run: a checkout that exports
-// PUBLIC_PIFIRE_URL to reach its own backend -- which ./ports.ts tells every
-// parallel workspace to do -- made useLiveState.test.tsx assert against that
-// shell's port and the suite went red. A unit test must not depend on which
-// backend the developer happens to be running, so tests always see the unset
-// case and exercise the in-code fallback.
+// Rsbuild inlines every PUBLIC_* variable from the ambient shell at build time.
+// Eight modules read `import.meta.env.PUBLIC_PIFIRE_URL` as their fetch base
+// (useLiveState.ts, DashboardRoute.tsx, historyApi.ts, settingsRoutes.ts,
+// wizardRoutes.ts, useSaveSettings.ts, UnitsTab.tsx, HistoryPage.tsx), and
+// useLiveState.ts:72 falls back through PUBLIC_PIFIRE_TARGET for the origin it
+// DISPLAYS. Inlining is right for a dev server and wrong for a test run: with
+// either variable exported, useLiveState.test.tsx stops testing the in-code
+// fallback and asserts against whatever origin the developer's shell names.
+// Measured: `PUBLIC_PIFIRE_URL=http://localhost:5300 bun run test` failed with
+// "expected http://localhost:5000, received http://localhost:5300".
+//
+// Workspaces now point the proxy with PIFIRE_BACKEND_URL, which is deliberately
+// not a PUBLIC_ name and never reaches the bundle -- so that particular setup no
+// longer trips this. Both PUBLIC_ names remain supported for aiming a single
+// checkout at a real grill, though, and a developer using one should not get a
+// red suite for it. A unit test must not depend on which backend happens to be
+// running, so tests always see the unset case.
 const shared = {
   setupFiles: ["./src/test-setup.ts"],
   exclude: ["**/node_modules/**", "tests/e2e/**"],
   plugins: [pluginReact()],
-  source: { define: { "import.meta.env.PUBLIC_PIFIRE_URL": JSON.stringify("") } },
+  source: {
+    define: {
+      "import.meta.env.PUBLIC_PIFIRE_URL": JSON.stringify(""),
+      "import.meta.env.PUBLIC_PIFIRE_TARGET": JSON.stringify(""),
+    },
+  },
 };
 
 export default defineConfig({
