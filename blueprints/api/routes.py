@@ -14,7 +14,14 @@ from common.datastore_accessors import (
 from common.api_commands import process_command
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update, api_response
 from common.pellets_actions import PELLETS_DISPATCH
-from blueprints.api.probe_map_actions import module_requires_install
+from blueprints.api.probe_map_actions import (
+    apply_probe_map,
+    module_requires_install,
+    unsupported_new_modules,
+    valid_probe_map,
+)
+from common.i2c_bus import I2CBusConfigError, configured_bus_kinds, validate_bus_kinds
+from common.modes import Mode
 from common.server_status import get_server_status
 from common.settings_schema import SettingsValidationError, validate_partial_settings
 from common.controller_deps import guard_controller_selection
@@ -379,11 +386,59 @@ def _api_post_pellets(settings, request_json):
     return jsonify(handler(pelletdb, request_json.get("data") or {})), 200
 
 
+def _api_post_probe_map(settings, request_json):
+    """Apply a whole probe map to LIVE settings.
+
+    Whole-map, not intent-based, and that is deliberate (unlike
+    _api_post_pellets above): a probe map is one interdependent graph --
+    probe_info[].device references probe_devices[].device, virtual devices'
+    config.probes_list references probe_info[].label, and the reposition
+    invariant depends on probe_info ORDER. No per-item intent vocabulary
+    expresses "this entry sorts after that one" without re-sending the order.
+
+    Four guards, in the order a rejection is cheapest:
+      1. shape          -> 400, nothing read
+      2. control mode   -> 409, mirrors /api/wizard/finish (api_wizard:406)
+      3. new modules    -> 422, the installer is the only thing that can
+                           install dependencies and it does not run here
+      4. bus kinds      -> 422, FULL cross-subsystem (settings passed, not
+                           None) because this is live config, not a draft
+    Only after all four does anything get written.
+    """
+    probe_map = request_json.get("probe_map")
+    if not valid_probe_map(probe_map):
+        return jsonify({"result": "error", "message": "bad_probe_map"}), 400
+
+    control = read_control()
+    if control.get("mode") != Mode.STOP:
+        return jsonify({"result": "error", "message": "system_active"}), 409
+
+    manifest_modules = read_wizard().get("modules", {}).get("probes", {})
+    live_map = settings["probe_settings"]["probe_map"]
+    offenders = unsupported_new_modules(probe_map, live_map, manifest_modules)
+    if offenders:
+        return jsonify({"result": "error", "message": "modules_require_install", "modules": offenders}), 422
+
+    try:
+        validate_bus_kinds(configured_bus_kinds(settings, probe_map))
+    except I2CBusConfigError as exc:
+        return jsonify({"result": "error", "message": "bus_conflict", "detail": str(exc)}), 422
+
+    settings = apply_probe_map(settings, probe_map)
+    # settings_update makes the loop re-read settings; probe_map_update is what
+    # makes it REBUILD its probe devices (controller.py, Task 3).
+    # probe_profile_update is NOT enough on its own -- it only refills
+    # per-port profiles on already-constructed devices (probes/base.py:393).
+    save_settings_and_flag_update(settings, control, "settings_update", "probe_map_update", origin="api")
+    return jsonify({"result": "success", "message": "Probe map applied.", "data": {"probe_map": probe_map}}), 200
+
+
 _API_POST_ACTIONS = {
     "settings": _api_post_settings,
     "settings_update": _api_post_settings_update,
     "control": _api_post_control,
     "pellets": _api_post_pellets,
+    "probe_map": _api_post_probe_map,
     "wled_push_profiles": _api_post_wled_push_profiles,
     "wled_test_profile": _api_post_wled_test_profile,
 }

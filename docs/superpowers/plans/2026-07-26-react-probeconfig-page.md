@@ -687,7 +687,7 @@ Modify `blueprints/api/routes.py`
 
 **Steps:**
 
-- [ ] **Step 1: Neutralization sweep.** This route sets a control flag and writes settings. It
+- [x] **Step 1: Neutralization sweep.** This route sets a control flag and writes settings. It
       must **not** shell out. Prove it:
       ```sh
       rg -n "os\.system|subprocess|sudo|reboot|shutdown|restart_scripts" \
@@ -700,9 +700,19 @@ Modify `blueprints/api/routes.py`
       (`common/i2c_bus.py:223-239`) only reads dict keys. Confirm that by reading it before
       proceeding, do not assume.
 
-- [ ] **Step 2: Write the failing tests.** Append to `tests/web/test_api_probe_map.py`:
+- [x] **Step 2: Write the failing tests.** Append to `tests/web/test_api_probe_map.py`:
       ```python
-      from common.datastore_accessors import read_control, read_settings, write_settings_store
+      # CORRECTED 2026-07-26 against live code: there is NO `write_control_store`
+      # in common/datastore_accessors.py -- this plan's first draft invented it.
+      # Control is written with write_control(control, WriteKind.OVERWRITE).
+      from common.common import WriteKind
+      from common.datastore_accessors import (
+          execute_control_writes,
+          read_control,
+          read_settings,
+          write_control,
+          write_settings_store,
+      )
       from common.modes import Mode
 
       PROFILE_ID = "TWPS00"
@@ -740,12 +750,14 @@ Modify `blueprints/api/routes.py`
           }
 
 
-      def _stop_mode():
-          from common.datastore_accessors import write_control_store
-
+      def _set_mode(mode):
           control = read_control()
-          control["mode"] = Mode.STOP
-          write_control_store(control)
+          control["mode"] = mode
+          write_control(control, WriteKind.OVERWRITE, origin="test")
+
+
+      def _stop_mode():
+          _set_mode(Mode.STOP)
 
 
       def test_apply_writes_live_settings_and_flags_the_controller(ds, client):
@@ -759,7 +771,12 @@ Modify `blueprints/api/routes.py`
           stored = read_settings()["probe_settings"]["probe_map"]
           assert [d["device"] for d in stored["probe_devices"]] == ["VirtDev"]
           assert [p["label"] for p in stored["probe_info"]] == ["Grill"]
-          # The flag the controller acts on (Task 3).
+          # The flag the controller acts on (Task 3). CORRECTED 2026-07-26:
+          # save_settings_and_flag_update QUEUES a named-flag DELTA
+          # (common/app.py:419) instead of overwriting control:general, so the
+          # queue must be drained before read_control() can see it. In production
+          # that drain is the control loop's own execute_control_writes().
+          execute_control_writes()
           assert read_control()["probe_map_update"] is True
 
 
@@ -775,11 +792,7 @@ Modify `blueprints/api/routes.py`
 
 
       def test_apply_refuses_while_the_grill_is_running(ds, client):
-          from common.datastore_accessors import write_control_store
-
-          control = read_control()
-          control["mode"] = Mode.SMOKE
-          write_control_store(control)
+          _set_mode(Mode.SMOKE)
           before = read_settings()["probe_settings"]["probe_map"]
 
           resp = client.post("/api/probe_map", json={"probe_map": _map()})
@@ -858,24 +871,34 @@ Modify `blueprints/api/routes.py`
 
       def test_apply_rejects_a_malformed_map(ds, client):
           _stop_mode()
-          for bad in ({}, {"probe_map": None}, {"probe_map": {"probe_devices": {}}},
+          # CORRECTED 2026-07-26: `{}` is NOT in this loop. api_page's POST branch
+          # does `if not request.json: abort(400)` before any handler runs, so an
+          # empty JSON object gets a bare Werkzeug 400 with an HTML body -- there
+          # is no "message" key to assert. Pinned separately below.
+          for bad in ({"probe_map": None}, {"probe_map": {"probe_devices": {}}},
                       {"probe_map": {"probe_devices": [], "probe_info": "nope"}}):
               resp = client.post("/api/probe_map", json=bad)
               assert resp.status_code == 400, bad
               assert resp.get_json()["message"] == "bad_probe_map"
+
+
+      def test_apply_rejects_an_empty_body_before_any_handler(ds, client):
+          resp = client.post("/api/probe_map", json={})
+          assert resp.status_code == 400
+          assert resp.get_json() is None
       ```
       **Before running:** confirm the two write helpers exist and are named as used —
       `rg -n "def write_control_store|def write_settings_store" common/datastore_accessors.py`.
       If either differs, use the real name; do not invent one.
 
-- [ ] **Step 3: Run, confirm they fail** with 404
+- [x] **Step 3: Run, confirm they fail** with 404
       (`{"Error": "Received POST request no valid action."}`, `api/routes.py:404`):
       ```sh
       QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
         tests/web/test_api_probe_map.py -q
       ```
 
-- [ ] **Step 4: Implement the two pure helpers** in `blueprints/api/probe_map_actions.py`:
+- [x] **Step 4: Implement the two pure helpers** in `blueprints/api/probe_map_actions.py`:
       ```python
       from common.defaults import default_probe_config
 
@@ -930,7 +953,7 @@ Modify `blueprints/api/routes.py`
           return settings
       ```
 
-- [ ] **Step 5: Add the route.** In `blueprints/api/routes.py`, extend the Task 1 import to
+- [x] **Step 5: Add the route.** In `blueprints/api/routes.py`, extend the Task 1 import to
       `from blueprints.api.probe_map_actions import apply_probe_map, module_requires_install, unsupported_new_modules, valid_probe_map`,
       add `from common.modes import Mode` and
       `from common.i2c_bus import I2CBusConfigError, configured_bus_kinds, validate_bus_kinds`.
@@ -991,7 +1014,7 @@ Modify `blueprints/api/routes.py`
           "probe_map": _api_post_probe_map,
       ```
 
-- [ ] **Step 6: Run, confirm pass.** All 7 new tests plus Task 1's 2:
+- [x] **Step 6: Run, confirm pass.** All 7 new tests plus Task 1's 2:
       ```sh
       QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
         tests/web/test_api_probe_map.py -q
@@ -1002,7 +1025,7 @@ Modify `blueprints/api/routes.py`
       QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/ -q
       ```
 
-- [ ] **Step 7: Format and commit.**
+- [x] **Step 7: Format and commit.**
       ```sh
       .venv/bin/ruff format blueprints/api/probe_map_actions.py blueprints/api/routes.py \
         tests/web/test_api_probe_map.py
