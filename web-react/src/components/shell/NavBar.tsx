@@ -2,15 +2,22 @@ import { useState } from "react";
 import { NavLink } from "react-router";
 import "./shell.css";
 
-// Ported from templates/base.html:63-82. All six destinations are shown so the
-// new UI advertises the same surface as the Flask app, but only the three that
-// have been ported are navigable. The other three render as disabled spans
-// rather than links to the Flask pages -- linking out of the SPA would drop the
-// live socket and strand the user in the old UI.
+// Ported from templates/base.html:63-82. All six Flask destinations are shown
+// so the new UI advertises the same surface as the Flask app, but only the
+// ported ones are navigable. The rest render as disabled spans rather than
+// links to the Flask pages -- linking out of the SPA would drop the live socket
+// and strand the user in the old UI.
+//
+// "Pellets" is the one entry with NO counterpart in base.html: Flask reaches
+// the pellet manager from the dashboard hopper card's "Manager" button
+// (_macro_dash_default.html:360), not from the navbar. React's HopperGauge has
+// no footer yet, so the entry point is the chrome instead. A hopper-card
+// shortcut belongs to the dashboard-reflow plan, not here.
 const NAV_ITEMS = [
   { label: "Dashboard", to: "/", end: true },
   { label: "Recipes", to: null, end: false },
   { label: "History", to: "/history", end: false },
+  { label: "Pellets", to: "/pellets", end: false },
   { label: "Events", to: null, end: false },
   { label: "Settings", to: "/settings", end: false },
   { label: "Admin", to: null, end: false },

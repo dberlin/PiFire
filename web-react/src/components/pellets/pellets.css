@@ -1,0 +1,124 @@
+/* Pellet inventory manager. .pf-shell-main is flex:1/min-height:0/overflow:auto
+   (shell.css), so height:100% here measures exactly the area under the chrome
+   and every list scrolls inside its own pane -- the page never does.
+   Target viewport 1280x720. */
+.pf-pellets {
+  height: 100%;
+  box-sizing: border-box;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 300px 260px 1fr 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  overflow: hidden;
+  color: var(--text);
+}
+.pf-pellets-empty {
+  display: block;
+  overflow: auto;
+}
+/* Row 2 holds two panes, each spanning half the four columns. */
+.pf-pellets-wide {
+  grid-column: span 2;
+}
+/* The page's single error slot spans the whole grid above row 1. */
+.pf-pellets-error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+/* .pf-modal-scrim is position:absolute (dashboard.css); without a positioned
+   ancestor a ConfirmAction resolves against the initial containing block and
+   floats free of the card it belongs to. Same trap .pf-probes-card documents
+   in settings.css. */
+.pf-pellets-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 16px;
+  border-radius: 18px;
+  background: #2c231a;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+}
+.pf-pellets-card-title {
+  font: 600 13px "Barlow";
+  letter-spacing: 2.5px;
+  color: #7d7264;
+  text-transform: uppercase;
+}
+.pf-pellets-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.pf-pellets-meter {
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+.pf-pellets-meter > span {
+  display: block;
+  height: 100%;
+  transition: width 0.9s ease;
+}
+.pf-pellets-meter--ok > span {
+  background: #6cc070;
+}
+.pf-pellets-meter--warn > span {
+  background: #e0a44a;
+}
+.pf-pellets-meter--low > span {
+  background: #d05a4e;
+}
+.pf-pellets-level-text {
+  font: 600 14px "Barlow";
+  color: var(--text-dim);
+}
+.pf-pellets-usage {
+  font: 800 34px "Barlow Semi Condensed";
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.pf-pellets-usage-alt {
+  font: 500 13px "Barlow";
+  color: var(--text-dim);
+}
+.pf-pellets-star {
+  color: #e0a44a;
+}
+.pf-pellets-load-name {
+  font: 700 18px "Barlow";
+}
+.pf-pellets-load-date,
+.pf-pellets-load-comments {
+  font: 400 13px "Barlow";
+  color: var(--text-dim);
+  margin: 0;
+}
+.pf-pellets-actions,
+.pf-pellets-profile-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pf-pellets-profile {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pf-pellets-profile-head {
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  color: var(--text);
+  font: 600 15px "Barlow";
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.pf-pellets-profile-form {
+  display: grid;
+  gap: 8px;
+  padding: 8px 0;
+}

@@ -4,6 +4,7 @@ import { wizardLoader } from "../helpers/wizard/wizardRoutes";
 import { AppPrefsProvider } from "./AppPrefs";
 import { DashboardRoute } from "./DashboardRoute";
 import { HistoryPage } from "./history/HistoryPage";
+import { PelletsPage } from "./pellets/PelletsPage";
 import { SettingsError } from "./settings/SettingsError";
 import { SettingsShell } from "./settings/SettingsShell";
 import { ControllerTab } from "./settings/tabs/ControllerTab";
@@ -57,6 +58,10 @@ export const routes = [
       // The cook-history chart page. NOT to be confused with the
       // /settings/history child route below, which is the History *settings* tab.
       { path: "/history", element: <HistoryPage /> },
+      // The pellet INVENTORY manager (brands, woods, profiles, current load,
+      // log). NOT to be confused with /settings/pellets below, which is the
+      // pellet-LEVEL settings tab (thresholds, auger rate, prime ignition).
+      { path: "/pellets", element: <PelletsPage /> },
       {
         path: "/settings",
         element: <SettingsShell />,

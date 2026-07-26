@@ -40,10 +40,13 @@ describe("NavBar", () => {
     }
   });
 
-  it("renders the three ported destinations as real links", () => {
+  it("renders the ported destinations as real links", () => {
     renderNav();
     expect(screen.getByRole("link", { name: "Dashboard" }).getAttribute("href")).toBe("/");
     expect(screen.getByRole("link", { name: "History" }).getAttribute("href")).toBe("/history");
+    // Pellets has no base.html counterpart -- Flask reaches the pellet manager
+    // from the dashboard hopper card, so this entry exists only in the new UI.
+    expect(screen.getByRole("link", { name: "Pellets" }).getAttribute("href")).toBe("/pellets");
     expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe("/settings");
   });
 
