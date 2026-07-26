@@ -1,63 +1,11 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
+import { allStylesheets, classesUsedIn, declaredClasses } from "../../helpers/cssCoverage";
 
 const WIZARD_DIR = join("src", "components", "wizard");
 const WIZARD_CSS = join(WIZARD_DIR, "wizard.css");
 const PROBES_CSS = join(WIZARD_DIR, "probes", "probes.css");
-
-function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) walk(full, out);
-    else out.push(full);
-  }
-  return out;
-}
-
-// Every pf-* token in ANY string literal, not just in a className={...}
-// attribute. InstallProgress builds its bar class in a plain `const`, so an
-// attribute-only scan would miss pf-install-progress-bar and
-// pf-install-progress-bar-reduced-motion -- two of the classes this file exists
-// to protect. The "finds what it is checking" test below pins that.
-function classesUsed(): Set<string> {
-  const found = new Set<string>();
-  for (const file of walk(WIZARD_DIR)) {
-    if (!file.endsWith(".tsx") || file.endsWith(".test.tsx")) continue;
-    const src = readFileSync(file, "utf8");
-    for (const [, dq, tpl, sq] of src.matchAll(/"([^"\n]*)"|`([^`\n]*)`|'([^'\n]*)'/g)) {
-      for (const hit of (dq ?? tpl ?? sq ?? "").matchAll(/\bpf-[a-z0-9]+(?:-[a-z0-9]+)*/g)) {
-        found.add(hit[0]);
-      }
-    }
-  }
-  return found;
-}
-
-// Comments are prose, not selectors. Stripping them is load-bearing: the
-// `selector` capture below is "everything since the previous brace", which
-// includes any comment sitting above a rule -- and this stylesheet's comments
-// routinely name the very class they introduce. Without this, a class was
-// counted as declared because a COMMENT mentioned it, so deleting its rule left
-// the guard green. Found by mutation: removing both `.pf-module-notes` blocks
-// did not turn this file red until comments were stripped.
-function stripComments(css: string): string {
-  return css.replace(/\/\*[\s\S]*?\*\//g, "");
-}
-
-// A class "has a rule" only when a selector mentioning it is followed by a
-// declaration block that declares at least one property. `.foo {}` does not
-// count -- an empty rule is the original defect wearing a hat. The regex matches
-// innermost blocks first, so rules nested inside @media are captured (the outer
-// @media prelude never matches: its body contains braces).
-function declaredClasses(css: string): Set<string> {
-  const out = new Set<string>();
-  for (const [, selector, body] of stripComments(css).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    if (!body.includes(":")) continue;
-    for (const hit of selector.matchAll(/\.(pf-[a-z0-9]+(?:-[a-z0-9]+)*)/g)) out.add(hit[1]);
-  }
-  return out;
-}
 
 // The wizard's own vocabulary. Anything matching this must live in wizard.css,
 // so a rule cannot be satisfied by accident from another surface's stylesheet --
@@ -66,12 +14,8 @@ const WIZARD_OWNED =
   /^pf-(wizard|module|install|discovery|port-form|device-form|form-actions|probes-table|btn-primary)/;
 
 describe("wizard stylesheet coverage", () => {
-  const used = classesUsed();
-  const allCss = walk("src")
-    .filter((f) => f.endsWith(".css"))
-    .map((f) => readFileSync(f, "utf8"))
-    .join("\n");
-  const anywhere = declaredClasses(allCss);
+  const used = classesUsedIn(WIZARD_DIR);
+  const anywhere = declaredClasses(allStylesheets());
   // The probe-editing vocabulary lives in probes/probes.css so it can travel to
   // /settings/probes, which does not render inside .pf-wizard and does not
   // import wizard.css. Both files are wizard-owned; neither may push a rule out

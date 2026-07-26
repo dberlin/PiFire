@@ -67,7 +67,9 @@ cd /home/dannyb/sources/PiFire/web-react && find src -name '*.css' | sort | xarg
     Consequences for this plan: **`theme.css` is bigger than the 31 lines Task 8 assumes** (re-measure before editing it), **`themeTokens.test.ts` already exists** so Task 8 EXTENDS it rather than creating it, and **Task 4's baseline must be captured from a tree that already contains these three commits** — capturing before them pins colours the human has already ruled wrong. The values quoted throughout Task 8 have been updated in place; re-read them, do not trust memory of this file.
 7. **"~257 class sites" is low.** Live: **650** `pf-*` token occurrences across `.tsx` files, and **238 distinct** `pf-*` classes declared across the seven stylesheets. This does not change the approach (JSX is untouched either way) but it does change how badly a full utility rewrite would have gone.
 8. **"A test asserts that every `pf-*` class used in JSX is declared in CSS" overstates what exists.** That guard lives only in `src/components/wizard/wizardStyles.test.ts` and only walks `src/components/wizard/`. There is **no repo-wide guard**. Task 6 builds one.
-9. **The guard as written cannot survive `@apply` — measured.** `declaredClasses()` counts a rule only when its body `.includes(":")`. An `@apply`-only body (`.pf-card { @apply bg-card rounded-card; }`) contains no colon, so **every rule converted in Tasks 9–14 would silently stop counting as declared** and the guard would go green while proving nothing. Task 6 fixes this before the first conversion, with a mutation test.
+9. **The guard as written cannot survive `@apply` — measured.** `declaredClasses()` counts a rule only when its body `.includes(":")`. An `@apply`-only body (`.pf-card { @apply bg-card rounded-card; }`) contains no colon, so **every rule converted in Tasks 9–14 would silently stop counting as declared**. Task 6 fixes this before the first conversion, with a mutation test.
+
+    **Re-measured while implementing Task 6, because "the guard would go green" is not quite the mechanism.** Rewriting every real rule body into `@apply` form drops **231 of the 238** declared classes, and the guard's assertion is `used − declared === []`, so what it actually does is go *red* — but only eventually. A class stays in `declared` for as long as any single unconverted rule still names it in a compound selector: `.pf-history-chart { @apply relative w-full; }` was measured to keep passing purely on the strength of `.pf-history-chart .u-legend { color: … }` further down the same file. So the failure arrives partially, file by file, in the middle of a six-commit conversion, attached to no obvious cause — which is how a gate stops being believed and gets "simplified". Either way the fix and the mutation test are the same; only the story about what goes wrong changes.
 10. **"Confirm early that Biome's CSS parser accepts `@theme`, `@apply`" — it does not, by default.** Measured on Biome 2.5.5:
 
     ```
@@ -1613,7 +1615,7 @@ for (const [, selector, body] of stripComments(css).matchAll(/([^{}]+)\{([^{}]*)
 
 While extracting it, the guard also stops being wizard-only. Live, no other surface has one: dashboard, shell, settings, history and pellets classes could all be deleted from CSS without a single test noticing.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `web-react/src/helpers/cssCoverage.test.ts`:
 
@@ -1695,7 +1697,7 @@ describe("classesUsedIn", () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
@@ -1704,7 +1706,7 @@ bun run test 2>&1 | grep -A3 'cssCoverage'
 
 Expected: the file fails to resolve `./cssCoverage` — `Cannot find module`. This is `*.test.ts`, so it runs in the `unit-node` rstest project and `node:fs` is available.
 
-- [ ] **Step 3: Write the engine**
+- [x] **Step 3: Write the engine**
 
 Create `web-react/src/helpers/cssCoverage.ts`:
 
@@ -1799,16 +1801,16 @@ export function allStylesheets(root = "src"): string {
 }
 ```
 
-- [ ] **Step 4: Run the tests and watch them pass**
+- [x] **Step 4: Run the tests and watch them pass**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
 bun run test 2>&1 | grep -E 'cssCoverage|"tests"|failedTests'
 ```
 
-Expected: all 11 new tests pass; the totals rise from `1010` to `1021`.
+Expected: all 11 new tests pass. **Measured: 1038 -> 1049.** (The plan's 1010/1021 predate the palette-reconciliation commits.)
 
-- [ ] **Step 5: Prove the fix was needed — a mutation check**
+- [x] **Step 5: Prove the fix was needed — a mutation check**
 
 Temporarily revert the `@apply` clause and confirm the suite goes red, so nobody later "simplifies" it back:
 
@@ -1821,7 +1823,15 @@ git checkout src/helpers/cssCoverage.ts
 
 Expected: `"failedTests": 3` (the three `@apply` cases), then the file is restored. Confirm with `git status --short src/` printing nothing.
 
-- [ ] **Step 6: Add the repo-wide coverage guard**
+**Measured: `"failedTests": 4`, not 3** — `counts a rule whose whole body is @apply`, `does not count a class named only inside an @apply argument list`, `reaches rules nested inside @media` and `ignores an @reference line`. The one the plan counts that does NOT fail is `counts a rule mixing @apply with raw declarations`: its `background: color-mix(...)` supplies a colon, so the old predicate still accepts it. Worth knowing — a stylesheet only half-converted stays green, which is what makes the defect creep in file by file.
+
+**`git checkout` will not restore the file** — it is new and untracked at this point, so git has nothing to restore it *from* and the command errors while leaving the mutation in place. Copy it to `/tmp` first and copy it back, then confirm with `jj --no-pager st`.
+
+**A far more decisive mutation is available, and it is now a committed test** (`still sees every class when every rule body becomes @apply` in `styleCoverage.test.ts`). It takes the REAL concatenated stylesheets, mechanically rewrites every innermost rule body that contains a colon into `{ @apply flex; }` — exactly what Tasks 9-14 do — and asserts no class stops counting as declared. Measured against the old colon-only predicate: **231 of the 238 declared classes vanish.** Against the fixed predicate: zero. This is the assertion to keep; the two-line fixtures above only characterise the engine.
+
+One nuance the Corrections section states too simply. A single rule converted in isolation does NOT turn the guard red, because a class stays in `declared` for as long as any *other*, still-unconverted rule names it in a compound selector — `.pf-history-chart { @apply relative w-full; }` was measured to keep passing purely on the strength of `.pf-history-chart .u-legend { color: ... }` further down the file. The failure therefore arrives late, partially, and file by file, which is exactly how a gate stops being believed.
+
+- [x] **Step 6: Add the repo-wide coverage guard**
 
 Create `web-react/src/styleCoverage.test.ts`:
 
@@ -1890,7 +1900,7 @@ describe("every pf-* class the app uses has a rule", () => {
 
 If Biome objects to the `require` call, hoist `import { readFileSync } from "node:fs";` to the top of the file and delete the inline line — it is only inline to keep the import list of this test short.
 
-- [ ] **Step 7: Re-point the wizard guard at the shared engine**
+- [x] **Step 7: Re-point the wizard guard at the shared engine**
 
 In `web-react/src/components/wizard/wizardStyles.test.ts`, delete the local `walk`, `stripComments`, `declaredClasses` and `classesUsed` definitions (lines 8-59) and replace the import block at the top with:
 
@@ -1914,16 +1924,27 @@ then inside the `describe`, replace the three consts with:
 
 **Leave every `it(...)` in that file exactly as it is**, including `it("does not count a class that is only NAMED IN A COMMENT")` — it now tests the shared engine, which is precisely where you want it.
 
-- [ ] **Step 8: Run all four gates**
+- [x] **Step 8: Run all four gates**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
 bun run typecheck && bun run typecheck:e2e && bun run lint && bun run test && bun run gen:types:check
 ```
 
-Expected: rstest reports `117` test files and roughly `1028` tests, 0 failed. The wizard guard's own count must be unchanged — if `wizard stylesheet coverage` loses a test, the extraction dropped one.
+Expected: 0 failed, and the wizard guard's own count unchanged at **7** `it(...)` blocks — if `wizard stylesheet coverage` loses a test, the extraction dropped one.
 
-- [ ] **Step 9: Commit**
+**Measured: 118 test files, 1063 tests** (the plan's 117/1028 predate the palette work and the extra engine tests below).
+
+**Step 6 as written does not pass on the live tree.** The repo-wide guard reports 30 findings the first time it runs, in four groups, and each needs a different answer:
+
+  - **15 CSS custom properties.** ProbeCard and SystemStatus pass `"--pf-bar-color"`, `"--pf-out-dot"` etc. through inline style objects. `\b` sits between the second dash and the `p`, so a word-boundary match reads each variable as an undeclared class. Fixed with a `(?<![\w-])` lookbehind in `classesUsedIn`.
+  - **6 `@keyframes` names.** `pf-spin`, `pf-glow`, `pf-flicker`, `pf-heat`, `pf-augerFeed`, `pf-pellet` are named in inline `animation:` strings, not `className`. Excusing them would be wrong — deleting the `@keyframes` block breaks the animation exactly as deleting a rule breaks a class — so `declaredAnimations(css)` was added and the repo-wide guard unions it into `declared`.
+  - **1 truncation.** The lowercase-only token regex cut `pf-augerFeed` down to `pf-auger` and then reported the truncation as missing. `classesUsedIn` now matches `[a-zA-Z0-9]`; a scanner that rewrites the name it is checking is worse than one that finds nothing.
+  - **8 genuinely unstyled names**, pre-existing debt: `pf-settings-tab`, `pf-section-note`, `pf-kv`, `pf-kv-row` (all PlatformTab), `pf-rpt-range-label`, `pf-pellets-load`, `pf-devices-table-btn` (reaches for a button style that lives in the Flask/Jinja stylesheet this app never loads) and `pf-notify-action` (a radio group's `name` attribute, not a class at all). Adding rules for these would change how those surfaces look, which this migration may not do, so they sit in a documented `UNSTYLED` allowlist — with a companion test asserting no entry is stale, so fixing one or dropping it from the JSX also fails here.
+
+`require("node:fs")` inline in Step 6's last test does trip Biome; hoist the import as the step already allows.
+
+- [x] **Step 9: Commit**
 
 ```bash
 cd /home/dannyb/sources/PiFire
