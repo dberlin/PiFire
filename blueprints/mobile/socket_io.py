@@ -32,6 +32,7 @@ from common.common import (
     epoch_to_time,
     get_system_command_output,
 )
+from common.control_delta import control_delta
 from common.datastore_accessors import (
     read_settings_store,
     seed_settings_store,
@@ -431,12 +432,27 @@ def _post_app_data_update(settings, type, request):
                 return _response(result="Error", message="Error: Key not found in settings")
     elif type == "control":
         control = read_control()
+        if "timer" in request:
+            # start/paused/end are one countdown and the control code branches
+            # on their combinations, so a timer state computed from a read that
+            # cannot see the write queue is exactly the cross-writer race this
+            # door used to feed. The timer_action commands queue ops the drain
+            # resolves against live state; use those. Mirrors _api_post_control.
+            return _response(
+                result="Error",
+                message="Error: control['timer'] cannot be set here; use the timer_action commands",
+            )
         for key in request.keys():
             if key in control.keys():
-                """
-                    Updating of control input data is now done in common.py > execute_commands() 
-                """
-                write_control(request, WriteKind.MERGE, origin="app-socketio")
+                # A posted patch is ALREADY a statement of intent -- the client
+                # sent only what it means -- so it is WRAPPED as a delta, not
+                # rewritten. notify_data travels whole (an omitted entry means
+                # deletion, not silence), so it becomes an explicit
+                # notify.replace rather than an implicit array swap.
+                payload = dict(request)
+                entries = payload.pop("notify_data", None)
+                ops = [{"op": "notify.replace", "entries": entries}] if entries is not None else None
+                write_control(control_delta(set_values=payload, ops=ops), WriteKind.DELTA, origin="app-socketio")
                 return _response(result="OK", data=control)
             else:
                 return _response(result="Error", message="Error: Key not found in control")
@@ -546,45 +562,64 @@ def _post_app_data_timer(settings, type, request):
             break
     if index is None:
         return _response(result="Error", message="Error: No timer entry found")
+    # This handler is the second, independent implementation of the same timer
+    # grammar common/api_commands.py::_cmd_set_timer serves. Both now emit the
+    # SAME ops (common/control_delta.py), so the two doors can no longer drift
+    # and two timer gestures in one control cycle compose instead of racing.
+    # The `index` lookup above survives only for its no-timer-entry guard; the
+    # ops locate the entry by type themselves.
     if type == "start_timer":
-        control["notify_data"][index]["req"] = True
         if control["timer"]["paused"] == 0:
-            now = time.time()
-            control["timer"]["start"] = now
+            # The ranges are required for a FRESH start, and that answer is a
+            # request-time one (it is in the payload, not in control state).
             if "hours_range" in request["timer_action"] and "minutes_range" in request["timer_action"]:
+                now = time.time()
                 seconds = request["timer_action"]["hours_range"] * 60 * 60
                 seconds = seconds + request["timer_action"]["minutes_range"] * 60
-                control["timer"]["end"] = now + seconds
-                control["notify_data"][index]["shutdown"] = request["timer_action"]["timer_shutdown"]
-                control["notify_data"][index]["keep_warm"] = request["timer_action"]["timer_keep_warm"]
-                write_log("Timer started.  Ends at: " + epoch_to_time(control["timer"]["end"]))
-                write_control(control, WriteKind.MERGE, origin="app-socketio")
+                write_log("Timer started.  Ends at: " + epoch_to_time(now + seconds))
+                write_control(
+                    control_delta(
+                        ops=[
+                            {
+                                "op": "timer.start_with_options",
+                                "at": now,
+                                "seconds": seconds,
+                                "shutdown": request["timer_action"]["timer_shutdown"],
+                                "keep_warm": request["timer_action"]["timer_keep_warm"],
+                            }
+                        ]
+                    ),
+                    WriteKind.DELTA,
+                    origin="app-socketio",
+                )
                 return _response(result="OK")
             else:
                 return _response(result="Error", message="Error: Start time not specified")
         else:
+            # Unpause. As before, the ranges are ignored on this path; the drain
+            # picks resume-vs-fresh-start from live state.
             now = time.time()
-            control["timer"]["end"] = (control["timer"]["end"] - control["timer"]["paused"]) + now
-            control["timer"]["paused"] = 0
-            write_log("Timer unpaused.  Ends at: " + epoch_to_time(control["timer"]["end"]))
-            write_control(control, WriteKind.MERGE, origin="app-socketio")
+            write_log(
+                "Timer unpaused.  Ends at: "
+                + epoch_to_time((control["timer"]["end"] - control["timer"]["paused"]) + now)
+            )
+            write_control(
+                control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": None}]),
+                WriteKind.DELTA,
+                origin="app-socketio",
+            )
             return _response(result="OK")
     elif type == "pause_timer":
-        control["notify_data"][index]["req"] = False
-        now = time.time()
-        control["timer"]["paused"] = now
         write_log("Timer paused.")
-        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        write_control(
+            control_delta(ops=[{"op": "timer.pause", "at": time.time()}]),
+            WriteKind.DELTA,
+            origin="app-socketio",
+        )
         return _response(result="OK")
     elif type == "stop_timer":
-        control["notify_data"][index]["req"] = False
-        control["timer"]["start"] = 0
-        control["timer"]["end"] = 0
-        control["timer"]["paused"] = 0
-        control["notify_data"][index]["shutdown"] = False
-        control["notify_data"][index]["keep_warm"] = False
         write_log("Timer stopped.")
-        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        write_control(control_delta(ops=[{"op": "timer.clear"}]), WriteKind.DELTA, origin="app-socketio")
         return _response(result="OK")
     else:
         return _response(result="Error", message="Error: Received request without valid type")

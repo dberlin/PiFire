@@ -670,12 +670,42 @@ def test_post_timer_start_unpause(sio):
     assert control["notify_data"][_TIMER_IDX]["req"] is True
 
 
-def test_post_timer_pause(sio):
+def test_post_timer_pause_on_a_running_timer(sio):
+    control = read_control()
+    control["timer"] = {"start": 10.0, "paused": 0, "end": 900.0}
+    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
     resp = sio.mod._post_app_data("timer_action", "pause_timer", json.dumps({"timer_action": {}}))
     assert resp["result"] == "OK"
     _drain()
     control = read_control()
     assert control["timer"]["paused"] > 0
+    assert control["timer"]["start"] == 10.0
+    assert control["notify_data"][_TIMER_IDX]["req"] is False
+
+
+def test_post_timer_pause_on_a_stopped_timer_clears_instead_of_stamping_paused(sio):
+    """CHANGED, deliberately: pausing a timer that was never started now CLEARS.
+
+    It used to set paused = now on a timer whose start and end were both zero.
+    That is an incoherent state -- a "paused" countdown with nothing to count --
+    and it is not inert: the next start reads paused != 0, takes the unpause
+    branch, and computes end = (0 - paused) + now, arming an ALREADY-EXPIRED
+    timer. With shutdown set, that expiry shuts the grill down.
+
+    The REST implementation of this same grammar has always guarded it
+    (common/api_commands.py::_cmd_set_timer's start == 0 branch is a full
+    clear, logged as "Timer cleared."). Both doors now emit the same
+    `timer.pause` op (common/control_delta.py), so this second implementation
+    can no longer drift from the first -- which is what the change really buys.
+    """
+    control = read_control()
+    control["timer"] = {"start": 0, "paused": 0, "end": 0}
+    write_control(control, WriteKind.OVERWRITE, origin="test-socketio")
+    resp = sio.mod._post_app_data("timer_action", "pause_timer", json.dumps({"timer_action": {}}))
+    assert resp["result"] == "OK"
+    _drain()
+    control = read_control()
+    assert control["timer"] == {"start": 0, "paused": 0, "end": 0}
     assert control["notify_data"][_TIMER_IDX]["req"] is False
 
 

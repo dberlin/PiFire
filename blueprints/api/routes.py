@@ -1,5 +1,6 @@
 from flask import request, jsonify, abort
 from common.common import WriteKind, write_log, deep_update, read_generic_json
+from common.control_delta import control_delta
 from common.datastore_accessors import (
     read_settings,
     write_settings,
@@ -229,12 +230,33 @@ def _api_post_settings_update(settings, request_json):
 
 
 def _api_post_control(settings, request_json):
+    """Queue a client-supplied control patch as a delta.
+
+    A posted patch is ALREADY a statement of intent -- the client sent only what
+    it means -- so it needs no reduction and no client change; it is wrapped, not
+    rewritten. Two members are special:
+
+      * `notify_data` travels WHOLE (an omitted entry is a deletion, not silence
+        -- web-react/src/helpers/notify/notifyApi.ts), so it becomes an explicit
+        notify.replace op rather than an implicit array swap;
+      * `timer` is refused. start/paused/end are one countdown and the control
+        code branches on their combinations, so a value computed from a read
+        that cannot see the write queue is exactly the race this endpoint used
+        to feed. Use /api/set/timer/{start,pause,stop}, which queue ops the
+        drain resolves against live state.
     """
-    Updating of control input data is now done in common.py > execute_commands()
-    """
+    if "timer" in request_json:
+        return jsonify(
+            {
+                "control": "error",
+                "result": "error",
+                "message": "control['timer'] cannot be set through /api/control; use /api/set/timer/...",
+            }
+        ), 400
     try:
-        # Update control data with request JSON
-        write_control(request_json, WriteKind.MERGE, origin="app")
+        entries = request_json.pop("notify_data", None)
+        ops = [{"op": "notify.replace", "entries": entries}] if entries is not None else None
+        write_control(control_delta(set_values=request_json, ops=ops), WriteKind.DELTA, origin="app")
         return jsonify({"control": "success", "result": "success", "message": "Settings updated successfully."}), 201
     except Exception:
         return jsonify({"control": "error", "result": "error", "message": "Settings update failed."}), 201

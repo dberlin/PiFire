@@ -148,3 +148,92 @@ def test_start_then_stop_in_one_cycle_leaves_the_timer_stopped(seeded):
     dsa.execute_control_writes()
 
     assert read_control()["timer"] == {"start": 0, "paused": 0, "end": 0, "shutdown": False}
+
+
+# --- the two arbitrary-patch doors -----------------------------------------
+#
+# Both take a client-supplied patch, which is ALREADY a statement of intent --
+# the client sent only what it means -- so neither needs a client change to
+# become a delta; the server wraps it. Two members are special, and are the
+# reason wrapping is not merely mechanical: notify_data travels WHOLE (an
+# omitted entry is a deletion, not silence) and becomes an explicit
+# notify.replace, and `timer` is refused outright.
+
+
+@pytest.fixture
+def client(seeded):
+    from app import app as flask_app
+
+    flask_app.config.update(TESTING=True)
+    return flask_app.test_client()
+
+
+@pytest.fixture
+def sio(seeded):
+    """The socket door. Mirrors tests/web/test_socketio_app_data.py's fixture,
+    including its neutralization of every hazardous dispatch."""
+    from unittest import mock
+
+    import blueprints.mobile.socket_io as socket_io
+
+    with (
+        mock.patch.object(socket_io, "restart_control"),
+        mock.patch.object(socket_io, "restart_webapp"),
+        mock.patch.object(socket_io, "restart_scripts"),
+    ):
+        yield socket_io
+
+
+def test_post_control_rejects_a_timer_value(client):
+    """control["timer"] is a coupled value object. A client that posts one is
+    computing a timer state from a read it cannot trust; make it use the REST
+    timer grammar, which is now an op."""
+    resp = client.post("/api/control", json={"timer": {"start": 0, "paused": 0, "end": 0}})
+    assert resp.status_code == 400
+    assert "timer" in resp.get_json()["message"]
+
+
+def test_post_control_still_accepts_ordinary_members(client):
+    assert client.post("/api/control", json={"mode": "Startup", "s_plus": True}).status_code == 201
+    dsa.execute_control_writes()
+    control = read_control()
+    assert control["mode"] == "Startup"
+    assert control["s_plus"] is True
+
+
+def test_post_control_routes_notify_data_through_the_replace_op(client):
+    """saveTargetEdit's shape. An omitted entry still means DELETE -- now by name."""
+    entries = [{"label": "Only", "type": "probe", "req": True, "target": 165}]
+    assert client.post("/api/control", json={"notify_data": entries}).status_code == 201
+    dsa.execute_control_writes()
+    assert read_control()["notify_data"] == entries
+
+
+def test_socket_control_door_rejects_a_timer_value(sio):
+    resp = sio._post_app_data("update_action", "control", json.dumps({"timer": {"start": 0, "paused": 0, "end": 0}}))
+    assert resp["result"] == "Error"
+    assert "timer" in resp["message"]
+    assert c.SqliteQueue("queue_control_write").length() == 0
+
+
+def test_socket_control_door_still_accepts_ordinary_members(sio):
+    assert sio._post_app_data("update_action", "control", json.dumps({"s_plus": True}))["result"] == "OK"
+    dsa.execute_control_writes()
+    assert read_control()["s_plus"] is True
+
+
+def test_socket_timer_stop_then_pause_leaves_the_timer_stopped(sio):
+    """The socket door is a SECOND implementation of the same timer grammar
+    common/api_commands.py serves. Both now emit the same ops, so this pair
+    composes here exactly as it does over REST."""
+    control = read_control()
+    control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
+    write_control(control, WriteKind.OVERWRITE, origin="seed")
+    c.SqliteQueue("queue_control_write").flush()
+
+    payload = json.dumps({"timer_action": {}})
+    assert sio._post_app_data("timer_action", "stop_timer", payload)["result"] == "OK"
+    assert sio._post_app_data("timer_action", "pause_timer", payload)["result"] == "OK"
+    dsa.execute_control_writes()
+
+    assert read_control()["timer"] == {"start": 0, "paused": 0, "end": 0}
