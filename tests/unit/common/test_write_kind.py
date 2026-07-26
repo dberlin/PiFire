@@ -2,11 +2,11 @@ import pytest
 from enum import Enum
 
 
-def test_write_kind_is_enum_with_two_members():
+def test_write_kind_is_enum_with_three_members():
     from common.common import WriteKind
 
     assert issubclass(WriteKind, Enum)
-    assert {m.name for m in WriteKind} == {"OVERWRITE", "MERGE"}
+    assert {m.name for m in WriteKind} == {"OVERWRITE", "MERGE", "DELTA"}
 
 
 def test_write_control_requires_kind():

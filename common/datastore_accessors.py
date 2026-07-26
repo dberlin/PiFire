@@ -26,6 +26,7 @@ from common.common import (
     reduce_control_patch,
     strip_null_members,
 )
+from common.control_delta import validate_control_delta
 from common.defaults import (
     METRIC_COLUMNS,
     default_control,
@@ -71,16 +72,28 @@ def write_control(control, kind, origin="unknown"):
     """
     Write control to SQLite DB.
 
-    :param control: Control Dictionary
+    :param control: for OVERWRITE/MERGE, a control dictionary or partial; for
+                    DELTA, an envelope from common.control_delta.control_delta().
     :param kind: WriteKind.OVERWRITE writes control:general directly.
-                             WriteKind.MERGE queues a partial change for deep-merge on execute.
-    :param origin: Source label recorded on merge writes.
+                 WriteKind.MERGE queues a partial change for deep-merge on execute.
+                 WriteKind.DELTA queues a validated intent envelope.
+    :param origin: Source label recorded on queued writes.
     """
     if kind is WriteKind.OVERWRITE:
         _write_json_blob("control:general", control)
     elif kind is WriteKind.MERGE:
         control["origin"] = origin
         SqliteQueue("queue_control_write").push(control)
+    elif kind is WriteKind.DELTA:
+        # Validate HERE, in the writing process: a malformed envelope caught at
+        # drain time surfaces as a control-loop log line in a different process.
+        # Note the asymmetry with MERGE, and keep it: MERGE stamps `origin` into
+        # the caller's dict (observed behaviour the golden fixture records); a
+        # delta envelope is an immutable value, so it is copied first.
+        validate_control_delta(control)
+        payload = dict(control)
+        payload["origin"] = origin
+        SqliteQueue("queue_control_write").push(payload)
     else:
         raise TypeError(f"write_control: kind must be WriteKind, got {kind!r}")
 

@@ -40,6 +40,10 @@ from common.sqlite_log_handler import SqliteLogHandler
 class WriteKind(Enum):
     OVERWRITE = "overwrite"  # replace control:general wholesale (legacy True)
     MERGE = "merge"  # queue a partial change, deep-merged on execute (legacy False)
+    # queue a validated intent envelope (common/control_delta.py): the writer
+    # states what it MEANT, not the whole snapshot it read. MERGE keeps its
+    # meaning; the two coexist on one queue for the whole migration.
+    DELTA = "delta"
 
 
 # *****************************************
