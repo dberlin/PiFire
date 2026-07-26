@@ -57,7 +57,11 @@
   height: 22px;
   border-radius: 6px;
   background: linear-gradient(160deg, var(--accent-1), var(--accent-2));
-  box-shadow: 0 0 10px var(--glow);
+  /* 45% is this element's own choice, not a Qt value: Qt has no navbar, so
+     there is no counterpart to match. --glow is opaque (it is Theme.glowColor
+     verbatim) and the transparency belongs at the usage site, which is how Qt
+     applies its own. */
+  box-shadow: 0 0 10px color-mix(in srgb, var(--glow) 45%, transparent);
   flex: 0 0 auto;
 }
 .pf-nav-fire {

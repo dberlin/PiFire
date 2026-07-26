@@ -56,7 +56,11 @@
 
      --glow is Theme.glowColor, an opaque colour: Qt applies the transparency
      at the usage site (Gauge.qml draws the disc at opacity 0.28, which
-     .pf-dash-glow also does). Baking an alpha into the token dimmed it twice. */
+     .pf-dash-glow also does). Baking an alpha into the token dimmed it twice.
+     Two other consumers have no Qt counterpart at all (GrillGauge's arc
+     drop-shadow, and .pf-nav-mark's box-shadow, since Qt has no navbar) and
+     pick their own 45% with color-mix at the call site. That alpha is their
+     choice, not a copy of anything in Theme.qml. */
   --accent: var(--accent-ember); /* Theme.accentColor */
   --accent-mid: #ff8a2b; /* Theme.arcStop1 */
   --accent-1: #ffc24b; /* Theme.arcStop2 */

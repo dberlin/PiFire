@@ -63,7 +63,12 @@ export function GrillGauge({
             strokeDasharray: len,
             strokeDashoffset: offset,
             transition: "stroke-dashoffset .9s ease",
-            filter: "drop-shadow(0 0 7px var(--glow))",
+            // 45% is THIS element's own choice, not a Qt value: Qt's gauge
+            // (Gauge.qml) draws no drop-shadow at all, so there is nothing to
+            // match. --glow stays opaque, exactly as Theme.glowColor is, and
+            // the transparency is applied here the way Qt applies its own at
+            // the usage site.
+            filter: "drop-shadow(0 0 7px color-mix(in srgb, var(--glow) 45%, transparent))",
           }}
         />
         {hasSetpoint && (
