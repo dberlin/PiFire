@@ -6,6 +6,7 @@ blueprints/cookfile/routes.py.
 """
 
 import copy
+import datetime
 import os
 
 from werkzeug.utils import secure_filename
@@ -19,7 +20,7 @@ from common.app import (
     prepare_event_totals,
     prepare_metrics_csv,
 )
-from common.common import epoch_to_time
+from common.common import epoch_to_time, generate_uuid
 from file_mgmt.common import fixup_assets, read_json_file_data, update_json_file_data
 from file_mgmt.cookfile import read_cookfile, upgrade_cookfile
 
@@ -219,3 +220,77 @@ def recover(path, action):
             return status
         struct, status = fixup_assets(path, struct)
     return status
+
+
+def _load_comments(path):
+    """comments.json, or a status. A corrupt archive reads back as {}, and the
+    legacy branch appends to it -- AttributeError, HTTP 500 -- so the isinstance
+    check is the fix, not a formality."""
+    comments, status = read_json_file_data(path, "comments")
+    if status != "OK":
+        return None, status
+    if not isinstance(comments, list):
+        return None, "Error: comments unreadable."
+    return comments, None
+
+
+def add_comment(path, text):
+    comments, problem = _load_comments(path)
+    if problem:
+        return None, problem
+    now = datetime.datetime.now()
+    entry = {
+        "text": text,
+        "id": generate_uuid(),
+        "edited": "",
+        "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"),
+        "assets": [],
+    }
+    comments.append(entry)
+    status = update_json_file_data(comments, path, "comments")
+    return (entry, None) if status == "OK" else (None, status)
+
+
+def update_comment(path, comment_id, text):
+    comments, problem = _load_comments(path)
+    if problem:
+        return None, problem
+    for entry in comments:
+        if entry["id"] != comment_id:
+            continue
+        entry["text"] = text
+        entry["edited"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        status = update_json_file_data(comments, path, "comments")
+        return (entry, None) if status == "OK" else (None, status)
+    return None, "comment_not_found"
+
+
+def delete_comment(path, comment_id):
+    comments, problem = _load_comments(path)
+    if problem:
+        return problem
+    for entry in comments:
+        if entry["id"] == comment_id:
+            comments.remove(entry)
+            return update_json_file_data(comments, path, "comments")
+    return "comment_not_found"
+
+
+def set_comment_assets(path, comment_id, assets):
+    """Replace a comment's asset list wholesale.
+
+    Flask toggles ONE asset and infers add-vs-remove from a client-supplied
+    `state` string (routes.py:566-586): if the client's view of "selected" is
+    stale, the toggle does the OPPOSITE of what the user clicked. A whole-list
+    write states the intent and cannot invert.
+    """
+    comments, problem = _load_comments(path)
+    if problem:
+        return None, problem
+    for entry in comments:
+        if entry["id"] == comment_id:
+            entry["assets"] = list(assets)
+            status = update_json_file_data(comments, path, "comments")
+            return (entry["assets"], None) if status == "OK" else (None, status)
+    return None, "comment_not_found"

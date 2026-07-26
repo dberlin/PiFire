@@ -236,3 +236,62 @@ def cookfile_recover():
     if status != "OK":
         return cookfile_api.unreadable(status, error)
     return jsonify(api_response("OK")), 200
+
+
+_COMMENT_ACTIONS = ("add", "update", "delete")
+
+
+@api_files_bp.route("/cookfiles/comments", methods=["POST"])
+def cookfile_comments():
+    body = json_body()
+    action = body.get("action")
+    if action not in _COMMENT_ACTIONS:
+        return error("bad_request", 400, field="action")
+    path, err = require_file(body.get("file", ""))
+    if err:
+        return err
+
+    if action == "add":
+        text = body.get("text")
+        if not isinstance(text, str):
+            return error("bad_request", 400, field="text")
+        entry, problem = cookfile_api.add_comment(path, text)
+    elif action == "update":
+        text, cid = body.get("text"), body.get("id")
+        if not isinstance(cid, str) or not cid:
+            return error("bad_request", 400, field="id")
+        if not isinstance(text, str):
+            return error("bad_request", 400, field="text")
+        entry, problem = cookfile_api.update_comment(path, cid, text)
+    else:
+        cid = body.get("id")
+        if not isinstance(cid, str) or not cid:
+            return error("bad_request", 400, field="id")
+        status = cookfile_api.delete_comment(path, cid)
+        entry, problem = None, (None if status == "OK" else status)
+
+    if problem == "comment_not_found":
+        return error("comment_not_found", 404)
+    if problem:
+        return cookfile_api.unreadable(problem, error)
+    return jsonify(api_response("OK", None, entry)), 200
+
+
+@api_files_bp.route("/cookfiles/comments/assets", methods=["POST"])
+def cookfile_comment_assets():
+    body = json_body()
+    path, err = require_file(body.get("file", ""))
+    if err:
+        return err
+    cid = body.get("id")
+    assets = body.get("assets")
+    if not isinstance(cid, str) or not cid:
+        return error("bad_request", 400, field="id")
+    if not isinstance(assets, list) or not all(isinstance(a, str) for a in assets):
+        return error("bad_request", 400, field="assets")
+    stored, problem = cookfile_api.set_comment_assets(path, cid, assets)
+    if problem == "comment_not_found":
+        return error("comment_not_found", 404)
+    if problem:
+        return cookfile_api.unreadable(problem, error)
+    return jsonify(api_response("OK", None, {"assets": stored})), 200

@@ -1940,7 +1940,7 @@ jj desc -m "feat(api-files): cook-file title, probe-label rename and repair/upgr
   - unknown id → 404 `{message:"comment_not_found"}`
 - `POST /api/files/cookfiles/comments/assets` `{file, id, assets: string[]}` → `{result:"OK", data:{assets}}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_comment_lifecycle_add_update_delete(live_server, page, _isolated_folders):
@@ -2039,7 +2039,7 @@ def test_comment_assets_must_be_a_list_of_strings(live_server, page, _isolated_f
         assert resp.status == 400
 ```
 
-- [ ] **Step 2: Implement in `cookfile_api.py`**
+- [x] **Step 2: Implement in `cookfile_api.py`**
 
 ```python
 import datetime
@@ -2113,7 +2113,7 @@ def set_comment_assets(path, comment_id, assets):
     return None, "comment_not_found"
 ```
 
-- [ ] **Step 3: Register the two routes**
+- [x] **Step 3: Register the two routes**
 
 ```python
 _COMMENT_ACTIONS = ("add", "update", "delete")
@@ -2175,7 +2175,7 @@ def cookfile_comment_assets():
     return jsonify(api_response("OK", None, {"assets": stored})), 200
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/test_api_files_cookfile_comments.py -q
