@@ -1,0 +1,165 @@
+/* Cook-file browser layout.
+ *
+ * Reuses the .pf-* vocabulary from settings.css / dashboard.css (both imported
+ * at src/main.tsx) for anything that already exists -- .pf-section,
+ * .pf-modal-btn, .pf-settings-hint, .pf-banner. Only the two layouts those do
+ * not cover live here: the saved-cook table and the media grid. */
+
+.pf-cf-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.pf-cf-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.pf-cf-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.pf-cf-table th,
+.pf-cf-table td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.pf-cf-table th {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.pf-cf-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.pf-cf-thumb-col {
+  width: 64px;
+}
+
+.pf-cf-actions-col {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.pf-cf-row-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.pf-cf-name {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.pf-cf-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.pf-cf-pager-current {
+  font-weight: 700;
+}
+
+/* Detail page ------------------------------------------------------------ */
+
+.pf-cf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.pf-cf-meta-thumb {
+  width: 128px;
+  height: 128px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.pf-cf-meta-fields {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.pf-cf-dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.pf-cf-dl dt {
+  color: var(--text-dim);
+}
+
+.pf-cf-dl dd {
+  margin: 0;
+}
+
+.pf-cf-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.pf-cf-media-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.pf-cf-media-img {
+  width: 96px;
+  height: 96px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.pf-cf-media-img--selected {
+  outline: 3px solid var(--accent);
+}
+
+.pf-cf-comment {
+  border-bottom: 1px solid var(--card-border);
+  padding: 10px 0;
+}
+
+.pf-cf-comment-text {
+  white-space: pre-wrap;
+  margin: 6px 0;
+}
+
+.pf-cf-comment-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.pf-cf-comment-assets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pf-cf-comment-thumb {
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  object-fit: cover;
+}

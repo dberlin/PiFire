@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchHistoryChart, type HistoryChartData } from "../../helpers/history/historyApi";
 import { getSettings } from "../../helpers/settings/settingsApi";
+import { CookFileList } from "../cookfiles/CookFileList";
 import { NumberField } from "../settings/fields/NumberField";
 import { HistoryChart } from "./HistoryChart";
 import { hasPlottableHistory, toChartInput } from "./historyAdapter";
@@ -190,6 +191,16 @@ export function HistoryPage() {
             {data && !chart && (
               <p className="pf-settings-hint">No history yet — start a cook to see the chart.</p>
             )}
+          </div>
+        </div>
+
+        {/* Faithful placement: Flask renders the cook-file list on /history
+            (blueprints/history/templates/history/index.html), not on a page of
+            its own, so there is no nav entry to add either. */}
+        <div className="pf-section">
+          <h2 className="pf-section-title">Saved cooks</h2>
+          <div className="pf-section-body">
+            <CookFileList />
           </div>
         </div>
       </div>

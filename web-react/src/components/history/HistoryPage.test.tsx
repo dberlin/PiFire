@@ -40,6 +40,12 @@ rs.mock("./HistoryChart", () => ({
   },
 }));
 
+// The saved-cook list is its own component with its own tests and its own
+// fetches; stubbed here so this module's assertions stay about the chart.
+rs.mock("../cookfiles/CookFileList", () => ({
+  CookFileList: () => <div data-testid="cookfile-list" />,
+}));
+
 const { HistoryPage } = await import("./HistoryPage");
 
 const PAYLOAD: HistoryChartData = {
@@ -406,5 +412,12 @@ describe("HistoryPage — auto refresh", () => {
     await tick(REFRESH_MS * 4);
 
     expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the saved-cook list below the chart, as the Flask page does", async () => {
+    fetchHistoryChartMock.mockResolvedValue(PAYLOAD);
+    render(<HistoryPage />);
+    expect(await screen.findByTestId("cookfile-list")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Saved cooks" })).toBeInTheDocument();
   });
 });

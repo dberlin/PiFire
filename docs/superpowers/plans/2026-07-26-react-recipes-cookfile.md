@@ -2946,7 +2946,7 @@ jj desc -m "feat(web-react): typed clients for the /api/files cook-file surface"
 - Consumes `fetchFileListing`, `thumbnailUrl`, `deleteCookFile`, `uploadCookFile`, `cookFileDownloadUrl`.
 - Produces `export function CookFileList(): JSX.Element` — self-contained, no props. Links each row to `/cookfiles/:filename`.
 
-- [ ] **Step 1: Write the component test first**
+- [x] **Step 1: Write the component test first**
 
 ```tsx
 import { expect, rs, test } from "@rstest/core";
@@ -2987,7 +2987,7 @@ test("an ERROR-titled row is still openable so the repair prompt is reachable", 
 
 The last one matters: `browse_files` reports `title: "ERROR"` for an archive it cannot open (Task 1), and that row is precisely the one a user needs to click to reach the repair prompt. It must not be disabled.
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 Rules this component must obey:
 - **Derived state is computed in render.** The request-id / `Outcome` idiom from `HistoryPage.tsx:38-74` is the house pattern for "is a request in flight" — copy it rather than inventing a `loading` state set inside an effect.
@@ -3028,7 +3028,7 @@ const failed = !loading && outcome.failed;
 
 `reload()` is `setRequest((r) => ({ ...r, id: r.id + 1 }))`, used after a delete and after an upload.
 
-- [ ] **Step 3: Mount it on `/history`**
+- [x] **Step 3: Mount it on `/history`**
 
 In `HistoryPage.tsx`, add a second `pf-section` below the chart section:
 
@@ -3045,7 +3045,7 @@ This is the faithful placement: Flask renders the cook-file list on `/history` (
 
 Update `HistoryPage.test.tsx`: mock `./cookfiles/CookFileList` to a stub so the existing chart assertions stay isolated, and add one test that the section renders.
 
-- [ ] **Step 4: Gate and commit**
+- [x] **Step 4: Gate and commit**
 
 ```bash
 cd web-react
@@ -3057,6 +3057,11 @@ jj desc -m "feat(web-react): saved-cook list on /history with upload, download a
 
 ---
 
+
+**CORRECTED (rstest, not vitest):** `rs.mock`'s factory must be SYNCHRONOUS, so the
+usual `async () => ({ ...(await import(mod)) })` partial-mock idiom throws
+"An async mock factory is not supported". Use the import attribute instead:
+`import * as actual from "..." with { rstest: "importActual" };` then spread `actual`.
 ### Task 10: `CookFilePage` + `CookFileMeta` — the detail route
 
 **Files:**
