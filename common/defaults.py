@@ -473,6 +473,8 @@ def default_control():
 
     control["probe_profile_update"] = False
 
+    control["probe_map_update"] = False  # Request a full probe-device rebuild (POST /api/probe_map)
+
     control["settings_update"] = False
 
     control["distance_update"] = False

@@ -4,6 +4,7 @@ class FakeProbes:
         self._i = 0
         self._info = {}
         self._errors = []
+        self.update_probe_map_calls = []
 
     def script(self, items):
         norm = []
@@ -31,6 +32,10 @@ class FakeProbes:
 
     def update_probe_profiles(self, x):
         pass
+
+    def update_probe_map(self, probe_map):
+        self.update_probe_map_calls.append(probe_map)
+        return []
 
     def update_units(self, x):
         pass

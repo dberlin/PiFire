@@ -612,3 +612,35 @@ def test_tick_probe_profile_update_clears_flag(monkeypatch):
     c.setup()
     c.tick()
     assert store.read_control()["probe_profile_update"] is False
+
+
+def test_tick_probe_map_update_rebuilds_devices_and_clears_flag(monkeypatch):
+    """POST /api/probe_map sets this flag. probe_profile_update is NOT enough:
+    it only refills per-port profiles on already-constructed devices
+    (probes/base.py:393-401) and cannot see an added/removed/renamed probe."""
+    _neutralize_externals(monkeypatch)
+    settings = base_settings()
+    control_data = base_control(mode="Stop")
+    control_data["updated"] = False
+    control_data["probe_map_update"] = True
+    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    _spy_dispatch(c)
+    c.setup()
+    c.tick()
+    assert ctx.devices.probe_complex.update_probe_map_calls == [settings["probe_settings"]["probe_map"]]
+    assert store.read_control()["probe_map_update"] is False
+
+
+def test_tick_tolerates_a_control_blob_without_the_new_flag(monkeypatch):
+    """An install upgraded in place has a control blob written before this key
+    existed. probe_profile_update indexes control[...] directly and would
+    KeyError on such a blob; the new handler must use .get()."""
+    _neutralize_externals(monkeypatch)
+    control_data = base_control(mode="Stop")
+    control_data["updated"] = False
+    control_data.pop("probe_map_update", None)
+    c, ctx, store, grill, dist, notifier = make_controller(base_settings(), control_data, base_pellet_db())
+    _spy_dispatch(c)
+    c.setup()
+    c.tick()  # must not raise
+    assert ctx.devices.probe_complex.update_probe_map_calls == []

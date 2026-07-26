@@ -32,7 +32,15 @@ class ProbesMain:
         self._setup_probe_devices(self.probe_devices)
 
     def _setup_probe_devices(self, probe_devices):
+        """Construct one ReadProbes instance per configured device.
+
+        Returns the errors raised THIS call (also appended to self.errors,
+        which accumulates across calls). The return value matters now that
+        update_probe_map() is live: a rebuild triggered from the web tier has
+        no other way to report that a module failed to import.
+        """
         error_event = None
+        errors = []
         self.probe_device_list = []
         for device in probe_devices:
             try:
@@ -52,6 +60,7 @@ class ProbesMain:
                     f"Please run the configuration wizard again from the admin panel to fix this issue. "
                 )
                 self.errors.append(error_event)
+                errors.append(error_event)
                 self.logger.error(error_event)
 
             """
@@ -63,6 +72,8 @@ class ProbesMain:
 			Append the probe device to the devices list
 			"""
             self.probe_device_list.append(instance)
+
+        return errors
 
     def read_probes(self):
         """
@@ -82,10 +93,23 @@ class ProbesMain:
         return output_data
 
     def update_probe_map(self, probe_map):
+        """Rebuild every probe device from a new map, in place.
+
+        Called by the control loop when control["probe_map_update"] is set
+        (controller/runtime/controller.py) -- i.e. after POST /api/probe_map
+        wrote a new settings["probe_settings"]["probe_map"].
+
+        NOT equivalent to update_probe_profiles(): that only refills per-port
+        profiles on already-constructed devices (probes/base.py:393-401) and
+        cannot see an added, removed or renamed probe.
+
+        KNOWN LIMITATION: the previous device objects are dropped, not closed.
+        A Bluetooth/USB-HID device holding an OS handle releases it at GC, not
+        here. Callers gate this on control mode == Stop for that reason.
+        """
         self.probe_devices = probe_map["probe_devices"]
         self.probe_info = probe_map["probe_info"]
-        error = self._setup_probe_devices(self.probe_devices)
-        return error
+        return self._setup_probe_devices(self.probe_devices)
 
     def update_probe_profiles(self, probe_info):
         for device in self.probe_device_list:

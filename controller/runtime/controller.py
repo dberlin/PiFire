@@ -357,6 +357,28 @@ class Controller:
             store.write_pellet_db(self.pelletdb)
             self._hopper_refresh_time = ctx.clock.now()
 
+        # Rebuild every probe device if the probe MAP changed (POST /api/probe_map).
+        # Distinct from probe_profile_update below: that only refills per-port
+        # profiles on already-constructed devices (probes/base.py:393-401) and
+        # cannot see an added, removed or renamed probe.
+        #
+        # Ordered BEFORE probe_profile_update so that a tick carrying both flags
+        # applies the profiles refresh to the newly built devices.
+        #
+        # .get(), not [...]: an install upgraded in place has a control blob
+        # written before this key existed in default_control(). The
+        # probe_profile_update line below indexes directly and would KeyError
+        # on such a blob; do not copy that here.
+        if self.control.get("probe_map_update"):
+            self.settings = settings = store.read_settings()
+            self.control["probe_map_update"] = False
+            store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
+            errors = self.probe_complex.update_probe_map(settings["probe_settings"]["probe_map"])
+            store.write_generic_key("probe_device_info", self.probe_complex.get_device_info())
+            for error in errors or []:
+                self.eventLogger.error(error)
+            self.eventLogger.info("Probe map reloaded in control script.")
+
         # Grab current probe profiles if they have changed since the last loop.
         if self.control["probe_profile_update"]:
             self.settings = settings = store.read_settings()

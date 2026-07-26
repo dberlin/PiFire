@@ -1054,7 +1054,7 @@ Modify `blueprints/api/routes.py`
 
 **Steps:**
 
-- [ ] **Step 1: Neutralization sweep — this one matters.** The controller loop is the process
+- [x] **Step 1: Neutralization sweep — this one matters.** The controller loop is the process
       that drives real relays, and `tests/characterization/test_controller_loop_golden.py` already
       carries `_neutralize_externals(monkeypatch)` for that reason. Before touching anything:
       ```sh
@@ -1067,7 +1067,7 @@ Modify `blueprints/api/routes.py`
       neutralize it *at the import site inside the module under test* — moving the call
       elsewhere silently disarms a `patch.object`, which this repo has hit three times.
 
-- [ ] **Step 2: Write the failing unit test** for the revived method. Create
+- [x] **Step 2: Write the failing unit test** for the revived method. Create
       `tests/unit/probes/test_update_probe_map.py`:
       ```python
       """ProbesMain.update_probe_map() had ZERO callers before 2026-07-26 (verified
@@ -1129,7 +1129,7 @@ Modify `blueprints/api/routes.py`
           assert len(pm.probe_device_list) == 1  # the disabled stand-in
       ```
 
-- [ ] **Step 3: Run, confirm failure** (`errors` is `None`, not a list):
+- [x] **Step 3: Run, confirm failure** (`errors` is `None`, not a list):
       ```sh
       QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
         tests/unit/probes/test_update_probe_map.py -q
@@ -1137,7 +1137,7 @@ Modify `blueprints/api/routes.py`
       If `tests/unit/probes/` does not exist, create it; check whether sibling unit dirs carry an
       `__init__.py` (`ls tests/unit/*/__init__.py`) and match them.
 
-- [ ] **Step 4: Fix the two return values** in `probes/main.py`. In `_setup_probe_devices`
+- [x] **Step 4: Fix the two return values** in `probes/main.py`. In `_setup_probe_devices`
       (`:33-63`), collect per-device errors and return them. The existing code already appends
       each `error_event` to `self.errors` and sets `error_event` in the `except`; add a local
       list, append the same string, and `return` it at the end:
@@ -1186,15 +1186,15 @@ Modify `blueprints/api/routes.py`
       `_setup_probe_devices` and ignores the result — returning a list is backward-compatible
       there. Confirm with `rg -n "_setup_probe_devices" .` that those are the only two call sites.
 
-- [ ] **Step 5: Run, confirm the unit tests pass.**
+- [x] **Step 5: Run, confirm the unit tests pass.**
 
-- [ ] **Step 6: Seed the new control key.** In `common/defaults.py`'s `default_control()`, beside
+- [x] **Step 6: Seed the new control key.** In `common/defaults.py`'s `default_control()`, beside
       `control["probe_profile_update"] = False` (`:474`):
       ```python
           control["probe_map_update"] = False  # Request a full probe-device rebuild (POST /api/probe_map)
       ```
 
-- [ ] **Step 7: Teach the fake.** In `tests/fakes/probes.py`, beside `update_probe_profiles`
+- [x] **Step 7: Teach the fake.** In `tests/fakes/probes.py`, beside `update_probe_profiles`
       (`:32-33`):
       ```python
           def __init__(self):
@@ -1206,7 +1206,7 @@ Modify `blueprints/api/routes.py`
               return []
       ```
 
-- [ ] **Step 8: Write the failing controller test.** In
+- [x] **Step 8: Write the failing controller test.** In
       `tests/characterization/test_controller_loop_golden.py`, next to
       `test_tick_probe_profile_update_clears_flag` (`:604-614`). Note `make_controller` builds its
       own `FakeProbes` at `:107`, so reach it through `ctx.devices.probe_complex`:
@@ -1247,13 +1247,13 @@ Modify `blueprints/api/routes.py`
           assert ctx.devices.probe_complex.update_probe_map_calls == []
       ```
 
-- [ ] **Step 9: Run, confirm both fail** (`AttributeError` / no rebuild):
+- [x] **Step 9: Run, confirm both fail** (`AttributeError` / no rebuild):
       ```sh
       QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
         tests/characterization/test_controller_loop_golden.py -q -k probe_map
       ```
 
-- [ ] **Step 10: Implement in `controller/runtime/controller.py`.** Insert **immediately before**
+- [x] **Step 10: Implement in `controller/runtime/controller.py`.** Insert **immediately before**
       the `probe_profile_update` block at `:360`, so a full rebuild happens first and a
       profiles-only refresh in the same tick lands on the new devices:
       ```python
@@ -1280,14 +1280,14 @@ Modify `blueprints/api/routes.py`
       `rg -n "write_generic_key" controller/runtime/controller.py` shows it at `:283`; match that
       call style exactly.
 
-- [ ] **Step 11: Run, confirm pass**, then the whole suite:
+- [x] **Step 11: Run, confirm pass**, then the whole suite:
       ```sh
       QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/ -q
       ```
       Expected: green, including every pre-existing golden test. A red golden test here means the
       new block changed tick ordering — move it, do not re-baseline the golden.
 
-- [ ] **Step 12: Format and commit.**
+- [x] **Step 12: Format and commit.**
       ```sh
       .venv/bin/ruff format probes/main.py controller/runtime/controller.py common/defaults.py \
         tests/fakes/probes.py tests/characterization/test_controller_loop_golden.py \
