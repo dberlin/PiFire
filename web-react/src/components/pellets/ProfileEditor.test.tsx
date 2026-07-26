@@ -20,9 +20,16 @@ function renderEditor(over: Partial<Parameters<typeof ProfileEditor>[0]> = {}) {
     onDelete: rs.fn(),
     ...over,
   };
-  render(<ProfileEditor {...props} />);
-  return props;
+  const { rerender } = render(<ProfileEditor {...props} />);
+  return {
+    ...props,
+    /** Replay a socket tick: the same component with a fresh set of props. */
+    tick: (next: Partial<Parameters<typeof ProfileEditor>[0]>) =>
+      rerender(<ProfileEditor {...props} {...next} />),
+  };
 }
+
+const selected = (label: string) => (screen.getByLabelText(label) as HTMLSelectElement).value;
 
 describe("ProfileEditor", () => {
   it("lists profiles sorted by id, each headed '<brand> <wood>'", () => {
@@ -74,6 +81,60 @@ describe("ProfileEditor", () => {
       { brand_name: "Custom", wood_type: "Alder", rating: 5, comments: "Enter comments here." },
       true,
     );
+  });
+
+  it("adds what the add form shows after the brand it named leaves the vocabulary", () => {
+    // The add form keeps its own draft, so a socket tick that removes a brand
+    // can leave it naming a value with no matching <option>. A <select> in that
+    // state falls back to DISPLAYING its first option, so the form and the
+    // payload disagree and the user silently creates a profile under a brand
+    // they cannot see. The server takes brand_name verbatim
+    // (pellets_add_profile, common/pellets_actions.py:110-111).
+    const props = renderEditor();
+    fireEvent.click(screen.getByRole("button", { name: "Add Profile" }));
+    expect(selected("Brand for new profile")).toBe("Custom");
+
+    props.tick({ brands: ["Generic"], woods: ["Oak", "Alder"] });
+
+    expect(selected("Brand for new profile")).toBe("Generic");
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(props.onAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ brand_name: "Generic" }),
+      false,
+    );
+  });
+
+  it("adopts the first brand and wood once an empty vocabulary is populated", () => {
+    // Starting from nothing there is no valid default, so the draft holds "".
+    // Once the user adds the first brand and wood the form shows them; posting
+    // "" would write a profile whose brand and wood render as blank everywhere.
+    const props = renderEditor({ brands: [], woods: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Add Profile" }));
+
+    props.tick({ brands: ["Acme"], woods: ["Hickory"] });
+
+    expect(selected("Brand for new profile")).toBe("Acme");
+    expect(selected("Wood for new profile")).toBe("Hickory");
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(props.onAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ brand_name: "Acme", wood_type: "Hickory" }),
+      false,
+    );
+  });
+
+  it("keeps a deliberate add-form choice across an unrelated vocabulary change", () => {
+    // The re-anchor must only fire when the chosen value actually left the
+    // list; re-seeding on every tick would fight the user mid-entry, since the
+    // socket republishes the pellet database roughly once a second.
+    const props = renderEditor();
+    fireEvent.click(screen.getByRole("button", { name: "Add Profile" }));
+    fireEvent.change(screen.getByLabelText("Brand for new profile"), {
+      target: { value: "Generic" },
+    });
+
+    props.tick({ brands: ["Generic", "Custom", "Acme"] });
+
+    expect(selected("Brand for new profile")).toBe("Generic");
   });
 
   it("seeds an expanded profile's controls from that profile and saves them", () => {

@@ -83,6 +83,31 @@ export function ProfileEditor({
     comments: DEFAULT_COMMENTS,
   }));
 
+  // INVARIANT: the add form's brand and wood always name a member of the
+  // current vocabulary, or "" when there is nothing to name. The form holds its
+  // own draft, so a socket tick that adds or removes a brand would otherwise
+  // leave it pointing at a value with no matching <option> -- and a <select> in
+  // that state DISPLAYS its first option while its React state keeps the stale
+  // one, so the form shows one brand and posts another (or posts "" when the
+  // list had been empty). pellets_add_profile takes brand_name verbatim
+  // (common/pellets_actions.py:110-111), so the mismatch is written to the
+  // archive with nothing to catch it.
+  //
+  // Render-phase adjustment, NOT an effect: React Compiler is active and
+  // setState-in-useEffect for derived state is banned. Same idiom as
+  // CurrentLoadCard's `choice`. Conditioned on membership rather than on the
+  // props changing identity, so a deliberate choice survives the ~1s socket
+  // republish that hands over a fresh array with identical contents.
+  const anchoredBrand = brands.includes(newProfile.brand_name)
+    ? newProfile.brand_name
+    : (sortedBrands[0] ?? "");
+  const anchoredWood = woods.includes(newProfile.wood_type)
+    ? newProfile.wood_type
+    : (sortedWoods[0] ?? "");
+  if (anchoredBrand !== newProfile.brand_name || anchoredWood !== newProfile.wood_type) {
+    setNewProfile((p) => ({ ...p, brand_name: anchoredBrand, wood_type: anchoredWood }));
+  }
+
   const ids = Object.keys(archive).sort();
   const pendingProfile = pending === null ? undefined : archive[pending];
 
