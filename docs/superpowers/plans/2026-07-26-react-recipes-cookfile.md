@@ -3385,7 +3385,7 @@ interface EventsTableProps {
 }
 ```
 
-- [ ] **Step 1: Tests**
+- [x] **Step 1: Tests**
 
 ```tsx
 test("renders one row per event with the stored display strings", () => { /* ... */ });
@@ -3402,7 +3402,7 @@ Two behaviours are load-bearing and must be asserted explicitly:
 1. **The units switch reads the COOK FILE's units, not the app's.** `cookfile/index.html:268-272` branches on `metadata['units']` for the per-row usage column and `:285-289` does the same for the totals row. A cook recorded in °F must keep showing pounds/ounces even after the user switches the app to °C — the numbers in the archive were never converted.
 2. **`event_totals` may legitimately be `{}`.** Task 3 returns an empty dict when a file has fewer than two events, because `prepare_event_totals` indexes `events[-2]` unconditionally (`common/app.py:168`). The Flask page 500s on such a file; this table must render the rows it has and simply omit the totals.
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 - Columns exactly as `index.html:250-259`: Mode, Begin, End, Auger Time, Est. Pellet Use, Pellet Level Start, Pellet Level End, plus a detail control.
 - Every cell is a **stored string** (`starttime_c`, `endtime_c`, `augerontime_c`, `estusage_i`/`estusage_m`) computed at cook time by `process_metrics`. Do **not** recompute or reformat them — that would silently disagree with the CSV export, which reads the same rows.
@@ -3411,7 +3411,7 @@ Two behaviours are load-bearing and must be asserted explicitly:
 - Use a native `<details>`/`<summary>` disclosure rather than a modal — no focus trap to get wrong, and it prints.
 - CSV link: `<a href={cookFileExportUrl(filename, "events")} download>`, rendered only when `events.length > 0` (matching `index.html:342`, which hides the footer for an empty event list).
 
-- [ ] **Step 3: Gate and commit**
+- [x] **Step 3: Gate and commit**
 
 ```bash
 cd web-react

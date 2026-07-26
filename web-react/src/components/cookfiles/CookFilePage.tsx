@@ -9,6 +9,7 @@ import {
 } from "../../helpers/files/cookfileApi";
 import { CookFileChart } from "./CookFileChart";
 import { CookFileMeta } from "./CookFileMeta";
+import { EventsTable } from "./EventsTable";
 
 // The cook-file detail route. One fetch on mount (and on each reload), no
 // polling: a saved cook is a finished dataset except for the edits this page
@@ -130,6 +131,18 @@ export function CookFilePage() {
               <h2 className="pf-section-title">Chart</h2>
               <div className="pf-section-body">
                 <CookFileChart filename={detail.filename} />
+              </div>
+            </div>
+
+            <div className="pf-section">
+              <h2 className="pf-section-title">Events</h2>
+              <div className="pf-section-body">
+                <EventsTable
+                  filename={detail.filename}
+                  events={detail.events}
+                  totals={detail.event_totals}
+                  units={detail.metadata.units}
+                />
               </div>
             </div>
           </>

@@ -17,6 +17,12 @@ rs.mock("../../helpers/files/cookfileApi", () => ({
 
 // The metadata card has its own suite; stubbed here so this module's
 // assertions stay about routing, loading and the recovery branch.
+rs.mock("./EventsTable", () => ({
+  EventsTable: ({ units }: { units: string }) => (
+    <div data-testid="events-table" data-units={units} />
+  ),
+}));
+
 rs.mock("./CookFileChart", () => ({
   CookFileChart: () => <div data-testid="cookfile-chart" />,
 }));
@@ -164,5 +170,14 @@ describe("CookFilePage", () => {
       "href",
       "/history",
     );
+  });
+
+  it("hands the events table the COOK FILE's units, not the app's", async () => {
+    fetchCookFileDetailMock.mockResolvedValue({
+      ...DETAIL,
+      metadata: { ...DETAIL.metadata, units: "C" },
+    });
+    mount();
+    expect(await screen.findByTestId("events-table")).toHaveAttribute("data-units", "C");
   });
 });
