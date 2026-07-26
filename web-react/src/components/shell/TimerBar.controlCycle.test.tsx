@@ -10,29 +10,26 @@ import { TimerBar } from "./TimerBar";
 // fetches were issued.
 //
 // The properties modelled here are real (ported from the Python, and pinned at
-// that end in tests/characterization/test_process_command_golden.py and
-// tests/characterization/test_control_writes_cross_writer.py):
+// that end in tests/characterization/test_control_delta_seam.py and
+// tests/characterization/test_process_command_golden.py):
 //
-//  1. A web-process write queues the WHOLE control dict, not a diff
-//     (common/datastore_accessors.py write_control, WriteKind.MERGE).
-//  2. read_control() serves the PERSISTED blob and never the pending queue,
-//     so two commands issued inside one control cycle both read pre-write state.
-//  3. execute_control_writes drains the queue against the blob as it stood when
-//     the drain began -- the ancestor every writer in that cycle read. Each
-//     patch is REDUCED against it, so a member the writer left identical to the
-//     ancestor is dropped rather than imposed (common/common.py
-//     reduce_control_patch), and `notify_data` is additionally merged
-//     element-wise, field by field (::merge_notify_data).
-//  4. `timer` is the exception: it is reduced as ONE COUPLED UNIT
-//     (CONTROL_COUPLED_MEMBERS), because start/paused/end describe a single
-//     countdown the backend branches on in combination. So two writers that
-//     each computed a timer state still resolve LAST-WINS on the whole object.
+//  1. A timer command does NOT queue a computed timer state. It queues a named
+//     OP carrying the request's clock as `at` (common/control_delta.py,
+//     WriteKind.DELTA) -- `timer.clear`, `timer.pause`,
+//     `timer.start_or_resume`, `timer.start_with_options`.
+//  2. read_control() still serves the PERSISTED blob and never the pending
+//     queue, so a command's REQUEST-time answer (the API envelope) is still
+//     computed from pre-write state. That is why the paused-timer rejection in
+//     the 4-argument form is a request-time answer and stays one.
+//  3. execute_control_writes applies each op IN ORDER against the LIVE,
+//     evolving blob -- not against a captured ancestor, and with nothing
+//     reduced or inferred. So the second op in a cycle sees the first op's
+//     result.
 //
-// (3) is why a second write is no longer destructive in general -- the expiry
-// flags in particular survive. (4) is why it still is for the timer bar's own
-// buttons, and therefore why the bar allows one write per gesture. The
-// `seedControl` -> `drain` model below exercises exactly that, in
-// "the seam this guard exists for".
+// (3) is the whole point, and it is what retired this bar's
+// one-write-per-gesture guard: a stop followed by a pause pauses a timer that
+// the stop already cleared, which is the backend's own start == 0 branch, i.e.
+// nothing. See "the control-write seam" at the bottom of this file.
 // ---------------------------------------------------------------------------
 
 const NOW = 1_700_000_000;
@@ -63,117 +60,140 @@ function seedControl(
   };
 }
 
-/** One queued patch through the drain, for the two keys the timer commands
- *  write. `base` is the blob as it stood when the drain began -- the ancestor
- *  every writer in this cycle read.
- *
- *  `timer` is COUPLED: taken whole if the writer computed any part of it,
- *  dropped entirely if identical to the ancestor. `notify_data` is merged
- *  element-wise on (label, type), field by field: a field the writer left equal
- *  to the ancestor expresses no intent and is not imposed. (The Python also
- *  handles entries added or removed relative to the ancestor; the timer
- *  commands never do that, so the model does not.) */
-function applyPatch(base: Control, blob: Control, patch: Control): Control {
-  const next: Control = {
-    timer: { ...blob.timer },
-    notify_data: structuredClone(blob.notify_data),
-  };
-  if (JSON.stringify(patch.timer) !== JSON.stringify(base.timer)) {
-    next.timer = { ...patch.timer };
+/** The ops a queued delta can carry, mirroring common/control_delta.py's
+ *  _OP_FIELDS for the timer family. `at` is the REQUEST's clock: the branch
+ *  moves to the drain, the clock does not. */
+type Op =
+  | { op: "timer.clear" }
+  | { op: "timer.pause"; at: number }
+  | { op: "timer.start_or_resume"; at: number; seconds: number | null }
+  | {
+      op: "timer.start_with_options";
+      at: number;
+      seconds: number;
+      shutdown: boolean;
+      keep_warm: boolean;
+    };
+
+/** Port of common/control_delta.py's timer op appliers. Applied to the LIVE
+ *  control dict -- there is no ancestor and nothing is reduced, because an op
+ *  is nothing but intent. */
+function applyOp(control: Control, op: Op): void {
+  const entry = control.notify_data.find((e) => e.type === "timer");
+  if (entry === undefined) throw new Error("no timer notify entry");
+  switch (op.op) {
+    case "timer.clear":
+      control.timer = { start: 0, paused: 0, end: 0 };
+      entry.req = false;
+      entry.shutdown = false;
+      entry.keep_warm = false;
+      break;
+    case "timer.pause":
+      if (control.timer.start === 0) {
+        // The backend's own start == 0 branch is a full clear, not a pause.
+        applyOp(control, { op: "timer.clear" });
+        break;
+      }
+      entry.req = false;
+      control.timer.paused = op.at;
+      break;
+    case "timer.start_or_resume":
+      entry.req = true;
+      if (control.timer.paused === 0) {
+        control.timer.start = op.at;
+        control.timer.end = op.at + (op.seconds ?? 60);
+      } else {
+        control.timer.end = control.timer.end - control.timer.paused + op.at;
+        control.timer.paused = 0;
+      }
+      break;
+    case "timer.start_with_options":
+      if (control.timer.paused !== 0) {
+        // Request time already rejected a paused timer, so reaching the drain
+        // paused means another writer paused it inside this cycle. Dropped.
+        break;
+      }
+      entry.req = true;
+      entry.shutdown = op.shutdown;
+      entry.keep_warm = op.keep_warm;
+      control.timer.start = op.at;
+      control.timer.end = op.at + op.seconds;
+      break;
   }
-  const find = (entries: TimerNotify[], e: TimerNotify) =>
-    entries.find((x) => x.label === e.label && x.type === e.type);
-  for (const incoming of patch.notify_data) {
-    const ancestor = find(base.notify_data, incoming);
-    const target = find(next.notify_data, incoming);
-    if (ancestor === undefined || target === undefined) continue;
-    for (const key of ["req", "shutdown", "keep_warm"] as const) {
-      if (incoming[key] !== ancestor[key]) target[key] = incoming[key];
-    }
-  }
-  return next;
 }
 
 class ControlProcess {
   /** The persisted blob: what read_control() returns and what the socket ships. */
   blob: Control;
-  /** Queued MERGE partials, drained once per control cycle. */
-  private queue: Control[] = [];
+  /** Queued delta envelopes, drained once per control cycle. */
+  private queue: Op[][] = [];
 
   constructor(blob: Control) {
     this.blob = blob;
   }
 
   /** Port of common/api_commands.py _cmd_set_timer's start/pause/stop branches.
-   *  Returns the API envelope common/app.py api_response produces. */
+   *  Returns the API envelope common/app.py api_response produces.
+   *
+   *  Note what is NOT here any more: no timer state is computed. The only thing
+   *  this reads the blob for is the REQUEST-time rejection in the 4-argument
+   *  form, which is a synchronous HTTP answer the queue cannot give. */
   post(url: string): { result: string; message: string; data: unknown } {
     const [, , action, sub, ...rest] = url.split("/");
     if (action !== "set" || sub !== "timer") throw new Error(`unmodelled command: ${url}`);
 
-    // read_control(): the persisted blob, NOT the queue.
-    const control = structuredClone(this.blob);
-    const entry = control.notify_data.find((e) => e.type === "timer");
-    if (entry === undefined) throw new Error("no timer notify entry");
-
     switch (rest[0]) {
       case "start":
         if (rest[2] !== undefined) {
-          // The 4-argument form: server-computed end + both expiry flags, one write.
-          if (control.timer.paused !== 0) {
+          // read_control(): the persisted blob, NOT the queue. See (2) above.
+          if (this.blob.timer.paused !== 0) {
             return { result: "ERROR", message: "Timer is paused.", data: {} };
           }
-          entry.req = true;
-          entry.shutdown = rest[2].split(",").includes("shutdown");
-          entry.keep_warm = rest[2].split(",").includes("keep_warm");
-          control.timer.start = NOW;
-          control.timer.end = NOW + Number(rest[1]);
+          this.queue.push([
+            {
+              op: "timer.start_with_options",
+              at: NOW,
+              seconds: Number(rest[1]),
+              shutdown: rest[2].split(",").includes("shutdown"),
+              keep_warm: rest[2].split(",").includes("keep_warm"),
+            },
+          ]);
         } else {
-          entry.req = true;
-          if (control.timer.paused === 0) {
-            control.timer.start = NOW;
-            control.timer.end = NOW + Number(rest[1] ?? 60);
-          } else {
-            control.timer.end = control.timer.end - control.timer.paused + NOW;
-            control.timer.paused = 0;
-          }
+          this.queue.push([
+            {
+              op: "timer.start_or_resume",
+              at: NOW,
+              seconds: rest[1] === undefined ? null : Number(rest[1]),
+            },
+          ]);
         }
         break;
       case "pause":
-        entry.req = false;
-        if (control.timer.start !== 0) {
-          control.timer.paused = NOW;
-        } else {
-          control.timer = { start: 0, paused: 0, end: 0 };
-          entry.shutdown = false;
-          entry.keep_warm = false;
-        }
+        this.queue.push([{ op: "timer.pause", at: NOW }]);
         break;
       case "stop":
-        entry.req = false;
-        control.timer = { start: 0, paused: 0, end: 0 };
-        entry.shutdown = false;
-        entry.keep_warm = false;
+        this.queue.push([{ op: "timer.clear" }]);
         break;
       default:
         throw new Error(`unmodelled timer command: ${url}`);
     }
-
-    // write_control(control, MERGE): the whole dict goes on the queue.
-    this.queue.push(control);
     return { result: "OK", message: "", data: {} };
   }
 
-  /** A writer that reads control and queues the whole dict back without
-   *  computing a timer state -- common/system.py gather_system_info's shape. */
-  postWholeStaleDict(): void {
-    this.queue.push(structuredClone(this.blob));
+  /** A background writer that names only what it changed -- the shape every
+   *  converted writer now has (common/control_delta.py `set`). It cannot revert
+   *  a timer because it does not mention one. */
+  postUnrelatedDelta(): void {
+    this.queue.push([]);
   }
 
-  /** One turn of the control loop. The ancestor is captured ONCE, before the
-   *  loop, exactly as execute_control_writes does. */
+  /** One turn of the control loop. Each envelope's ops are applied IN ORDER
+   *  against the live blob, exactly as execute_control_writes does -- no
+   *  ancestor is captured, because nothing is inferred. */
   drain(): void {
-    const base = structuredClone(this.blob);
-    for (const patch of this.queue) this.blob = applyPatch(base, this.blob, patch);
+    for (const ops of this.queue) {
+      for (const op of ops) applyOp(this.blob, op);
+    }
     this.queue = [];
   }
 
@@ -242,12 +262,12 @@ describe("TimerBar across one control cycle", () => {
     expect(cp.timerEntry().req).toBe(true);
   });
 
-  // The bug. Pause and Stop are on screen TOGETHER while a timer runs, and the
-  // bar re-renders only when the socket republishes -- which cannot happen until
-  // the control loop drains. So a second click inside that window is an ordinary
-  // thing for a user to do, and it reads the pre-stop blob: the pause write
-  // carries the timer's OLD start/end and lands last. See the seam tests at the
-  // bottom of this file for what that costs when the guard is not there.
+  // Pause and Stop are on screen TOGETHER while a timer runs, and the bar
+  // re-renders only when the socket republishes -- which cannot happen until
+  // the control loop drains. So a second click inside that window is an
+  // ordinary thing for a user to do. It used to resurrect the timer, and the
+  // bar disabled its own buttons to prevent it; now both clicks queue ops that
+  // compose in the drain, so the bar lets them through.
   it("keeps a stopped timer stopped when the next click lands in the same cycle", async () => {
     const cp = new ControlProcess(
       seedControl({ start: NOW - 60, end: NOW + 600 }, { req: true, shutdown: true }),
@@ -267,7 +287,13 @@ describe("TimerBar across one control cycle", () => {
     expect(cp.timerEntry().req).toBe(false);
   });
 
-  it("keeps a stopped timer stopped when resume lands in the same cycle", async () => {
+  // Stop then Resume is the OTHER reachable pair -- both buttons are on screen
+  // together while a timer is paused. The guard used to block the second click
+  // outright. Now it goes through and the drain composes the two ops: the clear
+  // lands first, so the resume sees paused == 0 and arms a FRESH countdown for
+  // the time that was left. That is exactly what the same two clicks produce
+  // one control cycle apart, which is the property the guard stood in for.
+  it("arms a fresh countdown when resume lands in the same cycle as a stop", async () => {
     const cp = new ControlProcess(
       seedControl(
         { start: NOW - 600, paused: NOW - 10, end: NOW + 590 },
@@ -281,14 +307,30 @@ describe("TimerBar across one control cycle", () => {
 
     cp.drain();
 
-    expect(cp.blob.timer).toEqual({ start: 0, paused: 0, end: 0 });
+    // 600, not 590: the Resume button passes the REMAINING time (end - paused),
+    // and with the clear already applied the op uses it instead of ignoring it.
+    // The user gets the countdown they had left, which is what the button says.
+    expect(cp.blob.timer).toEqual({ start: NOW, paused: 0, end: NOW + 600 });
+    // The expiry action the stop disarmed stays disarmed: the resume op sets
+    // `req` and nothing re-arms shutdown.
     expect(cp.timerEntry().shutdown).toBe(false);
   });
 
-  // The guard waits for the live timer to change, and a rejected command never
-  // queues anything for the loop to publish -- so a failure has to release it
-  // then and there or the bar is stranded until the next socket change.
-  it("releases the guard when the command fails, rather than stranding the bar", async () => {
+  // The guard used to make the second gesture wait for the socket to
+  // republish. Nothing does now, and that is the user-visible half of this
+  // change: a second click is accepted the moment it is made.
+  it("lets a second gesture through immediately, without waiting for a republish", async () => {
+    const cp = new ControlProcess(seedControl({ start: NOW - 60, end: NOW + 600 }, { req: true }));
+    mount(cp);
+
+    await click(/stop timer/i);
+    // No drain, no republish -- the bar is still rendering the pre-stop blob.
+    expect(
+      (screen.getByRole("button", { name: /pause timer/i }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("issues a retry rather than swallowing it when a command fails", async () => {
     const cp = new ControlProcess(seedControl({ start: NOW - 60, end: NOW + 600 }, { req: true }));
     rs.stubGlobal(
       "fetch",
@@ -297,10 +339,7 @@ describe("TimerBar across one control cycle", () => {
     render(<TimerBar timer={liveTimer(cp)} command={createCommand("")} />);
 
     await click(/pause timer/i);
-    const pause = screen.getByRole("button", { name: /pause timer/i }) as HTMLButtonElement;
-    expect(pause.disabled).toBe(false);
 
-    // ...and a retry is actually issued rather than swallowed.
     const stopped = rs.fn(async () => ({
       ok: true,
       json: async () => cp.post("/api/set/timer/stop"),
@@ -328,15 +367,14 @@ describe("TimerBar across one control cycle", () => {
   });
 });
 
-// The guard's justification as an executable fact rather than a comment. These
-// drive the model directly, with no UI, because the guard is precisely what
-// stops the bar from producing these sequences -- so removing the guard would
-// make these the bar's behaviour. Both are pinned against the real backend in
-// tests/characterization/test_process_command_golden.py
-// (test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer and
-// test_a_resume_after_a_stop_in_one_cycle_resurrects_the_timer).
-describe("the control-write seam this guard exists for", () => {
-  it("resurrects a stopped countdown when a pause lands in the same cycle", () => {
+// The seam itself, driven directly with no UI. These used to be the guard's
+// justification -- they showed what the bar would do if the guard were removed.
+// They now show why it COULD be removed. Both are pinned against the real
+// backend in tests/characterization/test_process_command_golden.py
+// (test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped and
+// test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer).
+describe("the control-write seam", () => {
+  it("keeps a stopped countdown stopped when a pause lands in the same cycle", () => {
     const cp = new ControlProcess(
       seedControl({ start: NOW - 60, end: NOW + 600 }, { req: true, shutdown: true }),
     );
@@ -345,16 +383,13 @@ describe("the control-write seam this guard exists for", () => {
     cp.post("/api/set/timer/pause");
     cp.drain();
 
-    // The stop's zeros are gone: `timer` is coupled, so the pause's whole
-    // (pre-stop) object is taken and lands last.
-    expect(cp.blob.timer).toEqual({ start: NOW - 60, paused: NOW, end: NOW + 600 });
-    // What does NOT come back is the expiry action -- the pause never touched
-    // shutdown, so its stale copy is not imposed. That half the seam fix closed,
-    // and it is the half that would otherwise shut the grill down on expiry.
+    // The pause sees an already-cleared timer and takes the backend's own
+    // start == 0 branch, which is a clear -- i.e. nothing.
+    expect(cp.blob.timer).toEqual({ start: 0, paused: 0, end: 0 });
     expect(cp.timerEntry().shutdown).toBe(false);
   });
 
-  it("resurrects a stopped countdown when a resume lands in the same cycle", () => {
+  it("arms a fresh countdown rather than the old one when a resume lands in the same cycle", () => {
     const cp = new ControlProcess(
       seedControl(
         { start: NOW - 600, paused: NOW - 10, end: NOW + 590 },
@@ -366,20 +401,32 @@ describe("the control-write seam this guard exists for", () => {
     cp.post("/api/set/timer/start/590");
     cp.drain();
 
-    // Resume is the bare start form, which unpauses: it shifts `end` forward
-    // from the pre-stop blob and clears `paused`.
-    expect(cp.blob.timer).toEqual({ start: NOW - 600, paused: 0, end: NOW + 600 });
+    // The clear landed first, so the resume sees paused == 0 and starts fresh.
+    // The pre-stop end time does NOT come back.
+    expect(cp.blob.timer).toEqual({ start: NOW, paused: 0, end: NOW + 590 });
     expect(cp.timerEntry().shutdown).toBe(false);
+  });
+
+  it("keeps a start and a stop in one cycle from leaving the timer running", () => {
+    // The residual no merge could reach: a stop against an already-zero timer
+    // used to be indistinguishable from silence, because the payload carried a
+    // value rather than an intent. An op has no value to coincide with.
+    const cp = new ControlProcess(seedControl());
+
+    cp.post("/api/set/timer/start/600");
+    cp.post("/api/set/timer/stop");
+    cp.drain();
+
+    expect(cp.blob.timer).toEqual({ start: 0, paused: 0, end: 0 });
   });
 
   it("keeps an unrelated writer from reverting a timer it never touched", () => {
     const cp = new ControlProcess(seedControl({ start: NOW - 60, end: NOW + 600 }, { req: true }));
 
     cp.post("/api/set/timer/pause");
-    // A writer that queues the whole control dict without computing a timer
-    // state -- the shape of every background write. Its `timer` is identical to
-    // the ancestor, so it carries no evidence it touched one and is dropped.
-    cp.postWholeStaleDict();
+    // A background writer that names only what it changed. It cannot revert a
+    // timer because it does not mention one -- no reduction needed.
+    cp.postUnrelatedDelta();
     cp.drain();
 
     expect(cp.blob.timer.paused).toBe(NOW);

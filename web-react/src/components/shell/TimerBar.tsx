@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNow } from "../../helpers/clock";
-import type { CommandClient, CommandResult } from "../../helpers/command";
+import type { CommandClient } from "../../helpers/command";
 import { deriveTimer, formatRemaining } from "../../helpers/timer/timerState";
 import type { LiveState } from "../../helpers/types";
 import { TimerModal } from "./TimerModal";
@@ -30,27 +30,6 @@ export function TimerBar({
 
   const { state, remaining } = deriveTimer(timer, now);
 
-  // ONE control write per gesture -- see the block below the component for why a
-  // second one inside the same control cycle can still resurrect a timer the
-  // user just stopped. The write is "landed" once the live timer block changes,
-  // which is exactly when the control loop has drained the queue and the socket
-  // has republished.
-  const signature = `${timer.start}|${timer.paused}|${timer.end}`;
-  const [pendingAt, setPendingAt] = useState<string | null>(null);
-  // Render-phase adjustment rather than an effect (React Compiler is on, and
-  // this is derived state): the guard is only meaningful for the state that was
-  // on screen when the button was pressed.
-  if (pendingAt !== null && pendingAt !== signature) setPendingAt(null);
-  const pending = pendingAt !== null;
-
-  async function write(issue: () => Promise<CommandResult>) {
-    setPendingAt(signature);
-    const result = await issue();
-    // A rejected or failed command queues nothing, so nothing will ever arrive
-    // to release the guard. Release it here instead of stranding the controls.
-    if (!result.ok) setPendingAt(null);
-  }
-
   return (
     <div className="pf-timer-bar">
       <span className="pf-timer-time">
@@ -73,8 +52,7 @@ export function TimerBar({
           type="button"
           className="pf-timer-btn"
           aria-label="Pause timer"
-          disabled={pending}
-          onClick={() => write(() => command.timerPause())}
+          onClick={() => command.timerPause()}
         >
           Pause
         </button>
@@ -89,8 +67,7 @@ export function TimerBar({
           // timer.paused non-zero the backend shifts the existing end time and
           // ignores this argument entirely. It is passed anyway so the call
           // still reads as "run for the time that is left" if that ever changes.
-          disabled={pending}
-          onClick={() => write(() => command.timerStart(remaining))}
+          onClick={() => command.timerStart(remaining)}
         >
           Resume
         </button>
@@ -106,19 +83,12 @@ export function TimerBar({
           // Nothing re-sends them separately: there is nothing to restore, and
           // a standalone flag write only arms an expiry action on a timer that
           // is not running.
-          disabled={pending}
-          onClick={() => write(() => command.timerStop())}
+          onClick={() => command.timerStop()}
         >
           Stop
         </button>
       ) : null}
 
-      {/* The modal issues its own single write (timerStartWithOptions) and is
-          deliberately NOT covered by the guard: it is reachable only from the
-          `stopped` branch, where Pause/Resume/Stop are not rendered at all, so
-          its write cannot be followed by another one before the loop publishes.
-          Re-arming twice in a cycle is harmless -- each arm write is complete,
-          so the later one simply wins. */}
       {modalOpen ? (
         <TimerModal timer={timer} command={command} onClose={() => setModalOpen(false)} />
       ) : null}
@@ -126,43 +96,9 @@ export function TimerBar({
   );
 }
 
-// --------------------------------------------------------------------------
-// Why the write buttons go inert until the socket republishes
-//
-// Every web-process control write queues the WHOLE control dict
-// (common/datastore_accessors.py write_control), read_control() serves the
-// persisted blob and never the pending queue, and only the control loop drains
-// that queue. So two commands issued inside one control cycle both read
-// pre-write state.
-//
-// That no longer means the last one wins outright. The drain three-way merges
-// each queued patch against the blob as it stood when the drain began -- the
-// ancestor every writer in that cycle read -- and applies only what each writer
-// actually changed (common/common.py reduce_control_patch, merge_notify_data).
-// A writer's stale copy of a field it never touched is dropped. That closed
-// most of this class, including the expiry FLAGS: a timer the user stopped no
-// longer comes back with `shutdown` still armed.
-//
-// control["timer"] is the deliberate exception, and it is why this guard stays.
-// start/paused/end describe one countdown and the backend branches on their
-// COMBINATIONS, so the member is reduced whole rather than key by key
-// (common/common.py CONTROL_COUPLED_MEMBERS) -- a key-wise merge of a stop
-// racing a pause would synthesize {start: 0, paused: <now>, end: 0}, a paused
-// timer with no countdown, which makes the NEXT start arm an already-expired
-// timer. Kept whole, two writers that EACH computed a timer state still resolve
-// last-wins on the whole object.
-//
-// Pause and Stop are on screen together while a timer runs, Resume and Stop
-// while it is paused, and this component re-renders only when the live socket
-// republishes -- which cannot happen until the loop drains. Clicking Stop and
-// then Pause (or Resume) inside that window RESURRECTS the timer: the second
-// command reads the pre-stop blob, computes a timer state from it, and lands
-// after the stop's zeros. Both pairs are pinned at the other end of the seam,
-// in tests/characterization/test_process_command_golden.py --
-// test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer and
-// test_a_resume_after_a_stop_in_one_cycle_resurrects_the_timer.
-//
-// So: one control write per gesture, and no next gesture until this one is
-// visible. Unwinding this needs a seam that can merge two timer states, which
-// in turn needs writers to express deltas rather than whole states.
-// --------------------------------------------------------------------------
+// Every timer gesture queues an OP, not a computed timer state
+// (common/control_delta.py). Two gestures in one control cycle compose in the
+// drain against live state -- a stop followed by a pause pauses a timer that is
+// already cleared, i.e. nothing -- so the bar does not need to serialize them.
+// Pinned in Python at tests/characterization/test_control_delta_seam.py and
+// here by the ControlProcess model in TimerBar.controlCycle.test.tsx.
