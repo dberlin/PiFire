@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
+import type { HistoryAnnotation } from "../../helpers/history/historyApi";
+import { annotationPlugin } from "./annotationPlugin";
 import "./historyChart.css";
 import { shouldResetScales } from "./scaleReset";
 import { type SeriesShape, tooltipPlugin } from "./tooltipPlugin";
@@ -16,6 +18,9 @@ export interface HistoryChartProps {
   times: number[];
   series: ChartSeries[];
   height?: number;
+  /** Mode-change markers, x in epoch SECONDS. Omitted on /history, which
+   *  receives annotations from its endpoint but has never drawn them. */
+  annotations?: HistoryAnnotation[];
 }
 
 /**
@@ -40,10 +45,25 @@ function useStableSeriesShape(series: ChartSeries[]): SeriesShape[] {
   return useMemo(() => JSON.parse(key) as SeriesShape[], [key]);
 }
 
-export function HistoryChart({ times, series, height = 360 }: HistoryChartProps) {
+/**
+ * Same stabilisation for annotations, and it is load-bearing rather than an
+ * optimisation: uPlot reads `plugins` ONLY when the plot is constructed, so a
+ * change of annotations has to join the rebuild condition below. Without it,
+ * toggling the markers off would leave them painted until some unrelated shape
+ * change happened to rebuild the plot.
+ */
+function useStableAnnotations(
+  annotations: HistoryAnnotation[] | undefined,
+): HistoryAnnotation[] | null {
+  const key = annotations === undefined ? "" : JSON.stringify(annotations);
+  return useMemo(() => (key === "" ? null : (JSON.parse(key) as HistoryAnnotation[])), [key]);
+}
+
+export function HistoryChart({ times, series, height = 360, annotations }: HistoryChartProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const plotRef = useRef<uPlot | null>(null);
   const seriesShape = useStableSeriesShape(series);
+  const stableAnnotations = useStableAnnotations(annotations);
 
   // Tracks the shape/height a plot was last built with, and the height the
   // resize handler below should apply on the next resize event. Written
@@ -51,6 +71,7 @@ export function HistoryChart({ times, series, height = 360 }: HistoryChartProps)
   // react-hooks/refs; writes inside effects are fine).
   const builtShapeRef = useRef<SeriesShape[] | null>(null);
   const builtHeightRef = useRef<number | null>(null);
+  const builtAnnotationsRef = useRef<HistoryAnnotation[] | null | undefined>(undefined);
   const heightRef = useRef(height);
 
   // Lifecycle-only: attaches the resize listener once and destroys the plot
@@ -95,7 +116,10 @@ export function HistoryChart({ times, series, height = 360 }: HistoryChartProps)
 
     const existing = plotRef.current;
     const rebuild =
-      !existing || builtShapeRef.current !== seriesShape || builtHeightRef.current !== height;
+      !existing ||
+      builtShapeRef.current !== seriesShape ||
+      builtHeightRef.current !== height ||
+      builtAnnotationsRef.current !== stableAnnotations;
 
     if (rebuild) {
       existing?.destroy();
@@ -118,12 +142,18 @@ export function HistoryChart({ times, series, height = 360 }: HistoryChartProps)
         ],
         cursor: { drag: { x: true, y: false } }, // drag-to-zoom
         legend: { live: true },
-        plugins: [tooltipPlugin(seriesShape)],
+        plugins: [
+          tooltipPlugin(seriesShape),
+          //  Omitted entirely when the prop is absent, so /history builds the
+          //  exact plugin list it always has.
+          ...(stableAnnotations ? [annotationPlugin(stableAnnotations)] : []),
+        ],
       };
 
       plotRef.current = new uPlot(opts, data, host);
       builtShapeRef.current = seriesShape;
       builtHeightRef.current = height;
+      builtAnnotationsRef.current = stableAnnotations;
       return;
     }
 
@@ -139,7 +169,7 @@ export function HistoryChart({ times, series, height = 360 }: HistoryChartProps)
     existing.setData(data, reset);
     // Runs on every shape/height change (rebuild) AND on every data tick
     // (setData) -- see the branch above for which happens.
-  }, [height, seriesShape, times, series]);
+  }, [height, seriesShape, stableAnnotations, times, series]);
 
   return <div ref={hostRef} className="pf-history-chart" style={{ height }} />;
 }

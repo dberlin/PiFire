@@ -1,10 +1,26 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render } from "@testing-library/react";
-import { HistoryChart } from "./HistoryChart";
+import type uPlot from "uplot";
+import type { HistoryAnnotation } from "../../helpers/history/historyApi";
 import { formatTooltipValue } from "./tooltipFormat";
 import { createTooltipRow } from "./tooltipRow";
 
+// uPlot reads `plugins` only when a plot is CONSTRUCTED, so "was the annotation
+// plugin installed" is not observable from the DOM -- the factory call is the
+// seam. Mocking it also keeps these tests off a real canvas.
+const annotationPluginMock = rs.fn(
+  (_annotations: HistoryAnnotation[]) => ({ hooks: {} }) as uPlot.Plugin,
+);
+rs.mock("./annotationPlugin", () => ({
+  annotationPlugin: (annotations: HistoryAnnotation[]) => annotationPluginMock(annotations),
+}));
+
+const { HistoryChart } = await import("./HistoryChart");
+
 afterEach(cleanup);
+beforeEach(() => {
+  annotationPluginMock.mockClear();
+});
 
 const times = [1, 2, 3, 4, 5];
 const series = [
@@ -114,5 +130,50 @@ describe("formatTooltipValue", () => {
 
   it("renders a numeric value rounded to one decimal with a degree sign", () => {
     expect(formatTooltipValue(224.36)).toBe("224.4°");
+  });
+
+  it("installs no annotation plugin when the prop is absent -- /history is unchanged", () => {
+    render(<HistoryChart times={times} series={series} />);
+    expect(annotationPluginMock).not.toHaveBeenCalled();
+  });
+
+  it("installs the annotation plugin when annotations are supplied", () => {
+    const annotations: HistoryAnnotation[] = [
+      { type: "line", xMin: 2, xMax: 2, borderColor: "#abc", label: { content: "Smoke" } },
+    ];
+    render(<HistoryChart times={times} series={series} annotations={annotations} />);
+    expect(annotationPluginMock.mock.calls[0][0]).toEqual(annotations);
+  });
+
+  it("rebuilds the plot when the annotations change", () => {
+    // The rebuild is the point: the plugin list is frozen at construction, so
+    // toggling markers off has to destroy and rebuild, not just setData.
+    const first: HistoryAnnotation[] = [{ type: "line", xMin: 2, xMax: 2, borderColor: "#abc" }];
+    const second: HistoryAnnotation[] = [{ type: "line", xMin: 3, xMax: 3, borderColor: "#def" }];
+    const { rerender } = render(<HistoryChart times={times} series={series} annotations={first} />);
+    expect(annotationPluginMock.mock.calls).toHaveLength(1);
+
+    rerender(<HistoryChart times={times} series={series} annotations={second} />);
+    expect(annotationPluginMock.mock.calls).toHaveLength(2);
+    expect(annotationPluginMock.mock.calls[1][0]).toEqual(second);
+  });
+
+  it("does not rebuild on a plain data tick with unchanged annotations", () => {
+    const annotations: HistoryAnnotation[] = [
+      { type: "line", xMin: 2, xMax: 2, borderColor: "#abc" },
+    ];
+    const { rerender } = render(
+      <HistoryChart times={times} series={series} annotations={annotations} />,
+    );
+    expect(annotationPluginMock.mock.calls).toHaveLength(1);
+
+    rerender(
+      <HistoryChart
+        times={[...times, 6]}
+        series={series.map((s) => ({ ...s, values: [...s.values, 230] }))}
+        annotations={[{ type: "line", xMin: 2, xMax: 2, borderColor: "#abc" }]}
+      />,
+    );
+    expect(annotationPluginMock.mock.calls).toHaveLength(1);
   });
 });

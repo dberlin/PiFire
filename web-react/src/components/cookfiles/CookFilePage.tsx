@@ -7,6 +7,7 @@ import {
   fetchCookFileDetail,
   recoverCookFile,
 } from "../../helpers/files/cookfileApi";
+import { CookFileChart } from "./CookFileChart";
 import { CookFileMeta } from "./CookFileMeta";
 
 // The cook-file detail route. One fetch on mount (and on each reload), no
@@ -122,6 +123,13 @@ export function CookFilePage() {
                   labels={detail.graph_labels}
                   onChanged={reload}
                 />
+              </div>
+            </div>
+
+            <div className="pf-section">
+              <h2 className="pf-section-title">Chart</h2>
+              <div className="pf-section-body">
+                <CookFileChart filename={detail.filename} />
               </div>
             </div>
           </>

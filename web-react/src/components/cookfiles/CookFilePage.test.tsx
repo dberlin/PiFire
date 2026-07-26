@@ -17,6 +17,10 @@ rs.mock("../../helpers/files/cookfileApi", () => ({
 
 // The metadata card has its own suite; stubbed here so this module's
 // assertions stay about routing, loading and the recovery branch.
+rs.mock("./CookFileChart", () => ({
+  CookFileChart: () => <div data-testid="cookfile-chart" />,
+}));
+
 rs.mock("./CookFileMeta", () => ({
   CookFileMeta: ({ filename }: { filename: string }) => (
     <div data-testid="cookfile-meta" data-filename={filename} />

@@ -3208,7 +3208,7 @@ for the same reason: two probes may share a display name.
 - `toCookChartInput(data: CookFileChartData): ChartInput | null` — `null` when nothing is plottable.
 - `CookFileChart` props: `{ filename: string }`.
 
-- [ ] **Step 1: `cookfileAdapter.ts` — the one real gap**
+- [x] **Step 1: `cookfileAdapter.ts` — the one real gap**
 
 ```ts
 import { hasPlottableHistory, toChartInput } from "../history/historyAdapter";
@@ -3263,7 +3263,7 @@ export function toChartAnnotations(
 
 Tests must include: numeric labels adapt; **string labels return `null`**; an empty payload returns `null`; a payload whose datasets are all empty returns `null`; annotations convert ms→s and preserve `borderColor` and `label.content`.
 
-- [ ] **Step 2: `annotationPlugin.ts`**
+- [x] **Step 2: `annotationPlugin.ts`**
 
 ```ts
 import type uPlot from "uplot";
@@ -3320,7 +3320,7 @@ export function annotationPlugin(annotations: HistoryAnnotation[]): uPlot.Plugin
 
 Test it against a fake `uPlot` object (a `ctx` of `rs.fn()` spies plus a `bbox` and a `valToPos`): asserts one `stroke()` per in-range annotation, zero for an out-of-range one, the caption drawn when `label.content` is present and skipped when it is not, and `save`/`restore` balanced.
 
-- [ ] **Step 3: Extend `HistoryChart`**
+- [x] **Step 3: Extend `HistoryChart`**
 
 Add the optional prop and install the plugin. Two things to get right:
 
@@ -3341,7 +3341,7 @@ export interface HistoryChartProps {
 
 `HistoryChart.test.tsx` gains: with no `annotations` prop the plugin count is unchanged (guards `/history` against a visual regression); with annotations it is installed; changing the annotations array rebuilds the plot.
 
-- [ ] **Step 4: `CookFileChart.tsx`**
+- [x] **Step 4: `CookFileChart.tsx`**
 
 ```tsx
 // Fetches the chart separately from the detail payload, exactly as Flask does
@@ -3358,7 +3358,7 @@ Controls, matching F2 #16/#17 as far as the shipped chart allows:
 - **Download CSV File** anchor → `cookFileExportUrl(filename, "data")`, mirroring the button under the Flask graph card (`index.html:223`).
 - When `toCookChartInput` returns `null`: render an explicit message distinguishing "no chart data in this file" from "this file's chart data is in an old format" (the string-label case), the latter pointing at the repair action.
 
-- [ ] **Step 5: Gate and commit**
+- [x] **Step 5: Gate and commit**
 
 ```bash
 cd web-react
