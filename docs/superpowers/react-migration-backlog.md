@@ -32,8 +32,8 @@ it by path and line number; those citations point here.
   shared `SaveBar`.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
-  polling, and an Exit control. **Functionally complete but entirely
-  unstyled — see the open item below.**
+  polling, and an Exit control. Functionally complete; styling is being
+  finished — see open item 1.
 
 ### Behaviour and correctness
 
@@ -92,22 +92,36 @@ it by path and line number; those citations point here.
 
 ## OPEN
 
-### 1. Wizard has no CSS at all — highest priority
+### 1. Wizard styling — IN PROGRESS
 
-43 `pf-*` class names used across `web-react/src/components/wizard/**` match
-**zero rules**; there is no `wizard.css`. Only `pf-btn` and `pf-fit` resolve,
-from `dashboard.css`. At 1280×720 the wizard renders as raw HTML: step names run
-together as `WelcomeGrill PlatformProbesDisplayDistance / HopperFinish`, buttons
-stack at x=0, no padding, no card treatment, no modal chrome.
+**This item's original text was wrong by the time anyone read it.** It claimed
+"there is no `wizard.css`". There is: `web-react/src/components/wizard/wizard.css`,
+624 lines, committed 2026-07-25. It was written during the same day the backlog
+was reconciled, so the entry described a state that had already passed. Do not
+trust a count in this file without re-measuring — see the measurement note below.
 
-Every wizard unit test and all four wizard e2e specs pass against it, because
-they assert on text and roles. This is the first-run experience.
+What was true: the wizard shipped functionally complete and entirely unstyled,
+every `pf-*` class it used resolved to nothing, and at 1280×720 it rendered as
+raw HTML with step names running together as
+`WelcomeGrill PlatformProbesDisplayDistance / HopperFinish`. Every wizard unit
+test and all four wizard e2e specs passed against that, because they assert on
+text and roles, never on whether a class is defined.
 
-Plan: `docs/superpowers/plans/2026-07-25-react-wizard-styling.md` (8 tasks).
+Being executed now from
+`docs/superpowers/plans/2026-07-25-react-wizard-styling.md` (8 tasks) in the
+`PiFire-wizcss` workspace.
 
-**How this was missed:** no test in the project asserted that a class it uses
-is defined anywhere, and until 2026-07-25 nobody had opened the wizard in a
-browser.
+**How the original gap was missed:** no test in the project asserted that a class
+it uses is defined anywhere, and until 2026-07-25 nobody had opened the wizard in
+a browser.
+
+**Measuring "undefined classes" honestly.** A naive
+`grep -o 'pf-[a-z0-9-]*'` over `.tsx` and `.css` overcounts badly — as of this
+writing it reports 257 used / 215 defined / 44 undefined, but the "undefined"
+list is mostly noise: CSS custom properties (`--pf-btn-h`, `--pf-col-w`,
+`--pf-gauge-num`) match the same pattern, and template-literal prefixes
+(`pf-badge-`, `pf-banner--`) are never whole class names. Any real number has to
+exclude `--`-prefixed tokens and resolve dynamic class construction.
 
 ### 2. Dashboard reflow
 
@@ -155,19 +169,40 @@ signal, and offers a **Recheck** that asks `GET /api/sys/check_alive` directly
 endpoint that clears the error, or a liveness signal that is not sticky — is
 still open.
 
-### 5. Remaining audit findings
+### 5. Tailwind v4 migration — SPEC PENDING
+
+Move `web-react/`'s six hand-written stylesheets (2,603 lines: `theme.css`,
+`dashboard.css` 1149, `wizard.css` 624, `settings.css` 344, `shell.css` 315,
+`historyChart.css` 61) onto Tailwind v4 via the Rsbuild integration
+(<https://rsbuild.rs/guide/styling/tailwindcss>).
+
+Hard requirement: **visually identical before and after**, except where the
+"before" is clearly broken. The gate already exists in embryo and must be
+generalised rather than reinvented — `tests/e2e/layoutBaseline.ts` +
+`dashboard-layout-1280x720.json` capture a per-landmark box plus
+`fontSize`/`fontWeight`, compared with `BOX_TOL = 2`px and an `EXACT` override
+table. It is deliberately **not** a `toHaveScreenshot()` gate: `index.html`
+loads Barlow from `fonts.googleapis.com`, so pixels depend on the network and
+the host font stack, and masking the volatile regions would mask exactly the
+typography the gate exists to protect.
+
+Blocked on the wizard-styling and dashboard-reflow slices landing first — both
+are rewriting the two largest stylesheets right now, and this would collide with
+both.
+
+### 6. Remaining audit findings
 
 `docs/superpowers/audits/2026-07-25-audit-triage.md` — roughly 40 findings in 10
 slices. Slices for save-failure, notifications, guards, and the dashboard have
 been written and executed or planned; the rest are untouched.
 
-### 6. Accessor rename WAVE 2
+### 7. Accessor rename WAVE 2
 
 Four remaining items, including `read_warnings()` → `drain_warnings()`. That one
 is a genuine cross-consumer bug, not just a naming problem: the dash routes and
 socketio both call it, so whichever polls first consumes the other's warnings.
 
-### 7. Un-migrated Flask pages
+### 8. Un-migrated Flask pages
 
 Roughly ordered by daily-use value:
 
