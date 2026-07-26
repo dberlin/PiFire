@@ -169,7 +169,13 @@ signal, and offers a **Recheck** that asks `GET /api/sys/check_alive` directly
 endpoint that clears the error, or a liveness signal that is not sticky — is
 still open.
 
-### 5. Tailwind v4 migration — SPEC PENDING
+### 5. Tailwind v4 migration — SPEC WRITTEN, BLOCKED
+
+Spec: `docs/superpowers/specs/2026-07-25-tailwind-v4-migration-design.md`.
+Ratified: token bridge (`@theme` + `@apply`, `pf-*` names and JSX survive), gate
+extended to every page at 1280×720 and 390×844, implementation gated on the
+wizard-styling and dashboard-reflow slices merging first.
+
 
 Move `web-react/`'s six hand-written stylesheets (2,603 lines: `theme.css`,
 `dashboard.css` 1149, `wizard.css` 624, `settings.css` 344, `shell.css` 315,
