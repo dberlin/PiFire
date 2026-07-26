@@ -69,3 +69,15 @@ test("the app and demo servers never collide by default", () => {
   const p = resolvePorts({});
   expect(p.appPort).not.toBe(p.demoPort);
 });
+
+test("a unit test run never sees the shell's PUBLIC_PIFIRE_URL", () => {
+  // The seam this pins: `ports.ts` reads process.env, but the twelve app
+  // modules that pick a backend origin read `import.meta.env.PUBLIC_PIFIRE_URL`,
+  // which Rsbuild INLINES from the ambient shell at build time. Every parallel
+  // workspace is told to export that variable to reach its own backend, so
+  // without the `source.define` in rstest.config.ts the suite asserted against
+  // whichever port the developer's shell happened to name -- useLiveState's
+  // fallback test failed with `http://localhost:5300` in exactly the setup the
+  // docs prescribe. Tests must always exercise the unset case.
+  expect(import.meta.env.PUBLIC_PIFIRE_URL).toBe("");
+});

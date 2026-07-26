@@ -9,10 +9,21 @@ import { defineConfig } from "@rstest/core";
 // esbuild's automatic JSX runtime out of the box via Vite). Without the React
 // plugin, .tsx test files fail at runtime with "React is not defined" because
 // nothing configures the automatic JSX transform for rstest's Rspack build.
+// Rsbuild inlines every PUBLIC_* variable from the ambient shell at build time,
+// and a dozen modules read `import.meta.env.PUBLIC_PIFIRE_URL` to choose the
+// backend origin (useLiveState.ts, DashboardRoute.tsx, historyApi.ts,
+// settingsRoutes.ts, wizardRoutes.ts, useSaveSettings.ts, UnitsTab.tsx). That is
+// right for a dev server and wrong for a test run: a checkout that exports
+// PUBLIC_PIFIRE_URL to reach its own backend -- which ./ports.ts tells every
+// parallel workspace to do -- made useLiveState.test.tsx assert against that
+// shell's port and the suite went red. A unit test must not depend on which
+// backend the developer happens to be running, so tests always see the unset
+// case and exercise the in-code fallback.
 const shared = {
   setupFiles: ["./src/test-setup.ts"],
   exclude: ["**/node_modules/**", "tests/e2e/**"],
   plugins: [pluginReact()],
+  source: { define: { "import.meta.env.PUBLIC_PIFIRE_URL": JSON.stringify("") } },
 };
 
 export default defineConfig({
