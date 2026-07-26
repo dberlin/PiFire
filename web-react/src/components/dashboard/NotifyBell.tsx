@@ -1,6 +1,6 @@
-// The affordance that opens a probe's target-notification modal. Filled and
-// accented while a target is armed, muted and struck through when it is not --
-// the same two states as the Flask probe card's bell button
+// The affordance that opens a probe's notification modal (target, high limit,
+// low limit). Filled and accented while ANY of the three is armed, muted and
+// struck through when none is -- the same two states as the Flask bell button
 // (_macro_dash_default.html:108-121, btn-primary vs btn-outline + fa-bell-slash).
 //
 // Its own module because the food-probe card and the primary probe both need

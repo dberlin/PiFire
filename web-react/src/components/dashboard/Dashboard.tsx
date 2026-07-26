@@ -287,7 +287,9 @@ export function Dashboard({
               <div className="pf-dash-card pf-dash-bellbox">
                 <NotifyBell
                   probeName={dash.primaryProbe.title}
-                  on={dash.primaryProbe.targetReq}
+                  // Any of the three entries, not just the target -- the modal
+                  // behind this bell edits all three (deriveView.ts:133-137).
+                  on={dash.primaryProbe.hasNotifications}
                   onClick={() => openNotify(dash.primaryProbe.label)}
                 />
               </div>

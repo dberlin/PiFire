@@ -24,17 +24,19 @@ describe("probeCard identity", () => {
 });
 
 describe("probeCard notifyOn", () => {
-  // targetReq, NOT hasNotifications: socket_io.py:832-848 sets
-  // hasNotifications when ANY of the probe's three notify entries is armed,
-  // including a high/low LIMIT alert, which this bell does not control.
-  it("is targetReq", () => {
-    expect(card({ targetReq: true, target: 203 }).notifyOn).toBe(true);
-    expect(card({ targetReq: false, target: 203 }).notifyOn).toBe(false);
+  // hasNotifications, NOT targetReq. blueprints/mobile/socket_io.py:770-795
+  // sets it when ANY of the probe's three notify entries is armed, and since
+  // slice 2 the bell opens a modal that edits all three -- so a probe carrying
+  // only a high-limit alert used to show a struck-through bell for a
+  // notification it really had.
+  it("is set by an armed target", () => {
+    expect(card({ targetReq: true, hasNotifications: true, target: 203 }).notifyOn).toBe(true);
+    expect(card({ targetReq: false, hasNotifications: false, target: 203 }).notifyOn).toBe(false);
   });
 
-  it("ignores hasNotifications, which a limit alert also sets", () => {
+  it("is set by a limit alert with no target armed", () => {
     expect(card({ targetReq: false, hasNotifications: true, highLimitReq: true }).notifyOn).toBe(
-      false,
+      true,
     );
   });
 });

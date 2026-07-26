@@ -51,7 +51,8 @@ export interface ProbeCardView {
   tgtColor: string;
   barPct: number;
   barColor: string;
-  /** Whether a TARGET notification is armed on this probe. */
+  /** Whether ANY notification -- target, high limit or low limit -- is armed on
+   *  this probe. */
   notifyOn: boolean;
   /** Formatted time-to-target, or null when there is nothing to show. */
   etaStr: string | null;
@@ -132,10 +133,12 @@ function probeCard(fp: LiveState["foodProbes"][number], units: "F" | "C"): Probe
     tgtColor: hasTarget ? (done ? OK : YELLOW) : DIM,
     barPct: hasTarget ? Math.max(2, Math.min(100, (fp.temp / fp.target) * 100)) : 0,
     barColor: done ? OK : "var(--accent)",
-    // targetReq, NOT hasNotifications: the latter is also true when only a
-    // high/low LIMIT alert is armed (blueprints/mobile/socket_io.py:832-848),
-    // which the bell on this card does not control.
-    notifyOn: fp.targetReq,
+    // hasNotifications, NOT targetReq: the backend sets it when ANY of the
+    // probe's three notify entries is armed (blueprints/mobile/socket_io.py:
+    // 770-795), and the bell this feeds opens a modal that edits all three. A
+    // probe carrying only a high/low LIMIT alert would otherwise show a
+    // struck-through bell for a notification it really had.
+    notifyOn: fp.hasNotifications,
     // The backend recomputes eta each control pass for armed target entries and
     // writes back seconds or None (notify/notifications.py:81-99); the wire type
     // also allows a string. Matches the Flask ETA button, which is rendered only

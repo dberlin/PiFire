@@ -82,10 +82,14 @@ describe("ProbeCard", () => {
     expect(onOpenNotify).toHaveBeenCalledWith("Probe1");
   });
 
-  it("presses the bell while a target notification is armed", () => {
+  it("presses the bell while any notification is armed", () => {
     const armed = deriveView({
       ...FIXTURE_DASH,
-      foodProbes: [{ ...FIXTURE_DASH.foodProbes[0], target: 203, targetReq: true }],
+      foodProbes: [
+        // A LIMIT alert alone, with no target: the bell opens a modal that edits
+        // all three entries, so it must light for any of them.
+        { ...FIXTURE_DASH.foodProbes[0], highLimitReq: true, hasNotifications: true },
+      ],
     });
     const { unmount } = render(<ProbeCard p={armed.probes[0]} onOpenNotify={rs.fn()} />);
     expect(screen.getByRole("button", { name: /^Notifications for/ })).toHaveAttribute(
