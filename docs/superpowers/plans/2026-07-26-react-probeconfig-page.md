@@ -1328,7 +1328,7 @@ Modify `blueprints/api/routes.py`
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing seam test** `src/helpers/probes/probeMapTypes.test.ts` (`.ts` →
+- [x] **Step 1: Write the failing seam test** `src/helpers/probes/probeMapTypes.test.ts` (`.ts` →
       node project). This is the shape pin for a cross-process handoff, so it asserts **both
       ends**: the literal key names Python emits, and the fields the React cards consume.
       ```ts
@@ -1372,10 +1372,10 @@ Modify `blueprints/api/routes.py`
       });
       ```
 
-- [ ] **Step 2: Run, confirm fail** (module does not exist):
+- [x] **Step 2: Run, confirm fail** (module does not exist):
       `cd web-react && bun run test src/helpers/probes/probeMapTypes.test.ts`
 
-- [ ] **Step 3: Write `probeMapTypes.ts`.**
+- [x] **Step 3: Write `probeMapTypes.ts`.**
       ```ts
       import type { ProbeModuleData } from "../wizard/probeTypes";
 
@@ -1393,7 +1393,7 @@ Modify `blueprints/api/routes.py`
       export type ApplyProbeMapResult = { ok: true } | { ok: false; message: string };
       ```
 
-- [ ] **Step 4: Write the failing client tests** `probeMapApi.test.ts` (`.ts` → node). Use
+- [x] **Step 4: Write the failing client tests** `probeMapApi.test.ts` (`.ts` → node). Use
       `rs.fn`/`rs.stubGlobal` — **`vi` does not exist**:
       ```ts
       import { beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -1491,9 +1491,9 @@ Modify `blueprints/api/routes.py`
       });
       ```
 
-- [ ] **Step 5: Run, confirm fail.** `bun run test src/helpers/probes/probeMapApi.test.ts`
+- [x] **Step 5: Run, confirm fail.** `bun run test src/helpers/probes/probeMapApi.test.ts`
 
-- [ ] **Step 6: Write `probeMapApi.ts`.** This is the **only** module allowed to import both
+- [x] **Step 6: Write `probeMapApi.ts`.** This is the **only** module allowed to import both
       `ProbeMap` names — alias the generated one out of the way (`settingsTypes.gen.ts:510` also
       exports `ProbeMap`, with every member optional):
       ```ts
@@ -1562,20 +1562,25 @@ Modify `blueprints/api/routes.py`
       export function readLiveProbeMap(settings: Settings): ProbeMap {
         const raw = settings?.probe_settings?.probe_map;
         if (!raw) return EMPTY_MAP;
+        // CORRECTED 2026-07-26: a single `as` does NOT compile. The generated
+        // members are bare index signatures ({[k: string]: unknown}[]), which TS
+        // rejects as insufficiently overlapping (TS2352). `as unknown as` is
+        // required, and is the same idiom NotificationsTab.tsx:22 already uses
+        // for this exact generated-to-strict crossing. Same for readLiveProfiles.
         return {
-          probe_devices: (raw.probe_devices ?? []) as ProbeMap["probe_devices"],
-          probe_info: (raw.probe_info ?? []) as ProbeMap["probe_info"],
+          probe_devices: (raw.probe_devices ?? []) as unknown as ProbeMap["probe_devices"],
+          probe_info: (raw.probe_info ?? []) as unknown as ProbeMap["probe_info"],
         };
       }
 
       /** Live settings store probe_profiles keyed by id; PortForm's picker takes a
        *  list. Same flattening /api/wizard/state does (api_wizard/routes.py:129-130). */
       export function readLiveProfiles(settings: Settings): ProbeProfile[] {
-        return Object.values(settings?.probe_settings?.probe_profiles ?? {}) as ProbeProfile[];
+        return Object.values(settings?.probe_settings?.probe_profiles ?? {}) as unknown as ProbeProfile[];
       }
       ```
 
-- [ ] **Step 7: Write `probeMapRoutes.ts` + its test.** Mirrors
+- [x] **Step 7: Write `probeMapRoutes.ts` + its test.** Mirrors
       `helpers/wizard/wizardRoutes.ts:1-10` exactly:
       ```ts
       import { getProbeModules } from "./probeMapApi";
@@ -1593,7 +1598,7 @@ Modify `blueprints/api/routes.py`
       Test: stub `fetch`, assert the loader resolves the catalog, and assert it **rejects** when
       the endpoint 500s (that is what makes the errorElement fire).
 
-- [ ] **Step 8: Full gate.**
+- [x] **Step 8: Full gate.**
       ```sh
       cd web-react && bun run typecheck && bun run lint && bun run test && bun run gen:types:check
       ```
@@ -1601,7 +1606,7 @@ Modify `blueprints/api/routes.py`
       warnings. `gen:types:check` must pass unchanged — **no Python schema changed in Tasks 1–3**,
       so a diff here means something unrelated drifted; investigate rather than regenerating.
 
-- [ ] **Step 9: Commit.** **Deliverable:** `bun run test src/helpers/probes` is green and no
+- [x] **Step 9: Commit.** **Deliverable:** `bun run test src/helpers/probes` is green and no
       component imports both `ProbeMap` types.
 
 ---
