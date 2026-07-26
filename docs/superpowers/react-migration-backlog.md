@@ -424,55 +424,78 @@ Roughly ordered by daily-use value:
 
 ### 9. Per-probe notifications SLICE 2 — high/low limit alerts
 
+**SHIPPED 2026-07-26.** Both limit alerts are in the React dashboard: the probe
+notify modal now carries all three of Flask's accordion cards, and one Set
+writes all three entries as three addressed `notify_updates` in a single POST.
+Model in `web-react/src/helpers/notify/notifyState.ts` (`LimitEdit`,
+`LimitAction`, `NotifyEdit`, `limitEditFields`, `saveNotifyEdit`), UI in
+`ProbeNotifyModal.tsx`.
+
 **This item existed nowhere in this backlog until 2026-07-26.** Slice 1 shipped
 and the groundwork for slice 2 was written up carefully — but only inside
 `plans/2026-07-25-react-probe-notifications.md`, under a "Slice 2 groundwork"
 heading. A reader of the backlog alone would have concluded per-probe
-notifications were finished. They are not: the React dashboard shows the target
-bell only, and **there is no high/low limit UI at all**.
+notifications were finished; they were not. That is why this entry exists, and
+why the answers below are recorded here rather than left in the plan.
 
-Read that plan's groundwork section before planning this; it is good and should
-not be re-derived. What has changed under it since it was written:
+What the slice settled:
 
-- **`applyTargetEdit` no longer exists.** Slice 1's write was rebuilt on
-  2026-07-26 (see "Notify writes are addressed per entry" under SHIPPED). The
-  reducer is now `targetEditFields(edit)` returning just the fields, and the
-  write is `postNotifyUpdates(baseUrl, [{label, type, fields}])`. This makes
-  slice 2 *easier* than the plan assumes: two more entry types is two more
-  entries in the `notify_updates` array, and the plan's whole
-  "`applyTargetEdit` must leave the limit entries byte-identical" argument is
-  now structural — an addressed write cannot touch an entry it does not name.
-- **The plan's Flask bug #1 is FIXED**, not "decide about rather than port":
-  `setNotify` read `_low_limit_shutdown` for the `reignite` flag. See the
-  bug list above. Slice 2 should implement the *intended* behaviour.
-
-Still open and still true:
-
-- **`triggered` must be pre-armed by the client on save**, or the alarm fires
-  instantly. `dash_default.js` sets `triggered = current > target` for the high
-  limit and `current < target` for the low — i.e. mark it already-triggered when
-  the condition is *already* satisfied, so the backend stays quiet until the
-  temperature leaves and re-enters range. This is why the per-field REST
-  grammar cannot be used for slice 2 either: `/api/set/limit_high|limit_low/...`
+- **The suspected second backend bug was REAL, and is fixed.** Resolved by
+  running the code, as this item demanded, not by re-reading it: restoring the
+  original gate (`fired = not control["notify_data"][index]["req"]`) turns
+  `tests/unit/notify/test_notifications.py::test_check_notify_limit_shutdown_*`
+  red — a `probe_limit_high` entry with `shutdown: True` and the temperature
+  310°F past its 300°F limit leaves `control["mode"] == Hold`. Only the `probe`
+  branch ever clears `req`; a limit entry stays armed for the whole cook, so the
+  gate was permanently False and "Shutdown PiFire" beside every high/low limit
+  was dead. Fixed in `6c42611d` — `fired` is `triggered` for a limit entry (the
+  flag the neighbouring `reignite` branch already used) and `not req` for the
+  one-shot probe/timer/test entries. Copying the probe branch's `req = False`
+  would have been the WRONG fix: it disarms the alert for the rest of the cook.
+- **RULING on the Flask asymmetry: ported, not flattened.** The limit
+  temperatures render for every probe; the limit ACTIONS render for the Primary
+  probe only. "Shutdown PiFire" on a high limit is a runaway-heat cutoff and
+  "Attempt Re-ignite" on a low limit is a fire-out response — both are
+  statements about the FIRE, and only the primary probe measures the fire. A
+  food probe reading low means cold meat, not a dead fire: arming a re-ignite
+  there fires the moment cold food goes on the grate, and pre-arming `triggered`
+  cannot help, because the temperature genuinely leaves the range and comes
+  back. The two halves also complement each other — the target action set is
+  food-probe-only, the limit action set is primary-only — so every probe is
+  offered exactly one action set.
+- **`triggered` is pre-armed by the client, on the comparison the backend FIRES
+  on.** `>=` for `equal_above`, `<=` for `equal_below`. Flask uses a strict
+  `>` / `<` (`dash_default.js:724, :766`), so at exactly the limit it writes
+  `triggered: false` for a condition that already holds and the alarm sounds
+  immediately — the one boundary pre-arming exists to cover. This is also why
+  the per-field REST grammar is unusable here: `/api/set/limit_high|limit_low/…`
   accepts `req`/`shutdown`/`keep_warm`/`reignite`/`target` and **cannot set
-  `triggered`** (`common/api_commands.py`).
-- **Suspected second backend bug, still unverified.** The plan records that
-  `notify/notifications.py`'s shutdown branch gates on
-  `not control["notify_data"][index]["req"]`, and flags what that means for
-  limit entries as *read, not executed*. Resolve it by running the code, not by
-  re-reading it, and do that before building UI on top.
-- **Flask renders the limits asymmetrically**: the temperature sliders appear
-  for every probe, but the "Shutdown PiFire" and "Attempt Re-ignite" checkboxes
-  render for the **Primary probe only**. Decide deliberately whether to port
-  that asymmetry or offer the actions everywhere.
-- **Model the expiry action as ONE choice, not two booleans.** The backend runs
-  `if shutdown … elif keep_warm … elif reignite`, so a low-limit entry carrying
-  both `shutdown` and `reignite` silently drops the re-ignite. Slice 1 already
-  solved exactly this for the target modal with a single `TargetAction`
-  (`"none" | "shutdown" | "keepWarm"`) precisely so the UI cannot express a
-  state the backend will not honour. Reuse that pattern rather than porting
-  Flask's two-checkboxes-that-uncheck-each-other, which is the weaker form of
-  the same idea and is what the fixed bug hid behind.
+  `triggered`** (`common/api_commands.py:544-551`).
+- **One `LimitAction`, not two booleans** — `"none" | "shutdown" | "reignite"`,
+  the same shape as slice 1's `TargetAction`, so the UI cannot express the
+  shutdown-plus-reignite state the backend silently collapses. No keep-warm on a
+  limit: no UI in either app has ever offered it and the socket payload
+  publishes no flag to read it back from. No re-ignite on the HIGH limit for the
+  same reason — there is no `highLimitReignite` on the wire.
+
+Two consequences worth knowing:
+
+1. **The modal owns all three entries, so Set rewrites all three** — including
+   re-arming each limit's `triggered` from the probe's live reading, which is
+   what the backend itself would compute on its next pass. `limitEditFields`
+   also states every input to the backend's action tail (`shutdown`,
+   `keep_warm`, `reignite`) rather than only the control it shows, so an action
+   armed by the mobile DTO or by `/api/set/limit_*` cannot act on an alert whose
+   UI displays none. It names `condition` too: `notify.set` APPENDS an entry it
+   cannot find, and `check_notify` reads `item["condition"]` unguarded.
+2. **The bell now means "any notification", not "a target"** — it reads
+   `hasNotifications`, which the backend already sets when any of the label's
+   three entries is armed. The ETA readout is still target-only: the backend
+   computes `eta` for `probe` entries alone.
+
+**Not done, deliberately:** no cross-validation that the low limit sits below
+the high limit. Flask allows the overlap and the backend fires both alarms
+happily; forbidding it here would be a new rule, not a port.
 
 ### 9a. Live probe-map editing — three gaps disclosed by the probeconfig slice
 
