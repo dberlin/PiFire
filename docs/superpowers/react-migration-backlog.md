@@ -25,8 +25,20 @@ it by path and line number; those citations point here.
   through Outlet context; a structural test enforces the one-call rule, because
   a second socket fails no other test — every component test mocks the hook.
 - **History page** (`/history`) — uPlot chart, minutes window, drag-zoom,
-  reset, cursor tooltip, CSV export link. Chart only, as scoped; the cook-file
-  list/upload/delete still belongs to the un-migrated cookfile/recipes item.
+  reset, cursor tooltip, CSV export link, **plus the saved-cook list** (2026-07-26:
+  pagination, sort, per-page, upload, download, delete), which Flask also renders
+  on this page rather than on one of its own.
+- **Cook-file browser** (`/history` list + `/cookfiles/:filename`) — SHIPPED
+  2026-07-26 (`plans/2026-07-26-react-recipes-cookfile.md`, plan 1, 14 tasks).
+  The detail route carries the chart with mode-change annotations, the events
+  table with totals and per-event detail, both CSV exports, title and probe-label
+  editing, comments with attached photos and a lightbox, the media grid
+  (upload/delete/thumbnail), and the Attempt Conversion / Attempt Repair prompt
+  for an archive that will not open. Backed by a new `blueprints/api_files/`
+  surface (16 endpoints) that resolves every client-supplied filename through one
+  realpath-containment helper — the legacy `/cookfile` blueprint takes a
+  filesystem path from the client and uses it unvalidated, which is why none of
+  its routes were reused.
 - **Settings** — 12 tabs: General, Units, Pellets, Safety, WorkMode, Pwm,
   Startup, Controller, History, Notifications, Platform (read-only), plus the
   shared `SaveBar`.
@@ -333,8 +345,17 @@ Roughly ordered by daily-use value:
       the tests for it MUST neutralize `os.system`/`subprocess` before anything
       runs — an `is_real_hardware()` flag is not enough, and this repo has
       really rebooted the developer's machine twice that way.
-- [ ] **recipes** + **cookfile** — recipe editor and cook-file browser (share a
-      data model and need a JSON listing endpoint that does not exist yet)
+- [ ] **recipes** — recipe editor. **PLANNED 2026-07-26** as plan 2 of
+      `plans/2026-07-26-react-recipes-cookfile.md` (outline only, 17 tasks); the
+      **cookfile** half of this entry SHIPPED the same day — see the SHIPPED
+      section. Correction to what this line used to say: recipes and cookfile do
+      **not** "share a data model". They share a ZIP container and a listing
+      shape, and nothing else — different JSON member sets, different metadata
+      keys, no page in common, and **zero** overlapping action names between the
+      two dispatch tables. The listing endpoint this line said "does not exist
+      yet" now does: `GET /api/files/recipes` shipped alongside
+      `GET /api/files/cookfiles` from one handler, so the recipe browser's data
+      layer is already built.
 - [ ] **events** + **logs** — event feed and log viewer
 - [x] **probeconfig** — SHIPPED 2026-07-26 as the `/settings/probes` tab
       (`plans/2026-07-26-react-probeconfig-page.md`, 9 tasks). Both corrections

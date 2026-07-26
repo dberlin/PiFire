@@ -3512,7 +3512,7 @@ jj desc -m "feat(web-react): cook-file comments and media panels"
 
 **Interfaces:** none — this task proves the whole slice against a real backend.
 
-- [ ] **Step 1: Write the spec**
+- [x] **Step 1: Write the spec**
 
 ```ts
 import { expect, test } from "@playwright/test";
@@ -3559,7 +3559,7 @@ Requirements:
 - Clean up in `finally` — the suite is destructive and shared, and a leftover cook file changes the listing another test asserts on.
 - Run with `PIFIRE_DB_PATH` pointing at the DB the backend serves.
 
-- [ ] **Step 2: Run the whole gate, in the main checkout**
+- [x] **Step 2: Run the whole gate, in the main checkout**
 
 ```bash
 cd web-react
@@ -3580,14 +3580,14 @@ git status --short   # expect: no pifire.db, no settings.json, no os_info.json,
                      # no pelletdb.json, no static/img/tmp/* symlinks
 ```
 
-- [ ] **Step 3: Update the backlog**
+- [x] **Step 3: Update the backlog**
 
 In `docs/superpowers/react-migration-backlog.md`:
 - Move the cook-file half of the "recipes + cookfile" entry (line 297) into SHIPPED, naming this plan.
 - Rewrite the remaining entry as **recipes only**, and **correct the "share a data model" claim** — record that they share a container and a listing shape, that `/api/files/recipes` already exists, and point at the plan-2 outline below.
 - Add the History-page note: `/history` now hosts the saved-cook list.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 jj desc -m "test(web-react): e2e cook-file round trip; docs: reconcile the backlog"
@@ -3596,6 +3596,25 @@ jj desc -m "test(web-react): e2e cook-file round trip; docs: reconcile the backl
 **Deliverable:** a green full gate and a backlog that matches the code.
 
 ---
+
+**Result (2026-07-26).** `bunx playwright test tests/e2e/cookfiles.spec.ts --project=app`
+= 3 passed against a real backend (control.py + gunicorn on :5400, PORT=5473).
+Python suite 2938 -> 3069. web-react 1038/116 files -> 1157/127 files. typecheck,
+lint (0 errors, the 2 known warnings), gen:types:check and build all green, and
+`git status --short` is empty.
+
+**Full e2e suite: 9 failures, ALL pre-existing.** Verified by checking out the base
+revision (9f691d57) in this workspace and re-running the same projects against the
+same backend: `--project=app` gave 6 failed / 25 passed there and 6 failed / 28
+passed with this work (the +3 are cookfiles.spec.ts), and the three demo-server
+projects gave an identical 3 failed / 12 passed at both revisions. The failures are
+notify x3, roundtrip x2, settings x1 (all socket/mode-dependent) and
+dashboard-fidelity / -reflow / -panel; the latter three most likely follow the
+chromium-headless-shell bump to build 1234 that @playwright/test 1.62 requires,
+which is newer than the 1228 build the layout baselines were captured with.
+history.spec.ts -- the one spec genuinely downstream of the HistoryChart change --
+passes.
+
 
 ## Parallelization
 
