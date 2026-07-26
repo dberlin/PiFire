@@ -379,3 +379,45 @@ def test_no_production_writer_still_queues_a_whole_control_dict():
                 hits.append(f"{rel}:{node.lineno}")
 
     assert hits == [], f"still queueing whole control dicts: {hits}"
+
+
+# ---------------------------------------------------------------------------
+# THE invariant.
+# ---------------------------------------------------------------------------
+
+_PAIRS = [
+    (("timer", "start", "600"), ("timer", "stop")),
+    (("timer", "stop"), ("timer", "pause")),
+    (("timer", "pause"), ("timer", "stop")),
+    (("psp", "225"), ("splus", "true")),
+    (("psp", "225"), ("psp", "0")),
+    (("notify", "Grill", "target", "203"), ("notify", "Grill", "req", "true")),
+    (("notify", "Grill", "target", "203"), ("notify", "Grill", "target", "0")),
+    (("splus", "true"), ("pmode", "2")),
+    (("timer", "start", "600"), ("timer", "shutdown", "true")),
+]
+
+
+@pytest.mark.parametrize("first,second", _PAIRS, ids=lambda p: "_".join(str(x) for x in p))
+def test_two_commands_in_one_cycle_match_the_same_two_one_cycle_apart(seeded, first, second):
+    """THE invariant. Both residuals named in the task-ctl report were
+    violations of it; every op and every `set` in this plan exists to restore
+    it.
+
+    Scoped to ACCEPTED commands: request-time validation (e.g. the 4-argument
+    timer form's paused-timer rejection) reads a stale blob, and no queue
+    representation can fix a synchronous HTTP answer. See "Where the invariant
+    does not hold" in the plan.
+    """
+
+    def _run(drain_between):
+        write_control(default_control(), WriteKind.OVERWRITE, origin="prop")
+        c.SqliteQueue("queue_control_write").flush()
+        assert _cmd(*first)["result"] == "OK"
+        if drain_between:
+            dsa.execute_control_writes()
+        assert _cmd(*second)["result"] == "OK"
+        dsa.execute_control_writes()
+        return read_control()
+
+    assert _run(drain_between=False) == _run(drain_between=True)
