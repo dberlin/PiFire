@@ -528,6 +528,53 @@ def test_read_cookfile_old_version_returns_warning_and_only_metadata(ds, tmp_pat
     assert struct["metadata"]["version"] == "1.0.0"
 
 
+def _write_versioned_cookfile(path, version):
+    _write_zip(
+        path,
+        {
+            "metadata.json": _base_metadata(version),
+            "graph_data.json": {},
+            "raw_data.json": [],
+            "graph_labels.json": {},
+            "events.json": [],
+            "comments.json": [],
+            "assets.json": [],
+        },
+    )
+
+
+@pytest.mark.parametrize("version", ["2.4.0", "2.0.0", "1.5.0", "1.6.0", "1.5.1", "10.0.0"])
+def test_read_cookfile_accepts_any_version_at_or_above_the_minimum(ds, tmp_path, version):
+    """The version gate compared major/minor/patch INDEPENDENTLY
+    (`fileversion[0] >= min[0] and fileversion[1] >= min[1] and ...`), which
+    is not how semantic versions order. Against the shipped minimum of 1.5.0
+    that made "2.4.0" read as older than "1.5.0" (2 >= 1 passes, but 4 >= 5
+    fails), so a file written by a NEWER PiFire was reported as an old-format
+    file and routed to the repair/upgrade prompt -- which would then rewrite
+    it downwards. Every version here is >= 1.5.0 and must load."""
+    assert _current_version(ds) == "1.5.0", "this test's expectations are keyed to the shipped minimum"
+    path = str(tmp_path / "newer.pifire")
+    _write_versioned_cookfile(path, version)
+
+    struct, status = read_cookfile(path)
+
+    assert status == "OK", f"{version} should not be treated as older than 1.5.0"
+    assert struct["metadata"]["version"] == version
+
+
+@pytest.mark.parametrize("version", ["1.4.9", "1.0.0", "0.9.9", "1.4.0"])
+def test_read_cookfile_still_rejects_versions_below_the_minimum(ds, tmp_path, version):
+    """The counterpart: genuinely older files must still take the
+    upgrade-prompt path. `0.9.9` is the case the independent-component
+    comparison got right only by accident (9 >= 5 passes, 0 >= 1 fails)."""
+    path = str(tmp_path / "older.pifire")
+    _write_versioned_cookfile(path, version)
+
+    _struct, status = read_cookfile(path)
+
+    assert status.startswith("WARNING: Older cookfile version format!")
+
+
 def test_read_cookfile_corrupt_zip_returns_error_status_instead_of_crashing(ds, tmp_path):
     """FIXED (was LATENT BUG #2, HIGH severity) -- file_mgmt/cookfile.py:183.
 

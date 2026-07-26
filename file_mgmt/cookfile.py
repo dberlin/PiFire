@@ -21,6 +21,7 @@ import pathlib
 from common.common import (
     generate_uuid,
     process_metrics,
+    semantic_ver_is_lower,
     semantic_ver_to_list,
     unpack_history,
     create_logger,
@@ -184,15 +185,16 @@ def read_cookfile(filename):
         if status != "OK":
             break  # Exit loop and function, error string in status
         if jsonfile == "metadata":
-            fileversion = semantic_ver_to_list(cook_file_struct["metadata"]["version"])
-            minfileversion = semantic_ver_to_list(
-                settings["versions"]["cookfile"]
-            )  # Minimum file version to load assets
-            if not (
-                (fileversion[0] >= minfileversion[0])
-                and (fileversion[1] >= minfileversion[1])
-                and (fileversion[2] >= minfileversion[2])
-            ):
+            # settings["versions"]["cookfile"] is the MINIMUM file version this
+            # build can load. The comparison used to test major/minor/patch
+            # INDEPENDENTLY (`file[0] >= min[0] and file[1] >= min[1] and
+            # file[2] >= min[2]`), which is not how semantic versions order:
+            # against the shipped minimum of 1.5.0 a file written as 2.4.0
+            # failed the `4 >= 5` term and was reported as an OLDER format, so
+            # a file from a NEWER PiFire was routed to the repair/upgrade
+            # prompt that would rewrite it backwards. semantic_ver_is_lower()
+            # is the correct lexicographic comparison and was already in tree.
+            if semantic_ver_is_lower(cook_file_struct["metadata"]["version"], settings["versions"]["cookfile"]):
                 status = "WARNING: Older cookfile version format! "
                 break  # Exit loop and function, error string in status
 
