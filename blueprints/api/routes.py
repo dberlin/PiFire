@@ -11,7 +11,8 @@ from common.datastore_accessors import (
     read_probe_status,
 )
 from common.api_commands import process_command
-from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update
+from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update, api_response
+from common.pellets_actions import PELLETS_DISPATCH
 from common.server_status import get_server_status
 from common.settings_schema import SettingsValidationError, validate_partial_settings
 from common.controller_deps import guard_controller_selection
@@ -84,6 +85,21 @@ def _api_get_hopper(settings, server_status):
     return jsonify({"hopper_level": pelletlevel, "hopper_pellets": pellets})
 
 
+def _api_get_pellets(settings, server_status):
+    """Whole pellet database over REST.
+
+    The live UI reads this over socket_pellet_data (socket_io.py:174, :224);
+    this route exists so a test can assert store state without going through
+    the UI it is testing, and so a client with no socket can cold-start.
+    """
+    return jsonify(
+        api_response(
+            result="OK",
+            data={"uuid": settings["server_info"]["uuid"], "pellets": read_pellet_db()},
+        )
+    ), 200
+
+
 def _api_get_wled_discover(settings, server_status):
     """Discover WLED devices on the network (mDNS/zeroconf, in-process)"""
     try:
@@ -113,6 +129,7 @@ _API_GET_ACTIONS = {
     "control": _api_get_control,
     "current": _api_get_current,
     "hopper": _api_get_hopper,
+    "pellets": _api_get_pellets,
     "wled_discover": _api_get_wled_discover,
     "controller_metadata": _api_get_controller_metadata,
 }
@@ -287,10 +304,31 @@ def _api_post_wled_test_profile(settings, request_json):
         return jsonify({"result": "error", "message": f"Failed to test profile: {str(e)}"}), 500
 
 
+def _api_post_pellets(settings, request_json):
+    """One pellet action per request. body: {"action": <name>, "data": {...}}
+
+    The action name travels in the BODY, not the path: api_page's POST branch
+    calls handler(settings, request_json) and never forwards arg0.
+
+    INTENT ONLY -- see common/pellets_actions.py's module docstring. This route
+    must never grow a "here is the whole pellet database" form.
+    """
+    handler = PELLETS_DISPATCH.get(request_json.get("action"))
+    if handler is None:
+        return jsonify(api_response(result="Error", message="Error: Received request without valid action")), 200
+    pelletdb = read_pellet_db()
+    # `or {}`: add_profile subscripts action_data["brand_name"] without .get(),
+    # so a missing `data` must arrive as a dict and raise KeyError inside the
+    # handler rather than TypeError on None. Mirrors socket_io.py's
+    # _ACTIONS_REQUIRING_JSON_DATA.
+    return jsonify(handler(pelletdb, request_json.get("data") or {})), 200
+
+
 _API_POST_ACTIONS = {
     "settings": _api_post_settings,
     "settings_update": _api_post_settings_update,
     "control": _api_post_control,
+    "pellets": _api_post_pellets,
     "wled_push_profiles": _api_post_wled_push_profiles,
     "wled_test_profile": _api_post_wled_test_profile,
 }
