@@ -111,6 +111,17 @@ it by path and line number; those citations point here.
 - **Dashboard fallback was non-deterministic across installs** — `os.listdir()`
   ordering decided which dashboard an invalid `current` fell back to. Now falls
   back to the named `Default`, with a sorted listing on top.
+- **"Attempt Re-ignite" was unreachable from BOTH Flask dashboards** (found
+  2026-07-26 while converting `setNotify` to per-entry writes). `setNotify` read
+  the `_low_limit_shutdown` checkbox for the `reignite` flag as well as for
+  `shutdown`, in `dash_default.js` and `dash_basic.js` alike. The two boxes are
+  mutually exclusive (each unchecks the other), so the bug broke the feature in
+  both directions: ticking "Attempt Re-ignite" sent `reignite:false`, and ticking
+  "Shutdown PiFire" armed `reignite` as a side effect — where it was then dead
+  anyway, because `notify/notifications.py:141-167` runs
+  `if shutdown … elif keep_warm … elif reignite`. Witnessed by two Playwright
+  tests in `tests/web/test_page_dashboard.py` that drive the real modal; both
+  were confirmed RED against the old selector before the fix landed.
 
 ---
 
@@ -260,11 +271,24 @@ were rewriting the two largest stylesheets and would have collided with this —
 are both merged. Re-measure the line counts above before starting; they were
 taken before those two landed.
 
-### 6. Remaining audit findings
+### 6. Remaining audit findings — SUPERSEDED by item 10
 
-`docs/superpowers/audits/2026-07-25-audit-triage.md` — roughly 40 findings in 10
-slices. Slices for save-failure, notifications, guards, and the dashboard have
-been written and executed or planned; the rest are untouched.
+`audits/2026-07-25-audit-triage.md` and
+`audits/2026-07-25-react-vs-flask-ui-divergences.md`. This item used to say
+"roughly 40 findings … the rest are untouched", which was guesswork. The
+2026-07-26 sweep read both audits item by item and checked each against live
+code: **all 9 CRITICALs and 12 of 18 IMPORTANTs are done.** The genuinely
+remaining findings are enumerated in item 10 rather than counted in the
+abstract here.
+
+### 6a. Hopper card should link to /pellets — RULED 2026-07-26, not yet built
+
+Bootstrap's hopper card carries a "Manager" link. The dashboard slice asserted
+there must be **no** such link in React; the pellets plan recorded the shortcut
+as owed and assigned it to the dashboard slice. The two plans contradicted each
+other and neither shipped it. **Ruling: the link exists, because it exists in
+Bootstrap.** `/pellets` shipped 2026-07-25, so the target is real. Small,
+self-contained, unblocked.
 
 ### 7. Accessor rename WAVE 2
 
@@ -286,14 +310,216 @@ Roughly ordered by daily-use value:
 - [ ] **recipes** + **cookfile** — recipe editor and cook-file browser (share a
       data model and need a JSON listing endpoint that does not exist yet)
 - [ ] **events** + **logs** — event feed and log viewer
-- [ ] **probeconfig** — standalone probe-config page; the wizard's probes step is
-      done, so this can likely reuse the shipped reducer and cards
+- [ ] **probeconfig** — **PLANNED 2026-07-26:**
+      `plans/2026-07-26-react-probeconfig-page.md`, 9 tasks. Two corrections to
+      what this line used to say: it is **not a standalone page** — the Flask
+      route never calls `render_template`, only `render_template_string` over
+      two macros, and its only consumer is the wizard, which loads those
+      fragments by AJAX. And the reuse is real but lopsided: 100% of the
+      *editing* behaviour is reuse (the shipped `probeReducer`, both cards,
+      every picker, all five discovery flows) and ~0% of the *delivery* path
+      is. Ships as `/settings/probes`, matching Flask's own IA. Needs two new
+      REST endpoints and one refactor the "cheap" framing did not anticipate:
+      `wizard.css` is imported only by `WizardShell`, so the probe editor
+      rendered anywhere else is unstyled.
 - [ ] **tuner** — probe tuning tool
 - [ ] **update** — software updater (shells out; `is_real_hardware()`-gated)
 - [ ] **metrics** — metrics/stats page
 - [ ] **mobile** — may be obsolete once the dashboard reflows. Responsiveness is
       necessary, not sufficient; confirm before building, and do not delete the
       blueprint yet.
+
+### 9. Per-probe notifications SLICE 2 — high/low limit alerts
+
+**This item existed nowhere in this backlog until 2026-07-26.** Slice 1 shipped
+and the groundwork for slice 2 was written up carefully — but only inside
+`plans/2026-07-25-react-probe-notifications.md`, under a "Slice 2 groundwork"
+heading. A reader of the backlog alone would have concluded per-probe
+notifications were finished. They are not: the React dashboard shows the target
+bell only, and **there is no high/low limit UI at all**.
+
+Read that plan's groundwork section before planning this; it is good and should
+not be re-derived. What has changed under it since it was written:
+
+- **`applyTargetEdit` no longer exists.** Slice 1's write was rebuilt on
+  2026-07-26 (see "Notify writes are addressed per entry" under SHIPPED). The
+  reducer is now `targetEditFields(edit)` returning just the fields, and the
+  write is `postNotifyUpdates(baseUrl, [{label, type, fields}])`. This makes
+  slice 2 *easier* than the plan assumes: two more entry types is two more
+  entries in the `notify_updates` array, and the plan's whole
+  "`applyTargetEdit` must leave the limit entries byte-identical" argument is
+  now structural — an addressed write cannot touch an entry it does not name.
+- **The plan's Flask bug #1 is FIXED**, not "decide about rather than port":
+  `setNotify` read `_low_limit_shutdown` for the `reignite` flag. See the
+  bug list above. Slice 2 should implement the *intended* behaviour.
+
+Still open and still true:
+
+- **`triggered` must be pre-armed by the client on save**, or the alarm fires
+  instantly. `dash_default.js` sets `triggered = current > target` for the high
+  limit and `current < target` for the low — i.e. mark it already-triggered when
+  the condition is *already* satisfied, so the backend stays quiet until the
+  temperature leaves and re-enters range. This is why the per-field REST
+  grammar cannot be used for slice 2 either: `/api/set/limit_high|limit_low/...`
+  accepts `req`/`shutdown`/`keep_warm`/`reignite`/`target` and **cannot set
+  `triggered`** (`common/api_commands.py`).
+- **Suspected second backend bug, still unverified.** The plan records that
+  `notify/notifications.py`'s shutdown branch gates on
+  `not control["notify_data"][index]["req"]`, and flags what that means for
+  limit entries as *read, not executed*. Resolve it by running the code, not by
+  re-reading it, and do that before building UI on top.
+- **Flask renders the limits asymmetrically**: the temperature sliders appear
+  for every probe, but the "Shutdown PiFire" and "Attempt Re-ignite" checkboxes
+  render for the **Primary probe only**. Decide deliberately whether to port
+  that asymmetry or offer the actions everywhere.
+- **Model the expiry action as ONE choice, not two booleans.** The backend runs
+  `if shutdown … elif keep_warm … elif reignite`, so a low-limit entry carrying
+  both `shutdown` and `reignite` silently drops the re-ignite. Slice 1 already
+  solved exactly this for the target modal with a single `TargetAction`
+  (`"none" | "shutdown" | "keepWarm"`) precisely so the UI cannot express a
+  state the backend will not honour. Reuse that pattern rather than porting
+  Flask's two-checkboxes-that-uncheck-each-other, which is the weaker form of
+  the same idea and is what the fixed bug hid behind.
+
+### 10. Deferred-work inventory — 103 open items pulled out of plan documents
+
+**Swept 2026-07-26**, after Slice 2 (item 9) proved that deferred work was
+landing in plan documents and nowhere else. Two agents read all 17 React slice
+plans, the 7 wizard plans, 14 React/UI specs and both audits, and checked every
+finding against live code rather than trusting the document.
+
+**225 findings. 103 still open, 115 already shipped, 7 need a ruling.** The
+"already shipped" number is the important one: a great deal of this had been
+done and the documents never said so. All 9 CRITICALs and 12 of 18 IMPORTANTs
+from the divergence audit are closed.
+
+Per-item detail — source document, exactly what was deferred, and the
+`file:line` that decided each status — is in
+`audits/2026-07-26-deferred-inventory-plans.md` and
+`audits/2026-07-26-deferred-inventory-specs-audits.md`. The grouping below is
+so that nobody has to open those to know the work exists.
+
+**Do not re-raise two things:** the `augerontime` bound the guards sweep left
+blocked on a decision was decided (1000, live in `settings_schema.py` and
+`StartupTab.tsx`), and the hopper→`/pellets` link was ruled 2026-07-26 to
+**exist**, matching Bootstrap (this resolves the direct contradiction between
+the dashboard slice, which asserted there must be none, and the pellets plan,
+which said it was owed).
+
+#### Whole surfaces never built
+
+- **Probe config as a React surface** — the single most-deferred item in the
+  project: it appears five separate times across specs and plans as "next" and
+  was never started. Now planned (see item 8).
+- Recipes, Events, Admin — rendered disabled in the navbar; three whole Flask
+  pages unported. Recipes/cookfile now planned.
+- Cook-file list / upload / delete (D4) — History shipped the chart only.
+- Recipe unpause payload not ported — a paused recipe cannot be resumed.
+- `global_control_panel` neither read nor offered: no way to stop the grill
+  from anywhere but the dashboard.
+- WLED preset/profile grids (backend and schema are already ready).
+- OneSignal: no "add device"; `uuid`/`app_id` not editable.
+- "Send Test Notification" and all three WLED action buttons.
+- PlatformTab is read-only — no React editor for `platform.*`.
+- QML kiosk screens (Splash, Menu, Keypad, Hold/Notify overlays, QR, Sleep).
+  **These may be intentionally dead** — the project pivoted from cloning the Qt
+  kiosk to replacing the Flask web UI. Needs a one-line ruling either way.
+
+#### Shipping and deployment gaps
+
+- **Flask never serves the React app.** No SPA catch-all, no
+  `send_from_directory` for a build output — so `/settings/*` deep links do not
+  resolve and there is currently no deployment path at all.
+- No page title, no favicon, no PWA manifest.
+- `index.html` loads Barlow from `fonts.googleapis.com`: an offline PiFire
+  silently falls back to a different typeface. This is also why the visual
+  fidelity gate cannot be screenshot-based.
+- No `/manual` route — a bookmarked Flask `/manual` URL will not resolve.
+- `globals.page_theme` is settable but inert.
+
+#### Backend behaviour that is broken or lying
+
+- **High/low-limit "Shutdown PiFire" appears never to fire.** The shutdown
+  branch is gated on `not notify_data[index]["req"]`; only `type == "probe"`
+  entries ever clear `req`. Verified still present. `reignite` is gated on
+  `triggered` instead and does work.
+- The errors blob is write-only from the web tier, and `_check_control_status`
+  can false-positive on a healthy system (open item 4).
+- `get_os_info(persist=True)` — a destructive flag still defaults to true.
+- `backup_pellet_db` is not performed on a React "Load New Pellets".
+- Residual clobber window on the pellet blob — no optimistic concurrency.
+- Notify targets are never converted on a temperature-units change.
+
+#### UI parity, minor-graded
+
+History Stream toggle and 5 s poll vs Flask's ~1 s; chart annotations fetched
+but never drawn and disabled probes silently dropped; per-probe fill colours
+configurable but ignored; History duration is a bare number input, not a 1–480
+slider; History→Metrics link dropped; `display.sleep_timeout` has no control at
+all; Controller "use recommended value" buttons and metadata card dropped;
+updater release-notes modal dropped; per-setting Description dropped by
+`SelectField` and `ConfigOptionField`; secret masking not ported (API keys and
+tokens render as plain text); Flask's three dashboard error modals flattened and
+the `ui_hash` reload prompt has no counterpart; discovery results lost their
+Refresh/Close controls; `pf-section-note` and `pf-kv` have no CSS rule anywhere;
+PlatformTab's markup uses classes that do not exist.
+
+Wizard specifically: no confirmation summary at Finish; install output never
+rendered, so a failed install leaves the user blind; Finish error detail (422
+`detail`, 400 `sections`) thrown away; "System is active" warning still only at
+the last step rather than on entry; per-step explanatory copy dropped; strictly
+Back/Next with inert step indicators; tables have no column headers and device
+"Type" shows `friendly_name` rather than the module id.
+
+#### Verification gaps
+
+- The `Basic` dashboard (795 lines) has never been compared by anyone.
+- `probeconfig.js` plumbing and `probeReducer.ts` validation semantics never
+  verified against each other.
+- No 800×480 or phone-viewport coverage for the wizard.
+- Three wizard surfaces unreachable by e2e — they rest on the human eye alone.
+- Never checked: WCAG contrast, accent swaps, Barlow-unavailable rendering.
+- No unconsumed-field regression check exists.
+- `/scan`'s `vid`/`pid` are unwired — Flask hex-parses them, the React endpoint
+  does not.
+- `/admin/restart` and `/admin/reboot` are same-origin and hit the dev server
+  rather than Flask.
+- No e2e coverage of Exit Setup / `POST /api/wizard/cancel`.
+- The reboot-modal flow has never run on real Pi hardware, and the assumption
+  that `raspi-config nonint do_onewire 0` writes `dtoverlay=w1-gpio` is
+  unverified.
+
+#### Decisions needed from a human
+
+- Does React ship **one** dashboard forever? (`hidden_cards`,
+  `touch_screen_mode`, the dashboard picker and the whole `Basic` dashboard are
+  currently dropped wholesale on that assumption.)
+- `/mobile`'s fate — the backlog's "may be obsolete" line needs settling.
+- Where `display.sleep_timeout` lives (General vs Platform), and how it
+  coordinates with the Qt DPMS/sway work.
+- The persistence model for per-tab Save: SmartStart/PWM table edits are lost on
+  tab switch, where Flask persisted immediately.
+- Whether React's client-side clamps are deleted now that the schema enforces
+  bounds — S2 and the scoping spec disagree.
+- Whether the legacy Jinja `blueprints/probeconfig/*` surface gets deleted.
+  **No Flask page has been retired yet by this migration** — `blueprints/pellets/`
+  is still live behind a shipped React replacement.
+
+#### Schema and toolchain follow-ups
+
+S3 defaults consolidation and typed deep-path `setPath` helpers; per-controller
+schema generation from `controllers.json`; `additionalProperties` stripping in
+TS generation; `<path>: <why>` save-error display; read-path validation never
+scoped; mapping a dotted error path to the offending widget; the four 2b-1
+follow-ups (`waitFor`, `read*` fallback defaults, `aria-describedby`,
+float-vs-int audit).
+
+Tailwind prerequisites, all now owned by `plans/2026-07-26-tailwind-v4-migration.md`:
+no browserslist pinned; unverified whether Biome's CSS parser accepts
+`@theme`/`@apply`/`@import "tailwindcss"`; **no visual baselines exist for any
+page at either viewport**; dynamic class names are invisible to Tailwind's
+scanner and the required safelist note does not exist.
+
 
 ---
 
@@ -362,6 +588,24 @@ Bumping either is its own piece of work, not a lockfile refresh.
   code no current change touches. `ruff check .` is a merge gate (`ruff.toml`
   says so outright), so adopting 0.16 is a repo-wide cleanup commit. Raise the
   ceiling in that commit; the rationale is on the pin in `pyproject.toml`.
+
+## Standing rule: a slice is not done until its deferrals are HERE
+
+Every plan in `docs/superpowers/plans/` defers something -- a later slice, an
+accepted divergence, a suspected bug it read but did not execute, a decision it
+punted to a human. Until 2026-07-26 that deferred work lived only inside the
+plan document, and a plan document is read once, by the person executing it,
+and then never again.
+
+That is how per-probe notification **Slice 2** -- the entire high/low limit
+alert feature, carefully specified -- became invisible: the backlog said
+notifications shipped, and nothing anywhere said the limits had not.
+
+**So: before a slice is marked done, every "Slice N+1" / "out of scope" /
+"could not verify" / "decide later" item in its plan gets a line in this file.**
+The plan stays the detailed reference; this file is what guarantees anyone ever
+opens it again. A pointer plus one sentence of what is deferred is enough --
+the point is that it exists here at all.
 
 ## Lessons this backlog has already paid for
 
