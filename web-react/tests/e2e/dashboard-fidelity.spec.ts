@@ -1,10 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import {
+  CAPTURING,
   compareToBaseline,
   measureLandmarks,
   measureStageScale,
-  readBaseline,
+  requireBaseline,
   writeBaseline,
 } from "./layoutBaseline";
 
@@ -51,14 +52,12 @@ test("dashboard layout at 1280x720 matches the committed baseline", async ({ pag
   expect(actual.stage.h).toBe(720);
   expect(actual.controls.h).toBe(82);
 
-  const baseline = readBaseline(BASELINE);
-  if (baseline === null) {
-    // Recording run: the file is absent, so there is nothing to compare
-    // against. Write it, then inspect it by hand and commit it.
+  if (CAPTURING) {
     writeBaseline(BASELINE, actual);
-    console.log(`[fidelity] wrote a fresh baseline to ${BASELINE} -- review it before committing`);
+    console.log(`[fidelity] captured ${BASELINE} -- review it by hand before committing`);
     return;
   }
+  const baseline = requireBaseline(BASELINE);
 
   const problems = compareToBaseline(actual, baseline);
   expect(problems, problems.join("\n")).toEqual([]);

@@ -288,7 +288,7 @@ jj commit -m 'build(web-react): pin browserslist to the targets the CSS already 
 4. **`root` and `landmarks` run inside `page.evaluate` and must be plain CSS.** `ready` is evaluated by Playwright and may use its selector engines (`h2:text-is("Probes")`). Getting this backwards throws `Failed to execute 'querySelector'` at capture time.
 5. **`styles` is the point of this task.** Geometry alone cannot see a wrong colour, a lost border, a changed radius or a dropped shadow — exactly what `@apply` rewrites. Style comparison is exact, no tolerance: both sides run in the same Chromium.
 
-- [ ] **Step 1: Replace the private `FACES` list with a superset covering every face the app loads**
+- [x] **Step 1: Replace the private `FACES` list with a superset covering every face the app loads**
 
 In `web-react/tests/e2e/layoutBaseline.ts`, replace the `FACES` constant (lines 27-35) with:
 
@@ -314,11 +314,11 @@ const FACES = [
 ];
 ```
 
-- [ ] **Step 2: Export `waitForBarlow`**
+- [x] **Step 2: Export `waitForBarlow`**
 
 Change its declaration (line 53) from `async function waitForBarlow` to `export async function waitForBarlow`. Leave the body and its docblock alone — that comment records a real flake (7-25px width drift when the webfont was still in flight) and why `document.fonts.check()` cannot detect it.
 
-- [ ] **Step 3: Add the style-property list and the extended `Landmark` shape**
+- [x] **Step 3: Add the style-property list and the extended `Landmark` shape**
 
 Extend the `Landmark` interface (lines 16-23) and add the property list immediately after it:
 
@@ -380,7 +380,7 @@ export const STYLE_PROPS = [
 ] as const;
 ```
 
-- [ ] **Step 4: Rename `EXACT` to `DASHBOARD_EXACT`, export it and the two tolerances**
+- [x] **Step 4: Rename `EXACT` to `DASHBOARD_EXACT`, export it and the two tolerances**
 
 Replace lines 106-122 with:
 
@@ -409,7 +409,7 @@ export const EXACT_TOL = 0.5;
 export const BOX_TOL = 2;
 ```
 
-- [ ] **Step 5: Parameterise `compareToBaseline` and teach it about `styles`**
+- [x] **Step 5: Parameterise `compareToBaseline` and teach it about `styles`**
 
 Replace the body of `compareToBaseline` (lines 124-147) with:
 
@@ -451,7 +451,7 @@ export function compareToBaseline(
 }
 ```
 
-- [ ] **Step 6: Add `PageSpec` and `measureSelectors`**
+- [x] **Step 6: Add `PageSpec` and `measureSelectors`**
 
 Append to `layoutBaseline.ts`:
 
@@ -512,7 +512,7 @@ export async function measureSelectors(page: Page, spec: PageSpec): Promise<Land
 }
 ```
 
-- [ ] **Step 7: Add the synthetic style probe**
+- [x] **Step 7: Add the synthetic style probe**
 
 Some chrome never renders under a fixed fixture: `Banners` returns `null` when there are no errors or warnings, `TimerBar` renders only while a timer is visible, and the wizard's three `role="dialog"` surfaces need a running grill or a finished installer. `wizard-layout.spec.ts` already probes rules this way — attach a detached element carrying the class, read the computed style, remove it — and this generalises that. It proves the rules resolve and to what; it proves nothing about how they look in situ, which is Task 15's job.
 
@@ -570,7 +570,7 @@ export function compareStyles(actual: StyleMap, baseline: StyleMap): string[] {
 }
 ```
 
-- [ ] **Step 8: Add the explicit capture gate**
+- [x] **Step 8: Add the explicit capture gate**
 
 Append:
 
@@ -611,7 +611,7 @@ export function readStyleBaseline(path: string): StyleMap | null {
 }
 ```
 
-- [ ] **Step 9: Close the dashboard spec's silent recording run**
+- [x] **Step 9: Close the dashboard spec's silent recording run**
 
 The existing spec writes a fresh baseline whenever the file is absent. That is the same "update if different" hole one step removed: delete the file, run the suite, and it goes green against itself. Replace `dashboard-fidelity.spec.ts:54-61` with:
 
@@ -639,7 +639,7 @@ import {
 
 (`readBaseline` is no longer used here; leave it exported, `pellets-fidelity.spec.ts` uses it in Task 5.)
 
-- [ ] **Step 10: Give the harness a typechecker**
+- [x] **Step 10: Give the harness a typechecker**
 
 `web-react/tsconfig.json` has `"include": ["src"]`, so `tests/e2e/` is typechecked by nothing at all — `bun run typecheck` would not have caught a single error in the ~300 lines above. Create `web-react/tsconfig.e2e.json`:
 
@@ -659,7 +659,7 @@ Add to `package.json`'s `scripts`:
     "typecheck:e2e": "node node_modules/typescript7/bin/tsc -p tsconfig.e2e.json --noEmit",
 ```
 
-- [ ] **Step 11: Run both typecheckers**
+- [x] **Step 11: Run both typecheckers**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
@@ -668,7 +668,7 @@ bun run typecheck && bun run typecheck:e2e
 
 Expected: both silent, exit 0. (Measured on the pre-change tree, `typecheck:e2e` over the existing specs is already clean, so any error here is yours.)
 
-- [ ] **Step 12: Prove the dashboard gate still behaves identically**
+- [x] **Step 12: Prove the dashboard gate still behaves identically**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
@@ -678,7 +678,7 @@ git diff --stat tests/e2e/dashboard-layout-1280x720.json
 
 Expected: all specs pass; the `git diff --stat` prints nothing. The committed baseline has no `styles` key and `compareToBaseline` skips the style check when the baseline omits it — that is the compatibility this step is confirming.
 
-- [ ] **Step 13: Prove the capture gate actually gates**
+- [x] **Step 13: Prove the capture gate actually gates**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
@@ -689,7 +689,7 @@ mv /tmp/db.json tests/e2e/dashboard-layout-1280x720.json
 
 Expected: `1` — the spec fails loudly with the capture instruction instead of writing a fresh file. Confirm the file is restored with `git status --short tests/e2e/`, which must print nothing.
 
-- [ ] **Step 14: Run the four gates and commit**
+- [x] **Step 14: Run the four gates and commit**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
