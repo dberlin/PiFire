@@ -1011,6 +1011,13 @@ button.pf-dash-pill {
     --pf-gauge-size: 320px;
     --pf-gauge-ring: 292px;
     --pf-gauge-num: 88px;
+    /* Once the control row wraps into 96px tracks, the desktop 25px no longer
+       fits the longest label: "Shutdown" measured scrollWidth 104 inside a
+       96px button and painted over its own rounded border. The relationship is
+       not quite linear -- letter-spacing and padding do not scale with the
+       font -- so 22px still measured 97px against 96. 21px is the first value
+       that fits, and dashboard-panel.spec.ts holds it there. */
+    --pf-btn-font: 21px;
   }
   .pf-dash-body {
     flex-wrap: wrap;
@@ -1054,6 +1061,21 @@ button.pf-dash-pill {
     grid-auto-rows: var(--pf-btn-h);
     height: auto;
     flex: none;
+  }
+  /* The hopper's level bar is `flex: 1` inside the card, so it takes its height
+     from whatever the card was given. On the desktop board the right column is
+     a fixed-height column and the bar gets ~200px. Once the column wraps onto
+     its own line its height comes from its content instead, and the bar -- the
+     entire point of the card -- collapsed to nothing: the 800x480 capture
+     showed "HOPPER 70%" and "LEVEL OK" with no bar between them. Give the card
+     a floor so the bar always has something to fill.
+
+     The floor is not the bar's height: 32px of padding, the 34px head, 24px of
+     gaps and the 17px foot come off first, so 180px left a 73px bar against
+     the ~200px the desktop board gives it. 220px yields about 113px. */
+  .pf-dash-hopper {
+    flex: none;
+    min-height: 220px;
   }
 }
 
@@ -1133,10 +1155,6 @@ button.pf-dash-pill {
   }
   .pf-dash-probecard {
     flex: none;
-  }
-  .pf-dash-hopper {
-    flex: none;
-    min-height: 180px;
   }
 }
 

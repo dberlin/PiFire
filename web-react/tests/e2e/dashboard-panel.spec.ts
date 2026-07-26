@@ -142,6 +142,37 @@ test("the whole board is reachable by scrolling", async ({ page }) => {
   expect(reach.controlsWithinBoard).toBe(true);
 });
 
+test("no button label spills out of its button", async ({ page }) => {
+  // scrollWidth against clientWidth: a label wider than its box does not
+  // stretch the box and does not overflow the page, it just paints over the
+  // button's own rounded border. Measured at 800x480 with the desktop 25px
+  // still in force: "Shutdown" wanted 104px inside a 96px button.
+  const spills = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>(".pf-btn")]
+      .filter((el) => el.scrollWidth > el.clientWidth)
+      .map(
+        (el) =>
+          `"${(el.textContent ?? "").trim()}" needs ${el.scrollWidth}px inside a ${el.clientWidth}px button`,
+      ),
+  );
+  expect(spills, spills.join("\n")).toEqual([]);
+});
+
+test("the hopper still has a level bar to read", async ({ page }) => {
+  // `.pf-dash-hopper-track` is flex: 1 inside its card, so it renders at
+  // whatever height the card was handed. When the right column wraps onto its
+  // own line the card is sized by its content, and the bar collapsed to zero --
+  // the card kept its "HOPPER", its "70%" and its "LEVEL OK" and simply lost
+  // the one element that shows a level. Nothing else in this suite can see
+  // that: no landmark moves, no box overflows, and the numbers are still right.
+  const track = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(".pf-dash-hopper-track");
+    if (el === null) throw new Error("no hopper track on the page");
+    return el.getBoundingClientRect().height;
+  });
+  expect(track).toBeGreaterThanOrEqual(80);
+});
+
 test("every control button is a usable touch target", async ({ page }) => {
   const heights = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>(".pf-btn")].map(
