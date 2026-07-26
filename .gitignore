@@ -10,6 +10,11 @@ docs/restricted/
 local/
 
 settings.json
+# ...but not the committed e2e fixture of the same name. The rule above has no
+# leading slash, so it matches at every depth, and the captured GET /api/settings
+# body would silently never be committed -- leaving the fidelity gate stubbing
+# from a file that exists only on the machine that captured it.
+!web-react/tests/e2e/fixtures/settings.json
 
 templates/backups/
 

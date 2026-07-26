@@ -719,7 +719,7 @@ jj commit -m 'test(web-react): generalise the fidelity harness to any page, and 
 
 **Why stubbing, and why this is not the spec's `PIFIRE_DB_PATH` fixture.** `PUBLIC_DEMO=1` is read in exactly one place, `helpers/useLiveState.ts:29`, and its only effect is that no socket is opened and `demoDashAt()` supplies the dashboard state. Every settings, wizard and history loader still fetches over REST on the demo server exactly as on the app server. So the demo server alone does not make those pages deterministic; `page.route()` does, and it buys two more things a seeded database does not: the capture stops depending on which machine it runs on, and it stops **mutating** the backend — stepping the wizard forward normally flushes a draft, which `wizard-layout.spec.ts` has to `POST /api/wizard/draft {clear:true}` afterwards to undo.
 
-- [ ] **Step 1: Start the backend and capture the five fixture bodies**
+- [x] **Step 1: Start the backend and capture the five fixture bodies**
 
 From the repo root, in two terminals (this is the documented prototype launch; `python app.py` trips Werkzeug's production guard):
 
@@ -742,9 +742,24 @@ for f in tests/e2e/fixtures/*.json; do python3 -m json.tool "$f" > "$f.fmt" && m
 wc -c tests/e2e/fixtures/*.json
 ```
 
+**Do NOT use `python3 -m json.tool` here.** On this host's Python 3.14 it writes ANSI colour escapes even when stdout is a file, so all five fixtures came out as invalid JSON that still *looked* fine in a terminal. Use `json.load` / `json.dump` instead, and let Biome reformat afterwards (`files.includes` covers `tests/**`, so it rewrites them to 2-space indent regardless of what you choose here):
+
+```bash
+python3 -c "
+import json,glob
+for f in sorted(glob.glob('tests/e2e/fixtures/*.json')):
+    d=json.load(open(f))
+    with open(f,'w') as fh: json.dump(d,fh,indent=2); fh.write('\n')
+"
+```
+
+**`.gitignore` line 12 is `settings.json` with no leading slash, so it matches at every depth and silently swallows `tests/e2e/fixtures/settings.json`.** The fixture is written, the suite passes locally, and the file is never committed. Task 3 adds a negation (`!web-react/tests/e2e/fixtures/settings.json`) directly under it. Check `jj st` lists all five fixtures before committing.
+
+**Measured sizes after Biome formatting, captured from a freshly-seeded `pifire.db` (default probe map: 1 device, 4 probes; mode `Stop`):** settings 18.6 kB, controller-metadata 34.4 kB, mode 108 B, wizard-state 225 kB, history-chart 7.4 kB.
+
 Expected: five non-empty files; `settings.json` is the largest by far (the whole settings tree). If any `curl` exits non-zero the backend is not up — do not hand-write a fixture, the shapes are large and a wrong one produces a plausible-looking but meaningless baseline.
 
-- [ ] **Step 2: Sanity-check the two shapes the loaders unwrap**
+- [x] **Step 2: Sanity-check the two shapes the loaders unwrap**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
@@ -754,7 +769,7 @@ python3 -c "import json;d=json.load(open('tests/e2e/fixtures/mode.json'));print(
 
 Expected: the first prints a list beginning with the top-level settings keys, and the response either has a `settings` key or is the settings object itself — `settingsApi.ts:18` handles both (`body.settings ?? (body as Settings)`). The second prints something shaped like `{'data': {'mode': 'Stop'}}`.
 
-- [ ] **Step 3: Write the stub installer**
+- [x] **Step 3: Write the stub installer**
 
 Create `web-react/tests/e2e/apiFixtures.ts`:
 
@@ -802,7 +817,7 @@ export async function stubApi(page: Page): Promise<void> {
 }
 ```
 
-- [ ] **Step 4: Write the page catalogue — viewports and shared landmark lists**
+- [x] **Step 4: Write the page catalogue — viewports and shared landmark lists**
 
 Create `web-react/tests/e2e/pageSpecs.ts`:
 
@@ -870,7 +885,7 @@ const WIZARD = [
 ];
 ```
 
-- [ ] **Step 5: Add the dashboard, shell, history and settings specs**
+- [x] **Step 5: Add the dashboard, shell, history and settings specs**
 
 Append to `pageSpecs.ts`:
 
@@ -939,7 +954,7 @@ export const PAGE_SPECS: PageSpec[] = [
 ];
 ```
 
-- [ ] **Step 6: Add the six wizard specs**
+- [x] **Step 6: Add the six wizard specs**
 
 The wizard is a linear flow with no routes of its own — `STEPS` in `WizardShell.tsx` is `["welcome","grillplatform","probes","display","distance","finish"]` and the only way in is the Next button. **Never click Finish: it fires the real installer.** `ready` uses Playwright's text engine (allowed — it is evaluated Playwright-side, unlike `root`/`landmarks`).
 
@@ -979,7 +994,7 @@ PAGE_SPECS.push(
 );
 ```
 
-- [ ] **Step 7: Add the pellets spec and the chrome probes**
+- [x] **Step 7: Add the pellets spec and the chrome probes**
 
 Append to `pageSpecs.ts`:
 
@@ -993,7 +1008,12 @@ Append to `pageSpecs.ts`:
 export const PELLETS_SPEC: PageSpec = {
   name: "pellets",
   path: "/pellets",
-  ready: '[role="region"][aria-label="Brands"]',
+  // `section[aria-label=...]`, NOT `[role="region"][aria-label=...]`. VocabTable
+  // renders a bare <section aria-label={title}>; role="region" is that element's
+  // IMPLICIT role and never appears as an attribute, so an attribute selector
+  // for it matches nothing. Corrected against live code.
+  ready: 'section[aria-label="Brands"]',
+
   root: ".pf-shell",
   landmarks: [
     ...SHELL,
@@ -1040,7 +1060,7 @@ export const CHROME_PROBES: StyleProbe[] = [
 ];
 ```
 
-- [ ] **Step 8: Typecheck and lint the new files**
+- [x] **Step 8: Typecheck and lint the new files**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
@@ -1049,7 +1069,7 @@ bun run typecheck:e2e && bun run lint
 
 Expected: both clean. Biome's `files.includes` covers `tests/**`, so the new files are formatted and linted; ESLint ignores `tests/e2e` (see `eslint.config.js`'s `ignores`), which is why `typecheck:e2e` from Task 2 matters.
 
-- [ ] **Step 9: Verify the class names in the catalogue actually exist**
+- [x] **Step 9: Verify the class names in the catalogue actually exist**
 
 A selector list full of typos produces an empty, cheerful baseline. Check every one against the stylesheets:
 
@@ -1062,7 +1082,7 @@ comm -23 /tmp/want.txt /tmp/have.txt
 
 Expected: **no output**. Any line printed is a selector in the catalogue that no stylesheet declares — fix the catalogue, not the stylesheet.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 cd /home/dannyb/sources/PiFire
