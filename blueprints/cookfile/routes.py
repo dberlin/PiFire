@@ -573,26 +573,41 @@ def _cf_update_graph_labels():
 
 
 def _cf_update_media():
+    """Toggle one asset's attachment to one comment.
+
+    The direction used to be taken from the client-sent `state` string:
+    remove only if `state == "selected"`, add only if `state == "unselected"`.
+    A stale modal disagrees with the server, so both arms failed their guard,
+    nothing was written -- and `result` (seeded "OK", never reassigned on that
+    path) still reported success, which cookfile.js takes as licence to flip
+    the thumbnail's local class. The view then showed the opposite of what was
+    stored. The server owns this state: presence in `comment["assets"]` IS the
+    selectedness, so that is what decides the direction, and the authoritative
+    result is returned so the client renders it instead of guessing. `state`
+    is still accepted for wire compatibility, and deliberately ignored.
+    """
     requestjson = request.json
     filename = requestjson["filename"]
     assetfilename = requestjson["assetfilename"]
     commentid = requestjson["commentid"]
-    state = requestjson["state"]
     comments, status = read_json_file_data(filename, "comments")
     if status != "OK":
         return jsonify({"result": "ERROR"})
-    result = "OK"
     for index in range(0, len(comments)):
         if comments[index]["id"] == commentid:
-            if assetfilename in comments[index]["assets"] and state == "selected":
+            if assetfilename in comments[index]["assets"]:
                 comments[index]["assets"].remove(assetfilename)
-                result = update_json_file_data(comments, filename, "comments")
-            elif assetfilename not in comments[index]["assets"] and state == "unselected":
+                selected = False
+            else:
                 comments[index]["assets"].append(assetfilename)
-                result = update_json_file_data(comments, filename, "comments")
-            break
+                selected = True
+            result = update_json_file_data(comments, filename, "comments")
+            if result != "OK":
+                return jsonify({"result": result})
+            return jsonify({"result": "OK", "selected": selected})
 
-    return jsonify({"result": result})
+    # No comment carries this id -- nothing was written, so don't claim "OK".
+    return jsonify({"result": "ERROR"})
 
 
 _COOKFILE_UPDATE_DISPATCH = {

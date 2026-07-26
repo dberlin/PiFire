@@ -730,7 +730,7 @@ def test_cookfile_update_media_toggle_via_direct_post(live_server, page, _isolat
         },
     )
     assert select_resp.status == 200
-    assert select_resp.json() == {"result": "OK"}
+    assert select_resp.json() == {"result": "OK", "selected": True}
     comments_after = _read_cookfile_json(history_dir, filename, "comments")
     assert "photo.jpg" in comments_after[0]["assets"]
 
@@ -745,9 +745,79 @@ def test_cookfile_update_media_toggle_via_direct_post(live_server, page, _isolat
         },
     )
     assert unselect_resp.status == 200
-    assert unselect_resp.json() == {"result": "OK"}
+    assert unselect_resp.json() == {"result": "OK", "selected": False}
     comments_after = _read_cookfile_json(history_dir, filename, "comments")
     assert "photo.jpg" not in comments_after[0]["assets"]
+
+
+def _toggle_media(live_server, page, history_dir, filename, state):
+    return page.request.post(
+        f"{live_server}/cookfile/update",
+        data={
+            "media": True,
+            "filename": history_dir + filename,
+            "assetfilename": "photo.jpg",
+            "commentid": "c1",
+            "state": state,
+        },
+    )
+
+
+def test_cookfile_update_media_toggles_from_server_state_not_the_posted_state(
+    live_server, page, _isolated_history_folder
+):
+    """The branch decided which way to toggle from the client-sent `state`
+    string: it removed only when `state == "selected"` and added only when
+    `state == "unselected"`. A stale modal (someone else attached the asset,
+    or an earlier click that failed to repaint) disagrees with the server, so
+    BOTH arms fail their guard, nothing is written -- and the handler still
+    answers `{"result": "OK"}`, which cookfile.js takes as licence to flip the
+    thumbnail's local class/value. The view then shows the opposite of what is
+    stored, and the NEXT click acts on that wrong state.
+
+    The server owns the answer: presence in `comment["assets"]` is the state,
+    so the toggle is decided there, and the authoritative new selectedness is
+    returned so the client renders truth instead of guessing."""
+    history_dir = _isolated_history_folder
+    comments = [{"id": "c1", "text": "hi", "assets": []}]
+    filename = _write_cookfile(history_dir, "E2E-MediaStale", comments=comments)
+
+    # Stale view believes it is already attached; the user clicks to detach.
+    # The server has it detached, so the click must ATTACH it.
+    resp = _toggle_media(live_server, page, history_dir, filename, "selected")
+    assert resp.status == 200
+    assert resp.json() == {"result": "OK", "selected": True}
+    assert "photo.jpg" in _read_cookfile_json(history_dir, filename, "comments")[0]["assets"]
+
+    # Mirror case: stale view believes it is detached, server has it attached.
+    resp = _toggle_media(live_server, page, history_dir, filename, "unselected")
+    assert resp.status == 200
+    assert resp.json() == {"result": "OK", "selected": False}
+    assert "photo.jpg" not in _read_cookfile_json(history_dir, filename, "comments")[0]["assets"]
+
+
+def test_cookfile_update_media_reports_error_for_an_unknown_comment(live_server, page, _isolated_history_folder):
+    """`result` was seeded "OK" and the loop simply never matched, so a
+    commentid that is not in the file answered success having written
+    nothing -- the same false-success shape as the bare-filename case
+    below."""
+    history_dir = _isolated_history_folder
+    comments = [{"id": "c1", "text": "hi", "assets": []}]
+    filename = _write_cookfile(history_dir, "E2E-MediaNoComment", comments=comments)
+
+    resp = page.request.post(
+        f"{live_server}/cookfile/update",
+        data={
+            "media": True,
+            "filename": history_dir + filename,
+            "assetfilename": "photo.jpg",
+            "commentid": "does-not-exist",
+            "state": "unselected",
+        },
+    )
+
+    assert resp.status == 200
+    assert resp.json() == {"result": "ERROR"}
 
 
 def test_cookfile_update_bare_get_returns_error(live_server, page):

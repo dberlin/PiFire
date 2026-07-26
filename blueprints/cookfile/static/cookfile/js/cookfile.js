@@ -495,13 +495,11 @@ function saveComment(commentid) {
 function toggleSelectImage(tag, filename, cookfilename, commentid) {
 	var select_state = document.getElementById(tag).value;
 
-	console.log(select_state)
-
-	var postdata = { 
+	var postdata = {
 		'media' : true,
-		'filename' : cookfilename, 
-		'commentid' : commentid, 
-		'assetfilename' : filename, 
+		'filename' : cookfilename,
+		'commentid' : commentid,
+		'assetfilename' : filename,
 		'state' : select_state
 	};
 	req = $.ajax({
@@ -512,14 +510,18 @@ function toggleSelectImage(tag, filename, cookfilename, commentid) {
 		traditional: true,
 		success: function (data) {
 			if(data.result == 'OK') {
-				if(select_state == 'selected') {
-					document.getElementById(tag).className = "rounded";
-					$('#'+tag).val('unselected');
-				} else {
+				// Render what the SERVER decided, not a local flip of this
+				// element's own value: if this modal was stale, the two
+				// disagree, and guessing here is what used to leave the
+				// thumbnail showing the opposite of what was stored.
+				if(data.selected) {
 					document.getElementById(tag).className = "border rounded shadow";
 					$('#'+tag).val('selected');
+				} else {
+					document.getElementById(tag).className = "rounded";
+					$('#'+tag).val('unselected');
 				};
-				updateCommentThumbs(commentid);		
+				updateCommentThumbs(commentid);
 			} else {
 				var error = data.result;
 				console.log('Response: ' + error);
