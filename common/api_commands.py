@@ -31,6 +31,24 @@ from common.sqlite_queue import SqliteQueue
 from common.system import reboot_system, restart_scripts, shutdown_system
 
 
+def _write_control_delta(control, delta, kind, origin):
+    """Queue `delta`, unless the caller explicitly asked for an OVERWRITE.
+
+    `kind` is process_command's escape hatch for a caller that wants its write
+    to land NOW rather than on the next drain: WriteKind.OVERWRITE replaces the
+    control blob directly. A delta cannot honour that -- it is by construction a
+    queued statement of intent -- so an OVERWRITE caller still gets the
+    whole-dict write it asked for. That is pinned by the golden's
+    `kind_overwrite_splus` (queued_writes == []).
+
+    No PRODUCTION call site passes `kind`; every one of them takes the delta.
+    """
+    if kind is WriteKind.OVERWRITE:
+        write_control(control, kind, origin=origin)
+    else:
+        write_control(delta, WriteKind.DELTA, origin=origin)
+
+
 def _manual_toggle(control, pin_name, arglist, reset_pwm_when_off=False):
     """
     Apply a manual on/off/toggle action to a single manual-output pin
@@ -42,8 +60,15 @@ def _manual_toggle(control, pin_name, arglist, reset_pwm_when_off=False):
       - `reset_pwm_when_off=True` additionally resets control["manual"]["pwm"]
         to 100 when the output is turned off (this only applied to the
         original "fan" branch; do not enable it for the others).
+
+    Returns the manual members it ASSIGNED, so the caller can state exactly
+    those in a delta. `pwm` is in the result only when it was actually reset:
+    naming it unconditionally would let a fan toggle impose a stale pwm on a
+    concurrent pwm change, which is the class of bug deltas exist to remove.
+    (`control` is still mutated in place, because the write guard below reads
+    control["manual"]["change"] back -- including the stale-value wart.)
     """
-    control["manual"]["change"] = pin_name
+    assigned = {"change": pin_name}
     if arglist[2] == "toggle":
         status = read_status()
         if status["outpins"][pin_name]:
@@ -51,12 +76,13 @@ def _manual_toggle(control, pin_name, arglist, reset_pwm_when_off=False):
         else:
             arglist[2] = "true"
     if arglist[2] == "true":
-        control["manual"]["output"] = True
+        assigned["output"] = True
     else:
-        control["manual"]["output"] = False
+        assigned["output"] = False
         if reset_pwm_when_off:
-            control["manual"]["pwm"] = 100
-    return control
+            assigned["pwm"] = 100
+    control["manual"].update(assigned)
+    return assigned
 
 
 def _cmd_get_uuid(data, control, settings, arglist, origin, kind):
@@ -304,7 +330,18 @@ def _cmd_set_psp(data, control, settings, arglist, origin, kind):
         else:
             control["primary_setpoint"] = float(arglist[1])
         control["updated"] = True
-        write_control(control, kind, origin=origin)
+        _write_control_delta(
+            control,
+            control_delta(
+                set_values={
+                    "mode": Mode.HOLD,
+                    "primary_setpoint": control["primary_setpoint"],
+                    "updated": True,
+                }
+            ),
+            kind,
+            origin,
+        )
     else:
         data["result"] = "ERROR"
         data["message"] = f"Primary set point should be an integer or float in degrees {settings['globals']['units']}"
@@ -319,10 +356,13 @@ def _cmd_set_units(data, control, settings, arglist, origin, kind):
         settings = convert_settings_units(arglist[1], settings)
         write_settings(settings)
         control["settings_update"] = True
-        write_control(control, kind, origin=origin)
+        _write_control_delta(control, control_delta(set_values={"settings_update": True}), kind, origin)
         control["updated"] = True
         control["units_change"] = True
-        write_control(control, kind, origin=origin)
+        # The second write states only ITS two members. The old whole-dict form
+        # re-sent settings_update as well, which was harmless but was also the
+        # shape that let any writer re-impose a flag it never set.
+        _write_control_delta(control, control_delta(set_values={"updated": True, "units_change": True}), kind, origin)
         # print(f'Settings Units Changed to {arglist[1]}')
     else:
         data["result"] = "ERROR"
@@ -339,7 +379,12 @@ def _cmd_set_mode(data, control, settings, arglist, origin, kind):
     if arglist[1] in ["startup", "smoke", "shutdown", "stop", "reignite", "monitor", "error", "manual"]:
         control["mode"] = MODE_MAP[arglist[1]]
         control["updated"] = True
-        write_control(control, kind, origin=origin)
+        _write_control_delta(
+            control,
+            control_delta(set_values={"mode": MODE_MAP[arglist[1]], "updated": True}),
+            kind,
+            origin,
+        )
     elif arglist[1] == "prime":
         try:
             if arglist[2] is not None:
@@ -351,7 +396,19 @@ def _cmd_set_mode(data, control, settings, arglist, origin, kind):
                         control["next_mode"] = MODE_MAP[arglist[3]]
                     else:
                         control["next_mode"] = "Stop"
-                    write_control(control, kind, origin=origin)
+                    _write_control_delta(
+                        control,
+                        control_delta(
+                            set_values={
+                                "mode": control["mode"],
+                                "prime_amount": control["prime_amount"],
+                                "updated": True,
+                                "next_mode": control["next_mode"],
+                            }
+                        ),
+                        kind,
+                        origin,
+                    )
                 else:
                     data["result"] = "ERROR"
                     data["message"] = f"Prime amount should be an integer in grams."
@@ -370,7 +427,18 @@ def _cmd_set_mode(data, control, settings, arglist, origin, kind):
                 else:
                     control["primary_setpoint"] = float(arglist[2])
                 control["updated"] = True
-                write_control(control, kind, origin=origin)
+                _write_control_delta(
+                    control,
+                    control_delta(
+                        set_values={
+                            "mode": control["mode"],
+                            "primary_setpoint": control["primary_setpoint"],
+                            "updated": True,
+                        }
+                    ),
+                    kind,
+                    origin,
+                )
             else:
                 data["result"] = "ERROR"
                 data["message"] = f"Set Mode {arglist[1]} with {arglist[2]} failed [not a number]."
@@ -395,7 +463,7 @@ def _cmd_set_pmode(data, control, settings, arglist, origin, kind):
                 settings["cycle_data"]["PMode"] = int(arglist[1])
                 write_settings(settings)
                 control["settings_update"] = True
-                write_control(control, WriteKind.MERGE, origin=origin)
+                write_control(control_delta(set_values={"settings_update": True}), WriteKind.DELTA, origin=origin)
             else:
                 data["result"] = "ERROR"
                 data["message"] = f"Set PMode out of range(0-9): {arglist[1]}"
@@ -412,11 +480,8 @@ def _cmd_set_splus(data, control, settings, arglist, origin, kind):
     Smoke Plus
     /api/set/splus/{true/false}
     """
-    if arglist[1] == "true":
-        control["s_plus"] = True
-    else:
-        control["s_plus"] = False
-    write_control(control, kind, origin=origin)
+    control["s_plus"] = arglist[1] == "true"
+    _write_control_delta(control, control_delta(set_values={"s_plus": control["s_plus"]}), kind, origin)
 
 
 def _cmd_set_lid_open(data, control, settings, arglist, origin, kind):
@@ -429,7 +494,7 @@ def _cmd_set_lid_open(data, control, settings, arglist, origin, kind):
     """
     control["lid_open_toggle"] = True
 
-    write_control(control, kind, origin=origin)
+    _write_control_delta(control, control_delta(set_values={"lid_open_toggle": True}), kind, origin)
 
 
 def _cmd_set_notify(data, control, settings, arglist, origin, kind):
@@ -510,11 +575,8 @@ def _cmd_set_pwm(data, control, settings, arglist, origin, kind):
 
     /api/set/pwm/{true/false}
     """
-    if arglist[1] == "true":
-        control["pwm_control"] = True
-    else:
-        control["pwm_control"] = False
-    write_control(control, kind, origin=origin)
+    control["pwm_control"] = arglist[1] == "true"
+    _write_control_delta(control, control_delta(set_values={"pwm_control": control["pwm_control"]}), kind, origin)
 
 
 def _cmd_set_duty_cycle(data, control, settings, arglist, origin, kind):
@@ -529,7 +591,7 @@ def _cmd_set_duty_cycle(data, control, settings, arglist, origin, kind):
         duty_cycle = int(arglist[1])
         if duty_cycle >= 0 and duty_cycle <= 100:
             control["duty_cycle"] = duty_cycle
-            write_control(control, WriteKind.MERGE, origin=origin)
+            write_control(control_delta(set_values={"duty_cycle": duty_cycle}), WriteKind.DELTA, origin=origin)
         else:
             data["result"] = "ERROR"
             data["message"] = f"Duty cycle must be an integer between 0-100."
@@ -544,11 +606,8 @@ def _cmd_set_tuning_mode(data, control, settings, arglist, origin, kind):
 
     /api/set/tuning_mode/{true/false}
     """
-    if arglist[1] == "true":
-        control["tuning_mode"] = True
-    else:
-        control["tuning_mode"] = False
-    write_control(control, kind, origin=origin)
+    control["tuning_mode"] = arglist[1] == "true"
+    _write_control_delta(control, control_delta(set_values={"tuning_mode": control["tuning_mode"]}), kind, origin)
 
 
 """ The expiry flags /api/set/timer/start/{seconds}/{options} can name, in the
@@ -758,23 +817,34 @@ def _cmd_set_manual(data, control, settings, arglist, origin, kind):
     """
 
     if control["mode"] == Mode.MANUAL or settings["safety"]["allow_manual_changes"]:
+        assigned = None
         if arglist[1] == "power":
-            control = _manual_toggle(control, "power", arglist)
+            assigned = _manual_toggle(control, "power", arglist)
         elif arglist[1] == "igniter":
-            control = _manual_toggle(control, "igniter", arglist)
+            assigned = _manual_toggle(control, "igniter", arglist)
         elif arglist[1] == "fan":
-            control = _manual_toggle(control, "fan", arglist, reset_pwm_when_off=True)
+            assigned = _manual_toggle(control, "fan", arglist, reset_pwm_when_off=True)
         elif arglist[1] == "auger":
-            control = _manual_toggle(control, "auger", arglist)
+            assigned = _manual_toggle(control, "auger", arglist)
         elif arglist[1] == "pwm" and is_float(arglist[2]):
-            control["manual"]["change"] = "pwm"
-            control["manual"]["output"] = True
-            control["manual"]["pwm"] = int(float(arglist[2]))
+            assigned = {"change": "pwm", "output": True, "pwm": int(float(arglist[2]))}
+            control["manual"].update(assigned)
         else:
             data["result"] = "ERROR"
             data["message"] = f"Manual command not recognized or contained an error."
+        # The guard is UNCHANGED, wart included: it sits outside the if/elif
+        # chain, so a rejected request still writes when control["manual"]
+        # ["change"] holds a stale value from a previous command. What it writes
+        # is now an envelope naming nothing (`assigned` is None on that path)
+        # rather than a whole stale control dict -- so the wart survives as a
+        # queued no-op instead of as something that can revert another writer.
         if control["manual"]["change"] in ["power", "igniter", "fan", "auger", "pwm"]:
-            write_control(control, kind, origin=origin)
+            _write_control_delta(
+                control,
+                control_delta(set_values={"manual": assigned} if assigned else None),
+                kind,
+                origin,
+            )
 
     else:
         data["result"] = "ERROR"

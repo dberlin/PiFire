@@ -53,6 +53,18 @@ have always queued a write from outside the if/elif chain, and an envelope
 naming nothing is the honest form of "this command changed nothing". Previously
 they queued the whole control dict, which could revert a concurrent writer.
 
+Third and final pass, same rules again: the remaining 44 entries -- psp, units,
+mode (all four branches), pmode, splus, lid_open, pwm, duty_cycle, tuning_mode
+and every manual case. After it NO entry records a legacy "diff" any more, which
+is the fixture-level statement that no writer on this path queues a whole
+control dict. Two details worth naming: set_manual_unknown_stale_write queues a
+bare envelope (the write guard deliberately sits outside the if/elif chain, so a
+rejected request still writes -- the wart is preserved, but as a no-op rather
+than a stale snapshot); and kind_overwrite_splus is UNCHANGED, queued_writes
+still [], because process_command's kind=OVERWRITE escape hatch still writes the
+blob directly. A delta cannot honour "land now", so that caller keeps the
+whole-dict write it asked for.
+
 WHAT IS OBSERVED (per case, see `_run_case`):
   * the returned dict (result/message/data)
   * `arglist` AFTER the call -- process_command mutates its caller's list
@@ -160,7 +172,8 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_g
 # the module docstring): `queued_writes` only, in two passes --
 #   5a3702a7... -> 8d110035...  the six set_timer_ start/pause/stop entries
 #   8d110035... -> 2665570f...  the 18 notify / flag / hopper entries
-GOLDEN_SHA256 = "2665570f511eb583fbd0f0e8f8eca6b871ff84bea476051249c651c8d1ee104d"
+#   2665570f... -> 88c081a4...  the 44 scalar / mode / manual entries
+GOLDEN_SHA256 = "88c081a4e5d583aae69187beefc5d8a42afeaf1936ca36e891a305c2fe65cbde"
 
 # Frozen wall clock. The set/timer branches stamp time.time() into control.
 FIXED_NOW = 1700000000.0

@@ -267,3 +267,29 @@ def test_a_notify_write_is_not_reverted_by_a_concurrent_whole_dict_writer(seeded
     dsa.execute_control_writes()
     assert _notify_entry("Grill", "probe")["target"] == 203
     assert read_control()["s_plus"] is True
+
+
+def test_a_setpoint_set_back_to_its_opening_value_survives_a_concurrent_writer(seeded):
+    """Residual 2 for a scalar: both writes inside ONE cycle, the second
+    restoring the value the cycle began with."""
+    opening = read_control()["primary_setpoint"]
+    assert _cmd("psp", "225")["result"] == "OK"
+    assert _cmd("psp", str(opening))["result"] == "OK"
+    dsa.execute_control_writes()
+    assert read_control()["primary_setpoint"] == opening
+
+
+def test_a_manual_pwm_change_and_a_fan_toggle_in_one_cycle_both_land(seeded):
+    """A fan toggle used to carry a whole stale manual object, so it re-imposed
+    the pwm the cycle began with. It now names only change/output."""
+    control = read_control()
+    control["mode"] = "Manual"
+    write_control(control, WriteKind.OVERWRITE, origin="seed")
+    c.SqliteQueue("queue_control_write").flush()
+    assert _cmd("manual", "pwm", "50")["result"] == "OK"
+    assert _cmd("manual", "fan", "true")["result"] == "OK"
+    dsa.execute_control_writes()
+    manual = read_control()["manual"]
+    assert manual["pwm"] == 50
+    assert manual["change"] == "fan"
+    assert manual["output"] is True
