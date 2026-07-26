@@ -139,19 +139,26 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
                 control["notify_data"][index]["req"] = False
 
             """ Do Shutdown or Keep Warm if Requested """
-            if (
-                item["shutdown"]
-                and control["mode"] in (Mode.REIGNITE, Mode.STARTUP, Mode.SMOKE, Mode.HOLD)
-                and not control["notify_data"][index]["req"]
-            ):
+            # "Did this entry's alert fire?" is spelled differently per type.
+            # A `probe` target is one-shot: the branch above sends the alert
+            # and DISARMS the entry (req=False, target=0), so a cleared `req`
+            # is what "it fired" means there -- and for `timer`/`test`, which
+            # clear `req` the same way. A limit alert is not one-shot: it stays
+            # armed (`req` True) for the whole cook and re-arms via `triggered`
+            # when the temperature comes back into range. Gating limits on
+            # `not req` -- as this did -- made the "Shutdown PiFire" checkbox
+            # beside every high/low limit permanently dead. `triggered` is a
+            # limit's fired flag; the `reignite` branch below already uses it.
+            fired = (
+                item.get("triggered", False)
+                if item["type"] in ("probe_limit_high", "probe_limit_low")
+                else not control["notify_data"][index]["req"]
+            )
+            if item["shutdown"] and control["mode"] in (Mode.REIGNITE, Mode.STARTUP, Mode.SMOKE, Mode.HOLD) and fired:
                 control["mode"] = Mode.SHUTDOWN
                 control["updated"] = True
                 control["notify_data"][index]["shutdown"] = False
-            elif (
-                item["keep_warm"]
-                and control["mode"] in (Mode.SMOKE, Mode.HOLD)
-                and not control["notify_data"][index]["req"]
-            ):
+            elif item["keep_warm"] and control["mode"] in (Mode.SMOKE, Mode.HOLD) and fired:
                 control["mode"] = Mode.HOLD
                 control["primary_setpoint"] = settings["keep_warm"]["temp"]
                 control["s_plus"] = settings["keep_warm"]["s_plus"]

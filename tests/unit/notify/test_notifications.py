@@ -942,6 +942,120 @@ def test_check_notify_probe_limit_condition_clears_when_back_in_range(monkeypatc
     assert result["notify_data"][0]["triggered"] is False
 
 
+def _limit_item(entry_type="probe_limit_high", **overrides):
+    item = {
+        "req": True,
+        "type": entry_type,
+        "label": "Grill",
+        "condition": "above" if entry_type == "probe_limit_high" else "below",
+        "target": 300,
+        "triggered": False,
+        "shutdown": False,
+        "keep_warm": False,
+    }
+    item.update(overrides)
+    return item
+
+
+@pytest.mark.parametrize("entry_type,temp", [("probe_limit_high", 310), ("probe_limit_low", 100)])
+def test_check_notify_limit_shutdown_fires_when_the_limit_is_crossed(monkeypatch, entry_type, temp):
+    """The "Shutdown PiFire" checkbox rendered beside every high/low limit
+    alert (blueprints/dash/templates/*/_macro_dash_*.html, carried as
+    `high_limit_shutdown`/`low_limit_shutdown` through _NOTIFY_DTO_FIELDS)
+    could never fire: the shutdown tail gated on
+    `not control["notify_data"][index]["req"]`, and only the `probe` branch
+    ever clears `req`. A limit entry stays armed (`req` True) for the whole
+    cook, so the gate was permanently False. `triggered` is a limit alert's
+    "it fired" flag -- the same one the neighbouring `reignite` branch uses.
+    """
+    settings = _cn_settings()
+    item = _limit_item(entry_type, shutdown=True)
+    control = _cn_control(notify_data=[item], mode=Mode.HOLD)
+    _patch_check_notify_deps(monkeypatch)
+    in_data = {"probe_history": {"F": {"Grill": temp}}, "notify_targets": {}}
+
+    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+
+    assert result["mode"] == Mode.SHUTDOWN
+    assert result["updated"] is True
+    assert result["notify_data"][0]["shutdown"] is False
+    # The alert itself stays armed: unlike a target, a limit is not one-shot.
+    assert result["notify_data"][0]["req"] is True
+
+
+def test_check_notify_limit_shutdown_does_not_fire_while_in_range(monkeypatch):
+    """The counterpart guard: an armed limit whose temperature is inside the
+    range must NOT shut the grill down. Without this, "fired" could be
+    mistaken for "armed"."""
+    settings = _cn_settings()
+    item = _limit_item(shutdown=True)
+    control = _cn_control(notify_data=[item], mode=Mode.HOLD)
+    _patch_check_notify_deps(monkeypatch)
+    in_data = {"probe_history": {"F": {"Grill": 250}}, "notify_targets": {}}
+
+    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+
+    assert result["mode"] == Mode.HOLD
+    assert result["notify_data"][0]["shutdown"] is True
+
+
+def test_check_notify_limit_shutdown_re_arms_after_the_temperature_returns(monkeypatch):
+    """`triggered` is cleared when the temperature comes back into range, so a
+    limit alert re-arms. Pinning this is what makes copying the `probe`
+    branch's `req = False` the wrong fix: that would disarm the alert for the
+    rest of the cook."""
+    settings = _cn_settings()
+    item = _limit_item(shutdown=True)
+    control = _cn_control(notify_data=[item], mode=Mode.HOLD)
+    _patch_check_notify_deps(monkeypatch)
+
+    N.check_notify(
+        settings,
+        control,
+        in_data={"probe_history": {"F": {"Grill": 310}}, "notify_targets": {}},
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+    )
+    assert control["mode"] == Mode.SHUTDOWN
+
+    # Operator restarts the cook; temperature falls back into range.
+    control["mode"] = Mode.HOLD
+    result = N.check_notify(
+        settings,
+        control,
+        in_data={"probe_history": {"F": {"Grill": 250}}, "notify_targets": {}},
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+    )
+    assert result["notify_data"][0]["triggered"] is False
+    assert result["notify_data"][0]["req"] is True
+    assert result["mode"] == Mode.HOLD
+
+
+def test_check_notify_probe_shutdown_still_waits_for_the_target(monkeypatch):
+    """Regression guard on the other half of the gate: a `probe` entry whose
+    target has NOT been reached is still armed (`req` True) and must not shut
+    down. Only reaching the target clears `req`."""
+    settings = _cn_settings()
+    item = {
+        "req": True,
+        "type": "probe",
+        "label": "Probe1",
+        "condition": "equal_above",
+        "target": 200,
+        "shutdown": True,
+        "keep_warm": False,
+    }
+    control = _cn_control(notify_data=[item], mode=Mode.HOLD)
+    _patch_check_notify_deps(monkeypatch)
+    in_data = {"probe_history": {"F": {"Probe1": 150}}, "notify_targets": {"Probe1": 200}}
+
+    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+
+    assert result["mode"] == Mode.HOLD
+    assert result["notify_data"][0]["shutdown"] is True
+
+
 def test_check_notify_probe_update_eta_writes_computed_eta(monkeypatch):
     settings = _cn_settings()
     item = {
