@@ -3448,7 +3448,7 @@ interface MediaPanelProps {
 }
 ```
 
-- [ ] **Step 1: `CommentList` tests**
+- [x] **Step 1: `CommentList` tests**
 
 ```tsx
 test("renders each comment's date, time and text", () => { /* ... */ });
@@ -3471,7 +3471,7 @@ Three notes for the implementer:
 - **The picker posts the whole list.** Flask toggles one asset per click and infers the direction from a client-sent `state` string (`routes.py:565-585`), so a stale view inverts the operation. `setCommentAssets` takes the final list.
 - **Prev/next wraps within the comment's own assets**, matching `navimage` (`routes.py:130-141`) — not across all assets in the file. This is pure client-side arithmetic now; no endpoint needed, and E12/E13 deliberately have no `navimage` equivalent.
 
-- [ ] **Step 2: `MediaPanel` tests**
+- [x] **Step 2: `MediaPanel` tests**
 
 ```tsx
 test("renders a thumbnail grid over every asset", () => { /* ... */ });
@@ -3485,14 +3485,14 @@ test("an upload rejected as disallowed_file shows the reason", () => { /* ... */
 test("the empty state invites an upload instead of showing an empty grid", () => { /* ... */ });
 ```
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - Thumbnails: `assetThumbUrl(parentId, asset.filename)`. Fullsize: `assetUrl(parentId, asset.filename)`.
 - The file input takes `accept="image/*"` and `multiple` (matching `index.html:504`), and is cleared after a successful upload so re-picking the same file re-fires `change`.
 - Delete selection is local state; the request carries the array once. Confirmation names the count ("Remove 3 images?").
 - All four flows end with `onChanged()` so the page refetches and every panel sees the new asset list — a comment's thumbnails must disappear when the underlying asset is deleted, and `remove_assets` already scrubs the comment references server-side (`file_mgmt/common.py:220-228`), so a refetch is the whole synchronisation story.
 
-- [ ] **Step 4: Gate and commit**
+- [x] **Step 4: Gate and commit**
 
 ```bash
 cd web-react

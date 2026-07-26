@@ -17,6 +17,14 @@ rs.mock("../../helpers/files/cookfileApi", () => ({
 
 // The metadata card has its own suite; stubbed here so this module's
 // assertions stay about routing, loading and the recovery branch.
+rs.mock("./CommentList", () => ({
+  CommentList: () => <div data-testid="comment-list" />,
+}));
+
+rs.mock("./MediaPanel", () => ({
+  MediaPanel: () => <div data-testid="media-panel" />,
+}));
+
 rs.mock("./EventsTable", () => ({
   EventsTable: ({ units }: { units: string }) => (
     <div data-testid="events-table" data-units={units} />

@@ -7,9 +7,11 @@ import {
   fetchCookFileDetail,
   recoverCookFile,
 } from "../../helpers/files/cookfileApi";
+import { CommentList } from "./CommentList";
 import { CookFileChart } from "./CookFileChart";
 import { CookFileMeta } from "./CookFileMeta";
 import { EventsTable } from "./EventsTable";
+import { MediaPanel } from "./MediaPanel";
 
 // The cook-file detail route. One fetch on mount (and on each reload), no
 // polling: a saved cook is a finished dataset except for the edits this page
@@ -142,6 +144,32 @@ export function CookFilePage() {
                   events={detail.events}
                   totals={detail.event_totals}
                   units={detail.metadata.units}
+                />
+              </div>
+            </div>
+
+            <div className="pf-section">
+              <h2 className="pf-section-title">Comments</h2>
+              <div className="pf-section-body">
+                <CommentList
+                  filename={detail.filename}
+                  parentId={detail.metadata.id}
+                  comments={detail.comments}
+                  assets={detail.assets}
+                  onChanged={reload}
+                />
+              </div>
+            </div>
+
+            <div className="pf-section">
+              <h2 className="pf-section-title">Media</h2>
+              <div className="pf-section-body">
+                <MediaPanel
+                  filename={detail.filename}
+                  parentId={detail.metadata.id}
+                  assets={detail.assets}
+                  thumbnail={detail.metadata.thumbnail}
+                  onChanged={reload}
                 />
               </div>
             </div>
