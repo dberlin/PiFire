@@ -154,6 +154,51 @@ it by path and line number; those citations point here.
   `if shutdown … elif keep_warm … elif reignite`. Witnessed by two Playwright
   tests in `tests/web/test_page_dashboard.py` that drive the real modal; both
   were confirmed RED against the old selector before the fix landed.
+- **High/low-limit "Shutdown PiFire" could never fire.** `check_notify`'s
+  shutdown/keep-warm tail gated on `not notify_data[index]["req"]`, and only the
+  `probe` branch ever clears `req` — reaching a target is one-shot. A
+  `probe_limit_high`/`probe_limit_low` entry stays armed for the whole cook and
+  re-arms via `triggered`, so the gate was permanently False and the checkbox
+  rendered beside every limit alert did nothing. Fixed by asking `triggered` for
+  limit entries and `not req` for the one-shot ones — deliberately NOT by
+  copying the probe branch's `req = False`, which would disarm the alarm for the
+  rest of the cook. `reignite` already used `triggered`, which is why it worked.
+- **`read_cookfile`'s version gate compared semver components independently**
+  (`file[0] >= min[0] and file[1] >= min[1] and …`), so against the shipped
+  minimum of 1.5.0 a file written as 2.4.0 failed the `4 >= 5` term and was
+  reported as an OLDER format — routing a NEWER file to the repair/upgrade
+  prompt that rewrites it backwards. Now uses `semantic_ver_is_lower()`, which
+  was already in `common/common.py`.
+- **`prepare_csv`/`prepare_metrics_csv` were broken under any non-default
+  history folder.** Both did `filename.replace("./history/", "")` then
+  `"/tmp/" + …`; the replace only matched the default `HISTORY_FOLDER`, so any
+  other folder produced a path under a directory that does not exist and
+  `open()` raised. That is why the three legacy `dl_cookfile`/`dl_eventfile`/
+  `dl_graphfile` branches had never had a single test — every fixture uses a
+  temp folder, i.e. the broken case. One `os.path.basename()`-based helper now
+  serves both, which also stops a `../..` form value escaping `/tmp` (the new
+  traversal test was writing `/etc/passwd-Pifire-Export.csv` before the fix and
+  failed only on permissions). All three `dl_*` branches now have coverage.
+- **`thumbSelected` wrote any string it was handed** into `metadata.thumbnail`,
+  so a stale tab could leave a permanently broken `<img>` in the cook-file list
+  with no UI path back — the picker only ever offers assets that exist.
+  `/api/files/cookfiles/thumbnail` already validated this; the check moved down
+  to `file_mgmt/media.py` as `set_thumbnail_checked()` and both doors share it.
+- **The comment-asset toggle inferred its direction from a client-sent `state`
+  string.** With a stale modal both arms failed their guard, nothing was
+  written, and the handler still answered `OK` — which `cookfile.js` took as
+  licence to flip the thumbnail locally, leaving the view showing the opposite
+  of what was stored. The server now decides from presence in
+  `comment["assets"]` and returns the authoritative `selected`, which the JS
+  renders instead of guessing. An unknown `commentid` reports `ERROR` rather
+  than a false success.
+- **Factory reset left the whole pellet database in place.** Pre-SQLite,
+  `os.system("rm pelletdb.json")` WAS the mechanism; removing that dead line
+  preserved the accident it left behind. Human ruling: factory reset clears the
+  pellet database. Both `_admin_setting_factorydefaults` and the Socket.IO
+  `factory_defaults` (which never reset pellets at all, not even pre-SQLite) now
+  call the shared `common/pellets_actions.clear_pellet_db()`. The control reseed
+  is untouched — it is a deliberate explicit delta.
 
 ---
 
@@ -518,10 +563,6 @@ which said it was owed).
 
 #### Backend behaviour that is broken or lying
 
-- **High/low-limit "Shutdown PiFire" appears never to fire.** The shutdown
-  branch is gated on `not notify_data[index]["req"]`; only `type == "probe"`
-  entries ever clear `req`. Verified still present. `reignite` is gated on
-  `triggered` instead and does work.
 - The errors blob is write-only from the web tier, and `_check_control_status`
   can false-positive on a healthy system (open item 4).
 - `get_os_info(persist=True)` — a destructive flag still defaults to true.
