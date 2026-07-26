@@ -707,9 +707,23 @@ jj desc -m "refactor(files): shared managed-folder browsing + kill two os.system
   - 400 → `{"result":"Error","message":"bad_request","data":{"field": "<name>"}}`
 - Consumes: `common.file_browser.browse_files`, `common.app.api_response`.
 
-- [ ] **Step 1: Write the failing HTTP tests**
+- [x] **Step 1: Write the failing HTTP tests**
 
-Create `tests/web/test_api_files_listing.py`:
+Create `tests/web/test_api_files_listing.py`.
+
+**CORRECTED against live code.** The draft below reaches for the playwright
+`live_server`/`page` fixtures and `pytestmark = requires_chromium`. That is wrong for
+this surface and contradicts the plan's own F6, which names
+`tests/web/test_api_history.py` as "the model for the new endpoint tests" -- and that
+module uses `flask_app.test_client()` + the `ds` fixture. These endpoints have no DOM,
+so playwright buys nothing, and `requires_chromium` would make every test here AND the
+traversal/containment tests in Tasks 3-7 SKIP silently on a chromium-less checkout. A
+security test that can silently not run is not a security test. All /api/files test
+modules therefore use `test_client` + `ds`. The archive builders live in
+`tests/web/archive_builders.py` (a shared, non-collected module) instead of being
+copy-pasted into three new test modules.
+
+Original draft, for reference:
 
 ```python
 """GET /api/files/cookfiles and /api/files/recipes -- the JSON listing
@@ -923,7 +937,7 @@ def test_listing_never_leaks_a_filesystem_path(live_server, page, _isolated_fold
         assert history_dir not in json.dumps(item)
 ```
 
-- [ ] **Step 2: Create the blueprint**
+- [x] **Step 2: Create the blueprint**
 
 `blueprints/api_files/__init__.py`:
 
@@ -1014,7 +1028,7 @@ def file_listing(kind):
     return jsonify(browse_files(folder, extension, page=page, per_page=per_page, reverse=reverse)), 200
 ```
 
-- [ ] **Step 3: Register it**
+- [x] **Step 3: Register it**
 
 In `app.py`, beside the `api_history` import (line 85):
 
@@ -1028,12 +1042,12 @@ and beside its registration (line 106):
 app.register_blueprint(api_files_bp, url_prefix="/api/files")
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/test_api_files_listing.py -q
 ```
-Expected: `11 passed` (or `11 skipped` without chromium — re-run in the main checkout).
+Expected: `13 passed` (the harness change means they never skip).
 
 ```bash
 .venv/bin/ruff format blueprints/api_files/ tests/web/test_api_files_listing.py app.py

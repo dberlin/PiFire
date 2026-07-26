@@ -56,6 +56,7 @@ DB file directly.)
 """
 
 import os
+import shutil
 import tempfile
 import threading
 
@@ -233,3 +234,74 @@ def apply_control(mutate, *, origin="test-web-e2e"):
     write_control(final, WriteKind.MERGE, origin=origin)
     drain_control_writes()
     return final
+
+
+# ---------------------------------------------------------------------------
+# /api/files harness
+#
+# The three tests/web/test_api_files_*.py modules are pure JSON HTTP tests --
+# no DOM -- so they use flask_app.test_client() + the `ds` fixture, the shape
+# test_api_history.py established, rather than the Playwright `live_server`
+# above. That matters beyond speed: several of those tests assert that path
+# traversal is refused, and `requires_chromium` would let them SKIP silently on
+# a checkout without a browser.
+#
+# The fixtures live here rather than in one of the three modules because
+# function-scoped fixtures do not cross module boundaries and all three need
+# the identical isolated-folder setup.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def api_files_client(ds):
+    """Flask test client over an isolated temp SQLite datastore."""
+    from app import app as flask_app
+
+    flask_app.config["TESTING"] = True
+    with flask_app.test_client() as client:
+        yield client
+
+
+@pytest.fixture
+def api_files_folders():
+    """Redirect the history and recipe folders at a temp dir, and yield both.
+
+    Patches all FIVE places a folder is read -- app.config for each kind, plus
+    the module-level constants file_mgmt.cookfile, file_mgmt.common and
+    file_mgmt.recipes each define separately. Missing any one of them makes a
+    test write into the real repo checkout.
+    """
+    from app import app as flask_app
+    import file_mgmt.common as common_mod
+    import file_mgmt.cookfile as cookfile_mod
+    import file_mgmt.recipes as recipes_mod
+
+    tmp_dir = tempfile.mkdtemp(prefix="pifire_test_files_")
+    history_dir = os.path.join(tmp_dir, "history") + "/"
+    recipe_dir = os.path.join(tmp_dir, "recipes") + "/"
+    os.makedirs(history_dir, exist_ok=True)
+    os.makedirs(recipe_dir, exist_ok=True)
+
+    saved = (
+        flask_app.config["HISTORY_FOLDER"],
+        flask_app.config["RECIPE_FOLDER"],
+        cookfile_mod.HISTORY_FOLDER,
+        common_mod.HISTORY_FOLDER,
+        recipes_mod.RECIPE_FOLDER,
+    )
+    flask_app.config["HISTORY_FOLDER"] = history_dir
+    flask_app.config["RECIPE_FOLDER"] = recipe_dir
+    cookfile_mod.HISTORY_FOLDER = history_dir
+    common_mod.HISTORY_FOLDER = history_dir
+    recipes_mod.RECIPE_FOLDER = recipe_dir
+
+    yield history_dir, recipe_dir
+
+    (
+        flask_app.config["HISTORY_FOLDER"],
+        flask_app.config["RECIPE_FOLDER"],
+        cookfile_mod.HISTORY_FOLDER,
+        common_mod.HISTORY_FOLDER,
+        recipes_mod.RECIPE_FOLDER,
+    ) = saved
+    shutil.rmtree(tmp_dir, ignore_errors=True)
