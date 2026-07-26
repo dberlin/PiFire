@@ -35,15 +35,9 @@ def pellets_load_profile(pelletdb, action_data):
         pelletdb["current"]["date_loaded"] = now
         pelletdb["current"]["est_usage"] = 0
         pelletdb["log"][now] = action_data["profile"]
-        # MINIMAL patch, not the whole control dict. This handler changes one
-        # boolean, so one boolean is what it queues. execute_control_writes'
-        # reduce_control_patch already drops members equal to the pre-drain
-        # ancestor, so queuing the whole dict is not a correctness bug today --
-        # but it makes every pellet action carry a full stale control snapshot
-        # through the queue and relies on that reduction to undo it. Saying what
-        # we mean is cheaper and does not depend on the drain's defences.
-        # execute_control_writes pops `origin` before patching, so a bare
-        # single-key dict is a legal partial.
+        # This handler changes one boolean, so one boolean is what it states.
+        # Queuing the whole control dict would carry a stale snapshot of every
+        # other member through the queue, and a delta says only what it means.
         write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
         write_pellet_db(pelletdb)
         return api_response(result="OK")

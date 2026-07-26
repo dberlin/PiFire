@@ -211,11 +211,10 @@ describe("TimerModal", () => {
 // The single request is /api/set/timer/start/{seconds}/{options}, which does
 // exactly one write_control() on the server (common/api_commands.py
 // _cmd_set_timer). Splitting it into a start plus two flag writes used to lose
-// the flags -- every MERGE write queues the WHOLE control blob, read_control()
-// never sees the pending queue, and the last patch of a control cycle imposed
-// its stale array on the rest. The drain now three-way merges each patch
-// against the blob as it stood when it began (common/common.py
-// reduce_control_patch, merge_notify_data), so a split write would survive.
+// the flags -- every MERGE write queued the WHOLE control blob, read_control()
+// never saw the pending queue, and the last patch of a control cycle imposed
+// its stale snapshot on the rest. Writers now state what they changed
+// (common/control_delta.py), so a split write would survive.
 //
 // The form is kept, and this pin with it, for reasons independent of that seam.
 // It carries a DURATION: the control process compares control.timer.end against
