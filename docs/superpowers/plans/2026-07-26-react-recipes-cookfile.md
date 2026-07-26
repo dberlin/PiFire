@@ -1665,7 +1665,7 @@ jj desc -m "feat(api-files): cook-file download, CSV export, upload and delete"
 - `POST /api/files/cookfiles/label` `{file, old_label, new_label}` → `{result:"OK", data:{new_label_safe}}`; `{result:"Error", message:"label_exists"}` at 409.
 - `POST /api/files/cookfiles/recover` `{file, action:"upgrade"|"repair"}` → `{result:"OK"}`; 422 on failure.
 
-- [ ] **Step 1: Write the failing tests (append to `test_api_files_cookfile_write.py`)**
+- [x] **Step 1: Write the failing tests (append to `test_api_files_cookfile_write.py`)**
 
 ```python
 def _read_member(history_dir, name, member):
@@ -1735,6 +1735,14 @@ def test_label_rename_requires_all_three_fields(live_server, page, _isolated_fol
         assert resp.status == 400
 
 
+# CORRECTED: the plan also drafted a "detail 422s, then upgrade, then detail 200s" test
+# using `version="0.0.1"`. That version takes upgrade_cookfile's PRE-1.5 branch
+# (file_mgmt/cookfile.py:269), which reads flat `grill1_setpoint`/`grill1_temp` keys a
+# modern hand-built archive does not have -> KeyError. There is no version string that
+# both fails read_cookfile's check AND skips the pre-1.5 conversion, so the shipped test
+# uses a genuine v1.0-shaped archive (tests/web/archive_builders.py::write_legacy_cookfile,
+# mirroring tests/unit/file_mgmt/test_cookfile.py::_write_old_format_pifire) and asserts
+# the converted graph_labels come back in the modern nested shape.
 def test_recover_upgrade_rewrites_a_current_version_file_as_a_no_op(live_server, page, _isolated_folders):
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Upgrade-Cook")
@@ -1773,7 +1781,7 @@ def test_every_mutation_refuses_traversal(live_server, page, _isolated_folders):
         assert resp.status in (400, 404), path_suffix
 ```
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 Add to `cookfile_api.py`:
 
@@ -1906,7 +1914,7 @@ def cookfile_recover():
     return jsonify(api_response("OK")), 200
 ```
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit** (39 passed)
 
 ```bash
 QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/test_api_files_cookfile_write.py -q

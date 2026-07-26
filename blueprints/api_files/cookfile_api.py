@@ -13,14 +13,15 @@ from werkzeug.utils import secure_filename
 from common.app import (
     allowed_file,
     classify_cookfile_error,
+    create_safe_name,
     prepare_annotations,
     prepare_csv,
     prepare_event_totals,
     prepare_metrics_csv,
 )
 from common.common import epoch_to_time
-from file_mgmt.common import read_json_file_data
-from file_mgmt.cookfile import read_cookfile
+from file_mgmt.common import fixup_assets, read_json_file_data, update_json_file_data
+from file_mgmt.cookfile import read_cookfile, upgrade_cookfile
 
 
 def load(path):
@@ -144,3 +145,77 @@ def save_upload(storage):
     if not safe_name:
         return None, "bad_request"
     return safe_name, None
+
+
+def set_title(path, title):
+    metadata, status = read_json_file_data(path, "metadata")
+    if status != "OK":
+        return status
+    metadata["title"] = title
+    return update_json_file_data(metadata, path, "metadata")
+
+
+def rename_label(path, old_label, new_label):
+    """Rename a probe's display label across graph_labels.json AND
+    graph_data.json.
+
+    Ported from blueprints/cookfile/routes.py's _rename_graph_label (:499-554)
+    rather than imported, because that helper answers "already exists" and
+    "read failed" with the same jsonify({"result": "ERROR"}) -- the client
+    cannot tell a user mistake from a corrupt file. Here the two are distinct
+    return values so the route can answer 409 vs 422. The collision check is
+    also a separate pass: the original renames and checks in ONE loop, so by
+    the time it discovers the collision it has already mutated the dict it is
+    about to throw away.
+
+    Returns (safe_label, None) or (None, "label_exists" | <read/write status>).
+    """
+    labels, status = read_json_file_data(path, "graph_labels")
+    if status != "OK":
+        return None, status
+
+    safe = create_safe_name(new_label)
+    for category in labels:
+        if safe in labels[category]:
+            return None, "label_exists"
+
+    for category in labels:
+        if old_label in labels[category]:
+            labels[category].pop(old_label)
+            labels[category][safe] = new_label
+
+    status = update_json_file_data(labels, path, "graph_labels")
+    if status != "OK":
+        return None, status
+
+    graph, status = read_json_file_data(path, "graph_data")
+    if status != "OK":
+        return None, status
+    for category in graph["probe_mapper"]:
+        mapper = graph["probe_mapper"][category]
+        if old_label not in mapper:
+            continue
+        mapper[safe] = mapper.pop(old_label)
+        #  The three series a probe contributes get three different suffixes
+        #  (file_mgmt/cookfile.py:372, :388) and the chart label must keep them.
+        addendum = {"targets": " Target", "primarysp": " Set Point"}.get(category, "")
+        graph["chart_data"][mapper[safe]]["label"] = new_label + addendum
+
+    status = update_json_file_data(graph, path, "graph_data")
+    if status != "OK":
+        return None, status
+    return safe, None
+
+
+def recover(path, action):
+    """upgrade | repair. `repair` is upgrade(repair=True) followed by
+    fixup_assets, matching blueprints/cookfile/routes.py:271-303."""
+    struct, status = upgrade_cookfile(path, repair=(action == "repair"))
+    if status != "OK":
+        return status
+    if action == "repair":
+        struct, status = read_cookfile(path)
+        if status != "OK":
+            return status
+        struct, status = fixup_assets(path, struct)
+    return status

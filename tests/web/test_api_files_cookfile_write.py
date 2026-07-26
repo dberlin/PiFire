@@ -22,7 +22,7 @@ import os
 
 import pytest
 
-from tests.web.archive_builders import write_cookfile
+from tests.web.archive_builders import write_cookfile, write_legacy_cookfile
 
 
 @pytest.fixture
@@ -216,3 +216,168 @@ def test_delete_refuses_traversal_and_unknown_names(client, folders, tmp_path, h
 
 def test_delete_with_no_body_is_400(client, folders):
     assert client.post("/api/files/cookfiles/delete").status_code == 400
+
+
+# --------------------------------------------------------------------------
+# E9-E11 title, probe-label rename, repair/upgrade
+# --------------------------------------------------------------------------
+
+
+def _read_member(history_dir, name, member):
+    from file_mgmt.common import read_json_file_data
+
+    data, status = read_json_file_data(history_dir + name, member, unpackassets=False)
+    assert status == "OK"
+    return data
+
+
+def test_title_rename_persists(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Title-Cook")
+    resp = client.post("/api/files/cookfiles/title", json={"file": name, "title": "Sunday Brisket"})
+    assert resp.status_code == 200 and resp.get_json()["result"] == "OK"
+    assert _read_member(history_dir, name, "metadata")["title"] == "Sunday Brisket"
+
+
+def test_title_rename_does_not_rename_the_file(client, folders):
+    """Flask's editTitle only touches metadata.json (routes.py:483-495). The
+    filename is the identity the list and every URL use; renaming it here would
+    break the open browser tab."""
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Stable-Cook")
+    client.post("/api/files/cookfiles/title", json={"file": name, "title": "Something Else"})
+    assert os.path.isfile(history_dir + name)
+
+
+def test_title_requires_a_string(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "NoTitle-Cook")
+    resp = client.post("/api/files/cookfiles/title", json={"file": name, "title": 7})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "title"
+
+
+def test_label_rename_updates_labels_mapper_and_chart_label(client, folders):
+    """_rename_graph_label (routes.py:499-554) is a five-step rewrite across
+    TWO json members. All three effects are asserted."""
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Label-Cook")
+    resp = client.post(
+        "/api/files/cookfiles/label",
+        json={"file": name, "old_label": "grill1", "new_label": "Main Grill"},
+    )
+    assert resp.status_code == 200
+    safe = resp.get_json()["data"]["new_label_safe"]
+    assert safe == "MainGrill"  # create_safe_name strips non-alnum (common/app.py:325)
+
+    labels = _read_member(history_dir, name, "graph_labels")
+    assert labels["probes"][safe] == "Main Grill"
+    assert "grill1" not in labels["probes"]
+
+    graph = _read_member(history_dir, name, "graph_data")
+    assert safe in graph["probe_mapper"]["probes"]
+    assert graph["chart_data"][graph["probe_mapper"]["probes"][safe]]["label"] == "Main Grill"
+
+
+def test_label_rename_to_an_existing_label_is_refused(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Dup-Cook")
+    client.post(
+        "/api/files/cookfiles/label",
+        json={"file": name, "old_label": "grill1", "new_label": "Main Grill"},
+    )
+    resp = client.post(
+        "/api/files/cookfiles/label",
+        json={"file": name, "old_label": "MainGrill", "new_label": "Main Grill"},
+    )
+    assert resp.status_code == 409
+    assert resp.get_json()["message"] == "label_exists"
+
+
+def test_label_rename_refusal_leaves_the_archive_untouched(client, folders):
+    """A 409 must be a no-op, not a half-applied rename -- the legacy helper
+    pops the old key before it discovers the collision."""
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Intact-Cook")
+    client.post(
+        "/api/files/cookfiles/label",
+        json={"file": name, "old_label": "grill1", "new_label": "Main Grill"},
+    )
+    before = _read_member(history_dir, name, "graph_labels")
+    client.post(
+        "/api/files/cookfiles/label",
+        json={"file": name, "old_label": "MainGrill", "new_label": "Main Grill"},
+    )
+    assert _read_member(history_dir, name, "graph_labels") == before
+
+
+@pytest.mark.parametrize(
+    "body,field",
+    [
+        ({"old_label": "grill1"}, "new_label"),
+        ({"new_label": "X"}, "old_label"),
+        ({"old_label": "", "new_label": "X"}, "old_label"),
+        ({"old_label": "grill1", "new_label": "   "}, "new_label"),
+    ],
+)
+def test_label_rename_requires_all_three_fields(client, folders, body, field):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Fields-Cook")
+    resp = client.post("/api/files/cookfiles/label", json={"file": name, **body})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == field
+
+
+def test_recover_upgrade_rewrites_a_current_version_file_as_a_no_op(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Upgrade-Cook")
+    resp = client.post("/api/files/cookfiles/recover", json={"file": name, "action": "upgrade"})
+    assert resp.status_code == 200 and resp.get_json()["result"] == "OK"
+    assert _read_member(history_dir, name, "metadata")["title"] == "Upgrade-Cook"
+
+
+def test_recover_upgrade_makes_a_pre_1_5_file_readable(client, folders):
+    """The point of the endpoint, over a genuine v1.0-shaped archive: detail
+    422s with errortype "version", the client offers Attempt Conversion, and
+    afterwards detail succeeds and the converted graph_labels are the modern
+    nested shape."""
+    history_dir, _ = folders
+    name = write_legacy_cookfile(history_dir, "Convert-Cook")
+    first = client.get(f"/api/files/cookfiles/detail?file={name}")
+    assert first.status_code == 422
+    assert first.get_json()["data"]["errortype"] == "version"
+
+    assert client.post("/api/files/cookfiles/recover", json={"file": name, "action": "upgrade"}).status_code == 200
+    after = client.get(f"/api/files/cookfiles/detail?file={name}")
+    assert after.status_code == 200
+    assert set(after.get_json()["graph_labels"]) == {"primarysp", "probes", "targets"}
+
+
+def test_recover_repair_runs_upgrade_then_fixup_assets(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Repair-Cook")
+    resp = client.post("/api/files/cookfiles/recover", json={"file": name, "action": "repair"})
+    assert resp.status_code == 200 and resp.get_json()["result"] == "OK"
+
+
+def test_recover_rejects_an_unknown_action(client, folders):
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Action-Cook")
+    resp = client.post("/api/files/cookfiles/recover", json={"file": name, "action": "delete"})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "action"
+
+
+@pytest.mark.parametrize(
+    "route,body",
+    [
+        ("title", {"file": "../x.pifire", "title": "t"}),
+        ("label", {"file": "../x.pifire", "old_label": "a", "new_label": "b"}),
+        ("recover", {"file": "../x.pifire", "action": "upgrade"}),
+    ],
+)
+def test_every_mutation_refuses_traversal(client, folders, route, body):
+    """One sweep over all three, so a new mutation added without require_file
+    fails here rather than shipping."""
+    resp = client.post(f"/api/files/cookfiles/{route}", json=body)
+    assert resp.status_code in (400, 404), route

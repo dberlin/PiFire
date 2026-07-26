@@ -187,3 +187,52 @@ def cookfile_delete():
         return err
     os.remove(path)
     return jsonify(api_response("OK")), 200
+
+
+@api_files_bp.route("/cookfiles/title", methods=["POST"])
+def cookfile_title():
+    body = json_body()
+    path, err = require_file(body.get("file", ""))
+    if err:
+        return err
+    title = body.get("title")
+    if not isinstance(title, str):
+        return error("bad_request", 400, field="title")
+    status = cookfile_api.set_title(path, title)
+    if status != "OK":
+        return cookfile_api.unreadable(status, error)
+    return jsonify(api_response("OK")), 200
+
+
+@api_files_bp.route("/cookfiles/label", methods=["POST"])
+def cookfile_label():
+    body = json_body()
+    path, err = require_file(body.get("file", ""))
+    if err:
+        return err
+    old_label, new_label = body.get("old_label"), body.get("new_label")
+    if not isinstance(old_label, str) or not old_label:
+        return error("bad_request", 400, field="old_label")
+    if not isinstance(new_label, str) or not new_label.strip():
+        return error("bad_request", 400, field="new_label")
+    safe, problem = cookfile_api.rename_label(path, old_label, new_label)
+    if problem == "label_exists":
+        return error("label_exists", 409)
+    if problem:
+        return cookfile_api.unreadable(problem, error)
+    return jsonify(api_response("OK", None, {"new_label_safe": safe})), 200
+
+
+@api_files_bp.route("/cookfiles/recover", methods=["POST"])
+def cookfile_recover():
+    body = json_body()
+    action = body.get("action")
+    if action not in ("upgrade", "repair"):
+        return error("bad_request", 400, field="action")
+    path, err = require_file(body.get("file", ""))
+    if err:
+        return err
+    status = cookfile_api.recover(path, action)
+    if status != "OK":
+        return cookfile_api.unreadable(status, error)
+    return jsonify(api_response("OK")), 200

@@ -131,3 +131,52 @@ def write_recipe(recipe_dir, title):
         for name, data in files.items():
             archive.writestr(name, json.dumps(data))
     return filename
+
+
+def write_legacy_cookfile(history_dir, title):
+    """Write a genuine pre-v1.5.0-shaped `{title}.pifire` and return its name.
+
+    Flat `graph_data` (grill1_temp / grill1_setpoint / probe1_temp / ... /
+    time_labels) and flat `graph_labels` (grill1_label / probe1_label /
+    probe2_label), exactly what upgrade_cookfile's conversion branch expects to
+    read (file_mgmt/cookfile.py:220-227, :253-263). `raw_data.json` is omitted
+    on purpose so the raw-data-reconstruction branch (:212-232) runs too.
+
+    Same construction as tests/unit/file_mgmt/test_cookfile.py's
+    _write_old_format_pifire; kept here so the HTTP tests can exercise the
+    Attempt Conversion flow end to end.
+    """
+    files = {
+        "metadata.json": {
+            "title": title,
+            "starttime": 1000,
+            "endtime": 2000,
+            "units": "F",
+            "thumbnail": "",
+            "id": str(uuid.uuid4()),
+            "version": "1.0.0",
+        },
+        # raw_data.json intentionally omitted
+        "graph_data.json": {
+            "time_labels": [1000, 2000],
+            "grill1_temp": [100, 110],
+            "grill1_setpoint": [225, 225],
+            "probe1_temp": [90, 95],
+            "probe2_temp": [80, 85],
+            "probe1_setpoint": [165, 165],
+            "probe2_setpoint": [165, 165],
+        },
+        "graph_labels.json": {
+            "grill1_label": "Grill",
+            "probe1_label": "Probe 1",
+            "probe2_label": "Probe 2",
+        },
+        "events.json": [],
+        "comments.json": [],
+        "assets.json": [],
+    }
+    filename = f"{title}.pifire"
+    with zipfile.ZipFile(history_dir + filename, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in files.items():
+            archive.writestr(name, json.dumps(data))
+    return filename
