@@ -3,12 +3,18 @@
  PiFire Settings Migration
 ==============================================================================
 
-Description: Reading the settings.json FILE and migrating its contents across
+Description: Reading a settings JSON FILE and migrating its contents across
   server versions -- the upgrade/downgrade paths and the version-overlay that
   runs on first import.
 
-  Note: this is the FILE reader/migrator. At runtime SQLite is the source of
-  truth for settings; see common/datastore_accessors.py.
+  Note: this is the FILE reader/migrator, and it is IMPORT-ONLY. SQLite
+  (pifire.db) is the sole settings store -- see
+  common/datastore_accessors.py. The only files this ever reads are the
+  one-time first-boot import source (a settings.json left behind by a
+  pre-SQLite install; see common/datastore.py::_first_boot_import) and the
+  backup files the admin page restores from. Nothing writes a settings.json
+  at runtime; one exists only if a human runs
+  scripts/export-settings-json.py.
 
   Extracted from common/common.py; common/common.py re-imports these names
   for now so that existing `common.common.X` call sites keep resolving.
@@ -57,7 +63,10 @@ def read_settings_file(filename="settings.json", init=False, retry_count=0):
 
     With ``init=False`` and a readable, well-formed file this is a pure read.
 
-    :param filename: Filename to use (default settings.json)
+    :param filename: File to read. The default is only ever taken by the
+            one-time first-boot import, which looks for a settings.json left
+            behind by a pre-SQLite install; every other caller passes a
+            backup file path.
     :param init: Run the migration pipeline over the result (see above)
     :param retry_count: Internal -- recursion guard for the ValueError retry
     """
@@ -74,7 +83,7 @@ def read_settings_file(filename="settings.json", init=False, retry_count=0):
         return settings
     except ValueError:
         # A ValueError Exception occurs when multiple accesses collide, this code attempts a retry.
-        event = "ERROR: Value Error Exception - JSONDecodeError reading settings.json"
+        event = f"ERROR: Value Error Exception - JSONDecodeError reading {filename}"
         write_log(event)
         json_data_file.close()
         # Retry Reading Settings
@@ -329,12 +338,12 @@ def restore_settings(settings_default):
     server_version = settings_default["versions"]["server"]
     backup_settings_file = backup_manifest["server_settings"].get(server_version, None)
     if backup_settings_file is not None:
-        warning = f'Something failed when reading the "settings.json" file.  Restoring settings from the following backup settings file: {backup_settings_file}.'
+        warning = f"Something failed when reading the settings file.  Restoring settings from the following backup settings file: {backup_settings_file}."
         # Read the backup FILE (not SQLite -- that's the current, possibly
         # corrupt/absent, state we're recovering from).
         settings = read_settings_file(filename=backup_settings_file)
     else:
-        warning = f'Something failed when reading the "settings.json" file.  Resetting settings to defaults, since no backup settings files were found.'
+        warning = "Something failed when reading the settings file.  Resetting settings to defaults, since no backup settings files were found."
         settings = settings_default
     # Make the recovered settings the new current state in SQLite.
     write_settings_store(settings)

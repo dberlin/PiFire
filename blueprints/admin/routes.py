@@ -173,9 +173,10 @@ def _admin_setting_delete_logs(ctx):
 
 
 def _admin_setting_download_settings(ctx):
-    # settings.json is not kept in sync -- SQLite is the source of
-    # truth at runtime. Write the current settings out to a temp
-    # file to download, same pattern as 'download_control' below.
+    # An EXPORT, not a read of live state: SQLite is the only store, so the
+    # current settings are written out to a throwaway temp file purely so the
+    # browser has something to download. Same pattern as 'download_control'
+    # below. Nothing reads this file back.
     filename = "/tmp/settings.json"
     write_generic_json(ctx.settings, filename)
     return send_file(filename, as_attachment=True, max_age=0)

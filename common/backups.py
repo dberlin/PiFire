@@ -4,8 +4,11 @@
 ==============================================================================
 
 Description: Backup/restore of the settings and pellet databases, plus the
-  pelletdb.json FILE reader whose corrupt-file self-repair path calls back
-  into the pellet DB restore.
+  pellet-DB JSON FILE reader whose corrupt-file self-repair path calls back
+  into the pellet DB restore. That reader is IMPORT-ONLY: SQLite (pifire.db)
+  is the sole pellet store, and the only files it ever reads are the one-time
+  first-boot import source (a pelletdb.json left behind by a pre-SQLite
+  install) and the backup files this module writes.
 
   Extracted from common/common.py. These functions sit ABOVE
   common/datastore_accessors.py (they read/write the live SQLite state in
@@ -35,9 +38,8 @@ from common.defaults import default_pellets
 
 
 def backup_settings():
-    # Write the CURRENT settings (SQLite is the source of truth at runtime, the
-    # settings.json file is not kept in sync) to a backup copy in
-    # /[BACKUP_PATH]/PiFire_[DATE]_[TIME].json
+    # Write the CURRENT settings (read from SQLite, the only store) out to a
+    # backup copy in /[BACKUP_PATH]/PiFire_[DATE]_[TIME].json
     time_now = datetime.datetime.now()
     time_str = time_now.strftime("%m-%d-%y_%H%M%S")  # Truncate the microseconds
     backup_file = BACKUP_PATH + "PiFire_" + time_str + ".json"
@@ -62,7 +64,10 @@ def read_pellet_db_file(filename="pelletdb.json", retry_count=0):
     """
     Read Pellet DataBase from file
 
-    :param filename: Filename to use (default pelletdb.json)
+    :param filename: File to read. The default is only ever taken by the
+            one-time first-boot import, which looks for a pelletdb.json left
+            behind by a pre-SQLite install; every other caller passes a
+            backup file path.
     :param retry_count: Recursion guard for the corrupt-file self-repair path
             below (mirrors read_settings_file's retry_count<5 pattern). The
             self-repair calls backup_pellet_db(action='restore'), which calls
@@ -73,7 +78,7 @@ def read_pellet_db_file(filename="pelletdb.json", retry_count=0):
 
     pelletdb = default_pellets()
 
-    # Read all lines of pelletdb.json into a list(array)
+    # Read the whole file in and parse it
     try:
         json_data_file = os.fdopen(os.open(filename, os.O_RDONLY))
         json_data_string = json_data_file.read()
@@ -120,8 +125,8 @@ def backup_pellet_db(action="backup", retry_count=0):
         time_now = datetime.datetime.now()
         time_str = time_now.strftime("%m-%d-%y_%H%M%S")  # Truncate the microseconds
         backup_file = BACKUP_PATH + "PelletDB_" + time_str + ".json"
-        # Write the CURRENT pellet DB (SQLite is the source of truth at
-        # runtime, pelletdb.json is not kept in sync) directly to the backup file.
+        # Write the CURRENT pellet DB (read from SQLite, the only store)
+        # directly to the backup file.
         pelletdb = read_pellet_db()
         write_generic_json(pelletdb, backup_file)
         backup_manifest["pelletdb"]["current"] = backup_file

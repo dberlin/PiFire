@@ -54,7 +54,7 @@ class WriteKind(Enum):
  Constants and Globals
 ==============================================================================
 """
-BACKUP_PATH = "./backups/"  # Path to backups of settings.json, pelletdb.json
+BACKUP_PATH = "./backups/"  # Settings/pellet-DB backups exported from SQLite, plus their manifest.json
 
 
 """

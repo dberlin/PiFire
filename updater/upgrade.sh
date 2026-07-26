@@ -67,7 +67,7 @@ if [ "$OS_BITS" = "32" ]; then
 	echo " !!" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 	echo " !! Your options:" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 	echo " !!   1. Move to a 64-bit OS. Back up /usr/local/bin/pifire (at minimum" | tee -a /usr/local/bin/pifire/logs/upgrade.log
-	echo " !!      settings.json and the cookfiles/ directory), re-image the SD" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!      pifire.db and the cookfiles/ directory), re-image the SD" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 	echo " !!      card with 64-bit Raspberry Pi OS -- supported on Pi 3, Pi 4," | tee -a /usr/local/bin/pifire/logs/upgrade.log
 	echo " !!      Pi 5 and Pi Zero 2 W -- run auto-install/install.sh, then" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 	echo " !!      restore your backup." | tee -a /usr/local/bin/pifire/logs/upgrade.log
@@ -152,8 +152,9 @@ else
 	echo " + All bluepy-helper executables have been configured" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 fi
 
-# Set UV flag in settings.json
-echo " - Setting UV flag in settings.json" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+# Set the UV flag in the settings store (SQLite -- updater.py --uv writes
+# globals.uv/venv/python_exec via write_settings()).
+echo " - Setting UV flag in the settings database" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 python updater.py --uv
 
 # Run wizard to update module dependencies

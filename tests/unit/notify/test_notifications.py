@@ -26,7 +26,7 @@ notify/notifications.py:483-489 -- the OneSignal invalid-player-id cleanup
 used to read/write `settings["onesignal"]["devices"]`, but every other
 access in this function (and the whole app's settings schema) nests
 OneSignal config under `settings["notify_services"]["onesignal"]`
-(see common/defaults.py:365). Production settings.json has no top-level
+(see common/defaults.py:365). The production settings tree has no top-level
 "onesignal" key, so this raised KeyError, which was swallowed by the
 enclosing `except Exception`. Net effect: OneSignal's automatic
 invalid-device cleanup silently never ran, and a real HTTP success got

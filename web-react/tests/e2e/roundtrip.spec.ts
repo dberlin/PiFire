@@ -10,7 +10,7 @@ test("startup then hold round-trips through the live socket", async ({ page, req
 
   // Live data renders: the grill gauge shows a numeric temperature.
   // Note: exact match — the header's `grillName` field is a deliberate
-  // "BOOT_PATH_SENTINEL_GRILL" value (both in the backend's settings.json
+  // "BOOT_PATH_SENTINEL_GRILL" value (both in the backend's settings store
   // and the frontend's boot-path fixture, see src/fixture.ts), which also
   // contains the substring "GRILL" and would otherwise collide in a
   // case-insensitive substring match against the gauge's "Grill" label.

@@ -43,9 +43,11 @@ actually call `os.system("... sudo reboot ...")`, but the patch is applied
 unconditionally for every driver as a blanket safety measure.
 
 `display._base_flex.DisplayBase.__init__` reads `common.system.is_real_hardware()`
-(-> `settings.json["platform"]["real_hw"]`) to set `self.real_hardware`. This
-repo's checked-in settings.json ships with `real_hw: true` -- NOT a hardware
-probe, just a config value read verbatim. If left unpatched, ili9341f's
+(-> `read_settings()["platform"]["real_hw"]`, i.e. the SQLite settings blob) to
+set `self.real_hardware`. That flag defaults to `True`
+(`common/defaults.py::default_settings`) and is what a fresh store is seeded
+with -- NOT a hardware probe, just a config value read verbatim. If left
+unpatched, ili9341f's
 `_init_display_device` (`if self.real_hardware: from rpi_backlight import
 Backlight`) raises ModuleNotFoundError in this dev/CI environment, since
 rpi_backlight is not installed here (mirrors test_qtquick_parity.py's existing

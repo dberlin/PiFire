@@ -2,7 +2,7 @@
 
 
 class Config:
-    BACKUP_PATH = "./backups/"  # Path to backups of settings.json, pelletdb.json
+    BACKUP_PATH = "./backups/"  # Settings/pellet-DB backups exported from SQLite, plus their manifest.json
     UPLOAD_FOLDER = BACKUP_PATH  # Point uploads to the backup path
     HISTORY_FOLDER = "./history/"  # Path to historical cook files
     RECIPE_FOLDER = "./recipes/"  # Path to recipe files
