@@ -128,9 +128,17 @@ def _admin_setting_clearpelletdblog(ctx):
 def _admin_setting_factorydefaults(ctx):
     response = request.form
     if response["factorydefaults"] == "true":
-        write_log("Resetting Settings, Control and History to factory defaults.")
+        write_log("Resetting Settings, Control, History and Pellet Database to factory defaults.")
         flush_history()
         flush_control()
+        # Pre-SQLite this was `os.system("rm pelletdb.json")` -- deleting the
+        # file WAS how a factory reset cleared pellets. Removing that dead rm
+        # preserved the accident it left behind: a "Reset to Factory Settings"
+        # that kept every user profile, brand, wood and log entry. Same
+        # clear_pellet_db() the "Clear Pellet Database" action uses, and the
+        # Socket.IO factory_defaults now calls it too (it never reset pellets
+        # at all, not even pre-SQLite).
+        clear_pellet_db()
         settings = default_settings()
         write_settings(settings)
         # flush_control() above already OVERWROTE the blob with default_control().

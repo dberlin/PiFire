@@ -486,10 +486,14 @@ def _post_app_data_admin(settings, type, request):
     elif type == "factory_defaults":
         flush_history()
         flush_control()
+        # This door never reset pellets, not even pre-SQLite -- only the admin
+        # page had the `rm pelletdb.json`. Both say "factory defaults", so both
+        # do the same thing, through the same clear_pellet_db().
+        clear_pellet_db()
         settings = default_settings()
         control = default_control()
         _write_settings(settings, control)
-        write_log("Resetting Settings, Control, History to factory defaults.")
+        write_log("Resetting Settings, Control, History and Pellet Database to factory defaults.")
         return _response(result="OK")
     elif type == "reboot":
         write_log("Admin: Reboot")

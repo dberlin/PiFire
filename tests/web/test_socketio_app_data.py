@@ -373,13 +373,27 @@ def test_post_admin_factory_defaults(sio):
     settings = read_settings()
     settings["globals"]["grill_name"] = "Dirty"
     write_settings_store(settings)
+    pelletdb = read_pellets_store()
+    pelletdb["brands"].append("SHOULD_BE_WIPED_BRAND")
+    pelletdb["log"]["2020-01-01 00:00:00"] = "x"
+    write_pellet_db(pelletdb)
+
     resp = sio.mod._post_app_data("admin_action", "factory_defaults")
+
     assert resp["result"] == "OK"
     # FIXED: this used to `rm settings.json` -- a dead call against a file that
     # does not exist once SQLite is the store. The reseed below is what
     # actually restores factory defaults.
     assert not any(c[0] == "os.system" and "settings.json" in c[1] for c in sio.calls), sio.calls
     assert read_settings()["globals"]["grill_name"] == default_settings()["globals"]["grill_name"]
+    # This transport never reset pellets, even pre-SQLite (only the admin page
+    # had the `rm pelletdb.json`). Both doors say "factory defaults", so both
+    # now do the same thing, via the same clear_pellet_db().
+    cleared = read_pellets_store()
+    assert cleared["brands"] == default_pellets()["brands"]
+    # A fresh default database carries one placeholder profile and the single
+    # log entry recording its load -- the seeded 2020 entry must be gone.
+    assert list(cleared["log"].values()) == [cleared["current"]["pelletid"]]
 
 
 def test_post_admin_reboot(sio):

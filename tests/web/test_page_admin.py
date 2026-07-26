@@ -548,6 +548,18 @@ def test_restoresettings_neutralized_via_direct_post(live_server, page, hazard_g
 
 def test_factorydefaults_neutralized(live_server, page, hazard_guard):
     apply_settings(lambda s: s["globals"].__setitem__("grill_name", "Should Be Wiped"))
+    pelletdb = read_pellet_db()
+    pelletdb["brands"].append("SHOULD_BE_WIPED_BRAND")
+    pelletdb["woods"].append("SHOULD_BE_WIPED_WOOD")
+    pelletdb["archive"]["wiped-profile-id"] = {
+        "id": "wiped-profile-id",
+        "brand": "SHOULD_BE_WIPED_BRAND",
+        "wood": "SHOULD_BE_WIPED_WOOD",
+        "rating": 4,
+        "comments": "",
+    }
+    pelletdb["log"]["2020-01-01 00:00:00"] = "wiped-profile-id"
+    write_pellet_db(pelletdb)
     write_history(
         {
             "probe_history": {"primary": {"Grill": 200}, "food": {}, "aux": {}},
@@ -575,5 +587,19 @@ def test_factorydefaults_neutralized(live_server, page, hazard_guard):
     settings = read_settings_from_server()
     assert settings["globals"]["grill_name"] == default_settings()["globals"]["grill_name"]
     assert read_history() == []
+
+    # "Reset to Factory Settings" clears the pellet database too. Pre-SQLite
+    # the `rm pelletdb.json` above WAS that mechanism; when the dead rm was
+    # removed, the behaviour it used to have went with it, leaving every user
+    # profile, brand, wood and log entry in place after a factory reset.
+    # A fresh default database is not empty: it carries exactly one
+    # placeholder profile and the one log entry recording its load.
+    cleared = read_pellet_db()
+    defaults = default_pellets()
+    assert cleared["brands"] == defaults["brands"]
+    assert cleared["woods"] == defaults["woods"]
+    assert "wiped-profile-id" not in cleared["archive"]
+    assert list(cleared["archive"]) == [cleared["current"]["pelletid"]]
+    assert list(cleared["log"].values()) == [cleared["current"]["pelletid"]]
 
     _reset_server_status(hazard_guard["flask_app"])
