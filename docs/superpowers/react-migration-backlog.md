@@ -30,6 +30,15 @@ it by path and line number; those citations point here.
 - **Settings** — 12 tabs: General, Units, Pellets, Safety, WorkMode, Pwm,
   Startup, Controller, History, Notifications, Platform (read-only), plus the
   shared `SaveBar`.
+- **Pellets manager** (`/pellets`) — the pellet inventory manager: current
+  load-out, hopper level, usage, brand/wood/rating/size vocab tables, profile
+  add/edit/delete, and the pellet log. The eight actions that existed only as
+  Socket.IO handlers were extracted to `common/pellets_actions.py` so both
+  transports share one implementation, and new `GET`/`POST /api/pellets`
+  endpoints were added — no path read or wrote the pellet archive over REST
+  before. The page is socket-driven off `socket_pellet_data`, which
+  `useLiveState` now subscribes to, so it needs no polling and no refetch after
+  a write.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
   polling, and an Exit control. Functionally complete; styling is being
@@ -92,7 +101,7 @@ it by path and line number; those citations point here.
 
 ## OPEN
 
-### 1. Wizard styling — IN PROGRESS
+### 1. Wizard styling — DONE (one human checkpoint outstanding)
 
 **This item's original text was wrong by the time anyone read it.** It claimed
 "there is no `wizard.css`". There is: `web-react/src/components/wizard/wizard.css`,
@@ -107,9 +116,19 @@ raw HTML with step names running together as
 test and all four wizard e2e specs passed against that, because they assert on
 text and roles, never on whether a class is defined.
 
-Being executed now from
-`docs/superpowers/plans/2026-07-25-react-wizard-styling.md` (8 tasks) in the
-`PiFire-wizcss` workspace.
+Executed from `docs/superpowers/plans/2026-07-25-react-wizard-styling.md`
+(8 tasks). Tasks 1–7 had in fact already been implemented before that run began;
+the verification pass that followed found two real defects. One: the
+class-coverage guard had been **silently disarmed** — its regex treated CSS
+comment text as selector text, so a class counted as "declared" because prose in
+a comment mentioned it, and deleting both `.pf-module-notes` rules left the
+guard green. Fixed, plus a test that guards the guard. Two: duplicate
+`[role="alert"]` rules in descending specificity.
+
+**Still outstanding: Task 8, the human visual checkpoint.** 8 of its 12 items
+were pre-screened from clean screenshots; items 10–12 and the type/colour
+judgement need a person. Item 7 (the no-photo fallback) is unreachable — all 62
+manifest modules have images — and cannot be performed as written.
 
 **How the original gap was missed:** no test in the project asserted that a class
 it uses is defined anywhere, and until 2026-07-25 nobody had opened the wizard in
@@ -123,13 +142,30 @@ list is mostly noise: CSS custom properties (`--pf-btn-h`, `--pf-col-w`,
 (`pf-badge-`, `pf-banner--`) are never whole class names. Any real number has to
 exclude `--`-prefixed tokens and resolve dynamic class construction.
 
-### 2. Dashboard reflow
+### 2. Dashboard reflow — DONE (unvalidated on real hardware)
 
-Plan: `docs/superpowers/plans/2026-07-25-react-dashboard-slice.md` (14 tasks).
-Ratified 2026-07-25: the fixed 1280×720 uniformly-scaled stage is reversed and
-the dashboard becomes responsive, **with 1280×720 as a regression target** —
-"does not have to be pixel perfect, but very close." Capture reference geometry
-before touching layout.
+Plan: `docs/superpowers/plans/2026-07-25-react-dashboard-slice.md` (14 tasks),
+all implemented. The fixed 1280×720 uniformly-scaled stage is reversed and the
+dashboard is responsive; the committed landmark baseline
+(`tests/e2e/dashboard-layout-1280x720.json`) is unedited and still passes, which
+is the evidence that desktop rendering did not move. Stage scale 0.9222.
+
+The verification pass found that **3 of the 5 reflow gates were vacuous** —
+forced back onto the pre-change scaled layout at 390px, they passed against the
+very thing they exist to reject, because `getBoundingClientRect()` is
+post-transform and `getComputedStyle().fontSize` reports the authored 66px while
+the user sees ~20px. Now 5 of 5 bind.
+
+It also found the **800×480 panel band had no coverage at all** — the width a
+real PiFire device renders. Columns never wrapped (centre column crushed to
+71px, a 320px gauge into a 69px SVG), the control row overflowed so the Stop
+button showed nine pixels of itself, the hopper level bar collapsed to 2px, and
+"Shutdown" spilled outside its button. The last two were invisible to every
+geometric assertion — only reading the screenshot found them. A new `panel`
+Playwright project gates all four.
+
+**Nobody has held this on a real panel or phone.** The values are measured
+floors, not design choices.
 
 Also ratified: **one dashboard forever.** No picker, no `hidden_cards`, no
 `touch_screen_mode`, no port of `Basic`. Consequence to carry: `Basic`'s
@@ -269,6 +305,12 @@ Roughly ordered by daily-use value:
   script writes to that workspace's `pifire.db` while the backend serves the
   main checkout's. `beforeAll` now fails once with this instruction instead of
   five confusing "the chart never mounted" failures.
+- **Restart gunicorn before trusting an e2e result.** A worker started before a
+  backend change serves the old code, and new endpoints return 404 while the
+  specs that need them fail as if the frontend were broken. This has now cost
+  three separate tasks: two were blocked outright, and the pellets merge showed
+  two red specs purely because the running worker was ~13 hours older than the
+  `GET /api/pellets` route it was being asked for.
 - **Playwright needs the main checkout or an explicit DB path**, and the suite
   runs `workers: 1` because every spec drives one shared, stateful PiFire.
 - The Playwright characterization suite covers all 17 Flask blueprint pages
