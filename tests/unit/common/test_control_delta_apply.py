@@ -86,3 +86,109 @@ def test_apply_control_delta_drops_an_unknown_version_and_logs(caplog):
         apply_control_delta(control, envelope)
     assert control["mode"] == "Stop", "a partially-understood delta must not be applied"
     assert "unsupported control delta version" in caplog.text
+
+
+def _notify_control():
+    return {
+        "notify_data": [
+            {"label": "Grill", "type": "probe", "req": False, "target": 0, "eta": None},
+            {"label": "Grill", "type": "probe_limit_high", "req": False, "target": 0, "triggered": False},
+            {"label": "Timer", "type": "timer", "req": False, "shutdown": False, "keep_warm": False},
+        ]
+    }
+
+
+def _entry(control, label, type_):
+    return next(e for e in control["notify_data"] if e["label"] == label and e["type"] == type_)
+
+
+def test_notify_set_field_merges_the_addressed_entry_only():
+    control = _notify_control()
+    apply_control_delta(
+        control,
+        control_delta(
+            ops=[
+                {
+                    "op": "notify.set",
+                    "label": "Grill",
+                    "type": "probe",
+                    "fields": {"target": 203, "req": True},
+                }
+            ]
+        ),
+    )
+    assert _entry(control, "Grill", "probe")["target"] == 203
+    assert _entry(control, "Grill", "probe")["req"] is True
+    assert _entry(control, "Grill", "probe")["eta"] is None, "untouched fields survive"
+    assert _entry(control, "Grill", "probe_limit_high")["target"] == 0, "same label, different type"
+
+
+def test_notify_set_appends_when_the_entry_does_not_exist():
+    control = _notify_control()
+    apply_control_delta(
+        control,
+        control_delta(ops=[{"op": "notify.set", "label": "Probe9", "type": "probe", "fields": {"target": 165}}]),
+    )
+    assert _entry(control, "Probe9", "probe") == {"label": "Probe9", "type": "probe", "target": 165}
+    assert len(control["notify_data"]) == 4
+
+
+def test_two_notify_sets_on_the_same_entry_both_land_when_they_touch_different_fields():
+    """The residual-2 case for notify_data: neither is inferred, so neither is dropped."""
+    control = _notify_control()
+    apply_control_delta(
+        control,
+        control_delta(ops=[{"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"target": 203}}]),
+    )
+    apply_control_delta(
+        control,
+        control_delta(ops=[{"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"req": True}}]),
+    )
+    assert _entry(control, "Grill", "probe")["target"] == 203
+    assert _entry(control, "Grill", "probe")["req"] is True
+
+
+def test_a_notify_set_back_to_the_starting_value_still_lands():
+    """Under reduce_control_patch this write was indistinguishable from silence."""
+    control = _notify_control()
+    apply_control_delta(
+        control,
+        control_delta(ops=[{"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"target": 203}}]),
+    )
+    apply_control_delta(
+        control,
+        control_delta(ops=[{"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"target": 0}}]),
+    )
+    assert _entry(control, "Grill", "probe")["target"] == 0
+
+
+def test_notify_delete_removes_exactly_one_entry():
+    control = _notify_control()
+    apply_control_delta(control, control_delta(ops=[{"op": "notify.delete", "label": "Grill", "type": "probe"}]))
+    assert [(e["label"], e["type"]) for e in control["notify_data"]] == [
+        ("Grill", "probe_limit_high"),
+        ("Timer", "timer"),
+    ]
+
+
+def test_notify_replace_swaps_the_whole_array():
+    control = _notify_control()
+    fresh = [{"label": "Only", "type": "probe", "req": True}]
+    apply_control_delta(control, control_delta(ops=[{"op": "notify.replace", "entries": fresh}]))
+    assert control["notify_data"] == fresh
+    fresh[0]["req"] = False
+    assert control["notify_data"][0]["req"] is True, "replace deep-copies"
+
+
+def test_notify_replace_then_set_composes_in_order():
+    control = _notify_control()
+    apply_control_delta(
+        control,
+        control_delta(
+            ops=[
+                {"op": "notify.replace", "entries": [{"label": "Only", "type": "probe", "req": False}]},
+                {"op": "notify.set", "label": "Only", "type": "probe", "fields": {"req": True}},
+            ]
+        ),
+    )
+    assert control["notify_data"] == [{"label": "Only", "type": "probe", "req": True}]

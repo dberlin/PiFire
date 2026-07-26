@@ -207,5 +207,38 @@ def _apply_op(control, op, log):
     _OP_APPLIERS[op["op"]](control, op, log)
 
 
-#: op name -> applier. Populated below as each op family is defined.
-_OP_APPLIERS = {}
+def _notify_index(control, label, type_):
+    for index, entry in enumerate(control.get("notify_data", ())):
+        if isinstance(entry, Mapping) and entry.get("label") == label and entry.get("type") == type_:
+            return index
+    return None
+
+
+def _op_notify_set(control, op, log):
+    index = _notify_index(control, op["label"], op["type"])
+    if index is None:
+        control.setdefault("notify_data", []).append(
+            {"label": op["label"], "type": op["type"], **copy.deepcopy(dict(op["fields"]))}
+        )
+        return
+    control["notify_data"][index].update(copy.deepcopy(dict(op["fields"])))
+
+
+def _op_notify_delete(control, op, log):
+    index = _notify_index(control, op["label"], op["type"])
+    if index is not None:
+        del control["notify_data"][index]
+
+
+def _op_notify_replace(control, op, log):
+    control["notify_data"] = copy.deepcopy(list(op["entries"]))
+
+
+#: op name -> applier. Every name here must also appear in _OP_FIELDS, which is
+#: what the validator checks against, so an op can never be pushed that the
+#: drain cannot apply.
+_OP_APPLIERS = {
+    "notify.set": _op_notify_set,
+    "notify.delete": _op_notify_delete,
+    "notify.replace": _op_notify_replace,
+}
