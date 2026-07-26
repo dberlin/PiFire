@@ -9,6 +9,7 @@ from common.datastore_accessors import (
     write_control,
     write_settings_store,
 )
+from common.defaults import default_notify, default_probe_config
 from common.modes import Mode
 
 PROFILE_ID = "TWPS00"
@@ -218,6 +219,109 @@ def test_apply_rejects_a_malformed_map(ds, client):
         resp = client.post("/api/probe_map", json=bad)
         assert resp.status_code == 400, bad
         assert resp.get_json()["message"] == "bad_probe_map"
+
+
+"""Ruling 6 (2026-07-26, docs/superpowers/react-migration-backlog.md):
+renaming a probe must not leave a stale reference behind. The map used to be
+swapped in with only history_page.probe_config regenerated, so every OTHER
+structure keyed by a probe LABEL kept naming a probe that no longer exists."""
+
+
+def _seed_two_probes():
+    """A known map (Grill + Probe1) with every derived structure consistent
+    with it, so these tests never depend on the developer-machine settings.json
+    the `ds` fixture seeds from."""
+    settings = read_settings()
+    settings["probe_settings"]["probe_map"] = _map(
+        [_virtual_device()],
+        [_probe("Grill", "VirtDev", "VIRT0"), _probe("Probe1", "VirtDev", "VIRT0", "Food")],
+    )
+    settings["history_page"]["probe_config"] = default_probe_config(settings)
+    settings["recipe"]["probe_map"] = {"primary": "Grill", "food": ["Probe1"]}
+    settings["dashboard"]["dashboards"]["Default"]["custom"]["hidden_cards"] = ["Probe1", "hopper"]
+    write_settings_store(settings)
+
+    control = read_control()
+    control["mode"] = Mode.STOP
+    control["notify_data"] = default_notify(settings)
+    for entry in control["notify_data"]:
+        if entry["label"] == "Grill" and entry["type"] == "probe":
+            entry["req"] = True
+            entry["target"] = 225
+    write_control(control, WriteKind.OVERWRITE, origin="test")
+    return settings
+
+
+def _renamed_map():
+    """The same map with Probe1 renamed to Brisket -- the only edit."""
+    return _map(
+        [_virtual_device()],
+        [_probe("Grill", "VirtDev", "VIRT0"), _probe("Brisket", "VirtDev", "VIRT0", "Food")],
+    )
+
+
+def test_rename_leaves_no_stale_notify_entry(ds, client):
+    _seed_two_probes()
+
+    assert client.post("/api/probe_map", json={"probe_map": _renamed_map()}).status_code == 200
+
+    execute_control_writes()
+    probe_labels = {e["label"] for e in read_control()["notify_data"] if e["type"].startswith("probe")}
+    # Probe1 is gone, so nothing may still be notifying on it -- and Brisket,
+    # which is what the user now sees, must be notifiable at all.
+    assert probe_labels == {"Grill", "Brisket"}
+
+
+def test_rename_keeps_the_untouched_probes_notification(ds, client):
+    """Reconciliation is not a factory reset: an edit that did not touch Grill
+    must not silently clear the target the user set on it."""
+    _seed_two_probes()
+
+    client.post("/api/probe_map", json={"probe_map": _renamed_map()})
+
+    execute_control_writes()
+    grill = next(e for e in read_control()["notify_data"] if e["label"] == "Grill" and e["type"] == "probe")
+    assert grill["req"] is True
+    assert grill["target"] == 225
+
+
+def test_rename_updates_the_recipe_probe_map(ds, client):
+    """controller/runtime/controller.py:158 keys a recipe step's trigger_temps
+    off these labels, so a stale one is a step waiting on a probe that never
+    reports."""
+    _seed_two_probes()
+
+    client.post("/api/probe_map", json={"probe_map": _renamed_map()})
+
+    assert read_settings()["recipe"]["probe_map"] == {"primary": "Grill", "food": ["Brisket"]}
+
+
+def test_rename_drops_the_stale_hidden_card(ds, client):
+    """hidden_cards holds card ids, and a probe card's id IS its label
+    (blueprints/dash/templates/basic/dash_basic.html:18). Only ids the OLD map
+    had as labels are pruned, so "hopper" survives."""
+    _seed_two_probes()
+
+    client.post("/api/probe_map", json={"probe_map": _renamed_map()})
+
+    hidden = read_settings()["dashboard"]["dashboards"]["Default"]["custom"]["hidden_cards"]
+    assert hidden == ["hopper"]
+
+
+def test_removing_a_probe_takes_its_notify_entries_with_it(ds, client):
+    _seed_two_probes()
+
+    client.post(
+        "/api/probe_map",
+        json={"probe_map": _map([_virtual_device()], [_probe("Grill", "VirtDev", "VIRT0")])},
+    )
+
+    execute_control_writes()
+    notify_data = read_control()["notify_data"]
+    assert {e["label"] for e in notify_data if e["type"].startswith("probe")} == {"Grill"}
+    # The non-probe entries default_notify() always appends are not probes and
+    # must survive every map edit.
+    assert {e["label"] for e in notify_data if not e["type"].startswith("probe")} == {"Timer", "Hopper", "Test"}
 
 
 def test_apply_rejects_an_empty_body_before_any_handler(ds, client):

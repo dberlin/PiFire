@@ -1,4 +1,4 @@
-"""Live probe-map application logic, kept Flask-free.
+"""Guards for the live probe-map path, kept Flask-free.
 
 The Flask wizard's probeconfig fragment API (blueprints/probeconfig/routes.py)
 edits the wizard STAGING blob (`wizard:install`), and its edits reach live
@@ -12,9 +12,13 @@ INSTALLATION (wizard.py:319-430 runs apt/pip/command_list per selected
 module). So this module refuses instead: a probe module may be added here
 only when it is already present in the live map (hence already installed),
 or when its manifest declares no dependencies at all.
-"""
 
-from common.defaults import default_probe_config
+The application itself is NOT here: both this path and the installer call
+common.defaults.set_probe_map(), which is what keeps the two from drifting
+apart on what a probe rename has to update. It cannot live in this package --
+importing anything under blueprints.api pulls in Flask and every route, and
+wizard.py is a detached process that must not.
+"""
 
 
 def module_requires_install(module_data):
@@ -63,20 +67,3 @@ def unsupported_new_modules(new_map, live_map, manifest_modules):
         if module_requires_install(manifest_modules.get(module)):
             offenders.add(module)
     return sorted(offenders)
-
-
-def apply_probe_map(settings, probe_map):
-    """Replace the live probe map and regenerate everything derived from it.
-
-    Mirrors wizard.py:227-231, which is the ONLY other writer of this key.
-    default_probe_config() preserves an existing per-label entry and
-    colour-assigns new ones (common/defaults.py:319-348), so an edit that
-    leaves a probe alone leaves its chart colour alone.
-
-    Deliberately does NOT regenerate control["notify_data"] or
-    settings["recipe"]["probe_map"] -- the installer does not either, and
-    diverging from it is a separate decision.
-    """
-    settings["probe_settings"]["probe_map"] = probe_map
-    settings["history_page"]["probe_config"] = default_probe_config(settings)
-    return settings

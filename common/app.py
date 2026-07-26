@@ -403,7 +403,7 @@ def update_probe_config(settings, control, probe_dto):
         return settings, control, "label_not_found"
 
 
-def save_settings_and_flag_update(settings, control, *flags, origin="app"):
+def save_settings_and_flag_update(settings, control, *flags, origin="app", ops=None):
     """
     Shared "write settings + set one-or-more control update-flags + queue a
     control write" helper for the repeated persistence tail used by several
@@ -424,11 +424,17 @@ def save_settings_and_flag_update(settings, control, *flags, origin="app"):
     the delta no longer needs it: nine call sites pass it and may observe that
     mutation, and two of those files are shared with other in-flight work.
     Removing it would be a rename with no behavioural benefit.
+
+    `ops` rides along in the SAME envelope for the callers whose settings write
+    also has to say something about `timer`/`notify_data`, which
+    common/control_delta.py:34 forbids under `set` (both need addressing, not
+    assignment). One envelope rather than two writes, so the flags and the ops
+    cannot be drained a batch apart.
     """
     write_settings(settings)
     for flag in flags:
         control[flag] = True
-    write_control(control_delta(set_values={flag: True for flag in flags}), WriteKind.DELTA, origin=origin)
+    write_control(control_delta(set_values={flag: True for flag in flags}, ops=ops), WriteKind.DELTA, origin=origin)
 
 
 def api_response(result, message=None, data=None):

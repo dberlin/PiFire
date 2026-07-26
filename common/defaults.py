@@ -348,6 +348,69 @@ def default_probe_config(settings):
     return probe_config
 
 
+def set_probe_map(settings, probe_map, control):
+    """Install `probe_map` as the live map and rebuild everything keyed by a
+    probe LABEL, so a rename leaves nothing pointing at the old name.
+
+    The label IS a probe's identity -- probe_info entries carry no stable id --
+    so a rename is indistinguishable from a delete plus an add. Every derived
+    structure is therefore rebuilt from the new map: a label that survives
+    keeps its data untouched, a label that is gone takes its data with it.
+
+    The two writers of settings["probe_settings"]["probe_map"] (the live
+    /api/probe_map path and the installer, wizard.py) both used to regenerate
+    settings["history_page"]["probe_config"] and nothing else, which left three
+    other structures naming a probe that no longer exists (ruling 6, 2026-07-26,
+    docs/superpowers/react-migration-backlog.md):
+
+      * settings["recipe"]["probe_map"] -- controller/runtime/controller.py:158
+        keys a recipe step's trigger_temps off these labels, so a stale one is
+        a step waiting on a probe that never reports.
+      * settings["dashboard"][*]["custom"]["hidden_cards"] -- a probe card's id
+        IS its label (blueprints/dash/templates/basic/dash_basic.html:18). Only
+        ids the OLD map carried as labels are pruned, so non-probe card ids
+        ("hopper", "status") are left alone.
+      * control["notify_data"] -- rebuilt in place, but the CALLER persists it,
+        via a notify.replace op rather than a `set` member (that is the only
+        channel: common/control_delta.py:34 forbids notify_data under `set`,
+        being an array whose elements need addressing).
+
+    Consistency WITHIN the map (probe_info[].device, virtual devices'
+    config.probes_list) belongs to whoever built the map and is not touched
+    here.
+    """
+    retired = {probe.get("label") for probe in settings["probe_settings"]["probe_map"].get("probe_info", [])}
+    settings["probe_settings"]["probe_map"] = probe_map
+    retired -= {probe.get("label") for probe in probe_map.get("probe_info", [])}
+    retired.discard(None)
+
+    settings["history_page"]["probe_config"] = default_probe_config(settings)
+    settings["recipe"]["probe_map"] = _default_recipe_probe_map(settings)
+    for dashboard in settings.get("dashboard", {}).get("dashboards", {}).values():
+        hidden_cards = dashboard.get("custom", {}).get("hidden_cards")
+        if isinstance(hidden_cards, list):
+            dashboard["custom"]["hidden_cards"] = [card for card in hidden_cards if card not in retired]
+
+    control["notify_data"] = _resync_notify_data(settings, control.get("notify_data"))
+
+    return settings
+
+
+def _resync_notify_data(settings, notify_data):
+    """default_notify()'s shape for the CURRENT probe map, carrying over the
+    user's data for every (label, type) that still exists.
+
+    Reconciliation, not a factory reset: targets, req flags and
+    shutdown/keep_warm choices survive a map edit that did not touch that
+    probe. A label the map no longer has takes its entries with it, a label the
+    map has gained arrives with default_notify()'s fresh ones. The Timer/Hopper/
+    Test entries are part of default_notify() too, so the same (label, type)
+    match preserves them.
+    """
+    surviving = {(entry.get("label"), entry.get("type")): entry for entry in notify_data or []}
+    return [surviving.get((entry["label"], entry["type"]), entry) for entry in default_notify(settings)]
+
+
 def default_notify_services():
     services = {}
 

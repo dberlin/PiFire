@@ -15,11 +15,11 @@ from common.api_commands import process_command
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update, api_response
 from common.pellets_actions import PELLETS_DISPATCH
 from blueprints.api.probe_map_actions import (
-    apply_probe_map,
     module_requires_install,
     unsupported_new_modules,
     valid_probe_map,
 )
+from common.defaults import set_probe_map
 from common.i2c_bus import I2CBusConfigError, configured_bus_kinds, validate_bus_kinds
 from common.modes import Mode
 from common.server_status import get_server_status
@@ -424,12 +424,22 @@ def _api_post_probe_map(settings, request_json):
     except I2CBusConfigError as exc:
         return jsonify({"result": "error", "message": "bus_conflict", "detail": str(exc)}), 422
 
-    settings = apply_probe_map(settings, probe_map)
+    settings = set_probe_map(settings, probe_map, control)
     # settings_update makes the loop re-read settings; probe_map_update is what
     # makes it REBUILD its probe devices (controller.py, Task 3).
     # probe_profile_update is NOT enough on its own -- it only refills
     # per-port profiles on already-constructed devices (probes/base.py:393).
-    save_settings_and_flag_update(settings, control, "settings_update", "probe_map_update", origin="api")
+    # notify_data travels as a notify.replace op because set_probe_map() may
+    # have dropped entries, and "an entry the incoming array omits is a
+    # deletion" is exactly what replace says out loud.
+    save_settings_and_flag_update(
+        settings,
+        control,
+        "settings_update",
+        "probe_map_update",
+        origin="api",
+        ops=[{"op": "notify.replace", "entries": control["notify_data"]}],
+    )
     return jsonify({"result": "success", "message": "Probe map applied.", "data": {"probe_map": probe_map}}), 200
 
 

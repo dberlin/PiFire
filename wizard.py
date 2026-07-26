@@ -17,19 +17,23 @@
 import time
 
 from common.common import (  # Common Library for writing settings
+    WriteKind,
     convert_settings_units,
     set_nested_key_value,
     read_wizard,
     create_logger,
 )
+from common.control_delta import control_delta
 from common.datastore_accessors import (
     set_wizard_install_status,
     set_updater_install_status,
+    read_control,
     read_settings,
+    write_control,
     write_settings,
     load_wizard_install_info,
 )
-from common.defaults import default_probe_config
+from common.defaults import set_probe_map
 from common.system import is_real_hardware
 import subprocess
 import argparse
@@ -223,11 +227,20 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
     else:
         settings["modules"]["dist"] = distance_module_data["filename"]
 
-    """ Configuring Probes Data """
-    settings["probe_settings"]["probe_map"] = WizardInstallInfo["probe_map"]
-
-    """ Update History Page Config with Latest Probe Config """
-    settings["history_page"]["probe_config"] = default_probe_config(settings)
+    """ Configuring Probes Data, plus everything else keyed by a probe label """
+    control = read_control()
+    set_probe_map(settings, WizardInstallInfo["probe_map"], control)
+    # The installer used to regenerate only history_page.probe_config, so
+    # re-running the wizard with a probe RENAMED left recipe.probe_map and
+    # notify_data naming a probe that no longer exists -- and the reboot this
+    # ends with is what the user comes back to (ruling 6, 2026-07-26).
+    # notify_data is array-addressed, so it travels as a notify.replace op
+    # rather than a `set` member (common/control_delta.py:34).
+    write_control(
+        control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]),
+        WriteKind.DELTA,
+        origin="wizard",
+    )
 
     percent = 10
     status = "Updating Settings..."
