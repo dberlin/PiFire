@@ -4,6 +4,7 @@ import { type CommandClient, createCommand } from "./command";
 import { deriveControlAlive } from "./dashboard/health";
 import { demoDashAt } from "./demoData";
 import { FIXTURE_DASH } from "./fixture";
+import type { PelletDb } from "./pellets/pelletTypes";
 import type { LiveState } from "./types";
 
 export type ConnectionPhase = "connecting" | "live" | "unreachable" | "demo";
@@ -17,6 +18,12 @@ export interface LiveStateResult {
   controlAlive: boolean;
   targetUrl: string;
   command: CommandClient;
+  /** The whole pellet database, or null until the first socket_pellet_data
+      arrives (and forever in demo mode, which opens no socket). The backend
+      emits this on change at a 1s cadence and directly to a freshly
+      connected client (blueprints/mobile/socket_io.py), so the pellets page
+      needs no polling and no refetch after a write. */
+  pellets: PelletDb | null;
 }
 
 const FORCE_DEMO = import.meta.env.PUBLIC_DEMO === "1" || import.meta.env.PUBLIC_DEMO === "true";
@@ -25,6 +32,7 @@ const TARGET_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 export function useLiveState(): LiveStateResult {
   const [live, setLive] = useState<LiveState>(FIXTURE_DASH);
   const [phase, setPhase] = useState<ConnectionPhase>(FORCE_DEMO ? "demo" : "connecting");
+  const [pellets, setPellets] = useState<PelletDb | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
@@ -51,6 +59,12 @@ export function useLiveState(): LiveStateResult {
       setPhase("live");
       setLive(data);
     });
+    // Deliberately does NOT touch setPhase: phase is socket_dash_data's and
+    // connect's business, and a pellet payload arriving is not evidence the
+    // dash feed is healthy.
+    socket.on("socket_pellet_data", (data: { uuid: string; pellets: PelletDb }) => {
+      setPellets(data.pellets);
+    });
     return () => {
       socket.close();
       socketRef.current = null;
@@ -71,5 +85,6 @@ export function useLiveState(): LiveStateResult {
     controlAlive,
     targetUrl: TARGET_URL || import.meta.env.PUBLIC_PIFIRE_TARGET || "http://localhost:5000",
     command,
+    pellets,
   };
 }

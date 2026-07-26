@@ -58,6 +58,10 @@ function renderDashboardRoute(over: Partial<ShellContext> = {}) {
     controlAlive: true,
     targetUrl: "http://pifire.local:5000",
     command: stubCommand(),
+    // The shell forwards its whole useLiveState() result on Outlet context,
+    // so a stub must carry every field the real hook returns. null is what a
+    // client that has not yet received socket_pellet_data sees.
+    pellets: null,
     ...over,
   };
   const router = createMemoryRouter(

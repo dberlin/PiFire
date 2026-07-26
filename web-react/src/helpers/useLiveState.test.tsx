@@ -1,7 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, renderHook } from "@testing-library/react";
+import type { PelletDb } from "./pellets/pelletTypes";
 import type { LiveState } from "./types";
 import { useLiveState } from "./useLiveState";
+
+const PELLET_DB: PelletDb = {
+  current: {
+    pelletid: "p1",
+    hopper_level: 62,
+    date_loaded: "2026-07-25 09:00:00",
+    est_usage: 1200,
+  },
+  brands: ["Generic", "Custom"],
+  woods: ["Alder", "Oak"],
+  archive: {
+    p1: { id: "p1", brand: "Generic", wood: "Alder", rating: 4, comments: "placeholder" },
+  },
+  log: { "2026-07-25 09:00:00": "p1" },
+  lastupdated: { time: 1785000000 },
+};
 
 type Handler = (...args: unknown[]) => void;
 
@@ -97,6 +114,42 @@ describe("useLiveState (live mode)", () => {
     const { unmount } = renderHook(() => useLiveState());
     unmount();
     expect(fakeSocket.close).toHaveBeenCalled();
+  });
+
+  // The pellet database arrives on its own socket channel, which the backend
+  // emits on change and directly to a freshly connected client
+  // (blueprints/mobile/socket_io.py). The pellets page is its only consumer.
+  //
+  // NOT covered here: "in FORCE_DEMO mode pellets stays null". PUBLIC_DEMO is
+  // baked in at build time and unset in this test build, so the demo branch is
+  // unreachable from these tests -- see the describe-block comment above.
+  it("registers a socket_pellet_data handler", () => {
+    renderHook(() => useLiveState());
+    expect(Object.keys(handlers)).toEqual(expect.arrayContaining(["socket_pellet_data"]));
+  });
+
+  it("exposes pellets as null until the first socket_pellet_data frame arrives", () => {
+    const { result } = renderHook(() => useLiveState());
+    expect(result.current.pellets).toBeNull();
+  });
+
+  it("stores the inner pellets object, not the {uuid, pellets} envelope", () => {
+    const { result } = renderHook(() => useLiveState());
+
+    act(() => handlers.socket_pellet_data({ uuid: "u", pellets: PELLET_DB }));
+
+    expect(result.current.pellets).toEqual(PELLET_DB);
+    // Guard against storing the envelope: uuid must not leak into the value.
+    expect(result.current.pellets).not.toHaveProperty("uuid");
+  });
+
+  it("a socket_dash_data frame does not clear an already-received pellet database", () => {
+    const { result } = renderHook(() => useLiveState());
+    act(() => handlers.socket_pellet_data({ uuid: "u", pellets: PELLET_DB }));
+
+    act(() => handlers.socket_dash_data({ ...result.current.live, currentMode: "Hold" }));
+
+    expect(result.current.pellets).toEqual(PELLET_DB);
   });
 
   it("derives controlAlive from the live state and exposes a command client + fallback targetUrl", () => {
