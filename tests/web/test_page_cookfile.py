@@ -331,6 +331,48 @@ def test_thumbselected_via_direct_post(live_server, page, _isolated_history_fold
     assert metadata["thumbnail"] == "asset123.png"
 
 
+def test_dl_cookfile_downloads_the_raw_archive(live_server, page, _isolated_history_folder):
+    """First coverage of `_cf_form_dl_cookfile`. cookfile/index.html submits
+    the FULL path (`{{ cookfilename }}` = HISTORY_FOLDER + filename) as the
+    form value, which is what these three branches all do."""
+    history_dir = _isolated_history_folder
+    filename = _write_cookfile(history_dir, "E2E-DlCookfile")
+    cookfilepath = history_dir + filename
+
+    resp = page.request.post(f"{live_server}/cookfile/", form={"dl_cookfile": cookfilepath})
+
+    assert resp.status == 200
+    assert resp.body() == open(cookfilepath, "rb").read()
+
+
+def test_dl_graphfile_exports_raw_data_as_csv(live_server, page, _isolated_history_folder):
+    """First coverage of `_cf_form_dl_graphfile` -> `prepare_csv()`. This was
+    impossible before: prepare_csv composed `"/tmp/" + <full path>`, so under
+    the isolated temp history folder the open() raised and the request 500'd.
+    _write_cookfile seeds two raw_data rows, so the CSV is header + 2."""
+    history_dir = _isolated_history_folder
+    filename = _write_cookfile(history_dir, "E2E-DlGraph")
+
+    resp = page.request.post(f"{live_server}/cookfile/", form={"dl_graphfile": history_dir + filename})
+
+    assert resp.status == 200
+    lines = resp.text().splitlines()
+    assert lines[0].startswith("Time, ")
+    assert len(lines) == 3
+
+
+def test_dl_eventfile_exports_events_as_csv(live_server, page, _isolated_history_folder):
+    """First coverage of `_cf_form_dl_eventfile` -> `prepare_metrics_csv()`,
+    blocked by the same composition bug. _write_cookfile seeds two events."""
+    history_dir = _isolated_history_folder
+    filename = _write_cookfile(history_dir, "E2E-DlEvent")
+
+    resp = page.request.post(f"{live_server}/cookfile/", form={"dl_eventfile": history_dir + filename})
+
+    assert resp.status == 200
+    assert len(resp.text().splitlines()) == 3
+
+
 def test_repaircf_and_upgradecf_via_direct_post(live_server, page, _isolated_history_folder):
     """Both actions run `upgrade_cookfile()` -- our fabricated file's
     version already matches the live settings version, so this exercises

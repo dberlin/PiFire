@@ -22,6 +22,7 @@ from common.sqlite_queue import SqliteQueue
 import time
 import json
 import datetime
+import os
 
 
 def allowed_file(filename):
@@ -170,10 +171,25 @@ def prepare_event_totals(events):
     return event_totals
 
 
+def _export_temp_path(filename, suffix):
+    """Compose the /tmp path a CSV export is written to.
+
+    This used to be `filename.replace("./history/", "")` followed by
+    `"/tmp/" + ...`. That `.replace` only matched the DEFAULT HISTORY_FOLDER
+    literal, so under any other configured folder the full source path
+    survived and produced a path under a directory that does not exist
+    (`/tmp//srv/cooks/X.pifire-...csv`), which open() cannot create -- which
+    is why the legacy dl_eventfile/dl_graphfile branches had never worked
+    outside the default install. `filename` also arrives straight off a form
+    field, and plain concatenation let `../..` escape /tmp altogether.
+    os.path.basename() is correct for any folder and closes both.
+    """
+    stem = os.path.basename(filename.replace(".json", ""))
+    return os.path.join("/tmp", stem + suffix)
+
+
 def prepare_metrics_csv(metrics_data, filename):
-    filename = filename.replace(".json", "")
-    filename = filename.replace("./history/", "")
-    filename = "/tmp/" + filename + "-PiFire-Metrics-Export.csv"
+    filename = _export_temp_path(filename, "-PiFire-Metrics-Export.csv")
 
     csvfile = open(filename, "w")
 
@@ -204,13 +220,9 @@ def prepare_csv(data=[], filename=""):
     # Create filename if no name specified
     if filename == "":
         now = datetime.datetime.now()
-        filename = now.strftime("%Y%m%d-%H%M") + "-PiFire-Export"
+        exportfilename = _export_temp_path(now.strftime("%Y%m%d-%H%M"), "-PiFire-Export.csv")
     else:
-        filename = filename.replace(".json", "")
-        filename = filename.replace("./history/", "")
-        filename += "-Pifire-Export"
-
-    exportfilename = "/tmp/" + filename + ".csv"
+        exportfilename = _export_temp_path(filename, "-Pifire-Export.csv")
 
     # Open CSV File for editing
     csvfile = open(exportfilename, "w")
