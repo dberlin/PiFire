@@ -529,7 +529,11 @@ def _post_app_data_units(settings, type, request):
         _write_settings(settings, control)
         control["updated"] = True
         control["units_change"] = True
-        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        write_control(
+            control_delta(set_values={"updated": True, "units_change": True}),
+            WriteKind.DELTA,
+            origin="app-socketio",
+        )
         write_log("Changed units to Fahrenheit")
         return _response(result="OK", data=settings)
     elif type == "c_units" and settings["globals"]["units"] == "F":
@@ -538,7 +542,11 @@ def _post_app_data_units(settings, type, request):
         _write_settings(settings, control)
         control["updated"] = True
         control["units_change"] = True
-        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        write_control(
+            control_delta(set_values={"updated": True, "units_change": True}),
+            WriteKind.DELTA,
+            origin="app-socketio",
+        )
         write_log("Changed units to Celsius")
         return _response(result="OK", data=settings)
     else:
@@ -634,12 +642,20 @@ def _post_app_data_recipes(settings, type, request):
             return _response(result="OK")
     elif type == "recipe_start":
         if request["recipes_action"]["filename"]:
-            control = read_control()
             filename = request["recipes_action"]["filename"]
-            control["updated"] = True
-            control["mode"] = Mode.RECIPE
-            control["recipe"]["filename"] = recipe_folder + filename
-            write_control(control, WriteKind.MERGE, origin="app-socketio")
+            # recipe.filename is stated as a nested `set`, which deep-merges --
+            # step/step_data are the control loop's and are not touched here.
+            write_control(
+                control_delta(
+                    set_values={
+                        "updated": True,
+                        "mode": Mode.RECIPE,
+                        "recipe": {"filename": recipe_folder + filename},
+                    }
+                ),
+                WriteKind.DELTA,
+                origin="app-socketio",
+            )
             return _response(result="OK")
     else:
         return _response(result="Error", message="Error: Received request without valid type")
@@ -871,8 +887,11 @@ def _update_probe_config(settings, control, request):
 
     if result == "success":
         control["settings_update"] = True
-        # Take all settings and write them
-        _write_settings(settings, control)
+        # update_probe_config (common/app.py) also raises probe_profile_update.
+        # It used to ride along on the whole-dict write; now it has to be named.
+        save_settings_and_flag_update(
+            settings, control, "settings_update", "probe_profile_update", origin="app-socketio"
+        )
 
         return _response(result="OK", data=settings)
     else:
@@ -922,7 +941,14 @@ def _update_notify_data(control, request):
                 updated_notify_data[index]["req"] = False
 
     control["notify_data"] = updated_notify_data
-    write_control(control, WriteKind.MERGE, origin="app-socketio")
+    # This handler rebuilds the WHOLE array from the probe map, so an omitted
+    # entry really is a deletion. notify.replace says that by name instead of
+    # leaving it to merge_notify_data's delete-on-omit rule.
+    write_control(
+        control_delta(ops=[{"op": "notify.replace", "entries": updated_notify_data}]),
+        WriteKind.DELTA,
+        origin="app-socketio",
+    )
     return _response(result="OK")
 
 

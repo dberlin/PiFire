@@ -19,6 +19,7 @@ import threading
 import time
 
 from common.common import WriteKind, write_log
+from common.control_delta import control_delta
 from common.datastore_accessors import load_os_info, read_settings, store_os_info, write_control
 
 
@@ -289,6 +290,11 @@ def gather_system_info(control, origin="unknown"):
     }
 
     failures = []
+    # The control["system"] members this call actually assigns, so the delta can
+    # name exactly those. A member NOT probed on this platform stays absent from
+    # the envelope, which is silence -- the old whole-dict write re-sent every
+    # one of them from a stale read.
+    assigned = {}
     supported_cmds = get_supported_cmds()
 
     if "check_wifi_quality" in supported_cmds:
@@ -296,17 +302,19 @@ def gather_system_info(control, origin="unknown"):
         data = get_system_command_output(requested="check_wifi_quality")
         if data["result"] != "OK":
             failures.append(data["message"])
-        control["system"]["wifi_quality_value"] = data["data"].get("wifi_quality_value", None)
-        control["system"]["wifi_quality_max"] = data["data"].get("wifi_quality_max", None)
-        control["system"]["wifi_quality_percentage"] = data["data"].get("wifi_quality_percentage", None)
+        assigned["wifi_quality_value"] = data["data"].get("wifi_quality_value", None)
+        assigned["wifi_quality_max"] = data["data"].get("wifi_quality_max", None)
+        assigned["wifi_quality_percentage"] = data["data"].get("wifi_quality_percentage", None)
+        control["system"].update(assigned)
 
     if "check_throttled" in supported_cmds:
         process_command(action="sys", arglist=["check_throttled"], origin="admin")  # Request supported commands
         data = get_system_command_output(requested="check_throttled")
         if data["result"] != "OK":
             failures.append(data["message"])
-        control["system"]["cpu_throttled"] = data["data"].get("cpu_throttled", None)
-        control["system"]["cpu_under_voltage"] = data["data"].get("cpu_under_voltage", None)
+        assigned["cpu_throttled"] = data["data"].get("cpu_throttled", None)
+        assigned["cpu_under_voltage"] = data["data"].get("cpu_under_voltage", None)
+        control["system"].update(assigned)
 
         if control["system"]["cpu_throttled"] or control["system"]["cpu_under_voltage"]:
             failures.append(
@@ -318,7 +326,8 @@ def gather_system_info(control, origin="unknown"):
         data = get_system_command_output(requested="check_cpu_temp")
         if data["result"] != "OK":
             failures.append(data["message"])
-        control["system"]["cpu_temp"] = data["data"].get("cpu_temp", None)
+        assigned["cpu_temp"] = data["data"].get("cpu_temp", None)
+        control["system"].update(assigned)
 
     if "network_info" in supported_cmds:
         process_command(action="sys", arglist=["network_info"], origin="admin")
@@ -338,7 +347,13 @@ def gather_system_info(control, origin="unknown"):
         else:
             system_info["hardware_info"] = data.get("data", {})
 
-    write_control(control, WriteKind.MERGE, origin=origin)
+    # NOTE on nulls: a probe that answered with nothing assigns None, and under
+    # a delta that is a VALUE -- it lands as null. The old path ran these through
+    # strip_null_members (json_patch/RFC 7386 would have DELETED the key), so a
+    # failed probe silently left the previous reading in place. Writing null is
+    # the honest answer to "we asked and got nothing" and is what the admin page
+    # renders as Unknown; a stale reading presented as current is worse.
+    write_control(control_delta(set_values={"system": assigned}), WriteKind.DELTA, origin=origin)
 
     return system_info, failures
 

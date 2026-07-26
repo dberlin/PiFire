@@ -458,6 +458,11 @@ def _settings_cycle(settings, control, controller, event):
     event["type"] = "updated"
     event["text"] = "Successfully updated cycle settings."
 
+    # Flags travel BY NAME now (common/control_delta.py). Setting one on the
+    # local `control` dict is no longer enough to make it land: the write states
+    # what it means rather than shipping the whole snapshot, so every flag this
+    # handler raises has to be named here too.
+    flags = ["settings_update"]
     if is_not_blank(response, "selectController"):
         previous = settings["controller"]["selected"]
         previous_config = settings["controller"]["config"].get(previous)
@@ -479,8 +484,9 @@ def _settings_cycle(settings, control, controller, event):
             event["text"] = blocked
         else:
             control["controller_update"] = True
+            flags.append("controller_update")
 
-    save_settings_and_flag_update(settings, control, "settings_update", origin="app")
+    save_settings_and_flag_update(settings, control, *flags, origin="app")
 
 
 def _settings_pwm(settings, control, controller, event):
@@ -659,12 +665,17 @@ def _settings_pellets(settings, control, controller, event):
         settings["pelletlevel"]["warning_time"] = int(response["warning_time"])
     if is_not_blank(response, "warning_level"):
         settings["pelletlevel"]["warning_level"] = int(response["warning_level"])
+    # See the note in _settings_cycle: a flag must be NAMED to land.
+    flags = ["settings_update"]
     if is_not_blank(response, "empty"):
         settings["pelletlevel"]["empty"] = int(response["empty"])
         control["distance_update"] = True
+        flags.append("distance_update")
     if is_not_blank(response, "full"):
         settings["pelletlevel"]["full"] = int(response["full"])
         control["distance_update"] = True
+        if "distance_update" not in flags:
+            flags.append("distance_update")
     if is_not_blank(response, "auger_rate"):
         settings["globals"]["augerrate"] = float(response["auger_rate"])
 
@@ -676,7 +687,7 @@ def _settings_pellets(settings, control, controller, event):
     event["type"] = "updated"
     event["text"] = "Successfully updated pellet settings."
 
-    save_settings_and_flag_update(settings, control, "settings_update", origin="app")
+    save_settings_and_flag_update(settings, control, *flags, origin="app")
 
 
 def _settings_smartstart_get(settings, control, controller, event):

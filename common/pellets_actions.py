@@ -23,6 +23,7 @@ from datetime import datetime
 
 from common.app import api_response
 from common.common import WriteKind
+from common.control_delta import control_delta
 from common.datastore_accessors import write_control, write_pellet_db
 
 
@@ -43,7 +44,7 @@ def pellets_load_profile(pelletdb, action_data):
         # we mean is cheaper and does not depend on the drain's defences.
         # execute_control_writes pops `origin` before patching, so a bare
         # single-key dict is a legal partial.
-        write_control({"hopper_check": True}, WriteKind.MERGE, origin="app")
+        write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
         write_pellet_db(pelletdb)
         return api_response(result="OK")
     else:
@@ -52,7 +53,7 @@ def pellets_load_profile(pelletdb, action_data):
 
 def pellets_hopper_check(pelletdb, action_data):
     # MINIMAL patch -- see pellets_load_profile for the full rationale.
-    write_control({"hopper_check": True}, WriteKind.MERGE, origin="app")
+    write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
     return api_response(result="OK")
 
 
@@ -102,7 +103,7 @@ def pellets_add_profile(pelletdb, action_data):
     if action_data["add_and_load"]:
         pelletdb["current"]["pelletid"] = profile_id
         # MINIMAL patch -- see pellets_load_profile for the full rationale.
-        write_control({"hopper_check": True}, WriteKind.MERGE, origin="app")
+        write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
         now = str(datetime.now())
         now = now[0:19]
         pelletdb["current"]["date_loaded"] = now

@@ -13,6 +13,7 @@ from common.common import (
     get_system_command_output,
 )
 from common.modes import Mode
+from common.control_delta import control_delta
 from common.datastore_accessors import read_settings, read_all_metrics, read_history, write_settings, write_control
 from common.defaults import metrics_items
 from common.api_commands import process_command
@@ -392,17 +393,30 @@ def update_probe_config(settings, control, probe_dto):
 
 def save_settings_and_flag_update(settings, control, *flags, origin="app"):
     """
-    Shared "write settings + set one-or-more control update-flags + merge-write
-    control" helper for the repeated persistence tail used by several
+    Shared "write settings + set one-or-more control update-flags + queue a
+    control write" helper for the repeated persistence tail used by several
     settings/admin/socket_io actions.
 
-    Writes `settings` to disk, sets `control[flag] = True` for each flag name
-    in `flags`, then merge-writes `control`. Mutates `control` in place.
+    Writes `settings` to disk, sets `control[flag] = True` for each flag name in
+    `flags`, then queues a delta naming ONLY those flags. Mutates `control` in
+    place.
+
+    These are one-shot REQUEST flags: the control loop acts on them and clears
+    them. Under the old whole-dict write, a concurrent writer's stale snapshot
+    could set one back to False before the loop ever saw it -- the settings were
+    saved but the reload never happened, so the user's change appeared to do
+    nothing at all. A named flag cannot be reverted by a writer that never
+    mentions it.
+
+    `control` remains a parameter, and is still mutated in place, even though
+    the delta no longer needs it: nine call sites pass it and may observe that
+    mutation, and two of those files are shared with other in-flight work.
+    Removing it would be a rename with no behavioural benefit.
     """
     write_settings(settings)
     for flag in flags:
         control[flag] = True
-    write_control(control, WriteKind.MERGE, origin=origin)
+    write_control(control_delta(set_values={flag: True for flag in flags}), WriteKind.DELTA, origin=origin)
 
 
 def api_response(result, message=None, data=None):

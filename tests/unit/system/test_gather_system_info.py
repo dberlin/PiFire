@@ -17,6 +17,7 @@ from unittest import mock
 
 import common.system as cc
 from common.common import WriteKind
+from common.control_delta import CONTROL_DELTA_KEY
 
 
 def _ok(requested, data):
@@ -53,7 +54,12 @@ def test_gather_system_info_empty_supported_cmds_keeps_defaults_and_writes_contr
     # 'network_info' nor 'hardware_info' was in supported_cmds.
     assert system_info["network_info"] == {"Unknown": {"ip_address": "0.0.0.0", "mac_address": "00:00:00:00:00:00"}}
     assert system_info["hardware_info"]["total_ram"] == "Unknown"
-    write_control.assert_called_once_with(control, WriteKind.MERGE, origin="unit-test")
+    # Nothing was probed, so the delta names nothing under "system". It is still
+    # WRITTEN -- the call itself is the observable this pins -- but it imposes no
+    # stale reading on a concurrent writer, which the old whole-dict write did.
+    write_control.assert_called_once_with(
+        {CONTROL_DELTA_KEY: 1, "set": {"system": {}}}, WriteKind.DELTA, origin="unit-test"
+    )
 
 
 def test_gather_system_info_all_commands_ok_populates_control_and_system_info():
@@ -96,7 +102,25 @@ def test_gather_system_info_all_commands_ok_populates_control_and_system_info():
     assert system_info["network_info"] == {"eth0": {"ip_address": "192.168.1.5", "mac_address": "aa:bb"}}
     assert system_info["hardware_info"]["total_ram"] == "4GB"
 
-    write_control.assert_called_once_with(control, WriteKind.MERGE, origin="admin")
+    # The delta names exactly the six members this call assigned -- not the whole
+    # control dict, and not the system members it never probed.
+    write_control.assert_called_once_with(
+        {
+            CONTROL_DELTA_KEY: 1,
+            "set": {
+                "system": {
+                    "wifi_quality_value": 42,
+                    "wifi_quality_max": 70,
+                    "wifi_quality_percentage": 60.0,
+                    "cpu_throttled": False,
+                    "cpu_under_voltage": False,
+                    "cpu_temp": 55.5,
+                }
+            },
+        },
+        WriteKind.DELTA,
+        origin="admin",
+    )
 
 
 def test_gather_system_info_throttled_or_undervoltage_adds_failure_message():

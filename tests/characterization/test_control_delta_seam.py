@@ -293,3 +293,30 @@ def test_a_manual_pwm_change_and_a_fan_toggle_in_one_cycle_both_land(seeded):
     assert manual["pwm"] == 50
     assert manual["change"] == "fan"
     assert manual["output"] is True
+
+
+def test_a_background_system_write_does_not_hide_a_restore_to_the_opening_value(seeded):
+    """gather_system_info writes only control["system"]. Under the reduce it
+    still carried a stale copy of everything else, and a concurrent writer
+    restoring a member to its opening value was invisible.
+
+    The sibling in tests/characterization/test_control_writes_cross_writer.py
+    (test_background_full_control_write_does_not_eat_a_notify_write) passes
+    under BOTH seams, because a plain change differs from the ancestor. Only a
+    restore-to-opening tells the two apart.
+    """
+    opening = _notify_entry("Grill", "probe")["target"]
+    assert _cmd("notify", "Grill", "target", "203")["result"] == "OK"
+    assert _cmd("notify", "Grill", "target", str(opening))["result"] == "OK"
+    # A background writer naming only its own slice, exactly as gather_system_info
+    # now does.
+    write_control(
+        control_delta(set_values={"system": {"cpu_temp": 42.0}}),
+        WriteKind.DELTA,
+        origin="app-socketio",
+    )
+    dsa.execute_control_writes()
+
+    control = read_control()
+    assert _notify_entry("Grill", "probe")["target"] == opening
+    assert control["system"]["cpu_temp"] == 42.0
