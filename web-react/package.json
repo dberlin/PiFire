@@ -4,6 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "description": "POC: React reimplementation of the PiFire QT Quick on-device controller UI (remote browser app).",
+  "browserslist": [
+    "chrome >= 111",
+    "edge >= 111",
+    "firefox >= 128",
+    "safari >= 16.4"
+  ],
   "scripts": {
     "dev": "rsbuild dev",
     "demo": "PUBLIC_DEMO=1 rsbuild dev",

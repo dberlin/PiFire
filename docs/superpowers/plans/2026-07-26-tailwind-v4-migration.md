@@ -165,7 +165,7 @@ cd /home/dannyb/sources/PiFire/web-react && find src -name '*.css' | sort | xarg
 
 The targets below are not a guess about what users have — the app **already** requires them. `settings.css`, `shell.css` and `wizard.css` use `color-mix(in srgb, var(--accent) …)` in ten places. Lightning CSS can only precompute `color-mix()` when both operands are literal; with a `var()` operand it passes the function straight through, so the shipped CSS already demands a browser with native `color-mix` — Chrome 111, Safari 16.2.
 
-- [ ] **Step 1: Record the current CSS output as the thing that must not change**
+- [x] **Step 1: Record the current CSS output as the thing that must not change**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
@@ -175,7 +175,9 @@ ls -l dist/static/css/
 
 Expected: one file, roughly `37.2 kB` raw / `7.8 kB` gzip (the build banner prints both). Write the exact byte count down; Step 4 compares against it.
 
-- [ ] **Step 2: Add the `browserslist` key**
+**Measured 2026-07-26, after the palette reconciliation: `38.3 kB` raw / `7.9 kB` gzip, exactly `38,331` bytes.** The 37.2 kB figure predates the extra `theme.css` tokens.
+
+- [x] **Step 2: Add the `browserslist` key**
 
 In `web-react/package.json`, after the `"description"` field, add:
 
@@ -207,7 +209,7 @@ Then add this comment to `rsbuild.config.ts`, immediately above `export default 
 // required Chrome 111 / Safari 16.2 before this key existed.
 ```
 
-- [ ] **Step 3: Rebuild and diff the emitted CSS**
+- [x] **Step 3: Rebuild and diff the emitted CSS**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
@@ -217,7 +219,9 @@ ls -l dist/static/css/
 
 Expected: the size is within a few hundred bytes of Step 1. A large drop means Lightning CSS stopped emitting vendor prefixes it had been emitting — that is fine and expected; a large *rise* is not, and must be understood before continuing.
 
-- [ ] **Step 4: Prove nothing moved, using the gate that already exists**
+**Measured: `38,316` bytes, −15.** No vendor prefix changed. The *only* difference in the whole emitted sheet is that Lightning CSS now writes the five media queries in Media Queries Level 4 range syntax — `@media (width<=720px)` instead of `@media (max-width:720px)`, and `(width>=1280px)` instead of `(min-width:1280px)` — because Safari 16.4 is the first Safari to support it. Semantically identical; the reflow/panel projects prove the breakpoints still fire.
+
+- [x] **Step 4: Prove nothing moved, using the gate that already exists**
 
 The dashboard already has a committed landmark baseline. It is the only "before" available at this point in the plan, and it is enough to catch a targets change that altered layout.
 
@@ -228,16 +232,20 @@ bun run test:e2e --project=fidelity --project=reflow --project=panel
 
 Expected: all specs pass, and `dashboard-layout-1280x720.json` is unchanged (`git diff --stat tests/e2e/` prints nothing).
 
-- [ ] **Step 5: Run the four gates**
+**Measured: 15/15 passed, baseline untouched.** Two environment notes for every later Playwright task: (a) pass this workspace's own ports (`PORT=5573 DEMO_PORT=5574 PIFIRE_BACKEND_URL=...`); (b) `playwright-core` 1.62.0 pins Chromium revision **1234**, but the shared `~/.cache/ms-playwright` only holds **1228** and `playwright install` cannot reach `cdn.playwright.dev` from this host. Run with `PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers`, a private directory of symlinks aliasing `chromium{,_headless_shell}-1234` to the installed 1228, rather than mutating the shared cache. The main checkout has the same gap.
+
+- [x] **Step 5: Run the four gates**
 
 ```bash
 cd /home/dannyb/sources/PiFire/web-react
 bun run typecheck && bun run lint && bun run test && bun run gen:types:check
 ```
 
-Expected: typecheck silent; `Checked 265 files … No fixes applied.` plus the two pre-existing `react-refresh/only-export-components` warnings (App.tsx:49, WizardShell.tsx:14) and exit 0; rstest `115` test files / `1010` tests, 0 failed; `settingsTypes.gen.ts is up to date.`
+Expected: typecheck silent; Biome `No fixes applied.` plus the two pre-existing `react-refresh/only-export-components` warnings (App.tsx:49, WizardShell.tsx:14) and exit 0; rstest 0 failed; `settingsTypes.gen.ts is up to date.`
 
-- [ ] **Step 6: Commit**
+**Measured 2026-07-26 baseline (the plan's 265 / 115 / 1010 are stale): Biome `Checked 266 files`, rstest `116` test files / `1038` tests.**
+
+- [x] **Step 6: Commit**
 
 ```bash
 cd /home/dannyb/sources/PiFire

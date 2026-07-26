@@ -8,6 +8,20 @@ import { ports } from "./ports";
 // to run several checkouts at once.
 const target = ports.pifireUrl;
 
+// Browser targets are pinned in package.json's `browserslist`, not left to
+// Rsbuild's defaults. Two reasons, and the second is the load-bearing one:
+//
+//   - Tailwind v4 requires Cascade Layers, @property and color-mix(), i.e.
+//     Safari 16.4 / Chrome 111 / Firefox 128. Rsbuild's default target set is
+//     older than that, so the default would be quietly wrong.
+//   - An unpinned list means Lightning CSS's output changes whenever a
+//     dependency updates. tests/e2e/baselines/ would report that as a visual
+//     regression with no cause anywhere in the diff.
+//
+// This raises nothing in practice: the stylesheets already use
+// color-mix(in srgb, var(--accent) ...), which Lightning CSS cannot precompute
+// through a var() and passes through verbatim, so the shipped CSS already
+// required Chrome 111 / Safari 16.2 before this key existed.
 export default defineConfig({
   plugins: [pluginReact({ reactCompiler: true })],
   html: { template: "./index.html" },
