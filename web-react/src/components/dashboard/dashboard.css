@@ -991,6 +991,25 @@ button.pf-dash-pill {
   color: var(--pf-hopper-label-color);
   text-transform: uppercase;
 }
+/* Flask's "Manager" shortcut into the pellet manager
+   (_macro_dash_default.html:360). Shares the label's metrics so the footer
+   reads as one row rather than a caption with a button bolted on; .pf-btn is
+   the control-panel scale and would dwarf the card. */
+.pf-dash-hopper-link {
+  font: 600 12px "Barlow";
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  color: var(--accent);
+  padding: 4px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.pf-dash-hopper-link:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+}
 
 /* ==========================================================================
    Breakpoints.

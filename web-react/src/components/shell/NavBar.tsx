@@ -9,10 +9,12 @@ import "./shell.css";
 // and strand the user in the old UI.
 //
 // "Pellets" is the one entry with NO counterpart in base.html: Flask reaches
-// the pellet manager from the dashboard hopper card's "Manager" button
-// (_macro_dash_default.html:360), not from the navbar. React's HopperGauge has
-// no footer yet, so the entry point is the chrome instead. A hopper-card
-// shortcut belongs to the dashboard-reflow plan, not here.
+// the pellet manager only from the dashboard hopper card's "Manager" button
+// (_macro_dash_default.html:360), not from the navbar. React has both -- this
+// entry, and the hopper card's own shortcut (HopperGauge.tsx, ruled 2026-07-26)
+// -- which is a deliberate superset, not a duplicate to be pruned: the navbar
+// reaches the manager from every page, the card reaches it from the reading
+// that prompts the visit.
 const NAV_ITEMS = [
   { label: "Dashboard", to: "/", end: true },
   { label: "Recipes", to: null, end: false },

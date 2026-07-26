@@ -281,7 +281,7 @@ code: **all 9 CRITICALs and 12 of 18 IMPORTANTs are done.** The genuinely
 remaining findings are enumerated in item 10 rather than counted in the
 abstract here.
 
-### 6a. Hopper card should link to /pellets — RULED 2026-07-26, not yet built
+### 6a. Hopper card should link to /pellets — DONE 2026-07-26
 
 Bootstrap's hopper card carries a "Manager" link. The dashboard slice asserted
 there must be **no** such link in React; the pellets plan recorded the shortcut
@@ -289,6 +289,12 @@ as owed and assigned it to the dashboard slice. The two plans contradicted each
 other and neither shipped it. **Ruling: the link exists, because it exists in
 Bootstrap.** `/pellets` shipped 2026-07-25, so the target is real. Small,
 self-contained, unblocked.
+
+- [x] Shipped 2026-07-26: a router `<Link to="/pellets">Manager</Link>` in
+      `HopperGauge`'s footer (`.pf-dash-hopper-link`, existing `pf-*` tokens, no
+      new colour); the dashboard slice's "offers no link out" assertion was
+      flipped to assert the link exists and points at `/pellets`, plus one
+      pinning that it navigates in-app rather than reloading the document.
 
 ### 7. Accessor rename WAVE 2
 
