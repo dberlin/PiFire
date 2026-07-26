@@ -2062,7 +2062,7 @@ assertion about behaviour** — only where rules live and what they are scoped t
 
 **Steps:**
 
-- [ ] **Step 1: Neutralization check for the e2e path.** This spec drives a UI that can write a
+- [x] **Step 1: Neutralization check for the e2e path.** This spec drives a UI that can write a
       probe map, which sets `probe_map_update`, which makes `control.py` rebuild probe devices.
       It must not be able to reach an installer. Confirm:
       ```sh
@@ -2071,7 +2071,7 @@ assertion about behaviour** — only where rules live and what they are scoped t
       Expected: **zero hits.** If this is ever non-zero, this spec does not run until it is zero
       again.
 
-- [ ] **Step 2: Write the spec.**
+- [x] **Step 2: Write the spec.**
       ```ts
       // End-to-end coverage for the Probes settings tab at /settings/probes.
       //
@@ -2166,14 +2166,14 @@ assertion about behaviour** — only where rules live and what they are scoped t
       `tests/e2e/helpers.ts`'s `ensureStopped` instead — check whether it already exists
       (`rg -n "ensureStopped" web-react/tests/e2e/helpers.ts`) and prefer it if so.
 
-- [ ] **Step 3: Run it.**
+- [x] **Step 3: Run it.**
       ```sh
       cd web-react && bun run test:e2e tests/e2e/probes.spec.ts
       ```
       All three green. If the first test 404s on `/api/probe_map`, **restart gunicorn** before
       debugging anything else.
 
-- [ ] **Step 4: Confirm the controller actually reacted.** The e2e asserts settings; it does not
+- [x] **Step 4: Confirm the controller actually reacted.** The e2e asserts settings; it does not
       assert the control loop rebuilt anything, and per backlog lesson 3, asserting one end is not
       asserting the seam. With `control.py` running, immediately after the first test:
       ```sh
@@ -2184,14 +2184,27 @@ assertion about behaviour** — only where rules live and what they are scoped t
       print('device info:', get_blob('probe_device_info') is not None)
       "
       ```
-      Both `True`. **Verify `get_blob`'s real import path first** — `rg -n "def get_blob|def read_generic_key" common/datastore.py common/datastore_accessors.py` — and use whatever the repo actually exposes.
+      Both `True`. **RESOLVED 2026-07-26:** the accessor layer exposes
+      `read_generic_key(key)` (`common/datastore_accessors.py:874`), which is what to use;
+      `get_blob` does exist but one layer down, in `common/datastore.py:296`. Both `True`
+      confirmed against a live `control.py`, with `logs/events.log` carrying
+      `"Probe map reloaded in control script."` and `probe_device_info` holding the rebuilt
+      device list.
       If the flag is still `True`, `control.py` is not running or is an older process; that is a
       finding, not a reason to weaken the assertion.
 
-- [ ] **Step 5: Run the coverage gate once.** `bun run test:coverage` — the per-file 75 % line
+- [x] **Step 5: Run the coverage gate once.** `bun run test:coverage` — the per-file 75 % line
       floor applies to every new `src/` module (`rstest.config.ts:53-55`).
+      **RESULT 2026-07-26: every module this plan adds clears the floor** —
+      `probeMapApi.ts` 95.23, `probeMapRoutes.ts` 100, `ProbesTab.tsx` 91.66, and the two
+      touched cards went UP (`DevicesCard.tsx` 97.77, `PortsCard.tsx` 100). **The gate itself
+      exits 1 on a PRE-EXISTING failure**: `src/components/pellets/PelletsPage.tsx` sits at
+      65.21 % against the 75 % floor. Every file under `src/components/pellets/` and
+      `src/helpers/pellets/` is byte-identical to this branch's base commit, and adding tests
+      elsewhere cannot lower another file's coverage, so this is not caused by this work and
+      is deliberately not fixed here — it belongs in its own change.
 
-- [ ] **Step 6: Commit.** **Deliverable:** three green e2e tests and a manual confirmation that
+- [x] **Step 6: Commit.** **Deliverable:** three green e2e tests and a manual confirmation that
       the control process cleared the flag.
 
 ---
