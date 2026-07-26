@@ -33,6 +33,17 @@ function classesUsed(): Set<string> {
   return found;
 }
 
+// Comments are prose, not selectors. Stripping them is load-bearing: the
+// `selector` capture below is "everything since the previous brace", which
+// includes any comment sitting above a rule -- and this stylesheet's comments
+// routinely name the very class they introduce. Without this, a class was
+// counted as declared because a COMMENT mentioned it, so deleting its rule left
+// the guard green. Found by mutation: removing both `.pf-module-notes` blocks
+// did not turn this file red until comments were stripped.
+function stripComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
 // A class "has a rule" only when a selector mentioning it is followed by a
 // declaration block that declares at least one property. `.foo {}` does not
 // count -- an empty rule is the original defect wearing a hat. The regex matches
@@ -40,7 +51,7 @@ function classesUsed(): Set<string> {
 // @media prelude never matches: its body contains braces).
 function declaredClasses(css: string): Set<string> {
   const out = new Set<string>();
-  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+  for (const [, selector, body] of stripComments(css).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     if (!body.includes(":")) continue;
     for (const hit of selector.matchAll(/\.(pf-[a-z0-9]+(?:-[a-z0-9]+)*)/g)) out.add(hit[1]);
   }
@@ -65,6 +76,15 @@ describe("wizard stylesheet coverage", () => {
   it("finds the classes it is supposed to be checking", () => {
     expect(used.size).toBeGreaterThanOrEqual(51);
     expect(used.has("pf-install-progress-bar-reduced-motion")).toBe(true);
+  });
+
+  // Guards the guard. Every assertion below is only as good as declaredClasses()
+  // being able to say "no": if prose counts as a declaration, a stylesheet this
+  // heavily commented can lose a rule and stay green.
+  it("does not count a class that is only NAMED IN A COMMENT", () => {
+    const css = "/* .pf-ghost is explained here */\n.pf-real { color: red; }";
+    expect(declaredClasses(css).has("pf-real")).toBe(true);
+    expect(declaredClasses(css).has("pf-ghost")).toBe(false);
   });
 
   it("has a non-empty CSS rule for every pf-* class the wizard uses", () => {

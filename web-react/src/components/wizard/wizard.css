@@ -336,6 +336,14 @@
   color: var(--text);
   font: 700 18px "Barlow";
 }
+/* Every inline error on this step, whether it belongs to the card itself or to
+   an add/edit dialog inside it. One rule rather than two identical ones: as two
+   rules in two sections they read as descending specificity (the dialogs' 0,2,0
+   following the card's 0,3,0), which is a real ordering hazard the day either
+   set gains a declaration the other lacks. Listed lowest-specificity first for
+   the same reason. */
+.pf-port-form [role="alert"],
+.pf-device-form [role="alert"],
 .pf-wizard .pf-probes-card > [role="alert"] {
   margin: 0;
   color: #ff8b82;
@@ -423,12 +431,8 @@
 .pf-device-form .pf-input {
   width: 100%;
 }
-.pf-port-form [role="alert"],
-.pf-device-form [role="alert"] {
-  margin: 0;
-  color: #ff8b82;
-  font: 600 14px "Barlow";
-}
+/* The dialogs' [role="alert"] treatment lives with the probes-card one above,
+   as a single shared rule. */
 /* DeviceForm reuses .pf-module-image inside a flex column, where the grid
    placement above is inert and align-items: stretch would otherwise fight the
    fixed width. */
