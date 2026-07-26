@@ -609,21 +609,50 @@ Back/Next with inert step indicators; tables have no column headers and device
   that `raspi-config nonint do_onewire 0` writes `dtoverlay=w1-gpio` is
   unverified.
 
-#### Decisions needed from a human
+#### Rulings — 2026-07-26
 
-- Does React ship **one** dashboard forever? (`hidden_cards`,
-  `touch_screen_mode`, the dashboard picker and the whole `Basic` dashboard are
-  currently dropped wholesale on that assumption.)
-- `/mobile`'s fate — the backlog's "may be obsolete" line needs settling.
-- Where `display.sleep_timeout` lives (General vs Platform), and how it
-  coordinates with the Qt DPMS/sway work.
-- The persistence model for per-tab Save: SmartStart/PWM table edits are lost on
-  tab switch, where Flask persisted immediately.
+These were open questions. They are now answered; the entries they resolve are
+struck from the list below rather than left to be re-asked.
+
+1. **React ships ONE dashboard, permanently.** `hidden_cards`,
+   `touch_screen_mode`, the dashboard picker and the whole `Basic` dashboard
+   (795 lines) are dropped deliberately, not pending. Do not port them, and do
+   not open "the Basic dashboard has never been compared" as a gap again — there
+   is nothing to compare it to.
+2. **`/mobile` will die.** Stop treating it as a migration target. It is not
+   "may be obsolete"; it is going away. The blueprint stays only until the
+   general retirement in ruling 5.
+3. **Settings edits must survive a tab switch.** Today SmartStart/PWM table
+   edits are lost on navigation, where Flask persisted immediately. Either
+   answer is acceptable — preserve across the switch, or save immediately.
+   **Preserving is the better fit**: saving immediately contradicts the per-tab
+   `SaveBar` that already shipped and would make every keystroke a control
+   write. Losing the edit silently is the only outcome ruled out.
+4. **`display.sleep_timeout` belongs in the General tab**, and it must actually
+   drive the DPMS behaviour — see [[project_qt_display_dpms_sway]]: cage's
+   `wlr-randr --off` broke touch-wake on DSI+HDMI, blanking is disabled in the
+   interim, and the next step there is imperative DPMS under sway/labwc. The
+   React control and that work are the same feature; a control that renders but
+   does nothing is worse than no control.
+5. **No Flask page is retired until everything else is finished.** `pellets`,
+   `probeconfig` and `cookfile` all now have shipped React replacements and all
+   three Flask surfaces stay live. Retirement is one deliberate pass at the end,
+   not a trailing step of each slice.
+6. **Renaming a probe must not leave stale references.** This overrules item
+   9a.1's conservative "match `wizard.py` exactly" choice. `apply_probe_map`
+   regenerates only `history_page.probe_config`; a rename therefore leaves
+   `control["notify_data"]` and `settings["recipe"]["probe_map"]` pointing at
+   the old label. Fix it in `apply_probe_map`, and fix `run_wizard` too — the
+   installer has the same hole, which is why matching it looked safe.
+
+#### Still needing a human
+
+Everything else in this group was answered on 2026-07-26; see the rulings above.
+
 - Whether React's client-side clamps are deleted now that the schema enforces
-  bounds — S2 and the scoping spec disagree.
-- Whether the legacy Jinja `blueprints/probeconfig/*` surface gets deleted.
-  **No Flask page has been retired yet by this migration** — `blueprints/pellets/`
-  is still live behind a shipped React replacement.
+  bounds — S2 and the scoping spec disagree. The only one left, and it is a
+  genuine trade: the schema is authoritative, but a clamp gives feedback at the
+  keystroke instead of at the save.
 
 #### Schema and toolchain follow-ups
 
