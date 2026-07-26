@@ -2198,7 +2198,7 @@ jj desc -m "feat(api-files): cook-file comment CRUD and comment asset lists"
 - `POST /api/files/cookfiles/assets/delete`, JSON `{file, assets: string[]}` → `{result:"OK"}`.
 - `POST /api/files/cookfiles/thumbnail`, JSON `{file, asset}` → `{result:"OK"}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 import io
@@ -2367,7 +2367,7 @@ def test_thumbnail_rejects_an_asset_the_file_does_not_have(live_server, page, _i
 
 Add `import tempfile`, `import zipfile` to the module imports.
 
-- [ ] **Step 2: Implement in `cookfile_api.py`**
+- [x] **Step 2: Implement in `cookfile_api.py`**
 
 ```python
 import shutil
@@ -2432,7 +2432,7 @@ def apply_thumbnail(path, asset_filename):
     return "OK"
 ```
 
-- [ ] **Step 3: Register the three routes**
+- [x] **Step 3: Register the three routes**
 
 ```python
 @api_files_bp.route("/cookfiles/assets/upload", methods=["POST"])
@@ -2478,7 +2478,7 @@ def cookfile_thumbnail():
     return jsonify(api_response("OK")), 200
 ```
 
-- [ ] **Step 4: Verify, check for tree pollution, commit**
+- [x] **Step 4: Verify, check for tree pollution, commit**
 
 ```bash
 QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/test_api_files_cookfile_assets.py -q
@@ -2492,6 +2492,11 @@ jj desc -m "feat(api-files): cook-file asset upload, delete and thumbnail select
 
 ---
 
+
+**CORRECTED:** the drafted `assert not os.path.exists("/tmp/pifire")` fails on any dev
+box that ran PiFire before the predictable-staging-path fix -- a stale /tmp/pifire full
+of old uuid dirs is still there. The shipped test asserts on the per-cook entry
+`/tmp/pifire/{parent_id}` instead, which is what the fix actually guarantees.
 ### Task 8: TypeScript types + API clients
 
 **Files:**

@@ -295,3 +295,46 @@ def cookfile_comment_assets():
     if problem:
         return cookfile_api.unreadable(problem, error)
     return jsonify(api_response("OK", None, {"assets": stored})), 200
+
+
+@api_files_bp.route("/cookfiles/assets/upload", methods=["POST"])
+def cookfile_asset_upload():
+    path, err = require_file(request.form.get("file", ""))
+    if err:
+        return err
+    added, problem = cookfile_api.upload_assets(path, request.files.getlist("assets"))
+    if problem:
+        return error(problem, 400, field="assets")
+    return jsonify(api_response("OK", None, {"assets": added})), 200
+
+
+@api_files_bp.route("/cookfiles/assets/delete", methods=["POST"])
+def cookfile_asset_delete():
+    body = json_body()
+    path, err = require_file(body.get("file", ""))
+    if err:
+        return err
+    assets = body.get("assets")
+    if not isinstance(assets, list) or not all(isinstance(a, str) for a in assets):
+        return error("bad_request", 400, field="assets")
+    status = cookfile_api.delete_assets(path, assets)
+    if status != "OK":
+        return cookfile_api.unreadable(status, error)
+    return jsonify(api_response("OK")), 200
+
+
+@api_files_bp.route("/cookfiles/thumbnail", methods=["POST"])
+def cookfile_thumbnail():
+    body = json_body()
+    path, err = require_file(body.get("file", ""))
+    if err:
+        return err
+    asset = body.get("asset")
+    if not isinstance(asset, str) or not asset:
+        return error("bad_request", 400, field="asset")
+    status = cookfile_api.apply_thumbnail(path, asset)
+    if status == "unknown_asset":
+        return error("bad_request", 400, field="asset")
+    if status != "OK":
+        return cookfile_api.unreadable(status, error)
+    return jsonify(api_response("OK")), 200

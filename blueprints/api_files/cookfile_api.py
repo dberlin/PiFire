@@ -8,6 +8,8 @@ blueprints/cookfile/routes.py.
 import copy
 import datetime
 import os
+import shutil
+import tempfile
 
 from werkzeug.utils import secure_filename
 
@@ -21,8 +23,14 @@ from common.app import (
     prepare_metrics_csv,
 )
 from common.common import epoch_to_time, generate_uuid
-from file_mgmt.common import fixup_assets, read_json_file_data, update_json_file_data
+from file_mgmt.common import (
+    fixup_assets,
+    read_json_file_data,
+    remove_assets,
+    update_json_file_data,
+)
 from file_mgmt.cookfile import read_cookfile, upgrade_cookfile
+from file_mgmt.media import add_asset, set_thumbnail
 
 
 def load(path):
@@ -294,3 +302,57 @@ def set_comment_assets(path, comment_id, assets):
             status = update_json_file_data(comments, path, "comments")
             return (entry["assets"], None) if status == "OK" else (None, status)
     return None, "comment_not_found"
+
+
+def upload_assets(path, storages):
+    """Add one or more images to the archive.
+
+    Each upload is staged in a private per-request tempfile.mkdtemp (0700,
+    app-owned) and rmtree'd in a finally -- the same arrangement
+    blueprints/cookfile/routes.py:236-250 uses after the predictable
+    /tmp/pifire/{id} path was removed. secure_filename flattens the name before
+    it is written, so an asset called "../../x.png" cannot escape the staging
+    dir either.
+    """
+    added = []
+    for storage in storages:
+        if not storage or not storage.filename:
+            continue
+        if not allowed_file(storage.filename):
+            return None, "disallowed_file"
+        safe_name = secure_filename(storage.filename)
+        if not safe_name:
+            return None, "bad_request"
+        staging = tempfile.mkdtemp(prefix="pifire-upload-")
+        try:
+            storage.save(os.path.join(staging, safe_name))
+            asset_id, filetype = add_asset(path, staging, safe_name)
+            added.append({"id": asset_id, "filename": f"{asset_id}.{filetype}", "type": filetype})
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+    if not added:
+        return None, "bad_request"
+    return added, None
+
+
+def delete_assets(path, assets):
+    """remove_assets rewrites the whole archive and scrubs the names out of
+    metadata.thumbnail, comments[].assets and assets.json
+    (file_mgmt/common.py:203-278)."""
+    return remove_assets(path, list(assets))
+
+
+def apply_thumbnail(path, asset_filename):
+    """Set metadata.thumbnail, but only to an asset the file actually holds.
+
+    Flask writes whatever string it is handed (routes.py:202-210), so a stale
+    or hostile client can point the thumbnail at a file that does not exist and
+    the list renders a broken image forever.
+    """
+    assets, status = read_json_file_data(path, "assets", unpackassets=False)
+    if status != "OK":
+        return status
+    if asset_filename not in {asset["filename"] for asset in assets}:
+        return "unknown_asset"
+    set_thumbnail(path, asset_filename)
+    return "OK"
