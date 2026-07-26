@@ -3082,7 +3082,7 @@ usual `async () => ({ ...(await import(mod)) })` partial-mock idiom throws
   }
   ```
 
-- [ ] **Step 1: Tests**
+- [x] **Step 1: Tests**
 
 `CookFilePage.test.tsx`:
 - renders the title once the detail resolves
@@ -3103,7 +3103,7 @@ usual `async () => ({ ...(await import(mod)) })` partial-mock idiom throws
 - thumbnail falls back to the placeholder when `metadata.thumbnail` is `""`
 - Download buttons are anchors carrying the right `href`
 
-- [ ] **Step 2: Implement `CookFilePage`**
+- [x] **Step 2: Implement `CookFilePage`**
 
 ```tsx
 // The cook-file detail route. One fetch on mount (and on `reloadNonce`), no
@@ -3145,7 +3145,7 @@ The recover prompt:
 )}
 ```
 
-- [ ] **Step 3: Implement `CookFileMeta`**
+- [x] **Step 3: Implement `CookFileMeta`**
 
 Local edit state seeded from props uses the **render-phase adjustment** idiom (`components/settings/tabs/SafetyTab.tsx`, `components/dashboard/SetpointEntry.tsx`) — never `useEffect` + `setState`:
 
@@ -3160,7 +3160,7 @@ if (metadata.title !== seededTitle) {
 
 Label rows are `Object.entries(labels.probes)`. On save, call `renameCookFileLabel` and then `onChanged()` — the parent refetch is what re-keys the row, so the component never has to reconcile the safe-name transform itself.
 
-- [ ] **Step 4: Route**
+- [x] **Step 4: Route**
 
 In `App.tsx`, inside the `AppShell` children array, after the `/history` entry:
 
@@ -3172,7 +3172,7 @@ In `App.tsx`, inside the `AppShell` children array, after the `/history` entry:
 { path: "/cookfiles/:filename", element: <CookFilePage /> },
 ```
 
-- [ ] **Step 5: Gate and commit**
+- [x] **Step 5: Gate and commit**
 
 ```bash
 cd web-react
@@ -3184,6 +3184,16 @@ jj desc -m "feat(web-react): cook-file detail route with metadata, label rename 
 
 ---
 
+
+**CORRECTED (build order):** CookFilePage composes CookFileMeta only in this task.
+CookFileChart, EventsTable, CommentList and MediaPanel do not exist until Tasks 11-13,
+so each of those tasks adds its own `pf-section` to the page rather than this task
+shipping four dead stubs.
+
+**Also corrected:** the label rename sends the probe KEY as `old_label`
+(`_rename_graph_label` pops it from `graph_labels[category]`'s KEYS), not the display
+name the plan's prose implies. The accessible names of the rename controls use the key
+for the same reason: two probes may share a display name.
 ### Task 11: the chart — reuse `HistoryChart`, add annotations
 
 **Files:**

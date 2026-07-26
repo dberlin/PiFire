@@ -3,6 +3,7 @@ import { probeModulesLoader } from "../helpers/probes/probeMapRoutes";
 import { settingsLoader } from "../helpers/settings/settingsRoutes";
 import { wizardLoader } from "../helpers/wizard/wizardRoutes";
 import { AppPrefsProvider } from "./AppPrefs";
+import { CookFilePage } from "./cookfiles/CookFilePage";
 import { DashboardRoute } from "./DashboardRoute";
 import { HistoryPage } from "./history/HistoryPage";
 import { PelletsPage } from "./pellets/PelletsPage";
@@ -60,6 +61,10 @@ export const routes = [
       // The cook-history chart page. NOT to be confused with the
       // /settings/history child route below, which is the History *settings* tab.
       { path: "/history", element: <HistoryPage /> },
+      // The detail view for ONE saved cook file. The list that links here is a
+      // section of /history, mirroring Flask, where the cook-file list lives on
+      // the history page and "Open" posts through to cookfile/index.html.
+      { path: "/cookfiles/:filename", element: <CookFilePage /> },
       // The pellet INVENTORY manager (brands, woods, profiles, current load,
       // log). NOT to be confused with /settings/pellets below, which is the
       // pellet-LEVEL settings tab (thresholds, auger rate, prime ignition).
