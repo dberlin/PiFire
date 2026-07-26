@@ -708,31 +708,7 @@ def deep_update(dictionary, updates):
     return dictionary
 
 
-CONTROL_COUPLED_MEMBERS = frozenset({"timer"})
-"""Top-level control members that must be reduced WHOLE, never member-by-member.
-
-``control["timer"]`` is a value object: ``start``/``paused``/``end`` describe one
-countdown and only mean anything together, and the code branches on their
-combinations -- ``_cmd_set_timer`` resumes or starts depending on
-``paused == 0``, and clears depending on ``start != 0``. Reducing its members
-independently can therefore synthesize a state no writer ever computed: a `stop`
-(which zeroes all three) racing a `pause` (which sets ``paused`` and carries the
-other two unchanged) yields ``{start: 0, paused: <now>, end: 0}``, a "paused"
-timer with no countdown, which makes the NEXT `start` take the unpause branch and
-arm an already-expired timer.
-
-So the whole object is kept or dropped together: if any member differs from the
-ancestor, that writer computed a timer state and its version is taken intact.
-
-``control["manual"]`` looks similar (``change``/``output`` are equally coupled)
-but does NOT need this: the control loop clears both to False and OVERWRITEs
-after acting (controller/runtime/modes/base.py), so the ancestor's ``change`` is
-False at the start of every cycle and no writer's value can collide with it.
-It is a one-shot command slot, not persistent state.
-"""
-
-
-def reduce_control_patch(patch, base, coupled=CONTROL_COUPLED_MEMBERS):
+def reduce_control_patch(patch, base):
     """Drop from a queued control patch every member that already equals ``base``.
 
     This is the general half of the control-write seam fix; see
@@ -758,20 +734,25 @@ def reduce_control_patch(patch, base, coupled=CONTROL_COUPLED_MEMBERS):
 
     :param patch: the queued partial (already null-stripped)
     :param base: the common ancestor -- the pre-drain control blob
-    :param coupled: member names to reduce whole rather than member-by-member;
-        see :data:`CONTROL_COUPLED_MEMBERS`. Nested levels are never treated as
-        coupled, so the name cannot match accidentally further down the tree.
     :return: a new dict containing only the members that differ from ``base``
 
     Note the one thing this cannot recover: a writer whose intent is to set a
     member back to the value ``base`` already holds produces a patch identical
     to ``base`` in that member, and is indistinguishable from a writer that
-    never touched it. `/api/set/timer/stop` against an already-zero timer is the
-    live example. That is information the queue does not carry, not a defect in
-    the reduction; closing it needs writers to express deltas rather than whole
-    states. See
-    tests/characterization/test_control_writes_cross_writer.py::
-    test_a_reset_to_the_ancestor_value_cannot_be_distinguished_from_silence.
+    never touched it. That is information the queue does not carry, not a defect
+    in the reduction, and it is why converted writers state a DELTA instead
+    (:mod:`common.control_delta`): an op or a ``set`` member is nothing but
+    intent, so there is no ancestor for it to coincide with. This function is
+    what remains for whole-dict writers that have not been converted.
+
+    This used to carry a ``coupled`` exclusion (``CONTROL_COUPLED_MEMBERS``,
+    ``{"timer"}``) which took that member whole rather than member-by-member,
+    because reducing ``start``/``paused``/``end`` independently can synthesize a
+    countdown no writer computed. It is DELETED: no path can queue a computed
+    timer value any more -- the REST and socket timer commands emit ops
+    (:mod:`common.control_delta`) and both arbitrary-patch doors refuse a
+    ``timer`` member -- so a legacy patch carrying one is a stale snapshot, and
+    reducing it member-wise is strictly better than imposing it whole.
     """
     if not isinstance(base, Mapping) or not isinstance(patch, Mapping):
         return copy.deepcopy(patch)
@@ -782,13 +763,8 @@ def reduce_control_patch(patch, base, coupled=CONTROL_COUPLED_MEMBERS):
             reduced[key] = copy.deepcopy(value)
             continue
         base_value = base[key]
-        if key in coupled:
-            # All-or-nothing: see CONTROL_COUPLED_MEMBERS.
-            if value != base_value:
-                reduced[key] = copy.deepcopy(value)
-            continue
         if isinstance(value, Mapping) and isinstance(base_value, Mapping):
-            nested = reduce_control_patch(value, base_value, coupled=frozenset())
+            nested = reduce_control_patch(value, base_value)
             if nested:
                 reduced[key] = nested
             continue

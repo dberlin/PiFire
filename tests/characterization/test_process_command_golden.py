@@ -1380,15 +1380,16 @@ def test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer(se
     The user asked for a 10-minute timer that shuts the grill down and got a
     `shutdown` flag on no timer at all.
 
-    The drain now reduces each patch against the blob as it stood when the drain
-    began -- which is exactly what BOTH commands read. The shutdown command's
-    timer object is identical to that ancestor, so it carries no evidence the
-    command touched the timer and is dropped; only its `shutdown` flag lands.
-    Same for the start's `req`, via the notify_data element merge.
+    The start no longer sends a timer VALUE at all: it queues a
+    `timer.start_or_resume` op (common/control_delta.py) which the drain
+    evaluates against live state. The shutdown command is still a whole-dict
+    writer here, and the reduce is what keeps its stale timer copy out -- that
+    object is identical to the ancestor both commands read, so it carries no
+    evidence the command touched the timer and is dropped; only its `shutdown`
+    flag lands.
 
-    control['timer'] is reduced WHOLE rather than key-by-key
-    (common.common.CONTROL_COUPLED_MEMBERS): start/paused/end are one countdown
-    and merging them independently can synthesize a state no writer computed.
+    Ordering no longer matters either way: an op cannot be overwritten by a
+    stale snapshot, because the drain applies it to whatever the snapshot left.
     """
     control = dsa.read_control()
     control["timer"] = {"start": 0, "paused": 0, "end": 0}
