@@ -42,6 +42,17 @@ execute` is byte-identical in all six, as are `return`, `arglist_after`,
 pause branches now emit the SAME op, which is the point: `timer.pause` picks
 the running-vs-cleared branch in the drain instead of at request time.
 
+Second pass, same rules: 18 more entries -- every set_notify_*, set_limit_*_req,
+set_timer_shutdown_*, set_timer_keep_warm_*, get_hopper and
+kind_overwrite_ignored_notify -- swap "diff" for "delta" as the notify writers
+and the hopper_check flag convert. Again `control_diff_after_execute` and every
+other observable are byte-identical in all 18; only the payload SHAPE moved.
+Two of them (set_notify_target_not_a_number, set_notify_unknown_field) queue a
+BARE envelope, {"__control_delta__": 1}: those are the ERROR branches, which
+have always queued a write from outside the if/elif chain, and an envelope
+naming nothing is the honest form of "this command changed nothing". Previously
+they queued the whole control dict, which could revert a concurrent writer.
+
 WHAT IS OBSERVED (per case, see `_run_case`):
   * the returned dict (result/message/data)
   * `arglist` AFTER the call -- process_command mutates its caller's list
@@ -146,9 +157,10 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_g
 # See common/api_commands.py::_cmd_get_hopper and distance/intervals.py.
 #
 # CHANGED AGAIN, DELIBERATELY (control-write deltas, sanctioned exception #3 in
-# the module docstring): the six set_timer_* entries' `queued_writes` only.
-# 5a3702a7... -> 8d110035...
-GOLDEN_SHA256 = "8d1100350e3674678f6796780c0f03611f769f09c56bba828f6c02c63a8cca32"
+# the module docstring): `queued_writes` only, in two passes --
+#   5a3702a7... -> 8d110035...  the six set_timer_ start/pause/stop entries
+#   8d110035... -> 2665570f...  the 18 notify / flag / hopper entries
+GOLDEN_SHA256 = "2665570f511eb583fbd0f0e8f8eca6b871ff84bea476051249c651c8d1ee104d"
 
 # Frozen wall clock. The set/timer branches stamp time.time() into control.
 FIXED_NOW = 1700000000.0

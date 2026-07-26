@@ -237,3 +237,33 @@ def test_socket_timer_stop_then_pause_leaves_the_timer_stopped(sio):
     dsa.execute_control_writes()
 
     assert read_control()["timer"] == {"start": 0, "paused": 0, "end": 0}
+
+
+def _notify_entry(label, type_):
+    return next(e for e in read_control()["notify_data"] if e["label"] == label and e["type"] == type_)
+
+
+def test_a_notify_target_set_back_to_the_cycles_opening_value_still_lands(seeded):
+    """Residual 2 for notify_data -- and the plan's own example of it was wrong.
+
+    A restore is only invisible when it restores the value THIS CYCLE began
+    with. Setting a target to 203, draining, then setting it to 0 alongside a
+    concurrent writer already worked: 0 differs from that drain's ancestor, so
+    merge_notify_data applied it. The case that did NOT work is both writes in
+    ONE cycle -- the second field equals the ancestor exactly, so it carried no
+    evidence its writer touched anything and the FIRST write won.
+    """
+    opening = _notify_entry("Grill", "probe")["target"]
+    assert _cmd("notify", "Grill", "target", "203")["result"] == "OK"
+    assert _cmd("notify", "Grill", "target", str(opening))["result"] == "OK"
+    dsa.execute_control_writes()
+    assert _notify_entry("Grill", "probe")["target"] == opening
+
+
+def test_a_notify_write_is_not_reverted_by_a_concurrent_whole_dict_writer(seeded):
+    """The other half: a notify op and an unrelated command sharing one cycle."""
+    assert _cmd("notify", "Grill", "target", "203")["result"] == "OK"
+    assert _cmd("splus", "true")["result"] == "OK"
+    dsa.execute_control_writes()
+    assert _notify_entry("Grill", "probe")["target"] == 203
+    assert read_control()["s_plus"] is True

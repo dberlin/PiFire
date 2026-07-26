@@ -109,8 +109,11 @@ def _cmd_get_hopper(data, control, settings, arglist, origin, kind):
     worker hostage for 3 seconds per call. The flag is still raised, so a fresh
     sample is requested for the next refresh and for whoever reads next.
     """
-    control["hopper_check"] = True
-    write_control(control, kind, origin=origin)
+    # A one-shot request flag. Under the old whole-dict write it was one of the
+    # two flags (with settings_update) that a concurrent writer's stale snapshot
+    # could revert to False before the control loop ever saw it -- i.e. the user
+    # action simply never happened. Named, it cannot be.
+    write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin=origin)
     pelletdb = read_pellet_db()
     data["data"]["hopper"] = pelletdb["current"]["hopper_level"]
 
@@ -464,25 +467,38 @@ def _cmd_set_notify(data, control, settings, arglist, origin, kind):
             data["result"] = "ERROR"
             data["message"] = f"Notify object label {arglist[1]} was not found."
         else:
-            # print(f'{object["label"]} FOUND')
+            # Only the field this command actually set travels. `fields` stays
+            # empty on the two ERROR branches below, which still queue a write
+            # (an empty envelope) rather than none: preserving the "one command,
+            # one queued write" observable the golden records, while saying
+            # honestly that nothing was changed. The old code queued the whole
+            # control dict there, which could revert a concurrent writer.
+            fields = {}
             if arglist[2] in ["req", "shutdown", "keep_warm", "reignite"]:
-                if arglist[3] == "true":
-                    control["notify_data"][index][arglist[2]] = True
-                else:
-                    control["notify_data"][index][arglist[2]] = False
+                fields[arglist[2]] = arglist[3] == "true"
             elif arglist[2] == "target" and arglist[1] not in ["Timer", "Hopper"]:
                 if is_float(arglist[3]):
                     if settings["globals"]["units"] == "F":
-                        control["notify_data"][index]["target"] = int(float(arglist[3]))
+                        fields["target"] = int(float(arglist[3]))
                     else:
-                        control["notify_data"][index]["target"] = float(arglist[3])
+                        fields["target"] = float(arglist[3])
                 else:
                     data["result"] = "ERROR"
                     data["message"] = f"Notify object target value invalid or missing."
             else:
                 data["result"] = "ERROR"
                 data["message"] = f"Notify object update failed."
-            write_control(control, WriteKind.MERGE, origin=origin)
+            # The entry is addressed by (label, type) read off the entry the
+            # loop above MATCHED. Not by a type derived from the subcommand:
+            # `notify` matches on label alone, so for the Timer and Hopper
+            # labels the matched entry's type is "timer"/"hopper", not "probe".
+            entry = control["notify_data"][index]
+            ops = (
+                [{"op": "notify.set", "label": entry["label"], "type": entry["type"], "fields": fields}]
+                if fields
+                else None
+            )
+            write_control(control_delta(ops=ops), WriteKind.DELTA, origin=origin)
     else:
         data["result"] = "ERROR"
         data["message"] = f"Notify object label was not specified."
@@ -706,18 +722,21 @@ def _cmd_set_timer(data, control, settings, arglist, origin, kind):
     elif arglist[1] == "stop":
         write_log("Timer stopped.")
         write_control(control_delta(ops=[{"op": "timer.clear"}]), WriteKind.DELTA, origin="app")
-    elif arglist[1] == "shutdown":
-        if arglist[2] == "true":
-            control["notify_data"][index]["shutdown"] = True
-        else:
-            control["notify_data"][index]["shutdown"] = False
-        write_control(control, kind, origin=origin)
-    elif arglist[1] == "keep_warm":
-        if arglist[2] == "true":
-            control["notify_data"][index]["keep_warm"] = True
-        else:
-            control["notify_data"][index]["keep_warm"] = False
-        write_control(control, kind, origin=origin)
+    elif arglist[1] in ("shutdown", "keep_warm"):
+        write_control(
+            control_delta(
+                ops=[
+                    {
+                        "op": "notify.set",
+                        "label": control["notify_data"][index]["label"],
+                        "type": "timer",
+                        "fields": {arglist[1]: arglist[2] == "true"},
+                    }
+                ]
+            ),
+            WriteKind.DELTA,
+            origin=origin,
+        )
     else:
         data["result"] = "ERROR"
         data["message"] = f"Timer command not recognized."
