@@ -50,7 +50,17 @@ def test_a_legacy_whole_dict_write_is_unaffected_by_the_delta_branch(seeded):
     assert read_control()["mode"] == "Startup"
 
 
-def test_a_delta_and_a_legacy_patch_in_one_cycle_both_land_in_push_order(seeded):
+def test_a_delta_and_a_legacy_patch_in_one_cycle_apply_in_push_order(seeded):
+    """The MERGE primitive survives; the three-way merge on top of it does not.
+
+    While both writer styles coexisted, reduce_control_patch kept a legacy
+    patch's stale snapshot from reverting a delta queued ahead of it. That
+    reduction is deleted, so a whole-dict MERGE now applies verbatim and CAN
+    revert an earlier write -- which is exactly why it could only be deleted
+    once every production writer had been converted. That no writer sends one
+    is not an assumption here; it is pinned by
+    test_no_production_writer_still_queues_a_whole_control_dict below.
+    """
     write_control(control_delta(set_values={"primary_setpoint": 225}), WriteKind.DELTA, origin="delta")
     stale = read_control()
     stale["s_plus"] = True
@@ -58,8 +68,10 @@ def test_a_delta_and_a_legacy_patch_in_one_cycle_both_land_in_push_order(seeded)
     assert c.SqliteQueue("queue_control_write").length() == 2
     dsa.execute_control_writes()
     control = read_control()
-    assert control["primary_setpoint"] == 225, "the legacy patch's stale copy must not revert the delta"
     assert control["s_plus"] is True
+    assert control["primary_setpoint"] == stale["primary_setpoint"], (
+        "a raw MERGE applies verbatim now -- no production writer may send one"
+    )
 
 
 def test_a_legacy_patch_queued_first_does_not_stop_a_later_delta(seeded):
@@ -320,3 +332,50 @@ def test_a_background_system_write_does_not_hide_a_restore_to_the_opening_value(
     control = read_control()
     assert _notify_entry("Grill", "probe")["target"] == opening
     assert control["system"]["cpu_temp"] == 42.0
+
+
+def test_no_production_writer_still_queues_a_whole_control_dict():
+    """The reduce is gone. Its safety net was that a stale whole dict could not
+    revert an earlier writer; without a whole-dict writer there is nothing to
+    net, and this is what keeps it that way.
+
+    Checked with ast rather than a text scan: `WriteKind.MERGE` still appears in
+    docstrings, in process_command's default `kind=` argument and in a block of
+    commented-out code in notify/mqtt_handler.py, none of which queue anything.
+    What matters is a CALL to write_control whose kind argument is MERGE.
+    """
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    skip = {"tests", ".jj", ".git", ".venv", "node_modules", "web-react"}
+    allowed = {"common/datastore_accessors.py", "controller/runtime/store.py"}
+
+    def _is_merge(node):
+        return (
+            isinstance(node, ast.Attribute)
+            and node.attr == "MERGE"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "WriteKind"
+        )
+
+    hits = []
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        if rel.split("/")[0] in skip or rel in allowed:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - not expected in this repo
+            continue
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", node.func.__dict__.get("id", None)) in ("write_control",)
+            ):
+                continue
+            args = list(node.args) + [kw.value for kw in node.keywords]
+            if any(_is_merge(a) for a in args):
+                hits.append(f"{rel}:{node.lineno}")
+
+    assert hits == [], f"still queueing whole control dicts: {hits}"

@@ -80,14 +80,14 @@ def test_control_merge_null_handling_parity(store):
         assert st.read_control() == expected
 
 
-def test_notify_data_cross_writer_merge_parity(store):
-    # SqliteStore (json_patch + merge_notify_data) and InMemoryStore
-    # (deep_update + merge_notify_data) must agree that two writers in ONE
-    # cycle, each sending the whole notify_data array built from the same
-    # pre-drain read, both survive. This is the cross-process seam: the web
-    # process queues, the control process drains, and the two stores are
-    # swappable only if they resolve that identically.
+def test_notify_data_cross_writer_delta_parity(store):
+    # SqliteStore and InMemoryStore must agree that two writers in ONE cycle,
+    # each addressing a DIFFERENT notify_data entry with a notify.set op, both
+    # survive. This is the cross-process seam: the web process queues, the
+    # control process drains, and the two stores are swappable only if they
+    # resolve identically.
     from common.common import WriteKind
+    from common.control_delta import control_delta
     from controller.runtime.store import InMemoryStore
 
     base = [
@@ -95,41 +95,34 @@ def test_notify_data_cross_writer_merge_parity(store):
         {"label": "Grill", "type": "probe_limit_high", "req": False, "target": 0},
         {"label": "Timer", "type": "timer", "req": False, "shutdown": False},
     ]
-
-    def _writer(mutate):
-        """A whole-array write built from the caller's stale (pre-drain) read."""
-        stale = [dict(entry) for entry in base]
-        mutate(stale)
-        return {"notify_data": stale}
-
-    def _arm_probe(array):
-        array[0].update(req=True, target=203)
-
-    def _arm_timer(array):
-        array[2].update(req=True, shutdown=True)
-
     expected = [
         {"label": "Grill", "type": "probe", "req": True, "target": 203},
         {"label": "Grill", "type": "probe_limit_high", "req": False, "target": 0},
         {"label": "Timer", "type": "timer", "req": True, "shutdown": True},
     ]
 
-    mem = InMemoryStore()
-    for st in (store, mem):
+    arm_probe = control_delta(
+        ops=[{"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"req": True, "target": 203}}]
+    )
+    arm_timer = control_delta(
+        ops=[{"op": "notify.set", "label": "Timer", "type": "timer", "fields": {"req": True, "shutdown": True}}]
+    )
+
+    for st in (store, InMemoryStore()):
         st.write_control({"mode": "Stop", "notify_data": [dict(e) for e in base]}, WriteKind.OVERWRITE)
-        st.write_control(_writer(_arm_probe), WriteKind.MERGE, origin="app")
-        st.write_control(_writer(_arm_timer), WriteKind.MERGE, origin="app-socketio")
+        st.write_control(arm_probe, WriteKind.DELTA, origin="app")
+        st.write_control(arm_timer, WriteKind.DELTA, origin="app-socketio")
         st.execute_control_writes()
         assert st.read_control()["notify_data"] == expected
 
 
-def test_whole_dict_cross_writer_merge_parity(store):
-    # Same seam, now for every member of the control dict rather than just the
-    # notify_data array: SqliteStore reduces then json_patches, InMemoryStore
-    # reduces then deep_updates, and they must land on the same state. Both
-    # writers below queue the WHOLE dict from the same pre-drain read, which is
-    # what every production call site does.
+def test_whole_dict_cross_writer_delta_parity(store):
+    # The same seam for every member of the control dict rather than just the
+    # notify_data array. Each writer names ONLY what it changed, so nothing it
+    # never touched can be imposed -- which is what makes the order below
+    # irrelevant and the two backends agree.
     from common.common import WriteKind
+    from common.control_delta import control_delta
     from controller.runtime.store import InMemoryStore
 
     base = {
@@ -141,16 +134,6 @@ def test_whole_dict_cross_writer_merge_parity(store):
         "manual": {"change": False, "output": False, "pwm": 100},
         "timer": {"start": 0, "paused": 0, "end": 0},
     }
-
-    def _writer(**changes):
-        stale = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
-        for key, value in changes.items():
-            if isinstance(value, dict):
-                stale[key].update(value)
-            else:
-                stale[key] = value
-        return stale
-
     expected = {
         "mode": "Hold",
         "updated": True,
@@ -161,14 +144,20 @@ def test_whole_dict_cross_writer_merge_parity(store):
         "timer": {"start": 500.0, "paused": 0, "end": 1100.0},
     }
 
-    mem = InMemoryStore()
-    for st in (store, mem):
-        st.write_control({k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}, WriteKind.OVERWRITE)
-        st.write_control(_writer(mode="Hold", primary_setpoint=225, updated=True), WriteKind.MERGE, origin="app")
-        st.write_control(_writer(s_plus=True), WriteKind.MERGE, origin="app-socketio")
-        st.write_control(_writer(settings_update=True), WriteKind.MERGE, origin="app")
-        st.write_control(_writer(manual={"change": "fan", "output": True}), WriteKind.MERGE, origin="app")
-        st.write_control(_writer(timer={"start": 500.0, "end": 1100.0}), WriteKind.MERGE, origin="display")
+    writes = [
+        control_delta(set_values={"mode": "Hold", "primary_setpoint": 225, "updated": True}),
+        control_delta(set_values={"s_plus": True}),
+        control_delta(set_values={"settings_update": True}),
+        control_delta(set_values={"manual": {"change": "fan", "output": True}}),
+        # `timer` may not travel under `set` -- it is a coupled value object, so
+        # it is expressed as an op the drain evaluates against live state.
+        control_delta(ops=[{"op": "timer.start_or_resume", "at": 500.0, "seconds": 600}]),
+    ]
+
+    for st in (store, InMemoryStore()):
+        st.write_control(copy.deepcopy(base), WriteKind.OVERWRITE)
+        for envelope in writes:
+            st.write_control(envelope, WriteKind.DELTA, origin="parity")
         st.execute_control_writes()
         assert st.read_control() == expected
 

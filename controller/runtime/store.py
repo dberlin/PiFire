@@ -10,8 +10,6 @@ from common.common import (
     WriteKind,
     deep_update,
     generate_uuid,
-    merge_notify_data,
-    reduce_control_patch,
     strip_null_members,
 )
 from common.control_delta import apply_control_delta, is_control_delta, validate_control_delta
@@ -169,9 +167,6 @@ class InMemoryStore(Store):
             raise TypeError(f"write_control: kind must be WriteKind, got {kind!r}")
 
     def execute_control_writes(self):
-        # Captured once, before any patch lands: the common ancestor every
-        # writer in this cycle read. Mirrors common.execute_control_writes.
-        base = copy.deepcopy(self._control) if self._write_queue else None
         while self._write_queue:
             partial = self._write_queue.popleft()
             if is_control_delta(partial):
@@ -180,20 +175,9 @@ class InMemoryStore(Store):
                 apply_control_delta(self._control, partial)
                 continue
             partial.pop("origin", None)
-            # Mirror common.execute_control_writes: strip null members so the merge
-            # only adds/overwrites keys (json_patch parity), never deletes...
+            # Mirror common.execute_control_writes: strip null members so the
+            # merge only adds/overwrites keys (json_patch parity), never deletes.
             partial = strip_null_members(partial)
-            # ...then drop everything this writer did not actually change, so a
-            # stale whole-dict write cannot revert an earlier writer in the same
-            # cycle. deep_update replaces lists wholesale exactly as json_patch
-            # does, so notify_data additionally needs the element-wise merge.
-            partial = reduce_control_patch(partial, base)
-            if "notify_data" in partial:
-                partial["notify_data"] = merge_notify_data(
-                    base.get("notify_data"),
-                    self._control.get("notify_data"),
-                    partial["notify_data"],
-                )
             self._control = deep_update(self._control, partial)
 
     def read_settings(self):

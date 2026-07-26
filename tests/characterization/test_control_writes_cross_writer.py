@@ -2,51 +2,49 @@
 
 The seam
 --------
-Web-process control writes are queued as MERGE partials
-(``write_control(control, WriteKind.MERGE)``) and applied by the control loop
-in ``common/datastore_accessors.py::execute_control_writes``. Per RFC 7396,
-SQLite's ``json_patch`` **replaces arrays wholesale**, and
-``control["notify_data"]`` is an array.
+A control write does not land when it is made. It is queued
+(``common/datastore_accessors.py::write_control``) and applied by the control
+loop in ``execute_control_writes``. ``read_control()`` serves the persisted
+``control:general`` blob and never the pending queue, so two writers inside one
+control cycle both read pre-write state.
 
-Every writer therefore has to send the whole array back. Its copy comes from
-``read_control()``, which reads the ``control:general`` blob -- a blob that does
-NOT reflect the pending write queue, because the queue only drains inside the
-control loop. So two writers in one control cycle each build a full array from
-the same stale read, and whichever lands second silently discards the first's
-change.
+That used to mean the last one won. Every writer queued the WHOLE control dict
+it had read, so each carried a stale copy of every field it never touched, and
+whichever landed second silently reverted the others. ``control["notify_data"]``
+was the loudest instance -- it is an array, and json_patch replaces arrays
+wholesale (RFC 7396), so a writer touching one probe's target shipped every
+other probe's settings back with it -- but the same loss applied to every scalar
+flag and every nested object.
 
-This is the same shape as ``tests/web/test_warnings_cross_consumer.py``: two
-real callers, driven through the real code path, where one eats the other's
-data. Nothing here is a hand-rolled reproduction -- the writers are production
-entry points:
+The fix is not a smarter merge, it is a better payload. Every writer now queues
+a DELTA (``common/control_delta.py``): a statement of what it MEANT, not the
+snapshot it read. A member it does not name is silence, so there is nothing
+stale to impose and nothing for the drain to infer. Members that cannot be
+expressed as a value at all -- the coupled ``timer`` object, and addressing
+inside the ``notify_data`` array -- travel as named OPS which the drain
+evaluates against LIVE state, so two writers touching the same one compose in
+order instead of racing.
 
-* ``common/api_commands.py::process_command`` (``/api/set/...``), which reads
-  control, mutates one ``notify_data`` entry and queues the whole dict;
+The writers driven below are production entry points, not hand-rolled
+reproductions:
+
+* ``common/api_commands.py::process_command`` (``/api/set/...``);
 * ``blueprints/api/routes.py::_api_post_control`` (``POST /api/control``), the
-  door the React dashboard's ``saveTargetEdit`` posts a whole ``notify_data``
-  array through -- the case that provably cannot be fixed client-side, because
-  a server-side command's own ``read_control()`` is equally stale;
-* ``common/system.py::gather_system_info``, a *background* writer that touches
-  no notification at all yet still ships a stale full ``notify_data`` alongside
-  its ``control["system"]`` update.
+  door the React dashboard's ``saveTargetEdit`` posts through;
+* ``common/system.py::gather_system_info``, a background writer that touches no
+  notification at all.
 
-``notify_data`` is only the loudest instance. Because nearly every call site
-queues the WHOLE control dict it read, the same loss applies to every scalar
-flag and every nested object in the dict -- see the second half of this file.
-
-The fix is a three-way merge of the whole control dict inside the drain, using
-the pre-drain blob as the common ancestor: the blob only changes when the
-control loop drains or overwrites it, so it is exactly what every writer in
-this cycle read. Members whose incoming value already equals that ancestor were
-not touched by this writer and are dropped from the patch
-(``common.common.reduce_control_patch``); ``notify_data`` additionally needs an
-element-wise merge keyed on ``(label, type)``, because arrays travel whole
-(``common.common.merge_notify_data``).
+One case is NOT closed, and is called out where it is pinned: a client that
+posts a whole ``notify_data`` array has not said which fields it meant to
+change, so that door has replace semantics. See
+test_post_api_control_whole_array_is_a_replace_and_says_so.
 """
 
 from unittest import mock
 
 import pytest
+
+from common.control_delta import control_delta
 
 from common import api_commands
 from common import common as c
@@ -150,31 +148,78 @@ def test_limit_writers_do_not_eat_each_other(seeded):
 # ---------------------------------------------------------------------------
 
 
-def test_post_api_control_full_array_does_not_eat_a_concurrent_command(seeded):
+def test_post_api_control_whole_array_is_a_replace_and_says_so(seeded):
     """`saveTargetEdit`'s whole-array POST + a timer arm in the same cycle.
 
-    The client cannot avoid this: it has no way to see the pending queue, and
-    neither does the command handler it races. Only the drain can.
+    BEHAVIOUR CHANGE, and the one regression in the delta conversion. This used
+    to pass: merge_notify_data diffed the posted array against the pre-drain
+    ancestor and applied only the fields that differed, so the concurrent timer
+    arm survived. That three-way merge is gone, and POST /api/control now maps a
+    posted `notify_data` to an explicit notify.replace op -- which does exactly
+    what its name says, including discarding a change queued moments earlier.
+
+    Nothing in the delta representation can recover this. A client that posts a
+    WHOLE array from a read that cannot see the queue has not expressed which
+    fields it MEANT to change; the old merge inferred that from an ancestor,
+    which is precisely the inference this work removes because it is unsound in
+    the other direction (a field restored to its opening value was invisible).
+    The real fix is client-side: post the field, not the array. Until then this
+    door has replace semantics, stated by name rather than emerging from
+    json_patch's array handling.
     """
-    # The client's read -- taken before either write is queued.
     client_view = read_control()
     edited = _entry(client_view, "Probe2", "probe")
     edited["target"] = 145
     edited["req"] = True
 
-    # Server-side command arms the timer from its own (equally stale) read.
     assert _start_timer("900", "keep_warm")["result"] == "OK"
 
-    # ...then the client's POST lands, carrying the whole array.
-    write_control({"notify_data": client_view["notify_data"]}, WriteKind.MERGE, origin="app")
+    write_control(
+        control_delta(ops=[{"op": "notify.replace", "entries": client_view["notify_data"]}]),
+        WriteKind.DELTA,
+        origin="app",
+    )
 
     dsa.execute_control_writes()
 
     control = read_control()
     assert _entry(control, "Probe2", "probe")["target"] == 145
     assert _entry(control, "Probe2", "probe")["req"] is True
+    # The timer's countdown is NOT in notify_data, so the arm itself survives...
+    assert control["timer"]["end"] > 0
+    # ...but its expiry flag, which lives in the replaced array, does not.
+    assert _entry(control, "Timer", "timer")["keep_warm"] is False
+
+
+def test_post_api_control_per_entry_edit_does_not_eat_a_concurrent_command(seeded):
+    """...and the shape that DOES compose, which is what a client should send.
+
+    One notify.set naming the two fields the user edited. The concurrent timer
+    arm survives, because nothing in this write mentions the timer entry.
+    """
+    assert _start_timer("900", "keep_warm")["result"] == "OK"
+
+    write_control(
+        control_delta(
+            ops=[
+                {
+                    "op": "notify.set",
+                    "label": "Probe2",
+                    "type": "probe",
+                    "fields": {"target": 145, "req": True},
+                }
+            ]
+        ),
+        WriteKind.DELTA,
+        origin="app",
+    )
+
+    dsa.execute_control_writes()
+
+    control = read_control()
+    assert _entry(control, "Probe2", "probe")["target"] == 145
     timer = _entry(control, "Timer", "timer")
-    assert timer["keep_warm"] is True, "the client's whole-array POST reverted the timer arm"
+    assert timer["keep_warm"] is True
     assert timer["req"] is True
 
 
@@ -188,9 +233,14 @@ def test_background_full_control_write_does_not_eat_a_notify_write(seeded):
     """
     assert _set_notify("Probe3", "target", "180")["result"] == "OK"
 
-    stale = read_control()  # gather_system_info's read: pre-queue, hence stale
-    stale["system"] = {"cpu_temp": 42.0}
-    write_control(stale, WriteKind.MERGE, origin="app-socketio")
+    # gather_system_info's shape: it names only the slice it assigns, so it has
+    # nothing stale to impose. It used to queue the whole dict from a pre-queue
+    # read and revert whatever the user had just armed.
+    write_control(
+        control_delta(set_values={"system": {"cpu_temp": 42.0}}),
+        WriteKind.DELTA,
+        origin="app-socketio",
+    )
 
     dsa.execute_control_writes()
 
@@ -370,9 +420,11 @@ def test_background_system_info_write_does_not_eat_a_scalar_command(seeded):
     """
     assert _command("psp", "225")["result"] == "OK"
 
-    stale = read_control()  # the background tick's own pre-queue read
-    stale["system"] = {"cpu_temp": 42.0, "cpu_throttled": False}
-    write_control(stale, WriteKind.MERGE, origin="app-socketio")
+    write_control(
+        control_delta(set_values={"system": {"cpu_temp": 42.0, "cpu_throttled": False}}),
+        WriteKind.DELTA,
+        origin="app-socketio",
+    )
 
     dsa.execute_control_writes()
 
