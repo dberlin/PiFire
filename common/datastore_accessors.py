@@ -26,7 +26,7 @@ from common.common import (
     reduce_control_patch,
     strip_null_members,
 )
-from common.control_delta import validate_control_delta
+from common.control_delta import apply_control_delta, is_control_delta, validate_control_delta
 from common.defaults import (
     METRIC_COLUMNS,
     default_control,
@@ -122,6 +122,13 @@ def execute_control_writes():
     against the ancestor, keyed on (label, type)
     (:func:`common.common.merge_notify_data`).
 
+    A queued payload carrying ``__control_delta__`` is a DELTA envelope
+    (common/control_delta.py): the writer stated what it meant, so it is applied
+    directly and never reduced. Everything else is a legacy whole-dict partial and
+    takes the three-way-merge path below, unchanged, for as long as any writer
+    still sends one. ``base`` stays the pre-drain ancestor for those patches even
+    when a delta has landed in between -- it is what THEY read.
+
     :param None
 
     :return status : 'OK', 'ERROR'
@@ -140,6 +147,16 @@ def execute_control_writes():
         command = q.pop()
         if command is None:
             break
+        if is_control_delta(command):
+            # A delta states intent, so nothing is inferred and nothing is reduced.
+            # Ops branch on LIVE state, so this is a read-modify-write rather than
+            # a json_patch: read what earlier patches in this batch already left.
+            # `origin` is deliberately NOT popped first -- apply_control_delta
+            # ignores it, and names it in the unsupported-version error.
+            control = read_control()
+            apply_control_delta(control, command)
+            _write_json_blob("control:general", control)
+            continue
         origin = command.pop("origin", None)
         stripped = []
         patch = strip_null_members(command, stripped)

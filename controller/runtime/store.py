@@ -14,6 +14,7 @@ from common.common import (
     reduce_control_patch,
     strip_null_members,
 )
+from common.control_delta import apply_control_delta, is_control_delta, validate_control_delta
 from common.defaults import METRIC_COLUMNS, default_control, default_metrics
 
 
@@ -157,6 +158,13 @@ class InMemoryStore(Store):
             self._control = copy.deepcopy(control)
         elif kind is WriteKind.MERGE:
             self._write_queue.append(copy.deepcopy(control))
+        elif kind is WriteKind.DELTA:
+            # Mirror common.datastore_accessors.write_control: validate in the
+            # writing process, then queue a copy stamped with origin.
+            validate_control_delta(control)
+            payload = copy.deepcopy(dict(control))
+            payload["origin"] = origin
+            self._write_queue.append(payload)
         else:
             raise TypeError(f"write_control: kind must be WriteKind, got {kind!r}")
 
@@ -166,6 +174,11 @@ class InMemoryStore(Store):
         base = copy.deepcopy(self._control) if self._write_queue else None
         while self._write_queue:
             partial = self._write_queue.popleft()
+            if is_control_delta(partial):
+                # A delta states intent: applied directly against live state,
+                # never reduced. Mirrors common.execute_control_writes.
+                apply_control_delta(self._control, partial)
+                continue
             partial.pop("origin", None)
             # Mirror common.execute_control_writes: strip null members so the merge
             # only adds/overwrites keys (json_patch parity), never deletes...

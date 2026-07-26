@@ -1,3 +1,5 @@
+import copy
+
 import pytest
 
 
@@ -209,3 +211,45 @@ def test_update_metrics_partial_dict_parity(store):
         assert st.read_metrics()["pellet_brand_type"] is None
         assert st.read_metrics()["mode"] == "Hold"  # still untouched
         assert len(st.read_all_metrics()) == 1  # amended, never appended
+
+
+def test_delta_envelope_parity_between_sqlite_and_in_memory(store):
+    """The web process queues, the control process drains. Pin both ends.
+
+    SqliteStore applies a delta in Python and rewrites the blob; InMemoryStore
+    applies the same envelope to its dict. A drift between them is a
+    cross-process bug that would only show on real hardware.
+    """
+    from common.common import WriteKind
+    from common.control_delta import control_delta
+    from controller.runtime.store import InMemoryStore
+
+    base = {
+        "mode": "Stop",
+        "primary_setpoint": 0,
+        "timer": {"start": 1000.0, "paused": 0, "end": 2000.0},
+        "notify_data": [
+            {"label": "Grill", "type": "probe", "req": False, "target": 0},
+            {"label": "Timer", "type": "timer", "req": True, "shutdown": True, "keep_warm": False},
+        ],
+    }
+    envelope = control_delta(
+        set_values={"mode": "Hold", "primary_setpoint": 225},
+        ops=[
+            {"op": "timer.clear"},
+            {"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"target": 203}},
+        ],
+    )
+
+    results = []
+    for st in (store, InMemoryStore()):
+        st.write_control(copy.deepcopy(base), WriteKind.OVERWRITE)
+        st.write_control(envelope, WriteKind.DELTA, origin="parity")
+        st.execute_control_writes()
+        results.append(st.read_control())
+
+    assert results[0] == results[1]
+    assert results[0]["mode"] == "Hold"
+    assert results[0]["timer"] == {"start": 0, "paused": 0, "end": 0}
+    assert results[0]["notify_data"][0]["target"] == 203
+    assert "origin" not in results[0]
