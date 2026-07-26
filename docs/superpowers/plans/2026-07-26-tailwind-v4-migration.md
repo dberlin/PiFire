@@ -41,10 +41,10 @@ The spec's numbers are stale: the wizard-styling, dashboard-reflow and pellets-p
 | `web-react/src/components/wizard/wizard.css` | 624 | **628** |
 | `web-react/src/components/settings/settings.css` | 344 | **344** |
 | `web-react/src/components/shell/shell.css` | 315 | **315** |
-| `web-react/src/theme.css` | 110 | **110** |
+| `web-react/src/theme.css` | 110 | **158** (was 110 before the 2026-07-26 palette reconciliation) |
 | `web-react/src/components/history/historyChart.css` | 61 | **61** |
 | `web-react/src/components/pellets/pellets.css` | *(not in the spec)* | **137** |
-| **Total** | **2,603 over 6 files** | **2,783 over 7 files** |
+| **Total** | **2,603 over 6 files** | **2,831 over 7 files** |
 
 Re-measure before starting; if these have moved again, use your own numbers and say so.
 
@@ -59,7 +59,12 @@ cd /home/dannyb/sources/PiFire/web-react && find src -name '*.css' | sort | xarg
 3. **"settings-`<tab>` … 12 tabs" is wrong.** `SettingsShell.tsx`'s `SETTINGS_TABS` has **11**: general, work-mode, controller, pwm, startup, safety, pellets, history, notifications, units, platform. (The `pwm` pill is hidden on an AC-fan build but the route stays registered, so the baseline still covers it.)
 4. **"wizard-`<step>` … 7 steps" is wrong.** `WizardShell.tsx`'s `STEPS` has **6**: welcome, grillplatform, probes, display, distance, finish.
 5. **"Implementation is blocked until the wizard-styling and dashboard-reflow slices merge" no longer holds.** Both merged (`a4821358`…`60d6597d`), and a third slice (the pellets page) merged on top. The tree is unblocked; the baseline captured by Task 4 is the reference the spec's step 2 asks for.
-6. **"ported verbatim from `display/qml/Theme.qml`" is no longer true for one token.** `theme.css` has `--text-dim: #a89a86`; `display/qml/Theme.qml:15` has `dim: "#8a7f70"`. They have already drifted. **Do not "fix" this** — it would change the web UI's appearance and fail the gate. Task 8 writes a test that records the drift so nobody reconciles it by accident. The other seven do match: page `#0c0a09`, card `#2c231a`, inset `#1c1712`, text `#f4ede2`, ember `#ff8a2b`, ice `#3cc7d0`, crimson `#ff6a5a`.
+6. **The palette was reconciled with `display/qml/Theme.qml` on 2026-07-26, and Theme.qml is the source of truth.** This item previously said `--text-dim: #a89a86` had drifted from Qt's `dim: "#8a7f70"`, forbade fixing it, and asked Task 8 for a test that RECORDED the divergence. **That is overruled and no longer describes the tree.** A separate change (commits `refactor(web-react): route Qt-matching colour literals through theme tokens`, `fix(web-react): reconcile the palette with display/qml/Theme.qml`, `test(web-react): guard the palette against drifting from Theme.qml`) landed BEFORE this migration starts and:
+    - corrected `--text-dim` to `#8a7f70`, `--glow` to Qt's opaque `glowColor`, and `--accent-1`/`--accent-2` to Qt's `arcStop2`/`arcStop0`, and added `--accent-mid` (Qt's `arcStop1`);
+    - added the rest of the Qt palette as tokens: `--card-border`, `--label`, `--probe-label`, `--setpoint`, `--ok`, `--warn`, `--danger`, `--track`, `--cooking`, `--igniter`, `--icon-idle`, `--dot-idle`, `--row-label`, and the fixed `--accent-ember`/`--accent-ice`/`--accent-crimson` constants;
+    - created `web-react/src/themeTokens.test.ts`, which PARSES `Theme.qml` and fails on any divergence, plus on any raw literal in `src/` that equals a Qt token value.
+
+    Consequences for this plan: **`theme.css` is bigger than the 31 lines Task 8 assumes** (re-measure before editing it), **`themeTokens.test.ts` already exists** so Task 8 EXTENDS it rather than creating it, and **Task 4's baseline must be captured from a tree that already contains these three commits** — capturing before them pins colours the human has already ruled wrong. The values quoted throughout Task 8 have been updated in place; re-read them, do not trust memory of this file.
 7. **"~257 class sites" is low.** Live: **650** `pf-*` token occurrences across `.tsx` files, and **238 distinct** `pf-*` classes declared across the seven stylesheets. This does not change the approach (JSX is untouched either way) but it does change how badly a full utility rewrite would have gone.
 8. **"A test asserts that every `pf-*` class used in JSX is declared in CSS" overstates what exists.** That guard lives only in `src/components/wizard/wizardStyles.test.ts` and only walks `src/components/wizard/`. There is **no repo-wide guard**. Task 6 builds one.
 9. **The guard as written cannot survive `@apply` — measured.** `declaredClasses()` counts a rule only when its body `.includes(":")`. An `@apply`-only body (`.pf-card { @apply bg-card rounded-card; }`) contains no colon, so **every rule converted in Tasks 9–14 would silently stop counting as declared** and the guard would go green while proving nothing. Task 6 fixes this before the first conversion, with a mutation test.
@@ -78,7 +83,7 @@ cd /home/dannyb/sources/PiFire/web-react && find src -name '*.css' | sort | xarg
 
 ## The gate, and why the first task is not a Tailwind task
 
-**Tasks 1–6 add no Tailwind dependency at all.** They pin the current appearance. Task 4 captures the reference baseline from the pre-migration tree; **once Tailwind is installed in Task 7 the reference can never be captured again**, because there would be nothing left to capture it from. Capturing after a Tailwind change, or re-capturing to make a red gate green, makes the whole exercise worthless — it rewrites the gate into agreement with whatever it was supposed to be catching. Capture is therefore behind an explicit `PF_CAPTURE=1` flag on a separate `bun run baseline:capture` script and is never automatic.
+**Tasks 1–6 add no Tailwind dependency at all.** They pin the current appearance. **Precondition:** the palette reconciliation described in Corrections item 6 must already be in the tree. It is a deliberate, authorised visual change, and a baseline captured before it would pin colours that have been ruled wrong. Task 4 captures the reference baseline from the pre-migration tree; **once Tailwind is installed in Task 7 the reference can never be captured again**, because there would be nothing left to capture it from. Capturing after a Tailwind change, or re-capturing to make a red gate green, makes the whole exercise worthless — it rewrites the gate into agreement with whatever it was supposed to be catching. Capture is therefore behind an explicit `PF_CAPTURE=1` flag on a separate `bun run baseline:capture` script and is never automatic.
 
 **How the existing harness works, and what is kept.** `tests/e2e/layoutBaseline.ts` measures every `[data-pf]` element on the dashboard, converts screen pixels back into the authored 1280-wide coordinate space by dividing by the live stage scale, and records `{x, y, w, h, fontSize, fontWeight}`. `compareToBaseline` allows `BOX_TOL = 2`px on x/y/w/h — "2px at 1280 wide is 0.16% of the layout, below the threshold at which flipping two screenshots shows movement" — except for the seven entries in the `EXACT` table (`stage`, `header`, `probeCol`, `rightCol`, `controls`, `cookRow`, `pills`), which are literals in the source and get `EXACT_TOL = 0.5`. `fontSize` and `fontWeight` must match exactly. All of that is **kept verbatim**; Task 2 generalises around it rather than replacing it.
 
@@ -1059,6 +1064,8 @@ jj commit -m 'test(web-react): committed API fixtures and the fidelity page cata
 ---
 
 ## Task 4: Capture the reference baseline — THE point of no return
+
+**Before capturing:** confirm `git log`/`jj log` shows the 2026-07-26 palette reconciliation (Corrections item 6) as an ancestor. `web-react/src/theme.css` must read `--text-dim: #8a7f70` and `--glow: #ff7a1a`. If it does not, stop — you are about to freeze colours that have already been corrected.
 
 **Files:**
 - Create: `web-react/tests/e2e/pages-fidelity.spec.ts`
@@ -2098,16 +2105,16 @@ EOF
 ## Task 8: Move the tokens into `@theme`
 
 **Files:**
-- Modify: `web-react/src/theme.css:1-31`
-- Create: `web-react/src/themeTokens.test.ts`
+- Modify: `web-react/src/theme.css` (the token block — now ~75 lines, not 31; re-measure)
+- Modify: `web-react/src/themeTokens.test.ts` (already exists — the Theme.qml guard)
 
 **Interfaces:**
 - Consumes: Tailwind's `@theme` from Task 7.
 - Produces the Tailwind token namespace every later `@apply` uses:
-  - colours `--color-page`, `--color-card`, `--color-inset`, `--color-text`, `--color-text-dim`, `--color-accent`, `--color-accent-1`, `--color-accent-2`, `--color-glow` → utilities `bg-page`, `text-text-dim`, `border-accent`, …
+  - colours `--color-page`, `--color-card`, `--color-inset`, `--color-card-border`, `--color-text`, `--color-text-dim`, `--color-label`, `--color-probe-label`, `--color-setpoint`, `--color-ok`, `--color-warn`, `--color-danger`, `--color-track`, `--color-cooking`, `--color-igniter`, `--color-icon-idle`, `--color-dot-idle`, `--color-row-label`, `--color-accent`, `--color-accent-mid`, `--color-accent-1`, `--color-accent-2`, `--color-accent-ember`, `--color-accent-ice`, `--color-accent-crimson`, `--color-glow` → utilities `bg-page`, `text-text-dim`, `border-accent`, … (the full list is whatever `theme.css` declares — read it, this plan predates several of these)
   - radii `--radius-card`, `--radius-pill` → `rounded-card`, `rounded-pill`
   - easing `--ease-out-cubic` → `ease-out-cubic`
-  - The legacy names `--page`, `--card`, `--inset`, `--text`, `--text-dim`, `--card-radius`, `--pill-radius`, `--accent`, `--accent-1`, `--accent-2`, `--glow`, `--anim-ms`, `--ease-out-cubic` all keep resolving, so the ~180 `var(--…)` uses in the six stylesheets are untouched by this task.
+  - Every legacy name `theme.css` declares today (`--page`, `--card`, `--inset`, `--card-border`, `--text`, `--text-dim`, `--label`, `--probe-label`, `--setpoint`, `--ok`, `--warn`, `--danger`, `--track`, `--cooking`, `--igniter`, `--icon-idle`, `--dot-idle`, `--row-label`, `--card-radius`, `--pill-radius`, `--accent`, `--accent-mid`, `--accent-1`, `--accent-2`, `--accent-ember`, `--accent-ice`, `--accent-crimson`, `--glow`, `--anim-ms`, `--ease-out-cubic`) keeps resolving, so the `var(--…)` uses across the seven stylesheets are untouched by this task. The reconciliation raised that count well above the ~180 the spec measured; re-count rather than quoting it.
 
 **How the accent switcher survives, and why the aliases point the way they do.** `@theme` emits its variables inside `@layer theme`. Unlayered author declarations beat every layered one regardless of specificity. So an unlayered `:root[data-accent="ice"] { --color-accent: #3cc7d0 }` overrides `@theme`'s ember value, and an unlayered `:root { --accent: var(--color-accent) }` then resolves to whatever won. Every existing `var(--accent)` in every stylesheet, and every Tailwind `bg-accent` utility (which compiles to `background-color: var(--color-accent)`), pick up the same value. Aliasing in the other direction — theme reading from legacy — would put a `var()` inside `@theme`, which Tailwind cannot resolve at build time for utilities that need a literal.
 
@@ -2117,7 +2124,7 @@ EOF
 
 - [ ] **Step 1: Write the failing token test**
 
-Create `web-react/src/themeTokens.test.ts`:
+**`web-react/src/themeTokens.test.ts` ALREADY EXISTS** (it is the Theme.qml guard from the 2026-07-26 palette reconciliation). Do not overwrite it — its Theme.qml parser and its "no hardcoded Qt value outside theme.css" scan are the drift guard this migration relies on. Add the describes below ALONGSIDE what is there, and update its `MAPPING` so each CSS token resolves through its new `--color-*` name:
 
 ```ts
 import { readFileSync } from "node:fs";
@@ -2146,11 +2153,12 @@ describe("theme.css tokens", () => {
     "--color-card": "#2c231a",
     "--color-inset": "#1c1712",
     "--color-text": "#f4ede2",
-    "--color-text-dim": "#a89a86",
+    "--color-text-dim": "#8a7f70",
     "--color-accent": "#ff8a2b",
-    "--color-accent-1": "#ffd08a",
-    "--color-accent-2": "#ff5a1f",
-    "--color-glow": "rgba(255, 138, 43, 0.45)",
+    "--color-accent-mid": "#ff8a2b",
+    "--color-accent-1": "#ffc24b",
+    "--color-accent-2": "#ff5e1a",
+    "--color-glow": "#ff7a1a",
     "--radius-card": "18px",
     "--radius-pill": "999px",
     "--ease-out-cubic": "cubic-bezier(0.33, 1, 0.68, 1)",
@@ -2172,6 +2180,7 @@ describe("theme.css tokens", () => {
       ["--card-radius", "--radius-card"],
       ["--pill-radius", "--radius-pill"],
       ["--accent", "--color-accent"],
+      ["--accent-mid", "--color-accent-mid"],
       ["--accent-1", "--color-accent-1"],
       ["--accent-2", "--color-accent-2"],
       ["--glow", "--color-glow"],
@@ -2189,8 +2198,8 @@ describe("theme.css tokens", () => {
     // The switcher works by attribute on :root. These rules are unlayered, so
     // they beat @theme's layered value; the --accent alias then follows.
     for (const [attr, accent, a1, a2, glow] of [
-      ["ice", "#3cc7d0", "#a8ecf0", "#1f8fa0", "rgba(60, 199, 208, 0.45)"],
-      ["crimson", "#ff6a5a", "#ffb0a6", "#d83a2f", "rgba(255, 106, 90, 0.45)"],
+      ["ice", "#3cc7d0", "#7ef0d2", "#1f9fb8", "#2ec5d3"],
+      ["crimson", "#ff6a5a", "#ff9f43", "#e11d48", "#ff5a4d"],
     ]) {
       const at = css.indexOf(`:root[data-accent="${attr}"]`);
       expect(at, `no rule for the ${attr} accent`).toBeGreaterThan(-1);
@@ -2220,18 +2229,17 @@ describe("parity with display/qml/Theme.qml", () => {
     expect(qml).toContain('"#ff6a5a"');
   });
 
-  // DELIBERATE, RECORDED DRIFT -- do not "fix" it.
+  // RESOLVED 2026-07-26. Theme.qml is the source of truth and theme.css was
+  // corrected to match it: --text-dim is #8a7f70, Qt's dim. The old assertion
+  // here RECORDED the divergence and told nobody to fix it; that ruling was
+  // reversed before this migration began.
   //
-  // The design spec says theme.css was "ported verbatim" from Theme.qml. That
-  // stopped being true for one token: Theme.qml:15 has dim: "#8a7f70" and
-  // theme.css has --text-dim: #a89a86. Reconciling them would change the web
-  // UI's appearance and fail the fidelity gate, and reconciling the other way
-  // would change the on-device UI. Either is a design decision on its own.
-  //
-  // This test exists so the divergence is a fact the suite knows, not a
-  // surprise someone discovers while doing something else.
-  it("records that --text-dim has already diverged from Qt's dim", () => {
-    expect(css).toContain("--color-text-dim: #a89a86;");
+  // The live themeTokens.test.ts already parses Theme.qml and compares the
+  // whole palette per accent, so this describe does not restate values. Keep
+  // that file's checks working under the --color-* rename instead: its MAPPING
+  // is CSS-token -> Qt-property, so each entry gains the themed name.
+  it("keeps --text-dim equal to Qt's dim", () => {
+    expect(css).toContain("--color-text-dim: #8a7f70;");
     expect(qml).toContain('dim:');
     expect(qml).toContain('"#8a7f70"');
   });
@@ -2262,8 +2270,8 @@ Replace `web-react/src/theme.css` lines 1-31 (everything from the opening commen
 
 /* Design tokens. Values are shared with the Qt UI (display/qml/Theme.qml) and
  * are NOT ours to change -- a drift here alters the on-device dashboard by
- * implication. One token has already diverged (--color-text-dim vs Qt's
- * dim: "#8a7f70"); src/themeTokens.test.ts records that on purpose.
+ * implication. The palette was reconciled with Theme.qml on 2026-07-26 and
+ * src/themeTokens.test.ts parses Theme.qml and fails on any divergence.
  *
  * `static` forces every variable to be emitted. Without it Tailwind
  * tree-shakes theme variables that no generated utility references, and
@@ -2279,13 +2287,19 @@ Replace `web-react/src/theme.css` lines 1-31 (everything from the opening commen
   --color-card: #2c231a;
   --color-inset: #1c1712;
   --color-text: #f4ede2;
-  --color-text-dim: #a89a86;
+  --color-text-dim: #8a7f70;
 
-  /* Ember (default). Overridden per accent below. */
+  /* Ember (default). Overridden per accent below. The full Qt palette
+     (--color-card-border, --color-label, --color-probe-label, --color-setpoint,
+     --color-ok, --color-warn, --color-danger, --color-track, --color-cooking,
+     --color-igniter, --color-icon-idle, --color-dot-idle, --color-row-label and
+     the three fixed --color-accent-ember/-ice/-crimson) belongs here too --
+     re-read the live theme.css, which has them all. */
   --color-accent: #ff8a2b;
-  --color-accent-1: #ffd08a;
-  --color-accent-2: #ff5a1f;
-  --color-glow: rgba(255, 138, 43, 0.45);
+  --color-accent-mid: #ff8a2b;
+  --color-accent-1: #ffc24b;
+  --color-accent-2: #ff5e1a;
+  --color-glow: #ff7a1a;
 
   --radius-card: 18px;
   --radius-pill: 999px;
@@ -2316,6 +2330,7 @@ Replace `web-react/src/theme.css` lines 1-31 (everything from the opening commen
   --card-radius: var(--radius-card);
   --pill-radius: var(--radius-pill);
   --accent: var(--color-accent);
+  --accent-mid: var(--color-accent-mid);
   --accent-1: var(--color-accent-1);
   --accent-2: var(--color-accent-2);
   --glow: var(--color-glow);
@@ -2325,15 +2340,17 @@ Replace `web-react/src/theme.css` lines 1-31 (everything from the opening commen
 }
 :root[data-accent="ice"] {
   --color-accent: #3cc7d0;
-  --color-accent-1: #a8ecf0;
-  --color-accent-2: #1f8fa0;
-  --color-glow: rgba(60, 199, 208, 0.45);
+  --color-accent-mid: #35c7d0;
+  --color-accent-1: #7ef0d2;
+  --color-accent-2: #1f9fb8;
+  --color-glow: #2ec5d3;
 }
 :root[data-accent="crimson"] {
   --color-accent: #ff6a5a;
-  --color-accent-1: #ffb0a6;
-  --color-accent-2: #d83a2f;
-  --color-glow: rgba(255, 106, 90, 0.45);
+  --color-accent-mid: #ff5a4d;
+  --color-accent-1: #ff9f43;
+  --color-accent-2: #e11d48;
+  --color-glow: #ff5a4d;
 }
 ```
 
@@ -2357,7 +2374,7 @@ grep -c -- '--color-glow' dist/static/css/*.css
 grep -c -- '--color-accent-2' dist/static/css/*.css
 ```
 
-Expected: `1` or more for each. **A `0` means `static` was not honoured** — in that case add the ember defaults explicitly to the unlayered `:root` block (`--color-accent: #ff8a2b; --color-accent-1: #ffd08a; --color-accent-2: #ff5a1f; --color-glow: rgba(255, 138, 43, 0.45);`), extend `themeTokens.test.ts` to require them there, and note the duplication in the commit message so the next person knows there are now two places holding these four values.
+Expected: `1` or more for each. **A `0` means `static` was not honoured** — in that case add the ember defaults explicitly to the unlayered `:root` block (`--color-accent: #ff8a2b; --color-accent-mid: #ff8a2b; --color-accent-1: #ffc24b; --color-accent-2: #ff5e1a; --color-glow: #ff7a1a;`), extend `themeTokens.test.ts` to require them there, and note the duplication in the commit message so the next person knows there are now two places holding these five values.
 
 - [ ] **Step 6: Assert every baseline, on the default accent**
 
@@ -2434,9 +2451,9 @@ original names survive as unlayered :root aliases pointing AT the themed ones,
 so the six stylesheets' ~180 var() references and the [data-accent] switcher are
 untouched.
 
-Values are byte-identical, including the one token that had already diverged
-from display/qml/Theme.qml (--text-dim). src/themeTokens.test.ts pins both the
-values and the divergence.
+Values are byte-identical with the reconciled palette (see the 2026-07-26
+Theme.qml reconciliation). src/themeTokens.test.ts, which already parses
+Theme.qml, is extended to cover the new --color-* names.
 
 All 43 fidelity baselines unchanged; all three accents asserted.
 EOF
