@@ -68,11 +68,15 @@ export function PelletsPage() {
 
   return (
     <div className="pf-pellets">
-      {error && (
-        <p className="pf-settings-error-text pf-pellets-error" role="alert">
-          {error}
-        </p>
-      )}
+      {/* Always rendered, empty or not: grid auto-placement would shift every
+          card down a row the moment an action was rejected. */}
+      <div className="pf-pellets-error">
+        {error && (
+          <p className="pf-settings-error-text" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
 
       <CurrentLoadCard
         db={pellets}

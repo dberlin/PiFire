@@ -52,45 +52,47 @@ export function CurrentLoadCard({
   const secondary = tempUnits === "F" ? usage.metric : usage.imperial;
 
   return (
-    <section className="pf-pellets-card" aria-label="Current Load Out">
+    <section className="pf-pellets-card pf-pellets-wide" aria-label="Current Load Out">
       <div className="pf-pellets-card-title">Current Load Out</div>
-      {loaded ? (
-        <div className="pf-pellets-load">
-          <div className="pf-pellets-load-name">{`${loaded.brand} ${loaded.wood}`}</div>
-          <Rating value={loaded.rating} />
-          <div className="pf-pellets-load-date">{db.current.date_loaded}</div>
-          <p className="pf-pellets-load-comments">{loaded.comments}</p>
+      <div className="pf-pellets-scroll">
+        {loaded ? (
+          <div className="pf-pellets-load">
+            <div className="pf-pellets-load-name">{`${loaded.brand} ${loaded.wood}`}</div>
+            <Rating value={loaded.rating} />
+            <div className="pf-pellets-load-date">{db.current.date_loaded}</div>
+            <p className="pf-pellets-load-comments">{loaded.comments}</p>
+          </div>
+        ) : (
+          <div className="pf-pellets-load-name">No profile loaded</div>
+        )}
+
+        <div
+          role="progressbar"
+          aria-label="Hopper level"
+          aria-valuenow={hopperLevel}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className={meterClass(hopperLevel)}
+        >
+          <span style={{ width: `${hopperLevel}%` }} />
         </div>
-      ) : (
-        <div className="pf-pellets-load-name">No profile loaded</div>
-      )}
+        <div className="pf-pellets-level-text">{`${hopperLevel}%`}</div>
 
-      <div
-        role="progressbar"
-        aria-label="Hopper level"
-        aria-valuenow={hopperLevel}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        className={meterClass(hopperLevel)}
-      >
-        <span style={{ width: `${hopperLevel}%` }} />
-      </div>
-      <div className="pf-pellets-level-text">{`${hopperLevel}%`}</div>
-
-      {/* <output>, not a div: aria-label is prohibited on role generic, and
+        {/* <output>, not a div: aria-label is prohibited on role generic, and
           these two readouts each need their own accessible name so a test can
           tell the primary slot from the alternate-units one. <output> is the
           semantic element for the result of a calculation, which is exactly
           what formatUsage() returns. */}
-      <output className="pf-pellets-usage" aria-label="Estimated usage since reload">
-        {primary}
-      </output>
-      <output
-        className="pf-pellets-usage-alt"
-        aria-label="Estimated usage since reload, alternate units"
-      >
-        {secondary}
-      </output>
+        <output className="pf-pellets-usage" aria-label="Estimated usage since reload">
+          {primary}
+        </output>
+        <output
+          className="pf-pellets-usage-alt"
+          aria-label="Estimated usage since reload, alternate units"
+        >
+          {secondary}
+        </output>
+      </div>
 
       <div className="pf-pellets-actions">
         <button className="pf-modal-btn" disabled={busy} onClick={() => setPicking(true)}>

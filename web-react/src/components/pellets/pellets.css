@@ -7,8 +7,14 @@
   box-sizing: border-box;
   padding: 16px;
   display: grid;
-  grid-template-columns: 300px 260px 1fr 1fr;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Row 1 is the error slot (always present, so grid auto-placement does not
+     shift when an error appears). Rows 2 and 3 are BOUNDED -- an `auto` top
+     row sizes to its tallest card, and the 20-entry wood list made it 616px
+     of the 664px available, pushing the bottom row to y=704 on a 720px
+     viewport where it was clipped by the overflow:hidden below. Every card
+     scrolls inside itself instead; measured at 1280x720. */
+  grid-template-rows: auto minmax(0, 300px) minmax(0, 1fr);
   gap: 16px;
   overflow: hidden;
   color: var(--text);
@@ -21,9 +27,13 @@
 .pf-pellets-wide {
   grid-column: span 2;
 }
-/* The page's single error slot spans the whole grid above row 1. */
+/* The page's single error slot, spanning the whole grid above the cards. It
+   is ALWAYS rendered, empty or not: if it appeared only on failure, every
+   card would shift a row the moment an action was rejected. */
 .pf-pellets-error {
   grid-column: 1 / -1;
+}
+.pf-pellets-error > p {
   margin: 0;
 }
 /* .pf-modal-scrim is position:absolute (dashboard.css); without a positioned
@@ -36,6 +46,9 @@
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  /* Bounded by its grid row; anything taller scrolls in .pf-pellets-scroll
+     rather than bleeding past the card. */
+  overflow: hidden;
   padding: 16px;
   border-radius: 18px;
   background: #2c231a;
