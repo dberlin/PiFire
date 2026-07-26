@@ -1,30 +1,62 @@
-/* Design tokens ported verbatim from display/qml/Theme.qml.
+/* Design tokens ported from display/qml/Theme.qml, which is the source of truth
+   for every colour in this app: each token carries the value of the Qt property
+   named in its comment.
+
+   Adding a colour? If Qt has a token for it, add the token here and reference
+   it; do not paste the hex into a stylesheet.
+
    Accent is swappable (Ember/Ice/Crimson) via [data-accent] on :root. */
 :root {
-  --page: #0c0a09;
-  --card: #2c231a;
-  --inset: #1c1712;
-  --text: #f4ede2;
-  --text-dim: #a89a86;
+  /* Base palette — Theme.qml "Base palette" block. */
+  --page: #0c0a09; /* Theme.page */
+  --card: #2c231a; /* Theme.card */
+  --inset: #1c1712; /* Theme.inset */
+  --card-border: rgba(255, 255, 255, 0.13); /* Theme.cardBorder */
+  --text: #f4ede2; /* Theme.textColor */
+  --text-dim: #a89a86; /* Theme.dim */
+  --label: #7d7264; /* Theme.label */
+  --probe-label: #b7ac9c; /* Theme.probeLabel */
+  --setpoint: #6cc8ff; /* Theme.setpoint */
+  --ok: #5ec96f; /* Theme.okColor */
+  --warn: #ffb020; /* Theme.warn */
+  --danger: #ff5a4d; /* Theme.dangerColor */
+  --track: #4a4034; /* Theme.trackColor */
+  --cooking: #ffd23f; /* Theme.cookingColor */
+
+  /* System card — Theme.qml "SystemCard tokens", fixed regardless of accent. */
+  --igniter: #ff7a1a; /* Theme.igniterColor */
+  --icon-idle: #57514a; /* Theme.iconIdle */
+  --dot-idle: #4a443c; /* Theme.dotIdle */
+  --row-label: #cfc6b8; /* Theme.rowLabel */
+
+  /* Sizing — Theme.cardRadius / pillRadius / animMs. */
   --card-radius: 18px;
   --pill-radius: 999px;
   --anim-ms: 250ms;
   --ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
 
-  /* Ember (default) */
-  --accent: #ff8a2b;
+  /* The three accents as constants, so the accent picker can paint all three
+     swatches at once (only --accent tracks the selection). Theme.accentColor's
+     three branches. */
+  --accent-ember: #ff8a2b;
+  --accent-ice: #3cc7d0;
+  --accent-crimson: #ff6a5a;
+
+  /* Ember (default). --accent-2 / --accent-1 are the gauge arc's gradient
+     stops, dark end and light end. */
+  --accent: var(--accent-ember); /* Theme.accentColor */
   --accent-1: #ffd08a;
   --accent-2: #ff5a1f;
   --glow: rgba(255, 138, 43, 0.45);
 }
 :root[data-accent="ice"] {
-  --accent: #3cc7d0;
+  --accent: var(--accent-ice); /* Theme.accentColor */
   --accent-1: #a8ecf0;
   --accent-2: #1f8fa0;
   --glow: rgba(60, 199, 208, 0.45);
 }
 :root[data-accent="crimson"] {
-  --accent: #ff6a5a;
+  --accent: var(--accent-crimson); /* Theme.accentColor */
   --accent-1: #ffb0a6;
   --accent-2: #d83a2f;
   --glow: rgba(255, 106, 90, 0.45);

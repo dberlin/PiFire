@@ -32,12 +32,14 @@ describe("ProbeCard", () => {
     });
     const { container } = render(<ProbeCard p={v.probes[0]} onOpenNotify={rs.fn()} />);
     expect(screen.getByText("→ 203°")).toBeInTheDocument();
-    expect(screen.getByText("→ 203°")).toHaveStyle({ color: "rgb(94, 201, 111)" });
+    // The target text takes its colour from the ok token, so jsdom (which does
+    // not resolve var()) has to be asked for the declaration, not the value.
+    expect(screen.getByText("→ 203°").style.color).toBe("var(--ok)");
     expect(screen.getByText("203")).toBeInTheDocument(); // tempInt rounds 202.5 -> 203
 
     const bar = barVars(container);
     expect(Number.parseFloat(bar.pct)).toBeGreaterThan(90); // (202.5/203)*100 ~= 99.75%
-    expect(bar.color).toBe("#5ec96f"); // done -> green, not the accent
+    expect(bar.color).toBe("var(--ok)"); // done -> green, not the accent
   });
 
   it("renders an untargeted probe as AMBIENT with an empty bar", () => {

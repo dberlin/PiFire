@@ -92,7 +92,7 @@
   display: grid;
   place-items: center;
   overflow: hidden;
-  background: #0c0a09;
+  background: var(--page);
 }
 /* ==========================================================================
    The dashboard root, post-reflow.
@@ -112,7 +112,7 @@
   width: 100%;
   display: flex;
   justify-content: center;
-  background: #0c0a09;
+  background: var(--page);
 }
 .pf-dash {
   width: 100%;
@@ -130,7 +130,7 @@
   overflow: hidden;
   background: radial-gradient(120% 90% at 50% 118%, #241a12 0%, #16110d 42%, #0d0b09 100%);
   font-family: "Barlow", system-ui, sans-serif;
-  color: #f4ede2;
+  color: var(--text);
 }
 /* Animate toggle: kill @keyframes animations, leave transitions intact. */
 .pf-dash[data-animate="false"] * {
@@ -171,11 +171,11 @@
   padding: 0;
 }
 .pf-swatch.sel {
-  border-color: #f4ede2;
+  border-color: var(--text);
 }
 .pf-toggle {
   background: #1d1813;
-  color: #7d7264;
+  color: var(--label);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   font: 700 11px "Barlow";
@@ -197,7 +197,7 @@
   z-index: 10;
 }
 .pf-modal {
-  background: #2c231a;
+  background: var(--card);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 18px;
   padding: 22px;
@@ -208,7 +208,7 @@
 }
 .pf-modal-title {
   font: 700 20px "Barlow";
-  color: #f4ede2;
+  color: var(--text);
   text-align: center;
 }
 /* Body copy for consequences the headline can't carry (a cascading delete).
@@ -234,7 +234,7 @@
 }
 .pf-setpoint-val span {
   font-size: 24px;
-  color: #8a7f70;
+  color: var(--text-dim);
   margin-left: 2px;
 }
 .pf-step {
@@ -243,7 +243,7 @@
   border-radius: 14px;
   border: 2px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: #f4ede2;
+  color: var(--text);
   font: 700 28px "Barlow";
   cursor: pointer;
 }
@@ -271,8 +271,8 @@
   border-color: transparent;
 }
 .pf-modal-btn.danger {
-  background: rgba(255, 90, 77, 0.14);
-  border-color: #ff5a4d;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: var(--danger);
   color: #ff8b82;
 }
 .pf-modal-btn:disabled {
@@ -291,7 +291,7 @@
   border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: #1d1813;
-  color: #7d7264;
+  color: var(--label);
   cursor: pointer;
   padding: 0;
 }
@@ -303,7 +303,7 @@
 .pf-notify-eta {
   font: 600 12px "Barlow";
   letter-spacing: 1.5px;
-  color: #8a7f70;
+  color: var(--text-dim);
   margin-top: 6px;
   text-transform: uppercase;
 }
@@ -336,7 +336,7 @@
   gap: 10px;
   font: 600 12px "Barlow";
   letter-spacing: 2px;
-  color: #7d7264;
+  color: var(--label);
   text-transform: uppercase;
 }
 .pf-notify-num input {
@@ -353,11 +353,11 @@
   text-align: right;
 }
 .pf-notify-num input:disabled {
-  color: #7d7264;
+  color: var(--label);
 }
 .pf-notify-unit {
   font: 600 20px "Barlow Semi Condensed";
-  color: #8a7f70;
+  color: var(--text-dim);
 }
 .pf-notify-actions {
   display: flex;
@@ -374,7 +374,7 @@
 .pf-notify-actions legend {
   font: 600 11px "Barlow";
   letter-spacing: 2px;
-  color: #7d7264;
+  color: var(--label);
   text-transform: uppercase;
   padding: 0 6px;
 }
@@ -418,25 +418,25 @@
   border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: #1d1813;
-  color: #8a7f70;
+  color: var(--text-dim);
   font: 600 11px "Barlow";
   line-height: 1;
 }
 .pf-badge-ok {
   color: #8fe09a;
-  border-color: color-mix(in srgb, #5ec96f 45%, transparent);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
 }
 .pf-badge-warn {
   color: #ffce6a;
-  border-color: color-mix(in srgb, #ffb020 45%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }
 .pf-badge-danger {
   color: #ff8b82;
-  border-color: #ff5a4d;
+  border-color: var(--danger);
 }
 .pf-badge-off,
 .pf-badge-unknown {
-  color: #7d7264;
+  color: var(--label);
 }
 
 /* ==========================================================================
@@ -527,12 +527,12 @@
 .pf-dash-wordmark {
   font: 700 20px "Barlow";
   letter-spacing: 0.5px;
-  color: #f4ede2;
+  color: var(--text);
 }
 .pf-dash-grillname {
   font: 600 12px "Barlow";
   letter-spacing: 2px;
-  color: #7d7264;
+  color: var(--label);
   text-transform: uppercase;
   padding-left: 8px;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
@@ -556,7 +556,7 @@
   font-weight: 600;
   font-size: 22px;
   font-family: "Barlow Semi Condensed";
-  color: #cfc6b8;
+  color: var(--row-label);
   font-variant-numeric: tabular-nums;
 }
 .pf-dash-tools {
@@ -603,7 +603,7 @@
 .pf-dash-caption {
   font: 600 13px "Barlow";
   letter-spacing: 2.5px;
-  color: #7d7264;
+  color: var(--label);
   text-transform: uppercase;
 }
 .pf-dash-coltitle {
@@ -618,8 +618,8 @@
   flex: 0 0 52px;
 }
 .pf-dash-card {
-  background: #2c231a;
-  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: var(--card);
+  border: 1px solid var(--card-border);
 }
 .pf-dash-cookcard {
   flex: 1;
@@ -637,7 +637,7 @@
 .pf-dash-cookcaption {
   font: 600 12px "Barlow";
   letter-spacing: 2px;
-  color: #7d7264;
+  color: var(--label);
   text-transform: uppercase;
 }
 .pf-dash-modeleft {
@@ -656,7 +656,7 @@
   font-size: var(--pf-cook-val);
   font-family: "Barlow Semi Condensed";
   font-variant-numeric: tabular-nums;
-  color: #cfc6b8;
+  color: var(--row-label);
 }
 .pf-dash-bellbox {
   flex: 0 0 52px;
@@ -668,8 +668,8 @@
 .pf-dash-lid {
   flex: 0 0 210px;
   border-radius: 14px;
-  background: rgba(255, 90, 77, 0.14);
-  border: 1.5px solid #ff5a4d;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border: 1.5px solid var(--danger);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -720,7 +720,7 @@
   font-size: var(--pf-probe-name);
   font-family: "Barlow";
   letter-spacing: 1.5px;
-  color: #b7ac9c;
+  color: var(--probe-label);
   text-transform: uppercase;
 }
 .pf-dash-probemeta {
@@ -741,12 +741,12 @@
 .pf-dash-probetemp-int {
   font-size: var(--pf-probe-temp);
   font-weight: 800;
-  color: #f4ede2;
+  color: var(--text);
 }
 .pf-dash-probetemp-unit {
   font-size: var(--pf-probe-unit);
   font-weight: 600;
-  color: #8a7f70;
+  color: var(--text-dim);
   margin-left: 2px;
 }
 .pf-dash-bar {
@@ -798,7 +798,7 @@
 .pf-dash-gauge-caption {
   font: 600 14px "Barlow";
   letter-spacing: 4px;
-  color: #7d7264;
+  color: var(--label);
   text-transform: uppercase;
 }
 .pf-dash-gauge-num {
@@ -816,13 +816,13 @@
 .pf-dash-gauge-unit {
   font-size: var(--pf-gauge-unit);
   font-weight: 600;
-  color: #8a7f70;
+  color: var(--text-dim);
   margin-left: 4px;
 }
 .pf-dash-gauge-set {
   font: 600 20px "Barlow";
   letter-spacing: 1px;
-  color: #6cc8ff;
+  color: var(--setpoint);
   margin-top: 2px;
   white-space: nowrap;
 }
@@ -852,7 +852,7 @@
   align-items: center;
   gap: 14px;
   padding: 10px 14px;
-  background: #1c1712;
+  background: var(--inset);
   border-radius: 13px;
   border: 1px solid var(--pf-out-edge);
 }
@@ -868,7 +868,7 @@
 .pf-dash-statusname {
   font: 600 17px "Barlow";
   letter-spacing: 1.5px;
-  color: #cfc6b8;
+  color: var(--row-label);
 }
 .pf-dash-statusstate {
   font: 600 13px "Barlow";

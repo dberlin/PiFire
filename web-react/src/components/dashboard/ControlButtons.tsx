@@ -123,9 +123,13 @@ export function ControlButtons({
       {buttons.map((b) => {
         const danger = b.variant === "danger";
         const accent = b.variant === "accent";
-        const border = danger ? "#ff5a4d" : accent ? "var(--accent)" : "rgba(255,255,255,0.14)";
+        const border = danger
+          ? "var(--danger)"
+          : accent
+            ? "var(--accent)"
+            : "rgba(255,255,255,0.14)";
         const bg = danger
-          ? "rgba(255,90,77,0.14)"
+          ? "color-mix(in srgb, var(--danger) 14%, transparent)"
           : accent
             ? "color-mix(in srgb, var(--accent) 16%, transparent)"
             : "#1d1813";

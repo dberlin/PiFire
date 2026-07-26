@@ -43,7 +43,7 @@ describe("SystemStatus", () => {
     // The row's colours reach the stylesheet as custom properties now; the
     // assertion is the same value in its new place.
     expect(rowVar(screen.getByText("RUNNING"), "--pf-out-color")).toBe("var(--accent)");
-    expect(rowVar(screen.getByText("HOT"), "--pf-out-color")).toBe("#ff7a1a");
+    expect(rowVar(screen.getByText("HOT"), "--pf-out-color")).toBe("var(--igniter)");
   });
 
   it("uses the idle color when an output is off", () => {
@@ -52,6 +52,6 @@ describe("SystemStatus", () => {
       outputs: { fan: false, auger: false, igniter: false, power: false },
     });
     render(<SystemStatus fan={v.fan} auger={v.auger} igniter={v.igniter} animate={false} />);
-    expect(rowVar(screen.getAllByText("IDLE")[0], "--pf-out-color")).toBe("#57514a");
+    expect(rowVar(screen.getAllByText("IDLE")[0], "--pf-out-color")).toBe("var(--icon-idle)");
   });
 });

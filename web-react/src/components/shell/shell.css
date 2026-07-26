@@ -298,18 +298,18 @@
   font: 600 13px "Barlow";
 }
 .pf-banner--warning {
-  background: rgba(255, 176, 32, 0.14);
-  border: 1px solid #ffb020;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border: 1px solid var(--warn);
   color: #ffce6a;
 }
 .pf-banner--error {
-  background: rgba(255, 90, 77, 0.14);
-  border: 1px solid #ff5a4d;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border: 1px solid var(--danger);
   color: #ff8b82;
 }
 .pf-banner--critical {
-  background: rgba(255, 90, 77, 0.24);
-  border: 1px solid #ff5a4d;
+  background: color-mix(in srgb, var(--danger) 24%, transparent);
+  border: 1px solid var(--danger);
   color: #ffd0cb;
   font-weight: 700;
 }

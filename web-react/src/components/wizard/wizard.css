@@ -118,9 +118,9 @@
 .pf-wizard-finish-note {
   margin: 0;
   padding: 10px 14px;
-  border-left: 3px solid #ffb020;
+  border-left: 3px solid var(--warn);
   border-radius: 0 10px 10px 0;
-  background: rgba(255, 176, 32, 0.1);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
   color: #ffce6a;
   font: 600 14px "Barlow";
   line-height: 1.6;
@@ -286,7 +286,7 @@
   margin: 0;
   padding: 8px 12px;
   border-radius: 10px;
-  background: rgba(255, 176, 32, 0.1);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
   color: #ffce6a;
   font: 500 13px "Barlow";
   line-height: 1.6;
@@ -612,7 +612,7 @@
    (a 409 from /finish while the grill is running). A red edge marks it as a
    block, not a note. */
 .pf-wizard-system-active-modal {
-  border-color: color-mix(in srgb, #ff5a4d 55%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
 }
 
 /* ConfirmAction (dashboard/ConfirmAction.tsx) paints .pf-modal-scrim as

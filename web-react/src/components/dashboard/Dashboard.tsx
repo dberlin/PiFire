@@ -19,7 +19,14 @@ import { ProbeNotifyModal } from "./ProbeNotifyModal";
 import { SystemStatus } from "./SystemStatus";
 
 const ACCENTS: AccentName[] = ["ember", "ice", "crimson"];
-const SWATCH: Record<AccentName, string> = { ember: "#ff8a2b", ice: "#3cc7d0", crimson: "#ff6a5a" };
+// The picker paints all three at once, so it cannot use --accent (which tracks
+// the CURRENT selection); theme.css keeps the three Theme.accentColor branches
+// as constants for exactly this.
+const SWATCH: Record<AccentName, string> = {
+  ember: "var(--accent-ember)",
+  ice: "var(--accent-ice)",
+  crimson: "var(--accent-crimson)",
+};
 
 // Flask's P-Mode dropup: ten items, 0 labelled "0 - Off"
 // (_macro_dash_default.html:95-104).
@@ -175,7 +182,7 @@ export function Dashboard({
               style={
                 {
                   "--pf-status-color":
-                    phase === "demo" ? "#7d7264" : health.alive ? "#8fe09a" : "#ff8b82",
+                    phase === "demo" ? "var(--label)" : health.alive ? "#8fe09a" : "#ff8b82",
                 } as CSSProperties
               }
             >

@@ -111,7 +111,7 @@ function AugerIcon({ color, on, feed }: { color: string; on: boolean; feed: bool
 }
 
 function IgniterIcon({ on, color, anim }: { on: boolean; color: string; anim: boolean }) {
-  const glow = on ? "#ff7a1a" : "transparent";
+  const glow = on ? "var(--igniter)" : "transparent";
   return (
     <svg width={60} height={40} viewBox="0 0 100 60">
       <g
@@ -130,7 +130,7 @@ function IgniterIcon({ on, color, anim }: { on: boolean; color: string; anim: bo
         <path
           d="M50 42 Q 54 26 58 42"
           fill="none"
-          stroke="#ff7a1a"
+          stroke="var(--igniter)"
           strokeWidth={3}
           strokeLinecap="round"
         />

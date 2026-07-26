@@ -51,13 +51,13 @@
   overflow: hidden;
   padding: 16px;
   border-radius: 18px;
-  background: #2c231a;
-  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: var(--card);
+  border: 1px solid var(--card-border);
 }
 .pf-pellets-card-title {
   font: 600 13px "Barlow";
   letter-spacing: 2.5px;
-  color: #7d7264;
+  color: var(--label);
   text-transform: uppercase;
 }
 .pf-pellets-scroll {

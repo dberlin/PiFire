@@ -18,21 +18,21 @@ describe("HopperGauge", () => {
     const v = deriveView({ ...FIXTURE_DASH, hopperLevel: 68 });
     render(<HopperGauge h={v.hopper} />);
     expect(screen.getByText("68%")).toBeInTheDocument();
-    expect(hopperVar(screen.getByText("68%"), "--pf-hopper-color")).toBe("#5ec96f");
+    expect(hopperVar(screen.getByText("68%"), "--pf-hopper-color")).toBe("var(--ok)");
     expect(screen.getByText("LEVEL OK")).toBeInTheDocument();
   });
 
   it("is amber/RUNNING LOW below 35%", () => {
     const v = deriveView({ ...FIXTURE_DASH, hopperLevel: 20 });
     render(<HopperGauge h={v.hopper} />);
-    expect(hopperVar(screen.getByText("20%"), "--pf-hopper-color")).toBe("#ffb020");
+    expect(hopperVar(screen.getByText("20%"), "--pf-hopper-color")).toBe("var(--warn)");
     expect(screen.getByText("RUNNING LOW")).toBeInTheDocument();
   });
 
   it("is red/REFILL PELLETS below 15%", () => {
     const v = deriveView({ ...FIXTURE_DASH, hopperLevel: 8 });
     render(<HopperGauge h={v.hopper} />);
-    expect(hopperVar(screen.getByText("8%"), "--pf-hopper-color")).toBe("#ff5a4d");
+    expect(hopperVar(screen.getByText("8%"), "--pf-hopper-color")).toBe("var(--danger)");
     expect(screen.getByText("REFILL PELLETS")).toBeInTheDocument();
   });
 });

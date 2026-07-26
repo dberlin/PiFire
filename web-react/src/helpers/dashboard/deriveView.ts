@@ -11,18 +11,18 @@ import {
 // design's internal simulator). Kept side-effect free so it's unit-testable —
 // every color / label / geometry input the widgets need comes out of here.
 
-const OK = "#5ec96f";
+const OK = "var(--ok)";
 const OK2 = "#8fe09a";
-const AMBER = "#ffb020";
+const AMBER = "var(--warn)";
 const AMBER2 = "#ffce6a";
-const DANGER = "#ff5a4d";
+const DANGER = "var(--danger)";
 const DANGER2 = "#ff8b82";
-const IDLE = "#57514a";
-const GRAY = "#4a443c";
-const YELLOW = "#ffd23f";
-const DIM = "#7d7264";
-const SURFACE = "#2c231a";
-const EDGE = "rgba(255,255,255,0.13)";
+const IDLE = "var(--icon-idle)";
+const GRAY = "var(--dot-idle)";
+const YELLOW = "var(--cooking)";
+const DIM = "var(--label)";
+const SURFACE = "var(--card)";
+const EDGE = "var(--card-border)";
 
 // Modes where a cook is actively running (drives the live dot + gauge glow +
 // cook-time counter). Everything else (Monitor / Shutdown / Stop / Error / "")
@@ -170,7 +170,7 @@ export function deriveView(dash: LiveState): DashView {
   const pillL: PillView = {
     label: "P-MODE",
     value: `P-${dash.pMode}`,
-    valColor: "#cfc6b8",
+    valColor: "var(--row-label)",
     bg: SURFACE,
     border: EDGE,
     labelColor: DIM,
@@ -180,13 +180,13 @@ export function deriveView(dash: LiveState): DashView {
         label: "SMOKE+",
         value: "ON",
         valColor: OK2,
-        bg: "color-mix(in srgb, #5ec96f 14%, transparent)",
+        bg: "color-mix(in srgb, var(--ok) 14%, transparent)",
         border: OK,
         labelColor: OK2,
       }
     : { label: "SMOKE+", value: "OFF", valColor: DIM, bg: SURFACE, border: EDGE, labelColor: DIM };
 
-  const igniter = outputView(dash.outputs.igniter, "#ff7a1a", "HOT");
+  const igniter = outputView(dash.outputs.igniter, "var(--igniter)", "HOT");
 
   return {
     cooking,
@@ -203,7 +203,7 @@ export function deriveView(dash: LiveState): DashView {
     fan: outputView(dash.outputs.fan, "var(--accent)", "RUNNING"),
     auger: outputView(dash.outputs.auger, "var(--accent)", "FEEDING"),
     // igniter uses its fixed ember dot (not the shared green) when hot.
-    igniter: { ...igniter, dot: igniter.on ? "#ff7a1a" : GRAY },
+    igniter: { ...igniter, dot: igniter.on ? "var(--igniter)" : GRAY },
     pillL,
     pillR,
     hopper: hopperView(dash.hopperLevel),

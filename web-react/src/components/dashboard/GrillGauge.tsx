@@ -50,7 +50,7 @@ export function GrillGauge({
             <stop offset="1" stopColor="var(--accent-1)" />
           </linearGradient>
         </defs>
-        <path d={track} fill="none" stroke="#4a4034" strokeWidth={16} strokeLinecap="round" />
+        <path d={track} fill="none" stroke="var(--track)" strokeWidth={16} strokeLinecap="round" />
         <path
           d={track}
           fill="none"
@@ -70,7 +70,7 @@ export function GrillGauge({
             y1={inner.y}
             x2={outer.x}
             y2={outer.y}
-            stroke="#6cc8ff"
+            stroke="var(--setpoint)"
             strokeWidth={4}
             strokeLinecap="round"
           />
