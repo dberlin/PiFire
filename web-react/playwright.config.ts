@@ -48,7 +48,8 @@ export default defineConfig({
   projects: [
     {
       name: "app",
-      testIgnore: /dashboard-(fidelity|reflow|panel)\.spec\.ts/,
+      testIgnore:
+        /dashboard-(fidelity|reflow|panel)\.spec\.ts|(pages|chrome|pellets)-fidelity\.spec\.ts/,
       use: { baseURL: ports.appUrl },
     },
     {
@@ -74,6 +75,33 @@ export default defineConfig({
       name: "panel",
       testMatch: /dashboard-panel\.spec\.ts/,
       use: { baseURL: ports.demoUrl, viewport: { width: 800, height: 480 } },
+    },
+    // The generalised fidelity gate. Demo server for the same reason the
+    // dashboard one uses it -- useLiveState's demo branch opens no socket, so
+    // these specs cannot be raced by the shared PiFire instance the rest of the
+    // suite mutates -- plus stubApi(), which makes the REST-fed pages identical
+    // on every machine and stops the wizard capture flushing a draft.
+    //
+    // The viewport is set per-describe with test.use() rather than per-project:
+    // the same spec file measures both 1280x720 and 390x844, and one project per
+    // viewport would double the config for nothing.
+    {
+      name: "fidelity-pages",
+      testMatch: /pages-fidelity\.spec\.ts/,
+      use: { baseURL: ports.demoUrl },
+    },
+    {
+      name: "fidelity-chrome",
+      testMatch: /chrome-fidelity\.spec\.ts/,
+      use: { baseURL: ports.demoUrl },
+    },
+    // /pellets is socket-fed, so it cannot run on the demo server (no socket =
+    // no pellet database = the "Loading..." branch) and it cannot be stubbed
+    // over REST. App server, live backend, fingerprint guard. See Task 5.
+    {
+      name: "fidelity-pellets",
+      testMatch: /pellets-fidelity\.spec\.ts/,
+      use: { baseURL: ports.appUrl },
     },
   ],
 });

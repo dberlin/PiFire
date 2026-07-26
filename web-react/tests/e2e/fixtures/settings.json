@@ -247,7 +247,7 @@
       "debug_mode": false,
       "disp_rotation": 0,
       "ext_data": false,
-      "first_time_setup": true,
+      "first_time_setup": false,
       "global_control_panel": false,
       "grill_name": "",
       "page_theme": "light",

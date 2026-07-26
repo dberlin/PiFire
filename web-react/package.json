@@ -20,6 +20,8 @@
     "test": "rstest run",
     "test:coverage": "rstest run --coverage",
     "test:e2e": "playwright test",
+    "test:e2e:fidelity": "playwright test --project=fidelity-pages --project=fidelity-chrome --project=fidelity-pellets --project=fidelity --project=reflow --project=panel",
+    "baseline:capture": "PF_CAPTURE=1 playwright test --project=fidelity-pages --project=fidelity-chrome --project=fidelity-pellets --project=fidelity",
     "lint": "biome check . && eslint .",
     "format": "biome format --write .",
     "gen:types": "bun scripts/gen-types.ts",

@@ -99,6 +99,16 @@ export const PAGE_SPECS: PageSpec[] = [
       ".pf-dash-probecard",
       ".pf-dash-system",
       ".pf-dash-hopper",
+      // The card is a landmark; the FILL inside it is a separate one because it
+      // is the only element carrying the hopper gradient, and the card cannot
+      // see it. The gradient is new as of the 2026-07-26 colour ruling --
+      // HopperView.color2 was deleted and dashboard.css:997 now derives the
+      // light stop in place with color-mix -- so nothing has ever pinned it.
+      // Task 14 converts dashboard.css, the largest file in the migration;
+      // without this entry a wrong @apply on that rule would reach Task 15's
+      // eyeball as the only cover. `background-image` is in STYLE_PROPS, so the
+      // whole linear-gradient() is compared exactly.
+      ".pf-dash-hopper-fill",
       ".pf-dash-cookrow",
       ".pf-dash-pills",
       ".pf-dash-controls",
