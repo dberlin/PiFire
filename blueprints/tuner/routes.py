@@ -1,6 +1,7 @@
 from flask import render_template, request, render_template_string, jsonify
 from common.common import WriteKind
 from common.modes import Mode
+from common.control_delta import control_delta
 from common.datastore_accessors import (
     read_settings,
     read_control,
@@ -43,22 +44,30 @@ def tuner_page():
         if command == "stop_tuning":
             if control["tuning_mode"]:
                 control["tuning_mode"] = False  # Disable tuning mode
-                write_control(control, WriteKind.MERGE, origin="app")
+                write_control(control_delta(set_values={"tuning_mode": False}), WriteKind.DELTA, origin="app")
             if control["mode"] == Mode.MONITOR:
                 # If in Monitor Mode, stop
                 control["mode"] = Mode.STOP  # Go to Stop mode
                 control["updated"] = True
-                write_control(control, WriteKind.MERGE, origin="app")
+                write_control(
+                    control_delta(set_values={"mode": Mode.STOP, "updated": True}),
+                    WriteKind.DELTA,
+                    origin="app",
+                )
         if command == "read_tr":
             if not control["tuning_mode"]:
                 control["tuning_mode"] = True  # Enable tuning mode
-                write_control(control, WriteKind.MERGE, origin="app")
+                write_control(control_delta(set_values={"tuning_mode": True}), WriteKind.DELTA, origin="app")
 
             if control["mode"] == Mode.STOP:
                 # Turn on Monitor Mode if the system is stopped
                 control["mode"] = Mode.MONITOR  # Enable monitor mode
                 control["updated"] = True
-                write_control(control, WriteKind.MERGE, origin="app")
+                write_control(
+                    control_delta(set_values={"mode": Mode.MONITOR, "updated": True}),
+                    WriteKind.DELTA,
+                    origin="app",
+                )
 
             cur_probe_tr = read_tr()
             if requestjson["probe_selected"] in cur_probe_tr.keys():
@@ -68,12 +77,16 @@ def tuner_page():
         if command == "manual_finish" or command == "auto_finish":
             if control["tuning_mode"]:
                 control["tuning_mode"] = False  # Disable tuning mode
-                write_control(control, WriteKind.MERGE, origin="app")
+                write_control(control_delta(set_values={"tuning_mode": False}), WriteKind.DELTA, origin="app")
             if control["mode"] == Mode.MONITOR:
                 # If in Monitor Mode, stop
                 control["mode"] = Mode.STOP  # Go to Stop mode
                 control["updated"] = True
-                write_control(control, WriteKind.MERGE, origin="app")
+                write_control(
+                    control_delta(set_values={"mode": Mode.STOP, "updated": True}),
+                    WriteKind.DELTA,
+                    origin="app",
+                )
 
             tunerManualHighTemp = requestjson.get("tunerManualHighTemp", 0.1)
             tunerManualHighTemp = 0 if tunerManualHighTemp == "" else float(tunerManualHighTemp)
@@ -108,7 +121,7 @@ def tuner_page():
             first_run = False
             if not control["tuning_mode"]:
                 control["tuning_mode"] = True  # Enable tuning mode
-                write_control(control, WriteKind.MERGE, origin="app")
+                write_control(control_delta(set_values={"tuning_mode": True}), WriteKind.DELTA, origin="app")
                 flush_autotune()  # Flush autotune data
                 first_run = True
 
@@ -116,7 +129,11 @@ def tuner_page():
                 # Turn on Monitor Mode if the system is stopped
                 control["mode"] = Mode.MONITOR  # Enable monitor mode
                 control["updated"] = True
-                write_control(control, WriteKind.MERGE, origin="app")
+                write_control(
+                    control_delta(set_values={"mode": Mode.MONITOR, "updated": True}),
+                    WriteKind.DELTA,
+                    origin="app",
+                )
 
             status_data = {
                 "current_tr": 0,

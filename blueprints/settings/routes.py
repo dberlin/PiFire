@@ -1,6 +1,7 @@
 from flask import render_template, request, render_template_string, jsonify
 from common.common import WriteKind, read_generic_json, generate_uuid
 from common.modes import Mode
+from common.control_delta import control_delta
 from common.datastore_accessors import read_settings, read_control, write_settings, write_control
 from common.app import is_not_blank, is_checked, update_probe_config, save_settings_and_flag_update
 from common.defaults import DEFAULT_DASHBOARD
@@ -99,7 +100,8 @@ def _settings_probe_config_save(settings, control, controller, event):
     if result == "success":
         # Take all settings and write them
         write_settings(settings)
-        write_control(control, WriteKind.MERGE, origin="app")
+        # update_probe_config sets exactly this flag (common/app.py).
+        write_control(control_delta(set_values={"probe_profile_update": True}), WriteKind.DELTA, origin="app")
 
         return jsonify({"result": "success"})
     else:
@@ -298,7 +300,11 @@ def _settings_editprofile(settings, control, controller, event):
                 # If this profile is currently in use, update the profile in the control script as well
                 if profile_in_use:
                     control["probe_profile_update"] = True
-                    write_control(control, WriteKind.MERGE, origin="app")
+                    write_control(
+                        control_delta(set_values={"probe_profile_update": True}),
+                        WriteKind.DELTA,
+                        origin="app",
+                    )
             except:
                 event["type"] = "error"
                 event["text"] = "Something bad happened when trying to format your inputs.  Try again."

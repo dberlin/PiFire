@@ -1,6 +1,7 @@
 import datetime
 from flask import render_template, request
 from common.common import WriteKind
+from common.control_delta import control_delta
 from common.datastore_accessors import (
     read_settings,
     read_control,
@@ -28,7 +29,7 @@ def _pellets_loadprofile(settings, control, pelletdb, event):
             control.clear()
             control.update(read_control())
             control["hopper_check"] = True
-            write_control(control, WriteKind.MERGE, origin="app")
+            write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
             now = str(datetime.datetime.now())
             now = now[0:19]  # Truncate the microseconds
             pelletdb["current"]["date_loaded"] = now
@@ -41,7 +42,7 @@ def _pellets_loadprofile(settings, control, pelletdb, event):
 
 def _pellets_hopperlevel(settings, control, pelletdb, event):
     control["hopper_check"] = True
-    write_control(control, WriteKind.MERGE, origin="app")
+    write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
 
 
 def _pellets_editbrands(settings, control, pelletdb, event):
@@ -117,7 +118,7 @@ def _pellets_addprofile(settings, control, pelletdb, event):
             # tail render still observes the (wiped-then-set) content.
             control.clear()
             control["hopper_check"] = True
-            write_control(control, WriteKind.MERGE, origin="app")
+            write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
             now = str(datetime.datetime.now())
             now = now[0:19]  # Truncate the microseconds
             pelletdb["current"]["date_loaded"] = now

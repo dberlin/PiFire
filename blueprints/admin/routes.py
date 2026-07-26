@@ -5,6 +5,7 @@ import zipfile
 from flask import render_template, current_app, request, send_file
 from werkzeug.utils import secure_filename
 from common.common import WriteKind, write_log, read_generic_json, write_generic_json, get_display_info
+from common.control_delta import control_delta
 from common.datastore_accessors import (
     read_settings,
     write_settings,
@@ -85,11 +86,11 @@ def _admin_setting_debugenabled(ctx):
         write_log("Debug Mode Disabled.")
         settings["globals"]["debug_mode"] = False
         write_settings(settings)
-        write_control(control, WriteKind.MERGE, origin="app")
+        write_control(control_delta(set_values={"settings_update": True}), WriteKind.DELTA, origin="app")
     else:
         settings["globals"]["debug_mode"] = True
         write_settings(settings)
-        write_control(control, WriteKind.MERGE, origin="app")
+        write_control(control_delta(set_values={"settings_update": True}), WriteKind.DELTA, origin="app")
         write_log("Debug Mode Enabled.")
 
 
@@ -132,9 +133,24 @@ def _admin_setting_factorydefaults(ctx):
         os.system("rm settings.json")
         os.system("rm pelletdb.json")
         settings = default_settings()
-        control = default_control()
         write_settings(settings)
-        write_control(control, WriteKind.MERGE, origin="app")
+        # flush_control() above already OVERWROTE the blob with default_control().
+        # This restates the reseed as intent so it cannot be clobbered by a write
+        # queued alongside it: every scalar by name, the timer via timer.clear,
+        # and notify_data via notify.replace -- which is what a factory reset
+        # genuinely means for the array, said out loud instead of relying on
+        # "an entry the incoming array omits is a deletion".
+        control = default_control()
+        notify_entries = control.pop("notify_data")
+        control.pop("timer")
+        write_control(
+            control_delta(
+                set_values=control,
+                ops=[{"op": "timer.clear"}, {"op": "notify.replace", "entries": notify_entries}],
+            ),
+            WriteKind.DELTA,
+            origin="app",
+        )
         set_server_status("restarting")
         restart_scripts()
         return render_template(
