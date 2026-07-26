@@ -30,6 +30,21 @@ from file_mgmt.recipes import convert_recipe_units
 from file_mgmt.cookfile import create_cookfile
 from file_mgmt.common import read_json_file_data
 from os.path import exists
+from common.adaptive_controller_state import AdaptiveControllerStateStore
+from controller.runtime import (
+	apply_live_hold_target,
+	apply_live_hold_target_and_restart_cycle,
+	controller_reinit_output_seed,
+	diagnostics,
+	identification_allowed,
+	record_lid_open_transition,
+	hold_pid_update_due,
+	manual_override_duty,
+	normal_pid_output_recording_allowed,
+	record_output,
+	restore_model,
+	stage_model,
+)
 
 '''
 ==============================================================================
@@ -324,6 +339,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 	settings = read_settings()
 	control = read_control()
 	pelletdb = read_pellet_db()
+	adaptive_store = AdaptiveControllerStateStore()
+	controllerCore = None
+	adaptive_model_pending = False
 	control['hopper_check'] = True
 	write_control(control, direct_write=True, origin='control')
 
@@ -439,6 +457,11 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 		controllerCore, controller_status = _init_controller(settings, control)
 		if controller_status == 'Inactive':
 			status = 'Inactive'
+		else:
+			restore_model(
+				controllerCore, adaptive_store, settings['controller']['selected']
+			)
+			record_output(controllerCore, CycleRatio, identification_allowed=True)
 		eventLogger.debug('On Time = ' + str(OnTime) + ', OffTime = ' + str(OffTime) + ', CycleTime = ' + str(
 			CycleTime) + ', CycleRatio = ' + str(CycleRatio))
 
@@ -579,8 +602,14 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 
 		_process_system_commands(grill_platform)
 
+		cycle_restart = apply_live_hold_target_and_restart_cycle(
+			controllerCore, mode, control, now
+		)
+		if cycle_restart is not None:
+			controllerCycleStart = cycle_restart
+			write_control(control, direct_write=True, origin='control')
 		# Check if new mode has been requested
-		if control['updated']:
+		elif control['updated']:
 			break
 
 		# Check if user changed settings and reload
@@ -610,6 +639,27 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 			settings = read_settings()
 			controllerCore, controller_status = _init_controller(settings, control)
 			if controller_status == 'Active':
+				restore_model(
+					controllerCore, adaptive_store, settings['controller']['selected']
+				)
+				manual_override_active = manual_override['auger'] >= now
+				manual_auger_output = (
+					grill_platform.get_output_status()['auger']
+					if manual_override_active
+					else False
+				)
+				seed_duty, seed_identification_allowed = (
+					controller_reinit_output_seed(
+						CycleRatio,
+						LidOpenDetect,
+						manual_override_active,
+						ControlFanPid,
+						manual_auger_output,
+					)
+				)
+				record_output(
+					controllerCore, seed_duty, seed_identification_allowed
+				)
 				eventLogger.info('Controller reinitialized with updated settings')
 
 		# Check if user changed hopper levels and update if required
@@ -671,6 +721,11 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 						grill_platform.auger_off()
 						eventLogger.debug('Auger OFF')
 					manual_override['auger'] = override_time  # Set override time
+					record_output(
+						controllerCore,
+						manual_override_duty(control['manual']['output']),
+						False,
+					)
 				
 				if control['manual']['change'] == 'igniter':
 					if control['manual']['output'] and not current_output_status['igniter']:
@@ -706,8 +761,14 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 		if mode in ('Startup', 'Reignite', 'Smoke', 'Hold', 'Prime'):
 			if mode == 'Hold':
 				# Check to see if it's time to update pid and update if needed.
-				if (now - controllerCycleStart) > CycleTime:
+				if hold_pid_update_due(now, controllerCycleStart, CycleTime):
 					pid_output = controllerCore.update(ptemp)
+					if stage_model(
+						controllerCore, adaptive_store, settings['controller']['selected']
+					):
+						adaptive_model_pending = True
+					if adaptive_store.flush():
+						adaptive_model_pending = False
 					controllerCycleStart = now
 					CycleRatio = RawCycleRatio = settings['cycle_data']['u_min'] if LidOpenDetect else pid_output
 					# If ratio is less than min set auger ratio to min and control further via fan.
@@ -724,7 +785,21 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 						ControlFanPid = False
 					# Don't set ratio over maximum.
 					CycleRatio = min(CycleRatio, settings['cycle_data']['u_max'])			
+					if normal_pid_output_recording_allowed(
+						manual_override['auger'], now
+					):
+						record_output(
+							controllerCore,
+							CycleRatio,
+							identification_allowed=identification_allowed(
+								LidOpenDetect,
+								manual_override['auger'] >= now,
+								ControlFanPid,
+							),
+						)
 			if manual_override['auger'] < now:
+				if manual_override['auger']:
+					record_output(controllerCore, CycleRatio, False)
 				manual_override['auger'] = 0
 				# If Auger is OFF and time since toggle is greater than Off Time
 				if not current_output_status['auger'] and (now - auger_toggle_time) > (CycleTime * (1 - CycleRatio)):
@@ -741,7 +816,7 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 
 						#publish pid info to mqtt if enabled				
 						if settings['notify_services'].get('mqtt') != None and settings['notify_services']['mqtt']['enabled']:
-							pid_data = controllerCore.__dict__
+							pid_data = diagnostics(controllerCore)
 							pid_data['cycle_ratio'] = round(CycleRatio, 2)
 							check_notify(settings, control, pid_data=pid_data)
 
@@ -873,6 +948,7 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 				# If we are in a state where the auger ratio is min and we are using the fan for control, turning the fan on here would overshoot the temps.
 				# This is a major issue when using piFire for a wood or charcoal pit or a hybrid wood/pellet pit.
 				grill_platform.auger_off()
+				record_lid_open_transition(controllerCore)
 				grill_platform.fan_off()
 				auger_toggle_time = now 
 				LidOpenEventExpires = now + settings['cycle_data']['LidOpenPauseTime']
@@ -891,6 +967,7 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 					else:
 						LidOpenDetect = True
 						grill_platform.auger_off()
+						record_lid_open_transition(controllerCore)
 						grill_platform.fan_off()
 						auger_toggle_time = now
 						LidOpenEventExpires = now + settings['cycle_data']['LidOpenPauseTime']
@@ -1077,6 +1154,7 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 	# END Mode Loop
 	# *********
 
+
 	# Clean-up and Exit
 	grill_platform.auger_off()
 	grill_platform.igniter_off()
@@ -1087,6 +1165,21 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 		grill_platform.fan_off()
 		grill_platform.power_off()
 		eventLogger.debug('Fan OFF, Power OFF')
+
+	try:
+		if stage_model(
+			controllerCore, adaptive_store, settings['controller']['selected']
+		):
+			adaptive_model_pending = True
+	except Exception:
+		controlLogger.exception('Unable to stage adaptive controller model state')
+	try:
+		if adaptive_store.flush(force=True):
+			adaptive_model_pending = False
+		elif adaptive_model_pending:
+			controlLogger.error('Unable to persist adaptive controller model state')
+	except Exception:
+		controlLogger.exception('Unable to persist adaptive controller model state')
 	
 	if mode in ('Startup', 'Reignite'):
 		control['safety']['afterstarttemp'] = ptemp
