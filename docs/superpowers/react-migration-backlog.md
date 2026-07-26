@@ -644,15 +644,41 @@ struck from the list below rather than left to be re-asked.
    `control["notify_data"]` and `settings["recipe"]["probe_map"]` pointing at
    the old label. Fix it in `apply_probe_map`, and fix `run_wizard` too — the
    installer has the same hole, which is why matching it looked safe.
+7. **Qt wins for `ok`/`warn`/`danger` everywhere — both bespoke ramps are
+   gone.** Two React-only colour sets had no counterpart in `Theme.qml` and so
+   were never covered by the `themeTokens` guard: a LIGHT ramp for text on
+   tinted badges (`#8fe09a`/`#ffce6a`/`#ff8b82`, 24 sites in 7 stylesheets) and
+   a MUTED set for the pellet meter (`#6cc070`/`#e0a44a`/`#d05a4e`, 4 sites) —
+   drifting in opposite directions from the same three semantics. Every site now
+   reads `var(--ok)`/`var(--warn)`/`var(--danger)`, so the guard covers them for
+   free. Costs ~2 points of text contrast (all still clear AA) and removes the
+   app's only sub-AA value. `HopperView.color2` went with them: it was only the
+   light stop of the level bar's gradient, which `dashboard.css` now derives
+   with `color-mix()` instead of carrying a second colour. **Do not reintroduce
+   a hand-picked light or muted variant** — if a surface needs one, derive it
+   from the token. Landed `102378d9`.
+   *Leftover, deliberately not swept:* `tools/qt_dashboard_preview.qml:409,572,573`
+   still hold the light ramp. It is a standalone dev preview with its own
+   self-contained palette that never imports `Theme.qml`, so it was out of scope.
 
 #### Still needing a human
 
-Everything else in this group was answered on 2026-07-26; see the rulings above.
+Nothing. Every question in this group was answered on 2026-07-26; see the
+rulings above.
 
-- Whether React's client-side clamps are deleted now that the schema enforces
-  bounds — S2 and the scoping spec disagree. The only one left, and it is a
-  genuine trade: the schema is authoritative, but a clamp gives feedback at the
-  keystroke instead of at the save.
+~~Whether React's client-side clamps are deleted now that the schema enforces
+bounds.~~ **Ruled: the clamps stay.** The schema is authoritative and remains
+so — that was never the deciding factor. What settles it is a fact recorded in
+`NumberField.tsx`'s own comment: there is no `<form>` anywhere in the settings
+tree, so the browser never runs constraint validation and `min`/`max` only drive
+the spinner arrows and `:invalid` styling. Delete the clamp and a typed `500` in
+a `max={9}` field reaches the server and returns as a save error naming a dotted
+path. The clamp is not duplicating the schema; it is the only thing that makes
+the bound visible at the keystroke. It clamps on **blur, not change** — clamping
+on change makes a bounded field untypeable (`min={20}` turns the intermediate
+"2" of "25" into "205"). Sites: `helpers/settings/bounds.ts`,
+`settings/fields/NumberField.tsx:41-45`, `settings/RangeProfileTable.tsx:86,102,113`,
+`settings/tabs/StartupTab.tsx:111,115`.
 
 #### Schema and toolchain follow-ups
 
