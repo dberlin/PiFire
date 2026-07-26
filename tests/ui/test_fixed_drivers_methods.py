@@ -315,6 +315,16 @@ def test_ssd1306_public_status_methods_set_state_without_touching_device():
 
 
 def _fake_control_pair(initial_mode=Mode.STOP):
+    """A stand-in control process for the fixed-layout drivers.
+
+    Displays queue DELTA envelopes now (common/control_delta.py), so this
+    applies them the way the real drain does rather than dict.update()-ing a
+    whole snapshot. What it RECORDS in `calls` is the members the write actually
+    changed -- for a delta that is its `set`, which is the whole payload's
+    meaning; a legacy whole dict is recorded as-is. So an assertion like
+    calls[-1][0]["mode"] still reads "the write said mode".
+    """
+    from common.control_delta import apply_control_delta, is_control_delta
     from common.defaults import default_control
 
     state = default_control()
@@ -325,8 +335,12 @@ def _fake_control_pair(initial_mode=Mode.STOP):
         return dict(state)
 
     def write_control(control, kind=None, origin=None):
-        calls.append((dict(control), kind, origin))
-        state.update(control)
+        if is_control_delta(control):
+            calls.append((dict(control.get("set", {})), kind, origin))
+            apply_control_delta(state, control)
+        else:
+            calls.append((dict(control), kind, origin))
+            state.update(control)
 
     return state, read_control, write_control, calls
 

@@ -455,7 +455,8 @@ def _cmd_set_pmode(data, control, settings, arglist, origin, kind):
     PMode
     /api/set/pmode/{pmode value} where pmode value is between 0-9
 
-    NOTE: hard-codes WriteKind.MERGE, ignoring the caller's `kind`. Preserved.
+    NOTE: always queues, ignoring the caller's `kind` (it hard-coded
+    WriteKind.MERGE before the delta conversion). Preserved.
     """
     if arglist[1] is not None:
         if arglist[1].isdigit():
@@ -507,7 +508,8 @@ def _cmd_set_notify(data, control, settings, arglist, origin, kind):
     /api/set/notify/{object}/shutdown/{true/false}
     /api/set/notify/{object}/keep_warm/{true/false}
 
-    NOTE: hard-codes WriteKind.MERGE, ignoring the caller's `kind`. Preserved
+    NOTE: always queues, ignoring the caller's `kind` (it hard-coded
+    WriteKind.MERGE before the delta conversion). Preserved
     as-is.
     """
     if arglist[1] is not None:
@@ -585,7 +587,8 @@ def _cmd_set_duty_cycle(data, control, settings, arglist, origin, kind):
 
     /api/set/duty_cycle/{0-100 percent}
 
-    NOTE: hard-codes WriteKind.MERGE, ignoring the caller's `kind`. Preserved.
+    NOTE: always queues, ignoring the caller's `kind` (it hard-coded
+    WriteKind.MERGE before the delta conversion). Preserved.
     """
     if is_float(arglist[1]):
         duty_cycle = int(arglist[1])

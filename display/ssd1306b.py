@@ -27,6 +27,7 @@ from luma.oled.device import ssd1306
 from PIL import Image, ImageFont
 from common.common import WriteKind  # Common Library for WebUI and Control Program
 from common.modes import Mode
+from common.control_delta import control_delta
 from common.datastore_accessors import read_control, write_control
 from gpiozero import Button
 
@@ -378,11 +379,17 @@ class Display:
                 if self.menu["current"]["option"] > maxTemp:
                     self.menu["current"]["option"] = minTemp  # Roll over to minTemp if you go greater than 500.
             elif action == "ENTER":
-                control = read_control()
-                control["primary_setpoint"] = self.menu["current"]["option"]
-                control["updated"] = True
-                control["mode"] = Mode.HOLD
-                write_control(control, WriteKind.MERGE, origin="display")
+                write_control(
+                    control_delta(
+                        set_values={
+                            "primary_setpoint": self.menu["current"]["option"],
+                            "updated": True,
+                            "mode": Mode.HOLD,
+                        }
+                    ),
+                    WriteKind.DELTA,
+                    origin="display",
+                )
                 self.menu["current"]["mode"] = "none"
                 self.menu["current"]["option"] = 0
                 self.menu_active = False
@@ -431,29 +438,32 @@ class Display:
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    control = read_control()
-                    control["updated"] = True
-                    control["mode"] = Mode.STARTUP
-                    write_control(control, WriteKind.MERGE, origin="display")
+                    write_control(
+                        control_delta(set_values={"updated": True, "mode": Mode.STARTUP}),
+                        WriteKind.DELTA,
+                        origin="display",
+                    )
                 elif selected == "Monitor":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
-                    control = read_control()
-                    control["updated"] = True
-                    control["mode"] = Mode.MONITOR
-                    write_control(control, WriteKind.MERGE, origin="display")
+                    write_control(
+                        control_delta(set_values={"updated": True, "mode": Mode.MONITOR}),
+                        WriteKind.DELTA,
+                        origin="display",
+                    )
                 elif selected == "Stop":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
-                    control = read_control()
-                    control["updated"] = True
-                    control["mode"] = Mode.STOP
-                    write_control(control, WriteKind.MERGE, origin="display")
+                    write_control(
+                        control_delta(set_values={"updated": True, "mode": Mode.STOP}),
+                        WriteKind.DELTA,
+                        origin="display",
+                    )
                 # Active Mode
                 elif selected == "Shutdown":
                     self.menu["current"]["mode"] = "none"
@@ -461,10 +471,11 @@ class Display:
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
-                    control = read_control()
-                    control["updated"] = True
-                    control["mode"] = Mode.SHUTDOWN
-                    write_control(control, WriteKind.MERGE, origin="display")
+                    write_control(
+                        control_delta(set_values={"updated": True, "mode": Mode.SHUTDOWN}),
+                        WriteKind.DELTA,
+                        origin="display",
+                    )
                 elif selected == "Hold":
                     self.menu["current"]["mode"] = "grill_hold_value"
                     if self.units == "F":
@@ -477,22 +488,25 @@ class Display:
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
-                    control = read_control()
-                    control["updated"] = True
-                    control["mode"] = Mode.SMOKE
-                    write_control(control, WriteKind.MERGE, origin="display")
+                    write_control(
+                        control_delta(set_values={"updated": True, "mode": Mode.SMOKE}),
+                        WriteKind.DELTA,
+                        origin="display",
+                    )
                 elif selected == "SmokePlus":
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
                     self.menu_active = False
                     self.menu_time = 0
                     self.clear_display()
+                    # The read stays: this toggles the LIVE value rather than
+                    # setting a known one. Only the toggled member is stated.
                     control = read_control()
-                    if control["s_plus"]:
-                        control["s_plus"] = False
-                    else:
-                        control["s_plus"] = True
-                    write_control(control, WriteKind.MERGE, origin="display")
+                    write_control(
+                        control_delta(set_values={"s_plus": not control["s_plus"]}),
+                        WriteKind.DELTA,
+                        origin="display",
+                    )
                 elif selected == "Network":
                     self.display_network()
 

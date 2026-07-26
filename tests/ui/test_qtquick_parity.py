@@ -63,7 +63,19 @@ def _dispatch_probe(monkeypatch):
         qmod, "write_control", lambda data, kind=None, origin=None: effects.append(("write_control", data))
     )
     monkeypatch.setattr(qmod, "read_status", lambda: {"s_plus": False})
-    monkeypatch.setattr(qmod, "read_control", lambda: {"notify_data": [], "recipe": {"step_data": {}}})
+    # A notify entry the cmd_notify probe below can actually match. It used to be
+    # enough to leave notify_data empty, because the handler wrote the whole
+    # (unchanged) array back regardless -- so cmd_notify "passed" without doing
+    # anything. It now addresses ONE entry by (label, type) and writes only when
+    # it finds it, so the probe has to supply one.
+    monkeypatch.setattr(
+        qmod,
+        "read_control",
+        lambda: {
+            "notify_data": [{"name": "GrillMain", "label": "Grill", "type": "probe", "target": 0, "req": False}],
+            "recipe": {"step_data": {}},
+        },
+    )
     monkeypatch.setattr(qmod, "is_real_hardware", lambda: False)
     # _command_handler (inherited) uses names in _base_flex's namespace.
     import display._base_flex as bf
@@ -87,8 +99,10 @@ def _dispatch_probe(monkeypatch):
 @pytest.mark.parametrize("cmd", sorted(PYGAME_CMDS))
 def test_every_pygame_command_is_handled(monkeypatch, cmd):
     disp, effects = _dispatch_probe(monkeypatch)
-    # A representative value; hold/pmode/prime use it, others ignore it.
-    disp._dispatch_command(cmd, 100)
+    # A representative value; hold/pmode/prime use it, others ignore it. notify
+    # takes a dict, and now genuinely needs a matching entry to do anything.
+    command_data = {"origin": "GrillMain", "target": 200} if "notify" in cmd else 100
+    disp._dispatch_command(cmd, command_data)
     assert effects, f"{cmd} produced no control write / API call — unhandled in QT"
 
 

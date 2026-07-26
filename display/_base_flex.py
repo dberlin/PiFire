@@ -56,6 +56,7 @@ from display.flexobject import (
 from PIL import Image, ImageFilter
 from common.common import WriteKind, read_generic_json, display_sleep_timeout
 from common.modes import Mode
+from common.control_delta import control_delta
 from common.datastore_accessors import (
     read_control,
     write_control,
@@ -1304,21 +1305,21 @@ class DisplayBase:
         # print(' > Command Handler Called < ')
         if "monitor" in self.command:
             data = {"updated": True, "mode": "Monitor"}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             # print('Sent Monitor Mode Command!')
             self.display_active = "dash"
             self.display_init = True
 
         if "startup" in self.command:
             data = {"updated": True, "mode": "Startup"}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             # print('Sent Startup Mode Command!')
             self.display_active = "dash"
             self.display_init = True
 
         if "smoke" in self.command:
             data = {"updated": True, "mode": "Smoke"}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             self.display_active = "dash"
             self.display_init = True
 
@@ -1333,7 +1334,7 @@ class DisplayBase:
 
             if primary_setpoint:
                 data = {"updated": True, "mode": "Hold", "primary_setpoint": primary_setpoint}
-                write_control(data, WriteKind.MERGE, origin="display")
+                write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             self.display_active = "dash"
             self.display_init = True
 
@@ -1346,15 +1347,31 @@ class DisplayBase:
                     notify_target = objectData["data"].get("value", False)
                     break
 
+            # The entry is found by NAME (not label), so label and type are read
+            # off the matched entry. Only that entry's two fields travel: the
+            # whole array used to go back, which meant a concurrent notify write
+            # anywhere in it was reverted by this one.
             control = read_control()
-            for index, notify_source in enumerate(control["notify_data"]):
+            for notify_source in control["notify_data"]:
                 if notify_source["name"] == self.input_origin:
-                    control["notify_data"][index]["target"] = notify_target
-                    control["notify_data"][index]["req"] = True if notify_target else False
+                    write_control(
+                        control_delta(
+                            ops=[
+                                {
+                                    "op": "notify.set",
+                                    "label": notify_source["label"],
+                                    "type": notify_source["type"],
+                                    "fields": {
+                                        "target": notify_target,
+                                        "req": True if notify_target else False,
+                                    },
+                                }
+                            ]
+                        ),
+                        WriteKind.DELTA,
+                        origin="display",
+                    )
                     break
-
-            data = {"notify_data": control["notify_data"]}
-            write_control(data, WriteKind.MERGE, origin="display")
 
             self.input_origin = None
             self.display_active = "dash"
@@ -1362,13 +1379,13 @@ class DisplayBase:
 
         if "shutdown" in self.command:
             data = {"updated": True, "mode": "Shutdown"}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             self.display_active = "dash"
             self.display_init = True
 
         if "stop" in self.command:
             data = {"updated": True, "mode": "Stop"}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
 
             self._init_framework()
             self._zero_dash_data()
@@ -1379,19 +1396,19 @@ class DisplayBase:
         if "splus" in self.command:
             toggle = False if self.last_status_data.get("s_plus", False) else True
             data = {"s_plus": toggle}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             self.display_active = "dash"
             self.display_init = True
 
         if "primestartup" in self.command:
             data = {"updated": True, "mode": "Prime", "prime_amount": self.command_data, "next_mode": "Startup"}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             self.display_active = "dash"
             self.display_init = True
 
         if "primeonly" in self.command:
             data = {"updated": True, "mode": "Prime", "prime_amount": self.command_data, "next_mode": "Stop"}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             self.display_active = "dash"
             self.display_init = True
 
@@ -1401,33 +1418,36 @@ class DisplayBase:
             settings["cycle_data"]["PMode"] = self.command_data
             write_settings(settings)
             data = {"settings_update": True}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
 
             self.display_active = "dash"
             self.display_init = True
 
         if "next_step" in self.command:
+            # The read stays: which branch this is depends on the live recipe
+            # step_data. Each branch then states only its own member.
             data = read_control()
             # Check if currently in 'Paused' Status
             if "triggered" in data["recipe"]["step_data"] and "pause" in data["recipe"]["step_data"]:
                 if data["recipe"]["step_data"]["triggered"] and data["recipe"]["step_data"]["pause"]:
                     # 'Unpause' Recipe
-                    data["recipe"]["step_data"]["pause"] = False
-                    write_control(data, WriteKind.MERGE, origin="display")
+                    write_control(
+                        control_delta(set_values={"recipe": {"step_data": {"pause": False}}}),
+                        WriteKind.DELTA,
+                        origin="display",
+                    )
                 else:
                     # User is forcing next step
-                    data["updated"] = True
-                    write_control(data, WriteKind.MERGE, origin="display")
+                    write_control(control_delta(set_values={"updated": True}), WriteKind.DELTA, origin="display")
             else:
                 # User is forcing next step
-                data["updated"] = True
-                write_control(data, WriteKind.MERGE, origin="display")
+                write_control(control_delta(set_values={"updated": True}), WriteKind.DELTA, origin="display")
             self.display_active = "dash"
             self.display_init = True
 
         if "reboot" in self.command:
             data = {"updated": True, "mode": "Stop"}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             if self.real_hardware:
                 os.system("sleep 3 && sudo reboot &")
             else:
@@ -1438,7 +1458,7 @@ class DisplayBase:
 
         if "poweroff" in self.command:
             data = {"updated": True, "mode": "Stop"}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             if self.real_hardware:
                 os.system("sleep 3 && sudo shutdown -h now &")
             else:
@@ -1449,7 +1469,7 @@ class DisplayBase:
 
         if "restart" in self.command:
             data = {"updated": True, "mode": "Stop"}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             if self.real_hardware:
                 os.system("sleep 3 && sudo service supervisor restart &")
             else:
@@ -1460,7 +1480,7 @@ class DisplayBase:
 
         if "hopper" in self.command:
             data = {"hopper_check": True}
-            write_control(data, WriteKind.MERGE, origin="display")
+            write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             self.display_active = "dash"
             self.display_init = True
 
