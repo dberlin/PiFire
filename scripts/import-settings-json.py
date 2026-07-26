@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Import a JSON file into the settings kv blob (settings:general).
 
-Usage: scripts/import-settings-json [path]   (default: settings.json)
+Usage: scripts/import-settings-json.py [path]   (default: settings.json)
 """
 
 import os
@@ -10,5 +10,5 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common import datastore
 
-datastore.import_config('settings:general', sys.argv[1] if len(sys.argv) > 1 else 'settings.json')
-print('imported settings:general')
+datastore.import_config("settings:general", sys.argv[1] if len(sys.argv) > 1 else "settings.json")
+print("imported settings:general")

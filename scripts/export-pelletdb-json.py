@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export the pellet database kv blob (pellets:general) to a pretty-printed JSON file.
 
-Usage: scripts/export-pelletdb-json [path]   (default: pelletdb.json)
+Usage: scripts/export-pelletdb-json.py [path]   (default: pelletdb.json)
 """
 
 import os
@@ -10,5 +10,5 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common import datastore
 
-datastore.export_config('pellets:general', sys.argv[1] if len(sys.argv) > 1 else 'pelletdb.json')
-print('exported pellets:general')
+datastore.export_config("pellets:general", sys.argv[1] if len(sys.argv) > 1 else "pelletdb.json")
+print("exported pellets:general")

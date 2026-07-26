@@ -184,7 +184,7 @@ For Example (excerpt from controllers.json):
 The settings JSON contains the both the selected controller name and the configuration data for all controllers(under the key ['controller']).  Settings for any available controller would be managed via the WebUI settings page.  
 
 For Example (excerpt from the stored settings — SQLite is the source of truth.
-A `settings.json` appears only if someone runs `scripts/export-settings-json`;
+A `settings.json` appears only if someone runs `scripts/export-settings-json.py`;
 it is a snapshot, never live state):
 
 ```JSON

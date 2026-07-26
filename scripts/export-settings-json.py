@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export the settings kv blob (settings:general) to a pretty-printed JSON file.
 
-Usage: scripts/export-settings-json [path]   (default: settings.json)
+Usage: scripts/export-settings-json.py [path]   (default: settings.json)
 """
 
 import os
@@ -10,5 +10,5 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common import datastore
 
-datastore.export_config('settings:general', sys.argv[1] if len(sys.argv) > 1 else 'settings.json')
-print('exported settings:general')
+datastore.export_config("settings:general", sys.argv[1] if len(sys.argv) > 1 else "settings.json")
+print("exported settings:general")
