@@ -32,7 +32,7 @@ from common.common import (
     epoch_to_time,
     get_system_command_output,
 )
-from common.control_delta import control_delta
+from common.control_delta import NOTIFY_POST_KEYS, ControlDeltaError, control_delta, notify_ops_from_post
 from common.datastore_accessors import (
     read_settings_store,
     seed_settings_store,
@@ -443,15 +443,19 @@ def _post_app_data_update(settings, type, request):
                 message="Error: control['timer'] cannot be set here; use the timer_action commands",
             )
         for key in request.keys():
-            if key in control.keys():
+            # NOTIFY_POST_KEYS widens the membership test because `notify_updates`
+            # is a wire key, not a control member -- it addresses entries INSIDE
+            # control["notify_data"] rather than naming a key of its own.
+            if key in control.keys() or key in NOTIFY_POST_KEYS:
                 # A posted patch is ALREADY a statement of intent -- the client
                 # sent only what it means -- so it is WRAPPED as a delta, not
-                # rewritten. notify_data travels whole (an omitted entry means
-                # deletion, not silence), so it becomes an explicit
-                # notify.replace rather than an implicit array swap.
-                payload = dict(request)
-                entries = payload.pop("notify_data", None)
-                ops = [{"op": "notify.replace", "entries": entries}] if entries is not None else None
+                # rewritten. The notify keys are the exception, and
+                # notify_ops_from_post() is shared with _api_post_control so the
+                # two doors cannot drift.
+                try:
+                    payload, ops = notify_ops_from_post(request)
+                except ControlDeltaError as exc:
+                    return _response(result="Error", message=f"Error: {exc}")
                 write_control(control_delta(set_values=payload, ops=ops), WriteKind.DELTA, origin="app-socketio")
                 return _response(result="OK", data=control)
             else:
@@ -898,57 +902,75 @@ def _update_probe_config(settings, control, request):
         return _response(result="Error", message="Error: Probe was not found")
 
 
+#: The notify_action DTO addresses ONE probe label and carries a flat bag of
+#: per-type fields; this is that flattening written down once. Each entry type
+#: maps to the DTO key whose PRESENCE means "set this entry" and to the
+#: notify_data field each DTO key feeds.
+_NOTIFY_DTO_FIELDS = {
+    "probe": (
+        "target_temp",
+        {
+            "target": "target_temp",
+            "shutdown": "target_shutdown",
+            "keep_warm": "target_keep_warm",
+            "req": "target_req",
+        },
+    ),
+    "probe_limit_high": (
+        "high_limit_temp",
+        {"target": "high_limit_temp", "shutdown": "high_limit_shutdown", "req": "high_limit_req"},
+    ),
+    "probe_limit_low": (
+        "low_limit_temp",
+        {
+            "target": "low_limit_temp",
+            "shutdown": "low_limit_shutdown",
+            "reignite": "low_limit_reignite",
+            "req": "low_limit_req",
+        },
+    ),
+}
+
+#: What each field becomes when the DTO omits its type's temp key -- the app
+#: says "this alert is off" by leaving the temperature out.
+_NOTIFY_CLEARED = {"target": 0, "shutdown": False, "keep_warm": False, "reignite": False, "req": False}
+
+
+def _notify_fields_from_dto(entry_type, notify_dto):
+    """The fields ONE notify_data entry of `entry_type` takes from the DTO.
+
+    A missing companion key (target_temp without target_shutdown) raises
+    KeyError, as it always has: the app sends the group or none of it, and a
+    default here would silently disarm a shutdown the user asked for.
+    """
+    temp_key, dto_keys = _NOTIFY_DTO_FIELDS[entry_type]
+    if temp_key not in notify_dto:
+        return {field: _NOTIFY_CLEARED[field] for field in dto_keys}
+    fields = {field: notify_dto[dto_key] for field, dto_key in dto_keys.items()}
+    fields["target"] = int(fields["target"])
+    return fields
+
+
 def _update_notify_data(control, request):
     notify_dto = request["notify_action"]
-    updated_notify_data = control["notify_data"]
-
-    for index, item in enumerate(updated_notify_data):
-        if item["type"] == "probe" and item["label"] == notify_dto["label"]:
-            if "target_temp" in notify_dto.keys():
-                target_temp = notify_dto["target_temp"]
-                updated_notify_data[index]["target"] = int(target_temp)
-                updated_notify_data[index]["shutdown"] = notify_dto["target_shutdown"]
-                updated_notify_data[index]["keep_warm"] = notify_dto["target_keep_warm"]
-                updated_notify_data[index]["req"] = notify_dto["target_req"]
-            else:
-                updated_notify_data[index]["target"] = 0
-                updated_notify_data[index]["shutdown"] = False
-                updated_notify_data[index]["keep_warm"] = False
-                updated_notify_data[index]["req"] = False
-
-        if item["type"] == "probe_limit_high" and item["label"] == notify_dto["label"]:
-            if "high_limit_temp" in notify_dto.keys():
-                high_limit_temp = notify_dto["high_limit_temp"]
-                updated_notify_data[index]["target"] = int(high_limit_temp)
-                updated_notify_data[index]["shutdown"] = notify_dto["high_limit_shutdown"]
-                updated_notify_data[index]["req"] = notify_dto["high_limit_req"]
-            else:
-                updated_notify_data[index]["target"] = 0
-                updated_notify_data[index]["shutdown"] = False
-                updated_notify_data[index]["req"] = False
-
-        if item["type"] == "probe_limit_low" and item["label"] == notify_dto["label"]:
-            if "low_limit_temp" in notify_dto.keys():
-                low_limit_temp = notify_dto["low_limit_temp"]
-                updated_notify_data[index]["target"] = int(low_limit_temp)
-                updated_notify_data[index]["shutdown"] = notify_dto["low_limit_shutdown"]
-                updated_notify_data[index]["reignite"] = notify_dto["low_limit_reignite"]
-                updated_notify_data[index]["req"] = notify_dto["low_limit_req"]
-            else:
-                updated_notify_data[index]["target"] = 0
-                updated_notify_data[index]["shutdown"] = False
-                updated_notify_data[index]["reignite"] = False
-                updated_notify_data[index]["req"] = False
-
-    control["notify_data"] = updated_notify_data
-    # This handler rebuilds the WHOLE array from the probe map, so an omitted
-    # entry really is a deletion. notify.replace says that by name instead of
-    # leaving it to merge_notify_data's delete-on-omit rule.
-    write_control(
-        control_delta(ops=[{"op": "notify.replace", "entries": updated_notify_data}]),
-        WriteKind.DELTA,
-        origin="app-socketio",
-    )
+    label = notify_dto["label"]
+    # One notify.set per entry this DTO addresses, NOT a replace of the whole
+    # array. The DTO names a single label, so every other entry -- the other
+    # probes, the timer, the hopper -- is untouched, and a concurrent writer
+    # that armed one of them inside this control cycle keeps its write. The
+    # live read decides WHICH entries exist: notify.set appends a missing one,
+    # and this handler must not conjure a limit alert the probe never had.
+    ops = [
+        {
+            "op": "notify.set",
+            "label": label,
+            "type": entry["type"],
+            "fields": _notify_fields_from_dto(entry["type"], notify_dto),
+        }
+        for entry in control["notify_data"]
+        if entry["label"] == label and entry["type"] in _NOTIFY_DTO_FIELDS
+    ]
+    write_control(control_delta(ops=ops or None), WriteKind.DELTA, origin="app-socketio")
     return _response(result="OK")
 
 

@@ -1,24 +1,26 @@
 // Per-probe notification state lives in control["notify_data"] -- runtime
-// CONTROL state, not settings. Read with GET /api/get/notify, written with a
-// SINGLE POST /api/control carrying only the notify_data key.
+// CONTROL state, not settings. Written with a SINGLE POST /api/control
+// carrying only the `notify_updates` key.
 //
 // Why not the /api/set/notify/{label}/{field}/{value} grammar that already
-// exists (common/api_commands.py:420-476)? Four sequential field writes used to
-// LOSE three of them -- every web-process MERGE write queues the WHOLE control
-// dict, read_control() never sees the pending queue, and the last patch of a
-// control cycle imposed its stale array on the rest. The drain now merges
-// notify_data element-wise against the ancestor every writer read
-// (common/common.py::merge_notify_data), so those four writes would survive.
+// exists (common/api_commands.py:501-570)? It is one round trip per FIELD, and
+// an edit the user makes as one gesture would land as four -- leaving a window
+// in which a target is set but its action is not.
 //
-// One POST carrying the whole array is still the right shape, for reasons that
-// outlive that fix: it is ONE round trip for an edit the user makes as one
-// gesture, so there is no window in which a target is set but its action is
-// not. Note it must carry the array WHOLE either way -- an entry the incoming
-// array omits is read as a deletion, not as silence.
+// Why not post the whole `notify_data` array, which /api/control also accepts?
+// Because that form is applied as a replace: an entry it omits is read as a
+// deletion rather than as silence, so a client that built it from a read the
+// write queue is invisible to CLOBBERS anything another writer changed in the
+// same control cycle -- most visibly, a timer armed from the shell while this
+// modal was open. A whole array posted from a queue-blind read cannot say
+// WHICH fields it meant to change, so nothing at the drain can tell an
+// intentional deletion from an omission. `notify_updates` addresses one entry
+// at a time (label + type + the fields being changed), which is exactly what
+// the drain needs to compose two writers -- see the notify.set op in
+// common/control_delta.py.
 //
-// Verified live (Stop mode, 2026-07-25): GET /api/get/notify returns exactly the
-// array that /api/current exposes as notify_data (deep-equal), and a posted edit
-// becomes visible on the next GET after ~110 ms -- it is queued, not immediate.
+// Verified live (Stop mode, 2026-07-25): a posted edit becomes visible on the
+// next read after ~110 ms -- it is queued, not immediate.
 
 export interface NotifyEntry {
   label: string;
@@ -31,21 +33,17 @@ export interface NotifyEntry {
   eta?: number | null;
   condition?: string;
   triggered?: boolean;
-  // Index signature: entries carry per-type extras (name, last_check, ...) that
-  // MUST survive the round trip untouched -- we post the whole array back.
+  // Index signature: entries carry per-type extras (name, last_check, ...).
   [k: string]: unknown;
 }
 
-export async function getNotifyData(baseUrl: string): Promise<NotifyEntry[]> {
-  const res = await fetch(`${baseUrl}/api/get/notify`);
-  if (!res.ok) throw new Error(`GET /api/get/notify failed: HTTP ${res.status}`);
-  const body = (await res.json()) as { result?: string; data?: unknown };
-  if (body.result !== "OK" || !Array.isArray(body.data)) {
-    // Deliberately throws rather than returning []: the caller posts this array
-    // straight back, so an empty fallback would wipe every notification set.
-    throw new Error("GET /api/get/notify returned no notify_data");
-  }
-  return body.data as NotifyEntry[];
+/** One addressed patch: the entry is found by (label, type) at drain time, and
+ *  only the named fields are written. Every field the object omits keeps
+ *  whatever value the entry has when the control loop drains the queue. */
+export interface NotifyUpdate {
+  label: string;
+  type: string;
+  fields: Record<string, unknown>;
 }
 
 /** POST a minimal control patch. Keep the patch to the keys you actually own:
@@ -66,11 +64,6 @@ export async function postControl(baseUrl: string, patch: Record<string, unknown
   if (body.result !== "success") throw new Error(body.message ?? "control write rejected");
 }
 
-export function postNotifyData(baseUrl: string, entries: NotifyEntry[]): Promise<void> {
-  // eta is null on an idle probe entry (common/defaults.py:520) and is re-sent
-  // as null here. That is safe: strip_null_members (common/common.py:179-207)
-  // returns lists unchanged, so the null reaches the merge verbatim and the
-  // "stripped null member(s)" diagnostic does not fire. Confirmed against a live
-  // control.log -- no new ERROR line after a round-tripped write.
-  return postControl(baseUrl, { notify_data: entries });
+export function postNotifyUpdates(baseUrl: string, updates: NotifyUpdate[]): Promise<void> {
+  return postControl(baseUrl, { notify_updates: updates });
 }

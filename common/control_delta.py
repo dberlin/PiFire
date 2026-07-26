@@ -148,6 +148,51 @@ def _validate_op_types(ops):
             raise ControlDeltaError("timer.start_with_options 'seconds' must be an int greater than zero")
 
 
+#: The two keys a CLIENT-POSTED control patch may carry notify intent under.
+#: They are not equivalent:
+#:
+#:   * `notify_data` is the WHOLE array. An entry it omits is a deletion rather
+#:     than silence, so it can only be applied as a replace -- and a client that
+#:     built it from a read the write queue is invisible to therefore reverts
+#:     whatever another writer changed in the same control cycle. Kept for
+#:     clients that already speak it; nothing in this repo posts it any more.
+#:   * `notify_updates` states one patch per ADDRESSED entry, so two writers
+#:     touching different entries (or different fields of one entry) both
+#:     survive the drain. This is what in-repo clients post.
+NOTIFY_POST_KEYS = ("notify_data", "notify_updates")
+
+
+def notify_ops_from_post(payload):
+    """Split a client-posted control patch into (plain_members, ops).
+
+    `payload` is not mutated. Everything that is not a notify key comes back in
+    `plain_members` for `control_delta(set_values=...)`; the notify keys become
+    ops the drain evaluates against live state.
+
+    A payload carrying both keys applies `notify_data` first, so the addressed
+    `notify_updates` patches win. Raises ControlDeltaError on a malformed
+    payload -- at request time, in the web process, rather than at a drain in
+    the control process one cycle later.
+    """
+    members = dict(payload)
+    entries = members.pop("notify_data", None)
+    updates = members.pop("notify_updates", None)
+    ops = []
+    if entries is not None:
+        ops.append({"op": "notify.replace", "entries": entries})
+    if updates is not None:
+        if not isinstance(updates, list):
+            raise ControlDeltaError(f"notify_updates must be a list, got {type(updates).__name__}")
+        for update in updates:
+            if not isinstance(update, Mapping):
+                raise ControlDeltaError(f"each notify_updates item must be a mapping, got {update!r}")
+            # 1:1 with notify.set, so its validation -- required label/type/
+            # fields, no unknown members, fields must be a mapping -- is the
+            # only validation there is. No second copy to drift from it.
+            ops.append({"op": "notify.set", **update})
+    return members, (ops or None)
+
+
 def apply_control_delta(control, envelope, log=None):
     """Apply a delta envelope to `control` IN PLACE and return it.
 

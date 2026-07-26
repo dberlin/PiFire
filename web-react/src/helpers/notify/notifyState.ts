@@ -1,5 +1,5 @@
 import type { ProbeData } from "../types";
-import { getNotifyData, type NotifyEntry, postNotifyData } from "./notifyApi";
+import { postNotifyUpdates } from "./notifyApi";
 
 // The backend runs `if shutdown: ... elif keep_warm: ...`
 // (notify/notifications.py:142-159), so ticking both means shutdown and silently
@@ -33,46 +33,29 @@ export function readTargetEdit(probe: ProbeData): TargetEdit {
   };
 }
 
-// Edits ONLY the `type === "probe"` entry for `label`. Up to three entries share
-// a label (common/defaults.py:512-538) -- probe, probe_limit_high,
-// probe_limit_low -- and the limit pair is a separate feature. Everything else
-// in the array comes back untouched because the caller posts the WHOLE array,
-// and an entry the posted array omits is read as a DELETION rather than as
-// silence (common/common.py::merge_notify_data).
-export function applyTargetEdit(
-  entries: NotifyEntry[],
-  label: string,
-  edit: TargetEdit,
-): NotifyEntry[] {
-  return entries.map((e) => {
-    if (e.type !== "probe" || e.label !== label) return e;
-    if (!edit.enabled) {
-      // Only the target entry is cleared. Flask's cancelNotify
-      // (dash_default.js:807-813) clears every entry sharing the label, wiping
-      // the high/low limit alerts as a side effect; that is not ported.
-      return { ...e, req: false, target: 0, shutdown: false, keep_warm: false };
-    }
-    return {
-      ...e,
-      req: true,
-      target: Math.round(edit.target),
-      shutdown: edit.action === "shutdown",
-      keep_warm: edit.action === "keepWarm",
-    };
-  });
+// The four fields this modal owns on the `type === "probe"` entry. Up to three
+// entries share a label (common/defaults.py:512-538) -- probe,
+// probe_limit_high, probe_limit_low -- and the limit pair is a separate
+// feature, so only the "probe" entry is addressed and the limit alerts keep
+// whatever the user set. (Flask's cancelNotify, dash_default.js:807-813, clears
+// every entry sharing the label and wipes the limit alerts as a side effect;
+// that is not ported.)
+export function targetEditFields(edit: TargetEdit): Record<string, unknown> {
+  if (!edit.enabled) return { req: false, target: 0, shutdown: false, keep_warm: false };
+  return {
+    req: true,
+    target: Math.round(edit.target),
+    shutdown: edit.action === "shutdown",
+    keep_warm: edit.action === "keepWarm",
+  };
 }
 
-// Read-modify-write, exactly as the Flask dashboard does
-// (dash_default.js:784-799). One POST, so the array is replaced atomically and
-// nothing else in control is patched. The result is NOT echoed back
-// immediately: the write is queued and drained by the control loop (~110 ms in
-// Stop mode, measured), so callers must render from the socket payload rather
-// than mirroring the new value locally.
-export async function saveTargetEdit(
-  baseUrl: string,
-  label: string,
-  edit: TargetEdit,
-): Promise<void> {
-  const entries = await getNotifyData(baseUrl);
-  await postNotifyData(baseUrl, applyTargetEdit(entries, label, edit));
+// One POST naming one entry and four fields -- no read first, because nothing
+// here depends on the array's current contents, and a read-modify-write of the
+// whole array would revert whatever another writer changed in the same control
+// cycle. The result is NOT echoed back immediately: the write is queued and
+// drained by the control loop (~110 ms in Stop mode, measured), so callers must
+// render from the socket payload rather than mirroring the new value locally.
+export function saveTargetEdit(baseUrl: string, label: string, edit: TargetEdit): Promise<void> {
+  return postNotifyUpdates(baseUrl, [{ label, type: "probe", fields: targetEditFields(edit) }]);
 }

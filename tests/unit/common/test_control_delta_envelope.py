@@ -10,6 +10,7 @@ from common.control_delta import (
     ControlDeltaError,
     control_delta,
     is_control_delta,
+    notify_ops_from_post,
     validate_control_delta,
 )
 
@@ -98,3 +99,64 @@ def test_the_constructor_deep_copies_so_a_later_mutation_cannot_reach_the_queue(
     envelope = control_delta(set_values=values)
     values["manual"]["pwm"] = 99
     assert envelope["set"]["manual"]["pwm"] == 50
+
+
+# --- notify_ops_from_post: the client door onto the notify ops --------------
+
+
+def test_a_post_without_notify_members_is_left_alone():
+    assert notify_ops_from_post({"mode": "Hold", "s_plus": True}) == ({"mode": "Hold", "s_plus": True}, None)
+
+
+def test_notify_updates_become_one_notify_set_op_each():
+    members, ops = notify_ops_from_post(
+        {
+            "s_plus": True,
+            "notify_updates": [
+                {"label": "Grill", "type": "probe", "fields": {"req": True}},
+                {"label": "Grill", "type": "probe_limit_high", "fields": {"req": False}},
+            ],
+        }
+    )
+    assert members == {"s_plus": True}
+    assert ops == [
+        {"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"req": True}},
+        {"op": "notify.set", "label": "Grill", "type": "probe_limit_high", "fields": {"req": False}},
+    ]
+
+
+def test_notify_data_becomes_a_replace_op():
+    entries = [{"label": "Only", "type": "probe", "req": True}]
+    assert notify_ops_from_post({"notify_data": entries}) == ({}, [{"op": "notify.replace", "entries": entries}])
+
+
+def test_the_caller_s_payload_is_not_mutated():
+    payload = {"mode": "Hold", "notify_data": []}
+    notify_ops_from_post(payload)
+    assert payload == {"mode": "Hold", "notify_data": []}
+
+
+def test_both_notify_keys_apply_the_replace_first_so_addressed_updates_win():
+    _, ops = notify_ops_from_post(
+        {"notify_data": [], "notify_updates": [{"label": "Grill", "type": "probe", "fields": {"req": True}}]}
+    )
+    assert [op["op"] for op in ops] == ["notify.replace", "notify.set"]
+
+
+def test_a_malformed_notify_updates_payload_is_rejected():
+    with pytest.raises(ControlDeltaError, match="notify_updates must be a list"):
+        notify_ops_from_post({"notify_updates": {"label": "Grill"}})
+    with pytest.raises(ControlDeltaError, match="must be a mapping"):
+        notify_ops_from_post({"notify_updates": ["Grill"]})
+
+
+def test_a_notify_update_is_validated_by_the_op_it_becomes():
+    """No second validator to drift from notify.set's own."""
+    with pytest.raises(ControlDeltaError, match="missing field"):
+        control_delta(ops=notify_ops_from_post({"notify_updates": [{"label": "Grill"}]})[1])
+    with pytest.raises(ControlDeltaError, match="unknown field"):
+        control_delta(
+            ops=notify_ops_from_post(
+                {"notify_updates": [{"label": "Grill", "type": "probe", "fields": {}, "nope": 1}]}
+            )[1]
+        )

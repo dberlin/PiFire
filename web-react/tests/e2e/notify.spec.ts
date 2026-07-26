@@ -33,6 +33,11 @@ async function getNotify(request: APIRequestContext): Promise<NotifyEntry[]> {
   return body.data as NotifyEntry[];
 }
 
+/** HARNESS ONLY -- the whole-array door. This file's setup and its afterEach
+ *  restore genuinely mean "the array is exactly this", which is the one thing
+ *  notify_data's replace semantics are right for. The production client does
+ *  NOT post this shape (see notifyApi.ts): an array built from a queue-blind
+ *  read reverts whatever another writer changed in the same control cycle. */
 async function postNotify(request: APIRequestContext, entries: NotifyEntry[]): Promise<void> {
   const res = await request.post(`${API}/api/control`, { data: { notify_data: entries } });
   expect(res.ok()).toBe(true);
@@ -62,11 +67,13 @@ async function firstFoodProbe(
   return { label, name: String(entry?.name ?? label) };
 }
 
-/** Count of the null-stripping diagnostic in control.log. Round-tripping a
- *  probe entry re-sends its `"eta": null`, and execute_control_writes logs at
- *  ERROR when it strips nulls from a MERGE partial, naming /api/control as a
- *  suspected source (common/datastore_accessors.py:106-119). It should not fire:
- *  strip_null_members returns lists unchanged (common/common.py:188-191). */
+/** Count of the null-stripping diagnostic in control.log. The harness's own
+ *  whole-array postNotify above round-trips each probe entry's `"eta": null`,
+ *  and execute_control_writes logs at ERROR when it strips nulls from a MERGE
+ *  partial, naming /api/control as a suspected source
+ *  (common/datastore_accessors.py:106-119). It should not fire:
+ *  strip_null_members returns lists unchanged (common/common.py:188-191).
+ *  (The production client never sends eta at all now -- it names four fields.) */
 function nullStripCount(): number {
   try {
     // Same repo-root derivation history.spec.ts uses -- test.info().file rather
@@ -104,11 +111,10 @@ test("a probe target set in the UI reaches the backend and comes back over the s
   const logBefore = nullStripCount();
 
   // Pre-arm this probe's HIGH LIMIT entry directly. Three notify entries share
-  // one label (common/defaults.py:512-538); the whole point of writing the
-  // target with a single POST of the full array is that the other two survive.
-  // The per-field REST grammar could not do this: every MERGE queues the whole
-  // control dict and the drain applies it with json_patch, which replaces
-  // arrays wholesale, so the last write inside a control cycle wins outright.
+  // one label (common/defaults.py:512-538); the point of writing the target as
+  // ONE addressed update naming (label, "probe") is that the other two survive
+  // untouched -- the drain applies it against live state instead of against
+  // whatever array this page last saw.
   const armed = baseline.map((e) =>
     e.label === label && e.type === "probe_limit_high"
       ? { ...e, req: true, target: 555, triggered: true, shutdown: false, keep_warm: false }

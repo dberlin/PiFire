@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { CommandClient, CommandResult } from "../../helpers/command";
 import { FIXTURE_DASH } from "../../helpers/fixture";
-import type { NotifyEntry } from "../../helpers/notify/notifyApi";
+import type { NotifyUpdate } from "../../helpers/notify/notifyApi";
 import type { LiveState } from "../../helpers/types";
 import { renderRoute } from "../../test-utils";
 import { Dashboard } from "./Dashboard";
@@ -193,50 +193,30 @@ describe("Dashboard", () => {
 //
 // These drive the real notify helpers and stub `fetch`, rather than mocking
 // helpers/notify/notifyState: the thing worth pinning is the request the
-// dashboard actually puts on the wire -- one GET, then one POST whose body
-// carries the WHOLE notify_data array with a single entry edited.
+// dashboard actually puts on the wire -- a single POST that ADDRESSES one
+// notify entry by (label, type) and names only the fields it changes. No read
+// first, and no whole array: an array posted from a queue-blind read is applied
+// as a replace and reverts anything another writer changed in the same control
+// cycle.
 // --------------------------------------------------------------------------
 
-const NOTIFY_ENTRIES: NotifyEntry[] = [
-  { label: "Grill", type: "probe", req: false, shutdown: false, keep_warm: false, target: 0 },
-  {
-    label: "Grill",
-    type: "probe_limit_high",
-    req: true,
-    shutdown: false,
-    keep_warm: false,
-    target: 500,
-    triggered: false,
-  },
-  { label: "Probe1", type: "probe", req: false, shutdown: false, keep_warm: false, target: 0 },
-  {
-    label: "Probe1",
-    type: "probe_limit_high",
-    req: true,
-    shutdown: false,
-    keep_warm: false,
-    target: 350,
-    triggered: false,
-  },
-];
-
 function stubNotifyFetch(postBody: unknown = { result: "success" }, postOk = true) {
-  const fetchMock: ReturnType<typeof rs.fn> = rs.fn(async (url: string) =>
-    String(url).endsWith("/api/get/notify")
-      ? { ok: true, status: 200, json: async () => ({ result: "OK", data: NOTIFY_ENTRIES }) }
-      : { ok: postOk, status: postOk ? 201 : 500, json: async () => postBody },
-  );
+  const fetchMock: ReturnType<typeof rs.fn> = rs.fn(async () => ({
+    ok: postOk,
+    status: postOk ? 201 : 500,
+    json: async () => postBody,
+  }));
   rs.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
 
-const postedNotifyData = (fetchMock: ReturnType<typeof rs.fn>): NotifyEntry[] => {
+const postedNotifyUpdates = (fetchMock: ReturnType<typeof rs.fn>): NotifyUpdate[] => {
   const post = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/api/control"));
   if (post === undefined) throw new Error("no POST /api/control was issued");
   const body = JSON.parse(String((post[1] as RequestInit).body)) as {
-    notify_data: NotifyEntry[];
+    notify_updates: NotifyUpdate[];
   };
-  return body.notify_data;
+  return body.notify_updates;
 };
 
 describe("Dashboard target notifications", () => {
@@ -283,7 +263,7 @@ describe("Dashboard target notifications", () => {
     expect(screen.getByRole("slider", { name: /target/i })).toHaveAttribute("max", "600");
   });
 
-  it("saves a food probe's target as ONE post of the whole array", async () => {
+  it("saves a food probe's target as ONE addressed post", async () => {
     const user = userEvent.setup();
     const fetchMock = stubNotifyFetch();
     renderDashboard({
@@ -300,20 +280,19 @@ describe("Dashboard target notifications", () => {
     await waitFor(() =>
       expect(screen.queryByText("Brisket Notifications")).not.toBeInTheDocument(),
     );
-    expect(fetchMock.mock.calls).toHaveLength(2);
-    const posted = postedNotifyData(fetchMock);
-    expect(posted).toHaveLength(NOTIFY_ENTRIES.length);
-    expect(posted.find((e) => e.label === "Probe1" && e.type === "probe")).toMatchObject({
-      req: true,
-      target: 203,
-      keep_warm: true,
-      shutdown: false,
-    });
-    // The limit entry sharing that label survives untouched -- the property the
-    // per-field REST grammar could not have given us.
-    expect(posted.find((e) => e.label === "Probe1" && e.type === "probe_limit_high")).toEqual(
-      NOTIFY_ENTRIES.find((e) => e.label === "Probe1" && e.type === "probe_limit_high"),
-    );
+    // ONE request, not a read followed by a write.
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    // The (label, type) pair is what keeps the two limit alerts sharing this
+    // label out of the write, and naming only these four fields is what leaves
+    // every other field of this entry to whatever the control loop holds when
+    // the queue drains.
+    expect(postedNotifyUpdates(fetchMock)).toEqual([
+      {
+        label: "Probe1",
+        type: "probe",
+        fields: { req: true, target: 203, keep_warm: true, shutdown: false },
+      },
+    ]);
   });
 
   it("saves the primary probe's target against its own label", async () => {
@@ -328,11 +307,11 @@ describe("Dashboard target notifications", () => {
     await user.type(screen.getByRole("spinbutton", { name: /target/i }), "225");
     await user.click(screen.getByRole("button", { name: "Set" }));
 
-    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(2));
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(1));
     expect(
-      postedNotifyData(fetchMock).find(
-        (e) => e.label === FIXTURE_DASH.primaryProbe.label && e.type === "probe",
-      ),
+      postedNotifyUpdates(fetchMock).find(
+        (u) => u.label === FIXTURE_DASH.primaryProbe.label && u.type === "probe",
+      )?.fields,
     ).toMatchObject({ req: true, target: 225 });
   });
 

@@ -214,11 +214,66 @@ def test_post_control_still_accepts_ordinary_members(client):
 
 
 def test_post_control_routes_notify_data_through_the_replace_op(client):
-    """saveTargetEdit's shape. An omitted entry still means DELETE -- now by name."""
+    """The legacy whole-array shape. An omitted entry still means DELETE -- now
+    by name. No in-repo client posts this; it is kept for ones that already do."""
     entries = [{"label": "Only", "type": "probe", "req": True, "target": 165}]
     assert client.post("/api/control", json={"notify_data": entries}).status_code == 201
     dsa.execute_control_writes()
     assert read_control()["notify_data"] == entries
+
+
+def test_post_control_routes_notify_updates_through_per_entry_set_ops(client):
+    """saveTargetEdit's shape. Names ONE entry and the fields it changes."""
+    update = {"label": "Grill", "type": "probe", "fields": {"req": True, "target": 165, "shutdown": True}}
+    assert client.post("/api/control", json={"notify_updates": [update]}).status_code == 201
+    dsa.execute_control_writes()
+    entry = _notify_entry("Grill", "probe")
+    assert (entry["req"], entry["target"], entry["shutdown"]) == (True, 165, True)
+
+
+def test_a_posted_notify_update_does_not_clobber_a_concurrent_timer_arm(client):
+    """THE regression this key exists to close.
+
+    A whole `notify_data` array posted from a queue-blind read reverts every
+    other entry to whatever the client last saw -- including the timer entry a
+    second writer armed inside the same control cycle. It cannot say WHICH
+    fields it meant, so nothing at the drain can tell an intentional deletion
+    from an omission. An addressed update says it, so both writes land.
+    """
+    stale = read_control()["notify_data"]  # what a client's cached copy holds
+    assert _cmd("timer", "start", "600")["result"] == "OK"
+    update = {"label": "Grill", "type": "probe", "fields": {"req": True, "target": 165}}
+    assert client.post("/api/control", json={"notify_updates": [update]}).status_code == 201
+    dsa.execute_control_writes()
+
+    assert _notify_entry("Grill", "probe")["target"] == 165
+    assert _notify_entry("Timer", "timer")["req"] is True, "the timer arm was clobbered"
+    assert read_control()["timer"]["end"] == NOW + 600
+
+    # And the same pair through the OLD door still loses the timer arm, which is
+    # why no in-repo client posts it any more.
+    assert client.post("/api/control", json={"notify_data": stale}).status_code == 201
+    dsa.execute_control_writes()
+    assert _notify_entry("Timer", "timer")["req"] is False
+
+
+def test_post_control_rejects_a_malformed_notify_update(client):
+    """Named at request time, in this process, rather than swallowed into the
+    generic 201 where a caller cannot tell a rejection from an accepted write."""
+    resp = client.post("/api/control", json={"notify_updates": [{"type": "probe", "fields": {}}]})
+    assert resp.status_code == 400
+    assert "label" in resp.get_json()["message"]
+    assert c.SqliteQueue("queue_control_write").length() == 0
+
+
+def test_socket_control_door_takes_notify_updates_too(sio):
+    """`notify_updates` is a WIRE key, not a control member, so this door's
+    "key must exist in control" test had to learn about it."""
+    update = {"label": "Grill", "type": "probe", "fields": {"req": True, "target": 165}}
+    resp = sio._post_app_data("update_action", "control", json.dumps({"notify_updates": [update]}))
+    assert resp["result"] == "OK"
+    dsa.execute_control_writes()
+    assert _notify_entry("Grill", "probe")["target"] == 165
 
 
 def test_socket_control_door_rejects_a_timer_value(sio):

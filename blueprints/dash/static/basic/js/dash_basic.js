@@ -422,175 +422,121 @@ function updateNotificationCard(notify_info) {
 	};
 };
 
+// Queue one ADDRESSED notify patch, if that entry exists.
+//
+// Posting the whole notify_data array instead would be applied as a replace:
+// an entry it omits is read as a deletion rather than as silence, so an array
+// built from this page's cached copy reverts whatever another writer changed in
+// the same control cycle -- most visibly a timer armed from another browser or
+// from the app. Naming (label, type) and only the fields being changed is what
+// lets the control loop compose two writers. See notify.set in
+// common/control_delta.py.
+//
+// The existence check is deliberate: notify.set APPENDS an entry it cannot
+// find, and this page must not conjure a limit alert for a probe that has none.
+function pushNotifyUpdate(updates, probe_label, entry_type, fields) {
+	for (item in notify_data) {
+		if ((notify_data[item].type == entry_type) && (notify_data[item].label == probe_label)) {
+			updates.push({ 'label' : probe_label, 'type' : entry_type, 'fields' : fields });
+			return;
+		};
+	};
+};
+
+function sendNotifyUpdates(updates, log_prefix) {
+	$.ajax({
+        url : '/api/control',
+        type : 'POST',
+        data : JSON.stringify({ 'notify_updates' : updates }),
+        contentType: "application/json; charset=utf-8",
+        traditional: true,
+        success: function (data) {
+            console.log(log_prefix + data.control);
+        }
+    });
+};
+
 // Set Notification Request and Send to the Server
 function setNotify(probe_label) {
 	//console.log('Updating Notify Settings...')
-	// Reset Action Settings 
-	var shutdown = false;
-	var keepWarm = false;
-	var reignite = false;
-
-	// Put current notify data into a new variable to update
-	var updated_notify_data = JSON.parse(JSON.stringify(notify_data)); // Copy notify_data into a new variable
+	var updates = [];
 
 	// If simple notify on temperature is set, get the data and update the notification structure
 	if ($("#"+probe_label +"_notify_temp").is(':checked')) {
 		var target_temp = $("#"+probe_label+"_tempInputId").val();
-		for (item in updated_notify_data) {
-			if ((updated_notify_data[item].type == 'probe') && (updated_notify_data[item].label == probe_label)) {
-			if ($("#"+probe_label +"_shutdown").is(':checked')){
-				shutdown = true;
-			};
-			if ($("#"+probe_label +"_keepWarm").is(':checked')){
-				keepWarm = true;
-			};
-			updated_notify_data[item].target = parseInt(target_temp);
-			updated_notify_data[item].shutdown = shutdown;
-			updated_notify_data[item].keep_warm = keepWarm;
-			updated_notify_data[item].req = true;
-			//console.log('Updated Simple Notify Temp Settings:');
-			//console.log(updated_notify_data[item]);
-			break;
-			};
-		};
+		pushNotifyUpdate(updates, probe_label, 'probe', {
+			'target' : parseInt(target_temp),
+			'shutdown' : $("#"+probe_label +"_shutdown").is(':checked'),
+			'keep_warm' : $("#"+probe_label +"_keepWarm").is(':checked'),
+			'req' : true
+		});
 	} else {
-		// If simple notify is unchecked, then remove notification request. 
-		for (item in updated_notify_data) {
-			if ((updated_notify_data[item].type == 'probe') && (updated_notify_data[item].label == probe_label)) {
-				updated_notify_data[item].req = false;
-				break;
-			};
-		};
+		// If simple notify is unchecked, then remove notification request.
+		pushNotifyUpdate(updates, probe_label, 'probe', { 'req' : false });
 	};
-
-	// Reset action variables
-	shutdown = false;
-	keepWarm = false;
-	reignite = false;
 
 	// If HIGH limit notify on temperature is set, get the data and update the notification structure
 	if ($("#"+probe_label +"_limit_high_temp").is(':checked')) {
 		var target_temp = $("#"+probe_label+"_high_limit_tempInputId").val();
 		var current_temp = document.getElementById(probe_label+"_temp").innerHTML;
-		for (item in updated_notify_data) {
-			if ((updated_notify_data[item].type == 'probe_limit_high') && (updated_notify_data[item].label == probe_label)) {
-				if ($("#"+probe_label +"_high_limit_shutdown").is(':checked')){
-					shutdown = true;
-				};
-				updated_notify_data[item].target = parseInt(target_temp);
-				updated_notify_data[item].shutdown = shutdown;
-				updated_notify_data[item].req = true;
-				// Mark as already triggered if the target value is greater than the current value
-				if (parseInt(current_temp) > parseInt(target_temp)) {
-					updated_notify_data[item].triggered = true;
-				} else {
-					updated_notify_data[item].triggered = false;
-				};
-				//console.log(probeGauges[probe_label].getValue());
-				//console.log('Updated High Limit Notify Temp Settings:');
-				//console.log(updated_notify_data[item]);
-				break;
-			};
-		};
+		pushNotifyUpdate(updates, probe_label, 'probe_limit_high', {
+			'target' : parseInt(target_temp),
+			'shutdown' : $("#"+probe_label +"_high_limit_shutdown").is(':checked'),
+			'req' : true,
+			// Mark as already triggered if the target value is greater than the current value
+			'triggered' : parseInt(current_temp) > parseInt(target_temp)
+		});
 	} else {
-		// If HIGH limit notify is unchecked, then remove notification request. 
-		for (item in updated_notify_data) {
-			if ((updated_notify_data[item].type == 'probe_limit_high') && (updated_notify_data[item].label == probe_label)) {
-				updated_notify_data[item].req = false;
-				break;
-			};
-		};
+		// If HIGH limit notify is unchecked, then remove notification request.
+		pushNotifyUpdate(updates, probe_label, 'probe_limit_high', { 'req' : false });
 	};
-
-	// Reset action variables
-	shutdown = false;
-	keepWarm = false;
-	reignite = false;
 
 	// If LOW limit notify on temperature is set, get the data and update the notification structure
 	if ($("#"+probe_label +"_limit_low_temp").is(':checked')) {
 		var target_temp = $("#"+probe_label+"_low_limit_tempInputId").val();
 		var current_temp = document.getElementById(probe_label+"_temp").innerHTML;
-		for (item in updated_notify_data) {
-			if ((updated_notify_data[item].type == 'probe_limit_low') && (updated_notify_data[item].label == probe_label)) {
-				if ($("#"+probe_label +"_low_limit_shutdown").is(':checked')){
-					shutdown = true;
-				};
-				if ($("#"+probe_label +"_low_limit_shutdown").is(':checked')){
-					reignite = true;
-				};
-				updated_notify_data[item].target = parseInt(target_temp);
-				updated_notify_data[item].shutdown = shutdown;
-				updated_notify_data[item].reignite = reignite;
-				updated_notify_data[item].req = true;
-				// Mark as already triggered if the target value is less than the current value
-				if (parseInt(current_temp) < parseInt(target_temp)) {
-					updated_notify_data[item].triggered = true;
-				} else {
-					updated_notify_data[item].triggered = false;
-				};
-				//console.log(probeGauges[probe_label].getValue());
-				//console.log('Updated Low Limit Notify Temp Settings:');
-				//console.log(updated_notify_data[item]);
-				break;
-			};
-		};
+		pushNotifyUpdate(updates, probe_label, 'probe_limit_low', {
+			'shutdown' : $("#"+probe_label +"_low_limit_shutdown").is(':checked'),
+			// PRESERVED AS-IS: reignite has always read the _low_limit_shutdown
+			// checkbox, never the _low_limit_reignite one the modal renders
+			// (_macro_dash_basic.html:238). Not changed here -- that is a
+			// behaviour fix, not part of routing this write per-entry.
+			'reignite' : $("#"+probe_label +"_low_limit_shutdown").is(':checked'),
+			'target' : parseInt(target_temp),
+			'req' : true,
+			// Mark as already triggered if the target value is less than the current value
+			'triggered' : parseInt(current_temp) < parseInt(target_temp)
+		});
 	} else {
-		// If LOW limit notify is unchecked, then remove notification request. 
-		for (item in updated_notify_data) {
-			if ((updated_notify_data[item].type == 'probe_limit_low') && (updated_notify_data[item].label == probe_label)) {
-				updated_notify_data[item].req = false;
-				break;
-			};
-		};
+		// If LOW limit notify is unchecked, then remove notification request.
+		pushNotifyUpdate(updates, probe_label, 'probe_limit_low', { 'req' : false });
 	};
 
-    var postdata = { 
-        'notify_data' : updated_notify_data
-    };
-
-	//console.log(updated_notify_data);
-
-	$.ajax({
-        url : '/api/control',
-        type : 'POST',
-        data : JSON.stringify(postdata),
-        contentType: "application/json; charset=utf-8",
-        traditional: true,
-        success: function (data) {
-            console.log('Notification Settings Sent: ' + data.control);
-        }
-    });
+	sendNotifyUpdates(updates, 'Notification Settings Sent: ');
 };
 
 // Cancel Notification Request
 function cancelNotify(probe_label) {
-	// Send to server
-	var updated_notify_data = JSON.parse(JSON.stringify(notify_data)); // Copy notify_data into a new variable
+	// Every entry sharing this label -- the target and both limit alerts.
+	var updates = [];
 
-	for (item in updated_notify_data) {
-		if (updated_notify_data[item].label == probe_label) {
-			updated_notify_data[item].req = false;  // Set request to false
-			updated_notify_data[item].shutdown = false;  // Set shutdown to false
-			updated_notify_data[item].keep_warm = false;  // Set keep_warm to false
-			updated_notify_data[item].target = 0;  // Set target to 0
+	for (item in notify_data) {
+		if (notify_data[item].label == probe_label) {
+			// Addressed straight from the live array, so no existence check.
+			updates.push({
+				'label' : probe_label,
+				'type' : notify_data[item].type,
+				'fields' : {
+					'req' : false,  // Set request to false
+					'shutdown' : false,  // Set shutdown to false
+					'keep_warm' : false,  // Set keep_warm to false
+					'target' : 0  // Set target to 0
+				}
+			});
 		};
 	};
 
-    var postdata = { 
-        'notify_data' : updated_notify_data
-    };
-
-	$.ajax({
-        url : '/api/control',
-        type : 'POST',
-        data : JSON.stringify(postdata),
-        contentType: "application/json; charset=utf-8",
-        traditional: true,
-        success: function (data) {
-            console.log('Notification Cancel Sent: ' + data.control);
-        }
-    });
+	sendNotifyUpdates(updates, 'Notification Cancel Sent: ');
 
 };
 

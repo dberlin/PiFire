@@ -1,6 +1,6 @@
 from flask import request, jsonify, abort
 from common.common import WriteKind, write_log, deep_update, read_generic_json
-from common.control_delta import control_delta
+from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
 from common.datastore_accessors import (
     read_settings,
     write_settings,
@@ -234,11 +234,17 @@ def _api_post_control(settings, request_json):
 
     A posted patch is ALREADY a statement of intent -- the client sent only what
     it means -- so it needs no reduction and no client change; it is wrapped, not
-    rewritten. Two members are special:
+    rewritten. Three members are special, all handled by notify_ops_from_post()
+    so this door and the Socket.IO one cannot drift:
 
-      * `notify_data` travels WHOLE (an omitted entry is a deletion, not silence
-        -- web-react/src/helpers/notify/notifyApi.ts), so it becomes an explicit
-        notify.replace op rather than an implicit array swap;
+      * `notify_updates` is the way to change notifications: one patch per
+        addressed entry ({label, type, fields}), applied against live state, so
+        a concurrent writer touching a different entry or field survives;
+      * `notify_data` travels WHOLE (an omitted entry is a deletion, not
+        silence), so it becomes an explicit notify.replace op rather than an
+        implicit array swap. It cannot express which fields the client meant,
+        so it CLOBBERS a concurrent write to the same array -- retained only
+        for clients that already speak it; post `notify_updates` instead;
       * `timer` is refused. start/paused/end are one countdown and the control
         code branches on their combinations, so a value computed from a read
         that cannot see the write queue is exactly the race this endpoint used
@@ -254,10 +260,14 @@ def _api_post_control(settings, request_json):
             }
         ), 400
     try:
-        entries = request_json.pop("notify_data", None)
-        ops = [{"op": "notify.replace", "entries": entries}] if entries is not None else None
-        write_control(control_delta(set_values=request_json, ops=ops), WriteKind.DELTA, origin="app")
+        members, ops = notify_ops_from_post(request_json)
+        write_control(control_delta(set_values=members, ops=ops), WriteKind.DELTA, origin="app")
         return jsonify({"control": "success", "result": "success", "message": "Settings updated successfully."}), 201
+    except ControlDeltaError as exc:
+        # A malformed patch is the CLIENT's error and is named as such, rather
+        # than falling into the generic 201 below where a caller cannot tell a
+        # rejected request from an accepted one.
+        return jsonify({"control": "error", "result": "error", "message": str(exc)}), 400
     except Exception:
         return jsonify({"control": "error", "result": "error", "message": "Settings update failed."}), 201
 
