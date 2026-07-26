@@ -1073,9 +1073,14 @@ jj desc -m "feat(api-files): JSON listing endpoints for cook files and recipes"
   and the two Flask views behind `GET /api/files/cookfiles/detail` and `GET /api/files/cookfiles/chart`.
 - Consumes: `file_mgmt.cookfile.read_cookfile`, `common.app.prepare_annotations` / `prepare_event_totals` / `classify_cookfile_error`, `common.common.epoch_to_time`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
-Create `tests/web/test_api_files_cookfile_read.py`. Import `_isolated_folders` and `_write_cookfile` by copying the fixture block from `test_api_files_listing.py` (module-scoped fixtures do not cross modules), then:
+Create `tests/web/test_api_files_cookfile_read.py`. **CORRECTED:** the shared
+`api_files_client` / `api_files_folders` fixtures live in `tests/web/conftest.py` (where
+pytest fixtures belong) and the archive builders in `tests/web/archive_builders.py`, so
+nothing is copied between modules. `page.request.get(...)` below is
+`client.get(...)`, `resp.status` is `resp.status_code`, `resp.json()` is
+`resp.get_json()`. Draft, translated:
 
 ```python
 def test_detail_returns_metadata_events_and_comments(live_server, page, _isolated_folders):
@@ -1187,7 +1192,7 @@ def test_an_old_version_archive_is_422_with_errortype_version(live_server, page,
     assert resp.json()["data"]["errortype"] == "version"
 ```
 
-- [ ] **Step 2: Add `_require_file` to `blueprints/api_files/routes.py`**
+- [x] **Step 2: Add `_require_file` to `blueprints/api_files/routes.py`**
 
 ```python
 from common.file_browser import resolve_managed_file
@@ -1215,7 +1220,7 @@ def require_file(name, *, must_exist=True):
 
 (add `import os` at the top).
 
-- [ ] **Step 3: Write `blueprints/api_files/cookfile_api.py`**
+- [x] **Step 3: Write `blueprints/api_files/cookfile_api.py`**
 
 ```python
 """Cook-file endpoint handlers for /api/files/cookfiles/*.
@@ -1299,7 +1304,7 @@ def chart_payload(struct):
     }
 ```
 
-- [ ] **Step 4: Register the two routes in `blueprints/api_files/routes.py`**
+- [x] **Step 4: Register the two routes in `blueprints/api_files/routes.py`**
 
 ```python
 from . import cookfile_api
@@ -1329,7 +1334,7 @@ def cookfile_chart():
     return jsonify(cookfile_api.chart_payload(struct)), 200
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit** (24 passed)
 
 ```bash
 QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/test_api_files_cookfile_read.py -q
