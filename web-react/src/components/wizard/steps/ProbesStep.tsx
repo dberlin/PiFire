@@ -13,7 +13,7 @@ export function ProbesStep({ state, working, onChange, baseUrl }: ProbesStepProp
   const setProbeMap = (probe_map: WizardWorking["probe_map"]) =>
     onChange({ ...working, probe_map });
   return (
-    <div className="pf-wizard-step" data-step="probes">
+    <div className="pf-wizard-step pf-probes-surface" data-step="probes">
       <h2 className="pf-wizard-step-title">Probes</h2>
       <label className="pf-field">
         <span className="pf-field-label">Temp Units</span>

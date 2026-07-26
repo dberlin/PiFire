@@ -11,6 +11,7 @@ import { validateBusKinds } from "../../../helpers/wizard/wizardApi";
 import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { DeviceForm } from "./DeviceForm";
+import "./probes.css";
 
 export interface DevicesCardProps {
   probeMap: ProbeMap;

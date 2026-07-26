@@ -4,6 +4,7 @@ import { describe, expect, it } from "@rstest/core";
 
 const WIZARD_DIR = join("src", "components", "wizard");
 const WIZARD_CSS = join(WIZARD_DIR, "wizard.css");
+const PROBES_CSS = join(WIZARD_DIR, "probes", "probes.css");
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -71,7 +72,14 @@ describe("wizard stylesheet coverage", () => {
     .map((f) => readFileSync(f, "utf8"))
     .join("\n");
   const anywhere = declaredClasses(allCss);
-  const inWizardCss = declaredClasses(readFileSync(WIZARD_CSS, "utf8"));
+  // The probe-editing vocabulary lives in probes/probes.css so it can travel to
+  // /settings/probes, which does not render inside .pf-wizard and does not
+  // import wizard.css. Both files are wizard-owned; neither may push a rule out
+  // to a stylesheet some other surface might refactor away.
+  const inWizardCss = new Set([
+    ...declaredClasses(readFileSync(WIZARD_CSS, "utf8")),
+    ...declaredClasses(readFileSync(PROBES_CSS, "utf8")),
+  ]);
 
   it("finds the classes it is supposed to be checking", () => {
     expect(used.size).toBeGreaterThanOrEqual(51);
@@ -112,7 +120,29 @@ describe("wizard stylesheet coverage", () => {
     expect(block).toContain("animation: none");
   });
 
-  it("scopes its .pf-probes-card override under .pf-wizard", () => {
-    expect(readFileSync(WIZARD_CSS, "utf8")).toContain(".pf-wizard .pf-probes-card");
+  it("scopes its .pf-probes-card override under .pf-probes-surface, not .pf-wizard", () => {
+    const css = readFileSync(PROBES_CSS, "utf8");
+    expect(css).toContain(".pf-probes-surface .pf-probes-card");
+    expect(readFileSync(WIZARD_CSS, "utf8")).not.toContain(".pf-wizard .pf-probes-card");
+  });
+
+  it("is imported by the two cards, so it reaches every surface that renders them", () => {
+    for (const file of ["DevicesCard.tsx", "PortsCard.tsx"]) {
+      expect(readFileSync(join(WIZARD_DIR, "probes", file), "utf8")).toContain(
+        'import "./probes.css";',
+      );
+    }
+  });
+
+  // The wizard's chrome buttons (Back/Next/Finish/Exit) and the probe cards'
+  // buttons are the same object family and share ONE rule, which is why that
+  // rule carries both scopes. Moving it to .pf-probes-surface alone -- as an
+  // earlier draft of the plan directed -- would have left every wizard chrome
+  // button as dashboard.css's bare 25px shell, since .pf-probes-surface is on
+  // the probes step only.
+  it("keeps the wizard's own chrome buttons in the shared button rule", () => {
+    const css = readFileSync(PROBES_CSS, "utf8");
+    expect(css).toContain(".pf-wizard .pf-btn,");
+    expect(css).toContain(".pf-probes-surface .pf-btn");
   });
 });

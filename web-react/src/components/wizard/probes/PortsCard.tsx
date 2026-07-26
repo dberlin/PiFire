@@ -8,6 +8,7 @@ import {
 import type { ProbeMap, ProbeProfile } from "../../../helpers/wizard/probeTypes";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { PortForm } from "./PortForm";
+import "./probes.css";
 
 export interface PortsCardProps {
   probeMap: ProbeMap;

@@ -1637,7 +1637,7 @@ assertion about behaviour** — only where rules live and what they are scoped t
 
 **Steps:**
 
-- [ ] **Step 1: Update the guard first, and watch it go red.** In `wizardStyles.test.ts`, the
+- [x] **Step 1: Update the guard first, and watch it go red.** In `wizardStyles.test.ts`, the
       wizard-owned check reads `wizard.css` alone (`:74`, `:94-96`). Make it read the union, and
       add an assertion that the new file is actually reachable:
       ```ts
@@ -1672,20 +1672,38 @@ assertion about behaviour** — only where rules live and what they are scoped t
       Run `bun run test src/components/wizard/wizardStyles.test.ts` — expect failures (no such
       file). That is the point: the guard leads.
 
-- [ ] **Step 2: Create `probes.css` and move the rules.** Cut these blocks out of `wizard.css`
+- [x] **Step 2: Create `probes.css` and move the rules.** Cut these blocks out of `wizard.css`
       **verbatim, comments included**, and paste them into the new file, rewriting `.pf-wizard `
       → `.pf-probes-surface ` in each:
       - the button treatment, `wizard.css:153-192` — `.pf-wizard .pf-btn`,
         `.pf-wizard-step > .pf-btn`, `:hover`, `:disabled`, `.pf-wizard .pf-btn-primary`,
         `.pf-btn-primary:hover`. **Keep `.pf-wizard-step > .pf-btn` in `wizard.css`** — it is
         about the wizard's step column, not about probes.
+        **CORRECTED 2026-07-26: do NOT re-scope this family to `.pf-probes-surface`.** These
+        five rules dress *every* button in the wizard — Back / Next / Finish / Exit Setup as
+        well as the probe cards' — and `.pf-probes-surface` sits on the probes step only.
+        Swapping the scope leaves the whole wizard chrome as `dashboard.css`'s bare 25px
+        shell. They move to `probes.css` with **both** scopes in one selector list
+        (`.pf-wizard .pf-btn, .pf-probes-surface .pf-btn { … }`), which is one rule, no
+        duplicated declarations, and no change to what matches inside the wizard.
+        `wizardStyles.test.ts` pins it.
       - `.pf-module-image` / `-name` / `-description` / `-notes` (`:253-299`) — `DeviceForm.tsx:23-32`
         uses all four. **`.pf-module-details > .pf-module-image` (`:263`) stays in `wizard.css`**:
         `.pf-module-details` is `ModuleCard`'s grid, which no settings surface renders.
       - `.pf-form-actions` (`:312-318`)
       - the whole `/* ---- probes step: DevicesCard / PortsCard ---- */` section (`:320-406`)
       - the whole `/* ---- add/edit dialogs ---- */` section (`:408-443`)
-      - the whole `/* ---- discovery results ---- */` section (`:445-497`)
+      - the whole `/* ---- discovery results ---- */` section (`:445-497`), including
+        `.pf-wizard .pf-field-column > .pf-discovery-group-items`, which BluetoothPicker needs
+        and which the plan's prose did not call out by name.
+
+      **Stays behind, verified 2026-07-26:** `.pf-wizard .pf-modal-scrim { position: fixed }`
+      (`wizard.css`, near the modals section). That override exists because the wizard's
+      nearest positioned ancestor is its scrolling content area, so ConfirmAction's absolute
+      scrim would leave the sticky header and footer at full brightness. `/settings/probes`
+      has no such chrome, and `settings.css:342`'s `.pf-probes-card { position: relative }`
+      makes `dashboard.css`'s `position: absolute` anchor to the card — which is the wanted
+      behaviour there. Re-scoping it would be a regression on both surfaces.
 
       Head the new file with:
       ```css
@@ -1705,7 +1723,7 @@ assertion about behaviour** — only where rules live and what they are scoped t
          scrim depends on and which must NOT be overridden here). */
       ```
 
-- [ ] **Step 3: Apply the hook class.** `ProbesStep.tsx:16`:
+- [x] **Step 3: Apply the hook class.** `ProbesStep.tsx:16`:
       ```tsx
       <div className="pf-wizard-step pf-probes-surface" data-step="probes">
       ```
@@ -1714,20 +1732,20 @@ assertion about behaviour** — only where rules live and what they are scoped t
       it. `data-step="probes"` is untouched, so a spec keyed on that attribute keeps working; one
       keyed on an exact `class` string does not.
 
-- [ ] **Step 4: Import the stylesheet from the two cards.** Add to `DevicesCard.tsx` and
+- [x] **Step 4: Import the stylesheet from the two cards.** Add to `DevicesCard.tsx` and
       `PortsCard.tsx`, after the existing imports and matching `PelletsPage.tsx:17`'s placement
       idiom:
       ```ts
       import "./probes.css";
       ```
 
-- [ ] **Step 5: Run the guard, confirm green.**
+- [x] **Step 5: Run the guard, confirm green.**
       `bun run test src/components/wizard/wizardStyles.test.ts`
       All six assertions must pass, including `"has a non-empty CSS rule for every pf-* class the
       wizard uses"` — that one catches a class dropped during the cut/paste, which is the single
       most likely mistake in this task.
 
-- [ ] **Step 6: Full gate + the whole wizard test surface.**
+- [x] **Step 6: Full gate + the whole wizard test surface.**
       ```sh
       cd web-react && bun run typecheck && bun run lint && bun run test
       ```
@@ -1737,14 +1755,14 @@ assertion about behaviour** — only where rules live and what they are scoped t
       `pluginReact` handles the `.css` side-effect import the same way it does for
       `pellets.css`/`historyChart.css` (it does; those ship today).
 
-- [ ] **Step 7: Look at it.** With the backend up and `bun run dev` running, open `/wizard`,
+- [x] **Step 7: Look at it.** With the backend up and `bun run dev` running, open `/wizard`,
       advance to the Probes step, and confirm the devices/ports cards, the add/edit dialogs and a
       Discover panel are **visually unchanged**. This task is a pure refactor; a visible
       difference means a rule was dropped or mis-scoped. **If the backend is not reachable, say
       so rather than marking this step done** — backlog lesson 2 is that the wizard shipped with
       zero CSS and a fully green suite.
 
-- [ ] **Step 8: Commit.** **Deliverable:** `wizard.css` no longer contains `.pf-wizard .pf-probes-card`;
+- [x] **Step 8: Commit.** **Deliverable:** `wizard.css` no longer contains `.pf-wizard .pf-probes-card`;
       `probes.css` is imported by both cards; every wizard test is green and the Probes step looks
       identical.
 

@@ -150,23 +150,9 @@
 }
 
 /* ---- buttons ---- */
-/* dashboard.css's .pf-btn is a bare shell: 25px bold text, a 2px currentColor
-   border, no padding, no background -- the dashboard's control buttons supply
-   the rest inline, and nothing in the wizard does. This is the complete
-   treatment, matched to shell.css's .pf-timer-btn and dashboard.css's
-   .pf-modal-btn so it reads as the same object family. */
-.pf-wizard .pf-btn {
-  display: inline-flex;
-  border-width: 1px;
-  border-color: rgba(255, 255, 255, 0.14);
-  border-radius: 12px;
-  padding: 9px 18px;
-  background: var(--inset);
-  color: #e8dfd1;
-  font: 700 15px "Barlow";
-  letter-spacing: 0.3px;
-  text-decoration: none;
-}
+/* The treatment itself lives in probes/probes.css, which both the wizard and
+   /settings/probes load; only this layout rule is about the wizard's own step
+   column, so only this one stayed. */
 /* A flex item stretches on the cross axis whatever its own `display` is, so
    inline-flex alone does NOT stop a button filling the width of a flex COLUMN
    -- align-self does. .pf-wizard-step is such a column (the Finish button is a
@@ -174,23 +160,6 @@
    alone. */
 .pf-wizard-step > .pf-btn {
   align-self: flex-start;
-}
-.pf-wizard .pf-btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--text);
-}
-.pf-wizard .pf-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-.pf-wizard .pf-btn-primary {
-  background: var(--accent);
-  border-color: transparent;
-  color: #1a0f04;
-}
-.pf-wizard .pf-btn-primary:hover:not(:disabled) {
-  background: var(--accent-1);
-  color: #1a0f04;
 }
 
 /* ---- route-level error ---- */
@@ -249,14 +218,6 @@
   padding-left: 0;
   min-height: 0;
 }
-/* The tile itself, shared with DeviceForm. */
-.pf-module-image {
-  width: 132px;
-  height: auto;
-  padding: 6px;
-  border-radius: 12px;
-  background: var(--inset);
-}
 /* Scoped to this container: DeviceForm reuses .pf-module-image inside a plain
    flex column (.pf-device-form) where there is no gutter to absolutely position
    into. */
@@ -266,35 +227,6 @@
   left: 0;
   height: 132px;
   object-fit: contain;
-}
-.pf-module-name {
-  margin: 0;
-  color: var(--text);
-  font: 700 18px "Barlow";
-}
-.pf-module-description {
-  margin: 0;
-  color: var(--text-dim);
-  font: 500 14px "Barlow";
-  line-height: 1.6;
-}
-/* Flask badged this: <span class="badge badge-warning">NOTE:</span> then the
-   text in <i class="small"> (_macro_wizard_card.html). ::before content is not
-   part of textContent, so no testing-library or Playwright text assertion sees
-   it. */
-.pf-module-notes {
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--warn) 10%, transparent);
-  color: #ffce6a;
-  font: 500 13px "Barlow";
-  line-height: 1.6;
-}
-.pf-module-notes::before {
-  content: "NOTE: ";
-  font-weight: 700;
-  letter-spacing: 0.5px;
 }
 /* Flask rendered these as a 3-column Setting/Options/Description table
    (_macro_wizard_card.html). React already emits label + control as a .pf-field
@@ -308,191 +240,10 @@
   padding-top: 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-/* Cancel/Save row shared by PortForm and DeviceForm. */
-.pf-form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding-top: 4px;
-}
 
-/* ---- probes step: DevicesCard / PortsCard ---- */
-/* settings.css already gives .pf-probes-card `position: relative`, which it
-   needs as the containing block for ConfirmAction's position:absolute scrim.
-   That rule stays where it is; this adds appearance only, scoped .pf-wizard
-   (0,2,0) so it beats the bare class (0,1,0) on specificity and cannot be
-   reordered out of effect. */
-.pf-wizard .pf-probes-card {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 18px 20px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--card-radius);
-  background: var(--card);
-}
-.pf-wizard .pf-probes-card > h3 {
-  margin: 0;
-  color: var(--text);
-  font: 700 18px "Barlow";
-}
-/* Every inline error on this step, whether it belongs to the card itself or to
-   an add/edit dialog inside it. One rule rather than two identical ones: as two
-   rules in two sections they read as descending specificity (the dialogs' 0,2,0
-   following the card's 0,3,0), which is a real ordering hazard the day either
-   set gains a declaration the other lacks. Listed lowest-specificity first for
-   the same reason. */
-.pf-port-form [role="alert"],
-.pf-device-form [role="alert"],
-.pf-wizard .pf-probes-card > [role="alert"] {
-  margin: 0;
-  color: #ff8b82;
-  font: 600 14px "Barlow";
-}
-/* Same cross-axis stretch problem as the Finish button: "Add Probe" / "Add
-   Device" are direct children of this flex column. */
-.pf-wizard .pf-probes-card > .pf-btn {
-  align-self: flex-start;
-}
-
-.pf-probes-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.pf-probes-table td {
-  padding: 8px 10px 8px 0;
-  vertical-align: middle;
-  color: var(--text);
-  font: 500 14px "Barlow";
-}
-.pf-probes-table tbody tr {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-.pf-probes-table tbody tr:first-child {
-  border-top: none;
-}
-.pf-probes-table td:last-child {
-  text-align: right;
-  white-space: nowrap;
-}
-.pf-probes-table img {
-  border-radius: 8px;
-  background: var(--inset);
-}
-/* Edit/Delete are bare <button type="button"> with no class of their own
-   (PortsCard, DevicesCard). Same recipe as settings.css's
-   `.pf-field-column > button`, so they match the Discover and Scan buttons the
-   pickers already inherit from that rule. */
-.pf-probes-table button {
-  margin-left: 6px;
-  padding: 5px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  background: var(--inset);
-  color: var(--text);
-  font: 600 13px "Barlow";
-  cursor: pointer;
-}
-.pf-probes-table button:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-.pf-probes-table button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ---- add/edit dialogs ---- */
-/* Both are inline panels, not overlays -- they render in the card's own flow
-   (PortsCard, DevicesCard). The accent-tinted border is what marks them as the
-   thing the user is currently working in. */
-.pf-port-form,
-.pf-device-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 16px 18px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: 14px;
-  background: var(--inset);
-}
-/* PortForm's rows carry THREE children -- label, control, and a long
-   .pf-field-hint of verbatim manifest copy (the `type` hint is ~450 characters
-   of markup). settings.css's .pf-field is a space-between ROW, which crushes
-   that hint into a third column. Inside these two dialogs a field is a stack
-   instead. Scoped, so every other .pf-field in the app -- including the ones in
-   .pf-module-deps -- stays a row. */
-.pf-port-form .pf-field,
-.pf-device-form .pf-field {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-}
-.pf-port-form .pf-input,
-.pf-device-form .pf-input {
-  width: 100%;
-}
-/* The dialogs' [role="alert"] treatment lives with the probes-card one above,
-   as a single shared rule. */
-/* DeviceForm reuses .pf-module-image inside a flex column, where the grid
-   placement above is inert and align-items: stretch would otherwise fight the
-   fixed width. */
-.pf-device-form .pf-module-image {
-  width: 96px;
-  align-self: flex-start;
-}
-
-/* ---- discovery results (I2C / USB-serial / Bluetooth scans) ---- */
-.pf-discovery-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 10px;
-  padding: 12px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  background: var(--inset);
-}
-.pf-discovery-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.pf-discovery-group-title {
-  margin: 0;
-  color: var(--text-dim);
-  font: 600 11px "Barlow";
-  letter-spacing: 2px;
-  text-transform: uppercase;
-}
-/* Standalone in BluetoothPicker as well as inside .pf-discovery-panel, so no
-   wrapper is assumed. */
-.pf-discovery-group-items {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-/* Each item is a bare <button type="button"> whose whole job is to be clicked
-   to fill the field above it (DiscoveryPanel, BluetoothPicker). Pills, because
-   the labels are short device identifiers. */
-.pf-discovery-group-items button {
-  padding: 6px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--pill-radius);
-  background: var(--card);
-  color: var(--text);
-  font: 600 13px "Barlow";
-  text-align: left;
-  cursor: pointer;
-}
-.pf-discovery-group-items button:hover {
-  border-color: var(--accent);
-  color: var(--accent-1);
-}
-/* BluetoothPicker puts the result row directly in the field stack, with no
-   .pf-discovery-panel to supply the spacing. */
-.pf-wizard .pf-field-column > .pf-discovery-group-items {
-  margin-top: 8px;
-}
+/* The probes step's own vocabulary -- the two cards, their add/edit dialogs and
+   the discovery panels -- is in probes/probes.css, imported by the cards so it
+   also reaches /settings/probes. */
 
 /* ---- install progress ---- */
 /* This replaces the whole step body once /finish succeeds, and WizardShell hides
