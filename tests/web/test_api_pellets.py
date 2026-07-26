@@ -82,3 +82,40 @@ def test_post_pellets_hopper_check_sets_control_flag(live_server, page):
     assert resp.json()["result"] == "OK"
     drain_control_writes()
     assert read_control_from_server()["hopper_check"] is True
+
+
+def test_hopper_check_does_not_clobber_notify_data(live_server, page):
+    """A pellet action queued in the same control cycle as a notification edit
+    must not revert that edit.
+
+    Two layers have to hold for this to pass, and it is worth being precise
+    about which is doing the work, because the obvious reading is wrong:
+
+    1. `pellets_hopper_check` queues a MINIMAL {"hopper_check": True} partial
+       rather than the whole control dict it read.
+    2. `execute_control_writes` three-way merges every queued partial against
+       the pre-drain blob -- `reduce_control_patch` drops members equal to that
+       ancestor and `merge_notify_data` merges the notify array element-wise
+       (common/datastore_accessors.py, common/common.py).
+
+    Layer 2 alone is already sufficient: this test passed BEFORE the minimal
+    patch landed, because the whole-dict snapshot's notify_data was identical
+    to the ancestor and got reduced away. So this is a regression net for the
+    seam, not a reproducer for a live bug -- do not read a pass here as proof
+    that layer 1 is load-bearing on its own.
+    """
+    before = read_control_from_server()["notify_data"]
+    assert before, "control.notify_data is empty; seed a probe before running this"
+
+    # Simulate the concurrent writer: flip one entry's `req` via the same
+    # minimal-patch route the React notify feature uses.
+    patched = [dict(entry) for entry in before]
+    patched[0]["req"] = not patched[0]["req"]
+    page.request.post(f"{live_server}/api/control", data={"notify_data": patched})
+
+    page.request.post(f"{live_server}/api/pellets", data={"action": "hopper_check", "data": {}})
+    drain_control_writes()
+
+    after = read_control_from_server()
+    assert after["hopper_check"] is True
+    assert after["notify_data"][0]["req"] == patched[0]["req"]

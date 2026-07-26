@@ -23,7 +23,7 @@ from datetime import datetime
 
 from common.app import api_response
 from common.common import WriteKind
-from common.datastore_accessors import read_control, write_control, write_pellet_db
+from common.datastore_accessors import write_control, write_pellet_db
 
 
 def pellets_load_profile(pelletdb, action_data):
@@ -34,9 +34,16 @@ def pellets_load_profile(pelletdb, action_data):
         pelletdb["current"]["date_loaded"] = now
         pelletdb["current"]["est_usage"] = 0
         pelletdb["log"][now] = action_data["profile"]
-        control = read_control()
-        control["hopper_check"] = True
-        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        # MINIMAL patch, not the whole control dict. This handler changes one
+        # boolean, so one boolean is what it queues. execute_control_writes'
+        # reduce_control_patch already drops members equal to the pre-drain
+        # ancestor, so queuing the whole dict is not a correctness bug today --
+        # but it makes every pellet action carry a full stale control snapshot
+        # through the queue and relies on that reduction to undo it. Saying what
+        # we mean is cheaper and does not depend on the drain's defences.
+        # execute_control_writes pops `origin` before patching, so a bare
+        # single-key dict is a legal partial.
+        write_control({"hopper_check": True}, WriteKind.MERGE, origin="app")
         write_pellet_db(pelletdb)
         return api_response(result="OK")
     else:
@@ -44,9 +51,8 @@ def pellets_load_profile(pelletdb, action_data):
 
 
 def pellets_hopper_check(pelletdb, action_data):
-    control = read_control()
-    control["hopper_check"] = True
-    write_control(control, WriteKind.MERGE, origin="app-socketio")
+    # MINIMAL patch -- see pellets_load_profile for the full rationale.
+    write_control({"hopper_check": True}, WriteKind.MERGE, origin="app")
     return api_response(result="OK")
 
 
@@ -95,9 +101,8 @@ def pellets_add_profile(pelletdb, action_data):
     }
     if action_data["add_and_load"]:
         pelletdb["current"]["pelletid"] = profile_id
-        control = read_control()
-        control["hopper_check"] = True
-        write_control(control, WriteKind.MERGE, origin="app-socketio")
+        # MINIMAL patch -- see pellets_load_profile for the full rationale.
+        write_control({"hopper_check": True}, WriteKind.MERGE, origin="app")
         now = str(datetime.now())
         now = now[0:19]
         pelletdb["current"]["date_loaded"] = now
