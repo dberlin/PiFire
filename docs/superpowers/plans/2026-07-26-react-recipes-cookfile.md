@@ -2518,7 +2518,7 @@ of old uuid dirs is still there. The shipped test asserts on the per-cook entry
   and, in `cookfileApi.ts`, `CookFileDetail` / `CookFileChartData` / `CookFileComment` / `CookFileAsset` / `CookFileError` plus one function per E3-E16.
 - Consumes: E1-E16.
 
-- [ ] **Step 1: `fileTypes.ts`**
+- [x] **Step 1: `fileTypes.ts`**
 
 ```ts
 /** One row of a managed-folder listing (GET /api/files/{cookfiles,recipes}).
@@ -2558,7 +2558,7 @@ export const PER_PAGE_CHOICES = [5, 10, 25, 50, 100] as const;
 export const FALLBACK_THUMB = "/static/img/pifire-cf-thumb.png";
 ```
 
-- [ ] **Step 2: `filesApi.ts`**
+- [x] **Step 2: `filesApi.ts`**
 
 ```ts
 import { FALLBACK_THUMB, type FileKind, type FileListing } from "./fileTypes";
@@ -2605,7 +2605,7 @@ export async function fetchFileListing(
 }
 ```
 
-- [ ] **Step 3: `filesApi.test.ts`**
+- [x] **Step 3: `filesApi.test.ts`**
 
 ```ts
 import { expect, rs, test } from "@rstest/core";
@@ -2645,7 +2645,7 @@ test("thumbnailUrl prefixes a relative thumbnail and falls back when empty", () 
 });
 ```
 
-- [ ] **Step 4: `cookfileApi.ts`**
+- [x] **Step 4: `cookfileApi.ts`**
 
 Types first — every field verified against the endpoint payloads in Tasks 3-7:
 
@@ -2892,7 +2892,7 @@ export const assetThumbUrl = (parentId: string, name: string, baseUrl = BASE_URL
   `${baseUrl}/static/img/tmp/${parentId}/thumbs/${name}`;
 ```
 
-- [ ] **Step 5: `cookfileApi.test.ts` — cover the error contract, not just the happy path**
+- [x] **Step 5: `cookfileApi.test.ts` — cover the error contract, not just the happy path**
 
 At minimum:
 - `fetchCookFileDetail` returns the parsed body on 200.
@@ -2923,7 +2923,7 @@ test("download urls percent-encode names with spaces and hashes", () => {
 });
 ```
 
-- [ ] **Step 6: Gate and commit**
+- [x] **Step 6: Gate and commit**
 
 ```bash
 cd web-react

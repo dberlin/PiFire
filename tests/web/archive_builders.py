@@ -69,7 +69,16 @@ def write_cookfile(history_dir, title, *, version=None, comments=None, assets=No
         },
         "graph_data.json": {
             "time_labels": [start_ms, now_ms] if numeric_times else ["12:00:00", "12:05:00"],
-            "chart_data": [{"label": "Grill", "borderColor": "#f00", "data": [225, 230]}],
+            "chart_data": [
+                {
+                    "label": "Grill",
+                    "borderColor": "#f00",
+                    "hidden": False,
+                    #  prepare_chartdata appends {"x": epoch_ms, "y": temp} points
+                    #  (file_mgmt/cookfile.py:449-463), not bare numbers.
+                    "data": [{"x": start_ms, "y": 225}, {"x": now_ms, "y": 230}],
+                }
+            ],
             "probe_mapper": {"probes": {"grill1": 0}, "targets": {}, "primarysp": {}},
         },
         "raw_data.json": [
