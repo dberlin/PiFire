@@ -21,6 +21,7 @@ from common.backups import read_pellet_db_file, backup_settings, backup_pellet_d
 from common.system import reboot_system, shutdown_system, restart_scripts, gather_system_info
 from common.defaults import default_settings, default_control
 from common.app import allowed_file
+from common.pellets_actions import clear_pellet_db
 from common.server_status import set_server_status, get_server_status
 from common.settings_schema import SettingsValidationError
 from . import admin_bp
@@ -112,7 +113,7 @@ def _admin_setting_clearpelletdb(ctx):
     response = request.form
     if response["clearpelletdb"] == "true":
         write_log("Clearing Pellet Database.")
-        os.system("rm pelletdb.json")
+        clear_pellet_db()
 
 
 def _admin_setting_clearpelletdblog(ctx):
@@ -130,8 +131,6 @@ def _admin_setting_factorydefaults(ctx):
         write_log("Resetting Settings, Control and History to factory defaults.")
         flush_history()
         flush_control()
-        os.system("rm settings.json")
-        os.system("rm pelletdb.json")
         settings = default_settings()
         write_settings(settings)
         # flush_control() above already OVERWROTE the blob with default_control().

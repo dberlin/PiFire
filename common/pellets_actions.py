@@ -25,6 +25,24 @@ from common.app import api_response
 from common.common import WriteKind
 from common.control_delta import control_delta
 from common.datastore_accessors import write_control, write_pellet_db
+from common.defaults import default_pellets
+
+
+def clear_pellet_db():
+    """Reset the pellet database to defaults -- the admin "Clear Pellet
+    Database" action, shared by the admin page and the Socket.IO admin channel.
+
+    Both transports used to run ``os.system("rm pelletdb.json")`` here. That
+    worked when the pellet database WAS that file: deleting it made the next
+    read_pellet_db_file() fall back to default_pellets(). SQLite is the store
+    now (pelletdb.json only ever exists if someone runs
+    scripts/export-pelletdb-json.py), so the rm removed nothing, the live blob
+    was left untouched, and the action logged success while doing nothing.
+    Reseeding the blob with default_pellets() is what that rm used to mean.
+    """
+    pelletdb = default_pellets()
+    write_pellet_db(pelletdb)
+    return pelletdb
 
 
 def pellets_load_profile(pelletdb, action_data):

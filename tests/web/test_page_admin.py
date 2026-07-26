@@ -47,8 +47,8 @@ scope + autouse, active for the ENTIRE module):
   function replacement: the real body (and its subprocess.run/os.system
   calls) never executes at all, regardless of `real_hw`.
 - Also patches the shared `os.system` (used directly, unconditionally, by
-  the `clearevents`/`clearpelletdb`/`delete_logs`/`factorydefaults`
-  sub-actions for `rm ...` calls) to a recording no-op. Since `app.py` runs
+  the `clearevents`/`delete_logs` sub-actions for `rm ...` calls) to a
+  recording no-op. Since `app.py` runs
   on a background THREAD in this SAME process (see conftest.py's
   "Thread-shared datastore" docs), patching the process-wide `os` module
   object intercepts the server thread's calls too -- there is only one
@@ -362,14 +362,28 @@ def test_clearevents_neutralized_via_direct_post(live_server, page, hazard_guard
     assert any(c[0] == "os.system" and "events.log" in c[1] for c in new_calls), new_calls
 
 
-def test_clearpelletdb_neutralized_via_direct_post(live_server, page, hazard_guard):
-    calls_before = len(hazard_guard["calls"])
+def test_clearpelletdb_via_direct_post(live_server, page, hazard_guard):
+    """FIXED: this used to run `os.system("rm pelletdb.json")`, a file that
+    does not exist once SQLite is the store -- so "Clear Pellet Database"
+    logged success and left the live pellet blob untouched. It now reseeds
+    the blob with default_pellets()."""
+    pelletdb = read_pellet_db()
+    pelletdb["brands"].append("SHOULD_BE_CLEARED")
+    pelletdb["log"]["2024-01-01_000000"] = "seed-log-id"
+    write_pellet_db(pelletdb)
+    assert "SHOULD_BE_CLEARED" in read_pellet_db()["brands"]
 
+    calls_before = len(hazard_guard["calls"])
     resp = page.request.post(f"{live_server}/admin/setting", form={"clearpelletdb": "true"})
 
     assert resp.status == 200
+    cleared = read_pellet_db()
+    assert cleared["brands"] == default_pellets()["brands"]
+    assert "SHOULD_BE_CLEARED" not in cleared["brands"]
+    assert "2024-01-01_000000" not in cleared["log"]
+    # And nothing shells out any more.
     new_calls = hazard_guard["calls"][calls_before:]
-    assert any(c[0] == "os.system" and "pelletdb.json" in c[1] for c in new_calls), new_calls
+    assert not any(c[0] == "os.system" and "pelletdb.json" in c[1] for c in new_calls), new_calls
 
 
 def test_download_logs_via_direct_post(live_server, page, hazard_guard):
@@ -550,9 +564,12 @@ def test_factorydefaults_neutralized(live_server, page, hazard_guard):
     assert "Restarting Server" in resp.text()
     assert hazard_guard["restart_scripts"].call_count >= 1
     new_calls = hazard_guard["calls"][calls_before:]
+    # FIXED: this used to `rm settings.json` and `rm pelletdb.json` -- dead
+    # calls against files that do not exist once SQLite is the store. The
+    # reseed below is what actually restores factory defaults.
     system_calls = [c for c in new_calls if c[0] == "os.system"]
-    assert any("settings.json" in c[1] for c in system_calls), system_calls
-    assert any("pelletdb.json" in c[1] for c in system_calls), system_calls
+    assert not any("settings.json" in c[1] for c in system_calls), system_calls
+    assert not any("pelletdb.json" in c[1] for c in system_calls), system_calls
     assert ("restart_scripts", (), {}) in new_calls
 
     settings = read_settings_from_server()

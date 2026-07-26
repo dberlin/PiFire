@@ -65,7 +65,7 @@ from common.system import (
 )
 from common.api_commands import process_command
 from common.modes import Mode
-from common.pellets_actions import PELLETS_DISPATCH
+from common.pellets_actions import PELLETS_DISPATCH, clear_pellet_db
 from common.app import update_probe_config, save_settings_and_flag_update, api_response
 from common.settings_schema import SettingsValidationError
 from flask import request
@@ -475,7 +475,7 @@ def _post_app_data_admin(settings, type, request):
         return _response(result="OK")
     elif type == "clear_pelletdb":
         write_log("Clearing Pellet Database.")
-        os.system("rm pelletdb.json")
+        clear_pellet_db()
         return _response(result="OK")
     elif type == "clear_pelletdb_log":
         pelletdb = read_pellets_store()
@@ -486,7 +486,6 @@ def _post_app_data_admin(settings, type, request):
     elif type == "factory_defaults":
         flush_history()
         flush_control()
-        os.system("rm settings.json")
         settings = default_settings()
         control = default_control()
         _write_settings(settings, control)

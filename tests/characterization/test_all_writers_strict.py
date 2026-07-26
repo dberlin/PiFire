@@ -31,14 +31,14 @@ conversion, migration matrix) explicitly reseed a canonical
 
 SAFETY (grepped for os.system/subprocess/reboot/shutdown across every module
 this file exercises):
-  - blueprints/admin/routes.py: os.system() at 4 sites (clearevents,
-    clearpelletdb x2 in factorydefaults, delete_logs) + reboot_system()/
-    shutdown_system()/restart_scripts(). The `admin_client` fixture below
-    patches blueprints.admin.routes.{reboot_system,shutdown_system,
-    restart_scripts} and the global os.system, mirroring
-    tests/web/test_page_admin.py's `hazard_guard`. Nothing destructive runs.
-  - blueprints/mobile/socket_io.py: os.system() (clear_events/clear_pelletdb/
-    factory_defaults/recipe_delete) + reboot_system()/shutdown_system()/
+  - blueprints/admin/routes.py: os.system() at 2 sites (clearevents,
+    delete_logs) + reboot_system()/shutdown_system()/restart_scripts(). The
+    `admin_client` fixture below patches
+    blueprints.admin.routes.{reboot_system,shutdown_system,restart_scripts}
+    and the global os.system, mirroring tests/web/test_page_admin.py's
+    `hazard_guard`. Nothing destructive runs.
+  - blueprints/mobile/socket_io.py: os.system() (clear_events/
+    recipe_delete) + reboot_system()/shutdown_system()/
     restart_control()/restart_webapp()/restart_scripts(). The `sio` fixture
     below patches the same module-level names, mirroring
     tests/web/test_socketio_app_data.py's `sio` fixture. Nothing destructive
@@ -161,7 +161,10 @@ def test_admin_boot_unchecked_writes_strict(admin_client):
 def test_admin_factorydefaults_writes_strict(admin_client):
     resp = admin_client.client.post("/admin/setting", data={"factorydefaults": "true"})
     assert resp.status_code == 200
-    assert ("os.system", "rm settings.json") in admin_client.calls
+    # FIXED: the handler used to `rm settings.json`/`rm pelletdb.json` before
+    # reseeding -- dead calls against files that do not exist once SQLite is
+    # the store. The reseed is the whole of the reset now.
+    assert not any(c[0] == "os.system" and ".json" in c[1] for c in admin_client.calls), admin_client.calls
     assert ("restart_scripts", (), {}) in admin_client.calls
     _assert_strict()
 
@@ -291,7 +294,9 @@ def test_socketio_update_settings_writes_strict(sio):
 def test_socketio_admin_factory_defaults_writes_strict(sio):
     resp = sio.mod._post_app_data("admin_action", "factory_defaults")
     assert resp["result"] == "OK"
-    assert ("os.system", "rm settings.json") in sio.calls
+    # FIXED: the handler used to `rm settings.json` before reseeding -- a dead
+    # call against a file that does not exist once SQLite is the store.
+    assert not any(c[0] == "os.system" and "settings.json" in c[1] for c in sio.calls), sio.calls
     _assert_strict()
 
 

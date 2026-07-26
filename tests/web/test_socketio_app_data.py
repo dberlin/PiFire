@@ -341,9 +341,21 @@ def test_post_admin_clear_events(sio):
 
 
 def test_post_admin_clear_pelletdb(sio):
+    """FIXED: this used to run `os.system("rm pelletdb.json")`, a file that
+    does not exist once SQLite is the store -- so the action logged success
+    and left the live pellet blob untouched. It now reseeds the blob with
+    default_pellets(), via the same common/pellets_actions.clear_pellet_db()
+    the admin page calls."""
+    pelletdb = read_pellets_store()
+    pelletdb["brands"].append("SHOULD_BE_CLEARED")
+    write_pellet_db(pelletdb)
+
     resp = sio.mod._post_app_data("admin_action", "clear_pelletdb")
+
     assert resp["result"] == "OK"
-    assert ("os.system", "rm pelletdb.json") in sio.calls
+    cleared = read_pellets_store()
+    assert cleared["brands"] == default_pellets()["brands"]
+    assert not any(c[0] == "os.system" and "pelletdb.json" in c[1] for c in sio.calls), sio.calls
 
 
 def test_post_admin_clear_pelletdb_log(sio):
@@ -363,7 +375,10 @@ def test_post_admin_factory_defaults(sio):
     write_settings_store(settings)
     resp = sio.mod._post_app_data("admin_action", "factory_defaults")
     assert resp["result"] == "OK"
-    assert ("os.system", "rm settings.json") in sio.calls
+    # FIXED: this used to `rm settings.json` -- a dead call against a file that
+    # does not exist once SQLite is the store. The reseed below is what
+    # actually restores factory defaults.
+    assert not any(c[0] == "os.system" and "settings.json" in c[1] for c in sio.calls), sio.calls
     assert read_settings()["globals"]["grill_name"] == default_settings()["globals"]["grill_name"]
 
 
