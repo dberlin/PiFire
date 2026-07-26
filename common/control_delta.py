@@ -204,6 +204,7 @@ def _delete_path(target, path):
 
 
 def _apply_op(control, op, log):
+    log.debug("apply_control_delta: applying %s", op["op"])
     _OP_APPLIERS[op["op"]](control, op, log)
 
 

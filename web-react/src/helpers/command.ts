@@ -63,13 +63,15 @@ export interface CommandClient {
   // on their own they set an expiry action on a timer that is not armed. They
   // used to be actively destructive next to another timer write --
   // /api/set/timer/start/600 followed by /api/set/timer/shutdown/true inside one
-  // control cycle left start/paused/end all ZERO -- which the drain's three-way
-  // merge fixed (tests/characterization/test_process_command_golden.py::
+  // control cycle left start/paused/end all ZERO -- which is now fixed at the
+  // SOURCE: timer writes queue an intent OP the server evaluates against live
+  // state (common/control_delta.py), so two of them in one cycle compose
+  // (tests/characterization/test_process_command_golden.py::
   // test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer).
-  // Use timerStartWithOptions anyway: one gesture, one write, and the server
-  // computes the end. They stay on the interface because the REST paths stay
-  // (the Flask dashboard and mobile still use them) and command.ts is this
-  // app's map of that grammar.
+  // Use timerStartWithOptions anyway, because the server computes the end and
+  // rejects durations the bare form would silently substitute. They stay on the
+  // interface because the REST paths stay (the Flask dashboard and mobile still
+  // use them) and command.ts is this app's map of that grammar.
   timerShutdown(on: boolean): Promise<CommandResult>;
   timerKeepWarm(on: boolean): Promise<CommandResult>;
   system(cmd: SystemCmd): Promise<CommandResult>;
@@ -142,10 +144,11 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
 // It was ALSO built to force ONE write_control() on the server, because the
 // countdown (control.timer) and the flags (control.notify_data) split across
 // two requests in one control cycle used to lose the first. That reason is
-// gone: the drain three-way merges each queued patch against the blob as it
-// stood when it began (common/common.py reduce_control_patch,
-// merge_notify_data). The form is kept on the two reasons above, which have
-// nothing to do with the write seam.
+// gone, at both ends: every timer write now queues a named OP that the server
+// evaluates at DRAIN time against live state rather than a timer state computed
+// from a stale read (common/control_delta.py), so two timer writes in one cycle
+// compose instead of racing. The form is kept on the two reasons above, which
+// have nothing to do with the write seam.
 // --------------------------------------------------------------------------
 
 /** Name the ticked flags for the option segment of the start command; 'none'

@@ -95,3 +95,56 @@ def test_a_future_version_envelope_is_dropped_rather_than_applied(seeded, caplog
     c.SqliteQueue("queue_control_write").push({CONTROL_DELTA_KEY: 99, "set": {"mode": "Hold"}, "origin": "future"})
     dsa.execute_control_writes()
     assert read_control()["mode"] != "Hold"
+
+
+def _cmd(*args, origin="test"):
+    from unittest import mock
+
+    from common import api_commands
+
+    with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=NOW):
+        return api_commands.process_command(action="set", arglist=list(args), origin=origin)
+
+
+def test_stop_then_pause_in_one_cycle_leaves_the_timer_stopped(seeded):
+    control = read_control()
+    control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
+    write_control(control, WriteKind.OVERWRITE, origin="seed")
+    c.SqliteQueue("queue_control_write").flush()
+
+    assert _cmd("timer", "stop")["result"] == "OK"
+    assert _cmd("timer", "pause")["result"] == "OK"
+    dsa.execute_control_writes()
+
+    assert read_control()["timer"] == {"start": 0, "paused": 0, "end": 0}
+
+
+def test_stop_then_resume_in_one_cycle_does_not_bring_back_the_old_end_time(seeded):
+    control = read_control()
+    control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+    write_control(control, WriteKind.OVERWRITE, origin="seed")
+    c.SqliteQueue("queue_control_write").flush()
+
+    assert _cmd("timer", "stop")["result"] == "OK"
+    assert _cmd("timer", "start", "500")["result"] == "OK"
+    dsa.execute_control_writes()
+
+    assert read_control()["timer"] == {"start": NOW, "paused": 0, "end": NOW + 500}
+
+
+def test_start_then_stop_in_one_cycle_leaves_the_timer_stopped(seeded):
+    """Residual 2, through the real commands.
+
+    Note the fourth member: default_control()'s timer is
+    {start, paused, end, shutdown} (common/defaults.py). `shutdown` has one
+    consumer (controller/runtime/modes/base.py) and no timer command has ever
+    written it -- the stop/clear paths disarm notify_data's shutdown flag, not
+    this one -- so timer.clear leaves it alone, exactly as the code it replaced
+    did. Asserted whole rather than by member so a future op that starts
+    touching it cannot slip through.
+    """
+    assert _cmd("timer", "start", "600")["result"] == "OK"
+    assert _cmd("timer", "stop")["result"] == "OK"
+    dsa.execute_control_writes()
+
+    assert read_control()["timer"] == {"start": 0, "paused": 0, "end": 0, "shutdown": False}

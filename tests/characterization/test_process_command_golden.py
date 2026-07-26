@@ -23,8 +23,24 @@ that was never converted at all -- a real, pre-existing bug found while
 auditing common/api_commands.py's set/units writer for schema strictness).
 The `set_units_c`/`set_units_f` golden entries and GOLDEN_SHA256 were
 hand-updated to include the now-correct `pwm.temp_range_list` diff. This is
-the one sanctioned exception to "never regenerate the fixture": a proven bug
+a sanctioned exception to "never regenerate the fixture": a proven bug
 fix, not refactor drift.
+
+DELIBERATE RE-BASELINE (control-write deltas): the timer commands stopped
+queueing a whole control snapshot and now queue an intent ENVELOPE -- a named
+op the drain evaluates against live state (common/control_delta.py). WHAT
+CHANGED: `queued_writes` in exactly six entries -- set_timer_start,
+set_timer_start_default_60, set_timer_start_resume, set_timer_stop,
+set_timer_pause_running, set_timer_pause_not_started -- each swapping its
+"diff" for a "delta". WHY: a whole-dict timer patch built from a read that
+cannot see the write queue is the cross-writer clobber this suite pins twice
+(stop-then-pause and stop-then-resume, below), and no reduction can recover
+intent the payload never carried. WHAT DID NOT CHANGE, and is the proof the
+conversion is behaviour-preserving for a lone writer: `control_diff_after_
+execute` is byte-identical in all six, as are `return`, `arglist_after`,
+`log_calls`, `settings_diff`, `systemq`, `cmd_calls` and `sleeps`. The two
+pause branches now emit the SAME op, which is the point: `timer.pause` picks
+the running-vs-cleared branch in the drain instead of at request time.
 
 WHAT IS OBSERVED (per case, see `_run_case`):
   * the returned dict (result/message/data)
@@ -113,6 +129,7 @@ import common.common as c
 import common.datastore_accessors as dsa
 import common.defaults as defaults
 from common.common import WriteKind
+from common.control_delta import is_control_delta
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_golden.json")
 
@@ -127,7 +144,11 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_g
 # sensor at all -- it refreshes the stored level on a timer -- so the sleep
 # stopped buying a fresher reading and only held a web worker for 3s per call.
 # See common/api_commands.py::_cmd_get_hopper and distance/intervals.py.
-GOLDEN_SHA256 = "5a3702a7f538317fba9f618f3e64b17e025308528ebaaf6c8a71d22b6aff8349"
+#
+# CHANGED AGAIN, DELIBERATELY (control-write deltas, sanctioned exception #3 in
+# the module docstring): the six set_timer_* entries' `queued_writes` only.
+# 5a3702a7... -> 8d110035...
+GOLDEN_SHA256 = "8d1100350e3674678f6796780c0f03611f769f09c56bba828f6c02c63a8cca32"
 
 # Frozen wall clock. The set/timer branches stamp time.time() into control.
 FIXED_NOW = 1700000000.0
@@ -795,8 +816,22 @@ def _run_case(case):
         sleeps = [call.args[0] for call in m_sleep.call_args_list]
 
     # --- observe --------------------------------------------------------
+    # A DELTA envelope is recorded AS-IS, because the envelope IS the
+    # observable: it is exactly what the writer said it meant. A legacy
+    # whole-dict partial is still diffed against pre_control, because a whole
+    # snapshot is not -- diffing an envelope against a ~40-member control dict
+    # would record every control key as [value, "<absent>"], which is noise and
+    # LARGER than the thing it replaces.
     queued = c.SqliteQueue("queue_control_write").list()
-    queued_writes = [{"origin": q.get("origin", "<absent>"), "diff": _diff(pre_control, q)} for q in queued]
+    queued_writes = [
+        {
+            "origin": q.get("origin", "<absent>"),
+            "delta": _normalize({k: v for k, v in q.items() if k != "origin"}),
+        }
+        if is_control_delta(q)
+        else {"origin": q.get("origin", "<absent>"), "diff": _diff(pre_control, q)}
+        for q in queued
+    ]
 
     systemq = c.SqliteQueue("queue_systemq").list()
     dsa.execute_control_writes()
@@ -1124,20 +1159,20 @@ def test_timer_start_with_options_computes_end_from_the_server_clock(seeded):
     assert control["timer"]["paused"] == 0
 
 
-def test_timer_start_with_options_sets_both_flags_in_the_same_write(seeded):
-    """One write_control, carrying the countdown AND both expiry flags.
+def test_timer_start_with_options_queues_one_op_carrying_both_flags(seeded):
+    """One queued write: a single timer.start_with_options op carrying the
+    server-computed duration AND both expiry flags.
 
-    Two writes used to be the bug this form closed: each web-process write
-    queues the whole control dict read from a blob that does not reflect the
-    queue, so the second carried a stale copy of everything the first changed.
-    The drain now reduces each patch against the blob as it stood when it began
-    and merges notify_data element-wise (common/common.py::reduce_control_patch,
-    ::merge_notify_data), so a split arm survives too -- see
+    The SHAPE changed and the "one write" RATIONALE is gone. Two writes used to
+    be the bug this form closed: each web-process write queued the whole control
+    dict read from a blob that does not reflect the queue, so the second carried
+    a stale copy of everything the first changed. Timer writers now queue an
+    intent envelope (common/control_delta.py) the drain evaluates against live
+    state, so a split arm composes just as well -- see
     test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer.
 
-    This test pins the SHAPE, which is still the right one for the reasons in
-    the section header (server-computed end, input rejections): one gesture,
-    one queued patch, both halves of it applied.
+    What is still pinned here is what the form is FOR: the end is an offset from
+    the server's own clock, both flags travel with it, and all three land.
     """
     for shutdown, keep_warm, options in (
         (False, False, "none"),
@@ -1156,22 +1191,35 @@ def test_timer_start_with_options_sets_both_flags_in_the_same_write(seeded):
 
         queued = c.SqliteQueue("queue_control_write").list()
         assert len(queued) == 1, f"options={options}"
-        entry = _timer_entry(queued[0])
-        assert entry["shutdown"] is shutdown, f"options={options}"
-        assert entry["keep_warm"] is keep_warm, f"options={options}"
-        assert entry["req"] is True
-        assert queued[0]["timer"]["end"] == FIXED_NOW + 600
-        # The flags are not merely queued -- they survive the drain.
+        assert is_control_delta(queued[0]), f"options={options}"
+        assert queued[0]["ops"] == [
+            {
+                "op": "timer.start_with_options",
+                "at": FIXED_NOW,
+                "seconds": 600,
+                "shutdown": shutdown,
+                "keep_warm": keep_warm,
+            }
+        ], f"options={options}"
+        # The flags are not merely queued -- they survive the drain, and so
+        # does the server-computed end.
         dsa.execute_control_writes()
-        applied = _timer_entry(dsa.read_control())
+        after = dsa.read_control()
+        applied = _timer_entry(after)
         assert (applied["shutdown"], applied["keep_warm"]) == (shutdown, keep_warm), f"options={options}"
+        assert applied["req"] is True, f"options={options}"
+        assert after["timer"]["end"] == FIXED_NOW + 600, f"options={options}"
 
 
 def test_timer_start_with_options_leaves_the_other_notifications_alone(seeded):
-    """notify_data goes back whole: an entry the incoming array omits is treated
-    as a DELETION (common/common.py::merge_notify_data, matching the json_patch
-    array replacement it replaced), so a partial one would delete every probe
-    notification the user has armed."""
+    """Still true, now for a stronger reason.
+
+    notify_data used to go back WHOLE, because an entry the incoming array
+    omitted was read as a DELETION (common/common.py::merge_notify_data,
+    matching the json_patch array replacement it replaced) -- so a partial array
+    would have deleted every probe notification the user had armed. The op
+    addresses ONE entry by (label, type) and never sends the array at all, so
+    there is nothing left for an omission to mean."""
     control = dsa.read_control()
     grill = next(obj for obj in control["notify_data"] if obj["label"] == "Grill" and obj["type"] == "probe")
     grill["req"] = True
@@ -1294,36 +1342,31 @@ def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
 # control dict, read_control() serves the persisted blob and never the queue,
 # so every writer in a cycle sends a full copy built from the same stale read.
 #
-# This is now FIXED at the seam, for the whole control dict. Each patch is
-# reduced against the blob as it stood when the drain began -- the ancestor
-# every writer in the cycle read -- so a member identical to that ancestor
-# carries no evidence its writer touched it and is dropped
-# (common/common.py::reduce_control_patch); notify_data additionally merges
-# element-wise (::merge_notify_data). See
-# tests/characterization/test_control_writes_cross_writer.py.
+# For the timer commands this is now CLOSED at the source rather than patched
+# at the seam. They no longer queue a computed timer state at all: each queues
+# a named OP (common/control_delta.py) which the drain evaluates, in order,
+# against LIVE state. `timer.pause` chooses the running-vs-cleared branch in the
+# drain; `timer.start_or_resume` chooses start-vs-unpause there. So the two
+# reachable pairs below -- stop-then-pause and stop-then-resume, both buttons on
+# screen together while a timer runs -- compose instead of racing, and the
+# undrained result equals the drained one:
+# test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped and
+# test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer.
 #
-# ONE case remains, and it is information-theoretic rather than a gap: a writer
-# whose intent is to restore the value the cycle STARTED with produces a patch
-# indistinguishable from one that never touched it. `timer stop` against an
-# already-zero timer is the live example; it is pinned in
-# test_a_reset_to_the_ancestor_value_cannot_be_distinguished_from_silence.
-# Closing it requires writers to express deltas rather than whole states.
+# That is what retired the client-side one-write-per-gesture guard in
+# web-react/src/components/shell/TimerBar.tsx, and it removes the residual the
+# reduce could not reach: restoring the value the cycle STARTED with used to be
+# indistinguishable from silence (a `timer stop` against an already-zero timer
+# queued a patch equal to the ancestor), because the payload never carried the
+# intent. An op is nothing but intent.
 #
-# One more case is NOT closed, and it is the reason the timer UI still refuses
-# a second write until the socket republishes
-# (web-react/src/components/shell/TimerBar.tsx). control['timer'] is reduced
-# WHOLE rather than member-by-member (common.common.CONTROL_COUPLED_MEMBERS),
-# so two writers that BOTH compute a timer state still resolve last-wins on the
-# whole object. Stop-then-pause and stop-then-resume are exactly that pair, and
-# both buttons are on screen together while a timer runs:
-# test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer and
-# test_a_resume_after_a_stop_in_one_cycle_resurrects_the_timer below still show
-# a stopped countdown coming back. The expiry FLAGS no longer come back with it,
-# which is the sharp end of the old bug, but the countdown does.
+# Legacy whole-dict writers still take the reduce path
+# (common/common.py::reduce_control_patch, ::merge_notify_data) and are pinned
+# by tests/characterization/test_control_writes_cross_writer.py.
 #
-# /api/set/timer/start/{seconds}/{options} is a different case: its single-write
-# rationale IS obsolete, and it is kept on its independent ones (server-computed
-# end, input rejections) -- see the section header above.
+# /api/set/timer/start/{seconds}/{options} keeps its two independent reasons
+# (server-computed end, input rejections). Its ONE-WRITE rationale is gone --
+# see the section header above.
 # ---------------------------------------------------------------------------
 
 
@@ -1372,20 +1415,22 @@ def test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer(se
     assert _timer_entry(after)["req"] is True
 
 
-def test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer(seeded):
-    """stop + pause, undrained: the stopped timer comes back.
+def test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped(seeded):
+    """stop + pause, undrained: the stopped timer STAYS stopped. FIXED.
 
-    The pause command reads the pre-stop blob, sees start != 0, and therefore
-    queues that blob's start/end -- so the stop's zeros on control['timer'] are
-    undone and a timer the user stopped returns paused. Both buttons are on
-    screen together in every timer UI, which is what makes this reachable
-    rather than theoretical.
+    This used to resurrect it. The pause command read the pre-stop blob, saw
+    start != 0, and queued that blob's start/end -- so the stop's zeros on
+    control['timer'] were undone and a timer the user stopped came back paused.
+    Both buttons are on screen together in every timer UI, which is what made it
+    reachable rather than theoretical.
 
-    It no longer comes back ARMED. The pause command also carried the pre-stop
-    notify_data, which used to undo the stop's clearing of shutdown/keep_warm
-    and shut the grill down when the resurrected timer expired. The pause did
-    not touch those flags, so the three-way merge does not impose its stale
-    copy of them.
+    Neither command computes a timer state any more. Each queues an OP
+    (common/control_delta.py) the drain evaluates in order against LIVE state,
+    so the pause sees an already-cleared timer and takes _cmd_set_timer's own
+    start == 0 branch, which is a clear -- i.e. nothing. The undrained and
+    drained halves below now agree, which is the invariant this work exists for:
+    N commands in one control cycle produce what the same N produce one cycle
+    apart.
     """
     control = dsa.read_control()
     control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
@@ -1400,11 +1445,12 @@ def test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer(seeded):
     dsa.execute_control_writes()
 
     after = dsa.read_control()
-    assert after["timer"] == {"start": 1000.0, "paused": FIXED_NOW, "end": 2000.0}
+    assert after["timer"] == {"start": 0, "paused": 0, "end": 0}
     assert _timer_entry(after)["shutdown"] is False  # the stop's clearing survives
 
     # Drained between the two commands -- the same clicks, one cycle apart --
-    # the pause reads the stopped blob and the timer stays stopped.
+    # the pause reads the stopped blob and the timer stays stopped. Identical
+    # to the undrained result above, which is the whole point.
     control = dsa.read_control()
     control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
     _timer_notify(shutdown=True, keep_warm=False)(control)
@@ -1420,19 +1466,21 @@ def test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer(seeded):
     assert _timer_entry(after)["shutdown"] is False
 
 
-def test_a_resume_after_a_stop_in_one_cycle_resurrects_the_timer(seeded):
-    """stop + resume, undrained: the other reachable pair, same outcome.
+def test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer(seeded):
+    """stop + resume, undrained: the other reachable pair. FIXED.
 
     The paused bar renders Resume and Stop together, so this is as ordinary a
-    pair of clicks as stop-then-pause. Resume is the bare `start` form, which
-    on a paused timer takes the unpause branch: it reads the pre-stop blob,
-    shifts `end` forward and clears `paused`. That is a timer state the writer
-    computed, so the coupled reduction keeps it whole and it lands after the
-    stop's zeros.
+    pair of clicks as stop-then-pause. Resume used to read the pre-stop blob,
+    take the unpause branch, shift `end` forward and clear `paused` -- a timer
+    state the writer computed, which the coupled reduction kept whole and landed
+    after the stop's zeros, bringing back a countdown the user had stopped.
 
-    Pinned so that a future attempt to drop the client-side one-write-per-gesture
-    guard (web-react/src/components/shell/TimerBar.tsx) fails here rather than
-    on a grill.
+    Resume now queues `timer.start_or_resume`, and the drain picks the branch:
+    the stop's `timer.clear` has already landed, so `paused == 0` and the op
+    arms a FRESH 500s countdown. That is byte-for-byte what the second half of
+    this test asserts for the same two clicks one control cycle apart -- the
+    undrained and drained results agree, which is the invariant this work
+    exists for.
     """
     control = dsa.read_control()
     control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
@@ -1447,7 +1495,7 @@ def test_a_resume_after_a_stop_in_one_cycle_resurrects_the_timer(seeded):
     dsa.execute_control_writes()
 
     after = dsa.read_control()
-    assert after["timer"] == {"start": 1000.0, "paused": 0, "end": 2000.0 - 1500.0 + FIXED_NOW}
+    assert after["timer"] == {"start": FIXED_NOW, "paused": 0, "end": FIXED_NOW + 500}
     # As with the pause pair, the expiry action the stop disarmed stays disarmed.
     assert _timer_entry(after)["shutdown"] is False
 

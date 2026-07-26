@@ -16,6 +16,7 @@ import json
 import time
 
 from common.common import MODE_MAP, WriteKind, convert_settings_units, epoch_to_time, is_float, write_log
+from common.control_delta import control_delta
 from common.modes import Mode
 from common.datastore_accessors import (
     read_control,
@@ -569,7 +570,7 @@ def _parse_timer_expiry_options(spec):
 
 def _timer_start_with_options(data, control, arglist, index, now, kind):
     """
-    Arm a NEW timer for a DURATION, with both expiry flags, in ONE control write.
+    Arm a NEW timer for a DURATION, with both expiry flags.
 
     /api/set/timer/start/{seconds}/{options}
 
@@ -580,17 +581,18 @@ def _timer_start_with_options(data, control, arglist, index, now, kind):
     client whose clock runs behind the Pi's arms an already-expired timer -- and
     an expired timer with 'shutdown' set shuts the grill down mid-cook.
 
-    Both flags and the countdown are set on the SAME control dict and written
-    once. That used to be load-bearing for correctness: splitting them across
-    requests meant the last write of a control cycle silently undid the earlier
-    ones. The drain now three-way merges each queued partial against the blob as
-    it stood when it began, so a split write survives
-    (common/common.py::reduce_control_patch, ::merge_notify_data), and this form
-    is no longer the only safe way to arm a timer with expiry actions.
+    The form's ONE-WRITE rationale is gone, at both ends. It used to be
+    load-bearing that both flags and the countdown travelled on one control
+    dict: splitting them across requests meant the last write of a control
+    cycle silently undid the earlier ones. Timer writers now queue an OP
+    evaluated at drain time against live state (common/control_delta.py), so
+    two timer gestures in one cycle compose instead of racing and nothing is
+    won by bundling them.
 
-    It is still the RIGHT way, and is kept: the server-clock rationale above is
-    entirely independent of the merge, as are this form's input rejections
-    below. One gesture, one write, no reliance on merge subtleties.
+    Two independent reasons keep the endpoint:
+      * the server clock, above -- nothing about the write seam changes it;
+      * the input rejections below (non-numeric / zero / negative duration, and
+        a paused timer), which are request-time answers a queue cannot give.
 
     Deliberately does NOT unpause. The bare `start` form is also the resume
     command and ignores its seconds argument when the timer is paused; doing
@@ -624,15 +626,31 @@ def _timer_start_with_options(data, control, arglist, index, now, kind):
         data["message"] = "Timer is paused. Resume or stop it before starting a new timer."
         return
 
-    control["notify_data"][index]["req"] = True
-    control["notify_data"][index]["shutdown"] = options["shutdown"]
-    control["notify_data"][index]["keep_warm"] = options["keep_warm"]
-    control["timer"]["start"] = now
-    control["timer"]["end"] = now + seconds
-    write_log("Timer started.  Ends at: " + epoch_to_time(control["timer"]["end"]))
-    write_control(control, kind, origin="app")
+    write_log("Timer started.  Ends at: " + epoch_to_time(now + seconds))
+    write_control(
+        control_delta(
+            ops=[
+                {
+                    "op": "timer.start_with_options",
+                    "at": now,
+                    "seconds": seconds,
+                    "shutdown": options["shutdown"],
+                    "keep_warm": options["keep_warm"],
+                }
+            ]
+        ),
+        WriteKind.DELTA,
+        origin="app",
+    )
 
 
+# NOTE: the log line is still computed HERE, from this request's (possibly
+# stale) read, while the STATE change is computed in the drain from live state.
+# They can disagree: two timer commands in one control cycle can log "Timer
+# unpaused" and then correctly take the start branch. That is deliberate --
+# moving the logging into the drain would move it into a different PROCESS and
+# flip `log_calls` in six golden entries, for a diagnostic line. The drain logs
+# the op it actually applied at DEBUG (common/control_delta.py).
 def _cmd_set_timer(data, control, settings, arglist, origin, kind):
     """
     Timer Control
@@ -656,52 +674,38 @@ def _cmd_set_timer(data, control, settings, arglist, origin, kind):
     now = time.time()
 
     if arglist[1] == "start" and arglist[3] is not None:
-        """ The 4-argument form: server-computed end + both expiry flags, one
-            write. Kept separate from the 3-argument form below, which other
-            clients (the Flask dashboard, mobile) still use and which doubles
-            as the unpause command. """
+        """ The 4-argument form: server-computed end + both expiry flags. Kept
+            separate from the 3-argument form below, which other clients (the
+            Flask dashboard, mobile) still use and which doubles as the unpause
+            command. """
         _timer_start_with_options(data, control, arglist, index, now, kind)
     elif arglist[1] == "start":
-        control["notify_data"][index]["req"] = True
-        # If starting new timer
+        seconds = int(float(arglist[2])) if is_float(arglist[2]) else None
+        # The BRANCH is not decided here. `start` is also the unpause command and
+        # which one it is depends on control["timer"]["paused"] -- a value this
+        # read_control() cannot see the queue behind. The drain decides, against
+        # live state; the clock still comes from here, as `at`.
         if control["timer"]["paused"] == 0:
-            control["timer"]["start"] = now
-            if is_float(arglist[2]):
-                seconds = int(float(arglist[2]))
-                control["timer"]["end"] = now + seconds
-            else:
-                control["timer"]["end"] = now + 60
-            write_log("Timer started.  Ends at: " + epoch_to_time(control["timer"]["end"]))
-            write_control(control, kind, origin="app")
-        else:  # If Timer was paused, restart with new end time.
-            control["timer"]["end"] = (control["timer"]["end"] - control["timer"]["paused"]) + now
-            control["timer"]["paused"] = 0
-            write_log("Timer unpaused.  Ends at: " + epoch_to_time(control["timer"]["end"]))
-            write_control(control, kind, origin="app")
+            write_log("Timer started.  Ends at: " + epoch_to_time(now + (seconds if seconds is not None else 60)))
+        else:
+            write_log(
+                "Timer unpaused.  Ends at: "
+                + epoch_to_time((control["timer"]["end"] - control["timer"]["paused"]) + now)
+            )
+        write_control(
+            control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": seconds}]),
+            WriteKind.DELTA,
+            origin="app",
+        )
     elif arglist[1] == "pause":
         if control["timer"]["start"] != 0:
-            control["notify_data"][index]["req"] = False
-            control["timer"]["paused"] = now
             write_log("Timer paused.")
-            write_control(control, kind, origin="app")
         else:
-            control["notify_data"][index]["req"] = False
-            control["timer"]["start"] = 0
-            control["timer"]["end"] = 0
-            control["timer"]["paused"] = 0
-            control["notify_data"][index]["shutdown"] = False
-            control["notify_data"][index]["keep_warm"] = False
             write_log("Timer cleared.")
-            write_control(control, kind, origin="app")
+        write_control(control_delta(ops=[{"op": "timer.pause", "at": now}]), WriteKind.DELTA, origin="app")
     elif arglist[1] == "stop":
-        control["notify_data"][index]["req"] = False
-        control["timer"]["start"] = 0
-        control["timer"]["end"] = 0
-        control["timer"]["paused"] = 0
-        control["notify_data"][index]["shutdown"] = False
-        control["notify_data"][index]["keep_warm"] = False
         write_log("Timer stopped.")
-        write_control(control, kind, origin="app")
+        write_control(control_delta(ops=[{"op": "timer.clear"}]), WriteKind.DELTA, origin="app")
     elif arglist[1] == "shutdown":
         if arglist[2] == "true":
             control["notify_data"][index]["shutdown"] = True

@@ -427,25 +427,25 @@ def test_a_writer_may_add_a_key_the_ancestor_never_had(seeded):
 # ---------------------------------------------------------------------------
 
 
-def test_a_reset_to_the_ancestor_value_cannot_be_distinguished_from_silence(seeded):
-    """KNOWN RESIDUAL, not an oversight: `start` then `stop` in ONE cycle.
+def test_a_reset_to_the_ancestor_value_is_now_distinguishable_because_the_writer_states_it(seeded):
+    """FORMER RESIDUAL, now closed: `start` then `stop` in ONE cycle.
 
-    `timer stop` writes zeros. When the ancestor already held zeros -- i.e. no
-    timer was running when the cycle began -- the stop's patch is byte-identical
-    to the ancestor in every member it touches, so it carries NO evidence that
-    the writer intended anything. No merge strategy can recover intent that was
-    never expressed; the information is simply not in the queue.
+    This was the case no merge strategy could reach. `timer stop` wrote zeros;
+    when the ancestor already held zeros -- no timer running when the cycle
+    began -- the stop's patch was byte-identical to the ancestor in every member
+    it touched, so it carried NO evidence that its writer intended anything. The
+    information was not in the queue to recover. A start and a stop inside one
+    control cycle therefore left the timer RUNNING.
 
-    So a start and a stop inside one control cycle leave the timer RUNNING.
-    Before the whole-dict merge the stop won (it replaced the start's values
-    wholesale) and this specific pair behaved better.
+    The fix was never a better merge, it was a better payload. `timer stop` now
+    queues {"op": "timer.clear"} (common/control_delta.py), which is nothing but
+    intent: there is no ancestor to compare it against and no value that could
+    coincide with one. Both halves below now agree.
 
-    The trade is heavily favourable and deliberate: the old scheme lost data
-    whenever two writers shared a cycle AT ALL -- for every field, on every
-    pair. The new one only loses when the second writer's intent is to restore
-    the value the cycle began with. Closing this last case needs writers to
-    express deltas rather than whole states, which is a call-site change across
-    every writer, not a seam change.
+    This closes the residual for writers that have been CONVERTED. A legacy
+    whole-dict writer still cannot express a restore-to-ancestor, which is why
+    the conversion is a call-site change across every writer rather than a seam
+    change.
     """
     assert _command("timer", "start", "600")["result"] == "OK"
     assert _command("timer", "stop")["result"] == "OK"
@@ -453,12 +453,15 @@ def test_a_reset_to_the_ancestor_value_cannot_be_distinguished_from_silence(seed
     dsa.execute_control_writes()
 
     control = read_control()
-    assert control["timer"]["end"] == FIXED_NOW + 600  # the stop did not land
-    assert _entry(control, "Timer", "timer")["req"] is True
+    assert control["timer"] == {"start": 0, "paused": 0, "end": 0, "shutdown": False}
+    assert _entry(control, "Timer", "timer")["req"] is False
 
     # Given a cycle of its own -- the normal case, since the control loop drains
-    # every iteration -- the stop is expressed against a non-zero ancestor and
-    # lands exactly as before.
+    # every iteration -- the same pair lands identically. That equality IS the
+    # invariant the delta seam exists to restore.
+    assert _command("timer", "start", "600")["result"] == "OK"
+    dsa.execute_control_writes()
+    assert read_control()["timer"]["end"] == FIXED_NOW + 600
     assert _command("timer", "stop")["result"] == "OK"
     dsa.execute_control_writes()
     control = read_control()
