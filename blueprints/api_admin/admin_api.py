@@ -23,6 +23,9 @@ from common.system import gather_system_info
 #: manifest.
 _BACKUP_PREFIXES = {"settings": "PiFire_", "pelletdb": "PelletDB_"}
 
+#: The two kinds a client may name. Exposed so routes validate against one list.
+BACKUP_KINDS = frozenset(_BACKUP_PREFIXES)
+
 LOG_FOLDER = "./logs/"
 
 

@@ -11,12 +11,18 @@ POST /api/files/recipes/run already apply. It is a SECOND line of defence behind
 test stubbing, never a replacement for it -- see tests/web/test_api_admin_system.py.
 """
 
-from flask import current_app, jsonify, request
+import os
+
+from flask import current_app, jsonify, request, send_file
 from werkzeug.exceptions import BadRequest
+from werkzeug.utils import secure_filename
 
 from common.app import api_response
+from common.backups import backup_pellet_db, backup_settings, read_pellet_db_file
 from common.common import WriteKind, write_log
 from common.control_delta import control_delta
+from common.file_browser import resolve_managed_file
+from common.settings_migration import read_settings_file
 from common.datastore_accessors import (
     flush_control,
     flush_history,
@@ -219,6 +225,103 @@ def admin_settings():
         write_control(control_delta(set_values={"settings_update": True}), WriteKind.DELTA, origin="api-admin")
         write_log(f"Debug Mode {'Enabled' if body['debug_mode'] else 'Disabled'}.")
     return jsonify(api_response("OK", None, body)), 200
+
+
+def _require_backup(kind, name):
+    """Resolve a client-supplied backup filename. (path, None) or (None, response).
+
+    The whole reason this blueprint exists in preference to /admin: that one
+    built `backup_path + local_file` by concatenation, so a `../` reached
+    anywhere the process could read -- and since a restore reads a file and
+    writes it over live settings, that was an arbitrary-file-LOAD, not just a
+    read. resolve_managed_file realpaths the join and requires it to stay under
+    the folder.
+    """
+    if kind not in admin_api.BACKUP_KINDS:
+        return None, error("bad_request", 400, field="kind")
+    if not name:
+        return None, error("bad_request", 400, field="file")
+    path = resolve_managed_file(backup_folder(), name)
+    if path is None or not os.path.isfile(path):
+        return None, error("not_found", 404)
+    return path, None
+
+
+@api_admin_bp.route("/backups", methods=["GET"])
+def admin_backups():
+    return jsonify(api_response("OK", None, admin_api.list_backups(backup_folder()))), 200
+
+
+@api_admin_bp.route("/backups/create", methods=["POST"])
+def admin_backup_create():
+    kind = json_body().get("kind")
+    if kind not in admin_api.BACKUP_KINDS:
+        return error("bad_request", 400, field="kind")
+    path = backup_settings() if kind == "settings" else backup_pellet_db(action="backup")
+    #  Only the bare name goes back: the path rule governs responses as well as
+    #  requests, and the client has no use for the server's filesystem layout.
+    return jsonify(api_response("OK", None, {"filename": os.path.basename(path)})), 200
+
+
+@api_admin_bp.route("/backups/download", methods=["GET"])
+def admin_backup_download():
+    args = request.args
+    path, err = _require_backup(args.get("kind"), args.get("file", ""))
+    if err:
+        return err
+    return send_file(path, as_attachment=True, max_age=0)
+
+
+@api_admin_bp.route("/backups/upload", methods=["POST"])
+def admin_backup_upload():
+    kind = request.form.get("kind")
+    if kind not in admin_api.BACKUP_KINDS:
+        return error("bad_request", 400, field="kind")
+    storage = request.files.get("backup")
+    if storage is None or not storage.filename:
+        return error("bad_request", 400, field="backup")
+    if not storage.filename.lower().endswith(".json"):
+        return error("bad_request", 400, field="backup")
+
+    name = secure_filename(storage.filename)
+    #  must_exist=False: an upload names a file that does not exist yet, which
+    #  is exactly why resolve_managed_file separates containment from existence.
+    destination = resolve_managed_file(backup_folder(), name)
+    if destination is None:
+        return error("bad_request", 400, field="backup")
+    storage.save(destination)
+    return jsonify(api_response("OK", None, {"filename": os.path.basename(destination)})), 200
+
+
+@api_admin_bp.route("/backups/restore", methods=["POST"])
+def admin_backup_restore():
+    """Restore settings or the pellet database from a backup in the folder.
+
+    Settings restore restarts the server and the pellet one does not, matching
+    Flask exactly -- settings are read once at boot by processes this request
+    cannot reach, whereas the pellet database is re-read on demand.
+    """
+    body = json_body()
+    kind = body.get("kind")
+    path, err = _require_backup(kind, body.get("file", ""))
+    if err:
+        return err
+
+    if kind == "settings":
+        refusal = require_stopped()
+        if refusal:
+            return refusal
+        #  init=True runs the same version-overlay/upgrade_settings() pipeline a
+        #  live boot applies; without it an older-format backup is written
+        #  straight to disk instead of being migrated forward.
+        write_settings(read_settings_file(filename=path, init=True))
+        write_log(f"Admin: restored settings from {os.path.basename(path)}")
+        set_server_status("restarting")
+        restart_scripts()
+    else:
+        write_pellet_db(read_pellet_db_file(filename=path))
+        write_log(f"Admin: restored pellet database from {os.path.basename(path)}")
+    return jsonify(api_response("OK", None, {"kind": kind, "file": os.path.basename(path)})), 200
 
 
 @api_admin_bp.route("/state", methods=["GET"])
