@@ -85,3 +85,40 @@ test("an unstyled probe is distinguishable from a styled one", async ({ page }) 
   // assertion above it is vacuous.
   expect(out.real["background-color"]).not.toBe(out.ghost["background-color"]);
 });
+
+// The accent switcher, end to end. @theme declares --color-accent once; the two
+// [data-accent] rules override it; the legacy --accent alias follows; every
+// stylesheet's var(--accent) and every Tailwind bg-accent resolve to the same
+// value. Four links, and a break in any of them is invisible on the default
+// accent -- which is the only one the baselines cover.
+test("all three accents resolve through the token bridge", async ({ page }) => {
+  await stubApi(page);
+  await page.goto("/");
+  await expect(page.locator(".pf-shell")).toBeVisible({ timeout: 15000 });
+
+  const seen = await page.evaluate(() => {
+    const out: Record<string, { themed: string; legacy: string; glow: string }> = {};
+    for (const accent of ["ember", "ice", "crimson"]) {
+      document.documentElement.setAttribute("data-accent", accent);
+      const cs = getComputedStyle(document.documentElement);
+      out[accent] = {
+        themed: cs.getPropertyValue("--color-accent").trim(),
+        legacy: cs.getPropertyValue("--accent").trim(),
+        glow: cs.getPropertyValue("--glow").trim(),
+      };
+    }
+    document.documentElement.setAttribute("data-accent", "ember");
+    return out;
+  });
+
+  expect(seen.ember.themed).toBe("#ff8a2b");
+  expect(seen.ice.themed).toBe("#3cc7d0");
+  expect(seen.crimson.themed).toBe("#ff6a5a");
+  // The alias follows the override, which is the whole mechanism.
+  for (const a of ["ember", "ice", "crimson"]) {
+    expect(seen[a].legacy, `--accent did not follow --color-accent on ${a}`).toBe(seen[a].themed);
+    expect(seen[a].glow, `--glow is empty on ${a} -- @theme static did not emit it`).not.toBe("");
+  }
+  // Three distinct accents, not one repeated.
+  expect(new Set(["ember", "ice", "crimson"].map((a) => seen[a].legacy)).size).toBe(3);
+});

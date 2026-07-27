@@ -121,6 +121,12 @@ function ruleBlock(css: string, selector: string): Map<string, string> {
   return out;
 }
 
+// Three places a token can be declared, in cascade order (most specific first).
+// THEME is Tailwind's `@theme static` block, which emits into @layer theme;
+// ROOT is the unlayered alias block that maps every legacy --name onto its
+// --color-* counterpart, and an unlayered declaration beats a layered one, so
+// the [data-accent] overrides below win over @theme's ember defaults.
+const THEME = ruleBlock(CSS, "@theme static");
 const ROOT = ruleBlock(CSS, ":root");
 const OVERRIDES: Record<Accent, Map<string, string>> = {
   ember: new Map(),
@@ -128,10 +134,11 @@ const OVERRIDES: Record<Accent, Map<string, string>> = {
   crimson: ruleBlock(CSS, ':root[data-accent="crimson"]'),
 };
 
-/** Resolve a token for one accent, following a single level of var(). */
+/** Resolve a token for one accent, following var() indirection through the
+ *  legacy alias into @theme. */
 function cssToken(name: string, accent: Accent): Rgba {
   const lookup = (n: string): string => {
-    const v = OVERRIDES[accent].get(n) ?? ROOT.get(n);
+    const v = OVERRIDES[accent].get(n) ?? ROOT.get(n) ?? THEME.get(n);
     if (v === undefined) throw new Error(`theme.css declares no ${n}`);
     const indirect = /^var\((--[\w-]+)\)$/.exec(v);
     return indirect !== null ? lookup(indirect[1]) : v;
@@ -237,6 +244,97 @@ describe("theme.css follows display/qml/Theme.qml", () => {
       unaccounted,
       `Theme.qml colours neither mapped into theme.css nor listed as unconsumed: ${unaccounted.join(", ")}`,
     ).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------- the Tailwind bridge
+
+describe("theme.css tokens", () => {
+  it("uses @theme static so unreferenced tokens are still emitted", () => {
+    // Without `static`, Tailwind tree-shakes theme variables no generated
+    // utility mentions. --color-glow and --color-accent-1/-2 are consumed only
+    // through the legacy var(--glow) / var(--accent-1) names, which Tailwind
+    // cannot see -- they would vanish and the glow would silently disappear.
+    expect(CSS).toContain("@theme static {");
+  });
+
+  const TOKENS: Record<string, string> = {
+    "--color-page": "#0c0a09",
+    "--color-card": "#2c231a",
+    "--color-inset": "#1c1712",
+    "--color-text": "#f4ede2",
+    "--color-text-dim": "#8a7f70",
+    "--color-accent": "#ff8a2b",
+    "--color-accent-mid": "#ff8a2b",
+    "--color-accent-1": "#ffc24b",
+    "--color-accent-2": "#ff5e1a",
+    "--color-glow": "#ff7a1a",
+    "--radius-card": "18px",
+    "--radius-pill": "999px",
+    "--ease-out-cubic": "cubic-bezier(0.33, 1, 0.68, 1)",
+  };
+
+  it("declares every token at its original value", () => {
+    for (const [name, value] of Object.entries(TOKENS)) {
+      expect(CSS, `${name} missing or changed`).toContain(`${name}: ${value};`);
+    }
+  });
+
+  it("keeps the legacy names resolving, so the seven stylesheets need no edit", () => {
+    for (const [legacy, themed] of [
+      ["--page", "--color-page"],
+      ["--card", "--color-card"],
+      ["--inset", "--color-inset"],
+      ["--card-border", "--color-card-border"],
+      ["--text", "--color-text"],
+      ["--text-dim", "--color-text-dim"],
+      ["--label", "--color-label"],
+      ["--probe-label", "--color-probe-label"],
+      ["--setpoint", "--color-setpoint"],
+      ["--ok", "--color-ok"],
+      ["--warn", "--color-warn"],
+      ["--danger", "--color-danger"],
+      ["--track", "--color-track"],
+      ["--cooking", "--color-cooking"],
+      ["--igniter", "--color-igniter"],
+      ["--icon-idle", "--color-icon-idle"],
+      ["--dot-idle", "--color-dot-idle"],
+      ["--row-label", "--color-row-label"],
+      ["--accent-ember", "--color-accent-ember"],
+      ["--accent-ice", "--color-accent-ice"],
+      ["--accent-crimson", "--color-accent-crimson"],
+      ["--card-radius", "--radius-card"],
+      ["--pill-radius", "--radius-pill"],
+      ["--accent", "--color-accent"],
+      ["--accent-mid", "--color-accent-mid"],
+      ["--accent-1", "--color-accent-1"],
+      ["--accent-2", "--color-accent-2"],
+      ["--glow", "--color-glow"],
+    ]) {
+      expect(CSS, `${legacy} is not aliased to ${themed}`).toContain(`${legacy}: var(${themed});`);
+    }
+    // No Tailwind namespace for durations; stays a plain custom property.
+    expect(CSS).toContain("--anim-ms: 250ms;");
+    // --ease-* IS a Tailwind namespace, so the themed name and the legacy name
+    // are the same string. Aliasing it to itself would be a var() cycle.
+    expect(CSS).not.toContain("--ease-out-cubic: var(--ease-out-cubic)");
+  });
+
+  it("keeps all three accents overriding the THEMED name", () => {
+    // The switcher works by attribute on :root. These rules are unlayered, so
+    // they beat @theme's layered value; the --accent alias then follows.
+    for (const [attr, accent, a1, a2, glow] of [
+      ["ice", "#3cc7d0", "#7ef0d2", "#1f9fb8", "#2ec5d3"],
+      ["crimson", "#ff6a5a", "#ff9f43", "#e11d48", "#ff5a4d"],
+    ]) {
+      const at = CSS.indexOf(`:root[data-accent="${attr}"]`);
+      expect(at, `no rule for the ${attr} accent`).toBeGreaterThan(-1);
+      const block = CSS.slice(at, CSS.indexOf("}", at));
+      expect(block).toContain(`--color-accent: ${accent};`);
+      expect(block).toContain(`--color-accent-1: ${a1};`);
+      expect(block).toContain(`--color-accent-2: ${a2};`);
+      expect(block).toContain(`--color-glow: ${glow};`);
+    }
   });
 });
 

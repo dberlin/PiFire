@@ -32,78 +32,143 @@
    it; do not paste the hex into a stylesheet. The same guard test fails on any
    raw literal elsewhere in src/ that equals a Theme.qml value.
 
-   Accent is swappable (Ember/Ice/Crimson) via [data-accent] on :root. */
-:root {
+   Accent is swappable (Ember/Ice/Crimson) via [data-accent] on :root.
+
+   `static` forces every variable to be emitted. Without it Tailwind
+   tree-shakes theme variables that no generated utility references, and
+   --color-glow / --color-accent-1 / --color-accent-2 are reached only through
+   the legacy var() names below -- which Tailwind cannot see. They would vanish
+   and the glow and the gauge's gradient stops would silently disappear.
+
+   Namespaces matter: --color-* generates bg-/text-/border-, --radius-*
+   generates rounded-, --ease-* generates ease-. A token in no namespace
+   generates no utility, which is why --anim-ms stays a plain property below. */
+@theme static {
   /* Base palette — Theme.qml "Base palette" block. */
-  --page: #0c0a09; /* Theme.page */
-  --card: #2c231a; /* Theme.card */
-  --inset: #1c1712; /* Theme.inset */
-  --card-border: rgba(255, 255, 255, 0.13); /* Theme.cardBorder */
-  --text: #f4ede2; /* Theme.textColor */
-  --text-dim: #8a7f70; /* Theme.dim */
-  --label: #7d7264; /* Theme.label */
-  --probe-label: #b7ac9c; /* Theme.probeLabel */
-  --setpoint: #6cc8ff; /* Theme.setpoint */
-  --ok: #5ec96f; /* Theme.okColor */
-  --warn: #ffb020; /* Theme.warn */
-  --danger: #ff5a4d; /* Theme.dangerColor */
-  --track: #4a4034; /* Theme.trackColor */
-  --cooking: #ffd23f; /* Theme.cookingColor */
+  --color-page: #0c0a09; /* Theme.page */
+  --color-card: #2c231a; /* Theme.card */
+  --color-inset: #1c1712; /* Theme.inset */
+  --color-card-border: rgba(255, 255, 255, 0.13); /* Theme.cardBorder */
+  --color-text: #f4ede2; /* Theme.textColor */
+  --color-text-dim: #8a7f70; /* Theme.dim */
+  --color-label: #7d7264; /* Theme.label */
+  --color-probe-label: #b7ac9c; /* Theme.probeLabel */
+  --color-setpoint: #6cc8ff; /* Theme.setpoint */
+  --color-ok: #5ec96f; /* Theme.okColor */
+  --color-warn: #ffb020; /* Theme.warn */
+  --color-danger: #ff5a4d; /* Theme.dangerColor */
+  --color-track: #4a4034; /* Theme.trackColor */
+  --color-cooking: #ffd23f; /* Theme.cookingColor */
 
   /* System card — Theme.qml "SystemCard tokens", fixed regardless of accent. */
-  --igniter: #ff7a1a; /* Theme.igniterColor */
-  --icon-idle: #57514a; /* Theme.iconIdle */
-  --dot-idle: #4a443c; /* Theme.dotIdle */
-  --row-label: #cfc6b8; /* Theme.rowLabel */
-
-  /* Sizing — Theme.cardRadius / pillRadius / animMs. */
-  --card-radius: 18px;
-  --pill-radius: 999px;
-  --anim-ms: 250ms;
-  --ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
+  --color-igniter: #ff7a1a; /* Theme.igniterColor */
+  --color-icon-idle: #57514a; /* Theme.iconIdle */
+  --color-dot-idle: #4a443c; /* Theme.dotIdle */
+  --color-row-label: #cfc6b8; /* Theme.rowLabel */
 
   /* The three accents as constants, so the accent picker can paint all three
-     swatches at once (only --accent tracks the selection). Theme.accentColor's
-     three branches. */
-  --accent-ember: #ff8a2b;
-  --accent-ice: #3cc7d0;
-  --accent-crimson: #ff6a5a;
+     swatches at once (only --color-accent tracks the selection).
+     Theme.accentColor's three branches. */
+  --color-accent-ember: #ff8a2b;
+  --color-accent-ice: #3cc7d0;
+  --color-accent-crimson: #ff6a5a;
 
-  /* Ember (default).
+  /* Ember (default), overridden per accent below.
 
-     --accent-2 / --accent-mid / --accent-1 are the grill gauge's three arc
-     gradient stops in drawing order -- Theme.arcStop0 / arcStop1 / arcStop2 --
-     which is why the DARK end is "-2" and the LIGHT end is "-1". The names
-     predate the mapping and are kept because six non-gauge rules (the navbar
-     mark, the running-timer button, the wizard primary hover) borrow --accent-1
-     as a light accent tint.
+     A literal, not var(--color-accent-ember), because @theme is compiled: a
+     utility such as bg-accent needs a value Tailwind can resolve at build
+     time. The duplication is safe -- themeTokens.test.ts checks BOTH against
+     Theme.accentColor, so they cannot drift apart silently.
 
-     --glow is Theme.glowColor, an opaque colour: Qt applies the transparency
-     at the usage site (Gauge.qml draws the disc at opacity 0.28, which
-     .pf-dash-glow also does). Baking an alpha into the token dimmed it twice.
-     Two other consumers have no Qt counterpart at all (GrillGauge's arc
+     --color-accent-2 / -mid / -1 are the grill gauge's three arc gradient
+     stops in drawing order -- Theme.arcStop0 / arcStop1 / arcStop2 -- which is
+     why the DARK end is "-2" and the LIGHT end is "-1". The names predate the
+     mapping and are kept because six non-gauge rules (the navbar mark, the
+     running-timer button, the wizard primary hover) borrow --accent-1 as a
+     light accent tint.
+
+     --color-glow is Theme.glowColor, an opaque colour: Qt applies the
+     transparency at the usage site (Gauge.qml draws the disc at opacity 0.28,
+     which .pf-dash-glow also does). Baking an alpha into the token dimmed it
+     twice. Two other consumers have no Qt counterpart at all (GrillGauge's arc
      drop-shadow, and .pf-nav-mark's box-shadow, since Qt has no navbar) and
      pick their own 45% with color-mix at the call site. That alpha is their
      choice, not a copy of anything in Theme.qml. */
-  --accent: var(--accent-ember); /* Theme.accentColor */
-  --accent-mid: #ff8a2b; /* Theme.arcStop1 */
-  --accent-1: #ffc24b; /* Theme.arcStop2 */
-  --accent-2: #ff5e1a; /* Theme.arcStop0 */
-  --glow: #ff7a1a; /* Theme.glowColor */
+  --color-accent: #ff8a2b; /* Theme.accentColor */
+  --color-accent-mid: #ff8a2b; /* Theme.arcStop1 */
+  --color-accent-1: #ffc24b; /* Theme.arcStop2 */
+  --color-accent-2: #ff5e1a; /* Theme.arcStop0 */
+  --color-glow: #ff7a1a; /* Theme.glowColor */
+
+  /* Sizing — Theme.cardRadius / pillRadius. */
+  --radius-card: 18px;
+  --radius-pill: 999px;
+
+  /* --ease-* IS a Tailwind namespace, so this token has no separate legacy
+     name and gets no alias below -- aliasing it to itself would be a cycle. */
+  --ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/* The bridge. Seven stylesheets reference the ORIGINAL names in hundreds of
+ * places and are not rewritten by this change; the accent switcher still works
+ * by attribute. Both keep working because these rules are UNLAYERED, and an
+ * unlayered declaration beats anything in @layer theme whatever its
+ * specificity -- so [data-accent="ice"] below wins over @theme's
+ * --color-accent, and every var(--accent) resolves through this alias to it.
+ *
+ * The direction is deliberate: theme -> legacy, never legacy -> theme. Putting
+ * var(--page) inside @theme would leave Tailwind without a literal for the
+ * utilities that need one. */
+:root {
+  --page: var(--color-page);
+  --card: var(--color-card);
+  --inset: var(--color-inset);
+  --card-border: var(--color-card-border);
+  --text: var(--color-text);
+  --text-dim: var(--color-text-dim);
+  --label: var(--color-label);
+  --probe-label: var(--color-probe-label);
+  --setpoint: var(--color-setpoint);
+  --ok: var(--color-ok);
+  --warn: var(--color-warn);
+  --danger: var(--color-danger);
+  --track: var(--color-track);
+  --cooking: var(--color-cooking);
+
+  --igniter: var(--color-igniter);
+  --icon-idle: var(--color-icon-idle);
+  --dot-idle: var(--color-dot-idle);
+  --row-label: var(--color-row-label);
+
+  --accent-ember: var(--color-accent-ember);
+  --accent-ice: var(--color-accent-ice);
+  --accent-crimson: var(--color-accent-crimson);
+
+  --accent: var(--color-accent);
+  --accent-mid: var(--color-accent-mid);
+  --accent-1: var(--color-accent-1);
+  --accent-2: var(--color-accent-2);
+  --glow: var(--color-glow);
+
+  --card-radius: var(--radius-card);
+  --pill-radius: var(--radius-pill);
+
+  /* No Tailwind namespace for durations, so a plain custom property. */
+  --anim-ms: 250ms;
 }
 :root[data-accent="ice"] {
-  --accent: var(--accent-ice); /* Theme.accentColor */
-  --accent-mid: #35c7d0; /* Theme.arcStop1 */
-  --accent-1: #7ef0d2; /* Theme.arcStop2 */
-  --accent-2: #1f9fb8; /* Theme.arcStop0 */
-  --glow: #2ec5d3; /* Theme.glowColor */
+  --color-accent: #3cc7d0; /* Theme.accentColor */
+  --color-accent-mid: #35c7d0; /* Theme.arcStop1 */
+  --color-accent-1: #7ef0d2; /* Theme.arcStop2 */
+  --color-accent-2: #1f9fb8; /* Theme.arcStop0 */
+  --color-glow: #2ec5d3; /* Theme.glowColor */
 }
 :root[data-accent="crimson"] {
-  --accent: var(--accent-crimson); /* Theme.accentColor */
-  --accent-mid: #ff5a4d; /* Theme.arcStop1 */
-  --accent-1: #ff9f43; /* Theme.arcStop2 */
-  --accent-2: #e11d48; /* Theme.arcStop0 */
-  --glow: #ff5a4d; /* Theme.glowColor */
+  --color-accent: #ff6a5a; /* Theme.accentColor */
+  --color-accent-mid: #ff5a4d; /* Theme.arcStop1 */
+  --color-accent-1: #ff9f43; /* Theme.arcStop2 */
+  --color-accent-2: #e11d48; /* Theme.arcStop0 */
+  --color-glow: #ff5a4d; /* Theme.glowColor */
 }
 
 * {
