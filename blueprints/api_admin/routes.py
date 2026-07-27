@@ -324,6 +324,29 @@ def admin_backup_restore():
     return jsonify(api_response("OK", None, {"kind": kind, "file": os.path.basename(path)})), 200
 
 
+@api_admin_bp.route("/logs", methods=["GET"])
+def admin_logs():
+    return jsonify(api_response("OK", None, {"logs": admin_api.list_logs()})), 200
+
+
+@api_admin_bp.route("/logs/download", methods=["GET"])
+def admin_logs_download():
+    return send_file(admin_api.build_log_archive(), as_attachment=True, max_age=0)
+
+
+@api_admin_bp.route("/logs/delete", methods=["POST"])
+def admin_logs_delete():
+    """Delete every log file.
+
+    Flask runs `os.system("rm logs/*.log")` inside a bare `except:`, so a
+    failure there is indistinguishable from success. This globs server-side and
+    reports what actually went.
+    """
+    removed = admin_api.delete_logs()
+    write_log(f"Admin: deleted {len(removed)} log file(s) via /api/admin/logs/delete")
+    return jsonify(api_response("OK", None, {"removed": removed})), 200
+
+
 @api_admin_bp.route("/state", methods=["GET"])
 def admin_state():
     settings = read_settings()

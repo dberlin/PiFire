@@ -11,7 +11,10 @@ a reimplementation -- there is exactly one place in the tree that knows how to
 power the machine off, and it stays that way.
 """
 
+import datetime
 import os
+import tempfile
+import zipfile
 
 from common.common import read_generic_json
 from common.system import gather_system_info
@@ -114,6 +117,23 @@ def delete_logs(folder=None):
         except OSError:
             continue
     return removed
+
+
+def build_log_archive(folder=None):
+    """Zip every .log into a temp file and return its path.
+
+    Staged in a private mkdtemp rather than a predictable /tmp name: a
+    world-writable, guessable path is how an attacker plants or reads content
+    a later step trusts. The caller send_file()s it; the OS reaps the temp dir.
+    """
+    folder = folder or LOG_FOLDER
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    staging = tempfile.mkdtemp(prefix="pifire-logs-")
+    archive = os.path.join(staging, f"PiFire_Logs_{stamp}.zip")
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in list_logs(folder):
+            zf.write(os.path.join(folder, name), arcname=name)
+    return archive
 
 
 def pip_list():
