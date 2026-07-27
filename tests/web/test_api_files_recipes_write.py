@@ -243,9 +243,9 @@ def test_run_refuses_traversal_and_never_writes_control(client, folders, monkeyp
 # --------------------------------------------------------------------------
 
 
-def _step(food_probes=2):
+def _step(food_probes=2, mode="Smoke"):
     return {
-        "mode": "Smoke",
+        "mode": mode,
         "trigger_temps": {"primary": 0, "food": [0] * food_probes},
         "hold_temp": 0,
         "timer": 0,
@@ -433,3 +433,357 @@ def test_ingredients_refuses_traversal(client, folders):
 
 def test_ingredients_with_no_body_is_400(client, folders):
     assert client.post("/api/files/recipes/ingredients").status_code == 400
+
+
+# --------------------------------------------------------------------------
+# instructions
+# --------------------------------------------------------------------------
+
+
+def test_add_instruction_appends_a_blank_entry(client, folders):
+    name = write_recipe(folders[1], "Brisket")
+    resp = client.post("/api/files/recipes/instructions", json={"file": name, "action": "add"})
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert detail["recipe"]["instructions"] == [{"text": "", "ingredients": [], "assets": [], "step": 0}]
+
+
+def test_update_instruction_replaces_text_ingredients_and_step(client, folders):
+    name = write_recipe(
+        folders[1],
+        "Brisket",
+        ingredients=[{"name": "Sugar", "quantity": "1c", "assets": []}],
+        instructions=[{"text": "Rub", "ingredients": [], "assets": [], "step": 0}],
+    )
+    resp = client.post(
+        "/api/files/recipes/instructions",
+        json={
+            "file": name,
+            "action": "update",
+            "index": 0,
+            "text": "Rub with sugar",
+            "ingredients": ["Sugar"],
+            "step": 1,
+        },
+    )
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    instruction = detail["recipe"]["instructions"][0]
+    assert instruction["text"] == "Rub with sugar"
+    assert instruction["ingredients"] == ["Sugar"]
+    assert instruction["step"] == 1
+    assert instruction["assets"] == []
+
+
+def test_deleting_an_instruction_does_not_touch_ingredients(client, folders):
+    """Nothing cascades from an instruction delete -- unlike ingredients,
+    no other member references an instruction."""
+    name = write_recipe(
+        folders[1],
+        "Brisket",
+        ingredients=[{"name": "Sugar", "quantity": "1c", "assets": []}],
+        instructions=[
+            {"text": "Rub", "ingredients": ["Sugar"], "assets": [], "step": 0},
+            {"text": "Rest", "ingredients": [], "assets": [], "step": 1},
+        ],
+    )
+    resp = client.post("/api/files/recipes/instructions", json={"file": name, "action": "delete", "index": 0})
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert len(detail["recipe"]["instructions"]) == 1
+    assert detail["recipe"]["instructions"][0]["text"] == "Rest"
+    assert detail["recipe"]["ingredients"] == [{"name": "Sugar", "quantity": "1c", "assets": []}]
+
+
+def test_update_instruction_rejects_an_ingredient_name_not_in_the_recipe(client, folders):
+    """Flask does not check this; the React multi-select can only offer real
+    names, so a request carrying an unknown one is a bug in something."""
+    name = write_recipe(
+        folders[1],
+        "Brisket",
+        ingredients=[{"name": "Sugar", "quantity": "1c", "assets": []}],
+        instructions=[{"text": "Rub", "ingredients": [], "assets": [], "step": 0}],
+    )
+    resp = client.post(
+        "/api/files/recipes/instructions",
+        json={
+            "file": name,
+            "action": "update",
+            "index": 0,
+            "text": "Rub",
+            "ingredients": ["Paprika"],
+            "step": 0,
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "ingredients"
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert detail["recipe"]["instructions"][0]["ingredients"] == []
+
+
+def test_instructions_update_out_of_range_index_is_400(client, folders):
+    name = write_recipe(
+        folders[1], "Brisket", instructions=[{"text": "Rub", "ingredients": [], "assets": [], "step": 0}]
+    )
+    resp = client.post(
+        "/api/files/recipes/instructions",
+        json={"file": name, "action": "update", "index": 5, "text": "x", "ingredients": [], "step": 0},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "index"
+
+
+def test_instructions_delete_out_of_range_index_is_400(client, folders):
+    name = write_recipe(
+        folders[1], "Brisket", instructions=[{"text": "Rub", "ingredients": [], "assets": [], "step": 0}]
+    )
+    resp = client.post("/api/files/recipes/instructions", json={"file": name, "action": "delete", "index": 5})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "index"
+
+
+def test_instructions_unknown_action_is_400(client, folders):
+    name = write_recipe(folders[1], "Brisket")
+    resp = client.post("/api/files/recipes/instructions", json={"file": name, "action": "bogus"})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "action"
+
+
+def test_instructions_refuses_traversal(client, folders):
+    resp = client.post("/api/files/recipes/instructions", json={"file": "../../../etc/passwd", "action": "add"})
+    assert resp.status_code == 404
+
+
+def test_instructions_with_no_body_is_400(client, folders):
+    assert client.post("/api/files/recipes/instructions").status_code == 400
+
+
+def test_instructions_write_leaves_comments_json_byte_identical(client, folders):
+    _history, recipe_dir = folders
+    name = write_recipe(recipe_dir, "Brisket")
+    path = recipe_dir + name
+    before = _read_member_bytes(path, "comments.json")
+
+    resp = client.post("/api/files/recipes/instructions", json={"file": name, "action": "add"})
+    assert resp.status_code == 200
+
+    after = _read_member_bytes(path, "comments.json")
+    assert after == before
+
+
+# --------------------------------------------------------------------------
+# steps
+# --------------------------------------------------------------------------
+
+
+def _valid_step_payload(primary=0, food=None, **overrides):
+    payload = {
+        "mode": "Smoke",
+        "message": "",
+        "hold_temp": 0,
+        "timer": 0,
+        "notify": False,
+        "pause": False,
+        "trigger_temps": {"primary": primary, "food": [0, 0] if food is None else food},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_a_step_is_inserted_at_the_index_not_appended(client, folders):
+    """Flask inserts (routes.py:281). A recipe is an ordered program;
+    appending would put a new step after Shutdown."""
+    name = write_recipe(folders[1], "Brisket", steps=[_step(mode="Smoke"), _step(mode="Shutdown")])
+    resp = client.post("/api/files/recipes/steps", json={"file": name, "action": "insert", "index": 0})
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert [s["mode"] for s in detail["recipe"]["steps"]] == ["Smoke", "Smoke", "Shutdown"]
+    assert len(detail["recipe"]["steps"]) == 3
+
+
+def test_an_inserted_step_gets_one_trigger_temp_per_food_probe(client, folders):
+    """Built from metadata.food_probes (routes.py:270-271), not from a
+    neighbouring step -- a neighbour may itself be stale."""
+    name = write_recipe(
+        folders[1],
+        "Brisket",
+        food_probes=3,
+        steps=[{**_step(food_probes=3), "trigger_temps": {"primary": 0, "food": [9, 9]}}],
+    )
+    resp = client.post("/api/files/recipes/steps", json={"file": name, "action": "insert", "index": 0})
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert detail["recipe"]["steps"][0]["trigger_temps"]["food"] == [0, 0, 0]
+
+
+def test_insert_at_len_appends_at_the_end(client, folders):
+    name = write_recipe(folders[1], "Brisket", steps=[_step(mode="Startup")])
+    resp = client.post("/api/files/recipes/steps", json={"file": name, "action": "insert", "index": 1})
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert [s["mode"] for s in detail["recipe"]["steps"]] == ["Startup", "Smoke"]
+
+
+def test_insert_out_of_range_index_is_400(client, folders):
+    name = write_recipe(folders[1], "Brisket", steps=[_step()])
+    resp = client.post("/api/files/recipes/steps", json={"file": name, "action": "insert", "index": 5})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "index"
+
+
+def test_update_step_replaces_every_field(client, folders):
+    name = write_recipe(folders[1], "Brisket", food_probes=2, steps=[_step()])
+    new_step = _valid_step_payload(
+        mode="Hold", primary=225, food=[160, 165], hold_temp=225, timer=30, notify=True, pause=True, message="Wrap it"
+    )
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={"file": name, "action": "update", "index": 0, "step": new_step},
+    )
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    step = detail["recipe"]["steps"][0]
+    assert step["mode"] == "Hold"
+    assert step["hold_temp"] == 225
+    assert step["timer"] == 30
+    assert step["notify"] is True
+    assert step["pause"] is True
+    assert step["message"] == "Wrap it"
+    assert step["trigger_temps"] == {"primary": 225, "food": [160, 165]}
+
+
+@pytest.mark.parametrize("mode", ["Smoke", "Hold", "Startup", "Shutdown"])
+def test_update_step_accepts_every_whitelisted_mode(client, folders, mode):
+    """The editor only offers Smoke/Hold, but Startup and Shutdown are seeded
+    by the recipe defaults and carried by every existing recipe, so a write
+    must still accept all four."""
+    name = write_recipe(folders[1], "Brisket", steps=[_step()])
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={"file": name, "action": "update", "index": 0, "step": _valid_step_payload(mode=mode)},
+    )
+    assert resp.status_code == 200
+
+
+def test_update_step_accepts_zero_as_a_legal_disabled_sentinel(client, folders):
+    """0 is the disabled sentinel for hold_temp and both trigger_temps
+    members -- legal, not "missing"."""
+    name = write_recipe(folders[1], "Brisket", steps=[_step()])
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={
+            "file": name,
+            "action": "update",
+            "index": 0,
+            "step": _valid_step_payload(hold_temp=0, primary=0, food=[0, 0]),
+        },
+    )
+    assert resp.status_code == 200
+
+
+def test_update_step_rejects_an_unknown_mode(client, folders):
+    name = write_recipe(folders[1], "Brisket", steps=[_step()])
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={"file": name, "action": "update", "index": 0, "step": _valid_step_payload(mode="Bogus")},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "mode"
+
+
+@pytest.mark.parametrize("field,value", [("hold_temp", "225"), ("hold_temp", 1.5), ("timer", "30"), ("timer", 1.5)])
+def test_update_step_rejects_a_non_int(client, folders, field, value):
+    name = write_recipe(folders[1], "Brisket", steps=[_step()])
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={"file": name, "action": "update", "index": 0, "step": _valid_step_payload(**{field: value})},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == field
+
+
+@pytest.mark.parametrize("field", ["notify", "pause"])
+def test_update_step_rejects_a_non_bool(client, folders, field):
+    name = write_recipe(folders[1], "Brisket", steps=[_step()])
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={"file": name, "action": "update", "index": 0, "step": _valid_step_payload(**{field: "true"})},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == field
+
+
+def test_update_step_rejects_a_food_list_that_does_not_match_food_probes(client, folders):
+    """A mismatch here is exactly the corruption Task 9's food_probes reshape
+    exists to prevent."""
+    name = write_recipe(folders[1], "Brisket", food_probes=2, steps=[_step(food_probes=2)])
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={"file": name, "action": "update", "index": 0, "step": _valid_step_payload(food=[1, 2, 3])},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "trigger_temps"
+
+
+def test_update_step_rejects_a_non_int_trigger_temp(client, folders):
+    name = write_recipe(folders[1], "Brisket", steps=[_step()])
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={"file": name, "action": "update", "index": 0, "step": _valid_step_payload(primary="225")},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "trigger_temps"
+
+
+def test_update_step_out_of_range_index_is_400(client, folders):
+    name = write_recipe(folders[1], "Brisket", steps=[_step()])
+    resp = client.post(
+        "/api/files/recipes/steps",
+        json={"file": name, "action": "update", "index": 5, "step": _valid_step_payload()},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "index"
+
+
+def test_delete_step(client, folders):
+    name = write_recipe(folders[1], "Brisket", steps=[_step(mode="Startup"), _step(mode="Shutdown")])
+    resp = client.post("/api/files/recipes/steps", json={"file": name, "action": "delete", "index": 0})
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert [s["mode"] for s in detail["recipe"]["steps"]] == ["Shutdown"]
+
+
+def test_delete_step_out_of_range_index_is_400(client, folders):
+    name = write_recipe(folders[1], "Brisket", steps=[_step()])
+    resp = client.post("/api/files/recipes/steps", json={"file": name, "action": "delete", "index": 5})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "index"
+
+
+def test_steps_unknown_action_is_400(client, folders):
+    name = write_recipe(folders[1], "Brisket", steps=[_step()])
+    resp = client.post("/api/files/recipes/steps", json={"file": name, "action": "bogus", "index": 0})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "action"
+
+
+def test_steps_refuses_traversal(client, folders):
+    resp = client.post("/api/files/recipes/steps", json={"file": "../../../etc/passwd", "action": "insert", "index": 0})
+    assert resp.status_code == 404
+
+
+def test_steps_with_no_body_is_400(client, folders):
+    assert client.post("/api/files/recipes/steps").status_code == 400
+
+
+def test_steps_write_leaves_comments_json_byte_identical(client, folders):
+    _history, recipe_dir = folders
+    name = write_recipe(recipe_dir, "Brisket", steps=[_step()])
+    path = recipe_dir + name
+    before = _read_member_bytes(path, "comments.json")
+
+    resp = client.post("/api/files/recipes/steps", json={"file": name, "action": "insert", "index": 0})
+    assert resp.status_code == 200
+
+    after = _read_member_bytes(path, "comments.json")
+    assert after == before

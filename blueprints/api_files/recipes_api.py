@@ -170,3 +170,130 @@ def delete_ingredient(path, index):
             instruction["ingredients"].remove(name)
     ingredients.pop(index)
     return update_json_file_data(recipe, path, "recipe")
+
+
+def add_instruction(path):
+    """Append a blank instruction, mirroring Flask's add/instructions branch."""
+    recipe, status = read_json_file_data(path, "recipe")
+    if status != "OK":
+        return status
+    recipe["instructions"].append({"text": "", "ingredients": [], "assets": [], "step": 0})
+    return update_json_file_data(recipe, path, "recipe")
+
+
+def update_instruction(path, index, text, ingredients, step):
+    """Replace instruction `index`'s text, ingredient list and step.
+
+    Nothing cascades from this write: no other member references an
+    instruction, unlike ingredients.
+
+    `ingredients` must be names the React multi-select could actually offer,
+    i.e. names present in recipe["ingredients"]; the client UI cannot
+    construct anything else, so a request carrying an unknown name is a bug
+    in something upstream, not a client typo to silently accept.
+
+    Returns "OK", "bad_index", "bad_ingredient", or a write status.
+    """
+    recipe, status = read_json_file_data(path, "recipe")
+    if status != "OK":
+        return status
+    instructions = recipe["instructions"]
+    if not 0 <= index < len(instructions):
+        return "bad_index"
+    known_names = {ingredient["name"] for ingredient in recipe["ingredients"]}
+    if any(name not in known_names for name in ingredients):
+        return "bad_ingredient"
+    instructions[index]["text"] = text
+    instructions[index]["ingredients"] = ingredients
+    instructions[index]["step"] = step
+    return update_json_file_data(recipe, path, "recipe")
+
+
+def delete_instruction(path, index):
+    """Pop instruction `index`. Nothing cascades: no other member references
+    an instruction, unlike ingredients.
+    """
+    recipe, status = read_json_file_data(path, "recipe")
+    if status != "OK":
+        return status
+    instructions = recipe["instructions"]
+    if not 0 <= index < len(instructions):
+        return "bad_index"
+    instructions.pop(index)
+    return update_json_file_data(recipe, path, "recipe")
+
+
+def _default_step(food_probes):
+    """A new program step, matching file_mgmt/recipes.py's own defaults."""
+    return {
+        "hold_temp": 0,
+        "message": "",
+        "mode": "Smoke",
+        "notify": False,
+        "pause": False,
+        "timer": 0,
+        "trigger_temps": {"primary": 0, "food": [0] * food_probes},
+    }
+
+
+def insert_step(path, index):
+    """Insert a new default step at `index` -- POSITIONAL, matching Flask
+    (blueprints/recipes/routes.py:281): a recipe is an ordered program, and
+    appending would place the new step after Shutdown.
+
+    The step's trigger_temps.food is sized from metadata.food_probes (Flask
+    does the same, routes.py:270-271), not from a neighbouring step, which
+    may itself be stale.
+
+    index == len(steps) is legal (append at the end); anything past that is
+    not. Returns "OK", "bad_index", or a read/write status.
+    """
+    metadata, status = read_json_file_data(path, "metadata")
+    if status != "OK":
+        return status
+    recipe, status = read_json_file_data(path, "recipe")
+    if status != "OK":
+        return status
+    steps = recipe["steps"]
+    if not 0 <= index <= len(steps):
+        return "bad_index"
+    steps.insert(index, _default_step(metadata["food_probes"]))
+    return update_json_file_data(recipe, path, "recipe")
+
+
+def update_step(path, index, fields):
+    """Replace step `index` with an already-validated payload.
+
+    trigger_temps.food must carry exactly one entry per metadata.food_probes
+    -- the same invariant the food_probes reshape in set_metadata protects.
+    Accepting a mismatched list here would silently reintroduce the
+    corruption that reshape exists to prevent, so it is checked again here
+    against the CURRENT metadata rather than trusted from the caller.
+
+    Returns "OK", "bad_index", "bad_food_probes", or a read/write status.
+    """
+    metadata, status = read_json_file_data(path, "metadata")
+    if status != "OK":
+        return status
+    recipe, status = read_json_file_data(path, "recipe")
+    if status != "OK":
+        return status
+    steps = recipe["steps"]
+    if not 0 <= index < len(steps):
+        return "bad_index"
+    if len(fields["trigger_temps"]["food"]) != metadata["food_probes"]:
+        return "bad_food_probes"
+    steps[index] = fields
+    return update_json_file_data(recipe, path, "recipe")
+
+
+def delete_step(path, index):
+    """Pop step `index`."""
+    recipe, status = read_json_file_data(path, "recipe")
+    if status != "OK":
+        return status
+    steps = recipe["steps"]
+    if not 0 <= index < len(steps):
+        return "bad_index"
+    steps.pop(index)
+    return update_json_file_data(recipe, path, "recipe")

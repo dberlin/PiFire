@@ -496,3 +496,124 @@ def recipe_ingredients():
     if status != "OK":
         return recipes_api.unreadable(status, error)
     return jsonify(api_response("OK")), 200
+
+
+@api_files_bp.route("/recipes/instructions", methods=["POST"])
+def recipe_instructions():
+    body = json_body()
+    path, err = require_file(body.get("file", ""), recipe_folder())
+    if err:
+        return err
+    action = body.get("action")
+    if action == "add":
+        status = recipes_api.add_instruction(path)
+    elif action == "update":
+        index = body.get("index")
+        text, ingredients, step = body.get("text"), body.get("ingredients"), body.get("step")
+        if not isinstance(index, int) or isinstance(index, bool):
+            return error("bad_request", 400, field="index")
+        if not isinstance(text, str):
+            return error("bad_request", 400, field="text")
+        if not isinstance(ingredients, list) or not all(isinstance(name, str) for name in ingredients):
+            return error("bad_request", 400, field="ingredients")
+        if not isinstance(step, int) or isinstance(step, bool):
+            return error("bad_request", 400, field="step")
+        status = recipes_api.update_instruction(path, index, text, ingredients, step)
+    elif action == "delete":
+        index = body.get("index")
+        if not isinstance(index, int) or isinstance(index, bool):
+            return error("bad_request", 400, field="index")
+        status = recipes_api.delete_instruction(path, index)
+    else:
+        return error("bad_request", 400, field="action")
+    if status == "bad_index":
+        return error("bad_request", 400, field="index")
+    if status == "bad_ingredient":
+        return error("bad_request", 400, field="ingredients")
+    if status != "OK":
+        return recipes_api.unreadable(status, error)
+    return jsonify(api_response("OK")), 200
+
+
+#: The editor only offers Smoke/Hold, but Startup and Shutdown are seeded by
+#: the recipe defaults and carried by every existing recipe, so a write must
+#: still accept all four.
+_STEP_MODES = ("Smoke", "Hold", "Startup", "Shutdown")
+
+
+def _validated_step_fields(body):
+    """Pull a step payload out of `body["step"]` and validate its shape.
+
+    Returns (fields, None) or (None, error_response). 0 is the disabled
+    sentinel for hold_temp and both trigger_temps members -- a legal value,
+    not a missing one -- so every check here is an isinstance check, never a
+    truthiness check.
+    """
+    step = body.get("step")
+    if not isinstance(step, dict):
+        return None, error("bad_request", 400, field="step")
+    mode = step.get("mode")
+    if mode not in _STEP_MODES:
+        return None, error("bad_request", 400, field="mode")
+    message = step.get("message")
+    if not isinstance(message, str):
+        return None, error("bad_request", 400, field="message")
+    hold_temp, timer = step.get("hold_temp"), step.get("timer")
+    if not isinstance(hold_temp, int) or isinstance(hold_temp, bool):
+        return None, error("bad_request", 400, field="hold_temp")
+    if not isinstance(timer, int) or isinstance(timer, bool):
+        return None, error("bad_request", 400, field="timer")
+    notify, pause = step.get("notify"), step.get("pause")
+    if not isinstance(notify, bool):
+        return None, error("bad_request", 400, field="notify")
+    if not isinstance(pause, bool):
+        return None, error("bad_request", 400, field="pause")
+    trigger_temps = step.get("trigger_temps")
+    if not isinstance(trigger_temps, dict):
+        return None, error("bad_request", 400, field="trigger_temps")
+    primary = trigger_temps.get("primary")
+    if not isinstance(primary, int) or isinstance(primary, bool):
+        return None, error("bad_request", 400, field="trigger_temps")
+    food = trigger_temps.get("food")
+    if not isinstance(food, list) or not all(isinstance(t, int) and not isinstance(t, bool) for t in food):
+        return None, error("bad_request", 400, field="trigger_temps")
+    fields = {
+        "mode": mode,
+        "message": message,
+        "hold_temp": hold_temp,
+        "timer": timer,
+        "notify": notify,
+        "pause": pause,
+        "trigger_temps": {"primary": primary, "food": food},
+    }
+    return fields, None
+
+
+@api_files_bp.route("/recipes/steps", methods=["POST"])
+def recipe_steps():
+    body = json_body()
+    path, err = require_file(body.get("file", ""), recipe_folder())
+    if err:
+        return err
+    action = body.get("action")
+    index = body.get("index")
+    if not isinstance(index, int) or isinstance(index, bool):
+        return error("bad_request", 400, field="index")
+    if action == "insert":
+        status = recipes_api.insert_step(path, index)
+    elif action == "update":
+        fields, err = _validated_step_fields(body)
+        if err:
+            return err
+        status = recipes_api.update_step(path, index, fields)
+    elif action == "delete":
+        status = recipes_api.delete_step(path, index)
+    else:
+        return error("bad_request", 400, field="action")
+    if status == "bad_index":
+        return error("bad_request", 400, field="index")
+    if status == "bad_food_probes":
+        return error("bad_request", 400, field="trigger_temps")
+    if status != "OK":
+        return recipes_api.unreadable(status, error)
+    return jsonify(api_response("OK")), 200
