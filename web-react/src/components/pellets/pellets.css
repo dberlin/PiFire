@@ -1,12 +1,12 @@
+@reference "../../theme.css";
+
 /* Pellet inventory manager. .pf-shell-main is flex:1/min-height:0/overflow:auto
    (shell.css), so height:100% here measures exactly the area under the chrome
    and every list scrolls inside its own pane -- the page never does.
    Target viewport 1280x720. */
 .pf-pellets {
-  height: 100%;
+  @apply grid h-full gap-[16px] overflow-hidden p-[16px] text-text;
   box-sizing: border-box;
-  padding: 16px;
-  display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   /* Row 1 is the error slot (always present, so grid auto-placement does not
      shift when an error appears). Rows 2 and 3 are BOUNDED -- an `auto` top
@@ -15,13 +15,9 @@
      viewport where it was clipped by the overflow:hidden below. Every card
      scrolls inside itself instead; measured at 1280x720. */
   grid-template-rows: auto minmax(0, 300px) minmax(0, 1fr);
-  gap: 16px;
-  overflow: hidden;
-  color: var(--text);
 }
 .pf-pellets-empty {
-  display: block;
-  overflow: auto;
+  @apply block overflow-auto;
 }
 /* Row 2 holds two panes, each spanning half the four columns. */
 .pf-pellets-wide {
@@ -34,60 +30,58 @@
   grid-column: 1 / -1;
 }
 .pf-pellets-error > p {
-  margin: 0;
+  @apply m-0;
 }
 /* .pf-modal-scrim is position:absolute (dashboard.css); without a positioned
    ancestor a ConfirmAction resolves against the initial containing block and
    floats free of the card it belongs to. Same trap .pf-probes-card documents
-   in settings.css. */
+   in settings.css.
+
+   overflow-hidden bounds the card to its grid row; anything taller scrolls in
+   .pf-pellets-scroll rather than bleeding past the card. */
 .pf-pellets-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  @apply relative flex flex-col gap-[12px] overflow-hidden rounded-[18px] bg-card p-[16px];
   min-height: 0;
-  /* Bounded by its grid row; anything taller scrolls in .pf-pellets-scroll
-     rather than bleeding past the card. */
-  overflow: hidden;
-  padding: 16px;
-  border-radius: 18px;
-  background: var(--card);
   border: 1px solid var(--card-border);
 }
 .pf-pellets-card-title {
+  @apply text-label uppercase;
   font: 600 13px "Barlow";
   letter-spacing: 2.5px;
-  color: var(--label);
-  text-transform: uppercase;
 }
 .pf-pellets-scroll {
+  @apply overflow-y-auto;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
 }
 .pf-pellets-meter {
-  height: 26px;
-  border-radius: 8px;
+  @apply h-[26px] overflow-hidden rounded-[8px];
   background: rgba(255, 255, 255, 0.09);
-  overflow: hidden;
 }
 .pf-pellets-meter > span {
-  display: block;
-  height: 100%;
+  @apply block h-full;
   transition: width 0.9s ease;
 }
+/* RUNTIME-CONSTRUCTED CLASS NAMES. CurrentLoadCard.tsx:18-20 picks one of
+   pf-pellets-meter--ok / --warn / --low from the hopper level, so only one of
+   the three ever renders and a page baseline can only ever cover that one.
+   Tailwind's content scanner cannot see any of them either.
+
+   Harmless while these stay hand-written rules; a silently-missing style the
+   moment they move into utility strings in JSX. tests/e2e/chrome-fidelity.spec.ts
+   probes all three synthetically for exactly this reason. */
 .pf-pellets-meter--ok > span {
-  background: var(--ok);
+  @apply bg-ok;
 }
 .pf-pellets-meter--warn > span {
-  background: var(--warn);
+  @apply bg-warn;
 }
 .pf-pellets-meter--low > span {
-  background: var(--danger);
+  @apply bg-danger;
 }
 .pf-pellets-level-text {
+  @apply text-text-dim;
   font: 600 14px "Barlow";
-  color: var(--text-dim);
 }
 .pf-pellets-usage {
   font: 800 34px "Barlow Semi Condensed";
@@ -95,43 +89,34 @@
   line-height: 1;
 }
 .pf-pellets-usage-alt {
+  @apply text-text-dim;
   font: 500 13px "Barlow";
-  color: var(--text-dim);
 }
 .pf-pellets-star {
-  color: var(--warn);
+  @apply text-warn;
 }
 .pf-pellets-load-name {
   font: 700 18px "Barlow";
 }
 .pf-pellets-load-date,
 .pf-pellets-load-comments {
+  @apply m-0 text-text-dim;
   font: 400 13px "Barlow";
-  color: var(--text-dim);
-  margin: 0;
 }
 .pf-pellets-actions,
 .pf-pellets-profile-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  @apply flex flex-wrap gap-[8px];
 }
 .pf-pellets-profile {
-  padding: 8px 0;
+  @apply px-0 py-[8px];
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 .pf-pellets-profile-head {
+  @apply w-full cursor-pointer px-0 py-[4px] text-left text-text;
   background: none;
   border: 0;
-  padding: 4px 0;
-  color: var(--text);
   font: 600 15px "Barlow";
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
 }
 .pf-pellets-profile-form {
-  display: grid;
-  gap: 8px;
-  padding: 8px 0;
+  @apply grid gap-[8px] px-0 py-[8px];
 }
