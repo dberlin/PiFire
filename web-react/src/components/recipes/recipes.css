@@ -86,3 +86,73 @@
 .pf-rcp-pager-current {
   @apply font-bold;
 }
+
+/* Recipe detail page (RecipeView, RecipeRunStatus). */
+
+.pf-rcp-about {
+  @apply flex flex-wrap gap-[20px];
+}
+
+.pf-rcp-splash {
+  @apply max-w-none rounded-[8px];
+  width: 200px;
+  height: 200px;
+  object-fit: cover;
+}
+
+/* Shared two-column fact list: the About card and each step's fact table
+   (hold temp, triggers, timer, pause, notify). */
+.pf-rcp-dl {
+  @apply m-0 grid gap-x-[16px] gap-y-[4px];
+  grid-template-columns: max-content 1fr;
+}
+.pf-rcp-dl dt {
+  @apply text-text-dim;
+}
+.pf-rcp-dl dd {
+  @apply m-0;
+}
+
+.pf-rcp-stars {
+  @apply text-text-dim;
+}
+.pf-rcp-star--filled {
+  @apply text-warn;
+}
+
+/* Inline thumbnails on an ingredient or instruction row -- one size for both,
+   matching the ingredient row size in the Flask template. */
+.pf-rcp-asset-thumb {
+  @apply max-w-none ml-[6px] rounded-[6px];
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+}
+
+.pf-rcp-ingredients-used {
+  @apply m-0 pl-[18px];
+}
+
+.pf-rcp-step {
+  @apply mb-[10px] rounded-[8px] p-[14px] bg-inset;
+  border: 1px solid var(--card-border);
+}
+.pf-rcp-step--active {
+  border-color: var(--accent);
+}
+.pf-rcp-step-number {
+  @apply mb-[8px] font-bold;
+}
+.pf-rcp-step-active-tag {
+  @apply text-accent font-normal;
+}
+
+.pf-rcp-run {
+  @apply mb-[16px] flex flex-col items-start gap-[8px];
+}
+.pf-rcp-run-active {
+  @apply font-semibold;
+}
+.pf-rcp-run-paused {
+  @apply text-warn;
+}

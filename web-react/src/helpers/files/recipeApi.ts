@@ -41,3 +41,10 @@ export async function uploadRecipe(archive: File, baseUrl = BASE_URL): Promise<s
  * the endpoint is GET where Flask's is POST. */
 export const recipeDownloadUrl = (file: string, baseUrl = BASE_URL) =>
   `${baseUrl}/api/files/recipes/download?file=${encodeURIComponent(file)}`;
+
+/** Splash image and every ingredient/instruction asset filename resolve the
+ * same way: static/img/tmp/{recipe id}/{filename} (file_mgmt/common.py), with
+ * no thumbs/ subfolder the way cook-file assets have -- _recipe_view.html
+ * always points straight at the full-size file. */
+export const assetUrl = (parentId: string, name: string, baseUrl = BASE_URL) =>
+  `${baseUrl}/static/img/tmp/${parentId}/${name}`;
