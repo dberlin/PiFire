@@ -116,6 +116,13 @@
 .pf-rcp-stars {
   @apply text-text-dim;
 }
+/* Read-only usage (RecipeView) is a <span>; RecipeMetaEditor's picker is a
+   <button> sharing the same class, so the reset lives here rather than in
+   both call sites. */
+.pf-rcp-star {
+  @apply border-0 bg-transparent p-0 text-inherit;
+  font-size: inherit;
+}
 .pf-rcp-star--filled {
   @apply text-warn;
 }
@@ -145,6 +152,17 @@
 }
 .pf-rcp-step-active-tag {
   @apply text-accent font-normal;
+}
+
+/* IngredientsEditor / InstructionsEditor. */
+
+.pf-rcp-instruction-row {
+  @apply mb-[14px] flex flex-col gap-[8px] rounded-[8px] p-[14px] bg-inset;
+  border: 1px solid var(--card-border);
+}
+
+.pf-rcp-ingredient-check {
+  @apply flex items-center gap-[6px] font-normal;
 }
 
 .pf-rcp-run {

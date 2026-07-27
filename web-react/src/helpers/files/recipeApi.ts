@@ -10,12 +10,87 @@
 // no `comments` key.
 
 import { postForm, read, write } from "./apiEnvelope";
-import type { RecipeDetail } from "./recipeTypes";
+import type { RecipeDetail, RecipeMetadata } from "./recipeTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 export const fetchRecipeDetail = (file: string, baseUrl = BASE_URL) =>
   read<RecipeDetail>("recipes", "detail", file, baseUrl);
+
+/** A whole-metadata patch, same shape recipes_api.py's set_metadata() accepts
+ * -- an unknown key is refused with 400 `data.field`, so this is typed as a
+ * subset of RecipeMetadata rather than a bare Record. */
+export type RecipeMetadataFields = Partial<
+  Pick<
+    RecipeMetadata,
+    | "title"
+    | "author"
+    | "description"
+    | "difficulty"
+    | "units"
+    | "prep_time"
+    | "cook_time"
+    | "rating"
+    | "food_probes"
+  >
+>;
+
+export const saveRecipeMetadata = (
+  file: string,
+  fields: RecipeMetadataFields,
+  baseUrl = BASE_URL,
+) => write<null>("recipes", "metadata", { file, fields }, baseUrl);
+
+/** Appends a blank ingredient row (recipes_api.py's add_ingredient) -- there
+ * is nothing to name it yet, so the caller refetches and edits the new row
+ * in place via updateIngredient. */
+export const addIngredient = (file: string, baseUrl = BASE_URL) =>
+  write<null>("recipes", "ingredients", { file, action: "add" }, baseUrl);
+
+/** Renames/requantifies ingredient `index`. A rename cascades server-side
+ * into every instruction that names the OLD value -- refetch the whole
+ * detail afterwards rather than patching local state. */
+export const updateIngredient = (
+  file: string,
+  index: number,
+  name: string,
+  quantity: string,
+  baseUrl = BASE_URL,
+) =>
+  write<null>("recipes", "ingredients", { file, action: "update", index, name, quantity }, baseUrl);
+
+/** Deletes ingredient `index`. The server also strips this ingredient's name
+ * out of every instruction that referenced it, so a refetch is required to
+ * see the true post-delete instruction list. */
+export const deleteIngredient = (file: string, index: number, baseUrl = BASE_URL) =>
+  write<null>("recipes", "ingredients", { file, action: "delete", index }, baseUrl);
+
+/** Appends a blank instruction row (recipes_api.py's add_instruction). */
+export const addInstruction = (file: string, baseUrl = BASE_URL) =>
+  write<null>("recipes", "instructions", { file, action: "add" }, baseUrl);
+
+/** Replaces instruction `index` wholesale: text, the ingredient NAME list,
+ * and its program step. `ingredients` must be names present in this
+ * recipe's ingredient list right now -- an unknown name is refused with 400
+ * `data.field == "ingredients"`, which is why the picker is a multi-select
+ * over the live list rather than free text. */
+export const updateInstruction = (
+  file: string,
+  index: number,
+  text: string,
+  ingredients: string[],
+  step: number,
+  baseUrl = BASE_URL,
+) =>
+  write<null>(
+    "recipes",
+    "instructions",
+    { file, action: "update", index, text, ingredients, step },
+    baseUrl,
+  );
+
+export const deleteInstruction = (file: string, index: number, baseUrl = BASE_URL) =>
+  write<null>("recipes", "instructions", { file, action: "delete", index }, baseUrl);
 
 export const createRecipe = (baseUrl = BASE_URL) =>
   write<{ filename: string }>("recipes", "create", {}, baseUrl);

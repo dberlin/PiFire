@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { FileRequestError } from "../../helpers/files/apiEnvelope";
 import type { RecipeDetail } from "../../helpers/files/recipeTypes";
@@ -9,12 +10,27 @@ import type { LiveState } from "../../helpers/types";
 const fetchRecipeDetailMock = rs.fn();
 // SAFETY: runRecipe starts a real cook, so it is stubbed here too --
 // RecipePage renders RecipeRunStatus, which imports it, even though this
-// file never clicks Run.
+// file never clicks Run. The metadata/ingredients/instructions writers are
+// stubbed for the same reason: RecipeMetaEditor/IngredientsEditor/
+// InstructionsEditor are rendered on every successful load, even though this
+// file's tests never click their buttons -- their own test files cover the
+// actual save/refetch behaviour.
 const runRecipeMock = rs.fn();
+// Hoisted (rather than inlined) because the refetch-cascade test below needs
+// to control what it resolves to; the rest are exercised by their own
+// editors' dedicated test files, not here.
+const updateIngredientMock = rs.fn();
 rs.mock("../../helpers/files/recipeApi", () => ({
   fetchRecipeDetail: (...a: unknown[]) => fetchRecipeDetailMock(...a),
   runRecipe: (...a: unknown[]) => runRecipeMock(...a),
   assetUrl: (parentId: string, name: string) => `/static/img/tmp/${parentId}/${name}`,
+  saveRecipeMetadata: rs.fn(),
+  addIngredient: rs.fn(),
+  updateIngredient: (...a: unknown[]) => updateIngredientMock(...a),
+  deleteIngredient: rs.fn(),
+  addInstruction: rs.fn(),
+  updateInstruction: rs.fn(),
+  deleteInstruction: rs.fn(),
 }));
 
 const useShellStateMock = rs.fn();
@@ -60,6 +76,7 @@ function mount(filename: string, live: LiveState = FIXTURE_DASH) {
 beforeEach(() => {
   fetchRecipeDetailMock.mockReset();
   runRecipeMock.mockReset();
+  updateIngredientMock.mockReset();
 });
 
 afterEach(cleanup);
@@ -110,5 +127,52 @@ describe("RecipePage", () => {
       },
     });
     await waitFor(() => expect(screen.getByText(/on step 1/)).toBeInTheDocument());
+  });
+
+  // THE RULE TASK 14+15 EXISTS TO ENFORCE: recipes_api.py's update_ingredient
+  // rewrites the OLD ingredient name to the new one inside every instruction
+  // that referenced it. IngredientsEditor and InstructionsEditor are siblings
+  // that each only see their own slice of `detail.recipe` -- the ONLY way the
+  // instruction list can show the renamed name is for the save to trigger a
+  // refetch of the WHOLE detail (onChanged -> RecipePage's reload), not a
+  // local patch of either editor's own state.
+  it("renaming an ingredient refetches the whole detail and updates the instruction that referenced it", async () => {
+    const user = userEvent.setup();
+    const before: RecipeDetail = {
+      ...DETAIL,
+      recipe: {
+        ingredients: [{ name: "Salt", quantity: "1 tsp", assets: [] }],
+        instructions: [{ text: "Add salt", ingredients: ["Salt"], assets: [], step: 0 }],
+        steps: [],
+      },
+    };
+    const after: RecipeDetail = {
+      ...DETAIL,
+      recipe: {
+        ingredients: [{ name: "Sea Salt", quantity: "1 tsp", assets: [] }],
+        instructions: [{ text: "Add salt", ingredients: ["Sea Salt"], assets: [], step: 0 }],
+        steps: [],
+      },
+    };
+    fetchRecipeDetailMock.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+    updateIngredientMock.mockResolvedValue(null);
+
+    mount("brisket.pfrecipe");
+    await waitFor(() => expect(screen.getAllByText("Salt").length).toBeGreaterThan(0));
+
+    const nameField = screen.getByLabelText("Name for ingredient 1");
+    await user.clear(nameField);
+    await user.type(nameField, "Sea Salt");
+    await user.click(screen.getByRole("button", { name: "Save ingredient 1" }));
+
+    await waitFor(() =>
+      expect(updateIngredientMock).toHaveBeenCalledWith("brisket.pfrecipe", 0, "Sea Salt", "1 tsp"),
+    );
+    // The save's success handler calls onChanged -> reload -> a SECOND fetch
+    // of the whole detail. Nothing here patches instruction.ingredients
+    // locally -- it can only come from that refetch.
+    await waitFor(() => expect(fetchRecipeDetailMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryAllByText("Salt")).toHaveLength(0));
+    expect(screen.getAllByText("Sea Salt").length).toBeGreaterThan(0);
   });
 });
