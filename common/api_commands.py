@@ -15,6 +15,7 @@ Description: The /api command processor -- process_command() and the
 import json
 import time
 
+from common import server_revision
 from common.common import MODE_MAP, WriteKind, convert_settings_units, epoch_to_time, is_float, write_log
 from common.control_delta import control_delta
 from common.modes import Mode
@@ -108,9 +109,34 @@ def _cmd_get_versions(data, control, settings, arglist, origin, kind):
         'version' : <Server version>,
         'build' : <Server build>
     }
+
+    These come from the release manifest, so they move on a release and say
+    nothing about whether THIS process is running current code. /api/get/revision
+    answers that.
     """
     data["data"]["version"] = settings["versions"]["server"]
     data["data"]["build"] = settings["versions"]["build"]
+
+
+def _cmd_get_revision(data, control, settings, arglist, origin, kind):
+    """
+    Get the source revision this server process is actually running
+    /api/get/revision
+
+    Returns:
+    {
+        'revision' : <git commit this process imported, or None>,
+        'stale' : <True if loaded Python has changed since this process started>,
+        'started_at' : <epoch seconds>,
+        'newest_source_mtime' : <epoch seconds>
+    }
+
+    Separate from /api/get/versions on purpose. Two of these fields are clocks,
+    so folding them into that response would make its golden fixture
+    (tests/characterization) unpinnable, and would put an mtime walk on a path
+    the mobile app polls. See common/server_revision.py.
+    """
+    data["data"].update(server_revision.status())
 
 
 def _cmd_get_hopper(data, control, settings, arglist, origin, kind):
@@ -920,6 +946,7 @@ _COMMAND_DISPATCH = {
     ("get", "mode"): _cmd_get_mode,
     ("get", "uuid"): _cmd_get_uuid,
     ("get", "versions"): _cmd_get_versions,
+    ("get", "revision"): _cmd_get_revision,
     ("get", "hopper"): _cmd_get_hopper,
     ("get", "timer"): _cmd_get_timer,
     ("get", "notify"): _cmd_get_notify,

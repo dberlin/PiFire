@@ -62,8 +62,11 @@ test.describe("recipe editor", () => {
       // update_instruction refuses any ingredient name not currently in the
       // recipe, so this proves the two editors' server-side ordering.
       await page.getByRole("button", { name: "Add instruction" }).click();
-      await expect(page.getByLabel("Direction 1")).toBeVisible();
-      await page.getByLabel("Direction 1").fill("Trim the fat cap.");
+      //  exact: true, because getByLabel substring-matches and the step select
+      //  beside this field is labelled "Program step for direction 1".
+      const direction = page.getByLabel("Direction 1", { exact: true });
+      await expect(direction).toBeVisible();
+      await direction.fill("Trim the fat cap.");
       await page.getByLabel("Brisket", { exact: true }).check();
       await page.getByRole("button", { name: "Save direction 1" }).click();
       await expect(page.getByRole("button", { name: "Save direction 1" })).toBeDisabled();
@@ -78,7 +81,10 @@ test.describe("recipe editor", () => {
       await page.reload();
       await expect(page.getByRole("heading", { name: "E2E Recipe Roundtrip" })).toBeVisible();
       await expect(page.getByText("Brisket").first()).toBeVisible();
-      await expect(page.getByText("Trim the fat cap.")).toBeVisible();
+      //  The cell, not getByText: the editor's textarea below holds the same
+      //  string, and asserting on the read-only table is the actual intent --
+      //  that the write round-tripped and the view refetched it.
+      await expect(page.getByRole("cell", { name: "Trim the fat cap." })).toBeVisible();
       await expect(page.getByText("Step 3 -- Shutdown")).toBeVisible();
 
       // Delete, through the UI, as the round trip's own last step.

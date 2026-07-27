@@ -1007,9 +1007,18 @@ scanner and the required safelist note does not exist.
   export PORT=5273 DEMO_PORT=5274                   # this checkout's dev servers
   export PIFIRE_BACKEND_URL=http://localhost:5100   # this checkout's backend
   export PIFIRE_DB_PATH="$PWD/pifire.db"            # and its own datastore
-  uv run python control.py &
-  uv run gunicorn -k gthread --threads 25 -b 0.0.0.0:5100 -w 1 app:app &
+  uv run watchfiles --filter python 'python control.py' \
+      control.py common controller display distance file_mgmt grillplat notify probes &
+  uv run gunicorn -k gthread --threads 25 -b 0.0.0.0:5100 -w 1 --reload app:app &
   ```
+
+  **Both halves auto-reload now**, which is the point: `--reload` restarts the
+  gunicorn worker when a source file it imported changes, and `watchfiles` does
+  the same for `control.py`, which has no equivalent of its own. Started this
+  way, the stale-worker failure below cannot happen. Plain
+  `uv run python control.py` and a `--reload`-less gunicorn are still correct for
+  a real appliance — a file watcher on a Pi is cost for nothing there, and
+  nothing restarts a controller mid-cook.
 
   **`PIFIRE_BACKEND_URL`, never `PUBLIC_PIFIRE_URL`.** rsbuild injects every
   `PUBLIC_*` variable into the browser bundle, and eight modules read
@@ -1030,12 +1039,26 @@ scanner and the required safelist note does not exist.
   script writes to that workspace's `pifire.db` while the backend serves the
   main checkout's. `beforeAll` now fails once with this instruction instead of
   five confusing "the chart never mounted" failures.
-- **Restart gunicorn before trusting an e2e result.** A worker started before a
-  backend change serves the old code, and new endpoints return 404 while the
-  specs that need them fail as if the frontend were broken. This has now cost
-  three separate tasks: two were blocked outright, and the pellets merge showed
-  two red specs purely because the running worker was ~13 hours older than the
-  `GET /api/pellets` route it was being asked for.
+- **A stale backend is now caught, not remembered.** A worker started before a
+  backend change serves the old code: new endpoints return 404 and the specs
+  that need them fail as if the frontend were broken. That cost five separate
+  tasks — two blocked outright, the pellets merge showing two red specs because
+  the worker was ~13 hours older than the `GET /api/pellets` route, and on
+  2026-07-27 a whole recipes run whose failures were confidently misdiagnosed as
+  browser colour drift.
+
+  Two things close it. `--reload` (above) prevents it in dev. And
+  `GET /api/get/revision` publishes the revision this process imported plus a
+  `stale` flag — true when any Python it loaded has changed since it started —
+  which `tests/e2e/globalSetup.ts` reads before any spec runs, aborting with the
+  reload command rather than producing failures that mean something else.
+
+  `stale` is computed from mtimes rather than by comparing revisions, because in
+  this jj-colocated checkout git HEAD tracks the working copy's PARENT and does
+  not move when you edit a file — a revision comparison would miss every
+  uncommitted change. Absent `stale` (an older PiFire) means "cannot tell" and
+  does not block a run, and an unreachable backend is not an error at all: the
+  demo-server projects stub every fetch and are meant to run without PiFire.
 - **Playwright needs the main checkout or an explicit DB path**, and the suite
   runs `workers: 1` because every spec drives one shared, stateful PiFire.
 - The Playwright characterization suite covers all 17 Flask blueprint pages

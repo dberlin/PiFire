@@ -4,6 +4,10 @@ import { ports } from "./ports";
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
+  // Aborts the run if PiFire is up but serving code older than this checkout.
+  // A stale worker 404s every route added since it forked, and those failures
+  // look like frontend bugs. See the file for why an ABSENT backend is fine.
+  globalSetup: "./tests/e2e/globalSetup.ts",
   // Every spec drives ONE shared, stateful PiFire instance (control.py plus
   // its SQLite datastore), so these tests are not isolated from each other the
   // way ordinary unit tests are. Playwright runs separate spec FILES in

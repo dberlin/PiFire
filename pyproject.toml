@@ -80,6 +80,12 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",
     "pytest-playwright>=0.7.1",
+    # Restarts control.py on a source change. gunicorn has --reload for the web
+    # tier; control.py is a plain long-running process with no equivalent, and a
+    # worker serving code the checkout no longer has has cost five separate
+    # tasks here. Dev only -- see the backlog's test-harness notes for why you
+    # do not want this running against a live cook.
+    "watchfiles>=0.24.0",
     # Held below 0.16 deliberately. 0.16 promotes new rules to the default set
     # and extends the formatter to Python code blocks inside Markdown, which
     # takes this repo from "ruff check . passes, 550 files formatted" to 1422
