@@ -67,15 +67,46 @@ def test_is_real_hardware_reads_settings_when_none_passed():
 
 
 def test_restart_control_invokes_supervisorctl_via_os_system():
-    with mock.patch.object(cc.os, "system") as m:
+    #  is_real_hardware is pinned rather than left to the ambient datastore:
+    #  it reads settings["platform"]["real_hw"], so without this the test's
+    #  meaning depends on whichever settings blob happens to be loaded.
+    with (
+        mock.patch.object(cc, "is_real_hardware", return_value=True),
+        mock.patch.object(cc.os, "system") as m,
+    ):
         cc.restart_control()
     m.assert_called_once_with("sleep 3 && sudo supervisorctl restart control &")
 
 
 def test_restart_webapp_invokes_supervisorctl_via_os_system():
-    with mock.patch.object(cc.os, "system") as m:
+    with (
+        mock.patch.object(cc, "is_real_hardware", return_value=True),
+        mock.patch.object(cc.os, "system") as m,
+    ):
         cc.restart_webapp()
     m.assert_called_once_with("sleep 3 && sudo supervisorctl restart webapp &")
+
+
+def test_restart_control_noop_when_not_real_hardware():
+    """These two were the only lifecycle calls in this module WITHOUT the
+    is_real_hardware() gate that reboot_system, shutdown_system and
+    restart_scripts all have -- so on a dev box they shelled out to sudo
+    supervisorctl where every neighbouring function was a no-op."""
+    with (
+        mock.patch.object(cc, "is_real_hardware", return_value=False),
+        mock.patch.object(cc.os, "system") as m,
+    ):
+        cc.restart_control()
+    m.assert_not_called()
+
+
+def test_restart_webapp_noop_when_not_real_hardware():
+    with (
+        mock.patch.object(cc, "is_real_hardware", return_value=False),
+        mock.patch.object(cc.os, "system") as m,
+    ):
+        cc.restart_webapp()
+    m.assert_not_called()
 
 
 # --------------------------------------------------------------------------

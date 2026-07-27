@@ -38,15 +38,23 @@ def is_real_hardware(settings=None):
 def restart_control():
     """
     Restart the Control Script
+
+    Gated on real hardware, like every other lifecycle call in this module:
+    supervisor is how a real appliance runs these processes, and on a dev box
+    the command either fails or restarts something the developer is using.
     """
-    os.system("sleep 3 && sudo supervisorctl restart control &")
+    if is_real_hardware():
+        os.system("sleep 3 && sudo supervisorctl restart control &")
 
 
 def restart_webapp():
     """
     Restart the WebApp Script
+
+    Gated on real hardware -- see restart_control.
     """
-    os.system("sleep 3 && sudo supervisorctl restart webapp &")
+    if is_real_hardware():
+        os.system("sleep 3 && sudo supervisorctl restart webapp &")
 
 
 def restart_scripts():
