@@ -112,8 +112,37 @@ def write_cookfile(history_dir, title, *, version=None, comments=None, assets=No
     return filename
 
 
-def write_recipe(recipe_dir, title):
-    """Write `{title}.pfrecipe` into `recipe_dir` and return the bare filename."""
+def write_recipe(
+    recipe_dir,
+    title,
+    *,
+    food_probes=2,
+    ingredients=None,
+    instructions=None,
+    steps=None,
+    units="F",
+):
+    """Build a minimal-but-realistic .pfrecipe under recipe_dir.
+
+    Defaults match file_mgmt/recipes.py's own defaults so a fixture archive and
+    a create_recipefile() archive are interchangeable in a test.
+    """
+    if steps is None:
+        steps = [
+            {
+                "mode": "Smoke",
+                "trigger_temps": {"primary": 0, "food": [0] * food_probes},
+                "hold_temp": 0,
+                "timer": 0,
+                "notify": False,
+                "message": "",
+                "pause": False,
+            }
+        ]
+    if ingredients is None:
+        ingredients = []
+    if instructions is None:
+        instructions = []
     files = {
         "metadata.json": {
             "title": title,
@@ -122,16 +151,16 @@ def write_recipe(recipe_dir, title):
             "description": "",
             "image": "",
             "thumbnail": "",
-            "units": "F",
+            "units": units,
             "prep_time": 0,
             "cook_time": 0,
             "rating": 5,
             "difficulty": "Easy",
             "version": "1.1.0",
-            "food_probes": 2,
+            "food_probes": food_probes,
             "username": "",
         },
-        "recipe.json": {"ingredients": [], "instructions": [], "steps": []},
+        "recipe.json": {"ingredients": ingredients, "instructions": instructions, "steps": steps},
         "comments.json": [],
         "assets.json": [],
     }

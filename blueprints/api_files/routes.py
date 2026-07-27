@@ -24,7 +24,7 @@ from werkzeug.exceptions import BadRequest
 from common.app import api_response
 from common.file_browser import browse_files, resolve_managed_file
 
-from . import api_files_bp, cookfile_api
+from . import api_files_bp, cookfile_api, recipes_api
 
 #: kind -> (app.config folder key, extension). The ONE place the two archive
 #: kinds share behaviour; everything below this line is cookfile-specific.
@@ -65,15 +65,23 @@ def cookfile_folder():
     return current_app.config["HISTORY_FOLDER"]
 
 
-def require_file(name, *, must_exist=True):
+def recipe_folder():
+    return current_app.config["RECIPE_FOLDER"]
+
+
+def require_file(name, folder, *, must_exist=True):
     """Resolve a client-supplied bare filename to a contained absolute path.
 
+    `folder` is passed rather than looked up because two archive kinds now
+    share this helper, and a default would let a new route silently resolve a
+    recipe against the history folder.
+
     Returns (path, None) on success or (None, response) on failure, so callers
-    read as `path, err = require_file(name); if err: return err`.
+    read as `path, err = require_file(name, folder); if err: return err`.
     """
     if not name:
         return None, error("bad_request", 400, field="file")
-    path = resolve_managed_file(cookfile_folder(), name)
+    path = resolve_managed_file(folder, name)
     if path is None:
         return None, error("not_found", 404)
     if must_exist and not os.path.isfile(path):
@@ -97,7 +105,7 @@ def json_body():
 def _load_cookfile(name):
     """require_file + read_cookfile. Returns (struct, path, None) or
     (None, None, response)."""
-    path, err = require_file(name)
+    path, err = require_file(name, cookfile_folder())
     if err:
         return None, None, err
     struct, status = cookfile_api.load(path)
@@ -144,7 +152,7 @@ def cookfile_chart():
 
 @api_files_bp.route("/cookfiles/download", methods=["GET"])
 def cookfile_download():
-    path, err = require_file(request.args.get("file", ""))
+    path, err = require_file(request.args.get("file", ""), cookfile_folder())
     if err:
         return err
     return send_file(path, as_attachment=True, max_age=0)
@@ -156,7 +164,7 @@ def cookfile_export():
     kind = request.args.get("kind", "")
     if kind not in ("data", "events"):
         return error("bad_request", 400, field="kind")
-    path, err = require_file(name)
+    path, err = require_file(name, cookfile_folder())
     if err:
         return err
     csv_path, status = cookfile_api.build_export(path, name, kind)
@@ -173,7 +181,7 @@ def cookfile_upload():
         return error(problem, 400, field="file")
     #  Re-contain the FLATTENED name: secure_filename is a character filter,
     #  resolve_managed_file is the containment proof, and this is a write.
-    path, err = require_file(safe_name, must_exist=False)
+    path, err = require_file(safe_name, cookfile_folder(), must_exist=False)
     if err:
         return err
     storage.save(path)
@@ -182,7 +190,7 @@ def cookfile_upload():
 
 @api_files_bp.route("/cookfiles/delete", methods=["POST"])
 def cookfile_delete():
-    path, err = require_file(json_body().get("file", ""))
+    path, err = require_file(json_body().get("file", ""), cookfile_folder())
     if err:
         return err
     os.remove(path)
@@ -192,7 +200,7 @@ def cookfile_delete():
 @api_files_bp.route("/cookfiles/title", methods=["POST"])
 def cookfile_title():
     body = json_body()
-    path, err = require_file(body.get("file", ""))
+    path, err = require_file(body.get("file", ""), cookfile_folder())
     if err:
         return err
     title = body.get("title")
@@ -207,7 +215,7 @@ def cookfile_title():
 @api_files_bp.route("/cookfiles/label", methods=["POST"])
 def cookfile_label():
     body = json_body()
-    path, err = require_file(body.get("file", ""))
+    path, err = require_file(body.get("file", ""), cookfile_folder())
     if err:
         return err
     old_label, new_label = body.get("old_label"), body.get("new_label")
@@ -229,7 +237,7 @@ def cookfile_recover():
     action = body.get("action")
     if action not in ("upgrade", "repair"):
         return error("bad_request", 400, field="action")
-    path, err = require_file(body.get("file", ""))
+    path, err = require_file(body.get("file", ""), cookfile_folder())
     if err:
         return err
     status = cookfile_api.recover(path, action)
@@ -247,7 +255,7 @@ def cookfile_comments():
     action = body.get("action")
     if action not in _COMMENT_ACTIONS:
         return error("bad_request", 400, field="action")
-    path, err = require_file(body.get("file", ""))
+    path, err = require_file(body.get("file", ""), cookfile_folder())
     if err:
         return err
 
@@ -280,7 +288,7 @@ def cookfile_comments():
 @api_files_bp.route("/cookfiles/comments/assets", methods=["POST"])
 def cookfile_comment_assets():
     body = json_body()
-    path, err = require_file(body.get("file", ""))
+    path, err = require_file(body.get("file", ""), cookfile_folder())
     if err:
         return err
     cid = body.get("id")
@@ -299,7 +307,7 @@ def cookfile_comment_assets():
 
 @api_files_bp.route("/cookfiles/assets/upload", methods=["POST"])
 def cookfile_asset_upload():
-    path, err = require_file(request.form.get("file", ""))
+    path, err = require_file(request.form.get("file", ""), cookfile_folder())
     if err:
         return err
     added, problem = cookfile_api.upload_assets(path, request.files.getlist("assets"))
@@ -311,7 +319,7 @@ def cookfile_asset_upload():
 @api_files_bp.route("/cookfiles/assets/delete", methods=["POST"])
 def cookfile_asset_delete():
     body = json_body()
-    path, err = require_file(body.get("file", ""))
+    path, err = require_file(body.get("file", ""), cookfile_folder())
     if err:
         return err
     assets = body.get("assets")
@@ -326,7 +334,7 @@ def cookfile_asset_delete():
 @api_files_bp.route("/cookfiles/thumbnail", methods=["POST"])
 def cookfile_thumbnail():
     body = json_body()
-    path, err = require_file(body.get("file", ""))
+    path, err = require_file(body.get("file", ""), cookfile_folder())
     if err:
         return err
     asset = body.get("asset")
@@ -338,3 +346,22 @@ def cookfile_thumbnail():
     if status != "OK":
         return cookfile_api.unreadable(status, error)
     return jsonify(api_response("OK")), 200
+
+
+def _load_recipe(name):
+    path, err = require_file(name, recipe_folder())
+    if err:
+        return None, None, err
+    struct, status = recipes_api.load(path)
+    if status != "OK":
+        return None, None, recipes_api.unreadable(status, error)
+    return struct, path, None
+
+
+@api_files_bp.route("/recipes/detail", methods=["GET"])
+def recipe_detail():
+    name = request.args.get("file", "")
+    struct, _path, err = _load_recipe(name)
+    if err:
+        return err
+    return jsonify(recipes_api.detail_payload(struct, name)), 200
