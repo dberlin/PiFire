@@ -1,3 +1,43 @@
+@reference "../../theme.css";
+
+/* CONVERTED TO @apply WHERE IT IS SAFE, AND ONLY THERE.
+ *
+ * src/components/dashboard/dashboardStyles.test.tsx asserts this file as TEXT,
+ * in seven ways. The ones that constrain a conversion:
+ *
+ *   - the 15 --pf-* size tokens must appear as `--pf-x: 58px;` in the root rule,
+ *     be consumed by a `var(--pf-x` outside it, and be declared exactly ONCE
+ *     outside a media query. Neither a token declaration nor a var() consumer
+ *     may become a utility, so NO rule mentioning `var(--pf-` was converted at
+ *     all.
+ *   - six rules are matched by regex and must keep their literal shape:
+ *     cookrow height: 52px, pills height: 64px, header/probecol/rightcol/controls
+ *     height|width: var(--pf-*). No `width`/`height` literal is converted
+ *     anywhere in this file for that reason.
+ *   - .pf-fit must keep `position: fixed` and `inset: 0`, and .pf-dash
+ *     `position: relative` and `overflow: hidden`, as literal text.
+ *   - .pf-btn must keep `font-size: var(--pf-btn-font, 25px)` WITH the fallback:
+ *     it is shared with the wizard and settings, which never see the dashboard
+ *     root and so never see the token.
+ *   - NO size token may sit inside a shorthand. `font: 800 var(--x) "..."`
+ *     followed by `font-variant-numeric: tabular-nums` loses the tabular
+ *     figures: a var() in a shorthand is pending-substitution, expands after
+ *     the cascade, and resets every longhand it owns. The digits then change
+ *     width while every landmark box stays exactly where it was. Never convert
+ *     a font longhand back into a shorthand.
+ *   - `animation: none !important` stays raw; @apply cannot carry !important,
+ *     so no rule containing `!important` was converted either.
+ *
+ * Rules inside a @media block are left raw as a whole: the two breakpoints
+ * redeclare --pf-* tokens, and both preludes are asserted as literal text.
+ *
+ * RUNTIME-CONSTRUCTED CLASS NAMES: ProbeCard.tsx:35,40 build
+ * `pf-badge pf-badge-${tone}`; Dashboard.tsx builds `pf-swatch ${sel}`
+ * and `pf-toggle ${on}`; NotifyBell.tsx builds `pf-notify-bell${on}`.
+ * Tailwind's content scanner cannot see any of them -- harmless while they are
+ * hand-written rules, a silently-missing style the moment they become utilities
+ * in JSX. tests/e2e/chrome-fidelity.spec.ts probes the badge tones. */
+
 /* PiFire Dashboard — keyframes + the few structural classes.
    Most styling is inline (mirroring the design's inline-style authoring); this
    file holds the @keyframes (which inline styles can't declare) plus the
@@ -87,12 +127,12 @@
    consumer; it is not any more (see .pf-dash-root below). Do not repurpose
    this rule. */
 .pf-fit {
+  /* `position: fixed` and `inset: 0` stay raw: dashboardStyles.test.tsx matches
+     both as literal text inside this rule. */
   position: fixed;
   inset: 0;
-  display: grid;
+  @apply grid overflow-hidden bg-page;
   place-items: center;
-  overflow: hidden;
-  background: var(--page);
 }
 /* ==========================================================================
    The dashboard root, post-reflow.
@@ -109,17 +149,10 @@
    fidelity is preserved by construction rather than by care.
    ========================================================================== */
 .pf-dash-root {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  background: var(--page);
+  @apply w-full flex justify-center bg-page;
 }
 .pf-dash {
-  width: 100%;
-  max-width: 1280px;
-  min-height: 720px;
-  display: flex;
-  flex-direction: column;
+  @apply w-full max-w-[1280px] min-h-[720px] flex flex-col text-text;
   /* Containing block for the decorative glow and for .pf-modal-scrim, both of
      which are position: absolute. The old .pf-stage got this from being
      absolutely positioned itself. */
@@ -130,7 +163,6 @@
   overflow: hidden;
   background: radial-gradient(120% 90% at 50% 118%, #241a12 0%, #16110d 42%, #0d0b09 100%);
   font-family: "Barlow", system-ui, sans-serif;
-  color: var(--text);
 }
 /* Animate toggle: kill @keyframes animations, leave transitions intact. */
 .pf-dash[data-animate="false"] * {
@@ -167,113 +199,86 @@
   height: 20px;
   border-radius: 50%;
   border: 2px solid transparent;
-  cursor: pointer;
+  @apply cursor-pointer;
   padding: 0;
 }
 .pf-swatch.sel {
   border-color: var(--text);
 }
 .pf-toggle {
-  background: var(--inset);
-  color: var(--label);
+  @apply bg-inset text-label rounded-[8px] py-[5px] px-[9px] cursor-pointer;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
   font: 700 11px "Barlow";
   letter-spacing: 1px;
-  padding: 5px 9px;
-  cursor: pointer;
 }
 .pf-toggle.on {
-  color: var(--accent);
+  @apply text-accent;
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .pf-modal-scrim {
-  position: absolute;
-  inset: 0;
+  @apply absolute inset-0 grid z-10;
   background: rgba(0, 0, 0, 0.6);
-  display: grid;
   place-items: center;
-  z-index: 10;
 }
 .pf-modal {
-  background: var(--card);
+  @apply bg-card rounded-[18px] p-[22px] min-w-[320px] flex flex-col gap-[16px];
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
-  padding: 22px;
-  min-width: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
 }
 .pf-modal-title {
   font: 700 20px "Barlow";
-  color: var(--text);
-  text-align: center;
+  @apply text-text text-center;
 }
 /* Body copy for consequences the headline can't carry (a cascading delete).
    Deliberately quieter than .pf-modal-title -- it is a sentence, not a shout. */
 .pf-modal-message {
   font: 400 15px "Barlow";
   color: #c9bdab;
-  text-align: center;
+  @apply text-center;
   max-width: 34ch;
 }
 .pf-setpoint-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  @apply flex items-center justify-between gap-[16px];
 }
 .pf-setpoint-val {
-  font-weight: 800;
-  font-size: 56px;
+  @apply font-extrabold text-[56px] text-text;
   font-family: "Barlow Semi Condensed";
-  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 .pf-setpoint-val span {
-  font-size: 24px;
-  color: var(--text-dim);
-  margin-left: 2px;
+  @apply text-[24px] text-text-dim ml-[2px];
 }
 .pf-step {
   width: 56px;
   height: 56px;
-  border-radius: 14px;
+  @apply rounded-[14px] text-text cursor-pointer;
   border: 2px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--text);
   font: 700 28px "Barlow";
-  cursor: pointer;
 }
 .pf-setpoint-slider {
-  width: 100%;
+  @apply w-full;
   accent-color: var(--accent);
 }
 .pf-modal-actions {
-  display: flex;
-  gap: 12px;
+  @apply flex gap-[12px];
 }
 .pf-modal-btn {
   flex: 1;
-  border-radius: 12px;
+  @apply rounded-[12px] bg-inset p-[12px] cursor-pointer;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: var(--inset);
   color: #e8dfd1;
   font: 700 16px "Barlow";
-  padding: 12px;
-  cursor: pointer;
 }
 .pf-modal-btn.accent {
-  background: var(--accent);
+  @apply bg-accent;
   color: #1a0f04;
   border-color: transparent;
 }
 .pf-modal-btn.danger {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   border-color: var(--danger);
-  color: var(--danger);
+  @apply text-danger;
 }
 .pf-modal-btn:disabled {
   opacity: 0.55;
@@ -284,28 +289,21 @@
    the armed notification puts under the probe card's progress bar. */
 .pf-notify-bell {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  @apply items-center justify-center rounded-[9px] bg-inset text-label cursor-pointer;
   width: 30px;
   height: 30px;
-  border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: var(--inset);
-  color: var(--label);
-  cursor: pointer;
   padding: 0;
 }
 .pf-notify-bell.on {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--accent);
+  @apply text-accent;
 }
 .pf-notify-eta {
   font: 600 12px "Barlow";
   letter-spacing: 1.5px;
-  color: var(--text-dim);
-  margin-top: 6px;
-  text-transform: uppercase;
+  @apply text-text-dim mt-[6px] uppercase;
 }
 
 /* Per-probe notification modal (ProbeNotifyModal). It sits inside the shared
@@ -317,78 +315,57 @@
    Cap it against the scrim and let the body scroll instead. */
 .pf-notify-modal {
   max-height: 88%;
-  overflow-y: auto;
+  @apply overflow-y-auto;
 }
 /* A rule, not a gap: the divider is what tells the three master switches apart
    at a glance, since each section repeats the same three controls. */
 .pf-notify-section {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  @apply flex flex-col gap-[14px] pt-[16px];
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 16px;
 }
 .pf-notify-section:first-of-type {
   border-top: none;
-  padding-top: 0;
+  @apply pt-0;
 }
 .pf-notify-switch,
 .pf-notify-actions label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  @apply flex items-center gap-[10px] cursor-pointer;
   font: 600 15px "Barlow";
   color: #e8dfd1;
-  cursor: pointer;
 }
 .pf-notify-switch input,
 .pf-notify-actions input {
   width: 20px;
   height: 20px;
   accent-color: var(--accent);
-  cursor: pointer;
+  @apply cursor-pointer;
 }
 .pf-notify-row {
-  display: flex;
-  justify-content: center;
+  @apply flex justify-center;
 }
 .pf-notify-num {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
+  @apply flex items-baseline gap-[10px] text-label uppercase;
   font: 600 12px "Barlow";
   letter-spacing: 2px;
-  color: var(--label);
-  text-transform: uppercase;
 }
 .pf-notify-num input {
   width: 140px;
-  background: var(--inset);
+  @apply bg-inset rounded-[12px] py-[6px] px-[12px] font-extrabold text-[34px] text-text text-right;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 12px;
-  padding: 6px 12px;
-  font-weight: 800;
-  font-size: 34px;
   font-family: "Barlow Semi Condensed";
   font-variant-numeric: tabular-nums;
-  color: var(--text);
-  text-align: right;
 }
 .pf-notify-num input:disabled {
-  color: var(--label);
+  @apply text-label;
 }
 .pf-notify-unit {
   font: 600 20px "Barlow Semi Condensed";
-  color: var(--text-dim);
+  @apply text-text-dim;
 }
 .pf-notify-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  @apply flex flex-col gap-[8px] rounded-[12px] m-0;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
   padding: 10px 14px 12px;
-  margin: 0;
 }
 .pf-notify-actions:disabled {
   opacity: 0.5;
@@ -396,14 +373,11 @@
 .pf-notify-actions legend {
   font: 600 11px "Barlow";
   letter-spacing: 2px;
-  color: var(--label);
-  text-transform: uppercase;
-  padding: 0 6px;
+  @apply text-label uppercase py-0 px-[6px];
 }
 .pf-notify-alert {
   font: 600 14px "Barlow";
-  color: var(--danger);
-  text-align: center;
+  @apply text-danger text-center;
   max-width: 34ch;
 }
 
@@ -416,15 +390,10 @@
    Prime amount menu and the P-Mode menu -- both of which are Flask dropups with
    more choices than a confirmation can carry. */
 .pf-menu-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 340px;
-  overflow-y: auto;
+  @apply flex flex-col gap-[8px] max-h-[340px] overflow-y-auto;
 }
 .pf-menu-item {
-  text-align: center;
-  padding: 12px 18px;
+  @apply text-center py-[12px] px-[18px];
 }
 
 /* Per-probe status badges (connected / battery). Fixed height so a card whose
@@ -432,33 +401,27 @@
    that reports both. */
 .pf-badge {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
+  @apply items-center justify-center min-w-[22px] py-0 px-[5px] rounded-[9px] bg-inset text-text-dim;
   height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: var(--inset);
-  color: var(--text-dim);
   font: 600 11px "Barlow";
   line-height: 1;
 }
 .pf-badge-ok {
-  color: var(--ok);
+  @apply text-ok;
   border-color: color-mix(in srgb, var(--ok) 45%, transparent);
 }
 .pf-badge-warn {
-  color: var(--warn);
+  @apply text-warn;
   border-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }
 .pf-badge-danger {
-  color: var(--danger);
+  @apply text-danger;
   border-color: var(--danger);
 }
 .pf-badge-off,
 .pf-badge-unknown {
-  color: var(--label);
+  @apply text-label;
 }
 
 /* ==========================================================================
@@ -508,7 +471,7 @@
    ========================================================================== */
 
 .pf-dash-glow {
-  position: absolute;
+  @apply absolute pointer-events-none;
   left: 50%;
   bottom: -160px;
   transform: translateX(-50%);
@@ -518,7 +481,6 @@
   background: radial-gradient(closest-side, var(--glow), transparent 70%);
   filter: blur(14px);
   opacity: 0.28;
-  pointer-events: none;
 }
 
 /* ---- header ---- */
@@ -534,9 +496,7 @@
   z-index: 2;
 }
 .pf-dash-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  @apply flex items-center gap-[12px];
 }
 .pf-dash-dot {
   width: 12px;
@@ -549,21 +509,16 @@
 .pf-dash-wordmark {
   font: 700 20px "Barlow";
   letter-spacing: 0.5px;
-  color: var(--text);
+  @apply text-text;
 }
 .pf-dash-grillname {
   font: 600 12px "Barlow";
   letter-spacing: 2px;
-  color: var(--label);
-  text-transform: uppercase;
-  padding-left: 8px;
+  @apply text-label uppercase pl-[8px] ml-[2px];
   border-left: 1px solid rgba(255, 255, 255, 0.08);
-  margin-left: 2px;
 }
 .pf-dash-headerright {
-  display: flex;
-  align-items: center;
-  gap: 18px;
+  @apply flex items-center gap-[18px];
 }
 .pf-dash-status {
   font: 600 13px "Barlow";
@@ -576,25 +531,19 @@
      figures are silently lost. Measured -- the clock computed
      font-variant-numeric: normal until this was split. */
   font-weight: 600;
-  font-size: 22px;
+  @apply text-[22px] text-row-label;
   font-family: "Barlow Semi Condensed";
-  color: var(--row-label);
   font-variant-numeric: tabular-nums;
 }
 .pf-dash-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  @apply flex items-center gap-[8px];
 }
 
 /* ---- body and columns ---- */
 .pf-dash-body {
   flex: 1;
-  display: flex;
-  gap: 16px;
+  @apply flex gap-[16px] relative z-1;
   padding: 16px 18px 18px;
-  position: relative;
-  z-index: 1;
   min-height: 0;
 }
 .pf-dash-probecol {
@@ -607,9 +556,7 @@
 }
 .pf-dash-centercol {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  @apply flex flex-col gap-[14px];
   min-width: 0;
 }
 .pf-dash-rightcol {
@@ -625,48 +572,38 @@
 .pf-dash-caption {
   font: 600 13px "Barlow";
   letter-spacing: 2.5px;
-  color: var(--label);
-  text-transform: uppercase;
+  @apply text-label uppercase;
 }
 .pf-dash-coltitle {
-  padding-left: 4px;
+  @apply pl-[4px];
 }
 
 /* ---- cook row ---- */
 .pf-dash-cookrow {
-  display: flex;
-  gap: 14px;
+  @apply flex gap-[14px];
   height: 52px;
   flex: 0 0 52px;
 }
 .pf-dash-card {
-  background: var(--card);
+  @apply bg-card;
   border: 1px solid var(--card-border);
 }
 .pf-dash-cookcard {
   flex: 1;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
+  @apply rounded-[14px] flex items-center justify-between py-0 px-[20px];
 }
 .pf-dash-cooklabels {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  @apply flex flex-col gap-[2px];
 }
 .pf-dash-cookcaption {
   font: 600 12px "Barlow";
   letter-spacing: 2px;
-  color: var(--label);
-  text-transform: uppercase;
+  @apply text-label uppercase;
 }
 .pf-dash-modeleft {
   font: 600 12px "Barlow";
   letter-spacing: 1px;
-  color: var(--ok);
-  white-space: nowrap;
+  @apply text-ok whitespace-nowrap;
 }
 .pf-dash-cookval {
   /* Longhands, NOT the `font` shorthand. A var() inside a shorthand makes the
@@ -682,22 +619,13 @@
 }
 .pf-dash-bellbox {
   flex: 0 0 52px;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  @apply rounded-[14px] flex items-center justify-center;
 }
 .pf-dash-lid {
   flex: 0 0 210px;
-  border-radius: 14px;
+  @apply rounded-[14px] flex items-center justify-center flex-col gap-[1px] text-danger;
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   border: 1.5px solid var(--danger);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 1px;
-  color: var(--danger);
   animation: pf-blink 1s ease-in-out infinite;
 }
 .pf-dash-lid-title {
@@ -707,7 +635,7 @@
 .pf-dash-lid-sub {
   font: 600 12px "Barlow";
   letter-spacing: 1px;
-  white-space: nowrap;
+  @apply whitespace-nowrap;
 }
 
 /* ---- control row ---- */
@@ -722,20 +650,11 @@
 
 /* ---- probe card ---- */
 .pf-dash-probecard {
-  border-radius: 18px;
-  padding: 15px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  position: relative;
-  overflow: hidden;
+  @apply rounded-[18px] py-[15px] px-[18px] flex flex-col gap-[2px] relative overflow-hidden justify-center;
   flex: 1;
-  justify-content: center;
 }
 .pf-dash-probehead {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
+  @apply flex justify-between items-baseline;
 }
 .pf-dash-probename {
   font-weight: 600;
@@ -746,16 +665,13 @@
   text-transform: uppercase;
 }
 .pf-dash-probemeta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  @apply flex items-center gap-[8px];
 }
 .pf-dash-probetarget {
   font: 600 15px "Barlow";
 }
 .pf-dash-probetemp {
-  display: flex;
-  align-items: baseline;
+  @apply flex items-baseline;
   font-family: "Barlow Semi Condensed";
   font-variant-numeric: tabular-nums;
   line-height: 0.92;
@@ -773,10 +689,8 @@
 }
 .pf-dash-bar {
   height: 6px;
-  border-radius: 6px;
+  @apply rounded-[6px] mt-[8px] overflow-hidden;
   background: rgba(255, 255, 255, 0.11);
-  margin-top: 8px;
-  overflow: hidden;
 }
 .pf-dash-bar-fill {
   height: 100%;
@@ -788,13 +702,8 @@
 
 /* ---- grill gauge ---- */
 .pf-dash-gauge {
-  border-radius: 22px;
+  @apply rounded-[22px] relative flex items-center justify-center overflow-hidden;
   flex: 1;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
 }
 .pf-dash-gauge-glow {
   position: absolute;
@@ -811,21 +720,15 @@
   height: var(--pf-gauge-size);
 }
 .pf-dash-gauge-overlay {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
+  @apply absolute flex flex-col items-center gap-[2px];
 }
 .pf-dash-gauge-caption {
   font: 600 14px "Barlow";
   letter-spacing: 4px;
-  color: var(--label);
-  text-transform: uppercase;
+  @apply text-label uppercase;
 }
 .pf-dash-gauge-num {
-  display: flex;
-  align-items: baseline;
+  @apply flex items-baseline;
   font-family: "Barlow Semi Condensed";
   font-variant-numeric: tabular-nums;
   line-height: 0.9;
@@ -844,30 +747,19 @@
 .pf-dash-gauge-set {
   font: 600 20px "Barlow";
   letter-spacing: 1px;
-  color: var(--setpoint);
-  margin-top: 2px;
-  white-space: nowrap;
+  @apply text-setpoint mt-[2px] whitespace-nowrap;
 }
 .pf-dash-gauge-mode {
-  margin-top: 12px;
-  padding: 6px 20px;
-  border-radius: 999px;
+  @apply mt-[12px] py-[6px] px-[20px] rounded-[999px] text-accent uppercase whitespace-nowrap;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border: 1.5px solid color-mix(in srgb, var(--accent) 55%, transparent);
   font: 700 17px "Barlow";
   letter-spacing: 3px;
-  color: var(--accent);
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 
 /* ---- system card ---- */
 .pf-dash-system {
-  border-radius: 18px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  @apply rounded-[18px] p-[16px] flex flex-col gap-[10px];
 }
 .pf-dash-statusrow {
   display: flex;
@@ -880,9 +772,7 @@
 }
 .pf-dash-statusicon {
   width: 64px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  @apply flex justify-center items-center;
 }
 .pf-dash-statustext {
   flex: 1;
@@ -890,7 +780,7 @@
 .pf-dash-statusname {
   font: 600 17px "Barlow";
   letter-spacing: 1.5px;
-  color: var(--row-label);
+  @apply text-row-label;
 }
 .pf-dash-statusstate {
   font: 600 13px "Barlow";
@@ -907,8 +797,7 @@
 
 /* ---- pills ---- */
 .pf-dash-pills {
-  display: flex;
-  gap: 14px;
+  @apply flex gap-[14px];
   height: 64px;
   flex: 0 0 64px;
 }
@@ -931,7 +820,7 @@
   appearance: none;
 }
 button.pf-dash-pill {
-  cursor: pointer;
+  @apply cursor-pointer;
 }
 .pf-dash-pill-label {
   font: 600 10px "Barlow";
@@ -951,17 +840,11 @@ button.pf-dash-pill {
 /* ---- hopper ---- */
 .pf-dash-hopper {
   flex: 1;
-  border-radius: 18px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  @apply rounded-[18px] p-[16px] flex flex-col gap-[12px];
   min-height: 0;
 }
 .pf-dash-hopper-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
+  @apply flex justify-between items-baseline;
 }
 .pf-dash-hopper-val {
   font-weight: 800;
@@ -974,10 +857,8 @@ button.pf-dash-pill {
 .pf-dash-hopper-track {
   flex: 1;
   min-height: 0;
-  position: relative;
-  border-radius: 14px;
+  @apply relative rounded-[14px] overflow-hidden;
   background: rgba(255, 255, 255, 0.09);
-  overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 .pf-dash-hopper-fill,
@@ -1010,10 +891,7 @@ button.pf-dash-pill {
   opacity: 0.55;
 }
 .pf-dash-hopper-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  @apply flex items-center justify-between gap-[10px];
 }
 .pf-dash-hopper-label {
   font: 600 12px "Barlow";
@@ -1028,17 +906,13 @@ button.pf-dash-pill {
 .pf-dash-hopper-link {
   font: 600 12px "Barlow";
   letter-spacing: 2px;
-  text-transform: uppercase;
+  @apply uppercase whitespace-nowrap text-accent py-[4px] px-[10px] rounded-[10px];
   text-decoration: none;
-  white-space: nowrap;
-  color: var(--accent);
-  padding: 4px 10px;
-  border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .pf-dash-hopper-link:hover {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--text);
+  @apply text-text;
 }
 
 /* ==========================================================================
