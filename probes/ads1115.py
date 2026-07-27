@@ -47,14 +47,26 @@ class ADSDevice:
     def __init__(self, i2c_bus_addr=0x48, i2c_bus_kind="basic", i2c_bus_num=0):
         self.logger = logging.getLogger("control")
         self.ads = ADS1115.ADS1115(address=i2c_bus_addr)
+        # Only set for the extended bus kind, where WE opened the handle; on the
+        # basic bus the ADS1115 library owns its own SMBus(1) and closing it is
+        # not ours to do.
+        self.smbus = None
         if i2c_bus_kind == "extended":
             # The ADS1115 library hardcodes smbus2.SMBus(1); repoint it at the
             # extended bus -- a /dev/i2c-N number or an adapter-name match (e.g.
             # 'CP2112') resolved against the available i2c adapters.
             import smbus2
 
-            self.ads.i2c = smbus2.SMBus(resolve_i2c_bus(i2c_bus_num))
+            self.smbus = smbus2.SMBus(resolve_i2c_bus(i2c_bus_num))
+            self.ads.i2c = self.smbus
         self.status = {}
+
+    def close(self):
+        """Close the extended-bus smbus2 handle this device opened, if any.
+        Idempotent: the handle is dropped after closing."""
+        if self.smbus is not None:
+            self.smbus.close()
+            self.smbus = None
 
     def read_voltage(self, port):
         adc_ports = {"ADC0": 0, "ADC1": 1, "ADC2": 2, "ADC3": 3}
@@ -87,3 +99,10 @@ class ReadProbes(ProbeInterface):
                 f"(i2c bus kind={i2c_bus_kind!r}, address=0x{i2c_bus_addr:02X}, bus={i2c_bus_num!r})."
             )
             raise
+
+    def close(self):
+        """Release the extended-bus i2c handle (see ADSDevice.close). The
+        Adafruit ADS modules deliberately have no close(): their bus comes from
+        the process-wide open_i2c_bus() cache and is shared with every other
+        device on the same physical bus."""
+        self.device.close()

@@ -193,6 +193,12 @@ class ReadProbes(ProbeInterface):
         )
         self.device.start()
 
+    def close(self):
+        """Stop the background poll loop. Its thread holds a reference back to
+        the device, so a probe-map rebuild that only dropped this instance would
+        leave it polling the cloud API forever."""
+        self.device.stop()
+
     def read_all_ports(self, output_data):
         for port in self.port_map:
             channel_number = int(port.replace("TWC", "")) + 1

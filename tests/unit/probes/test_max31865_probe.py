@@ -310,3 +310,24 @@ def test_read_all_ports_aux_celsius(monkeypatch):
     result = obj.read_all_ports(obj.output_data)
 
     assert result["aux"]["Probe3"] == pytest.approx(100.0, abs=0.1)
+
+
+# ---------------------------------------------------------------------------
+# close(): release the per-instance SPI handle
+# ---------------------------------------------------------------------------
+
+
+def test_close_releases_the_spi_handle(monkeypatch):
+    """spidev.SpiDev() is opened once per RTDDevice (not shared through a
+    process-global cache the way the Adafruit modules' buses are), so the fd
+    is this instance's to release when ProbesMain rebuilds the device list."""
+    probe = _load_probe(monkeypatch)
+    obj = probe.ReadProbes.__new__(probe.ReadProbes)  # bypass heavy base __init__
+    obj.device_info = {"config": {}}
+    obj._init_device()
+
+    assert ("close",) not in obj.device.spi.calls
+
+    obj.close()
+
+    assert ("close",) in obj.device.spi.calls

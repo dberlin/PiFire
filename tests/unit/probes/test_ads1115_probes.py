@@ -188,6 +188,45 @@ class TestADS1115:
 
         assert "Something went wrong" in caplog.text
 
+    def test_close_releases_an_extended_bus_handle(self, monkeypatch):
+        """The extended bus kind opens its OWN smbus2 handle per device (the
+        ADS1115 library hardcodes SMBus(1), so the module repoints it), which
+        makes it this instance's to release on a probe-map rebuild."""
+        probe = self._load(monkeypatch, {0: 1500})
+        fake_smbus2 = types.ModuleType("smbus2")
+        closed = []
+
+        class FakeSMBus:
+            def __init__(self, bus_num):
+                self.bus_num = bus_num
+
+            def close(self):
+                closed.append(self.bus_num)
+
+        fake_smbus2.SMBus = FakeSMBus
+        monkeypatch.setitem(sys.modules, "smbus2", fake_smbus2)
+        monkeypatch.setattr(probe, "resolve_i2c_bus", lambda selector: 42)
+
+        obj = probe.ReadProbes.__new__(probe.ReadProbes)
+        obj.logger = logging.getLogger("control")
+        obj.device_info = {"config": {"i2c_bus_kind": "extended", "i2c_bus_num": "42"}}
+        obj._init_device()
+
+        obj.close()
+
+        assert closed == [42]
+
+    def test_close_on_the_basic_bus_does_nothing(self, monkeypatch):
+        """On the basic bus the ADS1115 library owns the smbus handle
+        internally; this module opened nothing, so it must close nothing."""
+        probe = self._load(monkeypatch, {0: 1500})
+        obj = probe.ReadProbes.__new__(probe.ReadProbes)
+        obj.logger = logging.getLogger("control")
+        obj.device_info = {"config": {}}
+        obj._init_device()
+
+        obj.close()  # must not raise
+
 
 # ===========================================================================
 # Shared fake for the two Adafruit-based modules

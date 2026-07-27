@@ -205,6 +205,13 @@ class ReadProbes(ProbeInterface):
         wires = int(self.device_info["config"].get("wires", 2))
         self.device = RTDDevice(cs, rtd_nominal, ref_resistor, wires)
 
+    def close(self):
+        """Release the SPI file descriptor. Unlike the Adafruit SPI modules,
+        which share a process-cached bus object, spidev.SpiDev() is opened once
+        per RTDDevice, so this instance owns the fd and must release it before
+        its replacement re-opens the same chip select."""
+        self.device.close()
+
     def read_all_ports(self, output_data):
         """Read temperature from device"""
         tempC = round(self.device.temperature, 1)

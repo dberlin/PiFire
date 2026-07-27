@@ -422,3 +422,35 @@ def test_wizard_manifest_has_thermoworks_cloud_entry():
     assert config_by_label["device_serial"]["hidden"] is True
     assert config_by_label["num_probes"]["hidden"] is True
     assert config_by_label["poll_interval"]["default"] == 30
+
+
+def test_close_stops_the_background_poll_thread(monkeypatch):
+    """The poll thread outlives the ReadProbes instance that started it (it
+    holds a reference back to the device), so a rebuild that only dropped the
+    reference would leave it polling forever."""
+    probe = _load_probe(monkeypatch)
+    calls = []
+
+    class FakeDevice:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            calls.append("start")
+
+        def stop(self):
+            calls.append("stop")
+
+    monkeypatch.setattr(probe, "ThermoworksCloudDevice", FakeDevice)
+
+    read_probes = probe.ReadProbes.__new__(probe.ReadProbes)
+    read_probes.email = "user@example.com"
+    read_probes.password = "hunter2"
+    read_probes.device_serial = "SN1"
+    read_probes.num_probes = 1
+    read_probes.poll_interval = 30
+    read_probes._init_device()
+
+    read_probes.close()
+
+    assert calls == ["start", "stop"]

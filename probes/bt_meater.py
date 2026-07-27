@@ -57,6 +57,11 @@ from probes.base import ProbeInterface
 from bluepy import btle
 # from icecream import ic  # For debugging
 
+# Seconds close() waits for each background thread. A thread parked in a
+# blocking BLE scan (~5s) can outlast this; it is logged and left to exit on
+# its own rather than stalling the control loop's probe-map rebuild.
+_CLOSE_JOIN_TIMEOUT = 5
+
 
 class BaseMeater:
     # Handle addresses for Meater Original
@@ -289,6 +294,13 @@ class Meater_Device:
 
         self.sensor_thread_active = False
 
+        # Set by close() to bring both background threads down. They are
+        # non-daemon and their loops reference this object, so without it a
+        # dropped device keeps its BLE connection (and its bluepy helper
+        # process) for the life of the process. An Event rather than a bool so
+        # the loops' idle waits are interruptible.
+        self._closing = threading.Event()
+
         self.device_thread = threading.Thread(target=self._setup_device)
         self.device_thread.start()
 
@@ -299,7 +311,7 @@ class Meater_Device:
 
     def _setup_device(self):
         """Bluetooth Meater Device Class"""
-        while True:
+        while not self._closing.is_set():
             """ Scan for a Meater Probe """
             if self.hardware_id is None:
                 try:
@@ -329,7 +341,13 @@ class Meater_Device:
                     logger_msg = f"(Meater) Error scanning for device: {e}"
                     self.logger.error(logger_msg)
                     # ic(logger_msg)
-                    time.sleep(10)
+                    self._closing.wait(10)
+
+            # The scan above blocks for ~5s, so close() may have been called
+            # while it ran; connecting now would hand a fresh BLE connection to
+            # a device nobody holds a reference to any more.
+            if self._closing.is_set():
+                break
 
             """ If we found the Hardware ID and it hasn't been setup, then setup the Meater Probe """
             if self.hardware_id is not None and self.device_setup is False:
@@ -382,11 +400,11 @@ class Meater_Device:
                         self.logger.debug(logger_msg)
                         # ic(logger_msg)
 
-            time.sleep(10)
+            self._closing.wait(10)
 
     def _sensing_loop(self):
         """Bluetooth Meater Device Class"""
-        while True:
+        while not self._closing.is_set():
             if self.device_setup:
                 self.sensor_thread_active = True
                 logger_msg = f"(Meater) Sensor thread active."
@@ -394,9 +412,9 @@ class Meater_Device:
                 # ic(logger_msg)
 
                 try:
-                    while self.sensor_thread_active:
+                    while self.sensor_thread_active and not self._closing.is_set():
                         self.update()
-                        time.sleep(1)
+                        self._closing.wait(1)
                 except btle.BTLEDisconnectError as e:
                     logger_msg = f"(Meater) Device disconnected: {e}"
                     self.logger.error(logger_msg)
@@ -414,7 +432,41 @@ class Meater_Device:
                     # self.hardware_id = None
                     self.device = None
 
-            time.sleep(1)
+            self._closing.wait(1)
+
+    def close(self):
+        """Stop both background threads and drop the BLE connection.
+
+        Called by ProbesMain when the probe map is re-applied. Order matters:
+        the threads are stopped FIRST, because the setup thread reconnects
+        whenever device_setup goes False -- disconnecting a still-running device
+        would just make it dial the probe again. Whatever connection exists
+        after the join is then disconnected, so a connection opened during
+        shutdown is not left behind.
+
+        Idempotent. Bounded: each join waits _CLOSE_JOIN_TIMEOUT and a thread
+        that is still inside a blocking BLE scan is logged and left to exit at
+        its next flag check rather than stalling the control loop further.
+        """
+        self._closing.set()
+        self.sensor_thread_active = False
+        for name in ("sensor_thread", "device_thread"):
+            thread = getattr(self, name, None)
+            if thread is None:
+                continue
+            thread.join(_CLOSE_JOIN_TIMEOUT)
+            if thread.is_alive():
+                self.logger.warning(
+                    f"(Meater) {name} did not stop within {_CLOSE_JOIN_TIMEOUT}s; "
+                    f"it will exit at its next check of the closing flag."
+                )
+
+        peripheral = getattr(self, "device", None)
+        self.device = None
+        self.meater = None
+        self.device_setup = False
+        if peripheral is not None:
+            peripheral.disconnect()
 
     def update(self):
         if self.meater:
@@ -460,6 +512,10 @@ class ReadProbes(ProbeInterface):
         self.device = Meater_Device(
             self.port_map, self.primary_port, self.units, transient=self.transient, hardware_id=self.hardware_id
         )
+
+    def close(self):
+        """Stop the device's threads and release the BLE connection."""
+        self.device.close()
 
     def read_all_ports(self, output_data):
         port_values = {}

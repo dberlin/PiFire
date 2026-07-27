@@ -59,9 +59,13 @@ class _NoOpThread:
 
     def __init__(self, target=None, **kwargs):
         self._target = target
+        self.joins = []  # join() timeouts, so close() can be asserted on
 
     def start(self):
         pass  # intentionally never runs the sensing loop
+
+    def join(self, timeout=None):
+        self.joins.append(timeout)
 
 
 def _patch_no_thread(monkeypatch, probe):
@@ -305,3 +309,46 @@ def test_read_all_ports_none_reading_propagates_as_none(monkeypatch):
     result = obj.read_all_ports(obj.output_data)
 
     assert result["primary"]["Probe1"] is None
+
+
+# ---------------------------------------------------------------------------
+# close(): stop the background sensing thread
+# ---------------------------------------------------------------------------
+
+
+def test_close_stops_and_joins_the_sensing_thread(monkeypatch):
+    """DS18B20_Device owns a non-daemon polling thread whose loop holds a
+    reference back to the device, so dropping the reference on a probe-map
+    rebuild left the thread (and its 1-wire reads) running forever."""
+    probe = _load_probe(monkeypatch)
+    _patch_no_thread(monkeypatch, probe)
+    device = probe.DS18B20_Device()
+    assert device.sensor_thread_active is True
+
+    device.close()
+
+    assert device.sensor_thread_active is False
+    assert device.sensor_thread.joins == [2]
+
+
+def test_readprobes_close_delegates_to_the_device(monkeypatch):
+    probe = _load_probe(monkeypatch)
+    _patch_no_thread(monkeypatch, probe)
+    obj = probe.ReadProbes.__new__(probe.ReadProbes)
+    obj.device_info = {"config": {}}
+    obj._init_device()
+
+    obj.close()
+
+    assert obj.device.sensor_thread_active is False
+
+
+def test_close_is_safe_to_call_twice(monkeypatch):
+    probe = _load_probe(monkeypatch)
+    _patch_no_thread(monkeypatch, probe)
+    device = probe.DS18B20_Device()
+
+    device.close()
+    device.close()  # idempotent: ProbesMain may close a device it already closed
+
+    assert device.sensor_thread_active is False

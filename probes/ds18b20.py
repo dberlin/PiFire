@@ -113,6 +113,18 @@ class DS18B20_Device:
                 self.sensor_thread_update = False
             time.sleep(0.1)
 
+    def close(self):
+        """Stop the sensing thread and wait for it to exit.
+
+        The thread is non-daemon and its loop holds a reference to this device,
+        so nothing here is reclaimed by garbage collection: without this, a
+        probe-map rebuild leaves the old thread polling the 1-wire bus
+        alongside the new one. Idempotent, and the join is bounded because the
+        loop's longest wait is its 0.1s sleep.
+        """
+        self.sensor_thread_active = False
+        self.sensor_thread.join(2)
+
     @property
     def temperature(self):
         self.sensor_thread_update = True
@@ -133,6 +145,10 @@ class ReadProbes(ProbeInterface):
         self.time_delay = 0
         self.device_info["ports"] = ["DS0"]
         self.device = DS18B20_Device()
+
+    def close(self):
+        """Stop the device's background sensing thread."""
+        self.device.close()
 
     def read_all_ports(self, output_data):
         """Read temperature from device"""

@@ -57,6 +57,11 @@ from bluepy.btle import DefaultDelegate, Scanner, Peripheral, BTLEDisconnectErro
 *****************************************
 """
 
+# Seconds close() waits for each background thread. A thread parked in a
+# blocking BLE scan (~10s) can outlast this; it is logged and left to exit on
+# its own rather than stalling the control loop's probe-map rebuild.
+_CLOSE_JOIN_TIMEOUT = 5
+
 
 class ScanDelegate(DefaultDelegate):
     def __init__(self):
@@ -152,6 +157,13 @@ class iBBQ_Device:
 
         self.sensor_thread_active = False
 
+        # Set by close() to bring both background threads down. They are
+        # non-daemon and their loops reference this object, so without it a
+        # dropped device keeps its BLE connection (and its bluepy helper
+        # process) for the life of the process. An Event rather than a bool so
+        # the loops' idle waits are interruptible.
+        self._closing = threading.Event()
+
         self.device_thread = threading.Thread(target=self._setup_device)
         self.device_thread.start()
 
@@ -185,7 +197,7 @@ class iBBQ_Device:
         XBBQ_MSG_0825 = bytearray.fromhex("08 25 00 00 00 00")  # NEW
         SECURE_MODE = bytearray.fromhex("02 01 00 00 00 00")  # NEW
 
-        while True:
+        while not self._closing.is_set():
             try:
                 if self.hardware_id == None:
                     bbqs = {}
@@ -218,8 +230,14 @@ class iBBQ_Device:
                 logger_msg = f"(ibbq) Error scanning for iBBQ/xBBQ devices: {e}. Might be related to bluetooth permissions."  # NEW
                 self.logger.debug(logger_msg)
                 # ic(logger_msg)
-                time.sleep(10)
+                self._closing.wait(10)
                 continue
+
+            # The scan above blocks for ~10s, so close() may have been called
+            # while it ran; connecting now would hand a fresh BLE connection to
+            # a device nobody holds a reference to any more.
+            if self._closing.is_set():
+                break
 
             if self.hardware_id != None and self.device_setup == False:
                 # ic("Setting up iBBQ device thread active")
@@ -284,16 +302,16 @@ class iBBQ_Device:
                     self.device_setup = False
                     # self.hardware_id = None
 
-            time.sleep(10)
+            self._closing.wait(10)
 
     def _sensing_loop(self):
         # ic('Starting iBBQ sensor loop')
-        while True:
+        while not self._closing.is_set():
             if self.device_setup:
                 self.sensor_thread_active = True
                 # ic("Sensor Loop Active!")
                 try:
-                    while self.sensor_thread_active:
+                    while self.sensor_thread_active and not self._closing.is_set():
                         if self.ibbq_device.waitForNotifications(1):
                             self.probe_values_C = self.ibbq_delegate.get_probe_temps()
                             self.battery_percentage = self.ibbq_delegate.get_batt_percent()
@@ -320,7 +338,40 @@ class iBBQ_Device:
                     self.device_setup = False
                     # self.hardware_id = None
             else:
-                time.sleep(1)
+                self._closing.wait(1)
+
+    def close(self):
+        """Stop both background threads and drop the BLE connection.
+
+        Called by ProbesMain when the probe map is re-applied. Order matters:
+        the threads are stopped FIRST, because the setup thread reconnects
+        whenever device_setup goes False -- disconnecting a still-running device
+        would just make it dial the probe again. Whatever connection exists
+        after the join is then disconnected, so a connection opened during
+        shutdown is not left behind.
+
+        Idempotent. Bounded: each join waits _CLOSE_JOIN_TIMEOUT and a thread
+        that is still inside a blocking BLE scan is logged and left to exit at
+        its next flag check rather than stalling the control loop further.
+        """
+        self._closing.set()
+        self.sensor_thread_active = False
+        for name in ("sensor_thread", "device_thread"):
+            thread = getattr(self, name, None)
+            if thread is None:
+                continue
+            thread.join(_CLOSE_JOIN_TIMEOUT)
+            if thread.is_alive():
+                self.logger.warning(
+                    f"(ibbq) {name} did not stop within {_CLOSE_JOIN_TIMEOUT}s; "
+                    f"it will exit at its next check of the closing flag."
+                )
+
+        device = getattr(self, "ibbq_device", None)
+        self.ibbq_device = None
+        self.device_setup = False
+        if device is not None:
+            device.disconnect()
 
     def get_port_values(self):
         if not self.device_setup or not self.sensor_thread_active:
@@ -377,6 +428,10 @@ class ReadProbes(ProbeInterface):
         self.device = iBBQ_Device(
             self.port_map, self.primary_port, self.units, transient=self.transient, hardware_id=self.hardware_id
         )
+
+    def close(self):
+        """Stop the device's threads and release the BLE connection."""
+        self.device.close()
 
     def read_all_ports(self, output_data):
         port_values = {}
