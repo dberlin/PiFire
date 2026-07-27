@@ -31,16 +31,47 @@ class ProbesMain:
         self.device_info_list = []
         self._setup_probe_devices(self.probe_devices)
 
+    def _close_probe_devices(self):
+        """Release the resources of the devices built by the previous call.
+
+        Called before the device list is rebuilt so a device that owns an OS
+        handle (a bluepy Peripheral and its helper process, a spidev fd, an
+        smbus2 fd, a polling thread) gives it up deterministically, rather than
+        at garbage collection -- or never, when a live background thread still
+        references the device object. The replacement instance re-opens the same
+        hardware immediately afterwards, so this ordering is the whole point.
+
+        Every device is closed even if one of them raises: the rebuild is the
+        recovery path, so a failure here is logged and stepped over rather than
+        allowed to abort it. ProbeInterface.close() is a no-op by default, so
+        modules with nothing to release need no special-casing here.
+        """
+        for device in getattr(self, "probe_device_list", []):
+            try:
+                device.close()
+            except Exception as exception:
+                self.logger.error(
+                    f"An error occurred closing probe device "
+                    f"[{getattr(device, 'device_info', {}).get('device', 'unknown')}]: {exception}"
+                )
+
     def _setup_probe_devices(self, probe_devices):
         """Construct one ReadProbes instance per configured device.
+
+        Closes the previously constructed devices first (see
+        _close_probe_devices), then rebinds self.probe_device_list.
 
         Returns the errors raised THIS call (also appended to self.errors,
         which accumulates across calls). The return value matters now that
         update_probe_map() is live: a rebuild triggered from the web tier has
-        no other way to report that a module failed to import.
+        no other way to report that a module failed to import. Close failures
+        are NOT reported that way: they are logged, because they say something
+        about the configuration that is going away rather than about the one
+        being applied.
         """
         error_event = None
         errors = []
+        self._close_probe_devices()
         self.probe_device_list = []
         for device in probe_devices:
             try:
@@ -103,9 +134,11 @@ class ProbesMain:
         profiles on already-constructed devices (probes/base.py:393-401) and
         cannot see an added, removed or renamed probe.
 
-        KNOWN LIMITATION: the previous device objects are dropped, not closed.
-        A Bluetooth/USB-HID device holding an OS handle releases it at GC, not
-        here. Callers gate this on control mode == Stop for that reason.
+        The previous devices are closed before the new ones are built (see
+        _close_probe_devices), so a Bluetooth/USB-HID/SPI handle is released
+        before its replacement re-opens the same hardware. Callers still gate
+        this on control mode == Stop, for the independent reason that the
+        rebuild leaves the probes unreadable for its duration.
         """
         self.probe_devices = probe_map["probe_devices"]
         self.probe_info = probe_map["probe_info"]

@@ -386,6 +386,29 @@ class ProbeInterface:
 
         return output_data
 
+    def close(self):
+        """Release whatever this device owns; called by
+        ProbesMain._close_probe_devices() before the device list is rebuilt.
+
+        A no-op by default, and correctly so for most modules: a virtual/derived
+        probe owns nothing, and the I2C and SPI bus objects handed to the
+        Adafruit-based modules are process-global and cached on purpose
+        (common.i2c_bus.open_i2c_bus, probes.base.resolve_mcp2210) -- every
+        device on one physical bus shares one handle, so no single device may
+        close it. Modules that DO own a per-instance resource (a spidev fd, an
+        smbus2 fd, a BLE connection, a polling thread) override this.
+
+        Overriding rather than duck-typing at the call site is deliberate: the
+        underlying teardown is spelled differently per library (close(), stop(),
+        disconnect()), and the base declaration is what makes "this device owns
+        nothing" an answer rather than an omission.
+
+        Implementations must be idempotent and must not raise for a device that
+        never finished initializing; the caller isolates failures, but a probe
+        that cannot be closed still leaks.
+        """
+        return None
+
     def update_units(self, units):
         self.units = "C" if units == "C" else "F"
         self._init_device_with_retries()
