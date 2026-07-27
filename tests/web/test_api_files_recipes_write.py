@@ -7,6 +7,7 @@ recipe surface. SAFETY: every test here writes only into the temp folder
 
 import io
 import os
+import zipfile
 from unittest.mock import ANY
 
 import pytest
@@ -235,3 +236,200 @@ def test_run_refuses_traversal_and_never_writes_control(client, folders, monkeyp
     resp = client.post("/api/files/recipes/run", json={"file": "../../../etc/passwd"})
     assert resp.status_code == 404
     assert writes == []
+
+
+# --------------------------------------------------------------------------
+# metadata
+# --------------------------------------------------------------------------
+
+
+def _step(food_probes=2):
+    return {
+        "mode": "Smoke",
+        "trigger_temps": {"primary": 0, "food": [0] * food_probes},
+        "hold_temp": 0,
+        "timer": 0,
+        "notify": False,
+        "message": "",
+        "pause": False,
+    }
+
+
+def _read_member_bytes(path, member):
+    with zipfile.ZipFile(path) as archive:
+        return archive.read(member)
+
+
+def test_update_metadata_coerces_int_and_string_fields(client, folders):
+    _history, recipe_dir = folders
+    name = write_recipe(recipe_dir, "Brisket")
+    resp = client.post(
+        "/api/files/recipes/metadata",
+        json={"file": name, "fields": {"title": "My Smoked Brisket", "prep_time": "45", "rating": 4}},
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["result"] == "OK"
+
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert detail["metadata"]["title"] == "My Smoked Brisket"
+    assert detail["metadata"]["prep_time"] == 45
+    assert detail["metadata"]["rating"] == 4
+
+
+def test_raising_food_probes_pads_every_step(client, folders):
+    """food_probes is structural: trigger_temps.food must carry exactly one
+    entry per food probe on EVERY step, or the controller's probe_map remap
+    (controller.py:156-163) indexes past the end."""
+    name = write_recipe(folders[1], "Brisket", food_probes=2, steps=[_step(), _step()])
+    resp = client.post("/api/files/recipes/metadata", json={"file": name, "fields": {"food_probes": 4}})
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert [len(s["trigger_temps"]["food"]) for s in detail["recipe"]["steps"]] == [4, 4]
+    assert detail["recipe"]["steps"][0]["trigger_temps"]["food"][2] == 0
+    assert detail["metadata"]["food_probes"] == 4
+
+
+def test_lowering_food_probes_truncates_every_step(client, folders):
+    name = write_recipe(folders[1], "Brisket", food_probes=2, steps=[_step(), _step()])
+    resp = client.post("/api/files/recipes/metadata", json={"file": name, "fields": {"food_probes": 1}})
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert [len(s["trigger_temps"]["food"]) for s in detail["recipe"]["steps"]] == [1, 1]
+
+
+def test_metadata_without_food_probes_never_opens_recipe_json(client, folders, monkeypatch):
+    """The food_probes branch is the only one that touches recipe.json; if
+    the field is absent from the patch, recipe.json must not even be read."""
+    from blueprints.api_files import recipes_api
+
+    name = write_recipe(folders[1], "Brisket")
+
+    real_read = recipes_api.read_json_file_data
+
+    def _guard(path, jsonfile, *a, **k):
+        if jsonfile == "recipe":
+            raise AssertionError("recipe.json was opened despite food_probes being absent")
+        return real_read(path, jsonfile, *a, **k)
+
+    monkeypatch.setattr(recipes_api, "read_json_file_data", _guard)
+    resp = client.post("/api/files/recipes/metadata", json={"file": name, "fields": {"title": "New Title"}})
+    assert resp.status_code == 200
+
+
+def test_metadata_rejects_unknown_field(client, folders):
+    name = write_recipe(folders[1], "Brisket")
+    resp = client.post("/api/files/recipes/metadata", json={"file": name, "fields": {"bogus": "x"}})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "bogus"
+
+
+def test_metadata_refuses_traversal(client, folders):
+    resp = client.post("/api/files/recipes/metadata", json={"file": "../../../etc/passwd", "fields": {"title": "x"}})
+    assert resp.status_code == 404
+
+
+def test_metadata_of_an_unknown_file_is_404(client, folders):
+    resp = client.post("/api/files/recipes/metadata", json={"file": "Nope.pfrecipe", "fields": {"title": "x"}})
+    assert resp.status_code == 404
+
+
+def test_metadata_with_no_body_is_400(client, folders):
+    assert client.post("/api/files/recipes/metadata").status_code == 400
+
+
+def test_metadata_write_leaves_comments_json_byte_identical(client, folders):
+    """A write endpoint reads and rewrites only the member it changes; it
+    must never touch comments.json, which this feature does not model."""
+    _history, recipe_dir = folders
+    name = write_recipe(recipe_dir, "Brisket")
+    path = recipe_dir + name
+    before = _read_member_bytes(path, "comments.json")
+
+    resp = client.post("/api/files/recipes/metadata", json={"file": name, "fields": {"title": "New Title"}})
+    assert resp.status_code == 200
+
+    after = _read_member_bytes(path, "comments.json")
+    assert after == before
+
+
+# --------------------------------------------------------------------------
+# ingredients
+# --------------------------------------------------------------------------
+
+
+def test_add_ingredient_appends_a_blank_entry(client, folders):
+    name = write_recipe(folders[1], "Brisket")
+    resp = client.post("/api/files/recipes/ingredients", json={"file": name, "action": "add"})
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert detail["recipe"]["ingredients"] == [{"name": "", "quantity": "", "assets": []}]
+
+
+def test_renaming_an_ingredient_rewrites_every_instruction_that_used_it(client, folders):
+    name = write_recipe(
+        folders[1],
+        "Brisket",
+        ingredients=[{"name": "Sugar", "quantity": "1c", "assets": []}],
+        instructions=[
+            {"text": "Rub", "ingredients": ["Sugar"], "assets": [], "step": 0},
+            {"text": "Rest", "ingredients": [], "assets": [], "step": 1},
+        ],
+    )
+    resp = client.post(
+        "/api/files/recipes/ingredients",
+        json={"file": name, "action": "update", "index": 0, "name": "Brown Sugar", "quantity": "1c"},
+    )
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert detail["recipe"]["ingredients"][0]["name"] == "Brown Sugar"
+    assert detail["recipe"]["instructions"][0]["ingredients"] == ["Brown Sugar"]
+    assert detail["recipe"]["instructions"][1]["ingredients"] == []
+
+
+def test_deleting_an_ingredient_removes_it_from_every_instruction(client, folders):
+    name = write_recipe(
+        folders[1],
+        "Brisket",
+        ingredients=[{"name": "Sugar", "quantity": "1c", "assets": []}],
+        instructions=[
+            {"text": "Rub", "ingredients": ["Sugar"], "assets": [], "step": 0},
+        ],
+    )
+    resp = client.post("/api/files/recipes/ingredients", json={"file": name, "action": "delete", "index": 0})
+    assert resp.status_code == 200
+    detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
+    assert detail["recipe"]["ingredients"] == []
+    assert detail["recipe"]["instructions"][0]["ingredients"] == []
+
+
+def test_ingredients_update_out_of_range_index_is_400(client, folders):
+    name = write_recipe(folders[1], "Brisket", ingredients=[{"name": "Sugar", "quantity": "1c", "assets": []}])
+    resp = client.post(
+        "/api/files/recipes/ingredients",
+        json={"file": name, "action": "update", "index": 5, "name": "X", "quantity": "1c"},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "index"
+
+
+def test_ingredients_delete_out_of_range_index_is_400(client, folders):
+    name = write_recipe(folders[1], "Brisket", ingredients=[{"name": "Sugar", "quantity": "1c", "assets": []}])
+    resp = client.post("/api/files/recipes/ingredients", json={"file": name, "action": "delete", "index": 5})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "index"
+
+
+def test_ingredients_unknown_action_is_400(client, folders):
+    name = write_recipe(folders[1], "Brisket")
+    resp = client.post("/api/files/recipes/ingredients", json={"file": name, "action": "bogus"})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "action"
+
+
+def test_ingredients_refuses_traversal(client, folders):
+    resp = client.post("/api/files/recipes/ingredients", json={"file": "../../../etc/passwd", "action": "add"})
+    assert resp.status_code == 404
+
+
+def test_ingredients_with_no_body_is_400(client, folders):
+    assert client.post("/api/files/recipes/ingredients").status_code == 400

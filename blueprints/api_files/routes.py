@@ -446,3 +446,53 @@ def recipe_run():
         origin="api-files",
     )
     return jsonify(api_response("OK", None, {"filename": os.path.basename(path)})), 200
+
+
+@api_files_bp.route("/recipes/metadata", methods=["POST"])
+def recipe_metadata():
+    body = json_body()
+    path, err = require_file(body.get("file", ""), recipe_folder())
+    if err:
+        return err
+    fields = body.get("fields")
+    if not isinstance(fields, dict):
+        return error("bad_request", 400, field="fields")
+    status, field = recipes_api.set_metadata(path, fields)
+    if status == "bad_field":
+        return error("bad_request", 400, field=field)
+    if status != "OK":
+        return recipes_api.unreadable(status, error)
+    return jsonify(api_response("OK")), 200
+
+
+@api_files_bp.route("/recipes/ingredients", methods=["POST"])
+def recipe_ingredients():
+    body = json_body()
+    path, err = require_file(body.get("file", ""), recipe_folder())
+    if err:
+        return err
+    action = body.get("action")
+    if action == "add":
+        status = recipes_api.add_ingredient(path)
+    elif action == "update":
+        index = body.get("index")
+        name, quantity = body.get("name"), body.get("quantity")
+        if not isinstance(index, int) or isinstance(index, bool):
+            return error("bad_request", 400, field="index")
+        if not isinstance(name, str):
+            return error("bad_request", 400, field="name")
+        if not isinstance(quantity, str):
+            return error("bad_request", 400, field="quantity")
+        status = recipes_api.update_ingredient(path, index, name, quantity)
+    elif action == "delete":
+        index = body.get("index")
+        if not isinstance(index, int) or isinstance(index, bool):
+            return error("bad_request", 400, field="index")
+        status = recipes_api.delete_ingredient(path, index)
+    else:
+        return error("bad_request", 400, field="action")
+    if status == "bad_index":
+        return error("bad_request", 400, field="index")
+    if status != "OK":
+        return recipes_api.unreadable(status, error)
+    return jsonify(api_response("OK")), 200
