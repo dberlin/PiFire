@@ -12,6 +12,13 @@
 // bare payloads with an HTTP status, matching /api/history/chart.
 
 import type { HistoryAnnotation, HistoryDataset, HistoryProbeMapper } from "../history/historyApi";
+import {
+  FileRequestError as CookFileRequestError,
+  type FileErrorDetail,
+  postForm,
+  read,
+  write,
+} from "./apiEnvelope";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
@@ -109,86 +116,15 @@ export interface CookFileChartData {
 
 /** The 422 body: the file opened but would not load. `errortype` drives the
  * repair/convert prompt, exactly as cookfile/cferror.html branches on it. */
-export interface CookFileError {
-  status: number;
-  message: string;
-  errortype: "version" | "asset" | "other" | null;
-}
+export type CookFileError = FileErrorDetail;
 
-export class CookFileRequestError extends Error {
-  readonly detail: CookFileError;
-  constructor(detail: CookFileError) {
-    super(detail.message);
-    this.name = "CookFileRequestError";
-    this.detail = detail;
-  }
-}
-
-async function toError(res: Response): Promise<CookFileError> {
-  //  A 404 from a proxy (or an HTML error page) is not JSON. Never let a parse
-  //  failure mask the status the caller has to branch on.
-  const body = (await res.json().catch(() => ({}))) as {
-    message?: string;
-    data?: { errortype?: CookFileError["errortype"] };
-  };
-  return {
-    status: res.status,
-    message: body.message ?? `HTTP ${res.status}`,
-    errortype: body.data?.errortype ?? null,
-  };
-}
-
-async function read<T>(path: string, file: string, baseUrl: string): Promise<T> {
-  const res = await fetch(
-    `${baseUrl}/api/files/cookfiles/${path}?file=${encodeURIComponent(file)}`,
-  );
-  if (res.ok) return (await res.json()) as T;
-  throw new CookFileRequestError(await toError(res));
-}
-
-/** POST helper for every JSON write endpoint. */
-async function write<T>(path: string, body: unknown, baseUrl: string): Promise<T> {
-  const res = await fetch(`${baseUrl}/api/files/cookfiles/${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new CookFileRequestError(await toError(res));
-  const envelope = (await res.json()) as { result?: string; message?: string; data?: T };
-  if (envelope.result !== "OK") {
-    throw new CookFileRequestError({
-      status: res.status,
-      message: envelope.message ?? "rejected",
-      errortype: null,
-    });
-  }
-  return envelope.data as T;
-}
-
-/** Shared tail for the two multipart uploads, which cannot go through write():
- * the body is FormData, so no JSON Content-Type may be set. */
-async function postForm<T>(path: string, form: FormData, baseUrl: string): Promise<T> {
-  const res = await fetch(`${baseUrl}/api/files/cookfiles/${path}`, {
-    method: "POST",
-    body: form,
-  });
-  if (!res.ok) throw new CookFileRequestError(await toError(res));
-  const envelope = (await res.json()) as { result?: string; message?: string; data?: T };
-  if (envelope.result !== "OK") {
-    throw new CookFileRequestError({
-      status: res.status,
-      message: envelope.message ?? "rejected",
-      errortype: null,
-    });
-  }
-  return envelope.data as T;
-}
+export { CookFileRequestError };
 
 export const fetchCookFileDetail = (file: string, baseUrl = BASE_URL) =>
-  read<CookFileDetail>("detail", file, baseUrl);
+  read<CookFileDetail>("cookfiles", "detail", file, baseUrl);
 
 export const fetchCookFileChart = (file: string, baseUrl = BASE_URL) =>
-  read<CookFileChartData>("chart", file, baseUrl);
+  read<CookFileChartData>("cookfiles", "chart", file, baseUrl);
 
 /** Download URLs are plain hrefs, not fetches — the browser must own the
  * save dialog. They live under /api/files, which IS proxied in dev
@@ -201,10 +137,10 @@ export const cookFileExportUrl = (file: string, kind: "data" | "events", baseUrl
   `${baseUrl}/api/files/cookfiles/export?file=${encodeURIComponent(file)}&kind=${kind}`;
 
 export const deleteCookFile = (file: string, baseUrl = BASE_URL) =>
-  write<null>("delete", { file }, baseUrl);
+  write<null>("cookfiles", "delete", { file }, baseUrl);
 
 export const setCookFileTitle = (file: string, title: string, baseUrl = BASE_URL) =>
-  write<null>("title", { file, title }, baseUrl);
+  write<null>("cookfiles", "title", { file, title }, baseUrl);
 
 export const renameCookFileLabel = (
   file: string,
@@ -213,31 +149,32 @@ export const renameCookFileLabel = (
   baseUrl = BASE_URL,
 ) =>
   write<{ new_label_safe: string }>(
+    "cookfiles",
     "label",
     { file, old_label: oldLabel, new_label: newLabel },
     baseUrl,
   );
 
 export const recoverCookFile = (file: string, action: "upgrade" | "repair", baseUrl = BASE_URL) =>
-  write<null>("recover", { file, action }, baseUrl);
+  write<null>("cookfiles", "recover", { file, action }, baseUrl);
 
 export const addCookFileComment = (file: string, text: string, baseUrl = BASE_URL) =>
-  write<CookFileComment>("comments", { file, action: "add", text }, baseUrl);
+  write<CookFileComment>("cookfiles", "comments", { file, action: "add", text }, baseUrl);
 
 export const updateCookFileComment = (file: string, id: string, text: string, baseUrl = BASE_URL) =>
-  write<CookFileComment>("comments", { file, action: "update", id, text }, baseUrl);
+  write<CookFileComment>("cookfiles", "comments", { file, action: "update", id, text }, baseUrl);
 
 export const deleteCookFileComment = (file: string, id: string, baseUrl = BASE_URL) =>
-  write<null>("comments", { file, action: "delete", id }, baseUrl);
+  write<null>("cookfiles", "comments", { file, action: "delete", id }, baseUrl);
 
 export const setCommentAssets = (file: string, id: string, assets: string[], baseUrl = BASE_URL) =>
-  write<{ assets: string[] }>("comments/assets", { file, id, assets }, baseUrl);
+  write<{ assets: string[] }>("cookfiles", "comments/assets", { file, id, assets }, baseUrl);
 
 export const deleteCookFileAssets = (file: string, assets: string[], baseUrl = BASE_URL) =>
-  write<null>("assets/delete", { file, assets }, baseUrl);
+  write<null>("cookfiles", "assets/delete", { file, assets }, baseUrl);
 
 export const setCookFileThumbnail = (file: string, asset: string, baseUrl = BASE_URL) =>
-  write<null>("thumbnail", { file, asset }, baseUrl);
+  write<null>("cookfiles", "thumbnail", { file, asset }, baseUrl);
 
 /** Multipart: the archive name rides as a form field and each image as a
  * repeated `assets` part, matching request.files.getlist("assets"). */
@@ -249,14 +186,19 @@ export async function uploadCookFileAssets(
   const form = new FormData();
   form.append("file", file);
   for (const image of images) form.append("assets", image);
-  const data = await postForm<{ assets: CookFileAsset[] }>("assets/upload", form, baseUrl);
+  const data = await postForm<{ assets: CookFileAsset[] }>(
+    "cookfiles",
+    "assets/upload",
+    form,
+    baseUrl,
+  );
   return data?.assets ?? [];
 }
 
 export async function uploadCookFile(archive: File, baseUrl = BASE_URL): Promise<string> {
   const form = new FormData();
   form.append("file", archive);
-  const data = await postForm<{ filename: string }>("upload", form, baseUrl);
+  const data = await postForm<{ filename: string }>("cookfiles", "upload", form, baseUrl);
   return data?.filename ?? archive.name;
 }
 
