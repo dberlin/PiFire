@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import tempfile
+from unittest import mock
 
 import pytest
 
@@ -88,6 +89,120 @@ def test_state_reports_the_current_mode(client, backup_dir):
     so it needs the mode in the same read."""
     data = client.get("/api/admin/state").get_json()["data"]
     assert isinstance(data["mode"], str)
+
+
+# ---------------------------------------------------------------------------
+# Maintenance clears and the two toggles.
+#
+# Factory reset is deliberately NOT here -- it calls restart_scripts(), so it
+# lives in test_api_admin_system.py behind the proven hazard fixture.
+# ---------------------------------------------------------------------------
+
+
+def test_clear_events_does_not_shell_out(client, tmp_path, monkeypatch):
+    """Flask runs `os.system("rm ./logs/events.log")`. This surface builds the
+    path server-side and calls os.remove, so no shell is ever involved."""
+    import blueprints.api_admin.admin_api as admin_api
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "events.log").write_text("noise")
+    monkeypatch.setattr(admin_api, "LOG_FOLDER", str(log_dir) + os.sep)
+
+    with mock.patch("os.system") as m_system:
+        resp = client.post("/api/admin/maintenance", json={"action": "clear_events"})
+
+    assert resp.status_code == 200
+    assert not (log_dir / "events.log").exists()
+    m_system.assert_not_called()
+
+
+def test_clear_events_tolerates_a_missing_log(client, tmp_path, monkeypatch):
+    """`rm` on a missing file is an error Flask swallowed; here it is success."""
+    import blueprints.api_admin.admin_api as admin_api
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    monkeypatch.setattr(admin_api, "LOG_FOLDER", str(log_dir) + os.sep)
+    resp = client.post("/api/admin/maintenance", json={"action": "clear_events"})
+    assert resp.status_code == 200
+
+
+def test_clear_pelletdb_log_empties_it(client):
+    """pelletdb["log"] is a dict keyed by timestamp ({now: profile_id}), not a
+    list -- .clear() works on both, which is why the handler reads the same
+    either way, but a test must seed it correctly."""
+    from common.datastore_accessors import read_pellet_db, write_pellet_db
+
+    pelletdb = read_pellet_db()
+    pelletdb["log"]["1767225600"] = "sentinel-profile-id"
+    write_pellet_db(pelletdb)
+    assert read_pellet_db()["log"] != {}
+
+    resp = client.post("/api/admin/maintenance", json={"action": "clear_pelletdb_log"})
+    assert resp.status_code == 200
+    assert read_pellet_db()["log"] == {}
+
+
+def test_an_unknown_maintenance_action_is_refused(client):
+    resp = client.post("/api/admin/maintenance", json={"action": "rm_rf_slash"})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "action"
+
+
+def test_debug_mode_toggle_persists_and_flags_the_control_process(client):
+    """_admin_setting_debugenabled raises settings_update alongside the write;
+    without it the running control process never learns the setting changed.
+
+    Asserted on the QUEUED write rather than on read_control(): the flag goes
+    out as a delta that the control process drains, and no control process runs
+    in this test -- so read_control() would report the pre-write value and the
+    assertion would be testing the queue, not the intent.
+    """
+    import blueprints.api_admin.routes as admin_routes
+    from common.datastore_accessors import read_settings
+
+    with mock.patch.object(admin_routes, "write_control") as m_write:
+        resp = client.post("/api/admin/settings", json={"debug_mode": True})
+
+    assert resp.status_code == 200
+    assert read_settings()["globals"]["debug_mode"] is True
+    m_write.assert_called_once()
+    #  control_delta names the member map "set" in the envelope, not
+    #  "set_values" -- that is the keyword argument, not the wire key.
+    delta = m_write.call_args.args[0]
+    assert delta["set"]["settings_update"] is True
+
+
+def test_boot_to_monitor_alone_does_not_flag_the_control_process(client):
+    """Only debug_mode needs the control process to re-read settings."""
+    import blueprints.api_admin.routes as admin_routes
+
+    with mock.patch.object(admin_routes, "write_control") as m_write:
+        client.post("/api/admin/settings", json={"boot_to_monitor": True})
+    m_write.assert_not_called()
+
+
+def test_boot_to_monitor_toggle_passes_schema_validation(client):
+    """The plan flagged this as unverified: write_settings validates against the
+    settings schema, so a field the schema rejects would 500 here."""
+    from common.datastore_accessors import read_settings
+
+    resp = client.post("/api/admin/settings", json={"boot_to_monitor": True})
+    assert resp.status_code == 200
+    assert read_settings()["globals"]["boot_to_monitor"] is True
+
+
+def test_an_unknown_setting_key_is_refused(client):
+    resp = client.post("/api/admin/settings", json={"grill_name": "pwned"})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "grill_name"
+
+
+def test_a_non_boolean_toggle_is_refused(client):
+    resp = client.post("/api/admin/settings", json={"debug_mode": "yes"})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "debug_mode"
 
 
 def test_a_missing_backup_folder_is_an_empty_list_not_a_500(client):

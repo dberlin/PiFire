@@ -15,9 +15,21 @@ from flask import current_app, jsonify, request
 from werkzeug.exceptions import BadRequest
 
 from common.app import api_response
-from common.common import write_log
-from common.datastore_accessors import read_control, read_settings
+from common.common import WriteKind, write_log
+from common.control_delta import control_delta
+from common.datastore_accessors import (
+    flush_control,
+    flush_history,
+    read_control,
+    read_pellet_db,
+    read_settings,
+    write_control,
+    write_pellet_db,
+    write_settings,
+)
+from common.defaults import default_control, default_settings
 from common.modes import Mode
+from common.pellets_actions import clear_pellet_db
 from common.server_status import set_server_status
 from common.system import reboot_system, restart_scripts, shutdown_system
 
@@ -31,6 +43,21 @@ _SYSTEM_ACTIONS = {
     "reboot": (lambda: reboot_system(), "rebooting"),
     "shutdown": (lambda: shutdown_system(), "shutdown"),
     "restart": (lambda: restart_scripts(), "restarting"),
+}
+
+
+def _clear_pelletdb_log():
+    pelletdb = read_pellet_db()
+    pelletdb["log"].clear()
+    write_pellet_db(pelletdb)
+
+
+#: Destructive, but recoverable -- none of these can stop a cook or the machine.
+_MAINTENANCE_ACTIONS = {
+    "clear_history": lambda: flush_history(),
+    "clear_events": lambda: admin_api.clear_events_log(),
+    "clear_pelletdb": lambda: clear_pellet_db(),
+    "clear_pelletdb_log": _clear_pelletdb_log,
 }
 
 
@@ -106,6 +133,92 @@ def admin_system():
     #  module's own bindings intercept here.
     call()
     return jsonify(api_response("OK", None, {"action": action})), 200
+
+
+@api_admin_bp.route("/factory-reset", methods=["POST"])
+def admin_factory_reset():
+    """Reset settings, control, history and the pellet database to defaults.
+
+    Mirrors _admin_setting_factorydefaults step for step. Two of those steps
+    look redundant and are not:
+
+      * clear_pellet_db() -- pre-SQLite, `os.system("rm pelletdb.json")` WAS how
+        a factory reset cleared pellets. Removing that dead rm preserved the
+        accident it left behind, a reset that kept every profile and log entry.
+        Clearing them is a ruling, not an oversight.
+      * the control reseed after flush_control() -- flush already wrote
+        default_control(), and this restates it as named intent so a write
+        queued alongside cannot clobber it. timer and notify_data are stated as
+        ops because they are only expressible that way.
+    """
+    refusal = require_stopped()
+    if refusal:
+        return refusal
+
+    write_log("Admin: factory reset via /api/admin/factory-reset")
+    flush_history()
+    flush_control()
+    clear_pellet_db()
+    write_settings(default_settings())
+
+    control = default_control()
+    notify_entries = control.pop("notify_data")
+    control.pop("timer")
+    write_control(
+        control_delta(
+            set_values=control,
+            ops=[{"op": "timer.clear"}, {"op": "notify.replace", "entries": notify_entries}],
+        ),
+        WriteKind.DELTA,
+        origin="api-admin",
+    )
+    set_server_status("restarting")
+    restart_scripts()
+    return jsonify(api_response("OK", None, {"action": "factory_reset"})), 200
+
+
+@api_admin_bp.route("/maintenance", methods=["POST"])
+def admin_maintenance():
+    """The four destructive-but-not-fatal clears.
+
+    Deliberately NOT gated on Stop mode: clearing a pellet log mid-cook is
+    recoverable, and Flask offers all four from any mode. The system actions
+    above are the ones that need the guard.
+    """
+    action = json_body().get("action")
+    if action not in _MAINTENANCE_ACTIONS:
+        return error("bad_request", 400, field="action")
+
+    write_log(f"Admin: {action} via /api/admin/maintenance")
+    _MAINTENANCE_ACTIONS[action]()
+    return jsonify(api_response("OK", None, {"action": action})), 200
+
+
+@api_admin_bp.route("/settings", methods=["POST"])
+def admin_settings():
+    """The two admin toggles.
+
+    debug_mode also raises the settings_update control flag, matching
+    _admin_setting_debugenabled: without it the running control process never
+    learns the setting changed.
+    """
+    body = json_body()
+    unknown = set(body) - {"debug_mode", "boot_to_monitor"}
+    if unknown:
+        return error("bad_request", 400, field=sorted(unknown)[0])
+    if not body:
+        return error("bad_request", 400, field="debug_mode")
+    for key, value in body.items():
+        if not isinstance(value, bool):
+            return error("bad_request", 400, field=key)
+
+    settings = read_settings()
+    settings["globals"].update(body)
+    write_settings(settings)
+    if "debug_mode" in body:
+        write_control(control_delta(set_values={"settings_update": True}), WriteKind.DELTA, origin="api-admin")
+        write_log(f"Debug Mode {'Enabled' if body['debug_mode'] else 'Disabled'}.")
+    return jsonify(api_response("OK", None, body)), 200
 
 
 @api_admin_bp.route("/state", methods=["GET"])

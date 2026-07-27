@@ -138,6 +138,55 @@ def test_get_cannot_reach_it(hazard):
     assert hazard["calls"] == []
 
 
+# ---------------------------------------------------------------------------
+# Factory reset lives here rather than with the other maintenance actions:
+# it calls restart_scripts(), so it belongs behind the proven hazard fixture.
+# ---------------------------------------------------------------------------
+
+
+def test_factory_reset_restores_defaults_and_restarts(hazard):
+    from common.datastore_accessors import read_settings, write_settings
+
+    settings = read_settings()
+    settings["globals"]["grill_name"] = "Not A Default"
+    write_settings(settings)
+
+    resp = hazard["client"].post("/api/admin/factory-reset", json={})
+    assert resp.status_code == 200
+    assert read_settings()["globals"]["grill_name"] != "Not A Default"
+    assert [c[0] for c in hazard["calls"]] == ["restart_scripts"]
+    assert_nothing_hazardous_ran(hazard)
+
+
+def test_factory_reset_clears_the_pellet_database(hazard):
+    """Pre-SQLite this was `os.system("rm pelletdb.json")`; removing that dead
+    line preserved a reset that kept every profile. Clearing is the ruling.
+
+    The log does not end up EMPTY: clear_pellet_db() reseeds a default profile
+    and records loading it, so a reset leaves exactly one fresh entry. What must
+    be gone is the user's own history.
+    """
+    from common.datastore_accessors import read_pellet_db, write_pellet_db
+
+    pelletdb = read_pellet_db()
+    pelletdb["log"]["1767225600"] = "sentinel-profile-id"
+    write_pellet_db(pelletdb)
+    assert "1767225600" in read_pellet_db()["log"]
+
+    hazard["client"].post("/api/admin/factory-reset", json={})
+    log_after = read_pellet_db()["log"]
+    assert "1767225600" not in log_after
+    assert "sentinel-profile-id" not in log_after.values()
+
+
+def test_factory_reset_refused_unless_stopped(hazard):
+    with mock.patch.object(admin_routes, "read_control", return_value={"mode": "Hold"}):
+        resp = hazard["client"].post("/api/admin/factory-reset", json={})
+    assert resp.status_code == 409
+    assert hazard["calls"] == []
+    assert_nothing_hazardous_ran(hazard)
+
+
 def test_refused_unless_stopped(hazard):
     """G7. A deliberate divergence from Flask, which powers the machine off from
     any mode. Second line of defence behind stubbing, never a replacement."""

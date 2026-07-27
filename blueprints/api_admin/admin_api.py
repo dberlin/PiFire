@@ -39,8 +39,14 @@ def list_backups(folder):
     }
 
 
-def list_logs(folder=LOG_FOLDER):
-    """Bare .log filenames. Same missing-folder tolerance as list_backups."""
+def list_logs(folder=None):
+    """Bare .log filenames. Same missing-folder tolerance as list_backups.
+
+    `folder` resolves at CALL time rather than defaulting to LOG_FOLDER in the
+    signature: a default argument binds once at definition, so a test that
+    monkeypatches the module constant would never be seen.
+    """
+    folder = folder or LOG_FOLDER
     try:
         return sorted(n for n in os.listdir(folder) if n.endswith(".log"))
     except OSError:
@@ -70,6 +76,41 @@ def state_payload(settings, control, backup_folder):
         "logs": list_logs(),
         "mode": control.get("mode", ""),
     }
+
+
+def clear_events_log(folder=None):
+    """Delete the events log.
+
+    Flask runs `os.system("rm ./logs/events.log")` for this. The path is built
+    here rather than handed to a shell -- no interpolation, no shell, and a
+    missing file is success rather than a silently swallowed `rm` error.
+
+    `folder` resolves at call time; see list_logs.
+    """
+    folder = folder or LOG_FOLDER
+    try:
+        os.remove(os.path.join(folder, "events.log"))
+    except FileNotFoundError:
+        pass
+    return True
+
+
+def delete_logs(folder=None):
+    """Delete every .log in the folder, reporting what went.
+
+    Flask runs `os.system("rm logs/*.log")` inside a bare `except:`, so a
+    failure is indistinguishable from success. This globs server-side and names
+    what it removed. `folder` resolves at call time; see list_logs.
+    """
+    folder = folder or LOG_FOLDER
+    removed = []
+    for name in list_logs(folder):
+        try:
+            os.remove(os.path.join(folder, name))
+            removed.append(name)
+        except OSError:
+            continue
+    return removed
 
 
 def pip_list():
