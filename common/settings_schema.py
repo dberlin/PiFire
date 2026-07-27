@@ -246,7 +246,9 @@ class GlobalSettings(_Section):
     # Mirrors defaults.py settings["globals"].
     grill_name: str = ""
     debug_mode: bool = False
-    page_theme: str = "light"
+    # Bootstrap's light/dark theme for the legacy Flask pages. Nothing in the
+    # React app reads it; it is named for its one consumer so that stays plain.
+    bootstrap_page_theme: str = "light"
     disp_rotation: int = 0
     units: Literal["F", "C"] = "F"
     augerrate: float = 0.3

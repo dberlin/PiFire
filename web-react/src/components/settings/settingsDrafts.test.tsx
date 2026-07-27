@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
+import { AppPrefsProvider } from "../AppPrefs";
 import { SettingsShell } from "./SettingsShell";
 import { PwmTab } from "./tabs/PwmTab";
 import { SafetyTab } from "./tabs/SafetyTab";
@@ -67,7 +68,11 @@ function renderSettings() {
     ],
     { initialEntries: ["/settings/pwm"] },
   );
-  render(<RouterProvider router={router} />);
+  render(
+    <AppPrefsProvider>
+      <RouterProvider router={router} />
+    </AppPrefsProvider>,
+  );
   return { router, loaderCalls: () => loaderCalls };
 }
 

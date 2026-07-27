@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router";
 import { useSettingsDraftStore } from "../../../helpers/settings/settingsDrafts";
 import { renderRoute } from "../../../test-utils";
+import { AppPrefsProvider } from "../../AppPrefs";
 import { GeneralTab } from "./GeneralTab";
 
 const saveMock = rs.fn().mockResolvedValue(true);
@@ -47,13 +48,15 @@ function ContextHolder({ initial }: { initial: unknown }) {
 
 function renderResyncHarness(initial: unknown) {
   return render(
-    <MemoryRouter initialEntries={["/"]}>
-      <Routes>
-        <Route path="/" element={<ContextHolder initial={initial} />}>
-          <Route index element={<GeneralTab />} />
-        </Route>
-      </Routes>
-    </MemoryRouter>,
+    <AppPrefsProvider>
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route path="/" element={<ContextHolder initial={initial} />}>
+            <Route index element={<GeneralTab />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </AppPrefsProvider>,
   );
 }
 
@@ -61,10 +64,9 @@ describe("GeneralTab", () => {
   it("renders grill name and theme fields with loaded values", () => {
     const context = {
       settings: {
-        globals: {
-          grill_name: "Backyard Smoker",
-          page_theme: "dark",
-        },
+        globals: { grill_name: "Backyard Smoker" },
+        modules: { display: "qtquick_flex" },
+        display: { config: { qtquick_flex: { accent_theme: "Ice" } } },
       },
       mode: "Stop",
     };
@@ -73,16 +75,51 @@ describe("GeneralTab", () => {
 
     expect(screen.getByDisplayValue("Backyard Smoker")).toBeInTheDocument();
     const select = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(select.value).toBe("dark");
+    expect(select.value).toBe("Ice");
+  });
+
+  // The accent is one appliance-wide setting: this is the key
+  // display/qtapp.py's _accent_fn reads, so the attached screen follows.
+  it("falls back to Ember when the display module holds no accent", () => {
+    const context = {
+      settings: {
+        globals: { grill_name: "G" },
+        modules: { display: "qtquick_flex" },
+        display: { config: { qtquick_flex: {} } },
+      },
+      mode: "Stop",
+    };
+
+    renderRoute(<GeneralTab />, context);
+
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("Ember");
+  });
+
+  it("saves the chosen accent under the selected display module", async () => {
+    const context = {
+      settings: {
+        globals: { grill_name: "G" },
+        modules: { display: "qtquick_flex" },
+        display: { config: { qtquick_flex: { accent_theme: "Ember" } } },
+      },
+      mode: "Stop",
+    };
+
+    renderRoute(<GeneralTab />, context);
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "Crimson" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(saveMock.mock.calls[0][0].display.config.qtquick_flex.accent_theme).toBe("Crimson");
   });
 
   it("saves the edited grill name with empty flags when Save is clicked", async () => {
     const context = {
       settings: {
-        globals: {
-          grill_name: "Old Name",
-          page_theme: "light",
-        },
+        globals: { grill_name: "Old Name" },
+        modules: { display: "qtquick_flex" },
+        display: { config: { qtquick_flex: { accent_theme: "Ember" } } },
       },
       mode: "Stop",
     };
@@ -100,12 +137,13 @@ describe("GeneralTab", () => {
       {
         globals: {
           grill_name: "New Name",
-          page_theme: "light",
         },
         // Written unconditionally, like PwmTab's cross-section
-        // startup.pwm_duty_cycle: this fixture has no `display`, so the
-        // 300 default round-trips. Harmless, and it keeps onSave branch-free.
+        // startup.pwm_duty_cycle: this fixture has no `display.sleep_timeout`,
+        // so the 300 default round-trips. Harmless, and it keeps onSave
+        // branch-free.
         display: {
+          config: { qtquick_flex: { accent_theme: "Ember" } },
           sleep_timeout: 300,
         },
       },
@@ -123,7 +161,7 @@ describe("GeneralTab", () => {
   it("renders the screen sleep timeout with the loaded value", () => {
     const context = {
       settings: {
-        globals: { grill_name: "G", page_theme: "light" },
+        globals: { grill_name: "G" },
         display: { sleep_timeout: 45 },
       },
       mode: "Stop",
@@ -143,7 +181,7 @@ describe("GeneralTab", () => {
   it("saves an edited sleep timeout into the delta", async () => {
     const context = {
       settings: {
-        globals: { grill_name: "G", page_theme: "light" },
+        globals: { grill_name: "G" },
         display: { sleep_timeout: 300 },
       },
       mode: "Stop",
@@ -164,7 +202,7 @@ describe("GeneralTab", () => {
   it("keeps 0 (never sleep) rather than treating it as empty", async () => {
     const context = {
       settings: {
-        globals: { grill_name: "G", page_theme: "light" },
+        globals: { grill_name: "G" },
         display: { sleep_timeout: 300 },
       },
       mode: "Stop",
@@ -181,24 +219,22 @@ describe("GeneralTab", () => {
   it("resyncs displayed values when the settings object changes on re-render", () => {
     const first = {
       settings: {
-        globals: {
-          grill_name: "First Grill",
-          page_theme: "light",
-        },
+        globals: { grill_name: "First Grill" },
+        modules: { display: "qtquick_flex" },
+        display: { config: { qtquick_flex: { accent_theme: "Ember" } } },
       },
       mode: "Stop",
     };
 
     renderResyncHarness(first);
     expect(screen.getByDisplayValue("First Grill")).toBeInTheDocument();
-    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("light");
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("Ember");
 
     const second = {
       settings: {
-        globals: {
-          grill_name: "Second Grill",
-          page_theme: "dark",
-        },
+        globals: { grill_name: "Second Grill" },
+        modules: { display: "qtquick_flex" },
+        display: { config: { qtquick_flex: { accent_theme: "Crimson" } } },
       },
       mode: "Stop",
     };
@@ -208,6 +244,6 @@ describe("GeneralTab", () => {
     });
 
     expect(screen.getByDisplayValue("Second Grill")).toBeInTheDocument();
-    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("dark");
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("Crimson");
   });
 });

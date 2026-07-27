@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
+import { readAccent } from "../helpers/settings/accent";
 import { getSettings } from "../helpers/settings/settingsApi";
 import { useShellState } from "../helpers/shellContext";
 import { useAppPrefs } from "./AppPrefs";
@@ -23,11 +24,15 @@ export function DashboardRoute() {
   // after mount and redirect a fresh install to the wizard. A brief dashboard
   // flash before the redirect is the accepted tradeoff; a failed check is
   // advisory and must never block the dashboard.
+  // The same fetch also carries the stored accent, which is what the app should
+  // be wearing from the first paint rather than the provider's ember default.
   useEffect(() => {
     let cancelled = false;
     getSettings(BASE_URL)
       .then((s) => {
-        if (!cancelled && s.globals?.first_time_setup) navigate("/wizard");
+        if (cancelled) return;
+        setAccent(readAccent(s));
+        if (s.globals?.first_time_setup) navigate("/wizard");
       })
       .catch(() => {
         /* advisory only -- never block the dashboard on this check */
@@ -35,7 +40,7 @@ export function DashboardRoute() {
     return () => {
       cancelled = true;
     };
-  }, [navigate]);
+  }, [navigate, setAccent]);
 
   if (phase !== "live" && phase !== "demo") {
     return (

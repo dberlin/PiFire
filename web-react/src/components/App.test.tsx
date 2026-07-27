@@ -108,7 +108,7 @@ describe("App routing", () => {
 
   it("renders the settings shell and GeneralTab at /settings/general", async () => {
     getSettingsMock.mockResolvedValue({
-      globals: { grill_name: "Backyard Smoker", page_theme: "dark" },
+      globals: { grill_name: "Backyard Smoker" },
     });
     getModeMock.mockResolvedValue("Stop");
 
@@ -123,7 +123,7 @@ describe("App routing", () => {
 
   it("renders the Probes settings tab at /settings/probes", async () => {
     getSettingsMock.mockResolvedValue({
-      globals: { grill_name: "Backyard Smoker", page_theme: "dark" },
+      globals: { grill_name: "Backyard Smoker" },
       probe_settings: { probe_profiles: {}, probe_map: { probe_devices: [], probe_info: [] } },
     });
     getModeMock.mockResolvedValue("Stop");
@@ -178,7 +178,7 @@ describe("App routing", () => {
 
   it("renders the settings page inside the app shell", async () => {
     getSettingsMock.mockResolvedValue({
-      globals: { grill_name: "Backyard Smoker", page_theme: "dark" },
+      globals: { grill_name: "Backyard Smoker" },
     });
     getModeMock.mockResolvedValue("Stop");
 

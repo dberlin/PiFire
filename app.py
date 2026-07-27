@@ -128,7 +128,7 @@ def inject_theme_and_grill_name():
     the 39 call sites across the blueprints."""
     settings = read_settings()
     return {
-        "page_theme": settings["globals"].get("page_theme", "light"),
+        "page_theme": settings["globals"].get("bootstrap_page_theme", "light"),
         "grill_name": settings["globals"].get("grill_name", ""),
     }
 

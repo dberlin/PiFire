@@ -174,6 +174,11 @@
           "title": "Boot To Monitor",
           "type": "boolean"
         },
+        "bootstrap_page_theme": {
+          "default": "light",
+          "title": "Bootstrap Page Theme",
+          "type": "string"
+        },
         "debug_mode": {
           "default": false,
           "title": "Debug Mode",
@@ -202,11 +207,6 @@
         "grill_name": {
           "default": "",
           "title": "Grill Name",
-          "type": "string"
-        },
-        "page_theme": {
-          "default": "light",
-          "title": "Page Theme",
           "type": "string"
         },
         "prime_ignition": {
@@ -1951,13 +1951,13 @@
       "default": {
         "augerrate": 0.3,
         "boot_to_monitor": false,
+        "bootstrap_page_theme": "light",
         "debug_mode": false,
         "disp_rotation": 0,
         "ext_data": false,
         "first_time_setup": true,
         "global_control_panel": false,
         "grill_name": "",
-        "page_theme": "light",
         "prime_ignition": false,
         "python_exec": ".venv/bin/python",
         "units": "F",

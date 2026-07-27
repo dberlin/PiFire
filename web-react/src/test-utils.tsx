@@ -1,6 +1,7 @@
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
+import { AppPrefsProvider } from "./components/AppPrefs";
 import { useSettingsDraftStore } from "./helpers/settings/settingsDrafts";
 
 // Settings tabs (and other routed components) read their data via
@@ -29,5 +30,11 @@ export function renderRoute(ui: ReactElement, context: unknown) {
     ],
     { initialEntries: ["/"] },
   );
-  return render(<RouterProvider router={router} />);
+  // App.tsx wraps every route in this, and a tab that reads a preference (the
+  // accent on General) needs it present to render at all.
+  return render(
+    <AppPrefsProvider>
+      <RouterProvider router={router} />
+    </AppPrefsProvider>,
+  );
 }

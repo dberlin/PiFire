@@ -46,7 +46,7 @@ def default_settings():
     settings["globals"] = {
         "grill_name": "",
         "debug_mode": False,
-        "page_theme": "light",
+        "bootstrap_page_theme": "light",
         "disp_rotation": 0,
         "units": "F",
         "augerrate": 0.3,  # (grams per second) default auger load rate is 10 grams / 30 seconds

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
+import { AppPrefsProvider } from "../AppPrefs";
 import { SettingsShell } from "./SettingsShell";
 
 // SettingsShell reads its data via `useLoaderData()`, not outlet context, so
@@ -26,7 +27,11 @@ function renderShell(dcFan = true) {
     ],
     { initialEntries: ["/settings"] },
   );
-  return render(<RouterProvider router={router} />);
+  return render(
+    <AppPrefsProvider>
+      <RouterProvider router={router} />
+    </AppPrefsProvider>,
+  );
 }
 
 // Every tab in SettingsShell's nav, in nav order. Keep in sync with TABS there

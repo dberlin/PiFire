@@ -36,7 +36,7 @@ const SURFACES = [
 //   pf-rpt-range-label    RangeProfileTable.tsx:155 -- span, unstyled
 //   pf-pellets-load       CurrentLoadCard.tsx:59 -- wrapper div. Note that
 //                         .pf-pellets-load-name IS styled; the bare name is not.
-const UNSTYLED = ["pf-pellets-load", "pf-rpt-range-label", "pf-section-note", "pf-settings-tab"];
+const UNSTYLED = ["pf-pellets-load", "pf-section-note", "pf-settings-tab"];
 
 describe("every pf-* class the app uses has a rule", () => {
   // Animation names count as declared: SystemStatus and GrillGauge name

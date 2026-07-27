@@ -1,7 +1,10 @@
+import { useEffect } from "react";
 import { NavLink, Outlet, useLoaderData, useNavigate } from "react-router";
+import { readAccent } from "../../helpers/settings/accent";
 import { hasDcFan } from "../../helpers/settings/platform";
 import type { ControllerMetadata, Settings } from "../../helpers/settings/settingsApi";
 import { useSettingsDraftStore } from "../../helpers/settings/settingsDrafts";
+import { useAppPrefs } from "../AppPrefs";
 
 const SETTINGS_TABS = [
   { path: "general", label: "General" },
@@ -27,6 +30,12 @@ export function SettingsShell() {
     controllerMeta: ControllerMetadata | null;
   };
   const navigate = useNavigate();
+  // A deep link into /settings never passes the dashboard, so this is the other
+  // place the stored accent has to be picked up from.
+  const { setAccent } = useAppPrefs();
+  useEffect(() => {
+    setAccent(readAccent(settings));
+  }, [settings, setAccent]);
   // The shell outlives the tabs, so it is where an in-progress edit waits while
   // the user is on another pill (helpers/settings/settingsDrafts.ts).
   const draftStore = useSettingsDraftStore(settings);

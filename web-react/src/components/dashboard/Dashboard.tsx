@@ -7,6 +7,7 @@ import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboar
 import { deriveView, type PillView } from "../../helpers/dashboard/deriveView";
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
 import { type NotifyEdit, readNotifyEdit, saveNotifyEdit } from "../../helpers/notify/notifyState";
+import { saveAccent } from "../../helpers/settings/accent";
 import type { AccentName, LiveState, ProbeData } from "../../helpers/types";
 import type { ConnectionPhase } from "../../helpers/useLiveState";
 import { ActionMenu, type MenuItem } from "./ActionMenu";
@@ -215,7 +216,12 @@ export function Dashboard({
                   key={a}
                   className={`pf-swatch ${accent === a ? "sel" : ""}`}
                   style={{ background: SWATCH[a] }}
-                  onClick={() => setAccent(a)}
+                  // Applied locally first so the swatch responds at once, then
+                  // persisted for the next load and for the attached screen.
+                  onClick={() => {
+                    setAccent(a);
+                    void saveAccent(apiBase, a);
+                  }}
                   aria-label={a}
                 />
               ))}

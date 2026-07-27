@@ -64,6 +64,11 @@
     @apply flex-row flex-wrap;
     flex-basis: auto;
   }
+  /* Narrower control and unit tracks, so the label keeps enough width to read
+     on a phone. The input's own 120px floor sets how far this can go. */
+  .pf-section-body {
+    grid-template-columns: minmax(0, 1fr) 8rem 2.75rem;
+  }
 }
 .pf-section {
   @apply mb-[28px];
@@ -72,14 +77,40 @@
   font: 700 20px "Barlow";
   margin: 0 0 14px;
 }
+/* Three columns shared by every field in the section: label, control, unit.
+   The fields subgrid onto these, so one row's input and unit line up with the
+   next row's even when only some rows carry a unit. Anything that is not a
+   field row (tables, buttons, the save bar) spans the whole width. */
 .pf-section-body {
-  @apply flex flex-col gap-[14px];
+  @apply grid items-center gap-x-[16px] gap-y-[14px];
+  /* Both trailing tracks are fixed rather than content-sized so that every
+     section on a tab agrees: a section whose widest unit is "s" would
+     otherwise place its inputs a few pixels right of one containing "degrees".
+     4rem clears the longest unit in use (HistoryTab's "degrees").
+
+     The label track takes minmax(0, 1fr) so a long label wraps inside its
+     column. Left at 1fr its automatic min-content floor would widen the row,
+     and since only that track can absorb it, sections would each overflow by
+     a different amount and stop agreeing. */
+  grid-template-columns: minmax(0, 1fr) 11rem 4rem;
+}
+.pf-section-body > *:not(.pf-field) {
+  grid-column: 1 / -1;
 }
 .pf-field {
-  @apply flex items-center justify-between gap-[16px];
+  @apply flex flex-wrap items-center justify-between gap-[16px];
+}
+.pf-section-body > .pf-field {
+  @apply grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
 }
 .pf-field-column {
   @apply flex-col items-stretch;
+}
+.pf-section-body > .pf-field.pf-field-column {
+  @apply flex;
+  grid-column: 1 / -1;
 }
 .pf-field-label {
   @apply text-text-dim;
@@ -87,6 +118,14 @@
 }
 .pf-field-control {
   @apply flex items-center gap-[8px];
+}
+/* The control's right edge is what lines up, so the unit must sit in its own
+   column rather than inside the control. The gap matches the section's, because
+   a subgrid with a narrower one puts its tracks somewhere the parent's are not. */
+.pf-section-body > .pf-field > .pf-field-control {
+  @apply grid gap-x-[16px];
+  grid-template-columns: subgrid;
+  grid-column: 2 / 4;
 }
 .pf-input {
   @apply min-w-[120px] rounded-[10px] bg-inset px-[12px] py-[8px] text-text;
@@ -125,6 +164,10 @@
 .pf-switch {
   @apply relative h-[26px] w-[46px] cursor-pointer rounded-[999px] bg-inset;
   border: none;
+}
+/* A switch is narrower than an input; align the edge they share. */
+.pf-section-body > .pf-field > .pf-switch {
+  justify-self: end;
 }
 .pf-switch.on {
   @apply bg-accent;
@@ -170,9 +213,16 @@
 }
 /* Per-field helper copy: NumberField's `hint`, and ControllerTab's option
    descriptions, which have been rendering unstyled. Same tokens as
-   .pf-settings-hint — no new palette. */
+   .pf-settings-hint — no new palette.
+
+   The hint is a sibling of the label and control, so it takes a row of its own
+   in both layouts a field row can be in: a full-width flex line in the wizard's
+   module config, and in a settings section a row starting at the control it
+   describes. Sharing the field's row instead would displace the control. */
 .pf-field-hint {
   @apply text-text-dim;
+  flex: 1 0 100%;
+  grid-column: 2 / -1;
   font: 500 13px "Barlow";
   line-height: 1.6;
 }
@@ -222,12 +272,22 @@
 .pf-rpt tbody tr {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
+/* A table cell, so this column is sized by the table alongside the others.
+   The label is a fixed column of its own because its text varies per row
+   ("< 100°", "100 – 199°", "≥ 200°") and the boundary input that follows it
+   has to start at the same x on every row. */
 .pf-rpt-range {
-  @apply flex items-center gap-[8px] whitespace-nowrap text-text;
+  @apply whitespace-nowrap text-text;
+  display: table-cell;
+  vertical-align: middle;
   font: 600 14px "Barlow";
+}
+.pf-rpt-range-label {
+  @apply inline-block min-w-[92px] pr-[8px];
 }
 .pf-rpt-boundary-input {
   @apply min-w-[72px];
+  vertical-align: middle;
 }
 .pf-rpt-cell {
   display: table-cell;

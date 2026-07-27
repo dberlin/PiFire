@@ -1,28 +1,35 @@
+import { useOutletContext } from "react-router";
+import { accentPath, readAccent, storedAccentName } from "../../../helpers/settings/accent";
 import { setPath } from "../../../helpers/settings/delta";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
+import type { AccentName } from "../../../helpers/types";
+import { useAppPrefs } from "../../AppPrefs";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { Select } from "../fields/Select";
 import { TextField } from "../fields/TextField";
 import { SaveBar } from "../SaveBar";
 
-const THEMES = [
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
+// The three accents Theme.qml resolves (display/qml/Theme.qml:32-36), spelled
+// the way the store holds them.
+const ACCENTS = [
+  { value: "Ember", label: "Ember" },
+  { value: "Ice", label: "Ice" },
+  { value: "Crimson", label: "Crimson" },
 ];
 
 type General = {
   grill_name: string;
-  page_theme: string;
+  accent_theme: string;
   sleep_timeout: number;
 };
 
 function readGeneral(s: Settings): General {
   return {
     grill_name: s.globals?.grill_name ?? "",
-    page_theme: s.globals?.page_theme ?? "light",
+    accent_theme: storedAccentName(readAccent(s)),
     // Same default as common/common.py's display_sleep_timeout() and the
     // schema (settings_schema.py: ge=0, default 300).
     sleep_timeout: s.display?.sleep_timeout ?? 300,
@@ -31,13 +38,16 @@ function readGeneral(s: Settings): General {
 
 export function GeneralTab() {
   const { save, saving, status } = useSaveSettings();
+  const { settings } = useOutletContext<{ settings: Settings }>();
+  const { setAccent } = useAppPrefs();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("general", readGeneral);
   const set = <K extends keyof General>(k: K, val: General[K]) => setV((s) => ({ ...s, [k]: val }));
 
   const onSave = async () => {
     let delta = setPath({}, "globals.grill_name", v.grill_name);
-    delta = setPath(delta, "globals.page_theme", v.page_theme);
+    const path = accentPath(settings);
+    if (path) delta = setPath(delta, path, v.accent_theme);
     delta = setPath(delta, "display.sleep_timeout", v.sleep_timeout);
     // No control flag: Flask's _settings_display does a bare write_settings
     // too, and the display process re-reads the store itself once a second.
@@ -49,9 +59,14 @@ export function GeneralTab() {
       <TextField label="Grill Name" value={v.grill_name} onChange={(x) => set("grill_name", x)} />
       <Select
         label="Theme"
-        value={v.page_theme}
-        options={THEMES}
-        onChange={(x) => set("page_theme", x)}
+        value={v.accent_theme}
+        options={ACCENTS}
+        // Applied as it is picked so the choice can be seen before it is saved;
+        // Save is what writes it to the store the display reads.
+        onChange={(x) => {
+          set("accent_theme", x);
+          setAccent(x.toLowerCase() as AccentName);
+        }}
       />
       {/* Flask kept this on its Display pane (settings/index.html:1080); the
           React app has no Display tab and General is where it belongs. It is
