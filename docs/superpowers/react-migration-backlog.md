@@ -511,14 +511,37 @@ recorded here rather than left in the plan document, per the standing rule below
    deliberate decision that deserves its own change. **Consequence: renaming a
    probe here leaves a stale notify entry pointing at the old label.**
 
-2. **Rebuilding probe devices does not close the old ones.**
-   `ProbesMain._setup_probe_devices` rebinds `self.probe_device_list` to a fresh
-   list and lets the previous instances fall out of scope, so a Bluetooth or
-   USB-HID device holding an OS handle releases it at GC, not at rebuild — and
-   may fail to re-open the same hardware. Mitigated, not fixed: the endpoint
-   gates on `mode == Stop`, where no cook depends on the next read, and
-   `_setup_probe_devices` already degrades to `probes.disabled` on any
-   import/construct failure rather than crashing the control loop.
+2. ~~**Rebuilding probe devices does not close the old ones.**~~ **FIXED
+   2026-07-26.** `ProbeInterface.close()` is now an explicit teardown hook and
+   `ProbesMain._close_probe_devices()` runs it on every previous instance
+   before the new list is bound, isolating failures (one device raising is
+   logged and stepped over — the rebuild is the recovery path). Both original
+   mitigations survive: the endpoint still gates on `mode == Stop`, and an
+   unimportable module still degrades to `probes.disabled`.
+
+   The survey behind it, worth not repeating: only six modules own a
+   per-instance resource — `max31865` (spidev fd), `ads1115` (smbus2 fd, on the
+   extended bus kind only), `ds18b20` and `thermoworks_cloud` (background
+   threads), and `bt_ibbq` / `bt_meater` / `bt_meater_exp` (a BLE connection
+   plus two non-daemon threads each). For the Bluetooth modules the old
+   behavior was worse than "released at GC": the threads' own reference to the
+   device meant it was never collected at all, and their `while True` setup
+   loops reconnected to the same probe forever. Everything else deliberately
+   has no `close()` — the Adafruit I2C/SPI modules are handed a process-cached
+   bus (`common.i2c_bus.open_i2c_bus`, `probes.base.resolve_mcp2210`) shared by
+   every device on that physical bus, which no single probe may close.
+
+   **Still deliberately not done:** `ProbesMain` has no public `close()` for
+   process shutdown — nothing would call one today, and the control process
+   exits by termination.
+
+   **Adjacent, found while fixing it, NOT fixed:** `_setup_probe_devices`
+   degrades to `probes.disabled` on an *import* failure only. The
+   `newmodule.ReadProbes(...)` construction sits outside that `try`, so a
+   device whose `_init_device` fails all its retries propagates out of the
+   rebuild (and out of `update_probe_map`) instead of degrading, leaving a
+   partially built `probe_device_list`. The earlier text of this item claimed
+   the fallback covered construct failures too; it never has.
 
 3. **Last write wins between the two probe editors.** The Flask settings page
    still edits individual `probe_info` entries in place via
