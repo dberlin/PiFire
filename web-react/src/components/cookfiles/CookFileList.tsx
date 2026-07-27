@@ -138,15 +138,13 @@ export function CookFileList() {
         <label htmlFor={uploadId} className="pf-modal-btn accent">
           Upload cook file
         </label>
-        {/* Visually the label above; the input itself stays in the a11y tree so
-            the file picker is reachable by keyboard and by tests. */}
         <input
           id={uploadId}
           type="file"
           accept=".pifire"
           aria-label="Upload a cook file"
           onChange={onUpload}
-          style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+          className="pf-cf-file-input"
         />
       </div>
 

@@ -148,9 +148,7 @@ export function HistoryPage() {
 
   return (
     <div className="pf-settings">
-      {/* Widen past .pf-settings-content's 720px form column: this page is one
-          big chart, not a settings form. */}
-      <div className="pf-settings-content" style={{ maxWidth: 1100 }}>
+      <div className="pf-settings-content pf-settings-content--wide">
         <div className="pf-section">
           <h2 className="pf-section-title">History</h2>
           <div className="pf-section-body">
@@ -165,11 +163,7 @@ export function HistoryPage() {
               {/* Served by the legacy Flask route (blueprints/history/routes.py
                   `export`), which streams a CSV attachment -- a plain link, not
                   a fetch. */}
-              <a
-                className="pf-modal-btn"
-                href={`${BASE_URL}/history/export`}
-                style={{ textAlign: "center", textDecoration: "none" }}
-              >
+              <a className="pf-modal-btn pf-modal-btn-link" href={`${BASE_URL}/history/export`}>
                 Export CSV
               </a>
               <button

@@ -78,12 +78,7 @@ export function CookFileChart({ filename }: { filename: string }) {
         <button type="button" className="pf-modal-btn" onClick={() => setResetNonce((n) => n + 1)}>
           Reset zoom
         </button>
-        <a
-          className="pf-modal-btn"
-          href={cookFileExportUrl(filename, "data")}
-          download
-          style={{ textDecoration: "none" }}
-        >
+        <a className="pf-modal-btn" href={cookFileExportUrl(filename, "data")} download>
           Download CSV file
         </a>
       </div>

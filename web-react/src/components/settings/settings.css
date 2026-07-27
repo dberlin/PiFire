@@ -47,6 +47,11 @@
   @apply max-w-[720px] overflow-y-auto px-[32px] py-[28px];
   flex: 1;
 }
+/* 720px is a form column. The history and cook-file pages are one big chart
+   apiece, not a form, and get a wider column to draw it in. */
+.pf-settings-content--wide {
+  @apply max-w-[1100px];
+}
 .pf-settings-error {
   @apply flex flex-col items-center gap-[12px] text-text-dim;
   font: 600 16px "Barlow";

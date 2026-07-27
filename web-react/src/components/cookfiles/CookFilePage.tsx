@@ -81,7 +81,7 @@ export function CookFilePage() {
 
   return (
     <div className="pf-settings">
-      <div className="pf-settings-content" style={{ maxWidth: 1100 }}>
+      <div className="pf-settings-content pf-settings-content--wide">
         <Link className="pf-settings-back" to="/history">
           Back to history
         </Link>

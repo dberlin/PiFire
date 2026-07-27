@@ -76,6 +76,13 @@
   @apply underline;
 }
 
+/* The upload input is never shown -- its <label> is the visible affordance --
+   but it stays in the layout and in the a11y tree so the file picker remains
+   reachable by keyboard and by tests. display:none would take both away. */
+.pf-cf-file-input {
+  @apply absolute h-px w-px opacity-0;
+}
+
 .pf-cf-name {
   display: block;
   font-size: 12px;

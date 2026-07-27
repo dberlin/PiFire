@@ -175,7 +175,7 @@ export function Dashboard({
               style={{ "--pf-live-color": view.liveColor } as CSSProperties}
             />
             <span className="pf-dash-wordmark">
-              Pi<span style={{ color: "var(--accent)" }}>Fire</span>
+              Pi<span className="text-accent">Fire</span>
             </span>
             <span className="pf-dash-grillname">{dash.grillName}</span>
           </div>

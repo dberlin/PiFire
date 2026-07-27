@@ -56,10 +56,8 @@ function FanIcon({ color, spin }: { color: string; spin: boolean }) {
   return (
     <svg width={46} height={46} viewBox="0 0 100 100">
       <g
-        style={{
-          transformOrigin: "50px 50px",
-          animation: spin ? "pf-spin 0.85s linear infinite" : "none",
-        }}
+        className="origin-[50px_50px]"
+        style={{ animation: spin ? "pf-spin 0.85s linear infinite" : "none" }}
       >
         <path d="M50 50 Q 28 30 34 10 Q 50 4 50 50 Z" fill={color} />
         <path d="M50 50 Q 78 42 92 58 Q 88 76 50 50 Z" fill={color} />
@@ -116,10 +114,8 @@ function IgniterIcon({ on, color, anim }: { on: boolean; color: string; anim: bo
   return (
     <svg width={60} height={40} viewBox="0 0 100 60">
       <g
-        style={{
-          animation: anim ? "pf-heat 1.4s ease-out infinite" : "none",
-          transformOrigin: "50px 30px",
-        }}
+        className="origin-[50px_30px]"
+        style={{ animation: anim ? "pf-heat 1.4s ease-out infinite" : "none" }}
       >
         <path
           d="M30 40 Q 34 26 38 40"

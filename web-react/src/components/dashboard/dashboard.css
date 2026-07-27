@@ -282,6 +282,12 @@
   border-color: var(--danger);
   @apply text-danger;
 }
+/* Worn alongside .pf-modal-btn by an <a>. A <button> centres its own label; a
+   link blockified into the actions row does not, so the anchors that have to
+   sit in a row of buttons ask for it here. */
+.pf-modal-btn-link {
+  @apply text-center;
+}
 .pf-modal-btn:disabled {
   opacity: 0.55;
   cursor: default;
@@ -720,6 +726,14 @@
   position: relative;
   width: var(--pf-gauge-size);
   height: var(--pf-gauge-size);
+}
+/* The filled arc. Its length and offset are the reading, so they stay on the
+   element; the sweep that animates between two readings is fixed and lives here.
+
+   The gauge's only glow is the pulsing disc behind it (.pf-dash-gauge-glow),
+   which is what Gauge.qml draws. The arc itself casts nothing. */
+.pf-dash-gauge-arc {
+  transition: stroke-dashoffset 0.9s ease;
 }
 .pf-dash-gauge-overlay {
   @apply absolute flex flex-col items-center gap-[2px];

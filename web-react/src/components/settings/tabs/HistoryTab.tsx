@@ -171,7 +171,7 @@ export function HistoryTab() {
           checked={v.autorefresh}
           onChange={(b) => set("autorefresh", b)}
         />
-        <div style={{ position: "relative" }}>
+        <div className="relative">
           <Toggle
             label="Extended Data Logging"
             checked={v.ext_data}

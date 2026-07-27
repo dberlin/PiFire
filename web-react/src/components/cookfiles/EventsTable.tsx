@@ -119,10 +119,9 @@ export function EventsTable({ filename, events, totals, units }: Props) {
 
       <div className="pf-settings-actions">
         <a
-          className="pf-modal-btn"
+          className="pf-modal-btn pf-modal-btn-link"
           href={cookFileExportUrl(filename, "events")}
           download
-          style={{ textAlign: "center", textDecoration: "none" }}
         >
           Download events CSV
         </a>

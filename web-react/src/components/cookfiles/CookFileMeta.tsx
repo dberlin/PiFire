@@ -166,26 +166,23 @@ export function CookFileMeta({ filename, metadata, labels, onChanged }: Props) {
           {/* Plain hrefs: the browser owns the save dialog, and these live
               under /api/files, which the dev server proxies. */}
           <a
-            className="pf-modal-btn"
+            className="pf-modal-btn pf-modal-btn-link"
             href={cookFileDownloadUrl(filename)}
             download
-            style={{ textAlign: "center", textDecoration: "none" }}
           >
             Download cook file
           </a>
           <a
-            className="pf-modal-btn"
+            className="pf-modal-btn pf-modal-btn-link"
             href={cookFileExportUrl(filename, "data")}
             download
-            style={{ textAlign: "center", textDecoration: "none" }}
           >
             Download raw CSV
           </a>
           <a
-            className="pf-modal-btn"
+            className="pf-modal-btn pf-modal-btn-link"
             href={cookFileExportUrl(filename, "events")}
             download
-            style={{ textAlign: "center", textDecoration: "none" }}
           >
             Download events CSV
           </a>

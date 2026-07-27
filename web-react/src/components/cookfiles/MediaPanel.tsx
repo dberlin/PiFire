@@ -71,7 +71,7 @@ export function MediaPanel({ filename, parentId, assets, thumbnail, onChanged }:
           multiple
           aria-label="Upload photos"
           onChange={onUpload}
-          style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+          className="pf-cf-file-input"
         />
         <button
           type="button"
