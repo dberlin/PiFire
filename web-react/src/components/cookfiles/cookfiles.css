@@ -8,11 +8,7 @@
  * not cover live here: the saved-cook table and the media grid. */
 
 .pf-cf-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+  @apply mb-[12px] flex flex-wrap items-center gap-[12px];
 }
 
 .pf-cf-toolbar-spacer {
@@ -20,22 +16,20 @@
 }
 
 .pf-cf-table {
-  width: 100%;
+  @apply w-full;
   border-collapse: collapse;
 }
 
 .pf-cf-table th,
 .pf-cf-table td {
-  padding: 8px 10px;
-  text-align: left;
+  @apply px-[10px] py-[8px] text-left;
   vertical-align: middle;
   border-bottom: 1px solid var(--card-border);
 }
 
 .pf-cf-table th {
-  font-size: 13px;
+  @apply text-[13px] text-text-dim;
   font-weight: 600;
-  color: var(--text-dim);
 }
 
 /* A fixed 48px square, and it must stay one however narrow the column gets: a
@@ -43,10 +37,9 @@
    to collapse to nothing at phone width -- which takes the whole image with
    it. The size is the rule's, not the container's. */
 .pf-cf-thumb {
-  @apply max-w-none;
+  @apply max-w-none rounded-[6px];
   width: 48px;
   height: 48px;
-  border-radius: 6px;
   object-fit: cover;
 }
 
@@ -55,14 +48,12 @@
 }
 
 .pf-cf-actions-col {
+  @apply whitespace-nowrap;
   width: 1%;
-  white-space: nowrap;
 }
 
 .pf-cf-row-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+  @apply flex justify-end gap-[8px];
 }
 
 /* The cook's title, and the only way into its detail page. It is the one link
@@ -84,76 +75,62 @@
 }
 
 .pf-cf-name {
-  display: block;
-  font-size: 12px;
-  color: var(--text-dim);
+  @apply block text-[12px] text-text-dim;
 }
 
 .pf-cf-pager {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 12px;
+  @apply mt-[12px] flex flex-wrap items-center gap-[6px];
 }
 
 .pf-cf-pager-current {
-  font-weight: 700;
+  @apply font-bold;
 }
 
 /* Detail page ------------------------------------------------------------ */
 
 .pf-cf-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-  align-items: flex-start;
+  @apply flex flex-wrap items-start gap-[20px];
 }
 
 .pf-cf-meta-thumb {
+  @apply rounded-[8px];
   width: 128px;
   height: 128px;
-  border-radius: 8px;
   object-fit: cover;
 }
 
 .pf-cf-meta-fields {
+  @apply min-w-0;
   flex: 1 1 260px;
-  min-width: 0;
 }
 
 .pf-cf-dl {
-  display: grid;
+  @apply m-0 grid;
   grid-template-columns: max-content 1fr;
   gap: 4px 16px;
-  margin: 0;
 }
 
 .pf-cf-dl dt {
-  color: var(--text-dim);
+  @apply text-text-dim;
 }
 
 .pf-cf-dl dd {
-  margin: 0;
+  @apply m-0;
 }
 
 .pf-cf-media-grid {
-  display: grid;
+  @apply grid gap-[10px];
   grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 10px;
 }
 
 .pf-cf-media-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
+  @apply flex flex-col items-center gap-[6px];
 }
 
 .pf-cf-media-img {
+  @apply rounded-[6px];
   width: 96px;
   height: 96px;
-  border-radius: 6px;
   object-fit: cover;
 }
 
@@ -162,24 +139,20 @@
 }
 
 .pf-cf-comment {
+  @apply px-0 py-[10px];
   border-bottom: 1px solid var(--card-border);
-  padding: 10px 0;
 }
 
 .pf-cf-comment-text {
-  white-space: pre-wrap;
-  margin: 6px 0;
+  @apply mx-0 my-[6px] whitespace-pre-wrap;
 }
 
 .pf-cf-comment-meta {
-  font-size: 12px;
-  color: var(--text-dim);
+  @apply text-[12px] text-text-dim;
 }
 
 .pf-cf-comment-assets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  @apply flex flex-wrap gap-[8px];
 }
 
 /* Each asset is an <img> inside a control that exists only to be clicked: the
@@ -190,8 +163,8 @@
 }
 
 .pf-cf-comment-thumb {
+  @apply rounded-[6px];
   width: 64px;
   height: 64px;
-  border-radius: 6px;
   object-fit: cover;
 }

@@ -105,6 +105,7 @@ describe("every pf-* class the app uses has a rule", () => {
       ["src/main.tsx", "./theme.css"],
       ["src/main.tsx", "./components/dashboard/dashboard.css"],
       ["src/main.tsx", "./components/settings/settings.css"],
+      ["src/main.tsx", "./components/cookfiles/cookfiles.css"],
       ["src/components/shell/AppShell.tsx", "./shell.css"],
       ["src/components/wizard/WizardShell.tsx", "./wizard.css"],
       ["src/components/history/HistoryChart.tsx", "./historyChart.css"],
