@@ -7,9 +7,11 @@ import { deriveRunView } from "../../helpers/recipes/runStatus";
 import { useShellState } from "../../helpers/shellContext";
 import { IngredientsEditor } from "./IngredientsEditor";
 import { InstructionsEditor } from "./InstructionsEditor";
+import { RecipeAssetManager } from "./RecipeAssetManager";
 import { RecipeMetaEditor } from "./RecipeMetaEditor";
 import { RecipeRunStatus } from "./RecipeRunStatus";
 import { RecipeView } from "./RecipeView";
+import { StepsEditor } from "./StepsEditor";
 
 // Built on the same shell as CookFilePage.tsx: useParams, a requestId/reload
 // pair standing in for the single fetch effect, and a loading/error branch
@@ -140,6 +142,33 @@ export function RecipePage() {
                   ingredients={detail.recipe.ingredients}
                   instructions={detail.recipe.instructions}
                   steps={detail.recipe.steps}
+                  onChanged={reload}
+                />
+              </div>
+            </div>
+
+            <div className="pf-section">
+              <h2 className="pf-section-title">Edit Program Steps</h2>
+              <div className="pf-section-body">
+                <StepsEditor
+                  file={filename}
+                  steps={detail.recipe.steps}
+                  units={detail.metadata.units}
+                  onChanged={reload}
+                />
+              </div>
+            </div>
+
+            <div className="pf-section">
+              <h2 className="pf-section-title">Manage Photos</h2>
+              <div className="pf-section-body">
+                <RecipeAssetManager
+                  file={filename}
+                  parentId={detail.metadata.id}
+                  assets={detail.assets}
+                  splash={detail.metadata.image}
+                  ingredients={detail.recipe.ingredients}
+                  instructions={detail.recipe.instructions}
                   onChanged={reload}
                 />
               </div>

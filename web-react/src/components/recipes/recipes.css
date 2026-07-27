@@ -174,3 +174,52 @@
 .pf-rcp-run-paused {
   @apply text-warn;
 }
+
+/* StepsEditor. Deliberately its own classes rather than reusing RecipeView's
+   .pf-rcp-step/.pf-rcp-step-number/.pf-rcp-dl: those three are measured
+   landmarks (tests/e2e/pageSpecs.ts's recipe-detail spec), and adding more
+   elements that match an already-measured selector turns every one of them
+   into a "NEW landmark, not in the baseline" failure. */
+
+.pf-rcp-step-edit {
+  @apply mb-[10px] flex flex-col gap-[8px] rounded-[8px] p-[14px] bg-inset;
+  border: 1px solid var(--card-border);
+}
+
+.pf-rcp-step-edit-header {
+  @apply mb-[4px] font-bold;
+}
+
+.pf-rcp-trigger-row {
+  @apply flex flex-wrap items-end gap-[12px];
+}
+
+.pf-rcp-insert-row {
+  @apply my-[8px];
+}
+
+/* RecipeAssetManager. */
+
+.pf-rcp-media-grid {
+  @apply grid gap-[10px];
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+
+.pf-rcp-media-item {
+  @apply flex flex-col items-center gap-[6px];
+}
+
+.pf-rcp-media-img {
+  @apply rounded-[6px];
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+}
+
+.pf-rcp-media-img--selected {
+  outline: 3px solid var(--accent);
+}
+
+.pf-rcp-attach-heading {
+  @apply mt-[16px] mb-[8px] font-bold;
+}

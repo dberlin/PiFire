@@ -9,6 +9,7 @@ export function NumberField({
   step,
   suffix,
   hint,
+  disabled,
 }: {
   label: string;
   value: number;
@@ -18,6 +19,7 @@ export function NumberField({
   step?: number;
   suffix?: string;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="pf-field">
@@ -30,6 +32,7 @@ export function NumberField({
           min={min}
           max={max}
           step={step}
+          disabled={disabled}
           onChange={(e) => onChange(Number(e.target.value))}
           // Bounds enforcement lives here, not in onChange. There is no <form>
           // anywhere in the settings tree, so the browser never runs constraint

@@ -31,6 +31,15 @@ rs.mock("../../helpers/files/recipeApi", () => ({
   addInstruction: rs.fn(),
   updateInstruction: rs.fn(),
   deleteInstruction: rs.fn(),
+  // StepsEditor / RecipeAssetManager render on every successful load too --
+  // their own test files cover the actual insert/update/delete/upload/attach
+  // behaviour, so these only need to exist, not do anything.
+  insertStep: rs.fn(),
+  updateStep: rs.fn(),
+  deleteStep: rs.fn(),
+  uploadRecipeAssets: rs.fn(),
+  setRecipeAssets: rs.fn(),
+  deleteRecipeAssets: rs.fn(),
 }));
 
 const useShellStateMock = rs.fn();

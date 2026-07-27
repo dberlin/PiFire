@@ -10,7 +10,7 @@
 // no `comments` key.
 
 import { postForm, read, write } from "./apiEnvelope";
-import type { RecipeDetail, RecipeMetadata } from "./recipeTypes";
+import type { RecipeAsset, RecipeDetail, RecipeMetadata, RecipeStep } from "./recipeTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
@@ -91,6 +91,74 @@ export const updateInstruction = (
 
 export const deleteInstruction = (file: string, index: number, baseUrl = BASE_URL) =>
   write<null>("recipes", "instructions", { file, action: "delete", index }, baseUrl);
+
+/** Inserts a new default step at `index` -- POSITIONAL (recipes_api.py's
+ * insert_step, matching Flask's own stepAdd), not appended: `index ==
+ * steps.length` is legal and appends at the end, anything else shifts every
+ * later step down one. There is no separate append endpoint, which is why
+ * the editor always calls this with an explicit index rather than offering a
+ * single trailing "Add step" button. */
+export const insertStep = (file: string, index: number, baseUrl = BASE_URL) =>
+  write<null>("recipes", "steps", { file, action: "insert", index }, baseUrl);
+
+/** Replaces step `index` wholesale. `0` is the disabled sentinel for
+ * hold_temp and every trigger_temps member -- a legal value, not a missing
+ * one -- so every field here must be a real number/boolean, never omitted.
+ * trigger_temps.food must carry exactly one entry per the recipe's current
+ * food_probes count; a mismatch is refused with 400 `data.field ==
+ * "trigger_temps"`. */
+export const updateStep = (file: string, index: number, step: RecipeStep, baseUrl = BASE_URL) =>
+  write<null>("recipes", "steps", { file, action: "update", index, step }, baseUrl);
+
+export const deleteStep = (file: string, index: number, baseUrl = BASE_URL) =>
+  write<null>("recipes", "steps", { file, action: "delete", index }, baseUrl);
+
+/** Sections a recipe's assets can be assigned to (recipes_api.py's
+ * set_assets). `splash` sets/clears metadata.image and metadata.thumbnail
+ * TOGETHER and ignores `index`; `ingredients`/`instructions` replace item
+ * `index`'s own asset list. */
+export type RecipeAssetSection = "splash" | "ingredients" | "instructions";
+
+/** Multipart: adds one or more images to the recipe's asset pool WITHOUT
+ * attaching them to any section -- attaching is a separate whole-list write
+ * via setRecipeAssets. Field name is `assets` (recipes_api.py's upload_assets
+ * reads request.files.getlist("assets")); `file` rides alongside it as a
+ * form field. */
+export async function uploadRecipeAssets(
+  file: string,
+  images: File[],
+  baseUrl = BASE_URL,
+): Promise<RecipeAsset[]> {
+  const form = new FormData();
+  form.append("file", file);
+  for (const image of images) form.append("assets", image);
+  const data = await postForm<{ assets: RecipeAsset[] }>("recipes", "assets/upload", form, baseUrl);
+  return data?.assets ?? [];
+}
+
+/** Replaces one section's asset list wholesale -- the client sends the
+ * complete list a section should end up with, rather than a single
+ * add/remove action Flask infers direction for. `index` is required for
+ * `ingredients`/`instructions` and must be omitted for `splash`. */
+export const setRecipeAssets = (
+  file: string,
+  section: RecipeAssetSection,
+  assets: string[],
+  index?: number,
+  baseUrl = BASE_URL,
+) =>
+  write<{ assets: string[] }>(
+    "recipes",
+    "assets",
+    { file, section, assets, ...(index === undefined ? {} : { index }) },
+    baseUrl,
+  );
+
+/** Deletes assets from the recipe archive outright. remove_assets already
+ * scrubs metadata.image/thumbnail and every ingredient's/instruction's own
+ * asset list server-side, so a refetch is all that is needed afterwards. */
+export const deleteRecipeAssets = (file: string, assets: string[], baseUrl = BASE_URL) =>
+  write<null>("recipes", "assets/delete", { file, assets }, baseUrl);
 
 export const createRecipe = (baseUrl = BASE_URL) =>
   write<{ filename: string }>("recipes", "create", {}, baseUrl);
