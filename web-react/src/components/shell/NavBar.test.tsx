@@ -48,11 +48,12 @@ describe("NavBar", () => {
     // from the dashboard hopper card, so this entry exists only in the new UI.
     expect(screen.getByRole("link", { name: "Pellets" }).getAttribute("href")).toBe("/pellets");
     expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe("/settings");
+    expect(screen.getByRole("link", { name: "Recipes" }).getAttribute("href")).toBe("/recipes");
   });
 
-  it("renders the three unported destinations as disabled non-links", () => {
+  it("renders the two unported destinations as disabled non-links", () => {
     renderNav();
-    for (const label of ["Recipes", "Events", "Admin"]) {
+    for (const label of ["Events", "Admin"]) {
       const el = screen.getByText(label);
       expect(el.tagName).not.toBe("A");
       expect(el.getAttribute("aria-disabled")).toBe("true");

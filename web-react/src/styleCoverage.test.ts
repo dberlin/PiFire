@@ -23,6 +23,7 @@ const SURFACES = [
   "src/components/history",
   "src/components/pellets",
   "src/components/wizard",
+  "src/components/recipes",
 ];
 
 // Names written into a .tsx and styled by nothing, each because the element
@@ -106,6 +107,7 @@ describe("every pf-* class the app uses has a rule", () => {
       ["src/main.tsx", "./components/dashboard/dashboard.css"],
       ["src/main.tsx", "./components/settings/settings.css"],
       ["src/main.tsx", "./components/cookfiles/cookfiles.css"],
+      ["src/main.tsx", "./components/recipes/recipes.css"],
       ["src/components/shell/AppShell.tsx", "./shell.css"],
       ["src/components/wizard/WizardShell.tsx", "./wizard.css"],
       ["src/components/history/HistoryChart.tsx", "./historyChart.css"],

@@ -17,7 +17,7 @@ import "./shell.css";
 // that prompts the visit.
 const NAV_ITEMS = [
   { label: "Dashboard", to: "/", end: true },
-  { label: "Recipes", to: null, end: false },
+  { label: "Recipes", to: "/recipes", end: false },
   { label: "History", to: "/history", end: false },
   { label: "Pellets", to: "/pellets", end: false },
   { label: "Events", to: null, end: false },

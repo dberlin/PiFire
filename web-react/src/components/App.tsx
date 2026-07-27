@@ -7,6 +7,8 @@ import { CookFilePage } from "./cookfiles/CookFilePage";
 import { DashboardRoute } from "./DashboardRoute";
 import { HistoryPage } from "./history/HistoryPage";
 import { PelletsPage } from "./pellets/PelletsPage";
+import { RecipeList } from "./recipes/RecipeList";
+import { RecipePage } from "./recipes/RecipePage";
 import { SettingsError } from "./settings/SettingsError";
 import { SettingsShell } from "./settings/SettingsShell";
 import { ControllerTab } from "./settings/tabs/ControllerTab";
@@ -65,6 +67,12 @@ export const routes = [
       // section of /history, mirroring Flask, where the cook-file list lives on
       // the history page and "Open" posts through to cookfile/index.html.
       { path: "/cookfiles/:filename", element: <CookFilePage /> },
+      // The recipe browser and its detail view, mirroring the cook-file pair
+      // above -- a recipe is authored rather than produced by cooking, which
+      // is the one deliberate difference in RecipeList (a "New Recipe" create
+      // button with no cook-file equivalent).
+      { path: "/recipes", element: <RecipeList /> },
+      { path: "/recipes/:filename", element: <RecipePage /> },
       // The pellet INVENTORY manager (brands, woods, profiles, current load,
       // log). NOT to be confused with /settings/pellets below, which is the
       // pellet-LEVEL settings tab (thresholds, auger rate, prime ignition).

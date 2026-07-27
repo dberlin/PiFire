@@ -1,0 +1,88 @@
+@reference "../../theme.css";
+
+/* Recipe browser layout.
+ *
+ * Reuses the .pf-* vocabulary from settings.css / dashboard.css (both imported
+ * at src/main.tsx) for anything that already exists -- .pf-section,
+ * .pf-modal-btn, .pf-settings-hint, .pf-banner, .pf-input. Only the layout
+ * those do not cover lives here: the recipe table. */
+
+.pf-rcp-toolbar {
+  @apply mb-[12px] flex flex-wrap items-center gap-[12px];
+}
+
+.pf-rcp-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.pf-rcp-table {
+  @apply w-full;
+  border-collapse: collapse;
+}
+
+.pf-rcp-table th,
+.pf-rcp-table td {
+  @apply px-[10px] py-[8px] text-left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.pf-rcp-table th {
+  @apply text-[13px] text-text-dim;
+  font-weight: 600;
+}
+
+/* A fixed 48px square, and it must stay one however narrow the column gets: a
+   percentage cap resolves against the cell, and the cell in this table is free
+   to collapse to nothing at phone width -- which takes the whole image with
+   it. The size is the rule's, not the container's. */
+.pf-rcp-thumb {
+  @apply max-w-none rounded-[6px];
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+}
+
+.pf-rcp-thumb-col {
+  width: 64px;
+}
+
+.pf-rcp-actions-col {
+  @apply whitespace-nowrap;
+  width: 1%;
+}
+
+.pf-rcp-row-actions {
+  @apply flex justify-end gap-[8px];
+}
+
+/* The recipe's title, and the only way into its detail page. It is the one
+   link in this app presented AS a link, so it carries the affordance itself:
+   a tint that separates it from the filename under it, and an underline on
+   hover. */
+.pf-rcp-link {
+  @apply text-accent no-underline;
+  font: 600 15px "Barlow";
+}
+.pf-rcp-link:hover {
+  @apply underline;
+}
+
+/* The upload input is never shown -- its <label> is the visible affordance --
+   but it stays in the layout and in the a11y tree so the file picker remains
+   reachable by keyboard and by tests. display:none would take both away. */
+.pf-rcp-file-input {
+  @apply absolute h-px w-px opacity-0;
+}
+
+.pf-rcp-name {
+  @apply block text-[12px] text-text-dim;
+}
+
+.pf-rcp-pager {
+  @apply mt-[12px] flex flex-wrap items-center gap-[6px];
+}
+
+.pf-rcp-pager-current {
+  @apply font-bold;
+}
