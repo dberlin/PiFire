@@ -1,3 +1,27 @@
+/* Tailwind v4, WITHOUT preflight.
+ *
+ * `@import "tailwindcss"` is three layers -- theme, base (preflight) and
+ * utilities. This project wants the first and the third.
+ *
+ * Preflight is a reset, and this file has carried its own since before Tailwind
+ * existed (the `*`/`html`/`body` rules below, ported alongside the Qt theme).
+ * Cascade Layers mean preflight cannot override any pf-* rule -- unlayered
+ * author declarations beat every layered one regardless of specificity -- but it
+ * applies wherever those rules are silent, and v4's preflight sets
+ * `margin: 0; padding: 0; border: 0 solid` on `*, ::before, ::after, ::backdrop,
+ * ::file-selector-button`, drops heading sizes and list markers, and makes form
+ * controls inherit font and colour. The wizard, settings and pellets surfaces
+ * all render bare <p>, <h2>, <ul>, <table> and <input> elements that take UA
+ * defaults today.
+ *
+ * The measured result is recorded in this migration's commit message. Adopting
+ * preflight is a deliberate visual change to argue for on its own, not a side
+ * effect of a toolchain swap.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
 /* Design tokens ported from display/qml/Theme.qml, which is the source of truth
    for every colour in this app: each token carries the value of the Qt property
    named in its comment, and src/themeTokens.test.ts parses Theme.qml and fails

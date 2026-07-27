@@ -1,5 +1,6 @@
 import { defineConfig } from "@rsbuild/core";
 import { pluginReact } from "@rsbuild/plugin-react";
+import { pluginTailwindcss } from "@rsbuild/plugin-tailwindcss";
 import { ports } from "./ports";
 
 // The React app talks to a running PiFire instance. In dev we proxy /socket.io
@@ -23,7 +24,19 @@ const target = ports.pifireUrl;
 // through a var() and passes through verbatim, so the shipped CSS already
 // required Chrome 111 / Safari 16.2 before this key existed.
 export default defineConfig({
-  plugins: [pluginReact({ reactCompiler: true })],
+  // @rsbuild/plugin-tailwindcss wraps @tailwindcss/webpack. Deliberately NOT
+  // @tailwindcss/postcss: Rsbuild transforms CSS with Lightning CSS through
+  // Rspack's built-in lightningcss-loader and registers postcss-loader only
+  // when a postcss.config.* exists or tools.postcss is set -- neither of which
+  // this repo has. Tailwind v4 uses Lightning CSS internally too, so the PostCSS
+  // route would INTRODUCE a PostCSS pass into a pipeline that has none, for no
+  // benefit. See https://rsbuild.rs/guide/styling/tailwindcss.
+  //
+  // It follows that autoprefixer, postcss-preset-env, postcss-nesting and
+  // cssnano are all not needed and must not be added: Lightning CSS already
+  // reads package.json's browserslist, prefixes, and downlevels nesting, and
+  // minification comes from LightningCssMinimizerRspackPlugin.
+  plugins: [pluginReact({ reactCompiler: true }), pluginTailwindcss()],
   html: { template: "./index.html" },
   source: {
     entry: { index: "./src/main.tsx" },

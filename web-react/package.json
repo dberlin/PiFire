@@ -39,6 +39,7 @@
     "@playwright/test": "^1.62.0",
     "@rsbuild/core": "2.1.8",
     "@rsbuild/plugin-react": "2.1.0",
+    "@rsbuild/plugin-tailwindcss": "^2.0.3",
     "@rstest/core": "0.11.4",
     "@rstest/coverage-istanbul": "^0.11.4",
     "@testing-library/jest-dom": "^7.0.0",
@@ -53,6 +54,7 @@
     "eslint-plugin-react-refresh": "^0.5.3",
     "jsdom": "^29.1.1",
     "json-schema-to-typescript": "^15.0.4",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "typescript7": "npm:typescript@7.0.2"
   }

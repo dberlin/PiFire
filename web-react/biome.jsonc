@@ -13,6 +13,18 @@
       "!src/helpers/settings/settingsTypes.gen.ts"
     ]
   },
+  // Biome 2.5.5 treats @theme / @apply / @reference as a PARSE ERROR without
+  // this, and a parse error aborts formatting of the whole file -- so the
+  // Tailwind v4 migration would have made `bun run lint` unrunnable rather than
+  // merely noisy. Measured:
+  //
+  //   × Tailwind-specific syntax is disabled.
+  //   i Enable `tailwindDirectives` in the css parser options.
+  //
+  // Scoped to the CSS parser only; no lint rule is relaxed. noDescendingSpecificity
+  // and the rest still run over every stylesheet, and none of them fire on
+  // @apply bodies -- the migration changes declarations, never selectors.
+  "css": { "parser": { "tailwindDirectives": true } },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
