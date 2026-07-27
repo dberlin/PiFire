@@ -617,3 +617,59 @@ def recipe_steps():
     if status != "OK":
         return recipes_api.unreadable(status, error)
     return jsonify(api_response("OK")), 200
+
+
+@api_files_bp.route("/recipes/assets/upload", methods=["POST"])
+def recipe_asset_upload():
+    path, err = require_file(request.form.get("file", ""), recipe_folder())
+    if err:
+        return err
+    added, problem = recipes_api.upload_assets(path, request.files.getlist("assets"))
+    if problem:
+        return error(problem, 400, field="assets")
+    return jsonify(api_response("OK", None, {"assets": added})), 200
+
+
+@api_files_bp.route("/recipes/assets", methods=["POST"])
+def recipe_assets():
+    body = json_body()
+    path, err = require_file(body.get("file", ""), recipe_folder())
+    if err:
+        return err
+    section = body.get("section")
+    if section not in ("splash", "ingredients", "instructions"):
+        return error("bad_request", 400, field="section")
+    assets = body.get("assets")
+    if not isinstance(assets, list) or not all(isinstance(a, str) for a in assets):
+        return error("bad_request", 400, field="assets")
+    if section == "splash":
+        #  A single user-facing choice, not an arbitrary list: sets/clears
+        #  metadata.image and metadata.thumbnail together.
+        if len(assets) > 1:
+            return error("bad_request", 400, field="assets")
+        index = None
+    else:
+        index = body.get("index")
+        if not isinstance(index, int) or isinstance(index, bool):
+            return error("bad_request", 400, field="index")
+    stored, problem = recipes_api.set_assets(path, section, index, assets)
+    if problem == "bad_index":
+        return error("bad_request", 400, field="index")
+    if problem:
+        return recipes_api.unreadable(problem, error)
+    return jsonify(api_response("OK", None, {"assets": stored})), 200
+
+
+@api_files_bp.route("/recipes/assets/delete", methods=["POST"])
+def recipe_asset_delete():
+    body = json_body()
+    path, err = require_file(body.get("file", ""), recipe_folder())
+    if err:
+        return err
+    assets = body.get("assets")
+    if not isinstance(assets, list) or not all(isinstance(a, str) for a in assets):
+        return error("bad_request", 400, field="assets")
+    status = recipes_api.delete_assets(path, assets)
+    if status != "OK":
+        return recipes_api.unreadable(status, error)
+    return jsonify(api_response("OK")), 200

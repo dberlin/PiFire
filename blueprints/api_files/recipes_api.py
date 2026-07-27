@@ -10,10 +10,15 @@ is preserved on every write because update_json_file_data rewrites one member
 and copies the rest.
 """
 
+import os
+import shutil
+import tempfile
+
 from werkzeug.utils import secure_filename
 
-from common.app import api_response, classify_cookfile_error
-from file_mgmt.common import read_json_file_data, update_json_file_data
+from common.app import allowed_file, api_response, classify_cookfile_error
+from file_mgmt.common import read_json_file_data, remove_assets, update_json_file_data
+from file_mgmt.media import add_asset
 from file_mgmt.recipes import read_recipefile
 
 
@@ -297,3 +302,83 @@ def delete_step(path, index):
         return "bad_index"
     steps.pop(index)
     return update_json_file_data(recipe, path, "recipe")
+
+
+def upload_assets(path, storages):
+    """Add one or more images to the recipe archive.
+
+    Mirrors cookfile_api.upload_assets: each upload is staged in a private
+    per-request tempfile.mkdtemp (0700, app-owned) and rmtree'd in a finally --
+    the same arrangement _recipes_form_uploadassets
+    (blueprints/recipes/routes.py:79-108) uses after the predictable
+    /tmp/pifire/{id} path was removed. secure_filename flattens the name
+    before it is written, so an asset called "../../x.png" cannot escape the
+    staging dir either.
+    """
+    added = []
+    for storage in storages:
+        if not storage or not storage.filename:
+            continue
+        if not allowed_file(storage.filename):
+            return None, "disallowed_file"
+        safe_name = secure_filename(storage.filename)
+        if not safe_name:
+            return None, "bad_request"
+        staging = tempfile.mkdtemp(prefix="pifire-upload-")
+        try:
+            storage.save(os.path.join(staging, safe_name))
+            asset_id, filetype = add_asset(path, staging, safe_name)
+            added.append({"id": asset_id, "filename": f"{asset_id}.{filetype}", "type": filetype})
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+    if not added:
+        return None, "bad_request"
+    return added, None
+
+
+def set_assets(path, section, index, assets):
+    """Replace one section's asset list wholesale.
+
+    Mirrors cookfile_api.set_comment_assets: the client sends the complete
+    list a section should end up with, rather than a single add/remove action
+    Flask infers direction for (blueprints/recipes/routes.py:396-428) -- a
+    stale client view of that direction silently inverts the request.
+
+    `splash` is a single name (0 or 1 entries), not an arbitrary list: it sets
+    BOTH metadata.image and metadata.thumbnail together, and clearing it
+    clears both (blueprints/recipes/routes.py:412-413, :423-424) -- they are
+    one user-facing choice, and splitting them leaves a recipe whose card and
+    header disagree. `ingredients`/`instructions` each replace item `index`'s
+    own asset list; `index` is unused for `splash`.
+
+    Returns (stored_assets, None) on success, or (None, "bad_index") when
+    `index` is out of range, or (None, <read/write status>).
+    """
+    if section == "splash":
+        metadata, status = read_json_file_data(path, "metadata")
+        if status != "OK":
+            return None, status
+        asset_name = assets[0] if assets else ""
+        metadata["image"] = asset_name
+        metadata["thumbnail"] = asset_name
+        status = update_json_file_data(metadata, path, "metadata")
+        return ([asset_name] if asset_name else [], None) if status == "OK" else (None, status)
+
+    recipe, status = read_json_file_data(path, "recipe")
+    if status != "OK":
+        return None, status
+    items = recipe[section]
+    if not 0 <= index < len(items):
+        return None, "bad_index"
+    items[index]["assets"] = list(assets)
+    status = update_json_file_data(recipe, path, "recipe")
+    return (items[index]["assets"], None) if status == "OK" else (None, status)
+
+
+def delete_assets(path, assets):
+    """remove_assets(..., filetype="recipefile") already scrubs
+    metadata.image, metadata.thumbnail, every ingredient's assets and every
+    instruction's assets (file_mgmt/common.py:202-277) -- there is no separate
+    recipe scrubber to write here.
+    """
+    return remove_assets(path, list(assets), filetype="recipefile")
