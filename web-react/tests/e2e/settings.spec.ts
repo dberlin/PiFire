@@ -2,18 +2,37 @@ import { expect, test } from "@playwright/test";
 
 // Requires the prototype backend running (control.py + gunicorn on :5000).
 test("grill name saves and round-trips to the dashboard header", async ({ page }) => {
-  await page.goto("/settings/general");
-  const name = `E2E Grill ${Date.now().toString().slice(-4)}`;
-  await page.getByLabel("Grill Name").fill(name);
-  await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
-  await page.reload();
-  await expect(page.getByLabel("Grill Name")).toHaveValue(name);
-  await page.goto("/");
-  // Scoped to <main>: the shell's navbar renders the grill name too, so an
-  // unscoped match resolves to two elements and trips strict mode. The
-  // dashboard header is the one this test is about.
-  await expect(page.getByRole("main").getByText(name)).toBeVisible({ timeout: 15000 });
+  const beforeRes = await page.request.get("/api/settings");
+  expect(beforeRes.ok()).toBeTruthy();
+  const beforeBody = (await beforeRes.json()) as {
+    settings?: { globals?: { grill_name?: string } };
+  };
+  const originalName = beforeBody.settings?.globals?.grill_name ?? "";
+
+  try {
+    await page.goto("/settings/general");
+    const name = `E2E Grill ${Date.now().toString().slice(-4)}`;
+    await page.getByLabel("Grill Name").fill(name);
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
+    await page.reload();
+    await expect(page.getByLabel("Grill Name")).toHaveValue(name);
+    await page.goto("/");
+    // Scoped to <main>: the shell's navbar renders the grill name too, so an
+    // unscoped match resolves to two elements and trips strict mode. The
+    // dashboard header is the one this test is about.
+    await expect(page.getByRole("main").getByText(name)).toBeVisible({ timeout: 15000 });
+  } finally {
+    // Leave the backend as found. The grill name is not just a string on this
+    // page: the navbar renders it, and `.pf-nav-actions` is positioned by a
+    // `margin-left: auto` that moves with its width, so a name left behind here
+    // shifts a measured layout in pellets-fidelity.spec.ts. That spec pins the
+    // name for its own run either way -- this is the other half, so a
+    // randomised name does not outlive the test that needed it.
+    await page.request.post("/api/settings_update", {
+      data: { settings: { globals: { grill_name: originalName } } },
+    });
+  }
 });
 
 test("PWM update-time saves via the settings_update path", async ({ page }) => {
