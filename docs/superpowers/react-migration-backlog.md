@@ -71,6 +71,32 @@ it by path and line number; those citations point here.
   test that can reach a settings tab. `wizard.css`'s probe-editing vocabulary
   was extracted to `components/wizard/probes/probes.css`, imported by the two
   cards so it travels to any surface that renders them.
+- **Recipes** (`/recipes`, `/recipes/:filename`) — SHIPPED 2026-07-27
+  (`plans/2026-07-27-react-recipes.md`, 18 tasks). Browse, view, run and edit
+  `.pfrecipe` archives. Thirteen new `/api/files/recipes/*` routes in
+  `blueprints/api_files/recipes_api.py`, every one resolving a **bare filename**
+  through `resolve_managed_file` — the legacy `blueprints/recipes/` surface,
+  which concatenates `RECIPE_FOLDER + filename` unvalidated, is untouched and
+  stays live until the general retirement pass (ruling 5). `require_file` now
+  takes its folder explicitly, since two archive kinds share it and a default
+  would let a new route resolve a recipe against the history folder.
+
+  Run status needs no polling endpoint: `socket_dash_data` has always published
+  `recipeStatus` (`socket_io.py:330-336`) on every frame and on connect. The
+  plan's own outline proposed `GET /run-status`; reading the socket instead
+  deleted that task.
+
+  Two structural invariants are ported rather than reinvented, each pinned by a
+  test: changing `food_probes` reshapes `trigger_temps.food` on **every** step,
+  and renaming an ingredient rewrites that name inside **every** instruction
+  that used it (`instructions[].ingredients` holds names, not indices). The
+  editors refetch the whole detail after any write rather than reconciling
+  locally, because that cascade changes rows the user is not looking at.
+
+  **`0` is the disabled sentinel** for `hold_temp` and both `trigger_temps`
+  members throughout. The step editor derives each enable switch from
+  `value > 0` so the switch and the value cannot disagree, and the view renders
+  `0` as "—" rather than as a temperature.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
   polling, and an Exit control. Functionally complete; styling is being
@@ -192,6 +218,27 @@ it by path and line number; those citations point here.
   `comment["assets"]` and returns the authoritative `selected`, which the JS
   renders instead of guessing. An unknown `commentid` reports `ERROR` rather
   than a false success.
+- **`recipe_delete` over Socket.IO was a live command injection** (found
+  2026-07-27 while planning the recipes slice). `blueprints/mobile/socket_io.py`
+  ran `os.system(f"rm {filepath}")` on `request["recipes_action"]["filename"]`
+  with no `secure_filename`, no containment and no shell escaping, so a payload
+  of `x.pfrecipe; <anything>` executed. **Its HTTP sibling
+  (`blueprints/recipes/routes.py::_recipes_json_deletefile`) had been hardened
+  and regression-tested months earlier; this copy was simply missed** — which is
+  the reusable lesson: when a bug class is fixed at one door, grep for the other
+  doors rather than assuming the fix was global. Both attacks were demonstrated
+  RED against the old code before the fix landed
+  (`tests/web/test_socket_recipe_delete_safety.py`). Hardened rather than
+  deleted: `post_app_data` is the mobile app's API and `recipe_start` sits
+  beside it with no replacement.
+- **`convert_recipe_units` raised on every call.** It iterated
+  `step["settemps"]`, a key the recipe schema has never had — the shape is
+  `trigger_temps: {primary, food[]}`. `controller/runtime/controller.py:140`
+  calls it whenever a recipe's saved `metadata.units` differs from the live
+  setting, so running such a recipe took the control-process recipe loop down
+  with it. The fix converts `hold_temp` and both `trigger_temps` members, and
+  **passes `0` through unconverted** — `0` is the disabled sentinel, and mapping
+  0 °F to −17 °C would arm every disabled trigger on the recipe.
 - **Factory reset left the whole pellet database in place.** Pre-SQLite,
   `os.system("rm pelletdb.json")` WAS the mechanism; removing that dead line
   preserved the accident it left behind. Human ruling: factory reset clears the
@@ -523,17 +570,16 @@ Roughly ordered by daily-use value:
       the tests for it MUST neutralize `os.system`/`subprocess` before anything
       runs — an `is_real_hardware()` flag is not enough, and this repo has
       really rebooted the developer's machine twice that way.
-- [ ] **recipes** — recipe editor. **PLANNED 2026-07-26** as plan 2 of
-      `plans/2026-07-26-react-recipes-cookfile.md` (outline only, 17 tasks); the
-      **cookfile** half of this entry SHIPPED the same day — see the SHIPPED
-      section. Correction to what this line used to say: recipes and cookfile do
-      **not** "share a data model". They share a ZIP container and a listing
+- [x] **recipes** — SHIPPED 2026-07-27 (`plans/2026-07-27-react-recipes.md`, 18
+      tasks in two slices). See the SHIPPED section for what landed and item 11
+      for what was deliberately left out. The 17-row outline at the bottom of
+      `plans/2026-07-26-react-recipes-cookfile.md` is superseded by that plan;
+      it said in terms that it had to be written out in full before execution,
+      and it was. Correction to what this line used to say: recipes and cookfile
+      do **not** "share a data model". They share a ZIP container and a listing
       shape, and nothing else — different JSON member sets, different metadata
       keys, no page in common, and **zero** overlapping action names between the
-      two dispatch tables. The listing endpoint this line said "does not exist
-      yet" now does: `GET /api/files/recipes` shipped alongside
-      `GET /api/files/cookfiles` from one handler, so the recipe browser's data
-      layer is already built.
+      two dispatch tables.
 - [ ] **events** + **logs** — event feed and log viewer
 - [x] **probeconfig** — SHIPPED 2026-07-26 as the `/settings/probes` tab
       (`plans/2026-07-26-react-probeconfig-page.md`, 9 tasks). Both corrections
@@ -684,6 +730,52 @@ recorded here rather than left in the plan document, per the standing rule below
    compare-and-swap: that race is datastore-wide and pre-existing, and a
    point fix here would imply a guarantee the rest of the store does not make.
 
+### 11. Recipes slice — what it deliberately does NOT do
+
+Recorded here per the standing rule, rather than left in
+`plans/2026-07-27-react-recipes.md`.
+
+1. **No recipe comments panel.** Human ruling, 2026-07-27, taken before a line
+   was written. `comments.json` is in every `.pfrecipe` and Flask's
+   `recipeassetmanager` has a `comments` branch, but **nothing in either UI has
+   ever written a recipe comment** (`tests/web/test_page_recipes.py:33-38` says
+   so). Building one from the schema alone would invent a feature rather than
+   port one. The member is preserved byte-for-byte on every write, because each
+   endpoint rewrites only the member it changed. Revisit only if someone asks
+   for it as a feature.
+2. **`POST /recipes/run` refuses unless `mode == Stop`** (409 `not_stopped`).
+   Flask posts from any mode (`static/recipes/js/recipes.js:270-293`). This
+   matches the guard `POST /api/probe_map` already applies, and it is the
+   difference between a test suite that can exercise the route and one that
+   cannot.
+3. **Instruction writes reject an unknown ingredient name** (400,
+   `data.field == "ingredients"`). Flask does not check. The React multi-select
+   can only offer names that exist, so a request carrying an unknown one is a
+   bug in something.
+4. **Unknown metadata field names and out-of-range indices are refused**, where
+   Flask writes them. A negative index is refused rather than wrapping around to
+   the last element.
+5. **Asset writes are whole-list**, where Flask sends `{action, asset_name}` and
+   infers direction. Same reasoning that drove cook-file comments in plan 1: a
+   stale client can send an `add` for something already present and be told OK.
+6. **The asset lightbox carousel** (Flask's `recipeshowasset`) is not ported.
+   The cook-file lightbox exists and could be generalised; it is not a blocker
+   for editing a recipe.
+7. **No cross-validation of a recipe's steps against the live probe map.** The
+   controller remaps `trigger_temps` through
+   `settings["recipe"]["probe_map"]` (`controller.py:156-163`), so a recipe
+   saved against a different probe map is a real failure mode — but diagnosing
+   it is its own piece of work.
+8. **No migration for recipes already saved with mismatched units.** The
+   conversion is fixed; existing archives are not rewritten.
+9. **`get_recipefilelist_details` still reads the module constant
+   `file_mgmt.recipes.RECIPE_FOLDER`**, not `current_app.config`, so a fixture
+   must patch both. Nothing in the new surface depends on it; it is a trap for
+   the next person.
+10. **The Flask `/recipes` page stays live**, along with its
+    characterization suite. Retirement is one deliberate pass at the end
+    (ruling 5).
+
 ### 10. Deferred-work inventory — 103 open items pulled out of plan documents
 
 **Swept 2026-07-26**, after Slice 2 (item 9) proved that deferred work was
@@ -714,10 +806,14 @@ which said it was owed).
 - **Probe config as a React surface** — the single most-deferred item in the
   project: it appears five separate times across specs and plans as "next" and
   was never started. Now planned (see item 8).
-- Recipes, Events, Admin — rendered disabled in the navbar; three whole Flask
-  pages unported. Recipes/cookfile now planned.
+- ~~Recipes~~ — SHIPPED 2026-07-27; the navbar entry is a real link now. Events
+  and Admin remain rendered disabled — two whole Flask pages unported.
 - Cook-file list / upload / delete (D4) — History shipped the chart only.
-- Recipe unpause payload not ported — a paused recipe cannot be resumed.
+- Recipe unpause payload not ported — a paused recipe cannot be resumed. **Still
+  open after the 2026-07-27 recipes slice**, which shipped run/status but not
+  resume: `RecipeRunStatus` reads `paused` off the socket and displays it, and
+  nothing writes the unpause. This is the one run-time capability Flask has and
+  React does not.
 - `global_control_panel` neither read nor offered: no way to stop the grill
   from anywhere but the dashboard.
 - WLED preset/profile grids (backend and schema are already ready).
