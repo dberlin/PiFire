@@ -1,7 +1,7 @@
-# tests/unit/common/test_get_os_info_error_path.py
-"""Regression test for get_os_info()'s error-handling path.
+# tests/unit/common/test_probe_os_info_error_path.py
+"""Regression test for probe_os_info()'s error-handling path.
 
-get_os_info() (common/system.py) wraps its os-release/uname probing in a
+probe_os_info() (common/system.py, formerly get_os_info) wraps its os-release/uname probing in a
 broad try/except and, on failure, is supposed to log the error and return
 gracefully (the partial os_info dict built so far) rather than raising.
 
@@ -14,12 +14,12 @@ there is no `level` parameter. Python raises TypeError while binding the
 call's arguments (before write_log's body ever runs) whenever an unexpected
 `level` kwarg is passed. So the very handler meant to swallow the original
 failure and return gracefully instead replaced it with a new, unhandled
-TypeError that propagated out of get_os_info() -- the opposite of graceful
+TypeError that propagated out of the probe -- the opposite of graceful
 degradation.
 
-This test forces get_os_info()'s try-block to fail (subprocess.check_output,
+This test forces probe_os_info()'s try-block to fail (subprocess.check_output,
 used for the `uname -m` architecture probe, raising OSError) and asserts
-get_os_info() returns normally (the os_info dict) instead of raising.
+probe_os_info() returns normally (the os_info dict) instead of raising.
 
 Isolation notes:
   * write_log()'s create_logger() call hardcodes filename="./logs/events.log"
@@ -38,17 +38,17 @@ Isolation notes:
 import uuid
 from unittest import mock
 
-from common.system import get_os_info
+from common.system import probe_os_info
 
 
-def test_get_os_info_returns_gracefully_when_uname_probe_fails(tmp_path, monkeypatch, ds):
+def test_probe_os_info_returns_gracefully_when_uname_probe_fails(tmp_path, monkeypatch, ds):
     (tmp_path / "logs").mkdir()
     monkeypatch.chdir(tmp_path)
 
     logger_name = f"events-test-{uuid.uuid4().hex}"
 
     with mock.patch("common.system.subprocess.check_output", side_effect=OSError("boom")):
-        os_info = get_os_info(loggername=logger_name, persist=False)
+        os_info = probe_os_info(loggername=logger_name)
 
     # The bug: write_log(event, level="error", loggername=...) raised
     # TypeError before this line was ever reached. Reaching it -- and getting

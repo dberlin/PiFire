@@ -13,7 +13,7 @@
 # *****************************************
 
 from common.common import is_float
-from common.system import get_os_info, get_wifi_quality
+from common.system import get_wifi_quality, refresh_os_info
 
 
 class SystemCommandsMixin:
@@ -111,7 +111,9 @@ class SystemCommandsMixin:
         return {"result": result, "message": message, "data": {"bt_devices": bt_devices}}
 
     def os_info(self, arglist):
-        return {"result": "OK", "message": "OS information retrieved successfully.", "data": get_os_info()}
+        # refresh_, not probe_: this command IS the "go re-read the OS and
+        # update the cached copy" request, so the write is the point.
+        return {"result": "OK", "message": "OS information retrieved successfully.", "data": refresh_os_info()}
 
     def network_info(self, arglist):
         import netifaces

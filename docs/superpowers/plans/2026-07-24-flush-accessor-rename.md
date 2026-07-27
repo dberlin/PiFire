@@ -173,30 +173,66 @@ too narrow: the implementer found one instance outside it
 (`common/common.py::read_events_records(flush=True)`, fixed in Tier 1) and the
 reviewer's independent AST scan found three more.
 
-- [ ] **`common/system.py:144` — `get_os_info(loggername="events", persist=True)`.**
+**WAVE 2 IS COMPLETE (2026-07-26).** All four boxes below are closed; see the
+per-item notes for what each one actually turned out to be.
+
+- [x] **`common/system.py:144` — `get_os_info(loggername="events", persist=True)`.**
       A `get_`-named function that WRITES the datastore via `store_os_info()`,
       and **the destructive flag DEFAULTS TO TRUE** — strictly worse than every
       Tier-1 case, where the default was `False`. Three production call sites
       (`board-config.py:230,597`, `grillplat/system_commands.py:114`) all take
       the default; two tests pass `persist=False` precisely because they need a
       pure read. Split into `probe_os_info()` + `refresh_os_info()`.
-- [ ] **`common/common.py:609` — `get_system_command_output()`.** Pops
+
+      *Done 2026-07-26.* Task ACC deferred this one as "already fixed", on the
+      grounds that "no caller just wants to read". Live code says otherwise:
+      `board-config.py::rpi_config_write` reads `VERSION_ID` to choose between
+      `/boot/config.txt` and `/boot/firmware/config.txt` and took the
+      `persist=True` default, refreshing a cache it has no interest in. Split as
+      specified: `probe_os_info()` (pure) for `rpi_config_write`,
+      `refresh_os_info()` for `--osversion`, the `os_info` system command and
+      `get_display_os_info()`'s documented cache-miss backfill. `refresh_` still
+      skips the write when the probe fails, matching the old behaviour (the
+      `store_os_info()` call sat inside the `try`).
+
+      Same change removes a **dead workaround** the wave obsoleted:
+      `tests/conftest.py::_os_info_cache_off_repo` rebound `get_os_info` on two
+      modules to redirect a `filepath` default that no longer exists — so it was
+      not redirecting anything, it was passing a tmp file path as `loggername`
+      to every module-attribute call in the session. Pinned by
+      `test_no_test_fixture_stands_in_front_of_the_probe`.
+- [x] **`common/common.py:609` — `get_system_command_output()`.** Pops
       `SqliteQueue("queue_systemo")` and **silently discards every non-matching
       entry it pops**. A destructive drain behind a `get_` name, with real data
       loss for any concurrent consumer. This one is a bug, not just a naming
       problem.
-- [ ] **`common/settings_migration.py:37` — `read_settings_file(..., init=False)`.**
+
+      *Done by task ACC* (`33135e4aed48`): peek-then-pop, non-matching entries
+      pushed back in order, and the byte-identical second copy in `common/app.py`
+      collapsed into a re-export. 5 tests in
+      `tests/unit/common/test_system_command_output_queue.py`.
+- [x] **`common/settings_migration.py:37` — `read_settings_file(..., init=False)`.**
       `init=True` runs `backup_settings()` (writes files) and `write_warning()`.
       Called with `init=True` from `common/datastore.py:279`. The comment above
       that call describes `init=True` as only "the version-overlay /
       upgrade_settings() path" — accurate but incomplete; extend it.
-- [ ] **`read_warnings()` → `drain_warnings()`.** Deliberately left alone in
+
+      *Done by task ACC* (`c24354caaa40`), docstring only and deliberately so:
+      `init` defaults to False, all three production callers pass it explicitly
+      with a comment, and a rename would churn 24 references for no behavioural
+      gain. Both write paths (the opt-in migration, and the corruption recovery
+      that runs regardless of `init`) are now documented on the function.
+- [x] **`read_warnings()` → `drain_warnings()`.** Deliberately left alone in
       wave 1 as "a genuine read-and-clear with no flag". The reviewer's counter
       is decisive: `blueprints/dash/routes.py:22` and
       `blueprints/mobile/socket_io.py:208` BOTH call it, so whichever polls
       first eats the other's warnings. That is the same cross-consumer
       interference that forced `workers: 1` on the e2e suite. 4 sites, cheap,
       and worth fixing as behaviour, not just naming.
+
+      *Done by task ACC* (`717082664c23`): `read_warnings()` is a plain read,
+      `drain_warnings()` carries the read-and-clear, and `dash_page` is its only
+      caller. Pinned by `tests/web/test_warnings_cross_consumer.py`.
 
 ## Not in scope
 

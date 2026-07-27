@@ -22,7 +22,7 @@ import json
 import subprocess
 
 from common.datastore_accessors import read_settings
-from common.system import get_os_info
+from common.system import probe_os_info, refresh_os_info
 
 """
 ==============================================================================
@@ -227,7 +227,10 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param="", pin_t
     result = "SUCCESS"
     changed = False
     """ Check OS version, so we can get the correct location of config.txt """
-    os_info = get_os_info()
+    # probe_, not refresh_: this wants one value (VERSION_ID) to pick a path.
+    # It used to take get_os_info()'s persist=True default and refresh the
+    # datastore cache as a side effect nobody here asked for.
+    os_info = probe_os_info()
     version = os_info.get("VERSION_ID", None)
     if version in ["12", "13"]:
         """ Version 12 Bookworm or Version 13 Trixie """
@@ -539,7 +542,11 @@ if __name__ == "__main__":
     parser.add_argument("-ow", "--onewire", action="store_true", required=False, help="Set 1Wire GPIO.")
     parser.add_argument("-bl", "--backlight", action="store_true", required=False, help="Enable backlight permissions.")
     parser.add_argument(
-        "-ov", "--osversion", action="store_true", required=False, help="Get OS Version. Saves to os_info.json."
+        "-ov",
+        "--osversion",
+        action="store_true",
+        required=False,
+        help="Get OS Version. Refreshes the cached copy in the PiFire datastore.",
     )
     parser.add_argument("-s", "--spi", action="store_true", required=False, help="Enable SPI.")
     parser.add_argument("-i", "--i2c", action="store_true", required=False, help="Enable I2C.")
@@ -594,7 +601,7 @@ if __name__ == "__main__":
         reboot_flags.append(changed)
 
     if args.osversion:
-        os_info = get_os_info(loggername="board_config")
+        os_info = refresh_os_info(loggername="board_config")
         event = "OS Version Information: "
         results.append(event)
         for key, value in os_info.items():

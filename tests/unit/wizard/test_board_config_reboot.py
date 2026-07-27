@@ -6,7 +6,7 @@ normally. It's loaded here via importlib. Importing it this way does NOT execute
 `if __name__ == '__main__':` block (module __name__ is not '__main__'), so no argparse/
 logging/file side effects happen at import time.
 
-All file I/O in these tests is redirected to tmp_path -- get_os_info() is monkeypatched
+All file I/O in these tests is redirected to tmp_path -- probe_os_info() is monkeypatched
 to force board-config.py's "Test Mode" branch (./local/config.txt), and set_backlight's
 hardcoded /etc/udev path is never actually written to (create_file is monkeypatched).
 Nothing here ever touches real /boot or /etc files, and no sudo/subprocess call is made.
@@ -38,7 +38,12 @@ def _settings(system_type="prototype", pwm_pin=13, onewire_pin=None, shutdown_pi
 def _test_mode_config(monkeypatch, tmp_path):
     """Force rpi_config_write() onto a scratch config.txt under tmp_path -- never the
     real /boot/config.txt or /boot/firmware/config.txt."""
-    monkeypatch.setattr(board_config, "get_os_info", lambda *a, **k: {"VERSION_ID": "test-mode"})
+    # MUST match the name rpi_config_write actually resolves (probe_os_info,
+    # not the old get_os_info): if this monkeypatch misses, the real probe runs
+    # and a Debian 12/13 host takes the /boot/firmware/config.txt branch for
+    # real. That is why the assertion below exists.
+    assert hasattr(board_config, "probe_os_info"), "the OS-version probe was renamed; this stub is disarmed"
+    monkeypatch.setattr(board_config, "probe_os_info", lambda *a, **k: {"VERSION_ID": "test-mode"})
     monkeypatch.chdir(tmp_path)
     local_dir = tmp_path / "local"
     local_dir.mkdir()

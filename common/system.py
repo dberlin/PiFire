@@ -142,20 +142,25 @@ def shutdown_system():
         threading.Thread(target=_shutdown, daemon=True).start()
 
 
-def get_os_info(loggername="events", persist=True):
+def probe_os_info(loggername="events"):
     """Probe operating-system information (/etc/os-release + `uname -m`).
 
-    `persist=True` (the default) also caches the result in the DATASTORE, which
-    is how provisioning refreshes it (board-config.py --osversion, and the
-    system_commands "os_info" API command).
+    Pure: returns the values and touches nothing. Use this when you want to
+    KNOW something about the OS -- board-config.py's rpi_config_write reads
+    VERSION_ID to pick between /boot/config.txt and /boot/firmware/config.txt,
+    and has no interest in the cache.
 
-    This used to write an os_info.json resolved against the process CWD, so
-    where the cache landed depended on who started PiFire -- and a plain READ
-    could silently create one in the wrong directory (running the test suite
-    dropped one in the repo root). The datastore is the single source of truth
-    for live state; JSON files are exports, not the live copy.
+    Previously ``get_os_info(persist=False)``. That signature was the worst of
+    the accessor-naming wave: a ``get_``-named function that WROTE, with the
+    destructive flag defaulting to **True**, so every call site had to opt OUT
+    of a side effect its name did not admit -- and rpi_config_write, the one
+    caller that genuinely just wanted a value, took the default. See
+    :func:`refresh_os_info` for the writing half.
 
-    Pass `persist=False` for read paths that only need the values.
+    (Older still, it wrote an os_info.json resolved against the process CWD, so
+    where the cache landed depended on who started PiFire and a plain read
+    could create one in the wrong directory. The datastore is the single source
+    of truth for live state; JSON files are exports, not the live copy.)
     """
     os_info = {}
 
@@ -172,16 +177,35 @@ def get_os_info(loggername="events", persist=True):
         # Get architecture using uname -m
         arch = subprocess.check_output(["/bin/uname", "-m"]).decode().strip()
         os_info["ARCHITECTURE"] = arch
-
-        # Cache in the datastore (provisioning/refresh paths only -- see `persist`)
-        if persist:
-            store_os_info(os_info)
         return os_info
 
     except Exception as e:
         event = f"Error getting OS info: {str(e)}"
         write_log(event, loggername=loggername)
         return os_info
+
+
+def refresh_os_info(loggername="events"):
+    """Probe the OS info AND refresh the datastore's cached copy.
+
+    :func:`probe_os_info` plus the write, named so the write is visible at the
+    call site. Three callers, each of which wants the cache updated:
+    board-config.py's ``--osversion`` provisioning flag, the ``os_info`` system
+    command (grillplat/system_commands.py), and :func:`get_display_os_info`'s
+    cache-miss backfill.
+
+    A failed probe does NOT write, preserving ``get_os_info(persist=True)``'s
+    behaviour (its ``store_os_info()`` sat inside the ``try``, after the last
+    thing that could raise). probe_os_info() returns ``{}`` on failure and
+    always sets ARCHITECTURE on success, so emptiness is the success signal;
+    an unwritable cache is left as a miss rather than overwritten with nothing.
+
+    :return: The probed OS info (also now cached, if the probe succeeded).
+    """
+    os_info = probe_os_info(loggername=loggername)
+    if os_info:
+        store_os_info(os_info)
+    return os_info
 
 
 def get_display_os_info():
@@ -207,8 +231,9 @@ def get_display_os_info():
             # Cache miss: probe live and populate it. The probe is cheap and
             # local (/etc/os-release + uname), and the cache now lives in the
             # datastore, so this no longer depends on -- or writes to -- the
-            # process CWD.
-            os_info = get_os_info()
+            # process CWD. refresh_, not probe_: backfilling the cache is the
+            # point, so the next reader is a hit.
+            os_info = refresh_os_info()
     except Exception as e:
         write_log(f"Error reading OS info: {e}", loggername="events")
         os_info = None

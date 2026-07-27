@@ -35,41 +35,15 @@ from common import datastore  # noqa: E402
 REPO_BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
-@pytest.fixture(autouse=True, scope="session")
-def _os_info_cache_off_repo(tmp_path_factory):
-    """Keep tests from dropping an os_info.json in the repo root.
-
-    `common.system.get_os_info()` defaults to `filepath="os_info.json"` and
-    WRITES that cache relative to the cwd. `get_display_os_info()` (admin page /
-    mobile system-info panel) reads the cache and, on a miss, falls back to
-    `get_os_info()` -- so every test touching those paths writes the artifact.
-    That is a production wart (a read helper with a cwd write side effect), but
-    fixing it properly is a behaviour change; this just redirects the default
-    filepath for the test session so the suite stays hermetic.
-
-    `from common.system import get_os_info` binds at import time, so rebinding
-    only `common.system` would miss those callers. LSP findReferences puts the
-    production bindings at exactly two sites -- common/system.py (used by
-    get_display_os_info) and grillplat/system_commands.py -- so both are
-    rebound here.
-    """
-    import common.system as _system
-    import grillplat.system_commands as _syscmds
-
-    real = _system.get_os_info
-    cache_path = str(tmp_path_factory.mktemp("os_info_cache") / "os_info.json")
-
-    def _redirected(filepath=cache_path, *args, **kwargs):
-        return real(filepath, *args, **kwargs)
-
-    originals = {}
-    for mod in (_system, _syscmds):
-        if getattr(mod, "get_os_info", None) is not None:
-            originals[mod] = mod.get_os_info
-            mod.get_os_info = _redirected
-    yield
-    for mod, orig in originals.items():
-        mod.get_os_info = orig
+# Removed: the session-scoped `_os_info_cache_off_repo` fixture. It rebound
+# `get_os_info` on common.system and grillplat.system_commands to redirect a
+# `filepath` default, so the suite would stop dropping an os_info.json in the
+# repo root. That parameter is long gone -- the cache moved into the datastore
+# -- so the shim was not redirecting anything; it was passing a tmp file path
+# as `loggername` to every module-attribute call in the session. A harness that
+# silently reshapes production behaviour is worse than the artifact it was
+# guarding against, and there is no artifact any more.
+# Pinned by tests/unit/common/test_os_info_read_path_is_pure.py.
 
 
 def load_wizard_manifest():

@@ -716,7 +716,7 @@ _OS_INFO_KEY = "system:os_info"
 
 
 def store_os_info(os_info):
-    """Cache the OS/architecture probe (see common.system.get_os_info).
+    """Cache the OS/architecture probe (see common.system.refresh_os_info).
 
     Lives in the datastore rather than an os_info.json next to the process:
     the file was resolved against the CWD, so where it landed depended on who

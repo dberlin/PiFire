@@ -1,5 +1,6 @@
-"""Tests for common/system.py's OS-info helpers: get_os_info (raw /etc/os-release
-+ uname probe) and get_display_os_info (cached read with fallback/defaults/BITS
+"""Tests for common/system.py's OS-info helpers: probe_os_info (raw
+/etc/os-release + uname probe), refresh_os_info (that plus the datastore cache
+write) and get_display_os_info (cached read with fallback/defaults/BITS
 derivation), used by the admin page and mobile app system-info panel.
 """
 
@@ -17,14 +18,14 @@ FAKE_OS_RELEASE = (
 )
 
 
-def test_get_os_info_parses_os_release_and_appends_architecture():
+def test_refresh_os_info_parses_os_release_and_appends_architecture():
     m = mock.mock_open(read_data=FAKE_OS_RELEASE)
     with (
         mock.patch("builtins.open", m),
         mock.patch.object(cc.subprocess, "check_output", return_value=b"x86_64\n") as check_output,
         mock.patch.object(cc, "store_os_info") as store,
     ):
-        os_info = cc.get_os_info()
+        os_info = cc.refresh_os_info()
 
     # Quotes stripped, comment/blank lines skipped (152->151 continue branch)
     # -- exactly the 4 '='-bearing os-release lines plus ARCHITECTURE, no
@@ -49,12 +50,12 @@ def test_get_display_os_info_uses_cached_json_and_computes_64bit():
     }
     with (
         mock.patch.object(cc, "load_os_info", return_value=cached) as load_cache,
-        mock.patch.object(cc, "get_os_info") as get_os_info,
+        mock.patch.object(cc, "refresh_os_info") as refresh_os_info,
     ):
         info = cc.get_display_os_info()
 
     load_cache.assert_called_once_with()
-    get_os_info.assert_not_called()  # cache hit -- no live fallback read
+    refresh_os_info.assert_not_called()  # cache hit -- no live fallback read
     assert info["BITS"] == "64-Bit"
     assert info["PRETTY_NAME"] == "Fedora Linux 39"
 
@@ -77,11 +78,11 @@ def test_get_display_os_info_falls_back_to_live_read_when_cache_empty():
     live = {"ARCHITECTURE": "aarch64", "PRETTY_NAME": "Live Read OS"}
     with (
         mock.patch.object(cc, "load_os_info", return_value={}),
-        mock.patch.object(cc, "get_os_info", return_value=live) as get_os_info,
+        mock.patch.object(cc, "refresh_os_info", return_value=live) as refresh_os_info,
     ):
         info = cc.get_display_os_info()
 
-    get_os_info.assert_called_once()
+    refresh_os_info.assert_called_once()
     assert info["PRETTY_NAME"] == "Live Read OS"
     assert info["BITS"] == "64-Bit"
     # Missing fields backfilled with the "Unknown" default (no trailing period).
