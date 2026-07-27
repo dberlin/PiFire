@@ -346,7 +346,7 @@ its own (triage Slice 9 item 1, `33135e4aed48`,
 `tests/unit/common/test_system_command_output_queue.py`). The "can be written on
 a healthy system" clause of this entry was already stale when it was written.
 
-### 5. Tailwind v4 migration — SPEC WRITTEN, UNBLOCKED
+### 5. Tailwind v4 migration — TASKS 1-14 DONE 2026-07-27, Task 15 + 2 stylesheets open
 
 Spec: `docs/superpowers/specs/2026-07-25-tailwind-v4-migration-design.md`.
 Ratified: token bridge (`@theme` + `@apply`, `pf-*` names and JSX survive), gate
@@ -373,6 +373,66 @@ typography the gate exists to protect.
 were rewriting the two largest stylesheets and would have collided with this —
 are both merged. Re-measure the line counts above before starting; they were
 taken before those two landed.
+
+#### DONE 2026-07-27 — Tasks 1-14 shipped, Task 15 (human) outstanding
+
+Plan: `plans/2026-07-26-tailwind-v4-migration.md`. All fourteen implementation
+tasks landed; the visual guarantee held. **The 38 pre-Tailwind baselines are
+byte-identical before and after** (0 deletions across the whole diff — verified
+independently in the main checkout, not just reported), and the fidelity gate is
+**97 passed**. `bun run baseline:capture` was never re-run; Task 5 added 5 new
+baseline files that had never existed, for 43 total. Suite 1258 → 1262; CSS
+bundle 41,207 → 53,871 bytes raw / 10,555 gzip, with no duplicated theme layer.
+
+#### Tasks 16-20, 2026-07-27 — the plan's gaps closed, and preflight adopted
+
+Five follow-on tasks, none of them in the plan.
+
+- **16 — cook-file fidelity baseline** (`e27f70bb`). `cookfiles.css` styled a
+  page absent from `pageSpecs.ts`, so it had no gate. Two new specs
+  (`cookfile-list` on /history, `cookfile-detail`) and four new baseline files,
+  captured while the emitted CSS still matched the pre-Tailwind reference. A
+  per-spec `PageSpec.stubs?` hook keeps the list fixture out of the shared
+  `stubApi`, so the older `history` baselines stay untouched.
+- **17 — Tailwind preflight adopted** (`08d299bc`). The reset applies for real;
+  the app's own rules now declare the type and spacing they had been taking from
+  the UA. An earlier attempt (`88efe5da`) neutralised preflight with a
+  `@layer base` shim of `revert` declarations to keep the baselines matching, and
+  was rejected: a revert that protects nothing but a computed string is not worth
+  having. Five surfaces needed real fixes — cook-file thumbnails, the Platform
+  tab's hardware list, device-table buttons, comment thumbnails, and link/button
+  text-decoration. Everything else moved 5-30px and was deliberately left.
+- **20 — static inline styles moved into the style layer** (`0071f55d`). The
+  repeated download-link and visually-hidden-input treatments became named `pf-*`
+  rules; one-offs became utility classes; dynamic styles stayed inline. Also
+  dropped the gauge arc's drop-shadow — `Gauge.qml`'s only glow is the pulsing
+  disc behind the arc, which `.pf-dash-gauge-glow` already draws.
+- **18 / 19 — the last two stylesheets** (`05c749ef`, `560e0f4f`). `probes.css`
+  and `cookfiles.css` authored with `@apply`. No stylesheet in the app is
+  hand-written now.
+
+**Outstanding:**
+
+1. **The baselines now encode the pre-preflight rendering**, so
+   `bun run test:e2e:fidelity` is 47 failed / 58 passed by design. The "never
+   recapture" rule was premised on preflight changing nothing; that premise is
+   gone. The reference has to be re-established deliberately, **after** the human
+   visual checkpoint — recapturing first would bake in whatever they would have
+   objected to.
+2. **Task 15 human visual checkpoint.** Evidence pack is in the SDD ledger, and
+   the preflight before/after screenshots are the substantive input to it.
+   Carries the known 390×844 General-tab hint wart (52px column forcing a 187px
+   row against 36-38px neighbours) — pre-existing and deliberately not fixed
+   during a conversion.
+3. **Two things found and left alone**, both pre-existing: `.pf-settings-back`
+   ("Back to history") is dim text with no affordance, and the class is shared
+   with a `<button>` that should not be underlined, so it needs a decision rather
+   than a patch. The cook-file table runs its Download button off the right edge
+   at 390px.
+4. **`history-*.json` is machine-dependent.** `/history` embeds the cook-file
+   list, and the older `history` spec measures the developer's real cook files
+   through the demo server's `/api` proxy. It is the one baseline of the 43 that
+   would not reproduce on another machine.
 
 ### 6. Remaining audit findings — SUPERSEDED by item 10
 
