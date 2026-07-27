@@ -23,6 +23,7 @@ from werkzeug.exceptions import BadRequest
 
 from common.app import api_response
 from common.file_browser import browse_files, resolve_managed_file
+from file_mgmt.recipes import create_recipefile
 
 from . import api_files_bp, cookfile_api, recipes_api
 
@@ -365,3 +366,44 @@ def recipe_detail():
     if err:
         return err
     return jsonify(recipes_api.detail_payload(struct, name)), 200
+
+
+@api_files_bp.route("/recipes/create", methods=["POST"])
+def recipe_create():
+    """Flask's equivalent is `recipeedit` with an empty filename
+    (blueprints/recipes/routes.py:136-147). The new file's bare name is
+    returned so the client can navigate to it."""
+    path = create_recipefile()
+    return jsonify(api_response("OK", None, {"filename": os.path.basename(path)})), 200
+
+
+@api_files_bp.route("/recipes/download", methods=["GET"])
+def recipe_download():
+    path, err = require_file(request.args.get("file", ""), recipe_folder())
+    if err:
+        return err
+    return send_file(path, as_attachment=True, max_age=0)
+
+
+@api_files_bp.route("/recipes/upload", methods=["POST"])
+def recipe_upload():
+    storage = request.files.get("recipe")
+    safe_name, problem = recipes_api.save_upload(storage)
+    if problem:
+        return error(problem, 400, field="recipe")
+    #  Re-contain the FLATTENED name: secure_filename is a character filter,
+    #  resolve_managed_file is the containment proof, and this is a write.
+    path, err = require_file(safe_name, recipe_folder(), must_exist=False)
+    if err:
+        return err
+    storage.save(path)
+    return jsonify(api_response("OK", None, {"filename": safe_name})), 200
+
+
+@api_files_bp.route("/recipes/delete", methods=["POST"])
+def recipe_delete_file():
+    path, err = require_file(json_body().get("file", ""), recipe_folder())
+    if err:
+        return err
+    os.remove(path)
+    return jsonify(api_response("OK")), 200

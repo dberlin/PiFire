@@ -68,6 +68,7 @@ from common.pellets_actions import PELLETS_DISPATCH, clear_pellet_db
 from common.app import CONTROL_DOWN_ERROR, update_probe_config, save_settings_and_flag_update, api_response
 from common.settings_schema import SettingsValidationError
 from flask import request
+from werkzeug.utils import secure_filename
 from app import socketio
 from config import Config
 from file_mgmt.recipes import read_recipefile, get_recipefilelist
@@ -681,8 +682,15 @@ def _post_app_data_recipes(settings, type, request):
     if type == "recipe_delete":
         if request["recipes_action"]["filename"]:
             filename = request["recipes_action"]["filename"]
-            filepath = f"{recipe_folder}{filename}"
-            os.system(f"rm {filepath}")
+            # Guard against command injection / path traversal: only delete a
+            # bare filename that resolves to a real file directly inside
+            # recipe_folder. Mirrors blueprints/recipes/routes.py's
+            # _recipes_json_deletefile, this handler's already-hardened HTTP
+            # sibling.
+            safe_name = secure_filename(filename)
+            filepath = os.path.join(recipe_folder, safe_name)
+            if safe_name and os.path.isfile(filepath):
+                os.remove(filepath)
             return _response(result="OK")
     elif type == "recipe_start":
         if request["recipes_action"]["filename"]:

@@ -794,10 +794,18 @@ def test_timer_action_no_timer_entry_returns_error_without_mutation(sio):
 
 
 def test_post_recipe_delete(sio):
+    """FIXED: this used to shell out via os.system(f"rm {path}") on an
+    unsanitized client string (see tests/web/test_socket_recipe_delete_safety.py
+    for the injection/traversal regression net). It's now secure_filename() +
+    os.path.isfile() gated os.remove(), so no shell is ever invoked; a filename
+    that does not resolve to a real file under recipe_folder is a silent no-op
+    that still reports OK, matching the old handler's pinned "OK regardless"
+    response shape.
+    """
     payload = json.dumps({"recipes_action": {"filename": "foo.pfrecipe"}})
     resp = sio.mod._post_app_data("recipes_action", "recipe_delete", payload)
     assert resp["result"] == "OK"
-    assert any(c[0] == "os.system" and "rm " in c[1] and "foo.pfrecipe" in c[1] for c in sio.calls)
+    assert not any(c[0] == "os.system" for c in sio.calls)
 
 
 def test_post_recipe_delete_falsy_filename_returns_none(sio):
