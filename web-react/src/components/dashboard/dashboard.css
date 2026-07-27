@@ -263,9 +263,11 @@
 .pf-modal-actions {
   @apply flex gap-[12px];
 }
+/* Worn by <a> as well as <button> (the cook-file download links), so it owns
+   the whole treatment a link would otherwise bring with it. */
 .pf-modal-btn {
   flex: 1;
-  @apply rounded-[12px] bg-inset p-[12px] cursor-pointer;
+  @apply rounded-[12px] bg-inset p-[12px] cursor-pointer no-underline;
   border: 1px solid rgba(255, 255, 255, 0.14);
   color: #e8dfd1;
   font: 700 16px "Barlow";

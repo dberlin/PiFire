@@ -1,3 +1,5 @@
+@reference "../../theme.css";
+
 /* Cook-file browser layout.
  *
  * Reuses the .pf-* vocabulary from settings.css / dashboard.css (both imported
@@ -36,7 +38,12 @@
   color: var(--text-dim);
 }
 
+/* A fixed 48px square, and it must stay one however narrow the column gets: a
+   percentage cap resolves against the cell, and the cell in this table is free
+   to collapse to nothing at phone width -- which takes the whole image with
+   it. The size is the rule's, not the container's. */
 .pf-cf-thumb {
+  @apply max-w-none;
   width: 48px;
   height: 48px;
   border-radius: 6px;
@@ -56,6 +63,17 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* The cook's title, and the only way into its detail page. It is the one link
+   in this app presented AS a link, so it carries the affordance itself: a tint
+   that separates it from the filename under it, and an underline on hover. */
+.pf-cf-link {
+  @apply text-accent no-underline;
+  font: 600 15px "Barlow";
+}
+.pf-cf-link:hover {
+  @apply underline;
 }
 
 .pf-cf-name {
@@ -155,6 +173,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Each asset is an <img> inside a control that exists only to be clicked: the
+   thumbnail is the whole of the visible object, so the control contributes no
+   box of its own and only the pointer. */
+.pf-cf-comment-assets > button {
+  @apply cursor-pointer border-0 bg-transparent p-0;
 }
 
 .pf-cf-comment-thumb {

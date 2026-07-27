@@ -6,121 +6,20 @@
  * stylesheet are UNLAYERED. An unlayered author declaration beats any layered
  * one whatever its specificity, so Tailwind's reset reaches only the elements
  * and properties the app's own rules leave undeclared, and no layered rule can
- * ever override a pf-* one. Keep app rules unlayered; put anything that must
- * yield to an app rule in @layer base below.
+ * ever override a pf-* one. Keep app rules unlayered.
+ *
+ * Preflight is the document's only element reset, and it is deliberately
+ * complete: headings have no type scale, flow content no margins, lists no
+ * markers, links no colour or underline, form controls no platform chrome, and
+ * replaced elements are blocks capped at their container's width. Every one of
+ * those is a property the owning pf-* rule declares for itself. A rule that
+ * wants a margin, a bullet, a link colour or an image wider than its box says
+ * so; nothing above it will.
  */
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities);
-
-/* The element defaults the app's own rules are written against. Everything
-   here is a document-wide default that any pf-* rule overrides simply by
-   declaring the property. */
-@layer base {
-  /* Line boxes are sized by the font in use, not by a document-wide ratio: a
-     rule that wants a specific leading declares its own line-height. */
-  html {
-    line-height: revert;
-  }
-
-  /* Element borders are opt-in: a rule that wants one declares width AND
-     style. Tailwind's border-width utilities alone will not draw. */
-  *,
-  ::before,
-  ::after,
-  ::backdrop,
-  ::file-selector-button {
-    border-style: revert;
-  }
-
-  /* Flow content carries its own vertical rhythm and indentation, headings
-     their own type scale, and lists their markers. A layout that wants other
-     values -- a flush hint, a bulletless nav -- sets them on its own rule. */
-  p,
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6,
-  ul,
-  ol,
-  menu,
-  dl,
-  dd,
-  blockquote,
-  figure,
-  fieldset,
-  legend {
-    margin: revert;
-    padding: revert;
-  }
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    font-size: revert;
-    font-weight: revert;
-  }
-  ul,
-  ol,
-  menu {
-    list-style: revert;
-  }
-  b,
-  strong {
-    font-weight: revert;
-  }
-
-  /* Links carry the platform link treatment. A link that is presented as
-     something else -- a button, a thumbnail, a nav pill -- declares its own
-     colour and text-decoration. */
-  a {
-    color: revert;
-    text-decoration: revert;
-  }
-
-  /* Replaced elements sit inline at their intrinsic size and are not
-     constrained by their container, so sizing one means declaring both width
-     and height on it. */
-  img,
-  svg,
-  video,
-  canvas,
-  audio,
-  iframe,
-  embed,
-  object {
-    display: revert;
-    vertical-align: revert;
-  }
-  img,
-  video {
-    max-width: revert;
-    height: revert;
-  }
-
-  /* Form controls keep the platform's own type, colour, frame and metrics --
-     the button frame being the one exception to the opt-in border rule above.
-     A control that should look like the rest of the app declares its own font,
-     color, background and box; none of them are inherited. */
-  button,
-  input,
-  select,
-  optgroup,
-  textarea,
-  ::file-selector-button {
-    font: revert;
-    color: revert;
-    background-color: revert;
-    border-width: revert;
-    margin: revert;
-    padding: revert;
-  }
-}
 
 /* Design tokens ported from display/qml/Theme.qml, which is the source of truth
    for every colour in this app: each token carries the value of the Qt property

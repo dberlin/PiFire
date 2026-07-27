@@ -176,7 +176,10 @@ export function CookFileList() {
                 <td>
                   {/* An ERROR-titled row is exactly the one a user needs to open
                       to reach the repair prompt, so it is never disabled. */}
-                  <Link to={`/cookfiles/${encodeURIComponent(item.filename)}`}>
+                  <Link
+                    className="pf-cf-link"
+                    to={`/cookfiles/${encodeURIComponent(item.filename)}`}
+                  >
                     {item.title || item.filename}
                   </Link>
                   {item.title && <span className="pf-cf-name">{item.filename}</span>}
@@ -184,12 +187,7 @@ export function CookFileList() {
                 <td className="pf-cf-actions-col">
                   <div className="pf-cf-row-actions">
                     {/* A plain href: the browser has to own the save dialog. */}
-                    <a
-                      className="pf-modal-btn"
-                      href={cookFileDownloadUrl(item.filename)}
-                      download
-                      style={{ textDecoration: "none" }}
-                    >
+                    <a className="pf-modal-btn" href={cookFileDownloadUrl(item.filename)} download>
                       {`Download ${item.filename}`}
                     </a>
                     <button

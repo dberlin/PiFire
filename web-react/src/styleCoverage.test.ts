@@ -25,31 +25,18 @@ const SURFACES = [
   "src/components/wizard",
 ];
 
-// Pre-existing debt, found the moment this guard first ran on the whole tree.
-// Every name here is written into a .tsx and styled by nothing. Left as-is
-// deliberately: adding rules would change how these surfaces look, which is the
-// one thing the Tailwind migration may not do. The list is asserted for EXACT
-// equality below, so fixing one -- or introducing a new one -- fails here.
+// Names written into a .tsx and styled by nothing, each because the element
+// genuinely needs no box of its own -- not because a rule is missing. The list
+// is asserted for EXACT equality below, so styling one, or introducing a new
+// bare name, fails here and has to be argued for either way.
 //
-//   pf-settings-tab       PlatformTab.tsx:41  -- wrapper div; only that one tab
-//   pf-section-note       PlatformTab.tsx:43     uses any of these four, and
-//   pf-kv                 PlatformTab.tsx:50     none of them is styled.
-//   pf-kv-row             PlatformTab.tsx:52
+//   pf-settings-tab       PlatformTab.tsx:41  -- wrapper div, no box of its own
+//   pf-section-note       PlatformTab.tsx:43  -- the section body supplies the
+//                         gap, and the note takes the body's own type
 //   pf-rpt-range-label    RangeProfileTable.tsx:155 -- span, unstyled
 //   pf-pellets-load       CurrentLoadCard.tsx:59 -- wrapper div. Note that
 //                         .pf-pellets-load-name IS styled; the bare name is not.
-//   pf-devices-table-btn  PelletLog.tsx:46, VocabTable.tsx:70 -- reaches for a
-//                         button style that lives in the Flask/Jinja UI's
-//                         stylesheet, which this app never loads.
-const UNSTYLED = [
-  "pf-devices-table-btn",
-  "pf-kv",
-  "pf-kv-row",
-  "pf-pellets-load",
-  "pf-rpt-range-label",
-  "pf-section-note",
-  "pf-settings-tab",
-];
+const UNSTYLED = ["pf-pellets-load", "pf-rpt-range-label", "pf-section-note", "pf-settings-tab"];
 
 describe("every pf-* class the app uses has a rule", () => {
   // Animation names count as declared: SystemStatus and GrillGauge name

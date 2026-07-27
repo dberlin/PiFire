@@ -280,6 +280,41 @@
 .pf-devices-delete-col {
   @apply w-[72px] text-right;
 }
+/* The per-row delete control in those tables (also VocabTable and PelletLog).
+   Its whole content is one glyph, so the frame is what makes it read as a
+   control rather than as a character in the row. */
+.pf-devices-table-btn {
+  @apply cursor-pointer rounded-[8px] bg-inset px-[8px] py-[2px] text-text-dim;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font: 600 13px "Barlow";
+}
+.pf-devices-table-btn:hover:not(:disabled) {
+  @apply text-danger;
+  border-color: var(--danger);
+}
+.pf-devices-table-btn:disabled {
+  @apply cursor-default;
+  opacity: 0.5;
+}
+
+/* PlatformTab's read-only hardware summary (<dl>, one .pf-kv-row per pair).
+   The pairing is carried by the two-column track: the label sits in the first
+   column and its value in the second, on the same line, so the two read as one
+   row rather than as a flat list of alternating strings. */
+.pf-kv {
+  @apply m-0 flex flex-col gap-[8px];
+}
+.pf-kv-row {
+  @apply grid items-baseline gap-[16px] grid-cols-[minmax(120px,220px)_1fr];
+}
+.pf-kv-row dt {
+  @apply text-text-dim;
+  font: 600 15px "Barlow";
+}
+.pf-kv-row dd {
+  @apply m-0;
+  font: 500 15px "Barlow";
+}
 
 /* The wizard's probe cards host ConfirmAction, whose .pf-modal-scrim is
    position:absolute (dashboard.css:165-172) rather than fixed. Without a
