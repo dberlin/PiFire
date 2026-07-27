@@ -61,10 +61,21 @@ on.
 
 1. **"Never recapture" is void.** Task 4 forbade `baseline:capture` in any later
    task, because the migration was to change nothing. Preflight changed the
-   rendering deliberately, so the reference now describes a tree that no longer
-   exists: `bun run test:e2e:fidelity` is **47 failed / 58 passed**, every
-   failure a baseline comparison. The recapture is the correct next action and
-   is gated only on this sign-off, which it now has.
+   rendering deliberately, so the reference described a tree that no longer
+   existed: 47 failed / 58 passed, every failure a comparison rather than a
+   defect. **Recaptured 2026-07-27, after the sign-off** — that order is the
+   point, since recapturing first would have baked in the four defects the
+   walkthrough went on to find. `bun run test:e2e:fidelity` is now **105 passed,
+   0 failed**.
+
+   A recapture writes whatever it finds, so a selector that had stopped matching
+   would shrink a baseline rather than fail one. Verified instead of assumed:
+   all 47 files carry the same landmark set as before with none lost, no
+   landmark became zero-sized, insertions equal deletions exactly (6809/6809, so
+   every change is a value rather than a line), `pellets-fingerprint.json` is
+   unchanged so the pellets gate ran rather than skipped, and `reflow`/`panel`
+   are outside the capture set yet still pass — the green is not
+   self-confirming.
 2. **Baselines were not updated in the commit that moved them.** Task 15 Step 4
    requires the baseline entry to land with the change that causes it, so a
    reviewed reason cannot be separated from its result. `08d299bc` (preflight)
@@ -79,7 +90,6 @@ the audit's real question.
 
 ## Still open
 
-- The recapture itself, and a commit recording it.
 - `/settings/probes` has **no baseline**: twelve settings tabs, eleven settings
   baselines. ProbesTab shipped after the reference was captured, so the
   walkthrough is the only check it has ever had. The plan's Step 3 says "all 11

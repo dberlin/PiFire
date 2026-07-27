@@ -359,9 +359,14 @@ The spec's status line was **not** updated, though Task 15 Step 5 asks for it:
 repo, and that standing rule wins over a step in a plan. This entry is the
 status.
 
-**Outstanding:** `bun run baseline:capture`. The reference still describes the
-pre-preflight tree, so `test:e2e:fidelity` is 47 failed / 58 passed by design.
-Recapturing was gated on the sign-off, which it now has.
+The fidelity reference was re-established after the sign-off — that order
+matters, since recapturing first would have baked in the four defects the
+walkthrough found. `bun run test:e2e:fidelity` is **105 passed, 0 failed**.
+
+Nothing is outstanding on this item. The one gap it leaves behind:
+`/settings/probes` still has no baseline (twelve settings tabs, eleven settings
+baselines) because ProbesTab shipped after the reference was first captured, so
+the walkthrough remains the only check that surface has ever had.
 
 Spec: `docs/superpowers/specs/2026-07-25-tailwind-v4-migration-design.md`.
 Ratified: token bridge (`@theme` + `@apply`, `pf-*` names and JSX survive), gate
