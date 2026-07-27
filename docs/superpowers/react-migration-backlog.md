@@ -296,29 +296,55 @@ Remaining: `POST /api/control` still ACCEPTS a whole `notify_data` array and
 applies it as `notify.replace`, because third-party clients speak it. No
 in-repo client does. Documented as lossy at both doors.
 
-### 4. The errors blob is write-only from the web tier
+### 4. The errors blob is write-only from the web tier — DONE 2026-07-26
 
-`read_errors()` (`common/datastore_accessors.py:126-132`) is a plain,
-non-destructive JSON read — unlike `warnings` on the very same payload, which
-drains and self-heals frame to frame. Its only clearer, `flush_errors()`, has
-exactly one production caller: `control.py:107-109`, at boot. So once
-`_check_control_status` (`blueprints/mobile/socket_io.py:1009-1019`) appends
-"The control process did not respond…", that string is on every
-`socket_dash_data` frame until `control.py` restarts. No HTTP route, socket
-action or API command clears it.
+**Fixed as a non-sticky liveness signal, not a clearing endpoint.**
 
-Worse, it can be written on a **healthy** system: `get_system_command_output`
-(`common/app.py:31-44`) pops the shared `queue_systemo` and discards every entry
-whose command does not match, so any of its seven consumers can eat the
-`check_alive` reply, the 1 s timeout expires, and the sticky error lands anyway.
-Same class as triage Slice 9 item 1, which already owns
-`get_system_command_output`.
+The bug: `_check_control_status` (`blueprints/mobile/socket_io.py`) appended
+"The control process did not respond…" to the errors blob. `read_errors()` is a
+plain non-destructive read — unlike `warnings` on the very same payload, which
+drains and self-heals frame to frame — and its only clearer, `flush_errors()`,
+has exactly one production caller, `control.py` at boot. So one missed answer
+rode every `socket_dash_data` frame until the control process restarted, and no
+route, socket action or API command could clear it.
 
-The frontend has done what it can: it no longer withholds Stop/Shutdown on this
-signal, and offers a **Recheck** that asks `GET /api/sys/check_alive` directly
-(`web-react/src/helpers/dashboard/controlHealth.ts`). The backend half — an
-endpoint that clears the error, or a liveness signal that is not sticky — is
-still open.
+**Which fix, and why.** The blob's other writers decide it. Every one of them
+(`controller/runtime/devices.py`, `runner.py`, `controller.py`,
+`common/extra_installer.py`) is the control process or one of its subprocesses,
+and each records a failure that already happened and cannot un-happen — a
+display that would not load, a dependency install that failed. The
+`flush_errors()`-at-control-boot lifecycle matches exactly that: "errors
+accumulated since the control process started." Liveness is the opposite kind of
+fact: about right now, observed by the web process, false the moment control
+answers again. It was misfiled, and once filed correctly there is nothing
+durable left to clear, so no clearing endpoint is needed.
+
+The verdict now lives in `socket_io._control_alive` — process-local, in memory,
+overwritten by every check in both directions — and `_get_dash_data` composes
+`common/app.py::CONTROL_DOWN_ERROR` into each payload from it. Deliberately not
+persisted anywhere: persisting a statement about "right now" is what made this
+sticky. `dash_page` already worked this way (it appends to the local list it
+hands the template); the duplicated user-visible string is now one constant,
+because the React dashboard identifies the condition by matching a substring of
+it (`web-react/src/helpers/dashboard/health.ts`).
+
+Consequence worth keeping: **the errors blob is now read-only from the web
+tier**, giving it a single owner and removing a cross-process read-modify-write.
+
+Pinned by `tests/web/test_control_liveness_not_sticky.py` (6 tests, driving the
+real consumers), including that a durable control-process error is untouched in
+both directions — a guard against "fixing" this by deleting from the blob.
+
+The Recheck control in `controlHealth.ts` is **kept**: the payload can still be
+up to one 30 s poll interval stale, which is an independent reason for an
+on-demand probe. Its comment, which described the stickiness and the
+`get_system_command_output` queue race as live problems, is corrected.
+
+*The queue race is not a separate open item.* `get_system_command_output` no
+longer discards non-matching entries — it peeks and pushes back what is not
+its own (triage Slice 9 item 1, `33135e4aed48`,
+`tests/unit/common/test_system_command_output_queue.py`). The "can be written on
+a healthy system" clause of this entry was already stale when it was written.
 
 ### 5. Tailwind v4 migration — SPEC WRITTEN, UNBLOCKED
 
@@ -373,11 +399,37 @@ self-contained, unblocked.
       flipped to assert the link exists and points at `/pellets`, plus one
       pinning that it navigates in-app rather than reloading the document.
 
-### 7. Accessor rename WAVE 2
+### 7. Accessor rename WAVE 2 — DONE 2026-07-26
 
-Four remaining items, including `read_warnings()` → `drain_warnings()`. That one
-is a genuine cross-consumer bug, not just a naming problem: the dash routes and
-socketio both call it, so whichever polls first consumes the other's warnings.
+This entry was stale. It claimed four remaining items; three were already
+finished when it was written, by task ACC (`.superpowers/sdd/task-acc-report.md`).
+Checked against live code, not the docs:
+
+- `read_warnings()` → `drain_warnings()` — **already done.** Both exist in
+  `common/datastore_accessors.py`, `dash_page` is `drain_warnings()`'s only
+  caller, and `tests/web/test_warnings_cross_consumer.py` pins it. The
+  cross-consumer bug this entry described as open had already been fixed.
+- `get_system_command_output()` discarding other consumers' queue entries —
+  **already done.** It peeks and pushes back;
+  `tests/unit/common/test_system_command_output_queue.py`. (Backlog item 4 also
+  cited this as a live cause; that too was stale.)
+- `read_settings_file(init=True)` — **already done**, docstring only and
+  deliberately so: `init` defaults to False, all three production callers pass
+  it explicitly, and a rename would churn 24 references for no behavioural gain.
+- `get_os_info(persist=True)` — **the one that really was outstanding**, and the
+  only one closed by this pass. Task ACC skipped it as "already fixed" because
+  the old CWD-relative `os_info.json` write was gone, reasoning that no caller
+  just wants to read. `board-config.py::rpi_config_write` is that caller: it
+  reads `VERSION_ID` to choose a config.txt path and took the `persist=True`
+  default. Split into `probe_os_info()` + `refresh_os_info()` as the plan
+  specified, which also let a dead `tests/conftest.py` workaround go.
+
+Details and per-item commits: `plans/2026-07-24-flush-accessor-rename.md`
+"WAVE 2", now all checked.
+
+**Lesson, since it keeps recurring:** three of four items here were closed
+before the entry describing them as open was read. Verify against live code
+first; the docs drift.
 
 ### 8. Un-migrated Flask pages
 
@@ -609,9 +661,13 @@ which said it was owed).
 
 #### Backend behaviour that is broken or lying
 
-- The errors blob is write-only from the web tier, and `_check_control_status`
-  can false-positive on a healthy system (open item 4).
-- `get_os_info(persist=True)` — a destructive flag still defaults to true.
+- ~~The errors blob is write-only from the web tier, and `_check_control_status`
+  can false-positive on a healthy system~~ — FIXED 2026-07-26 (item 4). The blob
+  is now read-only from the web tier; liveness is a non-sticky in-memory signal
+  composed into each payload. The false-positive vector (the `queue_systemo`
+  race) was fixed earlier still.
+- ~~`get_os_info(persist=True)` — a destructive flag still defaults to true.~~
+  — FIXED 2026-07-26 (item 7): split into `probe_os_info()` + `refresh_os_info()`.
 - `backup_pellet_db` is not performed on a React "Load New Pellets".
 - Residual clobber window on the pellet blob — no optimistic concurrency.
 - Notify targets are never converted on a temperature-units change.

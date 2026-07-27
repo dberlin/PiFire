@@ -478,9 +478,14 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
     - Detail: `read_errors()` is a non-destructive blob read; the only clearer, `flush_errors()`, runs
       once at `control.py:107-109` boot. Any of seven consumers of the shared `queue_systemo` can eat
       the `check_alive` reply (`common/app.py:31-44`), writing the sticky error on a healthy system.
-    - Status: STILL-OPEN — confirmed: `flush_errors` has exactly one production caller
-      (`control.py:109`); there is no `/api/cmd/clear_errors` route. The React side got a client
-      workaround (`helpers/dashboard/controlHealth.ts` `recheckControl`) but the backend is unchanged.
+    - Status: **CLOSED 2026-07-26** — fixed as a non-sticky liveness signal rather than a clearing
+      endpoint, because every other writer of that blob is the control process recording a durable
+      past failure; liveness was simply misfiled. `socket_io._control_alive` holds the verdict in
+      memory and `_get_dash_data` composes `common/app.py::CONTROL_DOWN_ERROR` into each payload, so
+      the web tier no longer writes the blob at all. The `queue_systemo` false-positive vector was
+      already gone (that function stopped discarding non-matching entries in `33135e4aed48`), so this
+      entry's second bullet was stale. `recheckControl` is kept — the payload can still be one 30 s
+      poll interval stale. Pinned by `tests/web/test_control_liveness_not_sticky.py`.
 
 58. **Recipe unpause payload not ported — needs verification against a live recipe**
     - Source: Task 5 Step 1 (line 664) — "**The unpause payload … is deliberately NOT ported here** …

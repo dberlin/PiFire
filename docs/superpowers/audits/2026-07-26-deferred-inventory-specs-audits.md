@@ -322,12 +322,19 @@ constraint and the note that PlatformTab is read-only by decision so General is 
 Source: `## Slice 7`, opening paragraph ("cross-cutting chrome has no home in a page-shaped
 backlog"). Backlog-structure work; M1/M2/M4/M17/I17 are its residents.
 
-**[O] T-S9.3 — `common/system.py get_os_info(persist=True)`: destructive flag defaults to true, `get_`-named function writes the datastore**
+**[D] T-S9.3 — `common/system.py get_os_info(persist=True)`: destructive flag defaults to true, `get_`-named function writes the datastore**
 Source: `## Slice 9` item 3. Plan calls for splitting into `probe_os_info()` + `refresh_os_info()`;
 3 production call sites all take the default.
-Checked: `/home/dannyb/sources/PiFire/common/system.py:145` still
-`def get_os_info(loggername="events", persist=True)`. The *docstring* now documents the write
-path (`:146-158`) but the split/rename never happened.
+Was: `common/system.py:145` `def get_os_info(loggername="events", persist=True)` — the *docstring*
+documented the write path but the split never happened.
+**Done 2026-07-26.** Split as specified. `probe_os_info()` is pure and is what
+`board-config.py::rpi_config_write` calls (it reads `VERSION_ID` to choose a config.txt path and
+was the caller that genuinely just wanted a value — the counterexample to task ACC's "no caller
+just wants to read"). `refresh_os_info()` carries the write for `--osversion`, the `os_info` system
+command and `get_display_os_info()`'s cache-miss backfill; it still skips the write on a failed
+probe, matching the old behaviour. The same change deleted `tests/conftest.py`'s dead
+`_os_info_cache_off_repo` fixture, which had been feeding a tmp path to `loggername` session-wide.
+This closes Slice 9 / accessor-rename WAVE 2 entirely.
 
 **[O] T-S10.1 — No unconsumed-field regression check exists**
 Source: `## Slice 10` item 1. The audit found 14 payload fields + 4 per-probe fields with zero
