@@ -1,14 +1,23 @@
+@reference "../../theme.css";
+
 /* HistoryChart -- uPlot host + the cursor-following tooltip plugin markup.
    Colours reuse the app's design tokens from src/theme.css rather than
-   introducing new ones. */
+   introducing new ones.
+
+   The single-letter child classes (.t, .r, .r i, .r b) are written by
+   helpers/history/tooltipPlugin.ts and pinned by HistoryChart.test.tsx --
+   selectors here must not change, only declarations. */
 
 .pf-history-chart {
-  position: relative;
-  width: 100%;
+  @apply relative w-full;
 }
 
+/* The font shorthand is kept RAW, not split into @apply utilities. It resets
+   line-height to `normal` as part of its own expansion, and the equivalent
+   Tailwind named size (text-xs) would set a line-height of its own instead --
+   two different reflows of the same box. */
 .pf-history-chart .u-legend {
-  color: var(--text-dim);
+  @apply text-text-dim;
   font:
     600 12px "Barlow",
     system-ui,
@@ -16,38 +25,28 @@
 }
 
 .pf-history-tip {
-  position: absolute;
-  z-index: 10;
-  pointer-events: none;
-  background: var(--card);
+  @apply pointer-events-none absolute z-10 rounded-[10px] bg-card px-[10px] py-[8px] text-text;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 10px;
-  padding: 8px 10px;
   font:
     600 12px "Barlow",
     system-ui,
     sans-serif;
-  color: var(--text);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   min-width: 140px;
 }
 
 .pf-history-tip .t {
-  color: var(--text-dim);
-  font-size: 11px;
+  @apply text-[11px] text-text-dim;
   margin-bottom: 4px;
 }
 
 .pf-history-tip .r {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  @apply flex items-center gap-[6px] whitespace-nowrap;
   padding: 2px 0;
-  white-space: nowrap;
 }
 
 .pf-history-tip .r i {
-  display: inline-block;
+  @apply inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -55,7 +54,6 @@
 }
 
 .pf-history-tip .r b {
+  @apply font-bold text-text;
   margin-left: auto;
-  font-weight: 700;
-  color: var(--text);
 }
