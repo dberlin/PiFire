@@ -1,4 +1,4 @@
-import { stubCookFiles } from "./apiFixtures";
+import { stubCookFiles, stubProbeModules } from "./apiFixtures";
 import type { PageSpec, StyleProbe } from "./layoutBaseline";
 
 // The two viewports the fidelity gate is defined at. 1280x720 is the desktop
@@ -222,6 +222,33 @@ export const PAGE_SPECS: PageSpec[] = [
       landmarks: [...SHELL, ...SETTINGS],
     }),
   ),
+  // The twelfth settings tab, and the one that had no gate: it shipped after
+  // the pre-Tailwind reference was captured, so it is absent from
+  // SETTINGS_TABS above and from the 43 immutable baselines.
+  //
+  // It is written out here rather than added to that list because it needs
+  // both things the generated specs cannot express: its own fixture (its route
+  // loader is the only settings child with one), and the probes vocabulary
+  // below. Those rules are what this spec is for -- probes.css scopes
+  // .pf-probes-card and .pf-btn under .pf-probes-surface, and while the wizard
+  // baselines cover the unscoped forms, nothing has ever measured the scoped
+  // ones.
+  {
+    name: "settings-probes",
+    path: "/settings/probes",
+    ready: ".pf-probes-surface .pf-probes-card",
+    root: ".pf-shell",
+    stubs: stubProbeModules,
+    landmarks: [
+      ...SHELL,
+      ...SETTINGS,
+      ".pf-probes-surface",
+      ".pf-probes-card",
+      ".pf-probes-table",
+      ".pf-btn",
+      ".pf-modal-btn",
+    ],
+  },
 ];
 
 const NEXT = 'button:text-is("Next")';

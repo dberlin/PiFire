@@ -81,3 +81,21 @@ export async function stubCookFiles(page: Page): Promise<void> {
     r.fulfill({ status: 200, contentType: "image/png", body: PNG_8x8 }),
   );
 }
+
+/**
+ * The module catalog behind /settings/probes.
+ *
+ * Its route loader (probeModulesLoader) is the only settings child with one,
+ * and stubApi() does not cover /api/probe_modules -- so without this the tab
+ * renders its errorElement rather than the surface being measured. Installed
+ * per-spec, like the cook-file routes, so no other baseline can be affected by
+ * its presence.
+ *
+ * The fixture is the real catalog as the running backend reports it: 18
+ * modules with their descriptions and install requirements. Which modules
+ * exist changes what DevicesCard offers, so a hand-trimmed list would measure
+ * a surface no install actually has.
+ */
+export async function stubProbeModules(page: Page): Promise<void> {
+  await page.route("**/api/probe_modules", (r) => json(r, body("probe-modules.json")));
+}

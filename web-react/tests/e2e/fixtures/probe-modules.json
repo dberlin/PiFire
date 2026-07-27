@@ -1,0 +1,1505 @@
+{
+  "data": {
+    "modules": {
+      "ads1015_adafruit": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This module supports the ADS1015 12-Bit ADC based on Adafruit's Circuit Python implementation/module.  This version can also be used with the ADS1115, as it is backward compatible.  Some fidelity may be lost due to the fact that the ADC has less bits to measure with, however in testing it seems to be reasonably good.  Use this if you are having issues with the default ADS1115 module.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "0x48",
+              "description": "Select the I2C bus address to use for this device.  Default is 0x48.  If you have more than one ADS1115, you can assign unique device bus address for up to four devices.",
+              "friendly_name": "I2C Bus Address",
+              "hidden": false,
+              "label": "i2c_bus_addr",
+              "list_labels": ["0x48", "0x49", "0x4A", "0x4B"],
+              "list_values": ["0x48", "0x49", "0x4A", "0x4B"],
+              "type": "list"
+            },
+            {
+              "default": "basic",
+              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
+              "friendly_name": "I2C Bus Type",
+              "hidden": false,
+              "label": "i2c_bus_kind",
+              "list_labels": [
+                "Basic (native I2C)",
+                "Extended (USB / other bus)",
+                "FT232H (USB)",
+                "MCP2221 (USB)"
+              ],
+              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
+              "type": "list"
+            },
+            {
+              "default": "CP2112",
+              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
+              "friendly_name": "Extended I2C Bus",
+              "hidden": false,
+              "label": "i2c_bus_num",
+              "type": "i2c_bus_num"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC0 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC0_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC1 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC1_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC2 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC2_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC3 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC3_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 3.2,
+              "description": "Select the voltage reference measured at the top of the resistor dividers (from the power supply source).  Default is 3.28V",
+              "friendly_name": "Voltage Source Reference",
+              "hidden": false,
+              "label": "voltage_ref",
+              "max": 10,
+              "min": 1,
+              "step": 0.001,
+              "type": "float"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["ADC0", "ADC1", "ADC2", "ADC3"],
+          "type": "adc"
+        },
+        "filename": "ads1015_adafruit",
+        "friendly_name": "ADS1015 Adafruit",
+        "image": "ads1115.png",
+        "py_dependencies": [
+          "adafruit-circuitpython-ads1x15==2.4.3",
+          "adafruit-extended-bus==1.0.2"
+        ],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "ads1115": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "WARNING: This module is no longer the default due to reports of issues.  If you experience trouble with this module, use the Adafruit modules.  This is an alternative PiFire module supporting the ADS1115 16-Bit ADC and should only be used if you are experiencing difficulty with the Adafruit module.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "0x48",
+              "description": "Select the I2C bus address to use for this device.  Default is 0x48.  If you have more than one ADS1115, you can assign unique device bus address for up to four devices.",
+              "friendly_name": "I2C Bus Address",
+              "hidden": false,
+              "label": "i2c_bus_addr",
+              "list_labels": ["0x48", "0x49", "0x4A", "0x4B"],
+              "list_values": ["0x48", "0x49", "0x4A", "0x4B"],
+              "type": "list"
+            },
+            {
+              "default": "basic",
+              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
+              "friendly_name": "I2C Bus Type",
+              "hidden": false,
+              "label": "i2c_bus_kind",
+              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)"],
+              "list_values": ["basic", "extended"],
+              "type": "list"
+            },
+            {
+              "default": "CP2112",
+              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected); a number selects /dev/i2c-N explicitly. Use the Discover button to scan for connected devices. Ignored when Basic.",
+              "friendly_name": "Extended I2C Bus",
+              "hidden": false,
+              "label": "i2c_bus_num",
+              "type": "i2c_bus_num"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC0 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC0_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC1 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC1_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC2 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC2_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC3 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC3_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 3.2,
+              "description": "Select the voltage reference measured at the top of the resistor dividers (from the power supply source).  Default is 3.28V",
+              "friendly_name": "Voltage Source Reference",
+              "hidden": false,
+              "label": "voltage_ref",
+              "max": 10,
+              "min": 1,
+              "step": 0.001,
+              "type": "float"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["ADC0", "ADC1", "ADC2", "ADC3"],
+          "type": "adc"
+        },
+        "filename": "ads1115",
+        "friendly_name": "Legacy ADS1115",
+        "image": "ads1115.png",
+        "py_dependencies": ["ADS1115==0.2.1"],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "ads1115_adafruit": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": true,
+        "description": "This is the default module supporting ALL of the ADS1115 16-Bit ADC's and is based on Adafruit's Circuit Python implementation/module.  This version is still actively updated and may support a wider range of hardware.  There has been rumors of sellers shipping ADS1015 12-Bit ADC's instead of the ADS1115 16-Bit ADC's.  If you got one of these, you can try the ADS1015 Adafruit library instead.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "0x48",
+              "description": "Select the I2C bus address to use for this device.  Default is 0x48.  If you have more than one ADS1115, you can assign unique device bus address for up to four devices.",
+              "friendly_name": "I2C Bus Address",
+              "hidden": false,
+              "label": "i2c_bus_addr",
+              "list_labels": ["0x48", "0x49", "0x4A", "0x4B"],
+              "list_values": ["0x48", "0x49", "0x4A", "0x4B"],
+              "type": "list"
+            },
+            {
+              "default": "basic",
+              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
+              "friendly_name": "I2C Bus Type",
+              "hidden": false,
+              "label": "i2c_bus_kind",
+              "list_labels": [
+                "Basic (native I2C)",
+                "Extended (USB / other bus)",
+                "FT232H (USB)",
+                "MCP2221 (USB)"
+              ],
+              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
+              "type": "list"
+            },
+            {
+              "default": "CP2112",
+              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
+              "friendly_name": "Extended I2C Bus",
+              "hidden": false,
+              "label": "i2c_bus_num",
+              "type": "i2c_bus_num"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC0 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC0_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC1 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC1_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC2 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC2_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC3 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC3_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 3.2,
+              "description": "Select the voltage reference measured at the top of the resistor dividers (from the power supply source).  Default is 3.28V",
+              "friendly_name": "Voltage Source Reference",
+              "hidden": false,
+              "label": "voltage_ref",
+              "max": 10,
+              "min": 1,
+              "step": 0.001,
+              "type": "float"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["ADC0", "ADC1", "ADC2", "ADC3"],
+          "type": "adc"
+        },
+        "filename": "ads1115_adafruit",
+        "friendly_name": "ADS1115 Adafruit",
+        "image": "ads1115.png",
+        "py_dependencies": [
+          "adafruit-circuitpython-ads1x15==2.4.3",
+          "adafruit-extended-bus==1.0.2"
+        ],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "bt_ibbq": {
+        "apt_dependencies": ["libglib2.0-dev"],
+        "command_list": [["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]],
+        "default": false,
+        "description": "This device module supports Bluetooth LE iBBQ devices such as the Inkbird IBT-4XS four probe thermometer.  Note that the device can take up to a minute to be discovered and to start streaming data once turned on.  This has only been tested with the Inkbird IBT-4XS, but it may also work with other iBBQ models.  This module is still experimental, so feedback is welcome.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "",
+              "description": "This is the unique Hardware ID or Address of the peripheral (format: xx:xx:xx:xx:xx:xx).  This should be discovered during scanning.",
+              "friendly_name": "Hardware ID",
+              "hidden": false,
+              "label": "hardware_id",
+              "type": "bt_address"
+            },
+            {
+              "default": "True",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Transient (sometimes detached)", "Fixed (always attached)"],
+              "list_values": ["True", "False"],
+              "type": "list"
+            },
+            {
+              "default": 4,
+              "description": "Select the number of probes for this device.",
+              "friendly_name": "Number of Probes",
+              "hidden": true,
+              "label": "num_probes",
+              "max": 4,
+              "min": 2,
+              "step": 1,
+              "type": "int"
+            }
+          ],
+          "ports": ["BT0", "BT1", "BT2", "BT3"],
+          "type": "bluetooth"
+        },
+        "filename": "bt_ibbq",
+        "friendly_name": "Bluetooth - iBBQ / Inkbird BT (4 Probes)",
+        "image": "bt_ibbq.png",
+        "py_dependencies": ["bluepy==1.3.0"],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "bt_ibt6xs": {
+        "apt_dependencies": ["libglib2.0-dev"],
+        "command_list": [["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]],
+        "default": false,
+        "description": "This device module supports Bluetooth LE iBBQ devices such as the Inkbird IBT-6XS six probe thermometer.  Note that the device can take up to a minute to be discovered and to start streaming data once turned on.  This has only been tested with the Inkbird IBT-6XS, but it may also work with other iBBQ models.  This module is still experimental, so feedback is welcome.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "",
+              "description": "This is the unique Hardware ID or Address of the peripheral (format: xx:xx:xx:xx:xx:xx).  This should be discovered during scanning.",
+              "friendly_name": "Hardware ID",
+              "hidden": false,
+              "label": "hardware_id",
+              "type": "bt_address"
+            },
+            {
+              "default": "True",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Transient (sometimes detached)", "Fixed (always attached)"],
+              "list_values": ["True", "False"],
+              "type": "list"
+            },
+            {
+              "default": 6,
+              "description": "Select the number of probes for this device.",
+              "friendly_name": "Number of Probes",
+              "hidden": true,
+              "label": "num_probes",
+              "max": 6,
+              "min": 2,
+              "step": 1,
+              "type": "int"
+            }
+          ],
+          "ports": ["BT0", "BT1", "BT2", "BT3", "BT4", "BT5"],
+          "type": "bluetooth"
+        },
+        "filename": "bt_ibbq",
+        "friendly_name": "Bluetooth - iBBQ / Inkbird BT (6 Probes)",
+        "image": "bt_ibt6xs.png",
+        "py_dependencies": ["bluepy==1.3.0"],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "bt_meater": {
+        "apt_dependencies": ["libglib2.0-dev"],
+        "command_list": [["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]],
+        "default": false,
+        "description": "This device module supports Bluetooth LE Meater probe thermometer devices (Original Meater and Meater Plus supported).  At this time the Meater Pro (Meater 2 Plus) devices are not supported. ",
+        "device_specific": {
+          "config": [
+            {
+              "default": "",
+              "description": "This is the unique Hardware ID or Address of the peripheral (format: xx:xx:xx:xx:xx:xx).  This should be discovered during scanning.",
+              "friendly_name": "Hardware ID",
+              "hidden": false,
+              "label": "hardware_id",
+              "type": "bt_address"
+            },
+            {
+              "default": "True",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Transient (sometimes detached)", "Fixed (always attached)"],
+              "list_values": ["True", "False"],
+              "type": "list"
+            }
+          ],
+          "ports": ["BT_Tip", "BT_Ambient"],
+          "type": "bluetooth"
+        },
+        "filename": "bt_meater",
+        "friendly_name": "Bluetooth - Meater",
+        "image": "bt_meater.png",
+        "py_dependencies": ["bluepy==1.3.0"],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "bt_meater_exp": {
+        "apt_dependencies": ["libdbus-1-dev"],
+        "command_list": [],
+        "default": false,
+        "description": "This device module supports Bluetooth LE Meater probe thermometer devices and is experimental. Not that this module relies on the simplepyble module and will not co-exist with other bluetooth modules based on bluepy.  This is not recommended for production use.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "",
+              "description": "This is the unique Hardware ID or Address of the peripheral (format: xx:xx:xx:xx:xx:xx).  This should be discovered during scanning.",
+              "friendly_name": "Hardware ID",
+              "hidden": false,
+              "label": "hardware_id",
+              "type": "bt_address"
+            },
+            {
+              "default": "True",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Transient (sometimes detached)", "Fixed (always attached)"],
+              "list_values": ["True", "False"],
+              "type": "list"
+            }
+          ],
+          "ports": ["BT0"],
+          "type": "bluetooth"
+        },
+        "filename": "bt_meater_exp",
+        "friendly_name": "BT - Meater Experimental",
+        "image": "bt_meater.png",
+        "py_dependencies": ["simplepyble==0.7.3", "icecream==2.1.4"],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "ds18b20": {
+        "apt_dependencies": [],
+        "command_list": [["sudo", "bash", "wizard/ds18b20.sh"]],
+        "default": false,
+        "description": "The DS18B20 digital thermometer provides Celsius temperature measurements over a 1-wire communication bus.  This module is currently experimental, but may be useful for calibrating probe profiles for other probes as itself has been factory calibrated.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "True",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": false,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["DS0"],
+          "type": "1wire"
+        },
+        "filename": "ds18b20",
+        "friendly_name": "DS18B20 1-Wire Digital Thermometer",
+        "image": "ds18b20.png",
+        "py_dependencies": ["w1thermsensor==2.3.0"],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "max31856_adafruit": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This SPI device reads thermocouple probes (types B, E, J, K, N, R, S, T) using the Adafruit CircuitPython MAX31856 module. Supports native SPI or an MCP2210 USB-to-SPI bridge. Use a GPIO other than CE0/CE1 for the chip select.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "GPIO2",
+              "description": "SPI Chip Select pin. For Basic (native SPI) pick a board GPIO (D2-D27). For MCP2210 pick the bridge's GP0-GP8.",
+              "friendly_name": "SPI Chip Select (CS)",
+              "hidden": false,
+              "label": "cs",
+              "list_labels": [
+                "D2",
+                "D3",
+                "D4",
+                "D5",
+                "D6",
+                "D12",
+                "D13",
+                "D14",
+                "D15",
+                "D16",
+                "D17",
+                "D18",
+                "D19",
+                "D20",
+                "D21",
+                "D22",
+                "D23",
+                "D24",
+                "D25",
+                "D26",
+                "D27",
+                "MCP2210 GP0",
+                "MCP2210 GP1",
+                "MCP2210 GP2",
+                "MCP2210 GP3",
+                "MCP2210 GP4",
+                "MCP2210 GP5",
+                "MCP2210 GP6",
+                "MCP2210 GP7",
+                "MCP2210 GP8"
+              ],
+              "list_values": [
+                "GPIO2",
+                "GPIO3",
+                "GPIO4",
+                "GPIO5",
+                "GPIO6",
+                "GPIO12",
+                "GPIO13",
+                "GPIO14",
+                "GPIO15",
+                "GPIO16",
+                "GPIO17",
+                "GPIO18",
+                "GPIO19",
+                "GPIO20",
+                "GPIO21",
+                "GPIO22",
+                "GPIO23",
+                "GPIO24",
+                "GPIO25",
+                "GPIO26",
+                "GPIO27",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8"
+              ],
+              "type": "list"
+            },
+            {
+              "default": "basic",
+              "description": "Use the board's native SPI (Basic) or an MCP2210 USB-to-SPI bridge. MCP2210 is required on hosts without native SPI (e.g. x86).",
+              "friendly_name": "SPI Bus Type",
+              "hidden": false,
+              "label": "spi_bus_kind",
+              "list_labels": ["Basic (native SPI)", "MCP2210 (USB-to-SPI bridge)"],
+              "list_values": ["basic", "mcp2210"],
+              "type": "list"
+            },
+            {
+              "default": "",
+              "description": "Optional. Leave blank to use the first/only MCP2210. Enter a USB serial string to select a specific bridge when more than one is attached. Ignored when SPI Bus Type is Basic.",
+              "friendly_name": "MCP2210 Serial",
+              "hidden": false,
+              "label": "mcp2210_serial",
+              "type": "string"
+            },
+            {
+              "default": "K",
+              "description": "Thermocouple type. Type K is the most common for cooking.",
+              "friendly_name": "Thermocouple Type",
+              "hidden": false,
+              "label": "tc_type",
+              "list_labels": [
+                "Type B",
+                "Type E",
+                "Type J",
+                "Type K",
+                "Type N",
+                "Type R",
+                "Type S",
+                "Type T"
+              ],
+              "list_values": ["B", "E", "J", "K", "N", "R", "S", "T"],
+              "type": "list"
+            },
+            {
+              "default": "1",
+              "description": "Number of samples averaged per reading. More samples = smoother but slower.",
+              "friendly_name": "Averaging Samples",
+              "hidden": false,
+              "label": "averaging",
+              "list_labels": ["1", "2", "4", "8", "16"],
+              "list_values": ["1", "2", "4", "8", "16"],
+              "type": "list"
+            },
+            {
+              "default": "60",
+              "description": "Mains noise rejection filter frequency. Use 60 Hz in North America, 50 Hz in most of Europe/Asia.",
+              "friendly_name": "Noise Rejection",
+              "hidden": false,
+              "label": "noise_rejection",
+              "list_labels": ["60 Hz (US)", "50 Hz (EU)"],
+              "list_values": ["60", "50"],
+              "type": "list"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["TC0"],
+          "type": "thermocouple"
+        },
+        "filename": "max31856_adafruit",
+        "friendly_name": "MAX31856 Thermocouple Adafruit",
+        "image": "max31865.png",
+        "py_dependencies": ["adafruit-circuitpython-max31856", "mcp2210", "hid>=1.0.4"],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "max31865": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This SPI device reads RTD style probes, such as the Traeger PT100(PT1000) RTD probe.  Note that special care may need to be taken if this is used with another SPI device (i.e. SPI Display) on the system.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "1",
+              "description": "SPI Chip Select (CS/CEx) channel used for device.  This module supports CE0 and CE1 only.",
+              "friendly_name": "SPI Chip Select (CS)",
+              "hidden": false,
+              "label": "cs",
+              "list_labels": ["CE1", "CE0"],
+              "list_values": ["1", "0"],
+              "type": "list"
+            },
+            {
+              "default": 1000,
+              "description": "RTD Nominal Resistance Value in Ohms. Default 1000 Ohms.",
+              "friendly_name": "RTD Nominal",
+              "hidden": false,
+              "label": "rtd_nominal",
+              "max": 10000,
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 4300,
+              "description": "Reference Resistor Value in Ohms. Default 4300 Ohms. (Typical options: 4300, 430)",
+              "friendly_name": "Reference Resistor",
+              "hidden": false,
+              "label": "ref_resistor",
+              "max": 10000,
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": "2",
+              "description": "Number of RTD wires used for input.  Default 2",
+              "friendly_name": "RTD Wires",
+              "hidden": false,
+              "label": "wires",
+              "list_labels": ["2 Wires", "3 Wires", "4 Wires"],
+              "list_values": ["2", "3", "4"],
+              "type": "list"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["RTD0"],
+          "type": "rtd"
+        },
+        "filename": "max31865",
+        "friendly_name": "MAX31865 RTD",
+        "image": "max31865.png",
+        "py_dependencies": [],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "max31865_adafruit": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This SPI device reads RTD style probes, such as the Traeger PT100(PT1000) RTD probe.  This version uses the Adafruit CircuitPython modules.  It should be noted that this module does not allow the use of CE0 or CE1, thus another GPIO should be used for the CS pin. Note that special care may need to be taken if this is used with another SPI device (i.e. SPI Display) on the system.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "GPIO2",
+              "description": "SPI Chip Select pin. For Basic (native SPI) pick a board GPIO (D2-D27). For MCP2210 pick the bridge's GP0-GP8.",
+              "friendly_name": "SPI Chip Select (CS)",
+              "hidden": false,
+              "label": "cs",
+              "list_labels": [
+                "D2",
+                "D3",
+                "D4",
+                "D5",
+                "D6",
+                "D12",
+                "D13",
+                "D14",
+                "D15",
+                "D16",
+                "D17",
+                "D18",
+                "D19",
+                "D20",
+                "D21",
+                "D22",
+                "D23",
+                "D24",
+                "D25",
+                "D26",
+                "D27",
+                "MCP2210 GP0",
+                "MCP2210 GP1",
+                "MCP2210 GP2",
+                "MCP2210 GP3",
+                "MCP2210 GP4",
+                "MCP2210 GP5",
+                "MCP2210 GP6",
+                "MCP2210 GP7",
+                "MCP2210 GP8"
+              ],
+              "list_values": [
+                "GPIO2",
+                "GPIO3",
+                "GPIO4",
+                "GPIO5",
+                "GPIO6",
+                "GPIO12",
+                "GPIO13",
+                "GPIO14",
+                "GPIO15",
+                "GPIO16",
+                "GPIO17",
+                "GPIO18",
+                "GPIO19",
+                "GPIO20",
+                "GPIO21",
+                "GPIO22",
+                "GPIO23",
+                "GPIO24",
+                "GPIO25",
+                "GPIO26",
+                "GPIO27",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8"
+              ],
+              "type": "list"
+            },
+            {
+              "default": "basic",
+              "description": "Use the board's native SPI (Basic) or an MCP2210 USB-to-SPI bridge. MCP2210 is required on hosts without native SPI (e.g. x86).",
+              "friendly_name": "SPI Bus Type",
+              "hidden": false,
+              "label": "spi_bus_kind",
+              "list_labels": ["Basic (native SPI)", "MCP2210 (USB-to-SPI bridge)"],
+              "list_values": ["basic", "mcp2210"],
+              "type": "list"
+            },
+            {
+              "default": "",
+              "description": "Optional. Leave blank to use the first/only MCP2210. Enter a USB serial string to select a specific bridge when more than one is attached. Ignored when SPI Bus Type is Basic.",
+              "friendly_name": "MCP2210 Serial",
+              "hidden": false,
+              "label": "mcp2210_serial",
+              "type": "string"
+            },
+            {
+              "default": 1000,
+              "description": "RTD Nominal Resistance Value in Ohms. Default 1000 Ohms.",
+              "friendly_name": "RTD Nominal",
+              "hidden": false,
+              "label": "rtd_nominal",
+              "max": 10000,
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 4300,
+              "description": "Reference Resistor Value in Ohms. Default 4300 Ohms. (Typical options: 4300, 430)",
+              "friendly_name": "Reference Resistor",
+              "hidden": false,
+              "label": "ref_resistor",
+              "max": 10000,
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": "2",
+              "description": "Number of RTD wires used for input.  Default 2",
+              "friendly_name": "RTD Wires",
+              "hidden": false,
+              "label": "wires",
+              "list_labels": ["2 Wires", "3 Wires", "4 Wires"],
+              "list_values": ["2", "3", "4"],
+              "type": "list"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["RTD0"],
+          "type": "rtd"
+        },
+        "filename": "max31865_adafruit",
+        "friendly_name": "MAX31865 RTD Adafruit",
+        "image": "max31865.png",
+        "py_dependencies": ["adafruit-circuitpython-max31865==2.2.24", "mcp2210", "hid>=1.0.4"],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "mcp9600_adafruit": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This I2C device reads K-Type thermocouples / probes. Moreover the MCP9600 can interface with just about any thermocouple type: K, J, T, N, S, E, B and R type are all supported.  This version uses the Adafruit CircuitPython modules.  Note that this device can be intolerant of higher i2c bus speeds, so you may need to reduce the i2c bus speed manually.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "0x67",
+              "description": "Select the I2C bus address to use for this device.  Default is 0x67.  If you have more than one MCP9600, you can assign unique device bus address for up to five devices.",
+              "friendly_name": "I2C Bus Address",
+              "hidden": false,
+              "label": "i2c_bus_addr",
+              "list_labels": ["0x67", "0x66", "0x65", "0x64", "0x63", "0x62", "0x61", "0x60"],
+              "list_values": ["0x67", "0x66", "0x65", "0x64", "0x63", "0x62", "0x61", "0x60"],
+              "type": "list"
+            },
+            {
+              "default": "K",
+              "description": "Thermocouple type. Type K is the most common for cooking.",
+              "friendly_name": "Thermocouple Type",
+              "hidden": false,
+              "label": "tc_type",
+              "list_labels": [
+                "Type B",
+                "Type E",
+                "Type J",
+                "Type K",
+                "Type N",
+                "Type R",
+                "Type S",
+                "Type T"
+              ],
+              "list_values": ["B", "E", "J", "K", "N", "R", "S", "T"],
+              "type": "list"
+            },
+            {
+              "default": "basic",
+              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
+              "friendly_name": "I2C Bus Type",
+              "hidden": false,
+              "label": "i2c_bus_kind",
+              "list_labels": [
+                "Basic (native I2C)",
+                "Extended (USB / other bus)",
+                "FT232H (USB)",
+                "MCP2221 (USB)"
+              ],
+              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
+              "type": "list"
+            },
+            {
+              "default": "CP2112",
+              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
+              "friendly_name": "Extended I2C Bus",
+              "hidden": false,
+              "label": "i2c_bus_num",
+              "type": "i2c_bus_num"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["KTT0"],
+          "type": "thermocouple"
+        },
+        "filename": "mcp9600_adafruit",
+        "friendly_name": "MCP9600 Thermocouple Amplifier Adafruit",
+        "image": "mcp9600.png",
+        "py_dependencies": [
+          "adafruit-circuitpython-mcp9600==2.0.6",
+          "adafruit-extended-bus==1.0.2"
+        ],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "prototype": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This is the test module for probe input.  It should only be used for testing & debug.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "0x48",
+              "description": "Select the I2C bus address to use for this device.  Default is 0x48.  If you have more than one ADS1115, you can assign unique device bus address for up to four devices.",
+              "friendly_name": "I2C Bus Address",
+              "hidden": false,
+              "label": "i2c_bus_addr",
+              "list_labels": ["0x48", "0x49", "0x4A", "0x4B"],
+              "list_values": ["0x48", "0x49", "0x4A", "0x4B"],
+              "type": "list"
+            },
+            {
+              "default": "basic",
+              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
+              "friendly_name": "I2C Bus Type",
+              "hidden": false,
+              "label": "i2c_bus_kind",
+              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)"],
+              "list_values": ["basic", "extended"],
+              "type": "list"
+            },
+            {
+              "default": "CP2112",
+              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected); a number selects /dev/i2c-N explicitly. Use the Discover button to scan for connected devices. Ignored when Basic.",
+              "friendly_name": "Extended I2C Bus",
+              "hidden": false,
+              "label": "i2c_bus_num",
+              "type": "i2c_bus_num"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC0 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC0_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC1 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC1_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC2 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC2_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 10000,
+              "description": "Select the resistor divider value for this probe port.  Default is 10000 Ohm for temperature probes.",
+              "friendly_name": "ADC3 Resistor Divider Value",
+              "hidden": false,
+              "label": "ADC3_rd",
+              "max": "",
+              "min": 1,
+              "step": 1,
+              "type": "int"
+            },
+            {
+              "default": 3.2,
+              "description": "Select the voltage reference measured at the top of the resistor dividers (from the power supply source).  Default is 3.28V",
+              "friendly_name": "Voltage Source Reference",
+              "hidden": false,
+              "label": "voltage_ref",
+              "max": 10,
+              "min": 1,
+              "step": 0.001,
+              "type": "float"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": false,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["ADC0", "ADC1", "ADC2", "ADC3"],
+          "type": "adc"
+        },
+        "filename": "prototype",
+        "friendly_name": "Prototype",
+        "image": "prototype.png",
+        "py_dependencies": [],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "thermoworks_cloud": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This device module reads temperatures from a ThermoWorks Cloud-connected wireless thermometer (Signals, Smoke, Smoke X4, Node, RFX, BlueDOT, etc.) using your ThermoWorks account. Click Test Connection after entering your email/password to discover your devices.",
+        "device_specific": {
+          "config": [
+            {
+              "default": "",
+              "description": "The email address for your ThermoWorks Cloud account.",
+              "friendly_name": "Email",
+              "hidden": false,
+              "label": "email",
+              "type": "string"
+            },
+            {
+              "default": "",
+              "description": "The password for your ThermoWorks Cloud account.",
+              "friendly_name": "Password",
+              "hidden": false,
+              "label": "password",
+              "type": "string"
+            },
+            {
+              "default": "",
+              "description": "The serial number of the ThermoWorks device this entry reads from. This should be discovered by clicking Test Connection.",
+              "friendly_name": "Device Serial",
+              "hidden": true,
+              "label": "device_serial",
+              "type": "string"
+            },
+            {
+              "default": 0,
+              "description": "The number of channels this ThermoWorks device has. This should be discovered by clicking Test Connection.",
+              "friendly_name": "Number of Probes",
+              "hidden": true,
+              "label": "num_probes",
+              "type": "int"
+            },
+            {
+              "default": 30,
+              "description": "How often to check ThermoWorks Cloud for updated temperatures.",
+              "friendly_name": "Poll Interval (seconds)",
+              "hidden": false,
+              "label": "poll_interval",
+              "max": 300,
+              "min": 10,
+              "step": 1,
+              "type": "int"
+            }
+          ],
+          "ports": ["TWC0", "TWC1", "TWC2", "TWC3", "TWC4", "TWC5", "TWC6", "TWC7"],
+          "type": "network"
+        },
+        "filename": "thermoworks_cloud",
+        "friendly_name": "ThermoWorks Cloud",
+        "image": "default.png",
+        "py_dependencies": ["thermoworks-cloud>=0.1.13"],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "virtual_average": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This is a virtual probe module that will average specific ports on real devices.",
+        "device_specific": {
+          "config": [
+            {
+              "description": "A list of probes from other devices, to average. Select which probes should be averaged together with ctrl+click.",
+              "friendly_name": "Average Probes",
+              "hidden": false,
+              "label": "probes_list",
+              "type": "probes_list"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["VIRT0"],
+          "type": "virtual"
+        },
+        "filename": "virtual_average",
+        "friendly_name": "Virtual Probes - Average",
+        "image": "virtual_probe.png",
+        "py_dependencies": [],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "virtual_highest": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This is a virtual probe module that will return the highest value from specific ports on real devices.",
+        "device_specific": {
+          "config": [
+            {
+              "description": "A list of probes from other devices, to determine the highest value. Select which probes should used with ctrl+click.",
+              "friendly_name": "Use Probes",
+              "hidden": false,
+              "label": "probes_list",
+              "type": "probes_list"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["VIRT0"],
+          "type": "virtual"
+        },
+        "filename": "virtual_highest",
+        "friendly_name": "Virtual Probes - Highest",
+        "image": "virtual_probe.png",
+        "py_dependencies": [],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "virtual_lowest": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This is a virtual probe module that will return the lowest value from specific ports on real devices.",
+        "device_specific": {
+          "config": [
+            {
+              "description": "A list of probes from other devices, to determine the lowest value. Select which probes should used with ctrl+click.",
+              "friendly_name": "Use Probes",
+              "hidden": false,
+              "label": "probes_list",
+              "type": "probes_list"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["VIRT0"],
+          "type": "virtual"
+        },
+        "filename": "virtual_lowest",
+        "friendly_name": "Virtual Probes - Lowest",
+        "image": "virtual_probe.png",
+        "py_dependencies": [],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      },
+      "virtual_median": {
+        "apt_dependencies": [],
+        "command_list": [],
+        "default": false,
+        "description": "This is a virtual probe module that will return the median value from specific ports on real devices.",
+        "device_specific": {
+          "config": [
+            {
+              "description": "A list of probes from other devices, to determine the median value. Select which probes should used with ctrl+click.",
+              "friendly_name": "Use Probes",
+              "hidden": false,
+              "label": "probes_list",
+              "type": "probes_list"
+            },
+            {
+              "default": "False",
+              "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
+              "friendly_name": "Transient",
+              "hidden": true,
+              "label": "transient",
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
+              "list_values": ["False", "True"],
+              "type": "list"
+            }
+          ],
+          "ports": ["VIRT0"],
+          "type": "virtual"
+        },
+        "filename": "virtual_median",
+        "friendly_name": "Virtual Probes - Median",
+        "image": "virtual_probe.png",
+        "py_dependencies": [],
+        "settings_dependencies": {
+          "units": {
+            "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
+            "friendly_name": "Temp Units",
+            "options": {
+              "C": "Celsius",
+              "F": "Fahrenheit"
+            },
+            "settings": ["globals", "units"]
+          }
+        }
+      }
+    },
+    "requires_install": {
+      "ads1015_adafruit": true,
+      "ads1115": true,
+      "ads1115_adafruit": true,
+      "bt_ibbq": true,
+      "bt_ibt6xs": true,
+      "bt_meater": true,
+      "bt_meater_exp": true,
+      "ds18b20": true,
+      "max31856_adafruit": true,
+      "max31865": false,
+      "max31865_adafruit": true,
+      "mcp9600_adafruit": true,
+      "prototype": false,
+      "thermoworks_cloud": true,
+      "virtual_average": false,
+      "virtual_highest": false,
+      "virtual_lowest": false,
+      "virtual_median": false
+    }
+  },
+  "message": null,
+  "result": "OK"
+}

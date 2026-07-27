@@ -90,10 +90,18 @@ the audit's real question.
 
 ## Still open
 
-- `/settings/probes` has **no baseline**: twelve settings tabs, eleven settings
-  baselines. ProbesTab shipped after the reference was captured, so the
-  walkthrough is the only check it has ever had. The plan's Step 3 says "all 11
-  tabs" and undercounts.
+- ~~`/settings/probes` has **no baseline**~~ — CLOSED 2026-07-27. Twelve
+  settings tabs now have twelve settings baselines. The plan's Step 3 says "all
+  11 tabs" and undercounted because ProbesTab shipped after the reference was
+  captured. The new spec is written out rather than added to `SETTINGS_TABS`
+  because it needs two things the generated specs cannot express: its own
+  fixture (its route loader is the only settings child with one, and `stubApi`
+  does not cover `/api/probe_modules`), and the probes vocabulary —
+  `probes.css` scopes `.pf-probes-card` and `.pf-btn` under
+  `.pf-probes-surface`, and while the wizard baselines cover the unscoped forms,
+  nothing had ever measured the scoped ones. Captured with `-g "settings-probes"`
+  so the other 47 files could not move, and they did not: the diff is two new
+  files, pure additions.
 - `history-*.json` and `cookfile-*.json` measure the developer's real cook files
   through the demo server's `/api` proxy — the baselines that would not
   reproduce on another machine.

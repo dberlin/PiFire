@@ -363,10 +363,11 @@ The fidelity reference was re-established after the sign-off — that order
 matters, since recapturing first would have baked in the four defects the
 walkthrough found. `bun run test:e2e:fidelity` is **105 passed, 0 failed**.
 
-Nothing is outstanding on this item. The one gap it leaves behind:
-`/settings/probes` still has no baseline (twelve settings tabs, eleven settings
-baselines) because ProbesTab shipped after the reference was first captured, so
-the walkthrough remains the only check that surface has ever had.
+Nothing is outstanding on this item. `/settings/probes` — the one surface the
+migration left ungated, because ProbesTab shipped after the reference was first
+captured — got its own spec and baselines on 2026-07-27, so all twelve settings
+tabs are now covered at both viewports. `test:e2e:fidelity` is **109 passed, 0
+failed**.
 
 Spec: `docs/superpowers/specs/2026-07-25-tailwind-v4-migration-design.md`.
 Ratified: token bridge (`@theme` + `@apply`, `pf-*` names and JSX survive), gate
