@@ -1,3 +1,4 @@
+import { stubCookFiles } from "./apiFixtures";
 import type { PageSpec, StyleProbe } from "./layoutBaseline";
 
 // The two viewports the fidelity gate is defined at. 1280x720 is the desktop
@@ -128,6 +129,88 @@ export const PAGE_SPECS: PageSpec[] = [
       ".pf-section-body",
       ".pf-settings-actions",
       ".pf-history-chart",
+    ],
+  },
+  // The two cook-file surfaces, and the ONLY cover components/cookfiles/
+  // cookfiles.css has. That file landed after the Tailwind plan was written and
+  // belongs to no task in it, so nothing else would notice a wrong @apply or a
+  // preflight reset landing on it.
+  //
+  // Why the LIST is a separate spec rather than extra landmarks on `history`,
+  // even though both measure /history: the landmark set is the KEY set of the
+  // baseline file, so adding to `history` would force a recapture of
+  // history-1280x720.json and history-390x844.json -- two of the 43 immutable
+  // pre-Tailwind references the whole migration is measured against. A new spec
+  // writes new files and leaves those two byte-identical.
+  //
+  // It also has to bring its own fixture (PageSpec.stubs) for exactly the same
+  // reason: stubbing the listing inside stubApi() would change how many rows
+  // /history's second section renders, and move `.pf-section#1` in those two
+  // files. See apiFixtures.ts's stubCookFiles.
+  {
+    name: "cookfile-list",
+    path: "/history",
+    ready: ".pf-cf-table",
+    root: ".pf-shell",
+    stubs: stubCookFiles,
+    landmarks: [
+      ...SHELL,
+      ".pf-cf-toolbar",
+      ".pf-cf-toolbar-spacer",
+      ".pf-cf-table",
+      // The cell rule is measured directly, not inferred from the table box.
+      // `.pf-cf-table th, .pf-cf-table td` sets padding, text-align and a
+      // bottom border; a wrong text-align moves nothing the table can see, and
+      // `border-bottom-*` is not in STYLE_PROPS at all.
+      ".pf-cf-table th",
+      ".pf-cf-table td",
+      ".pf-cf-thumb-col",
+      ".pf-cf-thumb",
+      ".pf-cf-name",
+      ".pf-cf-actions-col",
+      ".pf-cf-row-actions",
+      ".pf-cf-pager",
+      ".pf-cf-pager-current",
+    ],
+  },
+  {
+    name: "cookfile-detail",
+    path: "/cookfiles/2026-07-04-Brisket.pifire",
+    // NOT `.pf-cf-meta`, which paints as soon as the detail payload lands.
+    // CookFileChart fetches separately and swaps a one-line "Loading graph..."
+    // hint for a 360px plot, so measuring before it arrives would record every
+    // section below the chart at the wrong y. `.pf-history-chart` only exists
+    // inside `{detail && ...}` AND after the chart request resolved, so it
+    // proves both.
+    ready: ".pf-history-chart",
+    root: ".pf-shell",
+    stubs: stubCookFiles,
+    landmarks: [
+      ...SHELL,
+      ".pf-cf-meta",
+      ".pf-cf-meta-thumb",
+      ".pf-cf-meta-fields",
+      ".pf-cf-dl",
+      // `.pf-cf-dl dt` and `.pf-cf-dl dd` are their own rules (a dimmed colour
+      // and a margin reset) that the grid container cannot report.
+      ".pf-cf-dl dt",
+      ".pf-cf-dl dd",
+      ".pf-cf-table",
+      ".pf-cf-row-actions",
+      ".pf-cf-comment",
+      ".pf-cf-comment-meta",
+      ".pf-cf-comment-text",
+      ".pf-cf-comment-assets",
+      ".pf-cf-comment-thumb",
+      ".pf-cf-media-grid",
+      ".pf-cf-media-item",
+      ".pf-cf-media-img",
+      // A state class, and reachable only because the fixture's
+      // metadata.thumbnail names one of its own assets -- MediaPanel adds the
+      // modifier to whichever grid image is the current thumbnail. Without that
+      // it would have needed a CHROME_PROBES entry, which would have moved an
+      // immutable baseline.
+      ".pf-cf-media-img--selected",
     ],
   },
   ...SETTINGS_TABS.map(

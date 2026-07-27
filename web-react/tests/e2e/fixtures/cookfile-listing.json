@@ -1,0 +1,34 @@
+{
+  "items": [
+    {
+      "filename": "2026-07-04-Brisket.pifire",
+      "title": "Independence Brisket",
+      "thumbnail": "brisket0704/thumb.png"
+    },
+    {
+      "filename": "2026-07-11-Ribs.pifire",
+      "title": "Baby Back Ribs",
+      "thumbnail": "ribs0711/thumb.png"
+    },
+    {
+      "filename": "2026-07-14-Chicken.pifire",
+      "title": "Spatchcock Chicken",
+      "thumbnail": "chicken0714/thumb.png"
+    },
+    {
+      "filename": "2026-07-18-Pork.pifire",
+      "title": "Pulled Pork Shoulder",
+      "thumbnail": "pork0718/thumb.png"
+    },
+    {
+      "filename": "2026-07-21-Salmon.pifire",
+      "title": "Cedar Plank Salmon",
+      "thumbnail": "salmon0721/thumb.png"
+    }
+  ],
+  "page": 1,
+  "last_page": 3,
+  "per_page": 5,
+  "reverse": true,
+  "total": 13
+}

@@ -73,6 +73,10 @@ for (const viewport of [DESKTOP, PHONE]) {
         await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
         await page.clock.pauseAt(new Date("2026-07-25T12:00:00Z"));
         await stubApi(page);
+        // Per-spec fixtures on top of the shared set. Registered AFTER stubApi
+        // so a spec can override a shared route: Playwright runs handlers in
+        // reverse registration order.
+        await spec.stubs?.(page);
         await page.goto(spec.path);
         // The measurement root, NOT `ready`, is what proves the page arrived:
         // a wizard spec's `ready` names the DESTINATION step's own heading, and
@@ -127,6 +131,7 @@ for (const viewport of [DESKTOP, PHONE]) {
         await page.clock.install({ time: new Date("2026-07-25T12:00:00Z") });
         await page.clock.pauseAt(new Date("2026-07-25T12:00:00Z"));
         await stubApi(page);
+        await spec.stubs?.(page);
         await page.goto(spec.path);
         await expect(page.locator(spec.root).first()).toBeVisible({ timeout: 15000 });
         for (const click of spec.clicks ?? []) {

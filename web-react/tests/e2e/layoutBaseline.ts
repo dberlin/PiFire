@@ -247,6 +247,11 @@ export interface PageSpec {
   /** Playwright selectors clicked in order, after `ready`, before measuring.
    *  How the wizard reaches step N. */
   clicks?: string[];
+  /** Fixture routes only THIS spec needs, installed on top of stubApi()'s
+   *  shared set. The cook-file specs use it: /history is measured by two specs
+   *  and the older one's baseline is immutable, so their listing fixture must
+   *  not reach it. */
+  stubs?: (page: Page) => Promise<void>;
   /** Dimensions that must not move at all, keyed by baseline entry name. */
   exact?: ExactTable;
 }

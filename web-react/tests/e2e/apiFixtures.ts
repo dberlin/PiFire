@@ -39,3 +39,45 @@ export async function stubApi(page: Page): Promise<void> {
   await page.route("**/api/settings_update", (r) => json(r, '{"ok":true}'));
   await page.route("**/api/wizard/module-values", (r) => json(r, '{"values":{}}'));
 }
+
+/** An 8x8 opaque PNG, inline so no fixture file has to be a binary blob.
+ *
+ * Every cook-file <img> is boxed to a fixed square by cookfiles.css
+ * (.pf-cf-thumb 48, .pf-cf-comment-thumb 64, .pf-cf-media-img 96,
+ * .pf-cf-meta-thumb 128) with object-fit: cover, so the intrinsic size cannot
+ * move the layout -- but a BROKEN image can, and every one of these URLs 404s
+ * on the demo server. /static/img IS proxied to Flask (rsbuild.config.ts), so
+ * without this route the boxes would be filled by whatever happens to be in
+ * the developer's own history folder. */
+const PNG_8x8 = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNISCv4jw8zjAwFAJ1gjUG5Vml9AAAAAElFTkSuQmCC",
+  "base64",
+);
+
+/**
+ * The cook-file surfaces' fixtures, deliberately NOT part of stubApi().
+ *
+ * /history is measured by TWO specs. The `history` one predates the cook-file
+ * list and its baseline is one of the 43 immutable pre-Tailwind references;
+ * stubbing the listing inside stubApi() would change how many rows the second
+ * section renders and move `.pf-section#1` in a file that must not move. So
+ * these routes are installed per-spec, through PageSpec.stubs.
+ *
+ * Route patterns, and why they do not collide: Playwright anchors a glob at
+ * both ends and `*` stops at "/", so the listing pattern -- which ends in a
+ * single star straight after "cookfiles" -- matches the listing and its query
+ * string only. `/api/files/cookfiles/detail?...` has a slash where that
+ * pattern wants none, so it cannot be swallowed by the listing route.
+ */
+export async function stubCookFiles(page: Page): Promise<void> {
+  await page.route("**/api/files/cookfiles/detail*", (r) => json(r, body("cookfile-detail.json")));
+  // The cook chart payload is structurally a subset of the history one
+  // (cookfileApi.ts: no graph_labels, no minutes), and history-chart.json
+  // already carries numeric epoch time_labels -- which is what cookfileAdapter
+  // requires to plot anything at all -- so it is reused rather than forked.
+  await page.route("**/api/files/cookfiles/chart*", (r) => json(r, body("history-chart.json")));
+  await page.route("**/api/files/cookfiles*", (r) => json(r, body("cookfile-listing.json")));
+  await page.route("**/static/img/tmp/**", (r) =>
+    r.fulfill({ status: 200, contentType: "image/png", body: PNG_8x8 }),
+  );
+}

@@ -1,0 +1,85 @@
+{
+  "filename": "2026-07-04-Brisket.pifire",
+  "metadata": {
+    "title": "Independence Brisket",
+    "units": "F",
+    "thumbnail": "photo-1.jpg",
+    "id": "brisket0704",
+    "version": "1.5.0",
+    "starttime": "06:30:00",
+    "endtime": "17:45:00",
+    "starttime_epoch": 1783312200000,
+    "endtime_epoch": 1783352700000
+  },
+  "graph_labels": {
+    "probes": {
+      "Grill": "Grill",
+      "Probe1": "Brisket Flat",
+      "Probe2": "Brisket Point"
+    },
+    "targets": {
+      "Probe1": "Brisket Flat Target",
+      "Probe2": "Brisket Point Target"
+    },
+    "primarysp": {
+      "Grill": "Grill Setpoint"
+    }
+  },
+  "events": [
+    {
+      "id": 0,
+      "mode": "Smoke",
+      "starttime_c": "06:30:00",
+      "endtime_c": "11:15:00",
+      "augerontime_c": "00:42:10",
+      "estusage_m": "1.9 kg",
+      "estusage_i": "4.2 lbs",
+      "pellet_level_start": 100,
+      "pellet_level_end": 71,
+      "timeinmode": "04:45:00"
+    },
+    {
+      "id": 1,
+      "mode": "Hold",
+      "starttime_c": "11:15:00",
+      "endtime_c": "17:45:00",
+      "augerontime_c": "01:03:25",
+      "estusage_m": "2.8 kg",
+      "estusage_i": "6.1 lbs",
+      "pellet_level_start": 71,
+      "pellet_level_end": 34,
+      "timeinmode": "06:30:00"
+    }
+  ],
+  "event_totals": {
+    "augerontime": "01:45:35",
+    "estusage_m": "4.7 kg",
+    "estusage_i": "10.3 lbs",
+    "cooktime": "11:15:00",
+    "pellet_level_start": 100,
+    "pellet_level_end": 34
+  },
+  "comments": [
+    {
+      "id": "comment-1",
+      "text": "Wrapped in butcher paper at 165F.\nBark was already where I wanted it.",
+      "date": "2026-07-04",
+      "time": "11:20:00",
+      "edited": "",
+      "assets": ["photo-1.jpg", "photo-2.jpg"]
+    },
+    {
+      "id": "comment-2",
+      "text": "Rested two hours in the cooler before slicing.",
+      "date": "2026-07-04",
+      "time": "17:52:00",
+      "edited": "2026-07-05 09:12:00",
+      "assets": []
+    }
+  ],
+  "assets": [
+    { "id": "asset-1", "filename": "photo-1.jpg", "type": "image/jpeg" },
+    { "id": "asset-2", "filename": "photo-2.jpg", "type": "image/jpeg" },
+    { "id": "asset-3", "filename": "photo-3.jpg", "type": "image/jpeg" }
+  ]
+}
