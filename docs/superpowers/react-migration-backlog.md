@@ -346,7 +346,22 @@ its own (triage Slice 9 item 1, `33135e4aed48`,
 `tests/unit/common/test_system_command_output_queue.py`). The "can be written on
 a healthy system" clause of this entry was already stale when it was written.
 
-### 5. Tailwind v4 migration — TASKS 1-14 DONE 2026-07-27, Task 15 + 2 stylesheets open
+### 5. Tailwind v4 migration — DONE 2026-07-27, one recapture outstanding
+
+**Closed out 2026-07-27.** All 20 tasks are shipped and the human checkpoint has
+signed off. Accepted visual differences, the four defects the walkthrough found
+that every gate had passed, and two deviations from the plan's own baseline
+rules are recorded in
+`docs/superpowers/audits/2026-07-27-tailwind-migration-diffs.md`.
+
+The spec's status line was **not** updated, though Task 15 Step 5 asks for it:
+`docs/superpowers/specs/` is treated as an immutable historical record in this
+repo, and that standing rule wins over a step in a plan. This entry is the
+status.
+
+**Outstanding:** `bun run baseline:capture`. The reference still describes the
+pre-preflight tree, so `test:e2e:fidelity` is 47 failed / 58 passed by design.
+Recapturing was gated on the sign-off, which it now has.
 
 Spec: `docs/superpowers/specs/2026-07-25-tailwind-v4-migration-design.md`.
 Ratified: token bridge (`@theme` + `@apply`, `pf-*` names and JSX survive), gate
@@ -717,7 +732,26 @@ which said it was owed).
   silently falls back to a different typeface. This is also why the visual
   fidelity gate cannot be screenshot-based.
 - No `/manual` route — a bookmarked Flask `/manual` URL will not resolve.
-- `globals.page_theme` is settable but inert.
+- ~~`globals.page_theme` is settable but inert.~~ — RENAMED 2026-07-27 to
+  `globals.bootstrap_page_theme` and dropped from the React settings form. It
+  only ever fed Bootstrap's light/dark theme on the legacy Flask pages, via
+  `app.py`'s `inject_theme_and_grill_name` context processor, which still reads
+  it under the new name. The React app has no light palette and never consumed
+  it. **Delete the key outright when the last Flask page is retired** (item 8):
+  remove it from `common/defaults.py` and `common/settings_schema.py`, drop the
+  context processor's entry, and drop `page_theme` from the five templates that
+  reference the injected variable.
+  - No migration was written for the rename. An existing install keeps its old
+    `page_theme` key, which the strict-schema repair wrapper strips on the next
+    validated write, and the new key takes its `"light"` default — so a user who
+    had chosen the dark Flask theme silently gets light back. Accepted because
+    the key is cosmetic, applies only to pages being retired, and is scheduled
+    for deletion; call it out if the Flask UI outlives this.
+- The dashboard's accent swatches and General's Theme field now write the same
+  key (`display.config.<module>.accent_theme`), which the Qt display reads once
+  a second — so changing the accent in a browser repaints the attached screen.
+  Intended, per the 2026-07-27 ruling, but it is the first setting the dashboard
+  writes without a Save, so a stray click is immediately live on the appliance.
 
 #### Backend behaviour that is broken or lying
 
