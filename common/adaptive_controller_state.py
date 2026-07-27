@@ -1,4 +1,14 @@
-"""Durable storage for trusted adaptive controller model snapshots."""
+"""Crash-safe persistence for trusted adaptive-controller model snapshots.
+
+Only the small, validated physical model crosses a process restart.  Live RLS
+covariance, command history, predictor branches, and confirmation windows remain
+runtime state and are rebuilt after restore.
+
+Callers stage newer revisions after PID updates.  Routine flushes are throttled
+to protect storage; shutdown forces a final attempt.  A write becomes committed
+only after a same-directory temporary file is flushed, fsynced, and atomically
+replaced over the prior state file.
+"""
 
 import logging
 import json
@@ -35,7 +45,13 @@ _NUMERIC_MODEL_KEYS = (
 
 
 class AdaptiveControllerStateStore:
-    """Atomically persist only validated, physical controller model snapshots."""
+    """Validate, stage, and atomically persist trusted physical models.
+
+    ``_models`` is the last durable generation and ``_pending`` is newer
+    in-memory work.  Pending entries are cleared only after a successful atomic
+    replacement, so a transient write failure can be retried without losing the
+    latest learned model.
+    """
 
     def __init__(
         self,
@@ -50,6 +66,8 @@ class AdaptiveControllerStateStore:
         self.path = Path(path)
         self._clock = clock
         self._min_write_interval = interval
+        # Treat a missing or invalid file as an empty store.  A corrupt snapshot
+        # must never partially restore model parameters into a controller.
         loaded_models = self._read_models()
         self._models = {} if loaded_models is None else loaded_models
         self._pending = {}
@@ -58,6 +76,8 @@ class AdaptiveControllerStateStore:
         )
 
     def load(self, name):
+        # Return a copy so controller restore code cannot mutate durable state
+        # before a newer, explicitly validated revision is staged.
         """Return a copy of a persisted trusted snapshot, if it is valid."""
         snapshot = self._models.get(name)
         return None if snapshot is None else dict(snapshot)
@@ -67,10 +87,14 @@ class AdaptiveControllerStateStore:
         if not isinstance(name, str) or not name:
             return False
 
+        # Validate the complete snapshot at the storage boundary.  Persistence
+        # accepts no extra keys, booleans-as-numbers, NaN, or unphysical values.
         validated = self._validate_model(snapshot)
         if validated is None:
             return False
 
+        # Revisions are monotonic per controller name.  Compare against pending
+        # first so repeated staging cannot replace newer unsaved work.
         current = self._pending.get(name, self._models.get(name))
         if current is not None and validated["revision"] <= current["revision"]:
             return False
@@ -80,8 +104,12 @@ class AdaptiveControllerStateStore:
 
     def flush(self, force=False):
         """Atomically write pending models when the routine-write interval permits."""
+        # No pending generation means there is nothing to commit.  ``False`` is
+        # intentionally also used for a throttled/no-op flush.
         if not self._pending:
             return False
+        # Routine writes are rate limited, but ``force=True`` bypasses only the
+        # timer—not validation or atomic-write safety.
         if (
             not force
             and self._last_successful_write is not None
@@ -90,12 +118,15 @@ class AdaptiveControllerStateStore:
         ):
             return False
 
+        # Build the next complete generation without mutating the durable view.
+        # If writing fails, both _models and _pending remain retryable.
         models = dict(self._models)
         models.update(self._pending)
         root = {"version": _ROOT_VERSION, "models": models}
         if not self._write(root):
             return False
 
+        # Publish the in-memory generation only after os.replace succeeded.
         self._models = models
         self._pending.clear()
         self._last_successful_write = self._now()
@@ -105,6 +136,8 @@ class AdaptiveControllerStateStore:
         return float(self._clock())
 
     def _read_models(self):
+        # Loading is fail-closed: any I/O, JSON, root-schema, or member error
+        # rejects the entire file rather than mixing trusted and suspect models.
         try:
             with self.path.open("r", encoding="utf-8") as state_file:
                 root = json.load(state_file)
@@ -129,6 +162,8 @@ class AdaptiveControllerStateStore:
         return models
 
     def _validate_model(self, snapshot):
+        # Exact versioned schemas make forward/backward incompatibility explicit
+        # and keep persistence limited to immutable physical model parameters.
         if type(snapshot) is not dict or set(snapshot) != _MODEL_KEYS:
             return None
         if type(snapshot["version"]) is not int or snapshot["version"] != _MODEL_VERSION:
@@ -159,6 +194,8 @@ class AdaptiveControllerStateStore:
     def _write(self, root):
         temporary_path = None
         try:
+            # The temporary file shares the destination directory, allowing
+            # os.replace to provide an atomic same-filesystem cutover.
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 mode="w",
@@ -168,9 +205,13 @@ class AdaptiveControllerStateStore:
                 encoding="utf-8",
             ) as state_file:
                 temporary_path = Path(state_file.name)
+                # Flush Python buffers and then the OS file descriptor before
+                # replacement so a successful return represents durable bytes.
                 json.dump(root, state_file, sort_keys=True, indent=2)
                 state_file.flush()
                 os.fsync(state_file.fileno())
+            # Atomic replacement preserves the previous complete generation if
+            # the process fails before this point.
             os.replace(temporary_path, self.path)
             temporary_path = None
             return True
@@ -180,6 +221,8 @@ class AdaptiveControllerStateStore:
             )
             return False
         finally:
+            # A failed write may leave a named temporary file; remove it without
+            # masking the original persistence error.  Pending state is retained.
             if temporary_path is not None:
                 try:
                     temporary_path.unlink()

@@ -1,4 +1,18 @@
-"""Exact first-order-plus-dead-time Smith predictor primitives."""
+"""Adaptive FOPDT identification and Smith prediction for PID-SP.
+
+The production lifecycle is:
+
+1. ``record_output`` stores the duty that the grill actually applied.
+2. ``AdaptiveFOPDTIdentifier.observe`` updates a bank of fixed-dead-time
+   recursive least-squares estimators from eligible temperature intervals.
+3. A model is published only after excitation, residual separation, physical
+   bounds, uncertainty, and repeated-stability checks all pass.
+4. ``SmithPredictor.update`` advances delayed and delay-free copies of that
+   model and adds their difference to the measured temperature.
+
+Every unsafe or incomplete path falls back to the measured temperature.  The
+adaptive model may improve control, but it is never required for safe control.
+"""
 
 import math
 from collections import deque
@@ -6,6 +20,8 @@ from dataclasses import dataclass
 from typing import Callable, Deque, List, Optional, Sequence, Tuple
 
 
+# Physical bounds reject mathematically valid fits that cannot represent a
+# grill.  They also bound every state used to correct a probe measurement.
 MIN_GAIN_F = 50.0
 MAX_GAIN_F = 2000.0
 MIN_TAU_SECONDS = 300.0
@@ -13,6 +29,8 @@ MAX_TAU_SECONDS = 20000.0
 MIN_PREDICTED_F = -100.0
 MAX_PREDICTED_F = 1200.0
 
+# Dead time is selected from a fixed bank.  Production evaluates all 25
+# candidates (0, 5, ..., 120 seconds); it does not narrow around a prior winner.
 MAX_DELAY_SECONDS = 120.0
 DELAY_CANDIDATE_STEP_SECONDS = 5.0
 DELAY_CANDIDATE_GRID = tuple(
@@ -21,6 +39,9 @@ DELAY_CANDIDATE_GRID = tuple(
         0, int(MAX_DELAY_SECONDS) + 1, int(DELAY_CANDIDATE_STEP_SECONDS)
     )
 )
+# Publication gates deliberately require much more evidence than one good fit.
+# The identifier learns continuously, but promotes only separated and stable
+# estimates after the grill has supplied enough input and temperature movement.
 RLS_FORGETTING_FACTOR = 0.9995
 MIN_ACCEPTED_SECONDS = 3600.0
 MIN_ACCEPTED_OBSERVATIONS = 240
@@ -74,7 +95,12 @@ class _DutyCommand:
 
 
 class DutyHistory:
-    """Piecewise-constant duty commands with their identification eligibility."""
+    """Timeline of the duty physically applied to the auger.
+
+    Commands are piecewise constant.  The same timeline supplies delayed model
+    inputs and marks intervals that identification must ignore, such as lid-open
+    handling, manual auger control, or fan-PID modulation.
+    """
 
     def __init__(self, max_age_seconds=300.0):
         if not self._is_finite(max_age_seconds) or max_age_seconds < 0.0:
@@ -124,6 +150,8 @@ class DutyHistory:
         if not self._is_finite(delay_seconds):
             raise ValueError("delay_seconds must be finite")
 
+        # Shift the entire observation interval backward by a candidate's dead
+        # time, then integrate every duty command crossing that shifted window.
         shifted_start = float(start) - float(delay_seconds)
         shifted_end = float(end) - float(delay_seconds)
         if shifted_end == shifted_start:
@@ -166,6 +194,8 @@ class DutyHistory:
         return True
 
     def prune(self, now):
+        # Keep the command immediately before the cutoff: its value remains in
+        # force until the first retained command and is needed for integration.
         self._validate_time(now)
         cutoff = float(now) - self.max_age_seconds
         first_at_or_after_cutoff = 0
@@ -228,7 +258,13 @@ def _advance_state(state, duty, duration, model):
 
 
 class SmithPredictor:
-    """Applies a validated FOPDT correction to native-unit temperature samples."""
+    """Correct measured temperature with a trusted FOPDT model.
+
+    Two model branches see the same applied-duty history.  The delayed branch
+    represents the grill response; the undelayed branch represents the response
+    without transport delay.  Their difference is the Smith correction.  Probe
+    measurement remains the baseline so model drift cannot replace reality.
+    """
 
     def __init__(self, units: str, clock: Callable[[], float]) -> None:
         if units not in ("F", "C"):
@@ -272,6 +308,8 @@ class SmithPredictor:
         now = float(self._clock())
         self._history._validate_time(now)
         self._history.prune(now)
+        # Start both branches at the equilibrium implied by the currently
+        # applied duty.  Equal states mean promotion itself adds no correction.
         state = model.gain_f_per_duty * self._history.value_at(now)
 
         self._model = model
@@ -293,6 +331,8 @@ class SmithPredictor:
     def update(
         self, measured_temperature: float, timestamp: Optional[float] = None
     ) -> float:
+        # Phase 1: validate external data and predictor state.  Any uncertainty
+        # disables prediction and returns the probe measurement unchanged.
         if not DutyHistory._is_finite(measured_temperature):
             self._deactivate(timestamp)
             return measured_temperature
@@ -320,6 +360,8 @@ class SmithPredictor:
             self._deactivate(now)
             return measured_temperature
 
+        # Phase 2: replay applied-duty changes through both model branches.  The
+        # only difference is whether command changes are shifted by theta.
         previous_time = self._last_time
         previous_delayed_state = self._delayed_state
         try:
@@ -340,6 +382,9 @@ class SmithPredictor:
             self._deactivate(now)
             return measured_temperature
 
+        # Phase 3: compare measured movement with the delayed model's movement.
+        # Four consecutive extreme mismatches indicate a stale or unsafe model;
+        # isolated disturbances do not permanently disable prediction.
         if self._last_measured_f is not None and now > previous_time:
             if self._history.interval_allowed(
                 previous_time - self._model.theta_seconds,
@@ -364,6 +409,8 @@ class SmithPredictor:
                 self._consecutive_implausible_residuals = 0
         self._last_measured_f = measured_f
 
+        # Phase 4: remove only the modeled transport delay.  The correction is
+        # added to the fresh measurement rather than using a free-running model.
         correction_f = undelayed_state - delayed_state
         predicted_f = measured_f + correction_f
         if not self._is_safe_prediction(correction_f, predicted_f):
@@ -385,6 +432,8 @@ class SmithPredictor:
         }
 
     def _advance_branch(self, state, start, end, delay_seconds):
+        # Split the interval at each effective command change so a long PID
+        # cycle is integrated exactly even when duty changed inside the window.
         duty = self._history.value_at(start - delay_seconds)
         cursor = start
         for command in self._history._commands:
@@ -413,6 +462,8 @@ class SmithPredictor:
         )
 
     def _deactivate(self, timestamp=None):
+        # Deactivation is fail-safe, not destructive: retain the trusted model
+        # and seed equal branches so a later valid sample can reactivate it.
         previous_time = self._last_time
         self._prediction_active = False
         self._last_time = None
@@ -511,7 +562,13 @@ def _matrix_vector(matrix, vector):
 
 
 class AdaptiveFOPDTIdentifier:
-    """Identifies a bounded FOPDT model from permitted applied-duty samples."""
+    """Learn a bounded FOPDT model from eligible applied-duty history.
+
+    Each accepted observation updates every configured dead-time candidate.
+    Candidates independently estimate gain and time constant; residual error
+    chooses the delay.  Selection is provisional until excitation, runner-up
+    separation, uncertainty, and 20 consecutive stability checks all pass.
+    """
 
     def __init__(
         self,
@@ -526,6 +583,8 @@ class AdaptiveFOPDTIdentifier:
 
         self.units = units
         self._clock = clock
+        # Each delay owns independent RLS coefficients, covariance, residual,
+        # and update count.  A numerical failure resets only that candidate.
         self._delay_candidates = self._validate_delay_candidates(delay_candidates)
         self._history = DutyHistory(
             max_age_seconds=2.0 * MAX_DELAY_SECONDS + MIN_TRANSITION_SECONDS
@@ -568,6 +627,9 @@ class AdaptiveFOPDTIdentifier:
         if self._last_output_time is not None and now < self._last_output_time:
             raise ValueError("output timestamp precedes identifier output history")
 
+        # A material, permitted duty transition starts the excitation clock.
+        # Ineligible commands remain in history for prediction but cannot teach
+        # the identifier a response caused by an override or safety mechanism.
         self._mark_sustained_transition(now)
         self._history.record(now, float(duty), identification_allowed)
         self._last_output_time = now
@@ -589,6 +651,8 @@ class AdaptiveFOPDTIdentifier:
         temperature_f = self._to_fahrenheit(float(temperature))
         if not DutyHistory._is_finite(temperature_f):
             return None
+        # Phase 1: establish or repair the temperature baseline.  Non-monotonic
+        # timestamps break confirmation continuity because order is meaningful.
         if self._last_time is None:
             self._set_baseline(now, temperature_f)
             self._history.prune(now)
@@ -599,6 +663,8 @@ class AdaptiveFOPDTIdentifier:
             self._history.prune(now)
             return None
 
+        # Phase 2: accept only intervals whose complete applied-duty history is
+        # eligible.  Rejected intervals still advance the observation baseline.
         previous_time = self._last_time
         previous_temperature_f = self._last_temperature_f
         self._mark_sustained_transition(now)
@@ -618,6 +684,9 @@ class AdaptiveFOPDTIdentifier:
         return published_model
 
     def restore_trusted_model(self, model: FOPDTModel) -> None:
+        # Persisted state is trusted physical knowledge, not live estimator
+        # state.  Restore the model, then restart evidence collection and RLS
+        # candidates so stale covariance/history cannot cross process restarts.
         model.validate()
         self._trusted_model = model
         self._candidates = self._fresh_candidates()
@@ -732,6 +801,8 @@ class AdaptiveFOPDTIdentifier:
         if not DutyHistory._is_finite(applied_duty):
             return None
 
+        # Track excitation globally before evaluating a fit.  These statistics
+        # prevent a quiet, nearly constant cook from appearing identifiable.
         self._accepted_seconds += duration
         self._accepted_observations += 1
         self._update_duty_statistics(applied_duty)
@@ -747,6 +818,8 @@ class AdaptiveFOPDTIdentifier:
             if self._temperature_max_f is None
             else max(self._temperature_max_f, interval_max_f)
         )
+        # Every accepted sample updates the full fixed-delay bank.  Delay is
+        # recovered by comparing the candidates, not estimated as an RLS term.
         for index in range(len(self._candidates)):
             self._update_candidate(
                 index,
@@ -773,6 +846,8 @@ class AdaptiveFOPDTIdentifier:
     ) -> None:
         candidate = self._candidates[index]
         try:
+            # A candidate sees the applied duty shifted by its assumed delay.
+            # If any part of that interval was ineligible, skip this update.
             if not self._history.interval_allowed(
                 previous_time - candidate.delay_seconds,
                 now - candidate.delay_seconds,
@@ -798,6 +873,8 @@ class AdaptiveFOPDTIdentifier:
             ):
                 raise ValueError("candidate update is non-finite")
 
+            # Regress temperature rate against offset, temperature, and delayed
+            # applied duty.  Scaling temperature keeps the covariance well sized.
             z = (
                 previous_temperature_f - self._temperature_reference_f
             ) / 500.0
@@ -806,6 +883,8 @@ class AdaptiveFOPDTIdentifier:
             if not all(DutyHistory._is_finite(value) for value in phi + [y]):
                 raise ValueError("candidate regression values are non-finite")
 
+            # Standard recursive least squares: compute P*phi, innovation gain,
+            # prediction error, then update coefficients and covariance.
             p_phi = _matrix_vector(candidate.covariance, phi)
             denominator = RLS_FORGETTING_FACTOR + _dot(phi, p_phi)
             if (
@@ -843,6 +922,8 @@ class AdaptiveFOPDTIdentifier:
                 ]
                 for row in range(3)
             ]
+            # Residual EWMA makes recent prediction quality comparable across
+            # candidates without retaining every historical observation.
             squared_error = error * error
             residual_ewma = (
                 squared_error
@@ -976,6 +1057,9 @@ class AdaptiveFOPDTIdentifier:
         winner = None
         runner_up_residual = None
         eligible_candidates = 0
+        # Only physically bounded, sufficiently sampled, low-uncertainty fits
+        # compete.  Keep both best residuals so delay must win decisively rather
+        # than by numerical noise between adjacent five-second candidates.
         for candidate in self._candidates:
             estimate = self._candidate_estimate(candidate)
             if estimate is None:
@@ -995,6 +1079,8 @@ class AdaptiveFOPDTIdentifier:
         return winner, delay_margin, eligible_candidates
 
     def _consider_estimate(self) -> Optional[FOPDTModel]:
+        # Phase 1: require a viable winner, at least 10% residual separation,
+        # and enough independent excitation to identify the plant.
         estimate, delay_margin, _ = self._select_candidate()
         if (
             estimate is None
@@ -1004,9 +1090,14 @@ class AdaptiveFOPDTIdentifier:
             self._confirmations.clear()
             return None
 
+        # Phase 2: avoid republishing insignificant movement around an existing
+        # trusted model; such churn would reset predictor state needlessly.
         if self._trusted_model is not None and not self._is_material(estimate):
             self._confirmations.clear()
             return None
+        # Phase 3: confirmation is consecutive.  A changing winning delay clears
+        # the window because gain/tau stability under different delays is not
+        # evidence that any single model is trustworthy.
         if self._confirmations and self._confirmations[0][2] != estimate[2]:
             self._confirmations.clear()
         self._confirmations.append(
@@ -1023,6 +1114,8 @@ class AdaptiveFOPDTIdentifier:
         if not self._confirmation_is_stable():
             return None
 
+        # Phase 4: publish after 20 stable winners.  Smooth gain and tau when
+        # revising a model, but take the discrete winning delay directly.
         confirmation_count = len(self._confirmations)
         confidence = max(
             0.0,

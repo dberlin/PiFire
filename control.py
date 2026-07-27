@@ -339,6 +339,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 	settings = read_settings()
 	control = read_control()
 	pelletdb = read_pellet_db()
+	# One store spans the mode loop. It holds the last durable models plus newer
+	# staged revisions, allowing routine writes to be throttled without losing
+	# the latest trusted model in memory.
 	adaptive_store = AdaptiveControllerStateStore()
 	controllerCore = None
 	adaptive_model_pending = False
@@ -458,6 +461,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 		if controller_status == 'Inactive':
 			status = 'Inactive'
 		else:
+			# Restore physical knowledge before the first PID update, then seed
+			# both adaptive timelines with the minimum duty already being applied.
+			# Restore intentionally does not revive stale RLS or predictor history.
 			restore_model(
 				controllerCore, adaptive_store, settings['controller']['selected']
 			)
@@ -639,6 +645,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 			settings = read_settings()
 			controllerCore, controller_status = _init_controller(settings, control)
 			if controller_status == 'Active':
+				# A settings change replaces the controller object. Restore its
+				# trusted model, then seed the replacement with current actuator
+				# reality so its history does not begin with a fictitious zero.
 				restore_model(
 					controllerCore, adaptive_store, settings['controller']['selected']
 				)
@@ -648,6 +657,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 					if manual_override_active
 					else False
 				)
+				# Manual auger state has precedence during reinitialization and is
+				# recorded as ineligible; otherwise preserve the clamped cycle duty
+				# and the current lid/fan identification gate.
 				seed_duty, seed_identification_allowed = (
 					controller_reinit_output_seed(
 						CycleRatio,
@@ -721,6 +733,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 						grill_platform.auger_off()
 						eventLogger.debug('Auger OFF')
 					manual_override['auger'] = override_time  # Set override time
+					# Prediction must see the exact manual on/off transition, but
+					# identification must not attribute its temperature response to
+					# normal PID control.
 					record_output(
 						controllerCore,
 						manual_override_duty(control['manual']['output']),
@@ -762,6 +777,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 			if mode == 'Hold':
 				# Check to see if it's time to update pid and update if needed.
 				if hold_pid_update_due(now, controllerCycleStart, CycleTime):
+					# First compute from the measured/Smith-selected temperature.
+					# A newly trusted model may be staged now, but routine flushes
+					# remain storage-throttled and never block model use in memory.
 					pid_output = controllerCore.update(ptemp)
 					if stage_model(
 						controllerCore, adaptive_store, settings['controller']['selected']
@@ -770,6 +788,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 					if adaptive_store.flush():
 						adaptive_model_pending = False
 					controllerCycleStart = now
+					# The controller returns an unclamped request. Apply lid safety,
+					# minimum/fan-PID handling, and the maximum before feeding duty
+					# back; the model must learn what reached the actuator.
 					CycleRatio = RawCycleRatio = settings['cycle_data']['u_min'] if LidOpenDetect else pid_output
 					# If ratio is less than min set auger ratio to min and control further via fan.
 					if CycleRatio < settings['cycle_data']['u_min']:
@@ -785,6 +806,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 						ControlFanPid = False
 					# Don't set ratio over maximum.
 					CycleRatio = min(CycleRatio, settings['cycle_data']['u_max'])			
+					# Do not overwrite an active manual command with a simultaneous
+					# normal PID sample. The eligibility flag separately excludes
+					# lid-open and fan-PID-disturbed intervals from identification.
 					if normal_pid_output_recording_allowed(
 						manual_override['auger'], now
 					):
@@ -798,6 +822,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 							),
 						)
 			if manual_override['auger'] < now:
+				# When a timed manual override expires, mark the transition back to
+				# normal duty as ineligible. This prevents one mixed interval from
+				# being treated as an ordinary PID experiment.
 				if manual_override['auger']:
 					record_output(controllerCore, CycleRatio, False)
 				manual_override['auger'] = 0
@@ -1166,6 +1193,9 @@ def _work_cycle(mode, grill_platform, probe_complex, display_device, dist_device
 		grill_platform.power_off()
 		eventLogger.debug('Fan OFF, Power OFF')
 
+	# Capture the newest trusted model before exit. A forced flush bypasses only
+	# the routine timer; validation and atomic replacement still apply. Failed
+	# writes leave pending state intact and are logged rather than hidden.
 	try:
 		if stage_model(
 			controllerCore, adaptive_store, settings['controller']['selected']

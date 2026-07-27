@@ -8,6 +8,17 @@
  Description: This object will be used to calculate PID for maintaining
  temperature in the grill.
 
+ PID-SP keeps the legacy proportional-band PID law, but chooses its controller
+ input through an optional adaptive Smith predictor:
+
+ 1. Observe the measured pit temperature and update the model identifier.
+ 2. Promote a newly trusted physical model into the predictor.
+ 3. Select measured or delay-corrected temperature through the predictor.
+ 4. Run transition gating and P/I/D from that one selected temperature.
+ 5. Later, receive the duty actually applied after production safety clamps.
+
+ Model identification and prediction are optional. Invalid or insufficient
+ adaptive state falls back to the measured probe temperature.
  This software was developed by GitHub user DBorello as part of his excellent
  PiSmoker project: https://github.com/DBorello/PiSmoker
 
@@ -43,6 +54,13 @@ from controller.smith_predictor import AdaptiveFOPDTIdentifier, FOPDTModel, Smit
 Class Definition
 '''
 class Controller(ControllerBase):
+	'''Proportional-band PID composed with optional adaptive Smith feedback.
+
+	``update`` consumes temperature and returns an unclamped duty request.
+	``set_output`` is called later with the duty production actually applied.
+	Keeping those directions separate prevents safety clamps and overrides from
+	being misrepresented as plant behavior commanded by the PID.
+	'''
 	def __init__(self, config, units, cycle_data):
 		super().__init__(config, units, cycle_data)
 		self.function_list.append('set_gains') 
@@ -65,6 +83,8 @@ class Controller(ControllerBase):
 		self.pb = pb
 
 		self.units = units
+		# The identifier learns a trusted physical model; the predictor consumes
+		# that model.  Both receive the same applied-duty history via set_output.
 		self._identifier = AdaptiveFOPDTIdentifier(units, clock=lambda: time.time())
 		self._predictor = SmithPredictor(units, clock=lambda: time.time())
 
@@ -120,14 +140,20 @@ class Controller(ControllerBase):
 		self.slow_approach_samples = 0
 
 	def update(self, current):
-		# Elapsed time since last update
+		# Phase 1: timestamp this observation before touching either adaptive
+		# component so identification, prediction, and PID share one interval.
 		current_time = time.time()
 		first_selected_sample = self.previous_controller_input is None
 
+		# Identification always sees the measured probe value.  A newly
+		# published model is promoted before selecting this cycle's PID input.
 		trusted_update = self._identifier.observe(current, current_time)
 		if trusted_update is not None:
 			self._predictor.set_model(trusted_update)
 			current_time = time.time()
+		# Prediction returns either a safe delay-corrected temperature or the
+		# measured value unchanged.  Every PID and transition term below uses
+		# this one selected input; mixing inputs would create false dynamics.
 		controller_input = self._predictor.update(current, current_time)
 		dt = current_time - self.last_update
 		self._predicted_temperature = controller_input
@@ -139,12 +165,17 @@ class Controller(ControllerBase):
 		else:
 			selected_rate = (controller_input - previous_controller_input) / dt
 	
+		# Phase 2: maintain target-transition state in selected-temperature
+		# coordinates.  This matters when a trusted prediction differs from the
+		# probe measurement during a live setpoint change.
 		# Seed setpoint-transition bookkeeping from the first selected sample.
 		if first_selected_sample:
 			self.derv = 0.0
 			if self.new_target:
 				self.start_change_temp = controller_input
 	
+		# Reaching the native-unit capture band—or crossing an upward target
+		# between samples—ends approach damping and restores normal integration.
 		capture_band = self._target_capture_band()
 		upward_transition = self.set_point > self.start_change_temp
 		captured_target = abs(error) <= capture_band or (upward_transition and error >= 0.0)
@@ -152,7 +183,8 @@ class Controller(ControllerBase):
 			self.new_target = False
 			self._reset_approach_state()
 	
-		# Determine output
+		# Phase 3: calculate the raw PID request.  Production applies u_min/u_max,
+		# lid-open, fan-PID, and manual overrides after this method returns.
 		if error < -self.pb:
 			self.u = 1.0
 		# If overshooting, minimize output
@@ -194,6 +226,9 @@ class Controller(ControllerBase):
 			if abs(error) < self.pb and current_time - self.last_set_time < self.cycle_time * 3:
 				self.u *= 0.65
 
+			# Mark only a genuinely output-limited upward approach.  The complete
+			# candidate (including derivative and startup scaling) must reach the
+			# external clamp before extended integral damping is justified.
 			u_max = self.cycle_data.get('u_max', 1.0)
 			if reached_halfway and upward_transition and self.u >= u_max:
 				if self.ti <= 0.0:
@@ -202,11 +237,17 @@ class Controller(ControllerBase):
 				else:
 					self.output_limited_approach = True
 
+		# Once active, process approach state after every output branch.  A
+		# stalled or reversed temperature can cross proportional-band branches;
+		# skipping those samples would leave stale confirmation state.
 		if self.output_limited_approach and self.new_target:
 			if self.ti <= 0.0:
 				self.new_target = False
 				self._reset_approach_state()
 			else:
+				# Three slow selected-temperature samples indicate that momentum
+				# no longer explains the residual.  Re-enable integral action so
+				# it can remove the remaining P-only offset.
 				rate_threshold = capture_band / (2.0 * self.ti)
 				if selected_rate <= rate_threshold:
 					self.slow_approach_samples += 1
@@ -216,7 +257,8 @@ class Controller(ControllerBase):
 					self.new_target = False
 					self._reset_approach_state()
 
-		# Update for next cycle
+		# Phase 4: commit exactly the selected input and timestamp used above.
+		# The next derivative and delay-rate decision compare like with like.
 		self.error = error
 		self.last = current
 		self.previous_controller_input = controller_input
@@ -225,6 +267,8 @@ class Controller(ControllerBase):
 		return self.u
 	
 	def set_target(self, set_point):
+		# A target change resets PID/approach transients but deliberately keeps
+		# learned model, predictor branches, and applied-duty history.
 		self.set_point = set_point
 		self.error = 0.0
 		self.inter = 0.0
@@ -232,12 +276,15 @@ class Controller(ControllerBase):
 		self._reset_approach_state()
 		self.last_update = time.time()
 		self.last_set_time = self.last_update
+		# Live changes begin from the last selected controller temperature.
+		# Measured temperature is only a startup fallback before selection exists.
 		if self.previous_controller_input is not None:
 			self.start_change_temp = self.previous_controller_input
 		else:
 			self.start_change_temp = self.last if self.last is not None else 0.0
 		self.new_target = True
-		# Dynamically set self.center depending on set_point. Higher centers are needed to achieve higher temps, lower centers for lower temps.
+		# Center is a feed-forward baseline.  Preserve the legacy high-target
+		# scaling while transition damping controls temporary approach integral.
 		if self.units == "F":
 			if set_point <= 240:
 				self.center = set_point * self.center_factor
@@ -251,6 +298,8 @@ class Controller(ControllerBase):
 		self._update_integral_limit()
     
 	def set_gains(self, pb, ti, td):
+		# Gain changes retain the physical model.  Non-positive Ti disables and
+		# clears integral state immediately so no stale contribution survives.
 		self._calculate_gains(pb,ti,td)
 		self._update_integral_limit()
 		if self.ti <= 0.0:
@@ -260,11 +309,16 @@ class Controller(ControllerBase):
 	def get_k(self):
 		return self.kp, self.ki, self.kd
 	def set_output(self, applied_ratio, identification_allowed=True):
+		# Feed both adaptive components the duty that production actually
+		# applied.  ``identification_allowed`` blocks learning during overrides
+		# while retaining the complete command timeline needed for prediction.
 		current_time = time.time()
 		self._identifier.record_output(applied_ratio, identification_allowed, timestamp=current_time)
 		self._predictor.record_output(applied_ratio, identification_allowed, timestamp=current_time)
 
 	def get_model_snapshot(self) -> Optional[dict]:
+		# Persist only a trusted immutable physical model.  Dynamic predictor and
+		# RLS state are intentionally reconstructed after process restart.
 		model = self._identifier.trusted_model
 		if model is None:
 			return None
