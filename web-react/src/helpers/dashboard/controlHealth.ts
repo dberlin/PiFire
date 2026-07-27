@@ -1,23 +1,20 @@
 import { useState } from "react";
 
-// dash.errors NEVER clears itself. read_errors() (common/datastore_accessors.py:126-132)
-// is a plain non-destructive blob read -- unlike `warnings` on the same payload,
-// which drains (q.list(); q.flush()) and therefore self-heals frame to frame --
-// and its only clearer, flush_errors(), is called from exactly one place in
-// production: control.py:107-109, at boot. So once _check_control_status
-// (blueprints/mobile/socket_io.py:1009-1019) writes the "control process did
-// not respond" string, it is on every subsequent socket_dash_data frame until
-// the control process restarts.
+// The "control process did not respond" entry in dash.errors is a POLL RESULT,
+// not a durable error. blueprints/mobile/socket_io.py re-probes every 30s and
+// composes common/app.py's CONTROL_DOWN_ERROR into each payload from that
+// verdict alone (`_control_alive`), so the entry is gone from the first frame
+// after control answers again.
 //
-// It can also be written on a HEALTHY system: get_system_command_output
-// (common/app.py:31-44) pops the shared queue_systemo and DISCARDS entries whose
-// command does not match, so any of its seven consumers can eat the check_alive
-// reply, the 1s timeout expires, and the sticky error lands anyway.
+// It used to be appended to the errors blob instead, which nothing reachable
+// from the UI could clear -- one missed answer was permanent until the control
+// process restarted. That is fixed on the backend; do not reintroduce a
+// clearing endpoint here.
 //
-// The frontend cannot clear the blob -- there is no route, socket action or API
-// command that does. What it CAN do is ask the same question directly and
-// believe the answer. GET /api/sys/check_alive (blueprints/api/routes.py:299-311)
-// runs exactly the same probe and answers {"result": "OK"} when control replies.
+// What the fix does NOT remove is the 30s window: a payload can still say
+// "down" for up to one poll interval after control has recovered. So an
+// on-demand probe is still worth having. GET /api/sys/check_alive runs the same
+// probe synchronously and answers {"result": "OK"} when control replies.
 
 export async function recheckControl(baseUrl: string): Promise<boolean> {
   try {
@@ -46,8 +43,13 @@ export interface ControlHealth {
  * into an effect, so there is no setState-in-useEffect for derived state.
  *
  * The override deliberately persists across later frames that still say false:
- * a live probe that just succeeded is better evidence than a blob written up to
- * 30 seconds ago that nothing in the system can clear.
+ * a live probe that just succeeded is better evidence than a poll result that
+ * may be up to 30 seconds old. It is sticky in the other direction, though --
+ * a control process that dies again after a successful recheck will not flip
+ * `alive` back within this mount. That is acceptable because the underlying
+ * signal now self-heals both ways, so the override exists only to close the
+ * one-poll-interval gap, and `stale` still reports the raw payload verdict for
+ * anything that wants it.
  */
 export function useControlHealth(controlAlive: boolean, apiBase: string): ControlHealth {
   const [override, setOverride] = useState(false);

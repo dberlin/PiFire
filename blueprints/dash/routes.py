@@ -9,7 +9,7 @@ from common.datastore_accessors import (
     write_settings,
 )
 from common.api_commands import process_command
-from common.app import get_system_command_output
+from common.app import CONTROL_DOWN_ERROR, get_system_command_output
 
 from . import dash_bp
 
@@ -35,9 +35,11 @@ def dash_page():
     process_command(action="sys", arglist=["check_alive"], origin="dash")  # Request supported commands
     data = get_system_command_output(requested="check_alive")
     if data["result"] != "OK":
-        errors.append(
-            "The control process did not respond to a request and may be stopped.  Try reloading the page or restarting the system.  Check logs for details."
-        )
+        # Appended to the LOCAL list only, never to the store. A page render
+        # probes live, so this observation is already as fresh as it can be;
+        # persisting it would make a transient miss permanent (see
+        # blueprints/mobile/socket_io.py's `_control_alive`).
+        errors.append(CONTROL_DOWN_ERROR)
 
     return render_template(
         dash_template,

@@ -102,6 +102,11 @@ def sio(ds):
 
     import blueprints.mobile.socket_io as socket_io
 
+    # The control-liveness verdict is process-local module state that outlives
+    # the `ds` datastore, so reset it around every test or a check that failed
+    # in one test leaks a CONTROL_DOWN_ERROR into another's dash payload.
+    socket_io._set_control_alive(True)
+
     calls = []
 
     def _rec(name):
@@ -1304,38 +1309,41 @@ def test_encode_img_success_reads_and_b64_encodes(sio, tmp_path):
 # =====================================================================
 
 
-def test_check_control_status_appends_error_when_not_alive(sio):
+def test_check_control_status_records_a_failure_without_writing_the_blob(sio):
+    # The check records its verdict in memory; the errors blob belongs to the
+    # control process. See tests/web/test_control_liveness_not_sticky.py for
+    # the full contract (payload composition + self-healing).
     with (
         mock.patch.object(sio.mod, "process_command") as m_pc,
         mock.patch.object(sio.mod, "get_system_command_output", return_value={"result": "Error"}),
     ):
         sio.mod._check_control_status()
     m_pc.assert_called_once_with(action="sys", arglist=["check_alive"], origin="app-socketio")
-    errors = read_errors()
-    assert any("did not respond" in e for e in errors)
+    assert sio.mod._control_alive is False
+    assert read_errors() == []
 
 
-def test_check_control_status_does_not_duplicate_existing_error(sio):
-    error_text = (
-        "The control process did not respond to a request and may be stopped.  "
-        "Try reloading the page or restarting the system.  Check logs for details."
-    )
-    write_errors([error_text])
-    with (
-        mock.patch.object(sio.mod, "process_command"),
-        mock.patch.object(sio.mod, "get_system_command_output", return_value={"result": "Error"}),
-    ):
-        sio.mod._check_control_status()
-    assert read_errors().count(error_text) == 1
-
-
-def test_check_control_status_alive_appends_no_error(sio):
+def test_check_control_status_alive_records_success_and_writes_nothing(sio):
+    sio.mod._set_control_alive(False)
     with (
         mock.patch.object(sio.mod, "process_command"),
         mock.patch.object(sio.mod, "get_system_command_output", return_value={"result": "OK"}),
     ):
         sio.mod._check_control_status()
+    assert sio.mod._control_alive is True
     assert read_errors() == []
+
+
+def test_check_control_status_leaves_a_control_process_error_alone(sio):
+    # Durable errors written by the control process are not this check's to
+    # clear, in either direction.
+    write_errors(["Grill Platform Error: Could not load the grill platform module."])
+    with (
+        mock.patch.object(sio.mod, "process_command"),
+        mock.patch.object(sio.mod, "get_system_command_output", return_value={"result": "OK"}),
+    ):
+        sio.mod._check_control_status()
+    assert read_errors() == ["Grill Platform Error: Could not load the grill platform module."]
 
 
 # =====================================================================

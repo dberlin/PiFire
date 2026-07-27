@@ -24,6 +24,23 @@ import json
 import datetime
 import os
 
+# Reported when the control process does not answer a `check_alive` probe
+# within get_system_command_output()'s timeout. Both web-tier consumers put it
+# in front of the user -- blueprints/dash/routes.py::dash_page renders it into
+# the Jinja page's banner, blueprints/mobile/socket_io.py::_get_dash_data puts
+# it in the socket_dash_data payload -- and neither PERSISTS it: liveness is an
+# observation about right now, not one of the durable failures the control
+# process records in the errors blob (see _check_control_status).
+#
+# It lives here, in one place, because the React dashboard identifies the
+# condition by matching a substring of it (web-react/src/helpers/dashboard/
+# health.ts::deriveControlAlive). Two copies of a string a client parses is one
+# copy too many.
+CONTROL_DOWN_ERROR = (
+    "The control process did not respond to a request and may be stopped.  "
+    "Try reloading the page or restarting the system.  Check logs for details."
+)
+
 
 def allowed_file(filename):
     ALLOWED_EXTENSIONS = current_app.config["ALLOWED_EXTENSIONS"]

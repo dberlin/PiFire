@@ -1,7 +1,9 @@
 import type { LiveState } from "../types";
 
-// Substring of the exact error socket_io._check_control_status appends every 30s
-// when the control process is unreachable.
+// Substring of common/app.py's CONTROL_DOWN_ERROR, which
+// socket_io._get_dash_data composes into `errors` on every frame while the last
+// 30s liveness check says the control process is unreachable. It is NOT stored
+// server-side, so it clears itself on the first frame after control answers.
 const CONTROL_DOWN_MARKER = "control process did not respond";
 
 export function deriveControlAlive(dash: LiveState): boolean {

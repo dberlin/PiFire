@@ -52,7 +52,6 @@ from common.datastore_accessors import (
     read_connected_users,
     flush_connected_users,
     remove_connected_user,
-    write_errors,
 )
 from common.defaults import default_settings, default_control
 from common.system import (
@@ -66,7 +65,7 @@ from common.system import (
 from common.api_commands import process_command
 from common.modes import Mode
 from common.pellets_actions import PELLETS_DISPATCH, clear_pellet_db
-from common.app import update_probe_config, save_settings_and_flag_update, api_response
+from common.app import CONTROL_DOWN_ERROR, update_probe_config, save_settings_and_flag_update, api_response
 from common.settings_schema import SettingsValidationError
 from flask import request
 from app import socketio
@@ -78,6 +77,40 @@ from threading import Event
 thread_lock = threading.Lock()
 thread_event = Event()
 thread = None
+
+# Whether the control process answered the last `check_alive` probe
+# (_check_control_status, run by the broadcast loop every 30s). Consumed by
+# _get_dash_data, which composes CONTROL_DOWN_ERROR into the payload it is
+# already building.
+#
+# Deliberately in memory, and deliberately NOT in the errors blob. That blob is
+# owned by the control process: every other writer of it (controller/runtime's
+# devices.py / runner.py / controller.py, and common/extra_installer.py) records
+# a failure that already happened and cannot un-happen, and its single clearer,
+# flush_errors(), runs from control.py's boot path -- "errors accumulated since
+# the control process started". Liveness is the opposite kind of fact: it is
+# about right now, it is observed by THIS process, and it stops being true the
+# moment control answers again. Filed in the blob it became permanent, because
+# read_errors() is a plain non-destructive read (unlike `warnings` on the very
+# same payload, which drains and self-heals frame to frame) and no route, socket
+# action or API command could clear it -- so one missed answer, from a control
+# process that was merely slow, rode every socket_dash_data frame until the
+# control process restarted.
+#
+# Nor is it in the datastore: persisting a statement about "right now" is what
+# made this sticky in the first place, and a persisted copy would outlive the
+# web process that observed it. Starting each web process optimistic is correct
+# -- the first check either confirms it or corrects it within 30s.
+#
+# blueprints/dash/routes.py::dash_page needs no equivalent: it probes live on
+# every render and appends to the local list it hands the template.
+_control_alive = True
+
+
+def _set_control_alive(alive):
+    global _control_alive
+    _control_alive = alive
+
 
 """
 ==============================================================================
@@ -230,7 +263,11 @@ def _get_dash_data(settings, pelletdb):
     control = read_control()
     status = read_status()
     current = read_current()
-    errors = read_errors()
+    # The durable half comes from the store (control-process failures); the
+    # liveness half is recomputed per frame from the last check, so it clears
+    # itself the moment control answers again. Copy rather than append: the
+    # blob is not ours to write.
+    errors = read_errors() + ([] if _control_alive else [CONTROL_DOWN_ERROR])
     warnings = read_warnings()
     notify_data = control["notify_data"]
     probe_device_info = read_generic_key("probe_device_info")
@@ -982,15 +1019,14 @@ def _write_settings(settings, control):
 
 
 def _check_control_status():
-    errors = read_errors()
-    """ Check if control process is up and running. """
+    """Ask the control process to prove it is alive; record the verdict.
+
+    The verdict is kept in `_control_alive` -- process-local, in memory -- and
+    NOT written to the errors blob. See that global's comment for why.
+    """
     process_command(action="sys", arglist=["check_alive"], origin="app-socketio")
     data = get_system_command_output(requested="check_alive")
-    if data["result"] != "OK":
-        error = "The control process did not respond to a request and may be stopped.  Try reloading the page or restarting the system.  Check logs for details."
-        if error not in errors:
-            errors.append(error)
-            write_errors(errors)
+    _set_control_alive(data["result"] == "OK")
 
 
 # `_response` relocated to `common/app.py` as `api_response`.
