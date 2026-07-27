@@ -16,6 +16,7 @@ from common.datastore_accessors import (
     write_pellet_db,
     flush_history,
 )
+from common.file_browser import resolve_managed_file
 from common.settings_migration import read_settings_file
 from common.backups import read_pellet_db_file, backup_settings, backup_pellet_db
 from common.system import reboot_system, shutdown_system, restart_scripts, gather_system_info
@@ -206,18 +207,44 @@ def _admin_setting_backupsettings(ctx):
     return send_file(backup_file, as_attachment=True, max_age=0)
 
 
+def _resolve_backup(ctx, name):
+    """Contain a client-supplied backup filename to the backup folder.
+
+    `localfile` arrives straight from the form and used to be concatenated onto
+    backup_path, so a `../` reached anywhere the process could read. A restore
+    READS a file and WRITES it over live settings or the pellet database, which
+    made that traversal an arbitrary-file-LOAD, not merely an arbitrary read.
+
+    resolve_managed_file realpaths the join and requires the result to stay
+    under the folder, which is why it rejects `..`, absolute paths and symlink
+    escapes alike. Returns None when the name does not resolve to a real file
+    inside the folder; callers report that as an ordinary form error, because
+    this blueprint renders a page rather than returning JSON.
+    """
+    path = resolve_managed_file(ctx.backup_path, name)
+    if path is None or not os.path.isfile(path):
+        return None
+    return path
+
+
 def _admin_setting_restoresettings(ctx):
     # Assume we have request.files and local file in response
     remote_file = request.files["uploadfile"]
     local_file = request.form["localfile"]
 
     if local_file != "none":
+        backup_file = _resolve_backup(ctx, local_file)
+        if backup_file is None:
+            ctx.errors.append(
+                "There was an error restoring settings.  File either is a disallowed type or was not found."
+            )
+            return None
         # init=True runs the same version-overlay/upgrade_settings() pipeline
         # a live startup read applies (see common/settings_migration.py) --
         # without it, restoring an older-format backup (missing fields added
         # by a later release) writes an incomplete settings tree straight to
         # disk instead of migrating it forward.
-        new_settings = read_settings_file(filename=ctx.backup_path + local_file, init=True)
+        new_settings = read_settings_file(filename=backup_file, init=True)
         write_settings(new_settings)
         set_server_status("restarting")
         restart_scripts()
@@ -231,8 +258,14 @@ def _admin_setting_restoresettings(ctx):
         if remote_file and allowed_file(remote_file.filename):
             filename = secure_filename(remote_file.filename)
             remote_file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], filename))
+            backup_file = _resolve_backup(ctx, filename)
+            if backup_file is None:
+                ctx.errors.append(
+                    "There was an error restoring settings.  File either is a disallowed type or was not found."
+                )
+                return None
             ctx.success.append("Successfully restored settings.")
-            new_settings = read_settings_file(filename=ctx.backup_path + filename, init=True)
+            new_settings = read_settings_file(filename=backup_file, init=True)
             write_settings(new_settings)
             set_server_status("restarting")
             restart_scripts()
@@ -259,7 +292,13 @@ def _admin_setting_restorepelletdb(ctx):
     local_file = request.form["localfile"]
 
     if local_file != "none":
-        pelletdb = read_pellet_db_file(filename=ctx.backup_path + local_file)
+        backup_file = _resolve_backup(ctx, local_file)
+        if backup_file is None:
+            ctx.errors.append(
+                "There was an error restoring the pellet database.  File either is a disallowed type or was not found."
+            )
+            return None
+        pelletdb = read_pellet_db_file(filename=backup_file)
         write_pellet_db(pelletdb)
         ctx.success.append("Successfully restored pellet database.")
     elif remote_file.filename != "":
@@ -268,8 +307,14 @@ def _admin_setting_restorepelletdb(ctx):
         if remote_file and allowed_file(remote_file.filename):
             filename = secure_filename(remote_file.filename)
             remote_file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], filename))
+            backup_file = _resolve_backup(ctx, filename)
+            if backup_file is None:
+                ctx.errors.append(
+                    "There was an error restoring the pellet database.  File either is a disallowed type or was not found."
+                )
+                return None
             ctx.success.append("Successfully restored pellet database.")
-            pelletdb = read_pellet_db_file(filename=ctx.backup_path + filename)
+            pelletdb = read_pellet_db_file(filename=backup_file)
             write_pellet_db(pelletdb)
         else:
             ctx.errors.append(
