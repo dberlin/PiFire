@@ -595,11 +595,11 @@
     "fontSize": "15px",
     "fontWeight": "600",
     "styles": {
-      "color": "color(srgb 0.541176 0.498039 0.439216 / 0.55)",
+      "color": "rgb(138, 127, 112)",
       "background-color": "rgba(0, 0, 0, 0)",
       "background-image": "none",
       "border-top-width": "0px",
-      "border-top-color": "color(srgb 0.541176 0.498039 0.439216 / 0.55)",
+      "border-top-color": "rgb(138, 127, 112)",
       "border-top-style": "solid",
       "border-top-left-radius": "10px",
       "box-shadow": "none",

@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "filename": "brisket.pfrecipe",
+      "title": "Sunday Brisket",
+      "thumbnail": "brisket-recipe/thumb.png"
+    },
+    {
+      "filename": "ribs.pfrecipe",
+      "title": "Baby Back Ribs",
+      "thumbnail": "ribs-recipe/thumb.png"
+    }
+  ],
+  "page": 1,
+  "last_page": 2,
+  "per_page": 2,
+  "reverse": false,
+  "total": 3
+}

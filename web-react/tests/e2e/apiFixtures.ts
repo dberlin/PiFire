@@ -99,3 +99,27 @@ export async function stubCookFiles(page: Page): Promise<void> {
 export async function stubProbeModules(page: Page): Promise<void> {
   await page.route("**/api/probe_modules", (r) => json(r, body("probe-modules.json")));
 }
+
+/**
+ * The two recipe surfaces (RecipeList, RecipePage), and the only cover
+ * components/recipes/recipes.css has -- it landed after the Tailwind plan was
+ * written, like cookfiles.css, so nothing else would notice a wrong @apply or
+ * preflight reset here either.
+ *
+ * Installed per-spec rather than in stubApi(): the fidelity-pages project
+ * runs against the demo server, which has no backend for either route at all,
+ * so an unstubbed fetch would render the error branch and the baseline would
+ * encode that instead of the styled surface.
+ *
+ * Route order matters the same way it does in stubCookFiles: the detail
+ * pattern has a "/" right after "recipes" where the listing pattern's `*`
+ * cannot follow, so the listing route can never swallow a detail request
+ * whatever order they are installed in.
+ */
+export async function stubRecipes(page: Page): Promise<void> {
+  await page.route("**/api/files/recipes/detail*", (r) => json(r, body("recipe-detail.json")));
+  await page.route("**/api/files/recipes*", (r) => json(r, body("recipe-listing.json")));
+  await page.route("**/static/img/tmp/**", (r) =>
+    r.fulfill({ status: 200, contentType: "image/png", body: PNG_8x8 }),
+  );
+}

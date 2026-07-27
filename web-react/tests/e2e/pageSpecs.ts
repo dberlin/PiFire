@@ -1,4 +1,4 @@
-import { stubCookFiles, stubProbeModules } from "./apiFixtures";
+import { stubCookFiles, stubProbeModules, stubRecipes } from "./apiFixtures";
 import type { PageSpec, StyleProbe } from "./layoutBaseline";
 
 // The two viewports the fidelity gate is defined at. 1280x720 is the desktop
@@ -211,6 +211,70 @@ export const PAGE_SPECS: PageSpec[] = [
       // it would have needed a CHROME_PROBES entry, which would have moved an
       // immutable baseline.
       ".pf-cf-media-img--selected",
+    ],
+  },
+  // The recipe browser, and the only cover components/recipes/recipes.css
+  // has -- it landed after the Tailwind plan was written, like cookfiles.css,
+  // so nothing else would notice a wrong @apply on it. Written out rather
+  // than generated for the same reason as the cook-file specs above: it needs
+  // its own fixture, since the demo server has no backend for either recipes
+  // route at all.
+  {
+    name: "recipe-list",
+    path: "/recipes",
+    ready: ".pf-rcp-table",
+    root: ".pf-shell",
+    stubs: stubRecipes,
+    landmarks: [
+      ...SHELL,
+      ".pf-rcp-toolbar",
+      ".pf-rcp-toolbar-spacer",
+      ".pf-rcp-table",
+      // The cell rule, like .pf-cf-table's above: measured directly since
+      // padding and text-align move nothing the table box itself can see.
+      ".pf-rcp-table th",
+      ".pf-rcp-table td",
+      ".pf-rcp-thumb-col",
+      ".pf-rcp-thumb",
+      ".pf-rcp-link",
+      ".pf-rcp-name",
+      ".pf-rcp-actions-col",
+      ".pf-rcp-row-actions",
+      ".pf-rcp-pager",
+      ".pf-rcp-pager-current",
+    ],
+  },
+  {
+    name: "recipe-detail",
+    path: "/recipes/brisket.pfrecipe",
+    // Unlike the cook-file detail page, nothing here fetches separately --
+    // RecipeView renders every section synchronously off the same `detail`
+    // state RecipePage holds. `.pf-rcp-step` is the last one added, from the
+    // Program Steps section, so waiting on it still proves the whole page
+    // painted.
+    ready: ".pf-rcp-step",
+    root: ".pf-shell",
+    stubs: stubRecipes,
+    landmarks: [
+      ...SHELL,
+      ".pf-rcp-about",
+      ".pf-rcp-splash",
+      ".pf-rcp-dl",
+      // `.pf-rcp-dl dt` and `.pf-rcp-dl dd` are their own rules (a dimmed
+      // colour, a margin reset) the grid container cannot report -- the same
+      // reasoning as `.pf-cf-dl dt`/`dd` above.
+      ".pf-rcp-dl dt",
+      ".pf-rcp-dl dd",
+      ".pf-rcp-stars",
+      // Reachable only because the fixture's rating is non-zero, the same way
+      // `.pf-cf-media-img--selected` depends on its fixture's thumbnail.
+      ".pf-rcp-star--filled",
+      ".pf-rcp-table",
+      ".pf-rcp-asset-thumb",
+      ".pf-rcp-ingredients-used",
+      ".pf-rcp-step",
+      ".pf-rcp-step-number",
+      ".pf-rcp-run",
     ],
   },
   ...SETTINGS_TABS.map(

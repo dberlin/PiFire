@@ -1,0 +1,93 @@
+{
+  "filename": "brisket.pfrecipe",
+  "metadata": {
+    "author": "Alex",
+    "username": "alex",
+    "id": "brisket-recipe",
+    "title": "Sunday Brisket",
+    "description": "Low and slow, wrapped in butcher paper once the bark sets.",
+    "image": "splash.jpg",
+    "thumbnail": "thumb.png",
+    "units": "F",
+    "prep_time": 20,
+    "cook_time": 600,
+    "rating": 4,
+    "difficulty": "Hard",
+    "version": "1.0",
+    "food_probes": 2
+  },
+  "recipe": {
+    "ingredients": [
+      { "name": "Brisket", "quantity": "1 whole (12-14 lbs)", "assets": ["brisket.jpg"] },
+      { "name": "Kosher salt", "quantity": "1/4 cup", "assets": [] }
+    ],
+    "instructions": [
+      {
+        "text": "Trim the fat cap to a quarter inch.",
+        "ingredients": ["Brisket"],
+        "assets": [],
+        "step": 0
+      },
+      {
+        "text": "Season generously and rest overnight.",
+        "ingredients": ["Brisket", "Kosher salt"],
+        "assets": [],
+        "step": 0
+      },
+      {
+        "text": "Smoke fat side up until the bark sets.",
+        "ingredients": ["Brisket"],
+        "assets": [],
+        "step": 1
+      },
+      {
+        "text": "Wrap and hold until probe-tender.",
+        "ingredients": ["Brisket"],
+        "assets": [],
+        "step": 2
+      }
+    ],
+    "steps": [
+      {
+        "mode": "Startup",
+        "hold_temp": 0,
+        "timer": 0,
+        "notify": false,
+        "message": "",
+        "pause": false,
+        "trigger_temps": { "primary": 0, "food": [] }
+      },
+      {
+        "mode": "Smoke",
+        "hold_temp": 0,
+        "timer": 0,
+        "notify": false,
+        "message": "",
+        "pause": false,
+        "trigger_temps": { "primary": 225, "food": [] }
+      },
+      {
+        "mode": "Hold",
+        "hold_temp": 165,
+        "timer": 120,
+        "notify": true,
+        "message": "Check bark and wrap if ready",
+        "pause": true,
+        "trigger_temps": { "primary": 0, "food": [165, 0] }
+      },
+      {
+        "mode": "Shutdown",
+        "hold_temp": 0,
+        "timer": 0,
+        "notify": false,
+        "message": "",
+        "pause": false,
+        "trigger_temps": { "primary": 0, "food": [] }
+      }
+    ]
+  },
+  "assets": [
+    { "id": "asset-1", "filename": "brisket.jpg", "type": "image/jpeg" },
+    { "id": "asset-2", "filename": "splash.jpg", "type": "image/jpeg" }
+  ]
+}
