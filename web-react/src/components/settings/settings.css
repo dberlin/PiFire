@@ -1,266 +1,214 @@
+@reference "../../theme.css";
+
+/* This stylesheet is NOT settings-only.
+ *
+ * HistoryPage.tsx renders .pf-settings, .pf-settings-content,
+ * .pf-settings-actions, .pf-settings-hint, .pf-section, .pf-section-title and
+ * .pf-section-body -- every one of them declared here and nowhere else. Any
+ * change to those rules moves /history too, so the gate for this file is 13
+ * pages, not 11.
+ *
+ * .pf-probes-card is also overridden from outside, by `.pf-probes-surface
+ * .pf-probes-card` in wizard/probes/probes.css (the scoping is pinned by
+ * wizardStyles.test.ts, which additionally asserts the override is NOT written
+ * as `.pf-wizard .pf-probes-card`). Its DECLARATIONS are safe to convert; its
+ * SELECTOR is not -- a rename here breaks that override with no error
+ * anywhere. */
+
 .pf-settings {
-  display: flex;
+  @apply flex bg-page text-text;
   min-height: 100vh;
-  background: var(--page);
-  color: var(--text);
 }
 .pf-settings-nav {
+  @apply flex flex-col gap-[6px] bg-inset p-[16px];
   flex: 0 0 220px;
-  background: var(--inset);
   border-right: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 .pf-settings-back {
+  @apply cursor-pointer px-[8px] py-[6px] text-left text-text-dim;
   background: none;
   border: none;
-  color: var(--text-dim);
   font: 600 13px "Barlow";
-  text-align: left;
-  cursor: pointer;
-  padding: 6px 8px;
 }
 .pf-settings-title {
   font: 700 18px "Barlow";
   margin: 8px 8px 12px;
 }
 .pf-settings-link {
-  color: var(--text-dim);
+  @apply rounded-[10px] px-[12px] py-[10px] text-text-dim;
   text-decoration: none;
-  padding: 10px 12px;
-  border-radius: 10px;
   font: 600 15px "Barlow";
 }
 .pf-settings-link.active {
+  @apply text-text;
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--text);
 }
 .pf-settings-content {
+  @apply max-w-[720px] overflow-y-auto px-[32px] py-[28px];
   flex: 1;
-  padding: 28px 32px;
-  max-width: 720px;
-  overflow-y: auto;
 }
 .pf-settings-error {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  color: var(--text-dim);
+  @apply flex flex-col items-center gap-[12px] text-text-dim;
   font: 600 16px "Barlow";
 }
 @media (max-width: 640px) {
   .pf-settings {
-    flex-direction: column;
+    @apply flex-col;
   }
   .pf-settings-nav {
+    @apply flex-row flex-wrap;
     flex-basis: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
   }
 }
 .pf-section {
-  margin-bottom: 28px;
+  @apply mb-[28px];
 }
 .pf-section-title {
   font: 700 20px "Barlow";
   margin: 0 0 14px;
 }
 .pf-section-body {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  @apply flex flex-col gap-[14px];
 }
 .pf-field {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  @apply flex items-center justify-between gap-[16px];
 }
 .pf-field-column {
-  flex-direction: column;
-  align-items: stretch;
+  @apply flex-col items-stretch;
 }
 .pf-field-label {
+  @apply text-text-dim;
   font: 600 15px "Barlow";
-  color: var(--text-dim);
 }
 .pf-field-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  @apply flex items-center gap-[8px];
 }
 .pf-input {
-  background: var(--inset);
-  color: var(--text);
+  @apply min-w-[120px] rounded-[10px] bg-inset px-[12px] py-[8px] text-text;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  padding: 8px 12px;
   font: 600 15px "Barlow";
-  min-width: 120px;
 }
 .pf-field-suffix {
-  color: var(--text-dim);
+  @apply text-text-dim;
   font: 600 14px "Barlow";
 }
 .pf-stringlist-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  @apply flex items-center gap-[8px];
 }
 .pf-stringlist-row .pf-input {
   flex: 1;
   min-width: 0;
 }
 .pf-stringlist-row button {
+  @apply shrink-0 cursor-pointer rounded-[8px] px-[8px] py-[4px] text-text-dim;
   background: none;
   border: none;
-  color: var(--text-dim);
   font: 700 15px "Barlow";
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 8px;
-  flex-shrink: 0;
 }
 .pf-stringlist-row button:hover {
-  color: var(--danger);
+  @apply text-danger;
   background: rgba(255, 139, 130, 0.12);
 }
 .pf-field-column > button {
-  align-self: flex-start;
-  background: var(--inset);
-  color: var(--text);
+  @apply mt-[8px] cursor-pointer self-start rounded-[10px] bg-inset px-[14px] py-[8px] text-text;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  padding: 8px 14px;
   font: 600 14px "Barlow";
-  cursor: pointer;
-  margin-top: 8px;
 }
 .pf-field-column > button:hover {
   border-color: var(--accent);
 }
 .pf-switch {
-  width: 46px;
-  height: 26px;
-  border-radius: 999px;
+  @apply relative h-[26px] w-[46px] cursor-pointer rounded-[999px] bg-inset;
   border: none;
-  background: var(--inset);
-  position: relative;
-  cursor: pointer;
 }
 .pf-switch.on {
-  background: var(--accent);
+  @apply bg-accent;
 }
 .pf-switch-knob {
-  position: absolute;
+  @apply absolute h-[20px] w-[20px] bg-text;
   top: 3px;
   left: 3px;
-  width: 20px;
-  height: 20px;
   border-radius: 50%;
-  background: var(--text);
   transition: transform 120ms ease;
 }
 .pf-switch.on .pf-switch-knob {
   transform: translateX(20px);
 }
 .pf-settings-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 8px;
+  @apply mt-[8px] flex items-center gap-[12px];
 }
 .pf-settings-saved {
-  color: var(--ok);
+  @apply text-ok;
   font: 600 14px "Barlow";
 }
 /* An edit now outlives the tab that made it (helpers/settings/settingsDrafts.ts),
    so both of these say "held, not stored": the text sits beside the Save button
    the user is looking at, the dot rides the nav pill they left behind. */
 .pf-settings-unsaved-text {
-  color: var(--text-dim);
+  @apply text-text-dim;
   font: 600 14px "Barlow";
 }
 .pf-settings-unsaved {
+  @apply ml-[6px] text-[18px];
   color: #f0c674;
-  font-size: 18px;
   line-height: 1;
-  margin-left: 6px;
   vertical-align: middle;
 }
 .pf-settings-hint {
-  color: var(--text-dim);
+  @apply text-text-dim;
   font: 500 13px "Barlow";
   line-height: 1.6;
 }
 .pf-settings-error-text {
-  color: var(--danger);
+  @apply text-danger;
   font: 600 14px "Barlow";
 }
 /* Per-field helper copy: NumberField's `hint`, and ControllerTab's option
    descriptions, which have been rendering unstyled. Same tokens as
    .pf-settings-hint — no new palette. */
 .pf-field-hint {
-  color: var(--text-dim);
+  @apply text-text-dim;
   font: 500 13px "Barlow";
   line-height: 1.6;
 }
 
 /* HistoryTab: Chart Colors section (per-probe color/flag cards) */
 .pf-probe-card {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 16px;
-  border-radius: 12px;
-  background: var(--inset);
+  @apply flex flex-col gap-[14px] rounded-[12px] bg-inset p-[16px];
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 .pf-probe-card + .pf-probe-card {
-  margin-top: 14px;
+  @apply mt-[14px];
 }
 .pf-probe-card-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  @apply flex flex-wrap items-center gap-[10px];
 }
 .pf-probe-card-header .pf-field {
+  @apply justify-end;
   flex: 1 1 auto;
-  justify-content: flex-end;
 }
 .pf-probe-card-name {
+  @apply mr-auto text-text;
   font: 700 15px "Barlow";
-  color: var(--text);
-  margin-right: auto;
 }
 .pf-probe-chip {
+  @apply rounded-[999px] px-[10px] py-[2px] text-text-dim uppercase;
   font: 600 12px "Barlow";
-  color: var(--text-dim);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border-radius: 999px;
-  padding: 2px 10px;
-  text-transform: uppercase;
   letter-spacing: 0.02em;
 }
 
 /* RangeProfileTable: boundary + N+1 profile-row editor (SmartStart, PWM tabs) */
 .pf-rpt-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  @apply flex flex-col gap-[12px];
 }
 .pf-rpt {
-  width: 100%;
+  @apply w-full;
   border-collapse: collapse;
 }
 .pf-rpt th {
-  text-align: left;
+  @apply text-left text-text-dim;
   font: 600 13px "Barlow";
-  color: var(--text-dim);
   padding: 0 10px 8px;
 }
 .pf-rpt td {
@@ -270,53 +218,39 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 .pf-rpt-range {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  @apply flex items-center gap-[8px] whitespace-nowrap text-text;
   font: 600 14px "Barlow";
-  color: var(--text);
-  white-space: nowrap;
 }
 .pf-rpt-boundary-input {
-  min-width: 72px;
+  @apply min-w-[72px];
 }
 .pf-rpt-cell {
   display: table-cell;
 }
 .pf-rpt-cell .pf-input {
-  min-width: 80px;
+  @apply min-w-[80px];
 }
 .pf-rpt-remove-col {
-  width: 36px;
-  text-align: right;
+  @apply w-[36px] text-right;
 }
 .pf-rpt-remove {
+  @apply cursor-pointer rounded-[8px] px-[8px] py-[4px] text-text-dim;
   background: none;
   border: none;
-  color: var(--text-dim);
   font: 700 15px "Barlow";
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 8px;
 }
 .pf-rpt-remove:hover:not(:disabled) {
-  color: var(--danger);
+  @apply text-danger;
   background: rgba(255, 139, 130, 0.12);
 }
 .pf-rpt-remove:disabled {
-  color: var(--text-dim);
+  @apply cursor-not-allowed text-text-dim;
   opacity: 0.35;
-  cursor: not-allowed;
 }
 .pf-rpt-add {
-  align-self: flex-start;
-  background: var(--inset);
-  color: var(--text);
+  @apply cursor-pointer self-start rounded-[10px] bg-inset px-[14px] py-[8px] text-text;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  padding: 8px 14px;
   font: 600 14px "Barlow";
-  cursor: pointer;
 }
 .pf-rpt-add:hover {
   border-color: var(--accent);
@@ -324,13 +258,12 @@
 
 /* OneSignal devices manager (Notifications tab) */
 .pf-devices-table {
-  width: 100%;
+  @apply w-full;
   border-collapse: collapse;
 }
 .pf-devices-table th {
-  text-align: left;
+  @apply text-left text-text-dim;
   font: 600 13px "Barlow";
-  color: var(--text-dim);
   padding: 0 10px 8px;
 }
 .pf-devices-table td {
@@ -341,12 +274,11 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 .pf-device-meta {
+  @apply text-text-dim;
   font: 500 14px "Barlow";
-  color: var(--text-dim);
 }
 .pf-devices-delete-col {
-  width: 72px;
-  text-align: right;
+  @apply w-[72px] text-right;
 }
 
 /* The wizard's probe cards host ConfirmAction, whose .pf-modal-scrim is
@@ -354,5 +286,5 @@
    positioned ancestor it resolves against the initial containing block and
    floats free of the card it belongs to. */
 .pf-probes-card {
-  position: relative;
+  @apply relative;
 }
