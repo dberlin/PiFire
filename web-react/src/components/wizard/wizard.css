@@ -1,3 +1,24 @@
+@reference "../../theme.css";
+
+/* Four things about this file are asserted from outside and must not drift:
+ *
+ *   - the `@media (prefers-reduced-motion: reduce)` block, which must contain
+ *     `.pf-install-progress-bar` and the text `animation: none`.
+ *     wizard-layout.spec.ts then checks in a real engine that it WINS the
+ *     cascade, which a text check cannot see.
+ *   - every pf-(wizard|module|install|discovery|port-form|device-form|
+ *     form-actions|probes-table|btn-primary)* class, which must be declared in
+ *     this file or in probes/probes.css, not borrowed from another surface.
+ *   - the probe cards' scoped override of settings.css's .pf-probes-card lives
+ *     in probes/probes.css, scoped under .pf-probes-surface -- and
+ *     wizardStyles.test.ts asserts it is NOT re-scoped under the wizard root in
+ *     this file, so do not add it here.
+ *   - the wizard's .pf-btn treatment is likewise in probes/probes.css, shared
+ *     with /settings/probes; it overrides dashboard.css's 25px default.
+ *
+ * Declarations are free to convert. Selectors, @media preludes and !important
+ * are not: @apply cannot carry !important, so leave those declarations raw. */
+
 /* PiFire Setup Wizard.
    The wizard is the one route mounted OUTSIDE AppShell (App.tsx) -- no navbar,
    no timer strip, no banners -- so .pf-wizard is the whole page and owns the
@@ -16,12 +37,7 @@
 
 /* ---- root ---- */
 .pf-wizard {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--page);
-  color: var(--text);
+  @apply fixed inset-0 flex flex-col bg-page text-text;
   font-family: "Barlow", system-ui, sans-serif;
 }
 
@@ -29,99 +45,79 @@
 /* flex: 0 0 auto on the header and footer plus a min-height: 0 scroller between
    them is what keeps the chrome put at 1280x720 while a long step scrolls. */
 .pf-wizard-header {
+  @apply flex items-center gap-[18px] bg-inset px-[20px] py-[10px];
   flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 10px 20px;
-  background: var(--inset);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 .pf-wizard-title {
+  @apply whitespace-nowrap text-text;
   font: 700 18px "Barlow";
-  color: var(--text);
-  white-space: nowrap;
 }
 .pf-wizard-steps {
-  display: flex;
-  align-items: center;
+  @apply flex flex-wrap items-center gap-[6px];
   flex: 1 1 auto;
-  flex-wrap: wrap;
-  gap: 6px;
   min-width: 0;
 }
 /* The six labels are adjacent inline <span>s in the markup (WizardShell.tsx):
    with no rule they render as one run-on string. Pills with their own padding
    and a gap are what separates them. */
 .pf-wizard-step-indicator {
-  padding: 5px 12px;
+  @apply rounded-pill px-[12px] py-[5px] whitespace-nowrap text-text-dim;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--pill-radius);
-  color: var(--text-dim);
   font: 600 13px "Barlow";
-  white-space: nowrap;
 }
 .pf-wizard-step-indicator.active {
+  @apply text-text;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  color: var(--text);
 }
 .pf-wizard-exit {
+  @apply ml-auto;
   flex: 0 0 auto;
-  margin-left: auto;
 }
 
 /* ---- content: the only scrolling region ---- */
 .pf-wizard-content {
+  @apply overflow-y-auto;
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
   padding: 22px 28px 28px;
 }
 .pf-wizard-step {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 880px;
+  @apply flex max-w-[880px] flex-col gap-[16px];
   margin: 0 auto;
 }
 .pf-wizard-step-title {
-  margin: 0;
+  @apply m-0 text-text;
   font: 700 24px "Barlow";
-  color: var(--text);
 }
 /* Body copy only. :not([class]) keeps this off .pf-wizard-finish-note and
    .pf-wizard-finish-error, which are also direct <p> children of the step and
    have their own treatment below. */
 .pf-wizard-step > p:not([class]) {
-  margin: 0;
-  max-width: 68ch;
-  color: var(--text-dim);
+  @apply m-0 max-w-[68ch] text-text-dim;
   font: 500 15px "Barlow";
   line-height: 1.7;
 }
 .pf-wizard-step > p:not([class]) strong {
-  color: var(--text);
+  @apply text-text;
 }
 /* Both of these steps are short; a floor stops the footer jumping up the page
    as the user moves between a one-paragraph step and a full module card. */
 .pf-wizard-step-placeholder,
 .pf-wizard-step-finish {
-  min-height: 220px;
+  @apply min-h-[220px];
 }
 .pf-wizard-placeholder-message {
-  margin: 0;
-  color: var(--text-dim);
+  @apply m-0 text-text-dim;
   font: 500 15px "Barlow";
   line-height: 1.7;
 }
 .pf-wizard-finish-note {
-  margin: 0;
-  padding: 10px 14px;
+  @apply m-0 px-[14px] py-[10px] text-warn;
   border-left: 3px solid var(--warn);
   border-radius: 0 10px 10px 0;
   background: color-mix(in srgb, var(--warn) 10%, transparent);
-  color: var(--warn);
   font: 600 14px "Barlow";
   line-height: 1.6;
 }
@@ -129,8 +125,7 @@
    GrillPlatformStep and, in WizardShell, for the exit error -- which is a
    direct child of .pf-wizard, outside the padded content box. */
 .pf-wizard-finish-error {
-  margin: 0;
-  color: var(--danger);
+  @apply m-0 text-danger;
   font: 600 14px "Barlow";
 }
 .pf-wizard > .pf-wizard-finish-error {
@@ -139,13 +134,8 @@
 
 /* ---- footer chrome ---- */
 .pf-wizard-footer {
+  @apply flex items-center justify-between gap-[12px] bg-inset px-[28px] py-[12px];
   flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 28px;
-  background: var(--inset);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -159,7 +149,7 @@
    direct child); the header, footer and .pf-form-actions are rows and are left
    alone. */
 .pf-wizard-step > .pf-btn {
-  align-self: flex-start;
+  @apply self-start;
 }
 
 /* ---- route-level error ---- */
@@ -167,21 +157,14 @@
    loader failed, so the shell never existed. It must NOT be scoped under
    .pf-wizard. */
 .pf-wizard-error {
-  padding: 24px;
-  color: var(--text-dim);
+  @apply p-[24px] text-center text-text-dim;
   font: 600 16px "Barlow";
-  text-align: center;
 }
 
 /* ---- module card (ModuleCard.tsx: grill platform, display, distance) ---- */
 .pf-module-card {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 18px 20px;
+  @apply flex flex-col gap-[16px] rounded-card bg-card px-[20px] py-[18px];
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--card-radius);
-  background: var(--card);
 }
 /* Flask's media object (_macro_wizard_card.html): vendor photo on the left,
    everything else stacked on the right. The photo is the wizard's
@@ -203,11 +186,7 @@
    object-fit: contain, which is what makes min-height exact rather than a guess
    about vendor photo aspect ratios. */
 .pf-module-details {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 0 0 150px;
+  @apply relative flex flex-col gap-[10px] pt-[14px] pr-0 pb-0 pl-[150px];
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 146px;
 }
@@ -215,17 +194,16 @@
    renders no <img> at all. Drop the gutter so the text does not sit behind
    150px of nothing. */
 .pf-module-details:not(:has(.pf-module-image)) {
-  padding-left: 0;
+  @apply pl-0;
   min-height: 0;
 }
 /* Scoped to this container: DeviceForm reuses .pf-module-image inside a plain
    flex column (.pf-device-form) where there is no gutter to absolutely position
    into. */
 .pf-module-details > .pf-module-image {
-  position: absolute;
+  @apply absolute h-[132px];
   top: 14px;
   left: 0;
-  height: 132px;
   object-fit: contain;
 }
 /* Flask rendered these as a 3-column Setting/Options/Description table
@@ -234,10 +212,7 @@
    those rows -- a deliberate divergence, and one that needs no markup change. */
 .pf-module-deps,
 .pf-module-config {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding-top: 14px;
+  @apply flex flex-col gap-[14px] pt-[14px];
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -250,25 +225,16 @@
    the footer at the same time -- there is nothing to go back to, the installer
    is running detached. */
 .pf-install-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 880px;
+  @apply flex max-w-[880px] flex-col gap-[16px] px-0 py-[48px] text-center;
   margin: 0 auto;
-  padding: 48px 0;
-  text-align: center;
 }
 .pf-install-progress-status {
-  margin: 0;
-  color: var(--text);
+  @apply m-0 text-text;
   font: 700 22px "Barlow";
 }
 .pf-install-progress-track {
-  height: 28px;
+  @apply h-[28px] overflow-hidden rounded-pill bg-inset;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--pill-radius);
-  background: var(--inset);
-  overflow: hidden;
 }
 @keyframes pf-install-stripes {
   from {
@@ -282,7 +248,7 @@
    rebuilt on the accent token. The width comes from the one legitimate inline
    style in this whole surface (InstallProgress). */
 .pf-install-progress-bar {
-  height: 100%;
+  @apply h-full;
   background-color: var(--accent);
   background-image: linear-gradient(
     115deg,
@@ -325,21 +291,11 @@
    layout it cannot create a scrollbar. */
 .pf-wizard-modal,
 .pf-install-reboot-modal {
-  position: fixed;
+  @apply fixed z-20 flex min-w-[320px] max-w-[480px] flex-col items-center gap-[16px] rounded-card bg-card p-[22px];
   top: 50%;
   left: 50%;
-  z-index: 20;
   transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  min-width: 320px;
-  max-width: 480px;
-  padding: 22px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--card-radius);
-  background: var(--card);
   box-shadow:
     0 24px 60px rgba(0, 0, 0, 0.55),
     0 0 0 100vmax rgba(0, 0, 0, 0.6);
@@ -347,17 +303,12 @@
 }
 .pf-wizard-modal > p,
 .pf-install-reboot-message {
-  margin: 0;
-  max-width: 34ch;
-  color: var(--text);
+  @apply m-0 max-w-[34ch] text-text;
   font: 500 15px "Barlow";
   line-height: 1.6;
 }
 .pf-install-reboot-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 12px;
+  @apply flex flex-wrap justify-center gap-[12px];
 }
 /* The only one of the three that appears over a step the user can still act on
    (a 409 from /finish while the grill is running). A red edge marks it as a
@@ -374,6 +325,5 @@
    and the Back/Next footer at full brightness behind the dialog. Anchor it to
    the viewport instead, above the wizard chrome. */
 .pf-wizard .pf-modal-scrim {
-  position: fixed;
-  z-index: 30;
+  @apply fixed z-30;
 }
