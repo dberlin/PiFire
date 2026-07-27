@@ -465,6 +465,15 @@ def api_page(action=None, arg0=None, arg1=None, arg2=None, arg3=None):
     # Get current server status
     server_status = get_server_status()
 
+    #  `cmd` reboots, shuts down and restarts the machine. This branch runs
+    #  BEFORE the method split below, so every one of those was reachable by a
+    #  bare GET -- no body, no confirmation, no CSRF token, which makes any
+    #  link, prefetch, crawler or <img src> pointing here enough to power the
+    #  box off. Only `cmd` is narrowed: `get` is read-only and the mobile app
+    #  polls it over GET, and narrowing `set`/`sys` is a separate decision.
+    if action == "cmd" and request.method != "POST":
+        return jsonify({"Error": "Method Not Allowed. /api/cmd/* requires POST."}), 405
+
     if action in ["get", "set", "cmd", "sys"]:
         # print(f'action={action}\narg0={arg0}\narg1={arg1}\narg2={arg2}\narg3={arg3}')
         arglist = []
