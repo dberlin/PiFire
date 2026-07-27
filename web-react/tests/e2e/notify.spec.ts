@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { APIRequestContext } from "@playwright/test";
 import { expect, test } from "@playwright/test";
-import { API, ensureStopped } from "./helpers";
+import { API, ensureStopped, refreshLiveProbeReadings } from "./helpers";
 
 // Requires the prototype backend running: `uv run python control.py` + `uv run
 // python app.py`.
@@ -233,32 +233,57 @@ test("turning the notification off clears the target and still leaves the limits
 
 // The pre-arm, end to end. A limit saved with triggered:false while the probe
 // has ALREADY passed it sounds its alarm on the very next control pass
-// (notify/notifications.py:112). Arming a high limit of 1 degree -- which every
-// probe is already above -- is the cheapest way to make the client's pre-arm the
-// only thing standing between the save and an immediate alarm.
+// (notify/notifications.py:112). Arming a high limit of 1 degree is the cheapest
+// way to make the client's pre-arm the only thing standing between the save and
+// an immediate alarm -- `triggered` is computed as `currentTemp >= target` at
+// save time (helpers/notify/notifyState.ts::limitEditFields).
+//
+// The grill therefore has to be RUNNING for this test to mean anything: the
+// prototype backend reads its probes only in a running mode, and every reading
+// reads back 0 in Stop -- against which no positive target has been "already
+// passed" at all, and the save guard (ProbeNotifyModal.tsx) refuses a target of
+// 0 outright. Monitor is the mode that reads probes and drives no outputs, so
+// this arranges the very situation the pre-arm exists for: a probe genuinely
+// sitting far above the limit being armed.
 //
 // SAFETY: no action is chosen, so this writes shutdown:false. A `triggered`
-// high limit with "Shutdown PiFire" would stop the grill.
+// high limit with "Shutdown PiFire" would stop the grill. Monitor mode itself
+// runs no auger and no igniter.
 test("a high limit the probe has already passed is saved pre-armed", async ({ page, request }) => {
+  // Two mode changes and a queued write on top of the usual UI round trip; the
+  // default 30s budget is spent before the assertions start.
+  test.setTimeout(90_000);
   const { label, name } = await firstFoodProbe(request);
 
-  await page.goto("/");
-  await page.getByRole("button", { name: `Notifications for ${name}` }).click();
-  await page.getByRole("checkbox", { name: /high limit/i }).check();
-  await page.getByRole("spinbutton", { name: /^high limit/i }).fill("1");
-  // exact: the dashboard's settings gear is aria-label="settings", which a
-  // substring match on "Set" also selects.
-  await page.getByRole("button", { name: "Set", exact: true }).click();
+  try {
+    const current = await refreshLiveProbeReadings(request);
+    expect(
+      current.F[label],
+      "the probe must already be above the 1° limit for the pre-arm to be the thing under test",
+    ).toBeGreaterThan(1);
 
-  await expect
-    .poll(
-      async () => {
-        const e = entryFor(await getNotify(request), label, "probe_limit_high");
-        return e ? { req: e.req, target: e.target, triggered: e.triggered } : null;
-      },
-      { timeout: 20_000, message: "the high-limit write never reached control.notify_data" },
-    )
-    .toEqual({ req: true, target: 1, triggered: true });
+    await page.goto("/");
+    await page.getByRole("button", { name: `Notifications for ${name}` }).click();
+    await page.getByRole("checkbox", { name: /high limit/i }).check();
+    await page.getByRole("spinbutton", { name: /^high limit/i }).fill("1");
+    // exact: the dashboard's settings gear is aria-label="settings", which a
+    // substring match on "Set" also selects.
+    await page.getByRole("button", { name: "Set", exact: true }).click();
+
+    await expect
+      .poll(
+        async () => {
+          const e = entryFor(await getNotify(request), label, "probe_limit_high");
+          return e ? { req: e.req, target: e.target, triggered: e.triggered } : null;
+        },
+        { timeout: 20_000, message: "the high-limit write never reached control.notify_data" },
+      )
+      .toEqual({ req: true, target: 1, triggered: true });
+  } finally {
+    // Before the afterEach restores notify_data, and however the assertions
+    // went: this is the only test in the file that starts the controller.
+    await ensureStopped(request);
+  }
 });
 
 test("the primary probe has a bell, with the limit actions but no target action", async ({
