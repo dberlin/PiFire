@@ -7,9 +7,11 @@ recipe surface. SAFETY: every test here writes only into the temp folder
 
 import io
 import os
+from unittest.mock import ANY
 
 import pytest
 
+from blueprints.api_files import routes
 from tests.web.archive_builders import write_recipe
 
 pytestmark = pytest.mark.usefixtures("api_files_folders")
@@ -169,3 +171,67 @@ def test_delete_refuses_traversal_and_unknown_names(client, folders, tmp_path, h
 
 def test_delete_with_no_body_is_400(client, folders):
     assert client.post("/api/files/recipes/delete").status_code == 400
+
+
+# --------------------------------------------------------------------------
+# run
+#
+# G1/G6 SAFETY: every test below stubs both write_control and read_control on
+# the routes module -- none of them may reach the real control store, and
+# none of them may read live state.
+# --------------------------------------------------------------------------
+
+
+def test_run_refuses_unless_stopped(client, folders, monkeypatch):
+    writes = []
+    monkeypatch.setattr(routes, "write_control", lambda *a, **k: writes.append(a))
+    monkeypatch.setattr(routes, "read_control", lambda: {"mode": "Hold"})
+    name = write_recipe(folders[1], "Brisket")
+    resp = client.post("/api/files/recipes/run", json={"file": name})
+    assert resp.status_code == 409
+    assert resp.get_json()["message"] == "not_stopped"
+    assert writes == []
+
+
+def test_run_sends_start_step_and_step_explicitly(client, folders, monkeypatch):
+    """_api_post_control deep-merges, so a bare {filename} inherits the previous
+    run's step and starts mid-recipe."""
+    writes = []
+    monkeypatch.setattr(routes, "write_control", lambda *a, **k: writes.append(a))
+    monkeypatch.setattr(routes, "read_control", lambda: {"mode": "Stop"})
+    _history, recipe_dir = folders
+    name = write_recipe(recipe_dir, "Brisket")
+
+    resp = client.post("/api/files/recipes/run", json={"file": name})
+
+    assert resp.status_code == 200
+    assert resp.get_json()["data"]["filename"] == name
+    envelope, kind = writes[0][0], writes[0][1]
+    assert kind is routes.WriteKind.DELTA
+    delta = envelope["set"]
+    assert delta["mode"] == routes.Mode.RECIPE
+    assert delta["recipe"] == {"filename": ANY, "start_step": 0, "step": 0}
+    # The path rule (bare filenames) governs what the client sends; the
+    # server stores the resolved absolute path, since that is what
+    # controller.py opens.
+    filename = delta["recipe"]["filename"]
+    assert os.path.isabs(filename)
+    assert filename == os.path.join(recipe_dir, name)
+
+
+def test_run_of_an_unknown_file_is_404(client, folders, monkeypatch):
+    writes = []
+    monkeypatch.setattr(routes, "write_control", lambda *a, **k: writes.append(a))
+    monkeypatch.setattr(routes, "read_control", lambda: {"mode": "Stop"})
+    resp = client.post("/api/files/recipes/run", json={"file": "Nope.pfrecipe"})
+    assert resp.status_code == 404
+    assert writes == []
+
+
+def test_run_refuses_traversal_and_never_writes_control(client, folders, monkeypatch):
+    writes = []
+    monkeypatch.setattr(routes, "write_control", lambda *a, **k: writes.append(a))
+    monkeypatch.setattr(routes, "read_control", lambda: {"mode": "Stop"})
+    resp = client.post("/api/files/recipes/run", json={"file": "../../../etc/passwd"})
+    assert resp.status_code == 404
+    assert writes == []

@@ -209,11 +209,20 @@ def read_recipefile(filename):
     return (file_data, status)
 
 
+def _convert_setpoint(temp, units):
+    """0 is the disabled sentinel for hold_temp and for both trigger_temps
+    members, so it passes through unconverted: 0 F -> -17 C would arm every
+    disabled trigger on the recipe."""
+    return 0 if not temp else convert_temp(units, temp)
+
+
 def convert_recipe_units(recipe, units):
-    for index, step in enumerate(recipe["steps"]):
-        for probe, settemp in step["settemps"]:
-            recipe["steps"][index]["settemps"][probe] = 0 if settemp == 0 else convert_temp(units, settemp)
-        recipe["steps"][index]["hold_temp"] = 0 if step["hold_temp"] == 0 else convert_temp(units, step["hold_temp"])
+    """Convert every temperature in a recipe's steps to `units`."""
+    for step in recipe["steps"]:
+        step["hold_temp"] = _convert_setpoint(step["hold_temp"], units)
+        triggers = step["trigger_temps"]
+        triggers["primary"] = _convert_setpoint(triggers["primary"], units)
+        triggers["food"] = [_convert_setpoint(temp, units) for temp in triggers["food"]]
     return recipe
 
 

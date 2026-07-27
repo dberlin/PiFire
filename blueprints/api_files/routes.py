@@ -22,7 +22,11 @@ from flask import current_app, jsonify, request, send_file
 from werkzeug.exceptions import BadRequest
 
 from common.app import api_response
+from common.common import WriteKind
+from common.control_delta import control_delta
+from common.datastore_accessors import read_control, write_control
 from common.file_browser import browse_files, resolve_managed_file
+from common.modes import Mode
 from file_mgmt.recipes import create_recipefile
 
 from . import api_files_bp, cookfile_api, recipes_api
@@ -407,3 +411,38 @@ def recipe_delete_file():
         return err
     os.remove(path)
     return jsonify(api_response("OK")), 200
+
+
+@api_files_bp.route("/recipes/run", methods=["POST"])
+def recipe_run():
+    """Start a recipe.
+
+    Refuses unless the grill is stopped -- a deliberate divergence from Flask,
+    which posts from any mode (static/recipes/js/recipes.js:270-293). It matches
+    the guard POST /api/probe_map applies and it is the difference between a
+    test suite that can exercise this route and one that cannot.
+
+    start_step and step are sent explicitly because _api_post_control
+    deep-merges: a bare {filename} inherits the previous run's step.
+    """
+    _struct, path, err = _load_recipe(json_body().get("file", ""))
+    if err:
+        return err
+    control = read_control()
+    if control.get("mode") != Mode.STOP:
+        return error("not_stopped", 409, mode=control.get("mode"))
+    write_control(
+        # The path rule (bare filenames) governs what the client SENDS; the
+        # resolved absolute path is what gets stored here, because that is
+        # what controller.py opens the recipe from.
+        control_delta(
+            set_values={
+                "updated": True,
+                "mode": Mode.RECIPE,
+                "recipe": {"filename": path, "start_step": 0, "step": 0},
+            }
+        ),
+        WriteKind.DELTA,
+        origin="api-files",
+    )
+    return jsonify(api_response("OK", None, {"filename": os.path.basename(path)})), 200
