@@ -109,6 +109,10 @@ describe("every pf-* class the app uses has a rule", () => {
       ["src/components/wizard/WizardShell.tsx", "./wizard.css"],
       ["src/components/history/HistoryChart.tsx", "./historyChart.css"],
       ["src/components/pellets/PelletsPage.tsx", "./pellets.css"],
+      // probes.css is imported by the two cards rather than by either surface's
+      // shell, so both surfaces that render them get it.
+      ["src/components/wizard/probes/DevicesCard.tsx", "./probes.css"],
+      ["src/components/wizard/probes/PortsCard.tsx", "./probes.css"],
     ];
     for (const [file, spec] of imports) {
       expect(readFileSync(file, "utf8"), `${file} no longer imports ${spec}`).toContain(
