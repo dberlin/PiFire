@@ -1,3 +1,5 @@
+@reference "../../theme.css";
+
 /* App shell: navbar + timer strip. Ported from templates/base.html and
    _macro_timer.html, restyled onto the existing theme tokens (theme.css) and
    the pf-* class vocabulary already used by the settings and dashboard
@@ -8,17 +10,12 @@
    page area is the only scrolling region, so the navbar and the alert strip
    stay put. */
 .pf-shell {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--page);
+  @apply fixed inset-0 flex flex-col bg-page;
 }
 .pf-shell-main {
-  position: relative;
+  @apply relative overflow-auto;
   flex: 1;
   min-height: 0;
-  overflow: auto;
 }
 /* Two page roots were written before there was any chrome above them and size
    themselves against the viewport: .pf-fit pins to it (position: fixed), and
@@ -26,7 +23,7 @@
    area BELOW the navbar instead, or they would slide under it. Scoped to
    .pf-shell-main so each page still stands alone in its own tests. */
 .pf-shell-main .pf-fit {
-  position: absolute;
+  @apply absolute;
 }
 .pf-shell-main .pf-settings {
   min-height: 100%;
@@ -34,28 +31,16 @@
 
 /* ---- navbar ---- */
 .pf-nav {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 10px 16px;
-  background: var(--inset);
+  @apply flex flex-wrap items-center gap-[16px] bg-inset px-[16px] py-[10px] text-text;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text);
 }
 .pf-nav-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text);
+  @apply flex min-w-0 items-center gap-[8px] text-text;
   text-decoration: none;
   font: 700 18px "Barlow";
-  min-width: 0;
 }
 .pf-nav-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  @apply h-[22px] w-[22px] rounded-[6px];
   background: linear-gradient(160deg, var(--accent-1), var(--accent-2));
   /* 45% is this element's own choice, not a Qt value: Qt has no navbar, so
      there is no counterpart to match. --glow is opaque (it is Theme.glowColor
@@ -65,16 +50,13 @@
   flex: 0 0 auto;
 }
 .pf-nav-fire {
-  color: var(--accent);
+  @apply text-accent;
   font-style: normal;
 }
 .pf-nav-grill {
-  color: var(--text-dim);
+  @apply max-w-[210px] overflow-hidden whitespace-nowrap text-text-dim;
   font: 600 13px "Barlow";
-  overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 210px;
 }
 .pf-nav-grill::before {
   content: "| ";
@@ -82,57 +64,41 @@
 /* base.html:50-61 keeps the stopwatch and the hamburger together in one
    right-hand group, outside the collapsible menu. */
 .pf-nav-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
+  @apply ml-auto flex items-center gap-[8px];
   order: 2;
 }
 .pf-nav-timer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  @apply flex cursor-pointer items-center justify-center rounded-[10px] px-[10px] py-[8px] text-text-dim;
   background: none;
-  color: var(--text-dim);
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 10px;
-  padding: 8px 10px;
-  cursor: pointer;
 }
 .pf-nav-timer:hover {
-  color: var(--text);
+  @apply text-text;
 }
 .pf-nav-timer.on {
+  @apply text-text;
   background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
 }
 /* Flask recolours this same button while a timer counts down and clears the
    colour when it stops or expires (timer.js:207, :180). */
 .pf-nav-timer.running {
-  color: var(--accent-1);
+  @apply text-accent-1;
   border-color: color-mix(in srgb, var(--accent-1) 55%, transparent);
 }
 .pf-nav-toggle {
-  display: none;
+  @apply hidden cursor-pointer rounded-[10px] px-[10px] py-[8px];
   background: none;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 10px;
-  padding: 8px 10px;
-  cursor: pointer;
 }
 .pf-nav-bars,
 .pf-nav-bars::before,
 .pf-nav-bars::after {
-  display: block;
-  width: 16px;
-  height: 2px;
-  background: var(--text);
-  border-radius: 2px;
+  @apply block h-[2px] w-[16px] rounded-[2px] bg-text;
 }
 .pf-nav-bars::before,
 .pf-nav-bars::after {
+  @apply relative;
   content: "";
-  position: relative;
 }
 .pf-nav-bars::before {
   top: -5px;
@@ -141,53 +107,43 @@
   top: 3px;
 }
 .pf-nav-list {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  @apply m-0 flex items-center gap-[4px] p-0;
   list-style: none;
-  margin: 0;
-  padding: 0;
   order: 1;
 }
 .pf-nav-item {
-  display: block;
+  @apply block;
 }
 .pf-nav-link {
-  display: block;
-  color: var(--text-dim);
+  @apply block rounded-[10px] px-[12px] py-[8px] text-text-dim;
   text-decoration: none;
-  padding: 8px 12px;
-  border-radius: 10px;
   font: 600 15px "Barlow";
 }
 .pf-nav-link:hover:not(.disabled) {
-  color: var(--text);
+  @apply text-text;
   background: rgba(255, 255, 255, 0.05);
 }
 .pf-nav-link.active {
+  @apply text-text;
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--text);
 }
 .pf-nav-link.disabled {
+  @apply cursor-not-allowed;
   color: color-mix(in srgb, var(--text-dim) 55%, transparent);
-  cursor: not-allowed;
 }
 
 @media (max-width: 720px) {
   .pf-nav-toggle {
-    display: block;
+    @apply block;
   }
   .pf-nav-list {
-    display: none;
+    @apply hidden flex-col items-stretch text-center;
     flex-basis: 100%;
-    flex-direction: column;
-    align-items: stretch;
-    text-align: center;
     /* Wraps below the brand and the action buttons, not between them. */
     order: 3;
   }
   .pf-nav-list.open {
-    display: flex;
+    @apply flex;
   }
 }
 
@@ -197,90 +153,73 @@
    same object as the setpoint dialog. Only the pieces that do not already
    exist are defined here. */
 .pf-timer-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 8px 16px;
-  background: var(--card);
+  @apply flex items-center justify-center gap-[10px] bg-card px-[16px] py-[8px];
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 .pf-timer-time {
+  @apply min-w-[92px] text-center text-accent-1;
   font: 700 18px "Barlow Semi Condensed";
   font-variant-numeric: tabular-nums;
-  color: var(--accent-1);
-  min-width: 92px;
-  text-align: center;
 }
 .pf-timer-btn {
-  background: var(--inset);
+  @apply cursor-pointer rounded-[10px] bg-inset px-[14px] py-[6px];
   color: #e8dfd1;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 10px;
   font: 700 14px "Barlow";
-  padding: 6px 14px;
-  cursor: pointer;
 }
 .pf-timer-btn:hover:not(:disabled) {
+  @apply text-text;
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--text);
 }
 /* A timer write is queued and the control loop has not published it yet, so a
    second click would clobber the first (see TimerBar.tsx). */
 .pf-timer-btn:disabled {
+  @apply cursor-progress;
   opacity: 0.45;
-  cursor: progress;
 }
 
 /* The dashboard scrim is absolute inside .pf-stage; the shell's timer modal
    sits above the whole page instead. */
 .pf-modal-scrim-fixed {
-  position: fixed;
+  @apply fixed;
 }
 .pf-timer-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 280px;
+  @apply flex min-w-[280px] flex-col gap-[4px];
 }
 .pf-timer-dial {
-  display: grid;
+  @apply grid items-baseline;
   grid-template-columns: auto 1fr;
-  align-items: baseline;
   column-gap: 8px;
 }
 .pf-timer-readout {
+  @apply text-text;
   font: 800 40px "Barlow Semi Condensed";
-  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 .pf-timer-unit {
+  @apply text-text-dim;
   font: 600 15px "Barlow";
-  color: var(--text-dim);
 }
 .pf-timer-dial input[type="range"] {
+  @apply w-full;
   grid-column: 1 / -1;
-  width: 100%;
   accent-color: var(--accent);
 }
 .pf-timer-expiry {
+  @apply text-text-dim;
   font: 600 14px "Barlow";
-  color: var(--text-dim);
   margin: 12px 0 4px;
 }
 .pf-timer-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  @apply flex items-center gap-[8px];
   font: 600 15px "Barlow";
 }
 .pf-timer-check input[type="checkbox"] {
+  @apply h-[16px] w-[16px];
   accent-color: var(--accent);
-  width: 16px;
-  height: 16px;
 }
 .pf-timer-error {
-  color: var(--danger);
+  @apply text-danger;
   font: 600 14px "Barlow";
   margin: 10px 0 0;
 }
@@ -290,30 +229,39 @@
    dashboard stage (position: absolute, top: 62px); as shell chrome it is a
    plain row in the stack, above the routed page like base.html's alert block.
    HistoryPage reuses .pf-banner--error on its own for an inline error. */
+
+/* RUNTIME-CONSTRUCTED CLASS NAMES. Banners.tsx:26 builds
+   `pf-banner pf-banner--${it.level}` and NavBar.tsx builds
+   `pf-nav-timer ${on} ${running}` and `pf-nav-link ${active}` from state.
+   Tailwind's content scanner cannot see any of them.
+
+   That is harmless as long as these stay hand-written rules -- @apply resolves
+   at build time from the theme and does not depend on content scanning at all.
+   It becomes a silently-missing style the moment someone moves them into
+   utility strings in JSX. Do not.
+
+   tests/e2e/chrome-fidelity.spec.ts probes all three banner kinds
+   synthetically, because none of them renders under the demo fixture. */
 .pf-banners {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 16px;
+  @apply flex flex-col gap-[6px] px-[16px] py-[8px];
 }
 .pf-banner {
-  border-radius: 10px;
-  padding: 8px 14px;
+  @apply rounded-[10px] px-[14px] py-[8px];
   font: 600 13px "Barlow";
 }
 .pf-banner--warning {
+  @apply text-warn;
   background: color-mix(in srgb, var(--warn) 14%, transparent);
   border: 1px solid var(--warn);
-  color: var(--warn);
 }
 .pf-banner--error {
+  @apply text-danger;
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   border: 1px solid var(--danger);
-  color: var(--danger);
 }
 .pf-banner--critical {
+  @apply font-bold;
   background: color-mix(in srgb, var(--danger) 24%, transparent);
   border: 1px solid var(--danger);
   color: #ffd0cb;
-  font-weight: 700;
 }
