@@ -12,7 +12,7 @@
 // or carries exact: true. "Save probe configuration" and "Save" are different
 // buttons on this page; do not shorten the name.
 import { expect, test } from "@playwright/test";
-import { ensureStopped } from "./helpers";
+import { ensureStopped, expectCurrentMatchesProbeMap } from "./helpers";
 
 let original: unknown;
 
@@ -22,8 +22,50 @@ test.beforeAll(async ({ request }) => {
   expect(original).toBeTruthy();
 });
 
+// Putting the map back in SETTINGS is only half the restore -- and the missing
+// half used to take the rest of the suite down with it.
+//
+// control.py republishes the `current` blob -- the label -> temperature map the
+// socket payload is assembled from -- only while it is in a RUNNING mode; in
+// Stop it keeps the labels the last running mode left. The socket payload
+// builder indexes `current` by the labels the probe map declares
+// (blueprints/mobile/socket_io.py::_get_probe_data), so once the two disagree it
+// raises KeyError inside the `connect` handler, python-socketio refuses every
+// connection, and roundtrip.spec.ts and settings.spec.ts -- which run next and
+// both need the dashboard's live data -- sit on "Connecting to PiFire…" until
+// they time out. Three failures, none of them in the file that caused them.
+//
+// The fix is the test ORDER below, not a repair here: as long as this file
+// never runs the grill while the map is renamed, `current` stays on the
+// original labels the whole time and the restore genuinely restores. The check
+// is what keeps that true -- reintroduce a running mode after the rename and it
+// fails HERE, naming the invariant, instead of two files later. Repairing it
+// instead (a Monitor pass after the restore) is what the earlier version did,
+// and it was worse: that ends a cook, and a cook end whose history store spans
+// a probe rename fails create_cookfile and plants a permanent error banner on
+// every page, which then breaks the layout gates.
 test.afterAll(async ({ request }) => {
-  await request.post("/api/probe_map", { data: { probe_map: original } });
+  const res = await request.post("/api/probe_map", { data: { probe_map: original } });
+  expect(res.ok(), "restoring the original probe map failed").toBeTruthy();
+  await expectCurrentMatchesProbeMap(request);
+});
+
+// FIRST, deliberately: this is the only test in the file that runs the
+// controller, and running it after the rename below is what froze `current` on
+// the renamed labels. See the afterAll.
+test("the tab refuses to save while the grill is running", async ({ page, request }) => {
+  await request.post("/api/set/mode/monitor");
+  try {
+    await page.goto("/settings/probes");
+    await expect(page.getByRole("alert").filter({ hasText: "Stop it before" })).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(
+      page.getByRole("button", { name: "Save probe configuration", exact: true }),
+    ).toBeDisabled();
+  } finally {
+    await ensureStopped(request);
+  }
 });
 
 test("renaming a probe round-trips to live settings", async ({ page, request }) => {
@@ -56,21 +98,10 @@ test("renaming a probe round-trips to live settings", async ({ page, request }) 
   expect(Object.keys(after.history_page.probe_config)).toContain(renamed);
 });
 
-test("the tab refuses to save while the grill is running", async ({ page, request }) => {
-  await request.post("/api/set/mode/monitor");
-  try {
-    await page.goto("/settings/probes");
-    await expect(page.getByRole("alert").filter({ hasText: "Stop it before" })).toBeVisible({
-      timeout: 15000,
-    });
-    await expect(
-      page.getByRole("button", { name: "Save probe configuration", exact: true }),
-    ).toBeDisabled();
-  } finally {
-    await ensureStopped(request);
-  }
-});
-
+// Runs with the probe renamed and the map not yet restored, so the socket is
+// refused for its duration (see the afterAll). Nothing here reads live data --
+// the probes tab is fed over REST -- and this is the shape the file has always
+// had between the rename and the restore.
 test("the page fits 1280x720 without page scroll", async ({ page }) => {
   await page.goto("/settings/probes");
   await expect(page.getByRole("region", { name: "Probe devices" })).toBeVisible({ timeout: 15000 });
