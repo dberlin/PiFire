@@ -18,18 +18,28 @@ it by path and line number; those citations point here.
 ### Pages and chrome
 
 - **Dashboard** (`/`) — live socket data.
-- **App shell / global navigation** — navbar with all six destinations, every
-  one of them a real link since 2026-07-28. Events was the last disabled entry;
-  with it ported, the `to: null` case and the disabled span it rendered are
+- **App shell / global navigation** — navbar with seven destinations
+  (Dashboard, Recipes, History, Pellets, Events, Settings, Admin), every one of
+  them a real link since 2026-07-28. Events was the last disabled entry; with
+  it ported, the `to: null` case and the disabled span it rendered are
   gone from NavBar entirely (TypeScript narrowed that branch to `never`), along
   with their stylesheet rule. A future unported destination has to reintroduce
-  the mechanism deliberately. Also: shared layout
+  the mechanism deliberately.
+
+  **Three routes are deliberately NOT in the navbar**, and adding them would be
+  a regression, not a fix: `/metrics` (reached from /history, matching Flask,
+  whose `base.html` has never carried a Metrics entry), `/cookfiles/:filename`
+  and `/recipes/:filename` (detail views, reached from their lists). The one
+  navbar entry with no Flask counterpart is Pellets — see the note there.
+
+  Also: shared layout
   route, timer bar + modal, and the `Banners` alert strip hoisted out of
   Dashboard. The shell owns the single socket subscription and passes it down
   through Outlet context; a structural test enforces the one-call rule, because
   a second socket fails no other test — every component test mocks the hook.
 - **History page** (`/history`) — uPlot chart, minutes window, drag-zoom,
-  reset, cursor tooltip, CSV export link, **plus the saved-cook list** (2026-07-26:
+  reset, cursor tooltip, CSV export link, a Metrics link (2026-07-28 — the only
+  route into `/metrics` in either UI), **plus the saved-cook list** (2026-07-26:
   pagination, sort, per-page, upload, download, delete), which Flask also renders
   on this page rather than on one of its own.
 - **Cook-file browser** (`/history` list + `/cookfiles/:filename`) — SHIPPED
