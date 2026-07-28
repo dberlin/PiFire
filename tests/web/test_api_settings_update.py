@@ -217,3 +217,56 @@ def test_settings_update_rejects_a_negative_sleep_timeout(client):
 
     assert resp.get_json()["result"] == "error"
     assert read_settings() == before
+
+
+# ---------------------------------------------------------------------------
+# The React SmartStart/PWM range-table saves ride the tab's single delta with
+# the ["settings_update"] flag, where Flask's separate table forms send a BARE
+# write. Judged a harmless superset -- the flag only makes the control loop
+# re-read settings -- but the settings-state half of that claim was never
+# pinned across the process boundary (deferred-inventory-plans finding #9). The
+# seam pinned here: an array-subtree ("table") save WITH the flag stores the
+# SAME settings tree as the identical delta WITHOUT it. The flag's only effect
+# is the queued control re-read; it never changes what is written.
+# ---------------------------------------------------------------------------
+
+
+def _settings_update(client, body):
+    return client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
+
+
+def _reset_settings_update_flag():
+    ctrl = read_control()
+    ctrl["settings_update"] = False
+    write_control(ctrl, WriteKind.OVERWRITE, origin="test")
+
+
+def test_settings_update_table_save_flag_does_not_alter_stored_settings(client):
+    # A real "table" payload: the whole pwm.profiles array with one duty_cycle
+    # changed -- the shape PwmTab posts, a whole-array replace (not a per-element
+    # merge). 25 is within the schema's [min_duty_cycle, max_duty_cycle] band.
+    baseline = read_settings()
+    new_profiles = [dict(p) for p in baseline["pwm"]["profiles"]]
+    new_profiles[0]["duty_cycle"] = 25
+    delta = {"pwm": {"profiles": new_profiles}}
+
+    # 1) React's write: the delta plus the settings_update flag.
+    _reset_settings_update_flag()
+    assert _settings_update(client, {"settings": delta, "flags": ["settings_update"]}).get_json()["result"] == "success"
+    execute_control_writes()
+    with_flag = read_settings()
+    assert read_control()["settings_update"] is True  # the flag's ONLY intended effect
+
+    # 2) Flask's write: the identical delta as a bare write, from the same start.
+    write_settings(baseline)
+    _reset_settings_update_flag()
+    assert _settings_update(client, {"settings": delta, "flags": []}).get_json()["result"] == "success"
+    execute_control_writes()
+    without_flag = read_settings()
+    assert read_control()["settings_update"] is False
+
+    # The array really landed (whole-array replace; sibling pwm fields intact)...
+    assert without_flag["pwm"]["profiles"][0]["duty_cycle"] == 25
+    assert without_flag["pwm"]["max_duty_cycle"] == baseline["pwm"]["max_duty_cycle"]
+    # ...and the extra flag changed NOTHING about what was stored.
+    assert with_flag == without_flag

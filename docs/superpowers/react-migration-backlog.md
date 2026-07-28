@@ -996,6 +996,56 @@ blocked on a decision was decided (1000, live in `settings_schema.py` and
 the dashboard slice, which asserted there must be none, and the pellets plan,
 which said it was owed).
 
+**Reconciled 2026-07-28 — the first 15 open findings of
+`audits/2026-07-26-deferred-inventory-plans.md`** (that audit is the dated
+historical snapshot; this is the current disposition). Findings are cited by
+their audit number:
+
+- **Shipped since the 2026-07-26 sweep** — **#25** cook-file list/upload/delete
+  (now `web-react/src/components/cookfiles/*` + `helpers/files/cookfileApi.ts`,
+  route `App.tsx`) and **#27** the disabled Recipes/Events/Admin nav entries
+  (gone; `shell/NavBar.tsx` has real `to:` targets for all seven). Both are in
+  the SHIPPED section.
+- **Resolved by a deliberate ruling** — **#22**: `.pf-kv`/`.pf-kv-row` now have
+  rules (`settings.css`), and `.pf-section-note` is *intentionally* unstyled
+  (allowlisted in `styleCoverage.test.ts`, which asserts that list for EXACT
+  equality — so adding a rule would fail the gate, not satisfy it). Nothing to do.
+- **#9 — the `settings_update` seam is now pinned.** The React SmartStart/PWM
+  table saves ride the tab's delta with `["settings_update"]` where Flask sends
+  a bare write; `tests/web/test_api_settings_update.py::`
+  `test_settings_update_table_save_flag_does_not_alter_stored_settings` proves a
+  whole-array table save WITH the flag stores the identical settings tree as the
+  same delta WITHOUT it — the flag's only effect is the queued control re-read.
+- **#6 — assumption confirmed, closed.** `after_startup_mode` is exactly
+  `{Smoke, Hold}`: `settings_schema.py` `Literal["Smoke","Hold"]` and Flask
+  `blueprints/settings/templates/settings/index.html:808-809` offer only those.
+- **Confirmed BY-DECISION won't-dos** (live code still matches the ruling):
+  **#18** OneSignal devices self-register, only `friendly_name` editable
+  (`NotificationsTab.tsx`); **#21** PlatformTab read-only by design, edits owned
+  by the wizard; **#29** no `/manual` route — manual outputs live on the
+  dashboard button row; **#30** `allowManualOutputs` deliberately unused, pinned
+  by `buttonsForMode.test.ts`.
+- **#19 is NOT a parity gap.** Flask renders all six credential fields as
+  `type="text"` too (`index.html:1515,1536,1543,1577,1714,1790`), so React
+  matches Flask. Masking secrets would be a NEW feature, not a port — it needs a
+  product decision, not a fix, and porting-not-inventing is the standing rule.
+- **#26 — accepted unmonitored risk.** The Flask Chart.js history page still
+  consumes `prepare_chartdata` at `data_points=10000` with LTTB's per-series
+  union possibly exceeding it; no cap is warranted until the slow page is
+  actually observed. No code change.
+- **Still genuinely open, each its own slice:** **#5** Flask serves no React
+  build (no SPA catch-all / `send_from_directory` in `app.py`) — the whole
+  deployment path; **#17** the WLED preset/profile grid editor
+  (`NotificationsTab.tsx` round-trips the subtree but renders only
+  `enabled`/`device_address`/`notify_duration`).
+- **#1 / #2 — RESOLVED by ruling (2026-07-28), not a web-react target.** The QML
+  kiosk is the on-device touchscreen UI (a fullscreen Wayland kiosk on the Pi's
+  attached screen) and it STAYS; the React app was never going to reimplement
+  its screens. The kiosk was only a *visual* target — the React UI borrows its
+  look, which shipped as `display/qml/Theme.qml` → `theme.css` (guarded by
+  `themeTokens.test.ts`). So the "kiosk screens never built in React" framing is
+  a category error the spike plan introduced; closed as won't-do. See ruling 8.
+
 #### Whole surfaces never built
 
 - **Probe config as a React surface** — the single most-deferred item in the
@@ -1017,9 +1067,11 @@ which said it was owed).
 - OneSignal: no "add device"; `uuid`/`app_id` not editable.
 - "Send Test Notification" and all three WLED action buttons.
 - PlatformTab is read-only — no React editor for `platform.*`.
-- QML kiosk screens (Splash, Menu, Keypad, Hold/Notify overlays, QR, Sleep).
-  **These may be intentionally dead** — the project pivoted from cloning the Qt
-  kiosk to replacing the Flask web UI. Needs a one-line ruling either way.
+- ~~QML kiosk screens (Splash, Menu, Keypad, Hold/Notify overlays, QR, Sleep).~~
+  **RULED 2026-07-28 (ruling 8): NOT a web-react target.** The QML kiosk is the
+  on-device touchscreen UI and stays; React never intended to reimplement its
+  screens. The kiosk was only a visual target, and that borrowing already
+  shipped (`Theme.qml` → `theme.css`). Findings #1/#2 closed as won't-do.
 
 #### Shipping and deployment gaps
 
@@ -1251,6 +1303,17 @@ struck from the list below rather than left to be re-asked.
    *Leftover, deliberately not swept:* `tools/qt_dashboard_preview.qml:409,572,573`
    still hold the light ramp. It is a standalone dev preview with its own
    self-contained palette that never imports `Theme.qml`, so it was out of scope.
+8. **The QML kiosk is NOT a web-react target** (2026-07-28). The Qt Quick (QML)
+   UI is a separate on-device front-end — a fullscreen Wayland kiosk on the Pi's
+   attached touchscreen (`display/qml/`), sharing only the SQLite datastore and
+   command channel with the web tier. The React app was never going to
+   reimplement its screens (Splash, Menu, Keypad, Hold/Notify overlays, QR,
+   Sleep); the kiosk was only a *visual* target so the web UI matches its look,
+   and that borrowing shipped as `Theme.qml` → `theme.css` (guarded by
+   `web-react/src/themeTokens.test.ts`). This closes deferred-inventory findings
+   **#1** (kiosk screens never built) and **#2** (QML parity check) as won't-do —
+   they were a category error the react spike plan introduced, not real gaps.
+   The `tests/ui/test_qtquick_*.py` specs remain the kiosk's own net.
 
 #### Still needing a human
 

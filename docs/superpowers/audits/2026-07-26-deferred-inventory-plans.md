@@ -8,11 +8,22 @@ superseded since the plan was written. **UNCLEAR** = needs a human decision or a
 
 Totals: **75 findings — 39 STILL-OPEN, 31 ALREADY-DONE, 5 UNCLEAR.**
 
+**Reconciled 2026-07-28:** 11 of the first-15 open findings are closed and
+moved to the RESOLVED section below — #1, #2, #6, #9, #18, #21, #22, #25, #27,
+#29, #30. Still open from that set: #5, #17 (each its own slice), #19
+(matches Flask — masking is a new feature, not a port), #26 (accepted risk).
+
 ---
 
-## plans/2026-07-21-react-qtquick-ui.md
+## RESOLVED 2026-07-28 (reconciliation)
 
-### STILL-OPEN
+Findings closed after the 2026-07-26 sweep, re-verified against live code on
+2026-07-28 (reconciliation of the first 15 open findings; see
+`react-migration-backlog.md` item 10 and ruling 8). Each keeps its original
+number and its original 2026-07-26 assessment below a RESOLVED header, for
+provenance.
+
+**→ RESOLVED 2026-07-28 — not a web-react target -- the QML kiosk is the on-device touchscreen UI and stays; React only borrowed its visual language (Theme.qml -> theme.css). Backlog ruling 8 (2026-07-28).**
 
 1. **QML kiosk screens never built: Splash, MenuScreen, Keypad, Hold/Notify overlays, QR, Sleep**
    - Source: "## Phasing" steps 4–5; "Explicitly deferred in the spike" (line 81).
@@ -23,12 +34,102 @@ Totals: **75 findings — 39 STILL-OPEN, 31 ALREADY-DONE, 5 UNCLEAR.**
      pivoted from "clone the QML kiosk" to "replace the Flask web UI", so these may be *intentionally*
      dead. Needs a one-line ruling in the backlog either way.
 
+**→ RESOLVED 2026-07-28 — not a web-react target -- parity was against the kiosk's LOOK (theme tokens, shipped), never its screens. Backlog ruling 8 (2026-07-28).**
+
 2. **Phase 6 parity check against the QML screens and `tests/ui/test_qtquick_*.py` never run**
    - Source: "## Phasing" step 6; "## Verification" last paragraph.
    - Deferred: cross-check React screens against `display/qml/screens/*` and the existing behaviour
      specs in `tests/ui/`.
    - Status: STILL-OPEN — `tests/ui/` exists (`test_flex_*`, `test_qtapp_power.py`, …) but nothing in
      `web-react/` references it and no parity artifact exists.
+
+**→ RESOLVED 2026-07-28 — assumption confirmed -- after_startup_mode is exactly {Smoke, Hold} (settings_schema Literal + Flask settings/index.html:808-809).**
+
+6. **Unverified assumption: `after_startup_mode` options are only Smoke/Hold**
+   - Source: Task 9 Step 1 (line 423) — "verify against the wizard/settings template if more exist —
+     default to Smoke/Hold".
+   - Status: UNCLEAR/STILL-OPEN — `common/settings_schema.py` pins
+     `after_startup_mode: Literal["Smoke", "Hold"]`, so the schema now agrees with the guess, but the
+     Flask template was never cross-checked. Low risk; one grep closes it.
+
+**→ RESOLVED 2026-07-28 — seam pinned -- tests/web/test_api_settings_update.py::test_settings_update_table_save_flag_does_not_alter_stored_settings (a table save WITH the flag stores the same settings as a bare write).**
+
+9. **Accepted divergence: React sends `settings_update` on table-only saves where Flask sends a bare write**
+   - Source: Task 10 "Interfaces" (line 413) — "**plan ruling: one Save per tab, existing flags kept**
+     … The reviewer should verify this reasoning, not silently narrow it."
+   - Deferred: SmartStart / PWM range-table edits ride in the tab's single delta with
+     `["settings_update"]`, whereas Flask's separate table forms are bare writes. Judged a harmless
+     superset (control loop re-reads settings) but never independently verified.
+   - Status: STILL-OPEN as an unverified reasoning claim —
+     `web-react/src/components/settings/tabs/StartupTab.tsx` and `PwmTab.tsx` still save with
+     `["settings_update"]`. No test pins that the extra flag is harmless.
+
+**→ RESOLVED 2026-07-28 — confirmed BY-DECISION won't-do -- OneSignal devices self-register; only friendly_name editable (NotificationsTab.tsx). Matches Flask.**
+
+18. **OneSignal: no "add device", and `uuid`/`app_id` not editable**
+    - Source: Global Constraints line 16; "Verification summary" non-goals (line 176).
+    - Status: STILL-OPEN by design — `NotificationsTab.tsx:190-241` edits `friendly_name` and deletes
+      rows only. Matches Flask (devices self-register), so this is a documented won't-do rather than a
+      gap; recorded for completeness.
+
+**→ RESOLVED 2026-07-28 — confirmed BY-DECISION -- PlatformTab read-only; platform.* is owned by the Setup Wizard.**
+
+21. **PlatformTab is read-only: no React editor for `platform.*`**
+    - Source: "Design decisions → **D1**" (line 13).
+    - Deferred: editing `current`, `system_type`, `dc_fan`, `triggerlevel`, `standalone`, `real_hw`,
+      and output pins — delegated to the Setup Wizard to avoid dual ownership.
+    - Status: STILL-OPEN by decision — `tabs/PlatformTab.tsx` renders a `<dl>` + a "Configure in Setup
+      Wizard" link. Ratified, but it *is* a Flask-vs-React difference worth a backlog line.
+
+**→ RESOLVED 2026-07-28 — .pf-kv / .pf-kv-row now have rules (settings.css); .pf-section-note is intentionally unstyled (allowlisted in styleCoverage.test.ts, asserted for exact equality).**
+
+22. **PlatformTab's markup uses CSS classes that have no rule anywhere**
+    - Source: not in this plan; recorded in `2026-07-25-react-settings-guards-sweep.md` "Missing CSS
+      classes" (line 327). Cross-listed here because it is PlatformTab's markup.
+    - Status: STILL-OPEN — `pf-section-note` and `pf-kv`/`pf-kv-row` appear in no stylesheet
+      (`rg` over `src/theme.css`, `settings.css`, `dashboard.css`, `shell.css`, `wizard.css`,
+      `pellets.css`, `historyChart.css`). Only `.pf-field-hint` was added
+      (`web-react/src/components/settings/settings.css:192`).
+
+**→ RESOLVED 2026-07-28 — SHIPPED -- web-react/src/components/cookfiles/* + helpers/files/cookfileApi.ts (list/upload/delete), route in App.tsx.**
+
+25. **D4 — cook-file list / upload / delete not ported**
+    - Source: "Design decisions → **D4 — Chart only**" (line 16).
+    - Deferred: the `/history` cook-file management UI (listing, upload, delete), parked with the
+      "cookfile + recipes" backlog item because they share a data model and need a JSON listing
+      endpoint that does not exist.
+    - Status: STILL-OPEN — no cookfile component or helper in `web-react/src`; `blueprints/cookfile/`
+      is Flask-only (`app.py:99`).
+
+**→ RESOLVED 2026-07-28 — SHIPPED -- NavBar.tsx has real to: targets for all seven nav entries; no disabled spans or to:null remain.**
+
+27. **Recipes, Events and Admin render disabled — three whole Flask pages unported**
+    - Source: "**Decision:** show all 6; Recipes, Events and Admin render disabled (not links) since
+      they are not ported. Do not link them to the Flask pages." (line 59).
+    - Status: STILL-OPEN — `web-react/src/components/shell/NavBar.tsx:16-24` has
+      `{ label: "Recipes", to: null }`, `{ label: "Events", to: null }`, `{ label: "Admin", to: null }`
+      rendered as `<span aria-disabled="true" title="Not available in the new interface yet">`
+      (`NavBar.tsx:101-108`). The no-link-out rule is cited by three later plans as precedent.
+
+**→ RESOLVED 2026-07-28 — confirmed BY-DECISION -- no /manual route; manual outputs live on the dashboard button row (buttonsForMode.ts).**
+
+29. **No `/manual` route — a bookmarked Flask `/manual` URL will not resolve in React**
+    - Source: "Design decisions → **D1**" (line 23) — "Consequence the user accepted".
+    - Status: STILL-OPEN by decision — manual outputs live on the dashboard button row
+      (`helpers/dashboard/buttonsForMode.ts:130-142`); `App.tsx` registers no `/manual`.
+
+**→ RESOLVED 2026-07-28 — confirmed BY-DECISION, test-pinned -- allowManualOutputs deliberately unused (buttonsForMode.test.ts).**
+
+30. **`allowManualOutputs` deliberately unused; manual toggles only in Manual mode**
+    - Source: "Design decisions → **D3**" (line 25).
+    - Deferred: Flask's `safety.allow_manual_changes` path (which `_cmd_set_manual` honours) is not
+      surfaced; parity with legacy's narrower gate was chosen instead.
+    - Status: STILL-OPEN by decision, pinned by a test. Recorded so nobody "fixes" it accidentally.
+      Also: the Flask `manual` blueprint is still registered (`app.py:94`) and un-retired.
+
+---
+
+## plans/2026-07-21-react-qtquick-ui.md
 
 ### ALREADY-DONE
 
@@ -65,15 +166,6 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
 
 ## plans/2026-07-22-settings-2b1-scalar-tabs.md
 
-### STILL-OPEN
-
-6. **Unverified assumption: `after_startup_mode` options are only Smoke/Hold**
-   - Source: Task 9 Step 1 (line 423) — "verify against the wizard/settings template if more exist —
-     default to Smoke/Hold".
-   - Status: UNCLEAR/STILL-OPEN — `common/settings_schema.py` pins
-     `after_startup_mode: Literal["Smoke", "Hold"]`, so the schema now agrees with the guess, but the
-     Flask template was never cross-checked. Low risk; one grep closes it.
-
 ### ALREADY-DONE
 
 7. **`return null` tab stubs left by Task 2 Step 7** (line 202) — all five tabs implemented
@@ -86,18 +178,6 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
 ---
 
 ## plans/2026-07-22-settings-2b2-widgets.md
-
-### STILL-OPEN
-
-9. **Accepted divergence: React sends `settings_update` on table-only saves where Flask sends a bare write**
-   - Source: Task 10 "Interfaces" (line 413) — "**plan ruling: one Save per tab, existing flags kept**
-     … The reviewer should verify this reasoning, not silently narrow it."
-   - Deferred: SmartStart / PWM range-table edits ride in the tab's single delta with
-     `["settings_update"]`, whereas Flask's separate table forms are bare writes. Judged a harmless
-     superset (control loop re-reads settings) but never independently verified.
-   - Status: STILL-OPEN as an unverified reasoning claim —
-     `web-react/src/components/settings/tabs/StartupTab.tsx` and `PwmTab.tsx` still save with
-     `["settings_update"]`. No test pins that the extra flag is harmless.
 
 ### ALREADY-DONE
 
@@ -156,12 +236,6 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
     - Status: STILL-OPEN — `web-react/src/components/settings/tabs/NotificationsTab.tsx:315-330` renders
       only `enabled`, `device_address`, `notify_duration` for WLED.
 
-18. **OneSignal: no "add device", and `uuid`/`app_id` not editable**
-    - Source: Global Constraints line 16; "Verification summary" non-goals (line 176).
-    - Status: STILL-OPEN by design — `NotificationsTab.tsx:190-241` edits `friendly_name` and deletes
-      rows only. Matches Flask (devices self-register), so this is a documented won't-do rather than a
-      gap; recorded for completeness.
-
 19. **Secret masking not ported** ("masking" non-goal, line 176)
     - Deferred: API keys / tokens render as plain `TextField`s in React.
     - Status: STILL-OPEN — every credential field in `NotificationsTab.tsx` (IFTTT `APIKey`, Pushover
@@ -176,23 +250,6 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
 ---
 
 ## plans/2026-07-24-react-small-batch.md
-
-### STILL-OPEN
-
-21. **PlatformTab is read-only: no React editor for `platform.*`**
-    - Source: "Design decisions → **D1**" (line 13).
-    - Deferred: editing `current`, `system_type`, `dc_fan`, `triggerlevel`, `standalone`, `real_hw`,
-      and output pins — delegated to the Setup Wizard to avoid dual ownership.
-    - Status: STILL-OPEN by decision — `tabs/PlatformTab.tsx` renders a `<dl>` + a "Configure in Setup
-      Wizard" link. Ratified, but it *is* a Flask-vs-React difference worth a backlog line.
-
-22. **PlatformTab's markup uses CSS classes that have no rule anywhere**
-    - Source: not in this plan; recorded in `2026-07-25-react-settings-guards-sweep.md` "Missing CSS
-      classes" (line 327). Cross-listed here because it is PlatformTab's markup.
-    - Status: STILL-OPEN — `pf-section-note` and `pf-kv`/`pf-kv-row` appear in no stylesheet
-      (`rg` over `src/theme.css`, `settings.css`, `dashboard.css`, `shell.css`, `wizard.css`,
-      `pellets.css`, `historyChart.css`). Only `.pf-field-hint` was added
-      (`web-react/src/components/settings/settings.css:192`).
 
 ### ALREADY-DONE
 
@@ -209,14 +266,6 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
 
 ### STILL-OPEN
 
-25. **D4 — cook-file list / upload / delete not ported**
-    - Source: "Design decisions → **D4 — Chart only**" (line 16).
-    - Deferred: the `/history` cook-file management UI (listing, upload, delete), parked with the
-      "cookfile + recipes" backlog item because they share a data model and need a JSON listing
-      endpoint that does not exist.
-    - Status: STILL-OPEN — no cookfile component or helper in `web-react/src`; `blueprints/cookfile/`
-      is Flask-only (`app.py:99`).
-
 26. **Legacy Flask chart may become unusable on long windows after the LTTB change**
     - Source: "### Legacy performance note (raised with the user, accepted)" (line 18).
     - Deferred: above the 10 000-sample threshold the Flask/Chart.js page now receives *more* points
@@ -228,16 +277,6 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
 ---
 
 ## plans/2026-07-24-react-app-shell.md
-
-### STILL-OPEN
-
-27. **Recipes, Events and Admin render disabled — three whole Flask pages unported**
-    - Source: "**Decision:** show all 6; Recipes, Events and Admin render disabled (not links) since
-      they are not ported. Do not link them to the Flask pages." (line 59).
-    - Status: STILL-OPEN — `web-react/src/components/shell/NavBar.tsx:16-24` has
-      `{ label: "Recipes", to: null }`, `{ label: "Events", to: null }`, `{ label: "Admin", to: null }`
-      rendered as `<span aria-disabled="true" title="Not available in the new interface yet">`
-      (`NavBar.tsx:101-108`). The no-link-out rule is cited by three later plans as precedent.
 
 ### ALREADY-DONE
 
@@ -253,19 +292,7 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
 
 ## plans/2026-07-24-react-manual-control.md
 
-### STILL-OPEN
-
-29. **No `/manual` route — a bookmarked Flask `/manual` URL will not resolve in React**
-    - Source: "Design decisions → **D1**" (line 23) — "Consequence the user accepted".
-    - Status: STILL-OPEN by decision — manual outputs live on the dashboard button row
-      (`helpers/dashboard/buttonsForMode.ts:130-142`); `App.tsx` registers no `/manual`.
-
-30. **`allowManualOutputs` deliberately unused; manual toggles only in Manual mode**
-    - Source: "Design decisions → **D3**" (line 25).
-    - Deferred: Flask's `safety.allow_manual_changes` path (which `_cmd_set_manual` honours) is not
-      surfaced; parity with legacy's narrower gate was chosen instead.
-    - Status: STILL-OPEN by decision, pinned by a test. Recorded so nobody "fixes" it accidentally.
-      Also: the Flask `manual` blueprint is still registered (`app.py:94`) and un-retired.
+*All findings (#29, #30) resolved 2026-07-28 -- moved to the RESOLVED section above.*
 
 ---
 
@@ -636,8 +663,15 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
 
 ## Cross-cutting items worth one backlog line each
 
-- **Nothing is served by Flask** (#5) — the React app has no production entry point at all.
-- **Three nav items disabled** (#27) plus **cookfile** (#25) and **manual** (#29/#71) — five Flask
-  surfaces with no React counterpart and no owning plan.
-- **No legacy page has been retired** (#71) — the migration is purely additive so far.
-- **Two plans contradict each other on the hopper→pellets shortcut** (#59 vs #70).
+Reconciled 2026-07-28 — several of these closed; see the RESOLVED section above.
+
+- **Nothing is served by Flask** (#5) — the React app has no production entry
+  point at all. **Still open** (its own slice).
+- ~~**Three nav items disabled** (#27) plus **cookfile** (#25)~~ — both SHIPPED;
+  the nav entries are real links and the cook-file surfaces exist. **manual**
+  (#29) is a confirmed by-decision won't-do — outputs live on the dashboard
+  button row, not a `/manual` route.
+- **No legacy page has been retired** (#71) — still true; every legacy blueprint
+  stays live until the single retirement pass (backlog ruling 5).
+- ~~**Two plans contradict each other on the hopper→pellets shortcut** (#59 vs
+  #70)~~ — RESOLVED: the link exists, matching Bootstrap (backlog item 6a).
