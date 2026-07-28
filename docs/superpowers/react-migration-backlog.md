@@ -26,11 +26,14 @@ it by path and line number; those citations point here.
   with their stylesheet rule. A future unported destination has to reintroduce
   the mechanism deliberately.
 
-  **Three routes are deliberately NOT in the navbar**, and adding them would be
+  **Four routes are deliberately NOT in the navbar**, and adding them would be
   a regression, not a fix: `/metrics` (reached from /history, matching Flask,
-  whose `base.html` has never carried a Metrics entry), `/cookfiles/:filename`
-  and `/recipes/:filename` (detail views, reached from their lists). The one
-  navbar entry with no Flask counterpart is Pellets — see the note there.
+  whose `base.html` has never carried a Metrics entry), `/tuner` (reached from
+  Settings > Probes — Flask's navbar has a Tuner entry, but the tuner opens a
+  live tuning session that moves the grill into Monitor, which belongs behind
+  the probe config, not on the global nav), `/cookfiles/:filename` and
+  `/recipes/:filename` (detail views, reached from their lists). The one navbar
+  entry with no Flask counterpart is Pellets — see the note there.
 
   Also: shared layout
   route, timer bar + modal, and the `Banners` alert strip hoisted out of
@@ -249,6 +252,46 @@ it by path and line number; those citations point here.
   `history/index.html:47` is the only link into `/metrics` in the Flask tree.
   That link was dropped by the first history port and is now restored as a
   `<Link>` — an `<a href>` would reload the SPA and drop the shell's socket.
+- **Tuner** (`/tuner`, MANUAL flow) — SHIPPED 2026-07-28
+  (`plans/2026-07-28-react-tuner-manual.md`, slice 1 of 2, 11 tasks), behind a
+  new `blueprints/api_tuner`. The auto flow is slice 2.
+
+  **The one structural change from Flask: the SESSION is split from the
+  READING.** `/tuner`'s `read_tr` command both enabled tuning mode AND returned
+  a value, so a page that merely polled mutated grill state on every tick and no
+  request meant "stop". Now exactly two calls write control —
+  `POST /api/tuner/session {open}` — and `GET /api/tuner/tr` is inert. Opening
+  moves a stopped grill to Monitor and is refused with 409 from any mode that is
+  neither Stop nor Monitor (Flask had no such guard); closing is idempotent and
+  restores Stop only when the mode is still Monitor, so a cook started mid-session
+  is left alone.
+
+  **This is the first ported page whose own operation changes grill mode**, so
+  the teardown is the load-bearing behaviour: `useTunerSession` closes on
+  unmount, including when the unmount races an open still in flight. Three
+  independent nets guard against a leaked Monitor session — an `autouse` pytest
+  fixture, the hook's unmount tests, and the live e2e's `afterEach` control
+  read — each with its own negative control.
+
+  **The template-injection door in `blueprints/tuner` is closed.** Its fragment
+  endpoint concatenated a client-supplied name into Jinja SOURCE and rendered
+  it (`render_template_string`); the six names the client sends are now an
+  allowlist into constant strings. Proven real: the seventh macro, defined but
+  never requested, rendered a full fragment under the old code.
+
+  **Two silent failures in the maths now have signals.**
+  `calc_shh_coefficients` swallows every exception and returns `(0, 0, 0)`,
+  which Flask fed straight to the save form — now a 422 `uncomputable`. And
+  `calc_shh_chart` abandons the whole curve on one bad point (its own docstring
+  calls this common) — now reported as `chart_ok: false` rather than drawn as
+  an empty chart. `tuner.py` itself is unchanged (`test_page_tuner.py` pins its
+  return shape); the endpoint interprets its output. A missing Tr reading is
+  `null`, not Flask's `0`, which is indistinguishable from a shorted probe.
+
+  **Reached from Settings > Probes, not the navbar** — Flask's navbar has a
+  Tuner link, but the tuner opens a live session and belongs behind the probe
+  config. The curve is an inline SVG polyline, not uPlot: twenty points need no
+  library and every coordinate stays readable from the DOM.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
   polling, and an Exit control. Functionally complete; styling is being
@@ -754,7 +797,12 @@ Roughly ordered by daily-use value:
       it is load-bearing for the Flask wizard, still the only installer UI, and
       `tests/web/test_page_probeconfig.py` remains its characterization net.
       See the SHIPPED section for what landed.
-- [ ] **tuner** — probe tuning tool
+- [ ] **tuner** — the **manual** three-point flow SHIPPED 2026-07-28 at
+      `/tuner`, behind a new read-only-ish `blueprints/api_tuner`
+      (`plans/2026-07-28-react-tuner-manual.md`, slice 1 of 2, 11 tasks). The
+      **auto** flow — `read_auto_status`, the autotune store, reference-probe
+      selection and the readiness threshold — is slice 2 and is why this stays
+      unchecked. See the SHIPPED section.
 - [ ] **update** — software updater (shells out; `is_real_hardware()`-gated)
 - [x] **metrics** — SHIPPED 2026-07-28 as `/metrics`, behind a new read-only
       `blueprints/api_metrics` (`plans/2026-07-28-react-metrics-page.md`,
@@ -1089,6 +1137,40 @@ detailed reference for each.
   mode ENDS and a mode lasts minutes to hours, so a poll would spend requests
   to show the same thing; a running mode's card does show `Active` and an em
   dash rather than a stale end time.
+
+#### Deferred by the tuner manual slice — 2026-07-28
+
+Per the standing rule below. `plans/2026-07-28-react-tuner-manual.md` is the
+detailed reference for each.
+
+- **The AUTO flow is not ported.** `read_auto_status`, the autotune store
+  (`read_autotune`/`write_autotune`/`flush_autotune`), reference-probe
+  selection and the readiness threshold are slice 2. The session, the typed
+  client and the segment machinery were built so slice 2 adds one endpoint and
+  one component.
+- **`blueprints/tuner/` is still live**, still renders its Jinja page, and
+  still owns `tuner.py`'s maths. Retirement waits for the general pass
+  (ruling 5), as `blueprints/metrics/` and `blueprints/admin/` do.
+- **`calc_shh_coefficients` and `temp_to_tr` still swallow every exception into
+  a bare `except:`.** The new endpoint interprets their output rather than
+  changing them: `test_page_tuner.py` pins the current return shape, and
+  `tuner.py` has other callers. `temp_to_tr` remains the documented-unreliable
+  inverse — `chart_ok` reports when it fails; nothing yet makes it fail less
+  often.
+- **`_settings_addprofile` still reports success for a profile it never
+  applied** when `apply_profile` matches no probe, and leaves the orphan behind.
+  The new `POST /api/tuner/profile` 404s before storing anything; the legacy
+  handler is untouched (it reads `request.form` off the global, so it is not
+  callable without a request context anyway).
+- **The tuner fidelity baseline captures only the pre-Start screen** — the
+  three empty segment cards. The curve and the save form are a second screen
+  (post-Finish) reached only by driving a live session, so they are covered by
+  unit tests, not the fidelity gate.
+- **`history-390x844.json` re-captured with the tuner baselines.** Not a tuner
+  change: the `/history` saved-cooks list is not stubbed by the fidelity
+  harness (it is a pre-Tailwind immutable reference), so its section height
+  floats with the demo server's live cook-file data — the same drift the
+  metrics slice absorbed. Only `.pf-section#1`'s height moved; no position did.
 
 #### UI parity, minor-graded
 

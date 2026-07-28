@@ -218,6 +218,34 @@ export async function stubMetrics(page: Page): Promise<void> {
   await page.route("**/api/metrics", (r) => json(r, JSON.stringify(METRICS_PAYLOAD)));
 }
 
+export async function stubTuner(page: Page): Promise<void> {
+  //  The tuner reads the probe list from /api/settings (stubApi already serves
+  //  it) and, once a session is open, polls /api/tuner/tr. A fidelity capture
+  //  never presses Start, so no session is opened and the tr/session endpoints
+  //  are stubbed only so a stray call cannot reach the live grill. Pinned so
+  //  the baseline never depends on what the grill is reading.
+  await page.route("**/api/tuner/tr*", (r) =>
+    json(
+      r,
+      JSON.stringify({
+        result: "OK",
+        message: null,
+        data: { probe: "Grill", trohms: 51234, tuning: false },
+      }),
+    ),
+  );
+  await page.route("**/api/tuner/session", (r) =>
+    json(
+      r,
+      JSON.stringify({
+        result: "OK",
+        message: null,
+        data: { open: false, mode: "Stop", restored: false },
+      }),
+    ),
+  );
+}
+
 export async function stubRecipes(page: Page): Promise<void> {
   await page.route("**/api/files/recipes/detail*", (r) => json(r, body("recipe-detail.json")));
   await page.route("**/api/files/recipes*", (r) => json(r, body("recipe-listing.json")));

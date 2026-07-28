@@ -5,6 +5,7 @@ import {
   stubMetrics,
   stubProbeModules,
   stubRecipes,
+  stubTuner,
 } from "./apiFixtures";
 import type { PageSpec, StyleProbe } from "./layoutBaseline";
 
@@ -435,6 +436,30 @@ export const PAGE_SPECS: PageSpec[] = [
       ".pf-metrics-table",
       ".pf-metrics-details",
       ".pf-metrics-summary",
+    ],
+  },
+  // The tuner page, captured BEFORE Start -- the three empty segment cards.
+  // No session is opened, so the capture never touches the live grill; the
+  // stub only guards a stray tr/session call. The chart and save form are a
+  // second screen (post-Finish) and are measured by unit tests, not here.
+  {
+    name: "tuner",
+    path: "/tuner",
+    ready: ".pf-tuner-segment",
+    root: ".pf-shell",
+    stubs: stubTuner,
+    landmarks: [
+      ...SHELL,
+      ".pf-tuner",
+      ".pf-tuner-header",
+      ".pf-tuner-title",
+      ".pf-tuner-field-label",
+      ".pf-tuner-input",
+      ".pf-tuner-btn",
+      ".pf-tuner-segments",
+      ".pf-tuner-segment",
+      ".pf-tuner-segment-title",
+      ".pf-tuner-reading",
     ],
   },
 ];
