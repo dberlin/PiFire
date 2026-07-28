@@ -6,12 +6,14 @@ import * as actualTunerApi from "../../helpers/tuner/tunerApi" with { rstest: "i
 const openMock = rs.fn();
 const closeMock = rs.fn();
 const fetchTrMock = rs.fn();
+const fetchAutoStatusMock = rs.fn();
 const computeMock = rs.fn();
 rs.mock("../../helpers/tuner/tunerApi", () => ({
   ...actualTunerApi,
   openSession: (...a: unknown[]) => openMock(...a),
   closeSession: (...a: unknown[]) => closeMock(...a),
   fetchTr: (...a: unknown[]) => fetchTrMock(...a),
+  fetchAutoStatus: (...a: unknown[]) => fetchAutoStatusMock(...a),
   computeCoefficients: (...a: unknown[]) => computeMock(...a),
 }));
 
@@ -31,6 +33,21 @@ const SETTINGS = {
 const OK = (data: unknown) => ({ ok: true, status: 200, message: "", data });
 const READING = OK({ probe: "Grill", trohms: 51234, tuning: true });
 
+const autoStatus = (over = {}) =>
+  OK({
+    current_tr: 41000,
+    current_temp: 225,
+    high_tr: 0,
+    high_temp: 0,
+    medium_tr: 0,
+    medium_temp: 0,
+    low_tr: 0,
+    low_temp: 0,
+    samples: 3,
+    ready: false,
+    ...over,
+  });
+
 // Fake timers must be installed BEFORE render, or the poll interval runs on the
 // real clock -- the mistake that cost the events slice four failing tests.
 const installFakeClock = rs.useFakeTimers.bind(rs);
@@ -41,10 +58,12 @@ beforeEach(() => {
   fetchTrMock.mockReset();
   computeMock.mockReset();
   getSettingsMock.mockReset();
+  fetchAutoStatusMock.mockReset();
   getSettingsMock.mockResolvedValue(SETTINGS);
   openMock.mockResolvedValue(OK({ open: true, mode: "Monitor", restored: true }));
   closeMock.mockResolvedValue(OK({ open: false, mode: "Stop", restored: true }));
   fetchTrMock.mockResolvedValue(READING);
+  fetchAutoStatusMock.mockResolvedValue(autoStatus());
 });
 
 afterEach(() => {
@@ -187,6 +206,103 @@ describe("TunerPage", () => {
 
   it("closes the session when the page is left", async () => {
     const view = render(<TunerPage />);
+    await startTuning();
+    view.unmount();
+    await waitFor(() => expect(closeMock).toHaveBeenCalled());
+  });
+});
+
+describe("TunerPage — auto mode", () => {
+  async function switchToAuto() {
+    await userEvent.click(screen.getByRole("button", { name: "Auto" }));
+  }
+
+  it("defaults to Manual with the three segment cards shown", async () => {
+    render(<TunerPage />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
+    expect(screen.getByRole("button", { name: "Manual" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("switching to Auto shows the reference selector and hides the segments", async () => {
+    render(<TunerPage />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
+    await switchToAuto();
+    expect(screen.getByRole("combobox", { name: /reference/i })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "High" })).toBeNull();
+  });
+
+  it("disables the toggle while a session is open", async () => {
+    render(<TunerPage />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
+    await switchToAuto();
+    await startTuning();
+    expect(screen.getByRole("button", { name: "Manual" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Auto" })).toBeDisabled();
+  });
+
+  it("Auto Start opens the session and polls auto-status with the tune and reference probes", async () => {
+    render(<TunerPage />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
+    await switchToAuto();
+    await startTuning();
+    await waitFor(() => expect(fetchAutoStatusMock).toHaveBeenCalled());
+    //  The tuned probe defaults to the first label, the reference to the first
+    //  OTHER label.
+    expect(fetchAutoStatusMock.mock.calls[0][0]).toBe("Grill");
+    expect(fetchAutoStatusMock.mock.calls[0][1]).toBe("Probe1");
+    //  Manual's Tr poll must NOT run in auto mode.
+    expect(fetchTrMock).not.toHaveBeenCalled();
+  });
+
+  it("Auto Finish is disabled until the status is ready", async () => {
+    fetchAutoStatusMock.mockResolvedValue(autoStatus({ ready: false }));
+    render(<TunerPage />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
+    await switchToAuto();
+    await startTuning();
+    await waitFor(() => expect(fetchAutoStatusMock).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Finish" })).toBeDisabled();
+  });
+
+  it("Auto Finish sends the derived high/medium/low points and closes the session", async () => {
+    fetchAutoStatusMock.mockResolvedValue(
+      autoStatus({
+        ready: true,
+        high_temp: 240,
+        high_tr: 30000,
+        medium_temp: 170,
+        medium_tr: 40000,
+        low_temp: 100,
+        low_tr: 50000,
+        samples: 14,
+      }),
+    );
+    computeMock.mockResolvedValue(
+      OK({ a: 1, b: 2, c: 3, chart: [{ x: 0, y: 9 }], chart_ok: true }),
+    );
+    render(<TunerPage />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
+    await switchToAuto();
+    await startTuning();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Finish" })).toBeEnabled());
+
+    await userEvent.click(screen.getByRole("button", { name: "Finish" }));
+
+    await waitFor(() => expect(computeMock).toHaveBeenCalled());
+    expect(computeMock.mock.calls[0][0]).toEqual([
+      { segment: "High", temp: 240, trohms: 30000 },
+      { segment: "Medium", temp: 170, trohms: 40000 },
+      { segment: "Low", temp: 100, trohms: 50000 },
+    ]);
+    await waitFor(() => expect(screen.getByRole("img", { name: /resistance/i })).toBeVisible());
+    expect(closeMock).toHaveBeenCalled();
+  });
+
+  it("closes the session when the page is left in auto mode", async () => {
+    const view = render(<TunerPage />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "High" })).toBeVisible());
+    await switchToAuto();
     await startTuning();
     view.unmount();
     await waitFor(() => expect(closeMock).toHaveBeenCalled());

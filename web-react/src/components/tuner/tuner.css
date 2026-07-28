@@ -34,6 +34,26 @@
   }
 }
 
+/* The Manual/Auto flow toggle in the header. A segmented pair; the active
+   one is filled with the accent tint the segment tabs use elsewhere. */
+.pf-tuner-mode {
+  @apply inline-flex overflow-hidden rounded-[12px] p-0;
+  margin: 0;
+  min-inline-size: 0;
+  border: 1px solid var(--color-card-border);
+}
+.pf-tuner-mode-btn {
+  @apply cursor-pointer bg-inset px-[14px] py-[6px] text-label;
+  font: 700 13px "Barlow";
+}
+.pf-tuner-mode-btn.on {
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  @apply text-text;
+}
+.pf-tuner-mode-btn:disabled {
+  @apply cursor-not-allowed;
+}
+
 /* The auto-tune card: one reference selector, two live readouts, a progress
    line. Shares .pf-tuner-segment-title / .pf-tuner-field-label / .pf-tuner-input
    / .pf-tuner-reading with the manual segment cards. */
