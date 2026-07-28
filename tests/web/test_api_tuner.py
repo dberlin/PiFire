@@ -278,3 +278,71 @@ def test_coefficients_does_not_write_control(ds, client):
     before = control_now()
     client.post("/api/tuner/coefficients", json={"points": points()})
     assert control_now()["mode"] == before["mode"]
+
+
+PROFILE = {"name": "Test Probe", "a": 0.0007343140544, "b": 0.0002157437229, "c": 0.0000000951568577}
+
+
+def test_saving_a_profile_stores_it_under_a_new_id(ds, client):
+    from common.datastore_accessors import read_settings
+
+    body = client.post("/api/tuner/profile", json=PROFILE).get_json()
+    assert body["result"] == "OK"
+    new_id = body["data"]["id"]
+    assert body["data"]["applied"] is None
+
+    profiles = read_settings()["probe_settings"]["probe_profiles"]
+    assert profiles[new_id]["name"] == "Test Probe"
+    assert profiles[new_id]["A"] == PROFILE["a"]
+    assert profiles[new_id]["id"] == new_id
+
+
+def test_applying_a_profile_attaches_it_to_the_probe(ds, client):
+    from common.datastore_accessors import read_settings
+
+    label = read_settings()["probe_settings"]["probe_map"]["probe_info"][0]["label"]
+    body = client.post("/api/tuner/profile", json={**PROFILE, "apply_to": label}).get_json()
+    assert body["data"]["applied"] == label
+
+    probe_info = read_settings()["probe_settings"]["probe_map"]["probe_info"]
+    attached = next(p for p in probe_info if p["label"] == label)
+    assert attached["profile"]["id"] == body["data"]["id"]
+
+
+def test_applying_to_an_unknown_probe_is_refused_and_saves_nothing(ds, client):
+    """Flask's _settings_addprofile loops looking for the label and silently
+    does nothing when it does not match -- reporting success for a profile that
+    was saved but never applied."""
+    from common.datastore_accessors import read_settings
+
+    before = set(read_settings()["probe_settings"]["probe_profiles"])
+    resp = client.post("/api/tuner/profile", json={**PROFILE, "apply_to": "Nonexistent"})
+    assert resp.status_code == 404
+    assert set(read_settings()["probe_settings"]["probe_profiles"]) == before
+
+
+@pytest.mark.parametrize("field", ["name", "a", "b", "c"])
+def test_every_field_is_required(ds, client, field):
+    payload = dict(PROFILE)
+    del payload[field]
+    resp = client.post("/api/tuner/profile", json=payload)
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == field
+
+
+def test_a_blank_name_is_refused(ds, client):
+    resp = client.post("/api/tuner/profile", json={**PROFILE, "name": "   "})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "name"
+
+
+def test_a_non_numeric_coefficient_is_refused(ds, client):
+    resp = client.post("/api/tuner/profile", json={**PROFILE, "a": "nope"})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "a"
+
+
+def test_saving_does_not_write_control(ds, client):
+    before = control_now()
+    client.post("/api/tuner/profile", json=PROFILE)
+    assert control_now()["mode"] == before["mode"]

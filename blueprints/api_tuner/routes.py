@@ -15,9 +15,15 @@ from flask import jsonify, request
 from werkzeug.exceptions import BadRequest
 
 from common.app import api_response
-from common.common import WriteKind
+from common.common import WriteKind, generate_uuid
 from common.control_delta import control_delta
-from common.datastore_accessors import read_control, read_settings, read_tr, write_control
+from common.datastore_accessors import (
+    read_control,
+    read_settings,
+    read_tr,
+    write_control,
+    write_settings,
+)
 from common.modes import Mode
 
 from blueprints.tuner.tuner import calc_shh_chart, calc_shh_coefficients
@@ -181,3 +187,66 @@ def tuner_coefficients():
         a, b, c, units=units, temp_range=220, tr_points=[int(high_r), int(medium_r), int(low_r)]
     )
     return jsonify(api_response("OK", None, {"a": a, "b": b, "c": c, "chart": chart, "chart_ok": bool(chart)})), 200
+
+
+@api_tuner_bp.route("/profile", methods=["POST"])
+def tuner_profile():
+    """Save a probe profile, optionally attaching it to a probe.
+
+    The same two writes _settings_addprofile makes, with three differences that
+    are all deliberate:
+
+      * numbers are validated instead of being float()-ed inside a bare
+        `except:` that reports "something bad happened";
+      * an apply_to that matches no probe is a 404, not a silent success --
+        Flask loops looking for the label and simply does not find it, so the
+        operator is told the profile was applied when it was not;
+      * nothing is written at all when apply_to does not match, so a failed
+        apply does not leave an orphan profile behind.
+
+    Not routed through _settings_addprofile: that handler reads request.form
+    off the global, so it is not callable without faking a request context.
+    """
+    body = json_body()
+
+    name = body.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return error("bad_request", 400, field="name")
+
+    coefficients = {}
+    for key in ("a", "b", "c"):
+        value = body.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return error("bad_request", 400, field=key)
+        coefficients[key] = float(value)
+
+    apply_to = body.get("apply_to")
+    if apply_to is not None and not isinstance(apply_to, str):
+        return error("bad_request", 400, field="apply_to")
+
+    settings = read_settings()
+    probe_info = settings["probe_settings"]["probe_map"]["probe_info"]
+    target = None
+    if apply_to:
+        target = next((i for i, p in enumerate(probe_info) if p["label"] == apply_to), None)
+        if target is None:
+            #  Refused BEFORE the profile is stored, so a bad label cannot
+            #  leave an orphan behind.
+            return error("not_found", 404, field="apply_to")
+
+    profile_id = generate_uuid()
+    profile = {
+        "A": coefficients["a"],
+        "B": coefficients["b"],
+        "C": coefficients["c"],
+        "name": name.strip(),
+        "id": profile_id,
+    }
+    settings["probe_settings"]["probe_profiles"][profile_id] = profile
+    if target is not None:
+        probe_info[target]["profile"] = profile
+    write_settings(settings)
+
+    return jsonify(
+        api_response("OK", None, {"id": profile_id, "applied": apply_to if target is not None else None})
+    ), 200
