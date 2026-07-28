@@ -17,6 +17,7 @@ import re
 import tempfile
 import zipfile
 
+from common import datastore
 from common.common import read_generic_json
 from common.system import gather_system_info
 
@@ -152,19 +153,32 @@ def state_payload(settings, control, backup_folder):
 
 
 def clear_events_log(folder=None):
-    """Delete the events log.
+    """Empty the event log in BOTH stores.
 
-    Flask runs `os.system("rm ./logs/events.log")` for this. The path is built
+    Flask runs `os.system("rm ./logs/events.log")` for this. The paths are built
     here rather than handed to a shell -- no interpolation, no shell, and a
     missing file is success rather than a silently swallowed `rm` error.
+
+    Two things that single `rm` misses:
+
+    - Rotated members. `events.log.1` and its siblings hold most of the history,
+      so removing only `events.log` leaves the bulk of it on disk.
+    - The database. Every logger create_logger builds writes to a
+      RotatingFileHandler AND a SqliteLogHandler, so clearing one sink alone
+      leaves the other holding what the user asked to be rid of.
+
+    Returns True: _MAINTENANCE_ACTIONS dispatches this and the admin page's
+    MaintenanceCard is built against the resulting response shape.
 
     `folder` resolves at call time; see list_logs.
     """
     folder = folder or LOG_FOLDER
-    try:
-        os.remove(os.path.join(folder, "events.log"))
-    except FileNotFoundError:
-        pass
+    for name in list_log_families(folder).get("events", []):
+        try:
+            os.remove(os.path.join(folder, name))
+        except OSError:
+            continue
+    datastore.clear_log("events")
     return True
 
 
