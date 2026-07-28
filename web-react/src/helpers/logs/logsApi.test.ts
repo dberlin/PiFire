@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { byteLength, fetchLogDelta, logDownloadUrl, logViewUrl } from "./logsApi";
+import { byteLength, fetchLogDelta, fetchLogFamilies, logDownloadUrl, logViewUrl } from "./logsApi";
 
 const fetchMock = rs.fn();
 beforeEach(() => {
@@ -57,5 +57,28 @@ describe("logsApi", () => {
       .mockResolvedValueOnce(res(200, "whole"));
     const d = await fetchLogDelta("events", 10, 900, "");
     expect(d).toEqual({ kind: "rotated", text: "whole", nextOffset: 5, total: 5 });
+  });
+
+  it("unpacks the families member", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          result: "OK",
+          message: "",
+          data: { logs: [], families: [{ stem: "events", members: ["events.log"], bytes: 4 }] },
+        }),
+        { status: 200 },
+      ),
+    );
+    expect(await fetchLogFamilies("")).toEqual([
+      { stem: "events", members: ["events.log"], bytes: 4 },
+    ]);
+  });
+
+  it("reports no families rather than throwing when the listing fails", async () => {
+    //  The page renders the picker from this list. A throw here would take out
+    //  the events tab too, which does not depend on the listing at all.
+    fetchMock.mockResolvedValue(new Response("nope", { status: 500 }));
+    expect(await fetchLogFamilies("")).toEqual([]);
   });
 });

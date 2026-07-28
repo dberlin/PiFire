@@ -327,7 +327,16 @@ def admin_backup_restore():
 
 @api_admin_bp.route("/logs", methods=["GET"])
 def admin_logs():
-    return jsonify(api_response("OK", None, {"logs": admin_api.list_logs()})), 200
+    #  `logs` is the flat, unrotated list the admin page's LogsCard is built
+    #  against and is left exactly as shipped. `families` is the rotation-aware
+    #  view the events page needs, added alongside rather than replacing it.
+    return jsonify(
+        api_response(
+            "OK",
+            None,
+            {"logs": admin_api.list_logs(), "families": admin_api.log_family_listing()},
+        )
+    ), 200
 
 
 @api_admin_bp.route("/logs/download", methods=["GET"])

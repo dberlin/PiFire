@@ -81,3 +81,15 @@ def test_download_flag_sets_an_attachment_name(env):
 def test_without_the_download_flag_it_renders_inline(env):
     resp = env["client"].get("/api/admin/logs/view?log=events")
     assert "attachment" not in resp.headers.get("Content-Disposition", "")
+
+
+def test_listing_reports_families_alongside_the_flat_list(env):
+    body = env["client"].get("/api/admin/logs").get_json()["data"]
+    #  `logs` keeps its exact shipped contract: the admin page's LogsCard is
+    #  built against it, and a rotated member appearing there would put
+    #  `events.log.1` in a list whose every other entry is downloadable by name.
+    assert body["logs"] == ["events.log"]
+    #  `bytes` is the STITCHED total across the family, which is what the
+    #  client seeds its tail cursor from -- the size of events.log alone would
+    #  start the cursor mid-stream and the first poll would replay old lines.
+    assert body["families"] == [{"stem": "events", "members": ["events.log.1", "events.log"], "bytes": 8}]

@@ -6,7 +6,7 @@
 // So there is no unpack() here -- the status line and Content-Range ARE the
 // protocol.
 
-import type { LogDelta } from "./logTypes";
+import type { LogDelta, LogFamily } from "./logTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
@@ -28,6 +28,22 @@ export function byteLength(text: string): number {
 function totalFromContentRange(header: string | null): number | null {
   const match = /\/(\d+)\s*$/.exec(header ?? "");
   return match ? Number(match[1]) : null;
+}
+
+/** The families the server can serve, for the Log Files picker.
+ *
+ * This one call DOES use the api_response envelope -- it is the same
+ * `GET /api/admin/logs` the admin page reads. A failure resolves to an empty
+ * list rather than throwing: the picker is one half of the page, and the events
+ * tab beside it does not depend on this listing at all. */
+export async function fetchLogFamilies(baseUrl = BASE_URL): Promise<LogFamily[]> {
+  const response = await fetch(`${baseUrl}/api/admin/logs`);
+  const body = (await response.json().catch(() => ({}))) as {
+    result?: string;
+    data?: { families?: LogFamily[] };
+  };
+  if (!response.ok || body.result !== "OK") return [];
+  return body.data?.families ?? [];
 }
 
 export async function fetchLogWhole(

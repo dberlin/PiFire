@@ -129,6 +129,29 @@ def stitch_family(stem, folder=None):
     return b"".join(chunks)
 
 
+def log_family_listing(folder=None):
+    """[{stem, members, bytes}] for every family, ordered by stem.
+
+    `bytes` is the STITCHED total across the family, not the size of the newest
+    member. The client seeds its tail cursor from it, and a cursor that started
+    at the size of `events.log` alone would sit mid-stream -- the first poll
+    would then hand back lines the viewer had already drawn.
+
+    `folder` resolves at call time; see list_logs.
+    """
+    folder = folder or LOG_FOLDER
+    listing = []
+    for stem, members in list_log_families(folder).items():
+        total = 0
+        for name in members:
+            try:
+                total += os.path.getsize(os.path.join(folder, name))
+            except OSError:
+                continue
+        listing.append({"stem": stem, "members": members, "bytes": total})
+    return listing
+
+
 def state_payload(settings, control, backup_folder):
     """Everything the admin page renders, in one read.
 
