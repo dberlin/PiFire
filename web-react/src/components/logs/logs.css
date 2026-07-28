@@ -1,0 +1,80 @@
+@reference "../../theme.css";
+
+/* The events/logs page. Two tabs over one viewer: the events family, and any
+   other log family the server offers.
+
+   @melloware/react-logviewer injects its own stylesheet at runtime (CSS
+   modules, styleInject) and ships a dark palette of its own choosing. The
+   frame below re-dresses it in the app's tokens rather than letting a second
+   theme sit inside the shell. Its public hooks -- .react-lazylog, .log-line,
+   .log-gutter -- are what the overrides hang off. */
+
+.pf-log-frame {
+  @apply overflow-hidden rounded-card bg-inset;
+  border: 1px solid var(--color-card-border);
+}
+.pf-log-frame .react-lazylog {
+  @apply bg-inset text-text;
+  font: 400 13px "Barlow";
+}
+/* The line-number gutter, which the package colours for its own dark grey. */
+.pf-log-frame .log-gutter,
+.pf-log-frame .log-line a {
+  @apply text-label;
+}
+.pf-log-frame .react-lazylog-searchbar {
+  @apply bg-card text-text;
+  border-bottom: 1px solid var(--color-card-border);
+}
+
+/* Level tags, applied by LogViewer's formatPart. Only ERROR and WARNING get a
+   colour: INFO is the overwhelming majority of every log here, and colouring
+   it would mean colouring everything, which is the same as colouring nothing. */
+.pf-log-error {
+  @apply text-danger;
+  font-weight: 600;
+}
+.pf-log-warning {
+  @apply text-warn;
+}
+
+/* The page shell around the viewer. */
+.pf-log-page {
+  @apply flex h-full flex-col gap-[12px] overflow-hidden p-[16px] text-text;
+  box-sizing: border-box;
+}
+.pf-log-title {
+  @apply m-0 text-text;
+  font: 600 22px "Barlow";
+}
+.pf-log-tabs {
+  @apply flex gap-[8px];
+}
+.pf-log-tab {
+  @apply cursor-pointer rounded-[12px] bg-inset px-[14px] py-[8px] text-text;
+  border: 1px solid var(--color-card-border);
+  font: 700 14px "Barlow";
+}
+.pf-log-tab[aria-selected="true"] {
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  border-color: var(--color-accent);
+  @apply text-text;
+}
+/* The follow toggle and family picker sitting above the viewer. */
+.pf-log-controls {
+  @apply flex flex-wrap items-center gap-[16px];
+}
+.pf-log-control-label {
+  @apply flex items-center gap-[8px] text-label;
+  font: 600 13px "Barlow";
+}
+.pf-log-select {
+  @apply rounded-[10px] bg-inset px-[10px] py-[6px] text-text;
+  border: 1px solid var(--color-card-border);
+  font: 500 14px "Barlow";
+}
+.pf-log-size {
+  @apply text-text-dim;
+  font: 500 13px "Barlow";
+  font-variant-numeric: tabular-nums;
+}

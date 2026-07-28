@@ -25,6 +25,7 @@ const SURFACES = [
   "src/components/wizard",
   "src/components/recipes",
   "src/components/admin",
+  "src/components/logs",
 ];
 
 // Names written into a .tsx and styled by nothing, each because the element
@@ -114,6 +115,7 @@ describe("every pf-* class the app uses has a rule", () => {
       ["src/components/history/HistoryChart.tsx", "./historyChart.css"],
       ["src/components/pellets/PelletsPage.tsx", "./pellets.css"],
       ["src/components/admin/AdminPage.tsx", "./admin.css"],
+      ["src/components/logs/LogViewer.tsx", "./logs.css"],
       // probes.css is imported by the two cards rather than by either surface's
       // shell, so both surfaces that render them get it.
       ["src/components/wizard/probes/DevicesCard.tsx", "./probes.css"],

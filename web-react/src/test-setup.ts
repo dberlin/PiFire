@@ -42,6 +42,21 @@ if (typeof HTMLCanvasElement !== "undefined") {
     )) as unknown as typeof HTMLCanvasElement.prototype.getContext;
 }
 
+// jsdom implements no ResizeObserver. virtua, the virtualizer inside
+// @melloware/react-logviewer (src/components/logs/LogViewer.tsx), constructs
+// one per list and throws outright without it -- the component never mounts.
+// A no-op observer is enough: jsdom reports every box as 0x0 anyway, so there
+// is no measurement to deliver, and virtua falls back to its estimated item
+// size and renders its initial window. Line CONTENT is what these tests
+// assert; which lines virtualization keeps mounted is not assertable here.
+if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === "undefined") {
+  (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 // jsdom also has no Path2D (used by uPlot to build series paths before
 // stroking them via the stubbed context above). Same permissive-stub idea,
 // via a plain constructor function rather than a class -- a class
