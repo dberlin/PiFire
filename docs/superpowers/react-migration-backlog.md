@@ -18,8 +18,12 @@ it by path and line number; those citations point here.
 ### Pages and chrome
 
 - **Dashboard** (`/`) — live socket data.
-- **App shell / global navigation** — navbar with all six destinations
-  (Events alone still rendered disabled, being unported), shared layout
+- **App shell / global navigation** — navbar with all six destinations, every
+  one of them a real link since 2026-07-28. Events was the last disabled entry;
+  with it ported, the `to: null` case and the disabled span it rendered are
+  gone from NavBar entirely (TypeScript narrowed that branch to `never`), along
+  with their stylesheet rule. A future unported destination has to reintroduce
+  the mechanism deliberately. Also: shared layout
   route, timer bar + modal, and the `Banners` alert strip hoisted out of
   Dashboard. The shell owns the single socket subscription and passes it down
   through Outlet context; a structural test enforces the one-call rule, because
@@ -148,6 +152,60 @@ it by path and line number; those citations point here.
   the fixture had been written from the same wrong assumption as the type. The
   live-backend `tests/e2e/admin.spec.ts` is what found it; both fixtures are now
   copied from an actual response.
+- **Events + Logs** (`/events`) — SHIPPED 2026-07-28
+  (`plans/2026-07-28-react-events-logs.md`, 14 tasks in two slices). ONE route
+  with two tabs, not Flask's two pages: both tabs are the same virtualized
+  viewer (`@melloware/react-logviewer`) over a different log family, and as two
+  separate pages in Flask they had already diverged — only one of them could
+  reach a rotated file.
+
+  **One endpoint answers both tabs**: `GET /api/admin/logs/view?log=<stem>`,
+  which `send_file`s the stitched family from a `BytesIO` with
+  `conditional=True`. That gives real `Range` support, so the live tail asks for
+  `bytes=<cursor>-` and appends a delta instead of re-downloading — for the
+  events family on this machine, 1.7 MB a poll otherwise.
+
+  **The parameter is a family STEM, never a filename and never a path.** It is
+  looked up in a server-built dict rather than joined onto a directory, so there
+  is no concatenation for a `../` to land in. That is what makes the two holes
+  in `blueprints/logs/routes.py` (`send_file` and `read_log_file`, both joining
+  a request field onto the logs folder) unreachable here rather than merely
+  unlikely.
+
+  **Rotation was a blind spot in three separate places**, all fixed:
+  `delete_logs` and `build_log_archive` each globbed `*.log` only — so "Delete
+  All" reported success while leaving `events.log.1`-`.3` on disk and the viewer
+  still showing content, and the support ZIP shipped without the history it
+  existed to carry. The listing had the same gap. `list_logs()` itself is
+  deliberately UNCHANGED; the rotation-aware view is a new `families` member
+  alongside it, because the shipped admin LogsCard is built against the flat one.
+
+  **A clear-path bug the questions surfaced:** clearing events removed
+  `./logs/events.log` via `os.system` while the `logs` TABLE kept everything —
+  every logger `create_logger` builds writes to a `RotatingFileHandler` AND a
+  `SqliteLogHandler`, so clearing one sink left the other holding exactly what
+  the user asked to be rid of. It now clears both.
+
+  **The `logs` table was unbounded** — nothing had ever deleted a row. Bounded
+  now by a SQLite `AFTER INSERT` trigger keeping 20 000 rows per logger, fired
+  every 1 000 inserts. A trigger rather than an emit counter (the user's
+  suggestion) because the counter could not see writes from other processes.
+
+  **The suite had been appending to the operator's real `./logs/`** for the
+  whole project. That is why the live `events.log` carried fixture strings
+  ("Admin: Shutdown failed: boom", a WLED connection to 127.0.0.1:1) in the
+  content the log viewer shows a user, and why the files disagreed with the
+  table: tests already used a temporary database, but not temporary log files.
+  `PIFIRE_LOG_DIR` is now resolved at import like `PIFIRE_DB_PATH`, and
+  `config.py`'s `LOGS_FOLDER` is derived from it rather than being a second
+  independent literal.
+
+  **What only the live e2e could find:** LazyLog's `height` prop runs through
+  `Number()` for anything but `"auto"`, so the `"60vh"` it was given was `NaN`
+  and the viewer rendered its search bar over zero rows. jsdom cannot see this —
+  virtua discards every measurement whose target has no `offsetParent`, and in
+  jsdom that is every element, so the unit tests mount no rows either way and
+  passed throughout. Height comes from `.pf-log-frame` now.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
   polling, and an Exit control. Functionally complete; styling is being
@@ -634,7 +692,12 @@ Roughly ordered by daily-use value:
       shape, and nothing else — different JSON member sets, different metadata
       keys, no page in common, and **zero** overlapping action names between the
       two dispatch tables.
-- [ ] **events** + **logs** — event feed and log viewer
+- [x] **events** + **logs** — SHIPPED 2026-07-28 as the single `/events` route
+      with Events and Log Files tabs (`plans/2026-07-28-react-events-logs.md`,
+      14 tasks in two slices). Correction to what this line used to imply: they
+      are not two pages. Flask ships them as two, and they had already diverged
+      because of it — only one of the two could reach a rotated file. Both tabs
+      are the same viewer over a different family. See the SHIPPED section.
 - [x] **probeconfig** — SHIPPED 2026-07-26 as the `/settings/probes` tab
       (`plans/2026-07-26-react-probeconfig-page.md`, 9 tasks). Both corrections
       this line already carried held up against live code: it is **not a
@@ -861,8 +924,9 @@ which said it was owed).
   project: it appears five separate times across specs and plans as "next" and
   was never started. Now planned (see item 8).
 - ~~Recipes~~ — SHIPPED 2026-07-27; the navbar entry is a real link now.
-  ~~Admin~~ — SHIPPED 2026-07-27, same. **Events** is now the last navbar entry
-  rendered disabled — one whole Flask page unported.
+  ~~Admin~~ — SHIPPED 2026-07-27, same. ~~Events~~ — SHIPPED 2026-07-28, and it
+  was the last one: **no navbar entry renders disabled any more**, and no whole
+  Flask page in the navbar is unported.
 - Cook-file list / upload / delete (D4) — History shipped the chart only.
 - Recipe unpause payload not ported — a paused recipe cannot be resumed. **Still
   open after the 2026-07-27 recipes slice**, which shipped run/status but not
@@ -922,6 +986,29 @@ which said it was owed).
 - `backup_pellet_db` is not performed on a React "Load New Pellets".
 - Residual clobber window on the pellet blob — no optimistic concurrency.
 - Notify targets are never converted on a temperature-units change.
+
+#### Deferred by the events + logs slice — 2026-07-28
+
+Per the standing rule below. `plans/2026-07-28-react-events-logs.md` is the
+detailed reference for each.
+
+- **`blueprints/events/` and `blueprints/logs/` are still live, and still carry
+  their two traversal doors** — `send_file` and `read_log_file` in
+  `logs/routes.py` both join a request field onto the logs folder. The React
+  surface does not inherit them (it takes a family stem, never a path), but
+  nothing has closed them where they are. They go with the general Flask
+  retirement pass (ruling 5), and until then they are reachable.
+- **`datastore.read_log()` still has no caller.** Confirmed by symbol search,
+  not grep. The events tab reads files rather than the table — deliberately, per
+  the user's ruling, since only supervisord logs to files without a database
+  row. So this remains a written-but-unused reader. Delete it or use it; do not
+  leave a third opinion about where logs live.
+- **`board-config.py` carries its own duplicate `create_logger`** writing to
+  `./logs/` directly. It is out of the web tier and was left untouched, so it is
+  the one remaining writer that ignores `PIFIRE_LOG_DIR`.
+- **The wizard's hard links to Flask's `/admin/reboot` and `/admin/restart`**
+  are still open — unchanged from the admin slice's deferral, restated here
+  because this slice touched the same blueprint and did not close them.
 
 #### UI parity, minor-graded
 

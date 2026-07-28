@@ -1,4 +1,4 @@
-import { stubAdmin, stubCookFiles, stubProbeModules, stubRecipes } from "./apiFixtures";
+import { stubAdmin, stubCookFiles, stubEvents, stubProbeModules, stubRecipes } from "./apiFixtures";
 import type { PageSpec, StyleProbe } from "./layoutBaseline";
 
 // The two viewports the fidelity gate is defined at. 1280x720 is the desktop
@@ -365,6 +365,38 @@ export const PAGE_SPECS: PageSpec[] = [
       ".pf-field-label",
       ".pf-input",
       ".pf-switch",
+    ],
+  },
+  // The events page. Written out for the same reason as admin: the demo server
+  // has no /api/admin backend, and an unstubbed read here would photograph the
+  // viewer's failure branch instead of the page.
+  //
+  // The stub also pins the CONTENT. One real log line carries a timestamp, a
+  // build number and a debug flag, every one of which moves between captures.
+  //
+  // Only the Events tab is measured. The Log Files tab is the same viewer under
+  // a picker, and capturing it would add a second baseline whose only unique
+  // geometry is a <select> already measured on the settings pages.
+  {
+    name: "events",
+    path: "/events",
+    //  The frame, not the heading: the heading paints before the log has been
+    //  read, and a baseline taken then would measure the loading note.
+    ready: ".pf-log-frame",
+    root: ".pf-shell",
+    stubs: stubEvents,
+    landmarks: [
+      ...SHELL,
+      ".pf-log-page",
+      ".pf-log-title",
+      ".pf-log-tabs",
+      ".pf-log-tab",
+      ".pf-log-controls",
+      ".pf-log-frame",
+      // Borrowed from settings.css by the follow toggle, as the admin page
+      // borrows them above.
+      ".pf-field",
+      ".pf-field-label",
     ],
   },
 ];
