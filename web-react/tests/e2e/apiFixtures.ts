@@ -137,6 +137,34 @@ export async function stubAdmin(page: Page): Promise<void> {
   await page.route("**/api/admin/state", (r) => json(r, body("admin-state.json")));
 }
 
+/** The events page, pinned so a baseline capture does not photograph whatever
+ *  the operator's log happened to say -- one real line has a timestamp, a build
+ *  number and a debug flag in it, all of which move. Routed BEFORE the listing
+ *  because `**\/api/admin/logs` would otherwise also swallow `/logs/view`. */
+export async function stubEvents(page: Page): Promise<void> {
+  await page.route("**/api/admin/logs/view*", (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: "text/plain",
+      headers: { "Accept-Ranges": "bytes" },
+      body: "2026-07-28 09:00:00 -0400 [INFO] PiFire Web UI started.\n",
+    }),
+  );
+  await page.route("**/api/admin/logs", (r) =>
+    json(
+      r,
+      JSON.stringify({
+        result: "OK",
+        message: "",
+        data: {
+          logs: ["events.log"],
+          families: [{ stem: "events", members: ["events.log"], bytes: 42 }],
+        },
+      }),
+    ),
+  );
+}
+
 export async function stubRecipes(page: Page): Promise<void> {
   await page.route("**/api/files/recipes/detail*", (r) => json(r, body("recipe-detail.json")));
   await page.route("**/api/files/recipes*", (r) => json(r, body("recipe-listing.json")));

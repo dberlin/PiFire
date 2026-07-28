@@ -9,8 +9,14 @@
    theme sit inside the shell. Its public hooks -- .react-lazylog, .log-line,
    .log-gutter -- are what the overrides hang off. */
 
+/* The viewer's height lives HERE, not on the component. LazyLog's `height`
+   prop runs through Number() for anything but "auto", so a CSS length passed
+   there is NaN and the list renders no rows at all. Under height="auto" it
+   asks for `calc(100% - <search bar>)`, which needs a definite height on this
+   box: flex-1 against .pf-log-page's column, and min-h-0 so a long log cannot
+   push the box past the viewport instead of scrolling inside it. */
 .pf-log-frame {
-  @apply overflow-hidden rounded-card bg-inset;
+  @apply min-h-0 flex-1 overflow-hidden rounded-card bg-inset;
   border: 1px solid var(--color-card-border);
 }
 .pf-log-frame .react-lazylog {

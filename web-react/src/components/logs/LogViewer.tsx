@@ -112,7 +112,11 @@ export function LogViewer({ stem, follow }: { stem: string; follow: boolean }) {
         wrapLines
         follow={follow}
         formatPart={formatPart}
-        height="60vh"
+        //  "auto" is the only string this accepts. Every other value goes
+        //  through Number(height), so a CSS length like "60vh" becomes NaN and
+        //  the list renders zero rows -- search bar and all, silently. The
+        //  height comes from .pf-log-frame instead.
+        height="auto"
         extraLines={1}
       />
     </div>
