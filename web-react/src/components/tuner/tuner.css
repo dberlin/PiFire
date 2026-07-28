@@ -1,0 +1,62 @@
+@reference "../../theme.css";
+
+/* The probe tuner. Self-contained pf-tuner-* classes rather than borrowing
+   settings.css's .pf-field, whose base rules are descendant-scoped to
+   .pf-section-body and would not apply here.
+
+   The page-level rules (.pf-tuner, its header and the segment grid) live in
+   this file too, added in Task 10 alongside the markup that uses them --
+   styleCoverage fails on a rule with no consumer, so nothing here can be
+   written ahead of the component that wears it. */
+
+/* One of the three tuning points. */
+.pf-tuner-segment {
+  @apply flex flex-col gap-[8px] rounded-card bg-card p-[16px] text-text;
+  border: 1px solid var(--color-card-border);
+}
+.pf-tuner-segment-title {
+  @apply m-0 text-text uppercase;
+  font: 700 13px "Barlow";
+  letter-spacing: 1px;
+}
+/* The live resistance readout. Tabular so the digits do not jitter as the
+   reading updates once a second. */
+.pf-tuner-reading {
+  @apply m-0 text-text;
+  font: 600 20px "Barlow";
+  font-variant-numeric: tabular-nums;
+}
+.pf-tuner-stale {
+  @apply m-0 text-warn;
+  font: 500 12px "Barlow";
+}
+.pf-tuner-field-label {
+  @apply text-label uppercase;
+  font: 600 11px "Barlow";
+  letter-spacing: 1px;
+}
+.pf-tuner-input {
+  @apply rounded-[10px] bg-inset px-[10px] py-[8px] text-text;
+  border: 1px solid var(--color-card-border);
+  font: 400 14px "Barlow";
+}
+/* Modelled on .pf-admin-btn (admin.css), which is itself modelled on
+   .pf-modal-btn. */
+.pf-tuner-btn {
+  @apply cursor-pointer rounded-[12px] bg-inset px-[14px] py-[8px] text-text no-underline;
+  border: 1px solid var(--color-card-border);
+  font: 700 14px "Barlow";
+  text-align: center;
+}
+.pf-tuner-btn:disabled {
+  opacity: 0.55;
+  @apply cursor-not-allowed;
+}
+.pf-tuner-recorded {
+  @apply flex flex-col gap-[8px];
+}
+.pf-tuner-recorded-value {
+  @apply m-0 text-accent;
+  font: 600 16px "Barlow";
+  font-variant-numeric: tabular-nums;
+}
