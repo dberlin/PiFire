@@ -461,7 +461,221 @@ it by path and line number; those citations point here.
 
 ---
 
+## RESOLVED
+
+Items that were tracked as OPEN but have since shipped, been superseded, or
+were otherwise closed. They keep their **original numbers** so cross-references
+elsewhere in this file ("(item 4)", "item 7", "SUPERSEDED by item 10") still
+resolve; the OPEN section below therefore skips these numbers by design.
+
+### 3. Timer clobber — DONE (closed at the source by control-write deltas)
+
+Every writer now queues an intent DELTA — named members, or an ordered OP the
+drain evaluates against live state — instead of the whole control snapshot it
+happened to read (`common/control_delta.py`). `control["timer"]` and
+`control["notify_data"]` are expressible ONLY as ops, which is what stopped the
+drain guessing: `timer.start_or_resume`, `timer.clear`, `notify.set`.
+
+- stop-then-pause in one cycle leaves the timer stopped, and a flag write after
+  a start no longer zeroes it (`test_control_delta_seam.py`,
+  `test_process_command_golden.py`).
+- `TimerBar`'s client-side guard against that pair is deleted — the workaround
+  went with the fix.
+- The whole-`notify_data` clobber is closed too, on both UIs: see
+  "Notify writes are addressed per entry" under SHIPPED.
+
+Remaining: `POST /api/control` still ACCEPTS a whole `notify_data` array and
+applies it as `notify.replace`, because third-party clients speak it. No
+in-repo client does. Documented as lossy at both doors.
+
+### 4. The errors blob is write-only from the web tier — DONE 2026-07-26
+
+**Fixed as a non-sticky liveness signal, not a clearing endpoint.**
+
+The bug: `_check_control_status` (`blueprints/mobile/socket_io.py`) appended
+"The control process did not respond…" to the errors blob. `read_errors()` is a
+plain non-destructive read — unlike `warnings` on the very same payload, which
+drains and self-heals frame to frame — and its only clearer, `flush_errors()`,
+has exactly one production caller, `control.py` at boot. So one missed answer
+rode every `socket_dash_data` frame until the control process restarted, and no
+route, socket action or API command could clear it.
+
+**Which fix, and why.** The blob's other writers decide it. Every one of them
+(`controller/runtime/devices.py`, `runner.py`, `controller.py`,
+`common/extra_installer.py`) is the control process or one of its subprocesses,
+and each records a failure that already happened and cannot un-happen — a
+display that would not load, a dependency install that failed. The
+`flush_errors()`-at-control-boot lifecycle matches exactly that: "errors
+accumulated since the control process started." Liveness is the opposite kind of
+fact: about right now, observed by the web process, false the moment control
+answers again. It was misfiled, and once filed correctly there is nothing
+durable left to clear, so no clearing endpoint is needed.
+
+The verdict now lives in `socket_io._control_alive` — process-local, in memory,
+overwritten by every check in both directions — and `_get_dash_data` composes
+`common/app.py::CONTROL_DOWN_ERROR` into each payload from it. Deliberately not
+persisted anywhere: persisting a statement about "right now" is what made this
+sticky. `dash_page` already worked this way (it appends to the local list it
+hands the template); the duplicated user-visible string is now one constant,
+because the React dashboard identifies the condition by matching a substring of
+it (`web-react/src/helpers/dashboard/health.ts`).
+
+Consequence worth keeping: **the errors blob is now read-only from the web
+tier**, giving it a single owner and removing a cross-process read-modify-write.
+
+Pinned by `tests/web/test_control_liveness_not_sticky.py` (6 tests, driving the
+real consumers), including that a durable control-process error is untouched in
+both directions — a guard against "fixing" this by deleting from the blob.
+
+The Recheck control in `controlHealth.ts` is **kept**: the payload can still be
+up to one 30 s poll interval stale, which is an independent reason for an
+on-demand probe. Its comment, which described the stickiness and the
+`get_system_command_output` queue race as live problems, is corrected.
+
+*The queue race is not a separate open item.* `get_system_command_output` no
+longer discards non-matching entries — it peeks and pushes back what is not
+its own (triage Slice 9 item 1, `33135e4aed48`,
+`tests/unit/common/test_system_command_output_queue.py`). The "can be written on
+a healthy system" clause of this entry was already stale when it was written.
+
+### 6. Remaining audit findings — SUPERSEDED by item 10
+
+`audits/2026-07-25-audit-triage.md` and
+`audits/2026-07-25-react-vs-flask-ui-divergences.md`. This item used to say
+"roughly 40 findings … the rest are untouched", which was guesswork. The
+2026-07-26 sweep read both audits item by item and checked each against live
+code: **all 9 CRITICALs and 12 of 18 IMPORTANTs are done.** The genuinely
+remaining findings are enumerated in item 10 rather than counted in the
+abstract here.
+
+### 6a. Hopper card should link to /pellets — DONE 2026-07-26
+
+Bootstrap's hopper card carries a "Manager" link. The dashboard slice asserted
+there must be **no** such link in React; the pellets plan recorded the shortcut
+as owed and assigned it to the dashboard slice. The two plans contradicted each
+other and neither shipped it. **Ruling: the link exists, because it exists in
+Bootstrap.** `/pellets` shipped 2026-07-25, so the target is real. Small,
+self-contained, unblocked.
+
+- [x] Shipped 2026-07-26: a router `<Link to="/pellets">Manager</Link>` in
+      `HopperGauge`'s footer (`.pf-dash-hopper-link`, existing `pf-*` tokens, no
+      new colour); the dashboard slice's "offers no link out" assertion was
+      flipped to assert the link exists and points at `/pellets`, plus one
+      pinning that it navigates in-app rather than reloading the document.
+
+### 7. Accessor rename WAVE 2 — DONE 2026-07-26
+
+This entry was stale. It claimed four remaining items; three were already
+finished when it was written, by task ACC (`.superpowers/sdd/task-acc-report.md`).
+Checked against live code, not the docs:
+
+- `read_warnings()` → `drain_warnings()` — **already done.** Both exist in
+  `common/datastore_accessors.py`, `dash_page` is `drain_warnings()`'s only
+  caller, and `tests/web/test_warnings_cross_consumer.py` pins it. The
+  cross-consumer bug this entry described as open had already been fixed.
+- `get_system_command_output()` discarding other consumers' queue entries —
+  **already done.** It peeks and pushes back;
+  `tests/unit/common/test_system_command_output_queue.py`. (Backlog item 4 also
+  cited this as a live cause; that too was stale.)
+- `read_settings_file(init=True)` — **already done**, docstring only and
+  deliberately so: `init` defaults to False, all three production callers pass
+  it explicitly, and a rename would churn 24 references for no behavioural gain.
+- `get_os_info(persist=True)` — **the one that really was outstanding**, and the
+  only one closed by this pass. Task ACC skipped it as "already fixed" because
+  the old CWD-relative `os_info.json` write was gone, reasoning that no caller
+  just wants to read. `board-config.py::rpi_config_write` is that caller: it
+  reads `VERSION_ID` to choose a config.txt path and took the `persist=True`
+  default. Split into `probe_os_info()` + `refresh_os_info()` as the plan
+  specified, which also let a dead `tests/conftest.py` workaround go.
+
+Details and per-item commits: `plans/2026-07-24-flush-accessor-rename.md`
+"WAVE 2", now all checked.
+
+**Lesson, since it keeps recurring:** three of four items here were closed
+before the entry describing them as open was read. Verify against live code
+first; the docs drift.
+
+### 9. Per-probe notifications SLICE 2 — high/low limit alerts
+
+**SHIPPED 2026-07-26.** Both limit alerts are in the React dashboard: the probe
+notify modal now carries all three of Flask's accordion cards, and one Set
+writes all three entries as three addressed `notify_updates` in a single POST.
+Model in `web-react/src/helpers/notify/notifyState.ts` (`LimitEdit`,
+`LimitAction`, `NotifyEdit`, `limitEditFields`, `saveNotifyEdit`), UI in
+`ProbeNotifyModal.tsx`.
+
+**This item existed nowhere in this backlog until 2026-07-26.** Slice 1 shipped
+and the groundwork for slice 2 was written up carefully — but only inside
+`plans/2026-07-25-react-probe-notifications.md`, under a "Slice 2 groundwork"
+heading. A reader of the backlog alone would have concluded per-probe
+notifications were finished; they were not. That is why this entry exists, and
+why the answers below are recorded here rather than left in the plan.
+
+What the slice settled:
+
+- **The suspected second backend bug was REAL, and is fixed.** Resolved by
+  running the code, as this item demanded, not by re-reading it: restoring the
+  original gate (`fired = not control["notify_data"][index]["req"]`) turns
+  `tests/unit/notify/test_notifications.py::test_check_notify_limit_shutdown_*`
+  red — a `probe_limit_high` entry with `shutdown: True` and the temperature
+  310°F past its 300°F limit leaves `control["mode"] == Hold`. Only the `probe`
+  branch ever clears `req`; a limit entry stays armed for the whole cook, so the
+  gate was permanently False and "Shutdown PiFire" beside every high/low limit
+  was dead. Fixed in `6c42611d` — `fired` is `triggered` for a limit entry (the
+  flag the neighbouring `reignite` branch already used) and `not req` for the
+  one-shot probe/timer/test entries. Copying the probe branch's `req = False`
+  would have been the WRONG fix: it disarms the alert for the rest of the cook.
+- **RULING on the Flask asymmetry: ported, not flattened.** The limit
+  temperatures render for every probe; the limit ACTIONS render for the Primary
+  probe only. "Shutdown PiFire" on a high limit is a runaway-heat cutoff and
+  "Attempt Re-ignite" on a low limit is a fire-out response — both are
+  statements about the FIRE, and only the primary probe measures the fire. A
+  food probe reading low means cold meat, not a dead fire: arming a re-ignite
+  there fires the moment cold food goes on the grate, and pre-arming `triggered`
+  cannot help, because the temperature genuinely leaves the range and comes
+  back. The two halves also complement each other — the target action set is
+  food-probe-only, the limit action set is primary-only — so every probe is
+  offered exactly one action set.
+- **`triggered` is pre-armed by the client, on the comparison the backend FIRES
+  on.** `>=` for `equal_above`, `<=` for `equal_below`. Flask uses a strict
+  `>` / `<` (`dash_default.js:724, :766`), so at exactly the limit it writes
+  `triggered: false` for a condition that already holds and the alarm sounds
+  immediately — the one boundary pre-arming exists to cover. This is also why
+  the per-field REST grammar is unusable here: `/api/set/limit_high|limit_low/…`
+  accepts `req`/`shutdown`/`keep_warm`/`reignite`/`target` and **cannot set
+  `triggered`** (`common/api_commands.py:544-551`).
+- **One `LimitAction`, not two booleans** — `"none" | "shutdown" | "reignite"`,
+  the same shape as slice 1's `TargetAction`, so the UI cannot express the
+  shutdown-plus-reignite state the backend silently collapses. No keep-warm on a
+  limit: no UI in either app has ever offered it and the socket payload
+  publishes no flag to read it back from. No re-ignite on the HIGH limit for the
+  same reason — there is no `highLimitReignite` on the wire.
+
+Two consequences worth knowing:
+
+1. **The modal owns all three entries, so Set rewrites all three** — including
+   re-arming each limit's `triggered` from the probe's live reading, which is
+   what the backend itself would compute on its next pass. `limitEditFields`
+   also states every input to the backend's action tail (`shutdown`,
+   `keep_warm`, `reignite`) rather than only the control it shows, so an action
+   armed by the mobile DTO or by `/api/set/limit_*` cannot act on an alert whose
+   UI displays none. It names `condition` too: `notify.set` APPENDS an entry it
+   cannot find, and `check_notify` reads `item["condition"]` unguarded.
+2. **The bell now means "any notification", not "a target"** — it reads
+   `hasNotifications`, which the backend already sets when any of the label's
+   three entries is armed. The ETA readout is still target-only: the backend
+   computes `eta` for `probe` entries alone.
+
+**Not done, deliberately:** no cross-validation that the low limit sits below
+the high limit. Flask allows the overlap and the backend fires both alarms
+happily; forbidding it here would be a new rule, not a port.
+
+---
+
 ## OPEN
+
+Numbering is non-contiguous by design — resolved items (3, 4, 6, 6a, 7, 9)
+moved to RESOLVED above keep their numbers there. Item 10 now precedes item 11.
 
 ### 1. Wizard styling — DONE (one human checkpoint outstanding)
 
@@ -534,76 +748,6 @@ Also ratified: **one dashboard forever.** No picker, no `hidden_cards`, no
 click-to-toggle manual outputs now have no home in React — that capability
 belongs to the **manual** page item below. This does not retire the Flask
 picker; it only says React will not grow one.
-
-### 3. Timer clobber — DONE (closed at the source by control-write deltas)
-
-Every writer now queues an intent DELTA — named members, or an ordered OP the
-drain evaluates against live state — instead of the whole control snapshot it
-happened to read (`common/control_delta.py`). `control["timer"]` and
-`control["notify_data"]` are expressible ONLY as ops, which is what stopped the
-drain guessing: `timer.start_or_resume`, `timer.clear`, `notify.set`.
-
-- stop-then-pause in one cycle leaves the timer stopped, and a flag write after
-  a start no longer zeroes it (`test_control_delta_seam.py`,
-  `test_process_command_golden.py`).
-- `TimerBar`'s client-side guard against that pair is deleted — the workaround
-  went with the fix.
-- The whole-`notify_data` clobber is closed too, on both UIs: see
-  "Notify writes are addressed per entry" under SHIPPED.
-
-Remaining: `POST /api/control` still ACCEPTS a whole `notify_data` array and
-applies it as `notify.replace`, because third-party clients speak it. No
-in-repo client does. Documented as lossy at both doors.
-
-### 4. The errors blob is write-only from the web tier — DONE 2026-07-26
-
-**Fixed as a non-sticky liveness signal, not a clearing endpoint.**
-
-The bug: `_check_control_status` (`blueprints/mobile/socket_io.py`) appended
-"The control process did not respond…" to the errors blob. `read_errors()` is a
-plain non-destructive read — unlike `warnings` on the very same payload, which
-drains and self-heals frame to frame — and its only clearer, `flush_errors()`,
-has exactly one production caller, `control.py` at boot. So one missed answer
-rode every `socket_dash_data` frame until the control process restarted, and no
-route, socket action or API command could clear it.
-
-**Which fix, and why.** The blob's other writers decide it. Every one of them
-(`controller/runtime/devices.py`, `runner.py`, `controller.py`,
-`common/extra_installer.py`) is the control process or one of its subprocesses,
-and each records a failure that already happened and cannot un-happen — a
-display that would not load, a dependency install that failed. The
-`flush_errors()`-at-control-boot lifecycle matches exactly that: "errors
-accumulated since the control process started." Liveness is the opposite kind of
-fact: about right now, observed by the web process, false the moment control
-answers again. It was misfiled, and once filed correctly there is nothing
-durable left to clear, so no clearing endpoint is needed.
-
-The verdict now lives in `socket_io._control_alive` — process-local, in memory,
-overwritten by every check in both directions — and `_get_dash_data` composes
-`common/app.py::CONTROL_DOWN_ERROR` into each payload from it. Deliberately not
-persisted anywhere: persisting a statement about "right now" is what made this
-sticky. `dash_page` already worked this way (it appends to the local list it
-hands the template); the duplicated user-visible string is now one constant,
-because the React dashboard identifies the condition by matching a substring of
-it (`web-react/src/helpers/dashboard/health.ts`).
-
-Consequence worth keeping: **the errors blob is now read-only from the web
-tier**, giving it a single owner and removing a cross-process read-modify-write.
-
-Pinned by `tests/web/test_control_liveness_not_sticky.py` (6 tests, driving the
-real consumers), including that a durable control-process error is untouched in
-both directions — a guard against "fixing" this by deleting from the blob.
-
-The Recheck control in `controlHealth.ts` is **kept**: the payload can still be
-up to one 30 s poll interval stale, which is an independent reason for an
-on-demand probe. Its comment, which described the stickiness and the
-`get_system_command_output` queue race as live problems, is corrected.
-
-*The queue race is not a separate open item.* `get_system_command_output` no
-longer discards non-matching entries — it peeks and pushes back what is not
-its own (triage Slice 9 item 1, `33135e4aed48`,
-`tests/unit/common/test_system_command_output_queue.py`). The "can be written on
-a healthy system" clause of this entry was already stale when it was written.
 
 ### 5. Tailwind v4 migration — DONE 2026-07-27, one recapture outstanding
 
@@ -714,63 +858,6 @@ Five follow-on tasks, none of them in the plan.
    through the demo server's `/api` proxy. It is the one baseline of the 43 that
    would not reproduce on another machine.
 
-### 6. Remaining audit findings — SUPERSEDED by item 10
-
-`audits/2026-07-25-audit-triage.md` and
-`audits/2026-07-25-react-vs-flask-ui-divergences.md`. This item used to say
-"roughly 40 findings … the rest are untouched", which was guesswork. The
-2026-07-26 sweep read both audits item by item and checked each against live
-code: **all 9 CRITICALs and 12 of 18 IMPORTANTs are done.** The genuinely
-remaining findings are enumerated in item 10 rather than counted in the
-abstract here.
-
-### 6a. Hopper card should link to /pellets — DONE 2026-07-26
-
-Bootstrap's hopper card carries a "Manager" link. The dashboard slice asserted
-there must be **no** such link in React; the pellets plan recorded the shortcut
-as owed and assigned it to the dashboard slice. The two plans contradicted each
-other and neither shipped it. **Ruling: the link exists, because it exists in
-Bootstrap.** `/pellets` shipped 2026-07-25, so the target is real. Small,
-self-contained, unblocked.
-
-- [x] Shipped 2026-07-26: a router `<Link to="/pellets">Manager</Link>` in
-      `HopperGauge`'s footer (`.pf-dash-hopper-link`, existing `pf-*` tokens, no
-      new colour); the dashboard slice's "offers no link out" assertion was
-      flipped to assert the link exists and points at `/pellets`, plus one
-      pinning that it navigates in-app rather than reloading the document.
-
-### 7. Accessor rename WAVE 2 — DONE 2026-07-26
-
-This entry was stale. It claimed four remaining items; three were already
-finished when it was written, by task ACC (`.superpowers/sdd/task-acc-report.md`).
-Checked against live code, not the docs:
-
-- `read_warnings()` → `drain_warnings()` — **already done.** Both exist in
-  `common/datastore_accessors.py`, `dash_page` is `drain_warnings()`'s only
-  caller, and `tests/web/test_warnings_cross_consumer.py` pins it. The
-  cross-consumer bug this entry described as open had already been fixed.
-- `get_system_command_output()` discarding other consumers' queue entries —
-  **already done.** It peeks and pushes back;
-  `tests/unit/common/test_system_command_output_queue.py`. (Backlog item 4 also
-  cited this as a live cause; that too was stale.)
-- `read_settings_file(init=True)` — **already done**, docstring only and
-  deliberately so: `init` defaults to False, all three production callers pass
-  it explicitly, and a rename would churn 24 references for no behavioural gain.
-- `get_os_info(persist=True)` — **the one that really was outstanding**, and the
-  only one closed by this pass. Task ACC skipped it as "already fixed" because
-  the old CWD-relative `os_info.json` write was gone, reasoning that no caller
-  just wants to read. `board-config.py::rpi_config_write` is that caller: it
-  reads `VERSION_ID` to choose a config.txt path and took the `persist=True`
-  default. Split into `probe_os_info()` + `refresh_os_info()` as the plan
-  specified, which also let a dead `tests/conftest.py` workaround go.
-
-Details and per-item commits: `plans/2026-07-24-flush-accessor-rename.md`
-"WAVE 2", now all checked.
-
-**Lesson, since it keeps recurring:** three of four items here were closed
-before the entry describing them as open was read. Verify against live code
-first; the docs drift.
-
 ### 8. Un-migrated Flask pages
 
 Roughly ordered by daily-use value:
@@ -830,81 +917,6 @@ Roughly ordered by daily-use value:
       necessary, not sufficient; confirm before building, and do not delete the
       blueprint yet.
 
-### 9. Per-probe notifications SLICE 2 — high/low limit alerts
-
-**SHIPPED 2026-07-26.** Both limit alerts are in the React dashboard: the probe
-notify modal now carries all three of Flask's accordion cards, and one Set
-writes all three entries as three addressed `notify_updates` in a single POST.
-Model in `web-react/src/helpers/notify/notifyState.ts` (`LimitEdit`,
-`LimitAction`, `NotifyEdit`, `limitEditFields`, `saveNotifyEdit`), UI in
-`ProbeNotifyModal.tsx`.
-
-**This item existed nowhere in this backlog until 2026-07-26.** Slice 1 shipped
-and the groundwork for slice 2 was written up carefully — but only inside
-`plans/2026-07-25-react-probe-notifications.md`, under a "Slice 2 groundwork"
-heading. A reader of the backlog alone would have concluded per-probe
-notifications were finished; they were not. That is why this entry exists, and
-why the answers below are recorded here rather than left in the plan.
-
-What the slice settled:
-
-- **The suspected second backend bug was REAL, and is fixed.** Resolved by
-  running the code, as this item demanded, not by re-reading it: restoring the
-  original gate (`fired = not control["notify_data"][index]["req"]`) turns
-  `tests/unit/notify/test_notifications.py::test_check_notify_limit_shutdown_*`
-  red — a `probe_limit_high` entry with `shutdown: True` and the temperature
-  310°F past its 300°F limit leaves `control["mode"] == Hold`. Only the `probe`
-  branch ever clears `req`; a limit entry stays armed for the whole cook, so the
-  gate was permanently False and "Shutdown PiFire" beside every high/low limit
-  was dead. Fixed in `6c42611d` — `fired` is `triggered` for a limit entry (the
-  flag the neighbouring `reignite` branch already used) and `not req` for the
-  one-shot probe/timer/test entries. Copying the probe branch's `req = False`
-  would have been the WRONG fix: it disarms the alert for the rest of the cook.
-- **RULING on the Flask asymmetry: ported, not flattened.** The limit
-  temperatures render for every probe; the limit ACTIONS render for the Primary
-  probe only. "Shutdown PiFire" on a high limit is a runaway-heat cutoff and
-  "Attempt Re-ignite" on a low limit is a fire-out response — both are
-  statements about the FIRE, and only the primary probe measures the fire. A
-  food probe reading low means cold meat, not a dead fire: arming a re-ignite
-  there fires the moment cold food goes on the grate, and pre-arming `triggered`
-  cannot help, because the temperature genuinely leaves the range and comes
-  back. The two halves also complement each other — the target action set is
-  food-probe-only, the limit action set is primary-only — so every probe is
-  offered exactly one action set.
-- **`triggered` is pre-armed by the client, on the comparison the backend FIRES
-  on.** `>=` for `equal_above`, `<=` for `equal_below`. Flask uses a strict
-  `>` / `<` (`dash_default.js:724, :766`), so at exactly the limit it writes
-  `triggered: false` for a condition that already holds and the alarm sounds
-  immediately — the one boundary pre-arming exists to cover. This is also why
-  the per-field REST grammar is unusable here: `/api/set/limit_high|limit_low/…`
-  accepts `req`/`shutdown`/`keep_warm`/`reignite`/`target` and **cannot set
-  `triggered`** (`common/api_commands.py:544-551`).
-- **One `LimitAction`, not two booleans** — `"none" | "shutdown" | "reignite"`,
-  the same shape as slice 1's `TargetAction`, so the UI cannot express the
-  shutdown-plus-reignite state the backend silently collapses. No keep-warm on a
-  limit: no UI in either app has ever offered it and the socket payload
-  publishes no flag to read it back from. No re-ignite on the HIGH limit for the
-  same reason — there is no `highLimitReignite` on the wire.
-
-Two consequences worth knowing:
-
-1. **The modal owns all three entries, so Set rewrites all three** — including
-   re-arming each limit's `triggered` from the probe's live reading, which is
-   what the backend itself would compute on its next pass. `limitEditFields`
-   also states every input to the backend's action tail (`shutdown`,
-   `keep_warm`, `reignite`) rather than only the control it shows, so an action
-   armed by the mobile DTO or by `/api/set/limit_*` cannot act on an alert whose
-   UI displays none. It names `condition` too: `notify.set` APPENDS an entry it
-   cannot find, and `check_notify` reads `item["condition"]` unguarded.
-2. **The bell now means "any notification", not "a target"** — it reads
-   `hasNotifications`, which the backend already sets when any of the label's
-   three entries is armed. The ETA readout is still target-only: the backend
-   computes `eta` for `probe` entries alone.
-
-**Not done, deliberately:** no cross-validation that the low limit sits below
-the high limit. Flask allows the overlap and the backend fires both alarms
-happily; forbidding it here would be a new rule, not a port.
-
 ### 9a. Live probe-map editing — three gaps disclosed by the probeconfig slice
 
 `/settings/probes` shipped 2026-07-26. Three things it deliberately does NOT do,
@@ -958,52 +970,6 @@ recorded here rather than left in the plan document, per the standing rule below
    page lifetime, is unmitigated. Not papered over with a `lastupdated.time`
    compare-and-swap: that race is datastore-wide and pre-existing, and a
    point fix here would imply a guarantee the rest of the store does not make.
-
-### 11. Recipes slice — what it deliberately does NOT do
-
-Recorded here per the standing rule, rather than left in
-`plans/2026-07-27-react-recipes.md`.
-
-1. **No recipe comments panel.** Human ruling, 2026-07-27, taken before a line
-   was written. `comments.json` is in every `.pfrecipe` and Flask's
-   `recipeassetmanager` has a `comments` branch, but **nothing in either UI has
-   ever written a recipe comment** (`tests/web/test_page_recipes.py:33-38` says
-   so). Building one from the schema alone would invent a feature rather than
-   port one. The member is preserved byte-for-byte on every write, because each
-   endpoint rewrites only the member it changed. Revisit only if someone asks
-   for it as a feature.
-2. **`POST /recipes/run` refuses unless `mode == Stop`** (409 `not_stopped`).
-   Flask posts from any mode (`static/recipes/js/recipes.js:270-293`). This
-   matches the guard `POST /api/probe_map` already applies, and it is the
-   difference between a test suite that can exercise the route and one that
-   cannot.
-3. **Instruction writes reject an unknown ingredient name** (400,
-   `data.field == "ingredients"`). Flask does not check. The React multi-select
-   can only offer names that exist, so a request carrying an unknown one is a
-   bug in something.
-4. **Unknown metadata field names and out-of-range indices are refused**, where
-   Flask writes them. A negative index is refused rather than wrapping around to
-   the last element.
-5. **Asset writes are whole-list**, where Flask sends `{action, asset_name}` and
-   infers direction. Same reasoning that drove cook-file comments in plan 1: a
-   stale client can send an `add` for something already present and be told OK.
-6. **The asset lightbox carousel** (Flask's `recipeshowasset`) is not ported.
-   The cook-file lightbox exists and could be generalised; it is not a blocker
-   for editing a recipe.
-7. **No cross-validation of a recipe's steps against the live probe map.** The
-   controller remaps `trigger_temps` through
-   `settings["recipe"]["probe_map"]` (`controller.py:156-163`), so a recipe
-   saved against a different probe map is a real failure mode — but diagnosing
-   it is its own piece of work.
-8. **No migration for recipes already saved with mismatched units.** The
-   conversion is fixed; existing archives are not rewritten.
-9. **`get_recipefilelist_details` still reads the module constant
-   `file_mgmt.recipes.RECIPE_FOLDER`**, not `current_app.config`, so a fixture
-   must patch both. Nothing in the new surface depends on it; it is a trap for
-   the next person.
-10. **The Flask `/recipes` page stays live**, along with its
-    characterization suite. Retirement is one deliberate pass at the end
-    (ruling 5).
 
 ### 10. Deferred-work inventory — 103 open items pulled out of plan documents
 
@@ -1320,6 +1286,51 @@ no browserslist pinned; unverified whether Biome's CSS parser accepts
 page at either viewport**; dynamic class names are invisible to Tailwind's
 scanner and the required safelist note does not exist.
 
+### 11. Recipes slice — what it deliberately does NOT do
+
+Recorded here per the standing rule, rather than left in
+`plans/2026-07-27-react-recipes.md`.
+
+1. **No recipe comments panel.** Human ruling, 2026-07-27, taken before a line
+   was written. `comments.json` is in every `.pfrecipe` and Flask's
+   `recipeassetmanager` has a `comments` branch, but **nothing in either UI has
+   ever written a recipe comment** (`tests/web/test_page_recipes.py:33-38` says
+   so). Building one from the schema alone would invent a feature rather than
+   port one. The member is preserved byte-for-byte on every write, because each
+   endpoint rewrites only the member it changed. Revisit only if someone asks
+   for it as a feature.
+2. **`POST /recipes/run` refuses unless `mode == Stop`** (409 `not_stopped`).
+   Flask posts from any mode (`static/recipes/js/recipes.js:270-293`). This
+   matches the guard `POST /api/probe_map` already applies, and it is the
+   difference between a test suite that can exercise the route and one that
+   cannot.
+3. **Instruction writes reject an unknown ingredient name** (400,
+   `data.field == "ingredients"`). Flask does not check. The React multi-select
+   can only offer names that exist, so a request carrying an unknown one is a
+   bug in something.
+4. **Unknown metadata field names and out-of-range indices are refused**, where
+   Flask writes them. A negative index is refused rather than wrapping around to
+   the last element.
+5. **Asset writes are whole-list**, where Flask sends `{action, asset_name}` and
+   infers direction. Same reasoning that drove cook-file comments in plan 1: a
+   stale client can send an `add` for something already present and be told OK.
+6. **The asset lightbox carousel** (Flask's `recipeshowasset`) is not ported.
+   The cook-file lightbox exists and could be generalised; it is not a blocker
+   for editing a recipe.
+7. **No cross-validation of a recipe's steps against the live probe map.** The
+   controller remaps `trigger_temps` through
+   `settings["recipe"]["probe_map"]` (`controller.py:156-163`), so a recipe
+   saved against a different probe map is a real failure mode — but diagnosing
+   it is its own piece of work.
+8. **No migration for recipes already saved with mismatched units.** The
+   conversion is fixed; existing archives are not rewritten.
+9. **`get_recipefilelist_details` still reads the module constant
+   `file_mgmt.recipes.RECIPE_FOLDER`**, not `current_app.config`, so a fixture
+   must patch both. Nothing in the new surface depends on it; it is a trap for
+   the next person.
+10. **The Flask `/recipes` page stays live**, along with its
+    characterization suite. Retirement is one deliberate pass at the end
+    (ruling 5).
 
 ---
 
