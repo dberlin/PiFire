@@ -60,3 +60,35 @@
   font: 600 16px "Barlow";
   font-variant-numeric: tabular-nums;
 }
+
+/* The Temp-vs-Tr curve. Sized by its box; the viewBox does the scaling. */
+.pf-tuner-chart {
+  @apply w-full rounded-card bg-inset;
+  height: 200px;
+  border: 1px solid var(--color-card-border);
+}
+.pf-tuner-chart-line {
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.pf-tuner-chart-empty {
+  @apply m-0 rounded-card bg-inset p-[16px] text-warn;
+  border: 1px solid var(--color-card-border);
+  font: 500 13px "Barlow";
+}
+
+/* The profile save form. */
+.pf-tuner-profile {
+  @apply flex flex-col gap-[8px];
+}
+.pf-tuner-coeff {
+  @apply flex flex-col gap-[4px];
+}
+.pf-tuner-error {
+  @apply m-0 text-danger;
+  font: 500 13px "Barlow";
+}
+.pf-tuner-profile-actions {
+  @apply flex flex-wrap gap-[8px];
+}
