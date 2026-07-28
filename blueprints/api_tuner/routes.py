@@ -18,16 +18,20 @@ from common.app import api_response
 from common.common import WriteKind, generate_uuid
 from common.control_delta import control_delta
 from common.datastore_accessors import (
+    autotune_length,
     flush_autotune,
+    read_autotune,
     read_control,
+    read_current,
     read_settings,
     read_tr,
+    write_autotune,
     write_control,
     write_settings,
 )
 from common.modes import Mode
 
-from blueprints.tuner.tuner import calc_shh_chart, calc_shh_coefficients
+from blueprints.tuner.tuner import calc_auto_tune_status, calc_shh_chart, calc_shh_coefficients
 
 from . import api_tuner_bp
 
@@ -256,3 +260,76 @@ def tuner_profile():
     return jsonify(
         api_response("OK", None, {"id": profile_id, "applied": apply_to if target is not None else None})
     ), 200
+
+
+def _reference_temp(current, reference):
+    """The reference probe's temperature, or None if it is not reporting.
+
+    read_current() groups probes as P / F / AUX by label, and Flask checks them
+    in that order. None (not -1): a probe absent from every group is not
+    reporting, which the client renders as "waiting" -- distinct from a real
+    reading that happens to be zero.
+    """
+    for group in ("P", "F", "AUX"):
+        values = current.get(group, {})
+        if reference in values:
+            return values[reference]
+    return None
+
+
+@api_tuner_bp.route("/auto-status", methods=["POST"])
+def tuner_auto_status():
+    """Record one auto-tuning sample and report the derived selection.
+
+    Unlike /tr this is a POST: each poll captures a datapoint. But it writes
+    only the autotune QUEUE -- never control -- so the mode-change safety stays
+    entirely in the session endpoint. The session's flush-on-open is what makes
+    each run start from zero.
+
+    A sample is recorded only when both readings are present and past the
+    DS18B20 warm-up guard (Flask's `autotune_length() > 4 or current_temp > 0`),
+    so a cold probe's leading zeros do not poison the solve. Once more than ten
+    samples span a wide enough temperature range, calc_auto_tune_status
+    (unchanged) fills in the high/medium/low points and flips `ready`.
+    """
+    body = json_body()
+    probe = body.get("probe")
+    reference = body.get("reference")
+    if not isinstance(probe, str) or not probe:
+        return error("bad_request", 400, field="probe")
+    if not isinstance(reference, str) or not reference:
+        return error("bad_request", 400, field="reference")
+
+    current_tr = read_tr().get(probe)
+    current_temp = _reference_temp(read_current(), reference)
+
+    #  Record only a complete, warmed-up reading. `current_temp > 0` lets an
+    #  early sample through once the probe is live; `autotune_length() > 4`
+    #  lets later samples through even at exactly zero, matching Flask.
+    if (
+        current_tr is not None
+        and current_temp is not None
+        and current_tr >= 0
+        and current_temp >= 0
+        and (autotune_length() > 4 or current_temp > 0)
+    ):
+        write_autotune({"ref_T": current_temp, "probe_Tr": current_tr})
+
+    status = {
+        "current_tr": current_tr,
+        "current_temp": current_temp,
+        "high_tr": 0,
+        "high_temp": 0,
+        "medium_tr": 0,
+        "medium_temp": 0,
+        "low_tr": 0,
+        "low_temp": 0,
+        "ready": False,
+    }
+    samples = read_autotune()
+    if len(samples) > 10:
+        settings = read_settings()
+        calc_auto_tune_status(samples, settings["globals"]["units"], status)
+
+    status["samples"] = len(samples)
+    return jsonify(api_response("OK", None, status)), 200
