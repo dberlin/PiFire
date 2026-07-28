@@ -648,8 +648,34 @@ jj new -m "fix(api_admin): clearing events empties the family and the database"
 
 **Interfaces:**
 - Produces: `datastore.prune_log(name, keep)` — deletes all but the newest
-  `keep` rows for that logger. `sqlite_log_handler.LOG_RETENTION_ROWS = 20_000`,
-  `sqlite_log_handler.PRUNE_INTERVAL = 1_000`.
+  `keep` rows for that logger. `datastore.LOG_RETENTION_ROWS = 20_000`,
+  `datastore.PRUNE_INTERVAL = 1_000`, `datastore._logs_retention_ddl()`,
+  `datastore._ensure_logs_retention(conn)`.
+
+> **REVISED DURING EXECUTION, 2026-07-28.** As written, this task put an emit
+> counter on `SqliteLogHandler`. It shipped as a SQLite **trigger** instead, at
+> the user's suggestion. The counter is per-handler-instance and per-process —
+> PiFire runs `control.py`, gunicorn and `board-config.py` separately, each with
+> its own count — and Task 7's `reset_loggers()` detaches handlers, which zeroes
+> every counter. A process that restarts regularly would prune late or never,
+> silently. A trigger cannot be bypassed and covers any writer that inserts into
+> `logs`, handler or not. The constants moved from `sqlite_log_handler` to
+> `datastore`, since the trigger DDL owns them, and the counter was deleted
+> rather than left alongside its replacement.
+>
+> Two things this turned up that the original design would not have:
+>
+> 1. **The `OFFSET` boundary was off by one.** `OFFSET keep` names the
+>    `keep + 1`-th newest row, so `id < cutoff` keeps it and leaves `keep + 1`
+>    rows. The comparison must be `id <=`. Caught only because the test asserts
+>    exact row contents rather than a count.
+> 2. **Refreshing the trigger is a schema WRITE.** Running `DROP TRIGGER` +
+>    `CREATE TRIGGER` unconditionally in `_ensure_schema` writes to
+>    `sqlite_master` on *every* connection and takes a write lock, which made
+>    `test_datastore_concurrency.py::test_concurrent_producers_no_loss` flaky
+>    (1 failure in 2 combined runs). `_ensure_logs_retention` compares the
+>    stored definition first and only rewrites when it differs; the combined
+>    suite then passed 5 runs in a row.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -713,50 +739,52 @@ def prune_log(name, keep):
     nothing is deleted.
     """
     execute_write(
-        "DELETE FROM logs WHERE name=? AND id < "
+        "DELETE FROM logs WHERE name=? AND id <= "
         "(SELECT id FROM logs WHERE name=? ORDER BY id DESC LIMIT 1 OFFSET ?)",
         (name, name, keep),
     )
 ```
 
-Replace `common/sqlite_log_handler.py` entirely:
+Add the constants and the trigger DDL to `common/datastore.py` above `SCHEMA`,
+and call `_ensure_logs_retention(conn)` from `_ensure_schema` *after*
+`conn.executescript(SCHEMA + _queue_ddl())`:
 
 ```python
-import logging
-import time
-
-from common import datastore
-
-#: The file handler caps each logger at 1 MiB x 4 backups. Nothing capped the
-#: table, so it grew forever onto the SD card. ~20k rows is the same order of
-#: magnitude as the ~4 MiB of files.
 LOG_RETENTION_ROWS = 20_000
-
-#: Pruning on every record would double the write rate of logging itself.
 PRUNE_INTERVAL = 1_000
 
 
-class SqliteLogHandler(logging.Handler):
-    """Log sink writing formatted records into the logs table under `name`."""
+def _logs_retention_ddl():
+    return f"""CREATE TRIGGER logs_prune AFTER INSERT ON logs
+WHEN NEW.id % {PRUNE_INTERVAL} = 0
+BEGIN
+    DELETE FROM logs
+     WHERE name = NEW.name
+       AND id <= (SELECT id FROM logs WHERE name = NEW.name
+                   ORDER BY id DESC LIMIT 1 OFFSET {LOG_RETENTION_ROWS});
+END"""
 
-    def __init__(self, name):
-        super().__init__()
-        self.name = name
-        self._emits = 0
 
-    def emit(self, record):
-        try:
-            datastore.execute_write(
-                "INSERT INTO logs(name, ts, message) VALUES(?,?,?)",
-                (self.name, int(time.time() * 1000), self.format(record)),
-            )
-            self._emits += 1
-            if self._emits >= PRUNE_INTERVAL:
-                self._emits = 0
-                datastore.prune_log(self.name, LOG_RETENTION_ROWS)
-        except Exception:  # never let logging crash the caller
-            self.handleError(record)
+def _ensure_logs_retention(conn):
+    """Install the trigger only when it is missing or stale -- an
+    unconditional DROP + CREATE writes to sqlite_master on every connection and
+    takes a write lock."""
+    desired = _logs_retention_ddl()
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='logs_prune'"
+    ).fetchone()
+    if row is not None and " ".join(row[0].split()) == " ".join(desired.split()):
+        return
+    conn.executescript(f"DROP TRIGGER IF EXISTS logs_prune;\n{desired};")
 ```
+
+`_logs_retention_ddl()` must be called from `_ensure_schema` at runtime, NOT
+concatenated into the module-level `SCHEMA` constant — `SCHEMA` is evaluated
+once at import, which would freeze the constants and make them unpatchable in
+tests.
+
+Leave `common/sqlite_log_handler.py` as it is apart from a docstring line
+recording that retention is the trigger's job, not the handler's.
 
 - [ ] **Step 4: Run test to verify it passes**
 

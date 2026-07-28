@@ -78,6 +78,65 @@ CREATE TABLE IF NOT EXISTS metrics (
 );
 """
 
+#: The file sink is capped by RotatingFileHandler at 1 MiB x 3 backups, roughly
+#: 4 MiB per logger. Nothing capped the table, so it grew onto the SD card
+#: forever. ~20k rows is the same order of magnitude as those files.
+LOG_RETENTION_ROWS = 20_000
+
+#: Pruning on every insert would roughly double the write cost of logging, so
+#: the trigger only does real work every Nth row.
+PRUNE_INTERVAL = 1_000
+
+
+def _logs_retention_ddl():
+    """A trigger, not a counter in the logging handler.
+
+    Retention has to hold for every writer, and a Python-side counter does not:
+    PiFire runs control.py, gunicorn and board-config.py as separate processes,
+    each with its own SqliteLogHandler instances and its own count, and
+    common.common.reset_loggers() detaches handlers -- which resets any such
+    counter to zero. A process that restarts often would prune late or never,
+    and nothing would report it. Enforcing this in the schema means anything
+    that inserts into `logs` is covered, including future writers that never go
+    near the handler.
+
+    `NEW.id % PRUNE_INTERVAL` gates the delete so the amortised cost matches a
+    counter's: the trigger fires on every insert but only does work every Nth.
+    `id` is a global AUTOINCREMENT, so the gate trips every N rows across all
+    loggers, and the delete then trims whichever logger wrote that row -- which
+    self-balances toward the noisiest one.
+
+    Recreated rather than CREATE TRIGGER IF NOT EXISTS, so changing the
+    constants above takes effect on the next connection instead of leaving a
+    stale definition on every existing database. _ensure_logs_retention only
+    applies it when the definition actually differs -- see there.
+    """
+    return f"""CREATE TRIGGER logs_prune AFTER INSERT ON logs
+WHEN NEW.id % {PRUNE_INTERVAL} = 0
+BEGIN
+    DELETE FROM logs
+     WHERE name = NEW.name
+       AND id <= (SELECT id FROM logs WHERE name = NEW.name
+                   ORDER BY id DESC LIMIT 1 OFFSET {LOG_RETENTION_ROWS});
+END"""
+
+
+def _ensure_logs_retention(conn):
+    """Install the retention trigger, but only when it is missing or stale.
+
+    Unconditionally running DROP + CREATE would write to sqlite_master on EVERY
+    connection, and a schema write takes a write lock. connection() runs per
+    thread and PiFire opens many, so that turns a read-only fast path into
+    lock contention for every other writer. Comparing first keeps the steady
+    state a single indexed read of sqlite_master.
+    """
+    desired = _logs_retention_ddl()
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='logs_prune'").fetchone()
+    if row is not None and " ".join(row[0].split()) == " ".join(desired.split()):
+        return
+    conn.executescript(f"DROP TRIGGER IF EXISTS logs_prune;\n{desired};")
+
+
 SCHEMA = (
     """
 CREATE TABLE IF NOT EXISTS kv (
@@ -140,6 +199,9 @@ def _migrate_history_to_numeric_psp(conn):
 
 def _ensure_schema(conn):
     conn.executescript(SCHEMA + _queue_ddl())
+    #  Applied separately, and conditionally: unlike CREATE TABLE IF NOT EXISTS
+    #  above, refreshing a trigger is a schema WRITE on every connection.
+    _ensure_logs_retention(conn)
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if 0 < version < 3:
         # Pre-v3 DB: either the old (id, data) JSON blob metrics table (v1,
@@ -323,6 +385,27 @@ def read_log(name, num=0):
 
 def clear_log(name):
     execute_write("DELETE FROM logs WHERE name=?", (name,))
+
+
+def prune_log(name, keep):
+    """Drop all but the newest `keep` rows for one logger.
+
+    The cutoff is found by OFFSET into that logger's own rows, walking
+    ix_logs_name_id directly. It cannot be `MAX(id) - keep` arithmetic: `id` is
+    a single global AUTOINCREMENT sequence shared by every logger, so wherever
+    two loggers interleave -- which on a running grill is always -- that
+    subtraction lands on the wrong row and deletes another logger's history.
+
+    `OFFSET keep` names the (keep + 1)-th newest row, so the comparison is
+    inclusive: deleting that row and everything older leaves exactly `keep`.
+
+    With fewer than `keep` rows the subquery yields NULL, `id <= NULL` is NULL,
+    and nothing is deleted.
+    """
+    execute_write(
+        "DELETE FROM logs WHERE name=? AND id <= (SELECT id FROM logs WHERE name=? ORDER BY id DESC LIMIT 1 OFFSET ?)",
+        (name, name, keep),
+    )
 
 
 def export_config(key, path):
