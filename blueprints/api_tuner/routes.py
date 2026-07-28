@@ -17,10 +17,14 @@ from werkzeug.exceptions import BadRequest
 from common.app import api_response
 from common.common import WriteKind
 from common.control_delta import control_delta
-from common.datastore_accessors import read_control, read_tr, write_control
+from common.datastore_accessors import read_control, read_settings, read_tr, write_control
 from common.modes import Mode
 
+from blueprints.tuner.tuner import calc_shh_chart, calc_shh_coefficients
+
 from . import api_tuner_bp
+
+SEGMENTS = ("High", "Medium", "Low")
 
 #: The only two modes a tuning session may be opened from. Stop is the normal
 #: case; Monitor is allowed because the session itself puts the grill there,
@@ -122,3 +126,58 @@ def tuner_tr():
             },
         )
     ), 200
+
+
+@api_tuner_bp.route("/coefficients", methods=["POST"])
+def tuner_coefficients():
+    """Solve Steinhart-Hart for three temperature/resistance pairs.
+
+    The maths itself is blueprints/tuner/tuner.py's, unchanged -- one
+    definition, and tests/web/test_page_tuner.py pins its return shape. What is
+    new is that both of its silent failures get a signal:
+
+      * calc_shh_coefficients wraps everything in a bare `except:` and returns
+        (0, 0, 0). Flask handed that tuple to the save form, so a failed tune
+        produced a saveable profile of zeros. Here it is a 422.
+      * calc_shh_chart abandons the whole series the moment temp_to_tr throws,
+        which its own docstring calls common. An empty chart is reported as
+        chart_ok: false rather than drawn as an empty chart.
+    """
+    body = json_body()
+    raw = body.get("points")
+    if not isinstance(raw, list) or len(raw) != 3:
+        return error("bad_request", 400, field="points")
+
+    by_segment = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            return error("bad_request", 400, field="points")
+        segment = entry.get("segment")
+        if segment not in SEGMENTS:
+            return error("bad_request", 400, field="segment")
+        try:
+            #  bool is a subclass of int, so `True` would otherwise sail
+            #  through float() and become a 1-ohm reading.
+            for key in ("temp", "trohms"):
+                if isinstance(entry.get(key), bool):
+                    raise TypeError(key)
+            by_segment[segment] = (float(entry["temp"]), float(entry["trohms"]))
+        except TypeError, ValueError, KeyError:
+            return error("bad_request", 400, field="points")
+
+    if set(by_segment) != set(SEGMENTS):
+        return error("bad_request", 400, field="points")
+
+    units = read_settings()["globals"]["units"]
+    (high_t, high_r) = by_segment["High"]
+    (medium_t, medium_r) = by_segment["Medium"]
+    (low_t, low_r) = by_segment["Low"]
+
+    a, b, c = calc_shh_coefficients(low_t, medium_t, high_t, low_r, medium_r, high_r, units=units)
+    if (a, b, c) == (0, 0, 0):
+        return error("uncomputable", 422)
+
+    _labels, chart = calc_shh_chart(
+        a, b, c, units=units, temp_range=220, tr_points=[int(high_r), int(medium_r), int(low_r)]
+    )
+    return jsonify(api_response("OK", None, {"a": a, "b": b, "c": c, "chart": chart, "chart_ok": bool(chart)})), 200

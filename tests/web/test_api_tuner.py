@@ -215,3 +215,66 @@ def test_tr_reports_whether_a_session_is_open(ds, client):
     and the page can say so instead of showing a frozen number."""
     seed_tr({"Grill": 51234})
     assert client.get("/api/tuner/tr?probe=Grill").get_json()["data"]["tuning"] is False
+
+
+def points(high=(400, 1200), medium=(250, 6000), low=(100, 40000)):
+    """A real thermistor triple that solves to non-zero coefficients and a full
+    20-point chart. Verified against blueprints/tuner/tuner.py on 2026-07-28."""
+    return [
+        {"segment": "High", "temp": high[0], "trohms": high[1]},
+        {"segment": "Medium", "temp": medium[0], "trohms": medium[1]},
+        {"segment": "Low", "temp": low[0], "trohms": low[1]},
+    ]
+
+
+def test_coefficients_are_computed_from_three_points(ds, client):
+    body = client.post("/api/tuner/coefficients", json={"points": points()}).get_json()
+    assert body["result"] == "OK"
+    data = body["data"]
+    for key in ("a", "b", "c"):
+        assert isinstance(data[key], float)
+    #  Not all three zero: that tuple is exactly what calc_shh_coefficients
+    #  returns from its bare `except:`, and Flask fed it straight to the save
+    #  form. A 200 carrying (0, 0, 0) is the bug this endpoint refuses to have.
+    assert (data["a"], data["b"], data["c"]) != (0, 0, 0)
+
+
+def test_an_uncomputable_set_is_refused_rather_than_saved_as_zeros(ds, client):
+    """calc_shh_coefficients swallows every exception and returns (0, 0, 0).
+    Two identical resistances divide by zero in step 3."""
+    resp = client.post(
+        "/api/tuner/coefficients",
+        json={"points": points(high=(400, 5000), medium=(250, 5000))},
+    )
+    assert resp.status_code == 422
+    assert resp.get_json()["message"] == "uncomputable"
+
+
+def test_the_chart_is_reported_as_missing_rather_than_empty(ds, client):
+    """calc_shh_chart abandons the whole series the moment temp_to_tr throws --
+    which its own docstring says is common. An empty list and a list that
+    genuinely has no points look identical, so the flag carries the difference.
+    """
+    body = client.post("/api/tuner/coefficients", json={"points": points()}).get_json()
+    data = body["data"]
+    assert isinstance(data["chart"], list)
+    assert data["chart_ok"] == (len(data["chart"]) > 0)
+
+
+def test_all_three_segments_are_required(ds, client):
+    resp = client.post("/api/tuner/coefficients", json={"points": points()[:2]})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "points"
+
+
+def test_a_non_numeric_reading_is_refused(ds, client):
+    bad = points()
+    bad[0]["trohms"] = "lots"
+    resp = client.post("/api/tuner/coefficients", json={"points": bad})
+    assert resp.status_code == 400
+
+
+def test_coefficients_does_not_write_control(ds, client):
+    before = control_now()
+    client.post("/api/tuner/coefficients", json={"points": points()})
+    assert control_now()["mode"] == before["mode"]
