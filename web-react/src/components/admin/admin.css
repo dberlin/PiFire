@@ -1,0 +1,117 @@
+@reference "../../theme.css";
+
+/* The admin page. .pf-shell-main is flex:1/min-height:0/overflow:auto
+   (shell.css), so height:100% here measures exactly the area under the chrome
+   and every card scrolls inside its own pane -- the page never does.
+   Target viewport 1280x720. */
+.pf-admin {
+  @apply grid h-full gap-[16px] overflow-hidden p-[16px] text-text;
+  box-sizing: border-box;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Row 1 is the error slot and row 2 the header, both always present so grid
+     auto-placement does not shift the cards when either fills. The two card
+     rows are BOUNDED: an `auto` row sizes to its tallest card, and a long
+     backup list would push the bottom row past the viewport, where the
+     overflow:hidden above clips it. */
+  grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr);
+}
+/* Loading and hard-failure states, which have no grid to place. */
+.pf-admin-empty {
+  @apply block overflow-auto;
+}
+.pf-admin-error,
+.pf-admin-header {
+  grid-column: 1 / -1;
+}
+.pf-admin-error > p {
+  @apply m-0;
+}
+.pf-admin-header {
+  @apply flex items-baseline gap-[16px];
+}
+.pf-admin-title {
+  @apply m-0 text-text;
+  font: 600 22px "Barlow";
+}
+.pf-admin-mode {
+  @apply text-label uppercase;
+  font: 600 12px "Barlow";
+  letter-spacing: 2px;
+}
+/* The page's one button treatment, worn by every card action below. Modelled
+   on .pf-modal-btn (dashboard.css) minus its `flex: 1`, which exists to divide
+   a modal's action row and would stretch a lone card button across its card.
+   The `danger` modifier is the same bare class .pf-modal-btn uses. */
+.pf-admin-btn {
+  @apply cursor-pointer rounded-[12px] bg-inset px-[14px] py-[8px] no-underline;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e8dfd1;
+  font: 700 14px "Barlow";
+  text-align: center;
+}
+.pf-admin-btn.danger {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: var(--danger);
+  @apply text-danger;
+}
+.pf-admin-btn:disabled {
+  opacity: 0.55;
+  @apply cursor-not-allowed;
+}
+/* Pushed to the far end of the header rather than sitting against the mode
+   badge, so the two readings stay one group. */
+.pf-admin-header > .pf-admin-btn {
+  margin-left: auto;
+}
+/* .pf-modal-scrim is position:absolute (dashboard.css); without a positioned
+   ancestor a ConfirmAction resolves against the initial containing block and
+   floats free of the card it belongs to. Same trap .pf-pellets-card documents.
+
+   overflow-hidden bounds the card to its grid row; anything taller scrolls in
+   .pf-admin-scroll rather than bleeding past the card. */
+.pf-admin-card {
+  @apply relative flex flex-col gap-[12px] overflow-hidden rounded-[18px] bg-card p-[16px];
+  min-height: 0;
+  border: 1px solid var(--card-border);
+}
+.pf-admin-card-title {
+  @apply m-0 text-label uppercase;
+  font: 600 13px "Barlow";
+  letter-spacing: 2.5px;
+}
+/* A card spanning two of the three columns. */
+.pf-admin-wide {
+  grid-column: span 2;
+}
+.pf-admin-scroll {
+  @apply overflow-y-auto;
+  flex: 1;
+  min-height: 0;
+}
+/* The system readings: a two-column label/value list that reflows to one
+   column when the card is narrow. */
+.pf-admin-facts {
+  @apply m-0 grid gap-x-[16px] gap-y-[6px];
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.pf-admin-fact {
+  @apply flex flex-col gap-[2px];
+  min-width: 0;
+}
+.pf-admin-fact-label {
+  @apply text-label uppercase;
+  font: 600 11px "Barlow";
+  letter-spacing: 1.5px;
+}
+.pf-admin-fact-value {
+  @apply m-0 text-text;
+  font: 400 14px "Barlow";
+  /* Readings are unbounded strings -- a full uptime line or a MAC pair must
+     wrap inside the card rather than widen the grid column. */
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .pf-admin-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

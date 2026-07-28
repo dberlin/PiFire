@@ -4,9 +4,9 @@ import "./shell.css";
 
 // Ported from templates/base.html:63-82. All six Flask destinations are shown
 // so the new UI advertises the same surface as the Flask app, but only the
-// ported ones are navigable. The rest render as disabled spans rather than
-// links to the Flask pages -- linking out of the SPA would drop the live socket
-// and strand the user in the old UI.
+// ported ones are navigable. Events is the last one that is not, and renders as
+// a disabled span rather than a link to the Flask page -- linking out of the SPA
+// would drop the live socket and strand the user in the old UI.
 //
 // "Pellets" is the one entry with NO counterpart in base.html: Flask reaches
 // the pellet manager only from the dashboard hopper card's "Manager" button
@@ -22,7 +22,7 @@ const NAV_ITEMS = [
   { label: "Pellets", to: "/pellets", end: false },
   { label: "Events", to: null, end: false },
   { label: "Settings", to: "/settings", end: false },
-  { label: "Admin", to: null, end: false },
+  { label: "Admin", to: "/admin", end: false },
 ] as const;
 
 const NAV_LIST_ID = "pf-nav-list";

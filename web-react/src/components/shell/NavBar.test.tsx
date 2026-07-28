@@ -49,16 +49,15 @@ describe("NavBar", () => {
     expect(screen.getByRole("link", { name: "Pellets" }).getAttribute("href")).toBe("/pellets");
     expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe("/settings");
     expect(screen.getByRole("link", { name: "Recipes" }).getAttribute("href")).toBe("/recipes");
+    expect(screen.getByRole("link", { name: "Admin" }).getAttribute("href")).toBe("/admin");
   });
 
-  it("renders the two unported destinations as disabled non-links", () => {
+  it("renders the one remaining unported destination as a disabled non-link", () => {
     renderNav();
-    for (const label of ["Events", "Admin"]) {
-      const el = screen.getByText(label);
-      expect(el.tagName).not.toBe("A");
-      expect(el.getAttribute("aria-disabled")).toBe("true");
-      expect(screen.queryByRole("link", { name: label })).toBeNull();
-    }
+    const el = screen.getByText("Events");
+    expect(el.tagName).not.toBe("A");
+    expect(el.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.queryByRole("link", { name: "Events" })).toBeNull();
   });
 
   it("marks the dashboard item active at /", () => {

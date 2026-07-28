@@ -3,6 +3,7 @@ import { probeModulesLoader } from "../helpers/probes/probeMapRoutes";
 import { settingsLoader } from "../helpers/settings/settingsRoutes";
 import { wizardLoader } from "../helpers/wizard/wizardRoutes";
 import { AppPrefsProvider } from "./AppPrefs";
+import { AdminPage } from "./admin/AdminPage";
 import { CookFilePage } from "./cookfiles/CookFilePage";
 import { DashboardRoute } from "./DashboardRoute";
 import { HistoryPage } from "./history/HistoryPage";
@@ -77,6 +78,11 @@ export const routes = [
       // log). NOT to be confused with /settings/pellets below, which is the
       // pellet-LEVEL settings tab (thresholds, auger rate, prime ignition).
       { path: "/pellets", element: <PelletsPage /> },
+      // System maintenance: reboot/shutdown/restart, the clears, backups and
+      // logs. No loader -- GET /api/admin/state probes the platform and writes
+      // the readings back into control, so it belongs behind a mount effect the
+      // page can retry, not in front of the first paint.
+      { path: "/admin", element: <AdminPage /> },
       {
         path: "/settings",
         element: <SettingsShell />,
