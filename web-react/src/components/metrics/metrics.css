@@ -1,0 +1,62 @@
+@reference "../../theme.css";
+
+/* The metrics page: one card per mode the grill passed through.
+
+   The page-level rules (.pf-metrics, its header and the empty state) live in
+   this file too, added alongside the markup that uses them -- styleCoverage
+   fails on a rule with no consumer, so nothing here can be written ahead of
+   the component that wears it. */
+
+/* One record. The accent band across the top replaces Bootstrap's tinted
+   card-header (bg-success / bg-danger / bg-warning / bg-secondary): the same
+   four-way signal, without a block of saturated colour behind white text. */
+.pf-metrics-card {
+  @apply rounded-card bg-card p-[16px] text-text;
+  border: 1px solid var(--color-card-border);
+  border-top: 3px solid var(--color-label);
+}
+.pf-metrics-card.start {
+  border-top-color: var(--color-accent);
+}
+.pf-metrics-card.stop {
+  border-top-color: var(--color-danger);
+}
+.pf-metrics-card.warn {
+  border-top-color: var(--color-warn);
+}
+.pf-metrics-card-title {
+  @apply m-0 mb-[12px] text-text;
+  font: 600 16px "Barlow";
+}
+.pf-metrics-table {
+  @apply w-full text-text;
+  border-collapse: collapse;
+  font: 400 13px "Barlow";
+}
+.pf-metrics-table th,
+.pf-metrics-table td {
+  @apply px-[8px] py-[6px];
+  text-align: left;
+  border-bottom: 1px solid var(--color-card-border);
+}
+.pf-metrics-table thead th {
+  @apply text-label uppercase;
+  font: 600 11px "Barlow";
+  letter-spacing: 1px;
+}
+/* The raw column: epoch milliseconds and second counts, which line up only in
+   a tabular face. */
+.pf-metrics-raw-value {
+  font-variant-numeric: tabular-nums;
+}
+.pf-metrics-details {
+  @apply mt-[12px];
+}
+.pf-metrics-summary {
+  @apply cursor-pointer text-label;
+  font: 600 12px "Barlow";
+}
+.pf-metrics-json {
+  @apply mt-[8px] overflow-x-auto rounded-card bg-inset p-[12px] text-label;
+  font: 400 12px monospace;
+}
