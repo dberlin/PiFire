@@ -162,3 +162,56 @@ def test_the_generic_api_catchall_does_not_swallow_this_path(ds, client):
         from flask import request
 
         assert request.endpoint == "api_tuner_bp.tuner_session"
+
+
+def seed_tr(values):
+    """Write the control:tuning blob read_tr() reads.
+
+    write_tr is the public writer for exactly this blob
+    (common/datastore_accessors.py:654) -- do not reach for _write_json_blob.
+    """
+    from common.datastore_accessors import write_tr
+
+    write_tr(values)
+
+
+def test_tr_reports_a_reading_for_a_known_probe(ds, client):
+    seed_tr({"Grill": 51234})
+    body = client.get("/api/tuner/tr?probe=Grill").get_json()
+    assert body["result"] == "OK"
+    assert body["data"]["probe"] == "Grill"
+    assert body["data"]["trohms"] == 51234
+
+
+def test_tr_reports_null_for_a_probe_that_is_not_reporting(ds, client):
+    """Flask answers {"trohms": 0} for a missing key, which a client cannot
+    tell apart from a real zero-ohm reading. null is the honest answer and the
+    page renders it as "waiting"."""
+    seed_tr({"Grill": 51234})
+    body = client.get("/api/tuner/tr?probe=Probe1").get_json()
+    assert body["data"]["trohms"] is None
+
+
+def test_tr_requires_a_probe(ds, client):
+    resp = client.get("/api/tuner/tr")
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "probe"
+
+
+def test_tr_does_not_write_control(ds, client):
+    """The whole reason session and reading are separate endpoints. This is a
+    GET and it must be inert: the page polls it once a second."""
+    seed_tr({"Grill": 51234})
+    before = control_now()
+    client.get("/api/tuner/tr?probe=Grill")
+    after = control_now()
+    assert after["mode"] == before["mode"]
+    assert after.get("tuning_mode") == before.get("tuning_mode")
+
+
+def test_tr_reports_whether_a_session_is_open(ds, client):
+    """A reading taken with no session is stale by definition -- control.py
+    only refreshes the tuning blob in tuning mode -- so the flag rides along
+    and the page can say so instead of showing a frozen number."""
+    seed_tr({"Grill": 51234})
+    assert client.get("/api/tuner/tr?probe=Grill").get_json()["data"]["tuning"] is False

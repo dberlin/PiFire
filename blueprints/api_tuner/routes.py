@@ -17,7 +17,7 @@ from werkzeug.exceptions import BadRequest
 from common.app import api_response
 from common.common import WriteKind
 from common.control_delta import control_delta
-from common.datastore_accessors import read_control, write_control
+from common.datastore_accessors import read_control, read_tr, write_control
 from common.modes import Mode
 
 from . import api_tuner_bp
@@ -89,3 +89,36 @@ def tuner_session():
     set_control(**values)
     mode_after = Mode.STOP if restored else control.get("mode")
     return jsonify(api_response("OK", None, {"open": False, "mode": mode_after, "restored": restored})), 200
+
+
+@api_tuner_bp.route("/tr", methods=["GET"])
+def tuner_tr():
+    """The current resistance reading for one probe, in ohms.
+
+    Inert by design: the page polls this once a second, and a poll that moved
+    the grill between modes is exactly the shape this blueprint exists to
+    avoid.
+
+    A probe that is not in the blob reads `null`, not 0. Flask returns 0, which
+    a client cannot tell apart from a real zero-ohm reading -- and 0 ohms is
+    what a shorted probe reports, so the two cases genuinely differ.
+    """
+    probe = request.args.get("probe", "")
+    if not probe:
+        return error("bad_request", 400, field="probe")
+
+    readings = read_tr()
+    control = read_control()
+    return jsonify(
+        api_response(
+            "OK",
+            None,
+            {
+                "probe": probe,
+                "trohms": readings.get(probe),
+                #  A reading taken outside a session is stale: control.py only
+                #  refreshes this blob in tuning mode.
+                "tuning": bool(control.get("tuning_mode")),
+            },
+        )
+    ), 200
