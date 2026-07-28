@@ -165,6 +165,59 @@ export async function stubEvents(page: Page): Promise<void> {
   );
 }
 
+/** One finished Smoke record, exactly as GET /api/metrics serves one.
+ *
+ * Smoke is the widest of the five row sets (ten rows), so a single card
+ * exercises every branch of metricRows that a card can show. The values are
+ * copied from a real response -- notably `timeinmode` as "1 m 30 s" (the
+ * minute branch needs `seconds > 60`, so 60 000 ms would read "60 s") and
+ * `fanontime_c` as the STRING "0", which is what a TEXT column returns. */
+const METRICS_PAYLOAD = {
+  result: "OK",
+  message: null,
+  data: {
+    units: "F",
+    augerrate: 0.3,
+    metrics: [
+      {
+        id: "m1",
+        starttime: 1700000000000,
+        starttime_c: "17:13:20",
+        endtime: 1700000090000,
+        endtime_c: "17:14:50",
+        timeinmode: "1 m 30 s",
+        mode: "Smoke",
+        augerontime: 100,
+        augerontime_c: "100 s",
+        estusage_m: "30 grams",
+        estusage_i: "0.07 pounds (1.06 ounces)",
+        fanontime: 60,
+        fanontime_c: "0",
+        smokeplus: true,
+        primary_setpoint: 225,
+        smart_start_profile: 2,
+        startup_temp: 160,
+        p_mode: 2,
+        auger_cycle_time: 20,
+        pellet_level_start: 90,
+        pellet_level_end: 85,
+        pellet_brand_type: "Lumber Jack Hickory",
+      },
+    ],
+  },
+};
+
+export async function stubMetrics(page: Page): Promise<void> {
+  //  Pinned content, not the live table: a real record carries wall-clock
+  //  timestamps and a pellet estimate that both move between captures, and a
+  //  baseline photographs geometry, not the grill's afternoon. It also makes
+  //  the page renderable on a machine that has never lit the grill.
+  //
+  //  The export endpoint is NOT stubbed: nothing fetches it, the link only
+  //  carries its href, and a baseline never follows a download.
+  await page.route("**/api/metrics", (r) => json(r, JSON.stringify(METRICS_PAYLOAD)));
+}
+
 export async function stubRecipes(page: Page): Promise<void> {
   await page.route("**/api/files/recipes/detail*", (r) => json(r, body("recipe-detail.json")));
   await page.route("**/api/files/recipes*", (r) => json(r, body("recipe-listing.json")));

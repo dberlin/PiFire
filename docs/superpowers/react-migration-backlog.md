@@ -206,6 +206,39 @@ it by path and line number; those citations point here.
   virtua discards every measurement whose target has no `offsetParent`, and in
   jsdom that is every element, so the unit tests mount no rows either way and
   passed throughout. Height comes from `.pf-log-frame` now.
+- **Metrics** (`/metrics`) — SHIPPED 2026-07-28
+  (`plans/2026-07-28-react-metrics-page.md`, 9 tasks). One card per metrics
+  record, behind a new **read-only** `blueprints/api_metrics`: two GETs, the
+  listing and the CSV, and no POST registered at all rather than one that
+  refuses. `GET /api/metrics` had to be taken back from `blueprints/api`'s
+  `/api/<action>` catch-all, which was answering that literal path; the
+  resolved endpoint is pinned by name, not by status, because a 200 from the
+  catch-all would satisfy a status check while returning a different body.
+
+  **`process_metrics()` stays the only definition of the derived columns.** The
+  endpoint returns its output rather than raw rows, so `"1 m 30 s"` and
+  `"30 grams"` are computed once, in Python, and the page and its own CSV
+  cannot disagree. The cost is one sharp edge the type had to carry:
+  `endtime_c` is a `"%H:%M:%S"` STRING for a finished mode and the NUMBER `0`
+  for a running one, so it is typed `string | number` and pinned on both ends.
+
+  **Three live defects fixed on the way.** (1) `metrics_page` never passed
+  `settings["globals"]["augerrate"]`, so every pellet-usage estimate on the
+  Flask page was computed at the 0.3 g/s default — wrong for any tuned grill.
+  Fixed in both routes, and the rate is now stated in the React page's header,
+  because an estimate whose constant is invisible is a number nobody can check.
+  (2) `_macro_metrics.html`'s Hold card reads `metric['grill_settemp']`, which
+  matches **no column** in the metrics table — the column is `primary_setpoint`
+  — so Jinja has always rendered that row blank. Fixed on the React surface
+  only; the template is the legacy UI and `test_page_smallpages.py`
+  characterizes it. (3) The Flask export names its file
+  `-PiFire-Metrics-Export` **twice**: the route appends the suffix that
+  `prepare_metrics_csv` appends itself.
+
+  **No navbar entry, deliberately.** `templates/base.html` has never had one;
+  `history/index.html:47` is the only link into `/metrics` in the Flask tree.
+  That link was dropped by the first history port and is now restored as a
+  `<Link>` — an `<a href>` would reload the SPA and drop the shell's socket.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
   polling, and an Exit control. Functionally complete; styling is being
@@ -713,7 +746,12 @@ Roughly ordered by daily-use value:
       See the SHIPPED section for what landed.
 - [ ] **tuner** — probe tuning tool
 - [ ] **update** — software updater (shells out; `is_real_hardware()`-gated)
-- [ ] **metrics** — metrics/stats page
+- [x] **metrics** — SHIPPED 2026-07-28 as `/metrics`, behind a new read-only
+      `blueprints/api_metrics` (`plans/2026-07-28-react-metrics-page.md`,
+      9 tasks). Correction to what this line implied: it is not a "stats" page.
+      It reports one record per MODE TRANSITION — no aggregate, no trend, no
+      cross-cook total — which is also why it does not poll. See the SHIPPED
+      section.
 - [ ] **mobile** — may be obsolete once the dashboard reflows. Responsiveness is
       necessary, not sufficient; confirm before building, and do not delete the
       blueprint yet.
@@ -1010,12 +1048,45 @@ detailed reference for each.
   are still open — unchanged from the admin slice's deferral, restated here
   because this slice touched the same blueprint and did not close them.
 
+#### Deferred by the metrics slice — 2026-07-28
+
+Per the standing rule below. `plans/2026-07-28-react-metrics-page.md` is the
+detailed reference for each.
+
+- **Four collected columns are shown nowhere but the raw disclosure.**
+  `fanontime`/`fanontime_c` and `pellet_level_start`/`pellet_level_end`/
+  `pellet_brand_type` are written by `control.py` and named by **no macro** in
+  `_macro_metrics.html`, so the port kept parity and left them to the `Raw
+  Data` panel. Two are worth promoting: `fanontime` is the only reading of fan
+  duty the system has, and the pellet-level delta over a mode is a **measured**
+  consumption figure sitting beside an estimate the page does display.
+- **`blueprints/metrics/` is still live** and still renders the Jinja page. It
+  keeps its `/metrics/<action>` rule for both POST and GET, and
+  `test_page_smallpages.py` remains its characterization net. Retirement waits
+  for the general pass (ruling 5), as `blueprints/admin/` does.
+- **`_macro_metrics.html`'s Hold card still reads the non-existent
+  `grill_settemp`.** Fixed on the React surface only — see the SHIPPED entry.
+  Fixing the template would change what its characterization test pins, which
+  is a separate decision from porting the page.
+- **The legacy export still doubles its filename.** Same reasoning: the new
+  route passes a bare stamp, `blueprints/metrics` was not touched.
+- **Metrics are shown flat, not grouped by cook.** Records chain
+  Startup → Smoke/Hold → Shutdown → Stop, so a session grouping is derivable;
+  it was considered and cut as scope. Order is the server's insertion order,
+  oldest first, matching the CSV — a page and its own export disagreeing about
+  order would make the two impossible to line up.
+- **No live refresh.** The page reads once on mount. A row is written when a
+  mode ENDS and a mode lasts minutes to hours, so a poll would spend requests
+  to show the same thing; a running mode's card does show `Active` and an em
+  dash rather than a stale end time.
+
 #### UI parity, minor-graded
 
 History Stream toggle and 5 s poll vs Flask's ~1 s; chart annotations fetched
 but never drawn and disabled probes silently dropped; per-probe fill colours
 configurable but ignored; History duration is a bare number input, not a 1–480
-slider; History→Metrics link dropped; `display.sleep_timeout` has no control at
+slider; ~~History→Metrics link dropped~~ (restored 2026-07-28 by the metrics
+slice); `display.sleep_timeout` has no control at
 all; Controller "use recommended value" buttons and metadata card dropped;
 updater release-notes modal dropped; per-setting Description dropped by
 `SelectField` and `ConfigOptionField`; secret masking not ported (API keys and

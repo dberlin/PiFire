@@ -1,4 +1,11 @@
-import { stubAdmin, stubCookFiles, stubEvents, stubProbeModules, stubRecipes } from "./apiFixtures";
+import {
+  stubAdmin,
+  stubCookFiles,
+  stubEvents,
+  stubMetrics,
+  stubProbeModules,
+  stubRecipes,
+} from "./apiFixtures";
 import type { PageSpec, StyleProbe } from "./layoutBaseline";
 
 // The two viewports the fidelity gate is defined at. 1280x720 is the desktop
@@ -397,6 +404,37 @@ export const PAGE_SPECS: PageSpec[] = [
       // borrows them above.
       ".pf-field",
       ".pf-field-label",
+    ],
+  },
+  // The metrics page. Stubbed for the same reason as admin and events: the
+  // demo server has no /api/metrics backend, and an unstubbed read here would
+  // photograph the empty state instead of the page. The stub also pins the
+  // CONTENT -- a real record's timestamps and pellet estimate move between
+  // captures.
+  //
+  // One Smoke record is enough: it is the widest row set of the five (ten
+  // rows), and a second card would only re-measure the same card geometry.
+  {
+    name: "metrics",
+    path: "/metrics",
+    //  The card, not the heading: the heading paints before the read lands,
+    //  and a baseline taken then would measure the loading note.
+    ready: ".pf-metrics-card",
+    root: ".pf-shell",
+    stubs: stubMetrics,
+    landmarks: [
+      ...SHELL,
+      ".pf-metrics",
+      ".pf-metrics-header",
+      ".pf-metrics-title",
+      ".pf-metrics-rate",
+      ".pf-metrics-btn",
+      ".pf-metrics-list",
+      ".pf-metrics-card",
+      ".pf-metrics-card-title",
+      ".pf-metrics-table",
+      ".pf-metrics-details",
+      ".pf-metrics-summary",
     ],
   },
 ];
