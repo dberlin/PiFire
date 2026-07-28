@@ -22,11 +22,11 @@ used for the `uname -m` architecture probe, raising OSError) and asserts
 probe_os_info() returns normally (the os_info dict) instead of raising.
 
 Isolation notes:
-  * write_log()'s create_logger() call hardcodes filename="./logs/events.log"
-    (not derived from the `loggername` argument), so the effective log
-    destination follows the CWD. The test chdirs into a tmp_path with its own
-    logs/ directory so it neither depends on nor pollutes the real project's
-    logs/events.log.
+  * write_log()'s create_logger() call resolves its filename through
+    common.common.LOG_DIR (not from the `loggername` argument), so this test
+    repoints LOG_DIR at a tmp_path rather than relying on the CWD. It used to
+    chdir, which worked only while the path was relative; LOG_DIR is now
+    absolute whenever PIFIRE_LOG_DIR is set, which the suite always does.
   * A per-test unique loggername avoids reusing (and re-attaching handlers
     to) a logger object some other test in the same process already created
     under the name "events".
@@ -42,8 +42,10 @@ from common.system import probe_os_info
 
 
 def test_probe_os_info_returns_gracefully_when_uname_probe_fails(tmp_path, monkeypatch, ds):
+    from common import common as common_mod
+
     (tmp_path / "logs").mkdir()
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(common_mod, "LOG_DIR", str(tmp_path / "logs"))
 
     logger_name = f"events-test-{uuid.uuid4().hex}"
 

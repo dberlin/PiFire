@@ -25,7 +25,7 @@ from flask_socketio import SocketIO
 from flask_qrcode import QRcode
 from werkzeug.exceptions import InternalServerError
 from common import datastore
-from common.common import create_logger
+from common.common import create_logger, log_path
 from common.datastore_accessors import read_settings
 from common.system import is_real_hardware
 import logging
@@ -168,12 +168,12 @@ settings = read_settings()
 
 log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.ERROR
 webappLogger = create_logger(
-    "webapp", filename="./logs/webapp.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
+    "webapp", filename=log_path("webapp.log"), messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
 )
 
 log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.INFO
 eventLogger = create_logger(
-    "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
+    "events", filename=log_path("events.log"), messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
 )
 
 event_message = f"PiFire Web UI started. PiFire Version: {settings['versions']['server']} Build: {settings['versions']['build']}, Debug Mode: {settings['globals']['debug_mode']}"

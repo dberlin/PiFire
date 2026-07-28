@@ -64,15 +64,61 @@ BACKUP_PATH = "./backups/"  # Settings/pellet-DB backups exported from SQLite, p
 """
 
 
+#: Every log file path in the tree derives from this, so logging can be
+#: redirected wholesale. The test suite does exactly that: before it could,
+#: tests appended to the operator's real ./logs/events.log -- which is why that
+#: file carried fixture strings like "Admin: Shutdown failed: boom" in the
+#: content the log viewer shows, and why the files and the `logs` table
+#: diverged (tests use a temporary database).
+#:
+#: Read from the environment at IMPORT time, the same shape as datastore's
+#: PIFIRE_DB_PATH and for the same reason: many test modules do
+#: `from app import app` at module scope, so loggers are built during
+#: collection, before any fixture can run.
+LOG_DIR = os.environ.get("PIFIRE_LOG_DIR", "./logs")
+
+#: Names create_logger has actually attached handlers for. logging.getLogger
+#: caches by name, so a logger built before LOG_DIR moved keeps its old file
+#: handler until something detaches it; reset_loggers needs to find those.
+_CREATED_LOGGERS = set()
+
+
+def log_path(name):
+    """Path to a log file inside LOG_DIR."""
+    return os.path.join(LOG_DIR, name)
+
+
+def reset_loggers():
+    """Detach and close every handler create_logger attached.
+
+    The next create_logger call for the same name sees `not logger.handlers`
+    and rebuilds against the current LOG_DIR. Redirecting LOG_DIR alone is not
+    enough: app.py builds its loggers at import time, before any test fixture
+    can run.
+    """
+    for name in sorted(_CREATED_LOGGERS):
+        logger = logging.getLogger(name)
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+    _CREATED_LOGGERS.clear()
+
+
 def create_logger(
     name,
-    filename="./logs/pifire.log",
+    filename=None,
     messageformat="%(asctime)s | %(levelname)s | %(message)s",
     level=logging.INFO,
     maxBytes=1 * 1024 * 1024,  # 1 MB
     backupCount=3,
 ):
     """Create or Get Existing Logger"""
+    #  Resolved at call time, not bound as a default argument: a default binds
+    #  once at import and would ignore any later LOG_DIR change.
+    filename = filename or log_path("pifire.log")
     logger = logging.getLogger(name)
     """ 
 		If the logger does not exist, create one. Else return the logger. 
@@ -98,6 +144,8 @@ def create_logger(
         sqlite_handler.setFormatter(formatter)
         sqlite_handler.addFilter(ratelimit)
         logger.addHandler(sqlite_handler)
+
+        _CREATED_LOGGERS.add(name)
     return logger
 
 
@@ -263,12 +311,12 @@ def read_events(legacy=True):
     """
     # Read all lines of events.log into a list(array)
     try:
-        with open("./logs/events.log") as event_file:
+        with open(log_path("events.log")) as event_file:
             event_lines = event_file.readlines()
             event_file.close()
     # If file not found error, then create events.log file
     except IOError, OSError:
-        event_file = open("./logs/events.log", "w")
+        event_file = open(log_path("events.log"), "w")
         event_file.close()
         event_lines = []
 
@@ -326,7 +374,7 @@ def write_log(event, loggername="events"):
     log_level = logging.INFO
     eventLogger = create_logger(
         loggername,
-        filename="./logs/events.log",
+        filename=log_path("events.log"),
         messageformat="%(asctime)s [%(levelname)s] %(message)s",
         level=log_level,
     )

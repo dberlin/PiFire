@@ -28,6 +28,19 @@ os.environ.setdefault(
     os.path.join(tempfile.mkdtemp(prefix="pifire-test-db-"), "pifire.db"),
 )
 
+# Must be set before `common.common` is imported, for the same reason as
+# PIFIRE_DB_PATH above: it resolves LOG_DIR at IMPORT time, and test modules
+# that do `from app import app` at module scope build their loggers during
+# COLLECTION -- before any fixture could redirect them.
+#
+# Without this the suite appended to the operator's real ./logs/events.log.
+# That is why that file carried fixture strings ("Admin: Shutdown failed: boom",
+# "[nonexistent_probe_module_xyz]", a WLED connection to 127.0.0.1:1) in the
+# content the log viewer shows a user, and why the log files disagreed with the
+# `logs` table -- tests already used a temporary database, but not temporary
+# log files.
+os.environ.setdefault("PIFIRE_LOG_DIR", tempfile.mkdtemp(prefix="pifire-test-logs-"))
+
 from common import datastore  # noqa: E402
 
 # Repo root, used by tests that need to locate files (e.g. wizard/, display/)

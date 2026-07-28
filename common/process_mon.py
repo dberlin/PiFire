@@ -26,7 +26,7 @@ import time
 import threading
 import subprocess
 import logging
-from common.common import create_logger, WriteKind
+from common.common import create_logger, log_path, WriteKind
 from common.modes import Mode
 from common.datastore_accessors import write_control, read_control
 from common.system import is_real_hardware
@@ -53,10 +53,10 @@ class Process_Monitor:
 
         # Setup logging
         log_level = logging.ERROR
-        self.process_logger = create_logger(self.process, filename=f"./logs/{self.process}.log", level=log_level)
+        self.process_logger = create_logger(self.process, filename=log_path(f"{self.process}.log"), level=log_level)
         self.event_logger = create_logger(
             "events",
-            filename="./logs/events.log",
+            filename=log_path("events.log"),
             messageformat="%(asctime)s [%(levelname)s] %(message)s",
             level=log_level,
         )

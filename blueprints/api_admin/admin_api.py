@@ -18,7 +18,7 @@ import tempfile
 import zipfile
 
 from common import datastore
-from common.common import read_generic_json
+from common.common import LOG_DIR, read_generic_json
 from common.system import gather_system_info
 
 #: backup_settings() writes PiFire_<ts>.json and backup_pellet_db() writes
@@ -31,7 +31,9 @@ _BACKUP_PREFIXES = {"settings": "PiFire_", "pelletdb": "PelletDB_"}
 #: The two kinds a client may name. Exposed so routes validate against one list.
 BACKUP_KINDS = frozenset(_BACKUP_PREFIXES)
 
-LOG_FOLDER = "./logs/"
+#: Derived from the one place logging resolves its directory, so this surface
+#: cannot end up listing a different folder than the one being written to.
+LOG_FOLDER = os.path.join(LOG_DIR, "")
 
 
 def list_backups(folder):
