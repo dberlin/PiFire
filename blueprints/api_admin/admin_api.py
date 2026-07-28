@@ -96,6 +96,36 @@ def list_log_families(folder=None):
     }
 
 
+def stitch_family(stem, folder=None):
+    """One family as a single byte stream, oldest first, or None if unknown.
+
+    The stem is looked up in list_log_families rather than joined onto a path,
+    so no client-supplied path component reaches the filesystem anywhere in this
+    function. Flask's logs page concatenates a request field onto the logs
+    folder in two places (send_file and read_log_file); this shape is what makes
+    that hole unreachable rather than merely unlikely.
+
+    `folder` resolves at call time; see list_logs.
+    """
+    folder = folder or LOG_FOLDER
+    members = list_log_families(folder).get(stem)
+    if members is None:
+        return None
+    chunks = []
+    for name in members:
+        try:
+            with open(os.path.join(folder, name), "rb") as handle:
+                chunk = handle.read()
+        except OSError:
+            continue
+        #  A member truncated without its final newline would otherwise weld its
+        #  last line onto the next member's first.
+        if chunk and not chunk.endswith(b"\n"):
+            chunk += b"\n"
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def state_payload(settings, control, backup_folder):
     """Everything the admin page renders, in one read.
 
