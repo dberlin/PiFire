@@ -11,6 +11,7 @@ POST /api/files/recipes/run already apply. It is a SECOND line of defence behind
 test stubbing, never a replacement for it -- see tests/web/test_api_admin_system.py.
 """
 
+import io
 import os
 
 from flask import current_app, jsonify, request, send_file
@@ -332,6 +333,36 @@ def admin_logs():
 @api_admin_bp.route("/logs/download", methods=["GET"])
 def admin_logs_download():
     return send_file(admin_api.build_log_archive(), as_attachment=True, max_age=0)
+
+
+@api_admin_bp.route("/logs/view", methods=["GET"])
+def admin_logs_view():
+    """One log family as plain text, with byte-range support.
+
+    `log` is a family STEM, not a filename: it is looked up in
+    list_log_families rather than joined onto a path, so there is no
+    client-supplied path component for `../` to ride in on.
+
+    conditional=True is what makes send_file advertise Accept-Ranges and answer
+    a Range: header with 206. It works for a synthesized BytesIO, not only for a
+    real path -- which matters because a rotation family does not exist as one
+    file on disk. It also emits `Content-Range: bytes * /<size>` on a 416, and
+    that header is load-bearing: it is how the client learns the family rotated
+    out from under its cursor and that it must refetch from zero.
+    """
+    stem = request.args.get("log", "")
+    payload = admin_api.stitch_family(stem)
+    if payload is None:
+        return error("not_found", 404, log=stem)
+    download = request.args.get("download") == "1"
+    return send_file(
+        io.BytesIO(payload),
+        mimetype="text/plain",
+        conditional=True,
+        as_attachment=download,
+        download_name=f"{stem}.log",
+        max_age=0,
+    )
 
 
 @api_admin_bp.route("/logs/delete", methods=["POST"])
