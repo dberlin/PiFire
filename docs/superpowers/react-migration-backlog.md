@@ -292,6 +292,23 @@ it by path and line number; those citations point here.
   Tuner link, but the tuner opens a live session and belongs behind the probe
   config. The curve is an inline SVG polyline, not uPlot: twenty points need no
   library and every coordinate stays readable from the DOM.
+
+  **AUTO flow** — SHIPPED 2026-07-28 as slice 2
+  (`plans/2026-07-28-react-tuner-auto.md`, 6 tasks). A Manual/Auto toggle on
+  the same page; auto mode adds a reference-probe selector and polls
+  `POST /api/tuner/auto-status` once a second while the session is open. Each
+  poll records one temperature/resistance sample against the reference probe
+  and reports the running high/medium/low selection, until the spread is wide
+  enough (`ready`). It writes only the **autotune queue, never control** — the
+  two session calls remain the sole writers of grill state — and the session's
+  **flush-on-open** is what makes each run start from zero (Flask flushed on
+  the first poll, which was its enable-tuning moment; ours is the explicit
+  open). The reference temperature is looked up across the `control:current`
+  P/F/AUX groups by label, and a missing probe reads `null`, not Flask's `-1`.
+  Auto's Finish sends the derived three points to the SAME
+  coefficients/close/chart/save path manual uses — the maths, the session
+  lifetime and the profile save are reused unchanged. The DS18B20 warm-up guard
+  (skip a cold probe's leading zeros) is preserved.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
   polling, and an Exit control. Functionally complete; styling is being
@@ -797,12 +814,11 @@ Roughly ordered by daily-use value:
       it is load-bearing for the Flask wizard, still the only installer UI, and
       `tests/web/test_page_probeconfig.py` remains its characterization net.
       See the SHIPPED section for what landed.
-- [ ] **tuner** — the **manual** three-point flow SHIPPED 2026-07-28 at
-      `/tuner`, behind a new read-only-ish `blueprints/api_tuner`
-      (`plans/2026-07-28-react-tuner-manual.md`, slice 1 of 2, 11 tasks). The
-      **auto** flow — `read_auto_status`, the autotune store, reference-probe
-      selection and the readiness threshold — is slice 2 and is why this stays
-      unchecked. See the SHIPPED section.
+- [x] **tuner** — SHIPPED 2026-07-28, BOTH flows, at `/tuner` behind a new
+      `blueprints/api_tuner`. Manual three-point flow:
+      `plans/2026-07-28-react-tuner-manual.md` (slice 1, 11 tasks). Auto
+      accumulation flow: `plans/2026-07-28-react-tuner-auto.md` (slice 2, 6
+      tasks). See the SHIPPED section.
 - [ ] **update** — software updater (shells out; `is_real_hardware()`-gated)
 - [x] **metrics** — SHIPPED 2026-07-28 as `/metrics`, behind a new read-only
       `blueprints/api_metrics` (`plans/2026-07-28-react-metrics-page.md`,
@@ -1138,16 +1154,12 @@ detailed reference for each.
   to show the same thing; a running mode's card does show `Active` and an em
   dash rather than a stale end time.
 
-#### Deferred by the tuner manual slice — 2026-07-28
+#### Deferred by the tuner slices — 2026-07-28
 
-Per the standing rule below. `plans/2026-07-28-react-tuner-manual.md` is the
-detailed reference for each.
+Per the standing rule below. Both flows have shipped;
+`plans/2026-07-28-react-tuner-manual.md` and `-auto.md` are the detailed
+references. What remains open:
 
-- **The AUTO flow is not ported.** `read_auto_status`, the autotune store
-  (`read_autotune`/`write_autotune`/`flush_autotune`), reference-probe
-  selection and the readiness threshold are slice 2. The session, the typed
-  client and the segment machinery were built so slice 2 adds one endpoint and
-  one component.
 - **`blueprints/tuner/` is still live**, still renders its Jinja page, and
   still owns `tuner.py`'s maths. Retirement waits for the general pass
   (ruling 5), as `blueprints/metrics/` and `blueprints/admin/` do.
@@ -1162,15 +1174,22 @@ detailed reference for each.
   The new `POST /api/tuner/profile` 404s before storing anything; the legacy
   handler is untouched (it reads `request.form` off the global, so it is not
   callable without a request context anyway).
-- **The tuner fidelity baseline captures only the pre-Start screen** — the
-  three empty segment cards. The curve and the save form are a second screen
-  (post-Finish) reached only by driving a live session, so they are covered by
-  unit tests, not the fidelity gate.
-- **`history-390x844.json` re-captured with the tuner baselines.** Not a tuner
-  change: the `/history` saved-cooks list is not stubbed by the fidelity
+- **The tuner fidelity baseline captures only the pre-Start MANUAL screen** —
+  the three empty segment cards plus the Manual/Auto toggle. The Auto screen
+  (reference selector + accumulation card), the curve and the save form are all
+  reached only by interaction or a live session, so they are covered by unit
+  tests, not the fidelity gate.
+- **The auto flow's e2e cannot reach `ready`.** A real ≥50 °F spread will not
+  occur on a Stopped/Monitor grill during a test, so the live spec proves
+  accumulation and the session lifecycle only; the `ready` selection path is
+  covered by `test_api_tuner_auto.py`'s seeded twelve-sample test. Nothing
+  drives the full converge-and-solve loop end to end against a real grill.
+- **`history-390x844.json` keeps re-capturing with the tuner baselines.** Not a
+  tuner change: the `/history` saved-cooks list is not stubbed by the fidelity
   harness (it is a pre-Tailwind immutable reference), so its section height
   floats with the demo server's live cook-file data — the same drift the
-  metrics slice absorbed. Only `.pf-section#1`'s height moved; no position did.
+  metrics and manual-tuner slices absorbed. Only `.pf-section#1`'s height moves;
+  no position does. This will keep recurring until that list is stubbed.
 
 #### UI parity, minor-graded
 

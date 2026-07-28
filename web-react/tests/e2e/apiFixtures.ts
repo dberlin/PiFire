@@ -244,6 +244,29 @@ export async function stubTuner(page: Page): Promise<void> {
       }),
     ),
   );
+  //  Auto mode's poll. Pinned not-ready so a capture never depends on the
+  //  grill's live samples, and never opens a session against it.
+  await page.route("**/api/tuner/auto-status", (r) =>
+    json(
+      r,
+      JSON.stringify({
+        result: "OK",
+        message: null,
+        data: {
+          current_tr: 41000,
+          current_temp: 225,
+          high_tr: 0,
+          high_temp: 0,
+          medium_tr: 0,
+          medium_temp: 0,
+          low_tr: 0,
+          low_temp: 0,
+          samples: 3,
+          ready: false,
+        },
+      }),
+    ),
+  );
 }
 
 export async function stubRecipes(page: Page): Promise<void> {

@@ -154,4 +154,54 @@ test.describe("tuner page", () => {
     await page.getByRole("link", { name: "Tune a probe" }).click();
     await expect(page).toHaveURL(/\/tuner$/);
   });
+
+  test("auto mode opens a session and shows the accumulation readout", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/tuner");
+    await page.getByRole("button", { name: "Auto" }).click();
+    await expect(page.getByRole("combobox", { name: /reference/i })).toBeVisible();
+
+    await page.getByRole("button", { name: "Start tuning" }).click();
+    await expect(page.getByRole("button", { name: "Stop tuning" })).toBeVisible();
+    //  The session really opened: the live grill is now in Monitor.
+    await expect.poll(async () => (await controlMode(request)).mode).toBe("Monitor");
+    //  The progress line appears once the first poll lands. Do NOT wait for
+    //  ready: a 50 F spread will not happen on a monitored grill during a test.
+    await expect(page.getByText(/Collecting samples|Ready/)).toBeVisible();
+
+    await page.getByRole("button", { name: "Stop tuning" }).click();
+    await expect
+      .poll(async () => (await controlMode(request)).mode, { timeout: 5000 })
+      .toBe("Stop");
+  });
+
+  test("serves the auto-status envelope", async ({ request }) => {
+    const resp = await request.post(`${API}/api/tuner/auto-status`, {
+      data: { probe: "Grill", reference: "Grill" },
+    });
+    expect(resp.status()).toBe(200);
+    const body = await resp.json();
+    expect(body.result).toBe("OK");
+    expect(typeof body.data.samples).toBe("number");
+    expect(typeof body.data.ready).toBe("boolean");
+    //  number or null -- never a coerced 0 for an absent probe.
+    expect(["number", "object"]).toContain(typeof body.data.current_tr);
+  });
+
+  test("leaving the page in auto mode closes the session", async ({ page, request }) => {
+    await page.goto("/tuner");
+    await page.getByRole("button", { name: "Auto" }).click();
+    await page.getByRole("button", { name: "Start tuning" }).click();
+    await expect.poll(async () => (await controlMode(request)).mode).toBe("Monitor");
+
+    //  Client-side nav, so the unmount's closeSession fetch lands (a hard
+    //  reload would cancel it; the afterEach force-close is the net for that).
+    await page.getByRole("link", { name: "Dashboard" }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect
+      .poll(async () => (await controlMode(request)).mode, { timeout: 5000 })
+      .toBe("Stop");
+  });
 });

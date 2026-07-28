@@ -453,6 +453,12 @@ export const PAGE_SPECS: PageSpec[] = [
       ".pf-tuner",
       ".pf-tuner-header",
       ".pf-tuner-title",
+      // The Manual/Auto flow toggle, on the header of both screens. The Auto
+      // screen itself is not captured -- Manual is the default and its segment
+      // cards are the wider surface; the auto card's own rules are covered by
+      // AutoTuneCard's unit tests, not by a second baseline.
+      ".pf-tuner-mode",
+      ".pf-tuner-mode-btn",
       ".pf-tuner-field-label",
       ".pf-tuner-input",
       ".pf-tuner-btn",
