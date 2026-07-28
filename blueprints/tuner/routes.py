@@ -18,6 +18,33 @@ from .tuner import calc_shh_coefficients, calc_shh_chart, calc_auto_tune_status
 from . import tuner_bp
 
 
+#: The macro fragments the tuner page may ask the server to render, mapped from
+#: the name the client sends to the constant template string that answers it.
+#:
+#: This is an ALLOWLIST, not a validation step, and the difference is the point:
+#: the name used to be concatenated into Jinja SOURCE and handed to
+#: render_template_string, so `value` was parsed as template code rather than
+#: escaped as data. Every string below is chosen by key -- no request value
+#: reaches the renderer as source.
+#:
+#: render_manual_tool_card is deliberately absent: it is defined in
+#: _macro_tuner.html but only ever called from inside render_manual_tool, and
+#: the client never asks for it. Reachable is not the same as offered.
+_RENDERABLE_FRAGMENTS = {
+    name: (
+        "{% from 'tuner/_macro_tuner.html' import render_" + name + " %}{{ render_" + name + "(settings, control) }}"
+    )
+    for name in (
+        "manual_instruction_card",
+        "manual_tool",
+        "manual_finish_btn",
+        "auto_instruction_card",
+        "auto_tool",
+        "auto_finish_btn",
+    )
+}
+
+
 @tuner_bp.route("/", methods=["POST", "GET"])
 def tuner_page():
     settings = read_settings()
@@ -28,13 +55,9 @@ def tuner_page():
         requestform = request.form
         if "command" in requestform.keys():
             if "render" in requestform["command"]:
-                render_string = (
-                    "{% from 'tuner/_macro_tuner.html' import render_"
-                    + requestform["value"]
-                    + " %}{{ render_"
-                    + requestform["value"]
-                    + "(settings, control) }}"
-                )
+                render_string = _RENDERABLE_FRAGMENTS.get(requestform.get("value", ""))
+                if render_string is None:
+                    return jsonify({"error": "unknown_fragment"}), 400
                 return render_template_string(render_string, settings=settings, control=control)
 
     # This POST path provides data back to the page
