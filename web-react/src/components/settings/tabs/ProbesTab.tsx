@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLoaderData, useOutletContext, useRevalidator } from "react-router";
+import { Link, useLoaderData, useOutletContext, useRevalidator } from "react-router";
 import {
   applyProbeMap,
   readLiveProbeMap,
@@ -132,6 +132,14 @@ export function ProbesTab() {
             Discard changes
           </button>
           {saved && !dirty && <span className="pf-settings-saved">Applied ✓</span>}
+          {/* The probe TUNER lives on its own top-level route, not under
+              settings -- it opens a live tuning session and moves the grill
+              into Monitor, which a settings tab should not. Flask reaches it
+              only from base.html's navbar; the React navbar has no Tuner
+              entry, so this link is the way in. */}
+          <Link className="pf-modal-btn" to="/tuner">
+            Tune a probe
+          </Link>
         </div>
       </Section>
     </div>

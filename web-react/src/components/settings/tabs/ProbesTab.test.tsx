@@ -221,4 +221,13 @@ describe("ProbesTab", () => {
     expect(screen.getByRole("region", { name: "Probe ports" })).toHaveTextContent("Grill");
     expect(saveButton()).toBeDisabled();
   });
+
+  it("links to the probe tuner", async () => {
+    //  The tuner is a top-level route, not a settings tab: it opens a live
+    //  tuning session. Flask reaches it from the navbar; the React navbar has
+    //  no Tuner entry, so this link is the only way in.
+    renderTab(<ProbesTab />, ctx(), CATALOG);
+    await screen.findByRole("region", { name: "Probe devices" });
+    expect(screen.getByRole("link", { name: "Tune a probe" })).toHaveAttribute("href", "/tuner");
+  });
 });

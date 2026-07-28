@@ -9,6 +9,31 @@
    styleCoverage fails on a rule with no consumer, so nothing here can be
    written ahead of the component that wears it. */
 
+/* The page shell. .pf-shell-main is flex:1/min-height:0/overflow:auto
+   (shell.css), so this scrolls inside that pane. Target viewport 1280x720. */
+.pf-tuner {
+  @apply flex h-full flex-col gap-[16px] overflow-auto p-[16px] text-text;
+  box-sizing: border-box;
+}
+.pf-tuner-header {
+  @apply flex flex-wrap items-center gap-[12px];
+}
+.pf-tuner-title {
+  @apply m-0 mr-[8px] text-text;
+  font: 600 22px "Barlow";
+}
+/* The three segment cards, side by side on the desktop and stacking on a
+   phone. */
+.pf-tuner-segments {
+  @apply grid gap-[16px];
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 720px) {
+  .pf-tuner-segments {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* One of the three tuning points. */
 .pf-tuner-segment {
   @apply flex flex-col gap-[8px] rounded-card bg-card p-[16px] text-text;

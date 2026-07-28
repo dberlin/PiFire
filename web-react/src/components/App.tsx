@@ -27,6 +27,7 @@ import { StartupTab } from "./settings/tabs/StartupTab";
 import { UnitsTab } from "./settings/tabs/UnitsTab";
 import { WorkModeTab } from "./settings/tabs/WorkModeTab";
 import { AppShell } from "./shell/AppShell";
+import { TunerPage } from "./tuner/TunerPage";
 import {
   WizardError,
   HydrateFallback as WizardHydrateFallback,
@@ -75,6 +76,11 @@ export const routes = [
       // Metrics entry and history/index.html:47 is the only link in. No
       // loader: the page reads on mount so a failed read is retryable in place.
       { path: "/metrics", element: <MetricsPage /> },
+      // The probe tuner. Reached from Settings > Probes, matching Flask, whose
+      // navbar Tuner entry has no React counterpart. No loader: the page must
+      // not read or write anything before the operator has asked for a
+      // session, and opening one moves the grill into Monitor.
+      { path: "/tuner", element: <TunerPage /> },
       // The recipe browser and its detail view, mirroring the cook-file pair
       // above -- a recipe is authored rather than produced by cooking, which
       // is the one deliberate difference in RecipeList (a "New Recipe" create
