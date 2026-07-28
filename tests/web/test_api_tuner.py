@@ -1,0 +1,164 @@
+"""The JSON tuner surface the React /tuner page drives.
+
+SAFETY: opening a session moves the grill from Stop to MONITOR. Monitor lights
+nothing -- it reads probes -- but it is a real mode change, so every test below
+that opens one closes it, and the module-level fixture asserts the grill is
+back in Stop afterwards. See
+docs/superpowers/plans/2026-07-28-react-tuner-manual.md.
+"""
+
+import pytest
+
+from app import app as flask_app
+
+
+@pytest.fixture
+def client(ds):
+    flask_app.config["TESTING"] = True
+    with flask_app.test_client() as c:
+        yield c
+
+
+def control_now():
+    """read_control(), after draining any queued writes.
+
+    The session endpoint writes control DELTAS, which only take effect when the
+    control loop drains them (common.datastore_accessors.execute_control_writes).
+    In production the real loop ticks every second; this Flask-only harness has
+    no loop, so a read-back must drain first to see what the next tick would
+    have produced. The endpoint's own RESPONSE is computed from intent and needs
+    no drain -- only reads of the persisted control:general do.
+    """
+    from common.datastore_accessors import execute_control_writes, read_control
+
+    execute_control_writes()
+    return read_control()
+
+
+@pytest.fixture(autouse=True)
+def grill_left_stopped(ds):
+    """Every test in this module must hand the grill back in Stop.
+
+    autouse and post-yield: a test that opens a session and then fails its
+    assertion would otherwise leave tuning_mode set for every test after it,
+    and the failure would be attributed to the wrong test.
+    """
+    yield
+    control = control_now()
+    assert control["mode"] == "Stop", "a test left the grill out of Stop"
+    assert not control.get("tuning_mode"), "a test left tuning_mode set"
+
+
+def set_mode(mode):
+    from common.common import WriteKind
+    from common.control_delta import control_delta
+    from common.datastore_accessors import write_control
+
+    write_control(control_delta(set_values={"mode": mode}), WriteKind.DELTA, origin="test")
+    #  Drain immediately so a test's precondition is live before it POSTs.
+    from common.datastore_accessors import execute_control_writes
+
+    execute_control_writes()
+
+
+def test_opening_a_session_enables_tuning_and_monitors(ds, client):
+    set_mode("Stop")
+    body = client.post("/api/tuner/session", json={"open": True}).get_json()
+    assert body["result"] == "OK"
+    assert body["data"]["open"] is True
+    assert body["data"]["mode"] == "Monitor"
+
+    control = control_now()
+    assert control["tuning_mode"] is True
+    assert control["mode"] == "Monitor"
+
+    client.post("/api/tuner/session", json={"open": False})
+
+
+def test_closing_a_session_restores_stop(ds, client):
+    set_mode("Stop")
+    client.post("/api/tuner/session", json={"open": True})
+    #  Stands in for the control loop ticking between open and close: without
+    #  it the close would read the not-yet-drained Stop and decline to restore.
+    control_now()
+
+    body = client.post("/api/tuner/session", json={"open": False}).get_json()
+    assert body["data"]["open"] is False
+    assert body["data"]["restored"] is True
+
+    control = control_now()
+    assert control["tuning_mode"] is False
+    assert control["mode"] == "Stop"
+
+
+def test_closing_is_idempotent(ds, client):
+    """The React hook closes on unmount, and an unmount can follow an explicit
+    Finish. Closing twice must not be an error and must not touch the mode the
+    second time.
+
+    control_now() between the calls stands in for the control loop ticking
+    between the user's actions in production: it drains the open write so the
+    first close sees Monitor and genuinely restores, making the SECOND close
+    the no-op this test is about.
+    """
+    set_mode("Stop")
+    client.post("/api/tuner/session", json={"open": True})
+    control_now()
+
+    first = client.post("/api/tuner/session", json={"open": False}).get_json()
+    assert first["data"]["restored"] is True
+    control_now()
+
+    second = client.post("/api/tuner/session", json={"open": False}).get_json()
+    assert second["result"] == "OK"
+    assert second["data"]["restored"] is False
+
+
+def test_a_cooking_grill_refuses_to_open_a_session(ds, client):
+    """Tuning from Hold would fight the controller for the probes and lie about
+    what the grill is doing. Flask offers no such guard; this one matches the
+    409 shape /api/admin/system already uses."""
+    set_mode("Hold")
+    try:
+        resp = client.post("/api/tuner/session", json={"open": True})
+        assert resp.status_code == 409
+        body = resp.get_json()
+        assert body["message"] == "not_tunable"
+        assert body["data"]["mode"] == "Hold"
+
+        assert not control_now().get("tuning_mode"), "a refused open still wrote tuning_mode"
+    finally:
+        set_mode("Stop")
+
+
+def test_closing_a_session_does_not_stop_a_cook(ds, client):
+    """The asymmetry in Flask that is CORRECT and must survive the port: close
+    only restores Stop when the mode is currently Monitor. If a cook started
+    while the session was open, closing leaves it alone."""
+    set_mode("Stop")
+    client.post("/api/tuner/session", json={"open": True})
+    set_mode("Hold")
+    try:
+        body = client.post("/api/tuner/session", json={"open": False}).get_json()
+        assert body["data"]["restored"] is False
+        control = control_now()
+        assert control["mode"] == "Hold"
+        assert control["tuning_mode"] is False
+    finally:
+        set_mode("Stop")
+
+
+def test_the_open_flag_must_be_a_bool(ds, client):
+    resp = client.post("/api/tuner/session", json={"open": "yes"})
+    assert resp.status_code == 400
+    assert resp.get_json()["data"]["field"] == "open"
+
+
+def test_the_generic_api_catchall_does_not_swallow_this_path(ds, client):
+    """blueprints/api registers /api/<action>/<arg0> for GET and POST, which
+    matches /api/tuner/session. See blueprints/api_admin/routes.py's docstring
+    for the case where a request fell through to it and 404'd from elsewhere."""
+    with flask_app.test_request_context("/api/tuner/session", method="POST"):
+        from flask import request
+
+        assert request.endpoint == "api_tuner_bp.tuner_session"
