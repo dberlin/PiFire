@@ -7,6 +7,51 @@
    fails on a rule with no consumer, so nothing here can be written ahead of
    the component that wears it. */
 
+/* The page shell. .pf-shell-main is flex:1/min-height:0/overflow:auto
+   (shell.css), so this scrolls inside that pane rather than growing the
+   document. Target viewport 1280x720. */
+.pf-metrics {
+  @apply flex h-full flex-col gap-[16px] overflow-auto p-[16px] text-text;
+  box-sizing: border-box;
+}
+.pf-metrics-header {
+  @apply flex flex-wrap items-baseline gap-[16px];
+}
+.pf-metrics-title {
+  @apply m-0 text-text;
+  font: 600 22px "Barlow";
+}
+/* The stated assumption behind every pellet-usage estimate on the page. An
+   estimate whose constant is invisible is a number nobody can check. */
+.pf-metrics-rate {
+  @apply text-label uppercase;
+  font: 600 12px "Barlow";
+  letter-spacing: 2px;
+}
+/* Modelled on .pf-admin-btn (admin.css), which is itself modelled on
+   .pf-modal-btn. An anchor rather than a button: the CSV is a download. */
+.pf-metrics-btn {
+  @apply cursor-pointer rounded-[12px] bg-inset px-[14px] py-[8px] text-text no-underline;
+  border: 1px solid var(--color-card-border);
+  font: 700 14px "Barlow";
+  text-align: center;
+}
+.pf-metrics-empty {
+  @apply rounded-card bg-card p-[24px] text-center text-text;
+  border: 1px solid var(--color-card-border);
+}
+.pf-metrics-empty-title {
+  @apply m-0 mb-[8px] text-text;
+  font: 600 18px "Barlow";
+}
+.pf-metrics-empty-note {
+  @apply m-0 text-label;
+  font: 400 14px "Barlow";
+}
+.pf-metrics-list {
+  @apply flex flex-col gap-[16px];
+}
+
 /* One record. The accent band across the top replaces Bootstrap's tinted
    card-header (bg-success / bg-danger / bg-warning / bg-secondary): the same
    four-way signal, without a block of saturated colour behind white text. */
