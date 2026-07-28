@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import { fetchHistoryChart, type HistoryChartData } from "../../helpers/history/historyApi";
 import { getSettings } from "../../helpers/settings/settingsApi";
 import { CookFileList } from "../cookfiles/CookFileList";
@@ -166,6 +167,14 @@ export function HistoryPage() {
               <a className="pf-modal-btn pf-modal-btn-link" href={`${BASE_URL}/history/export`}>
                 Export CSV
               </a>
+              {/* blueprints/history/templates/history/index.html:47. The ONLY
+                  link into /metrics in the Flask tree -- templates/base.html's
+                  navbar has never had one, and React's does not either. A
+                  <Link>, not an <a>: an href would reload the SPA and drop the
+                  shell's live socket. */}
+              <Link className="pf-modal-btn pf-modal-btn-link" to="/metrics">
+                Metrics
+              </Link>
               <button
                 type="button"
                 className="pf-modal-btn"

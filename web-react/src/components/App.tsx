@@ -8,6 +8,7 @@ import { CookFilePage } from "./cookfiles/CookFilePage";
 import { DashboardRoute } from "./DashboardRoute";
 import { HistoryPage } from "./history/HistoryPage";
 import { EventsPage } from "./logs/EventsPage";
+import { MetricsPage } from "./metrics/MetricsPage";
 import { PelletsPage } from "./pellets/PelletsPage";
 import { RecipeList } from "./recipes/RecipeList";
 import { RecipePage } from "./recipes/RecipePage";
@@ -69,6 +70,11 @@ export const routes = [
       // section of /history, mirroring Flask, where the cook-file list lives on
       // the history page and "Open" posts through to cookfile/index.html.
       { path: "/cookfiles/:filename", element: <CookFilePage /> },
+      // Per-mode metrics for the cooks in the history store. Reached from
+      // /history, matching Flask, where templates/base.html's navbar has no
+      // Metrics entry and history/index.html:47 is the only link in. No
+      // loader: the page reads on mount so a failed read is retryable in place.
+      { path: "/metrics", element: <MetricsPage /> },
       // The recipe browser and its detail view, mirroring the cook-file pair
       // above -- a recipe is authored rather than produced by cooking, which
       // is the one deliberate difference in RecipeList (a "New Recipe" create

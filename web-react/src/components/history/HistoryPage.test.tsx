@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useRef } from "react";
+import { MemoryRouter } from "react-router";
 import type { HistoryChartData } from "../../helpers/history/historyApi";
 
 // Counts chart INSTANCES (mounts), not renders -- see the stub below.
@@ -88,8 +89,19 @@ function chartEl(): HTMLElement {
   return screen.getByTestId("chart");
 }
 
+// The page carries a <Link> to /metrics, which needs a router in context.
+// MemoryRouter rather than the real one: these tests are about the chart,
+// and none of them navigates.
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <HistoryPage />
+    </MemoryRouter>,
+  );
+}
+
 async function renderLoaded() {
-  const view = render(<HistoryPage />);
+  const view = renderPage();
   await waitFor(() => expect(chartEl()).toBeInTheDocument());
   return view;
 }
@@ -138,7 +150,7 @@ describe("HistoryPage", () => {
   });
 
   it("shows a loading state before the first response", () => {
-    render(<HistoryPage />);
+    renderPage();
 
     expect(screen.getByText(/loading history/i)).toBeInTheDocument();
     expect(screen.queryByTestId("chart")).not.toBeInTheDocument();
@@ -192,7 +204,7 @@ describe("HistoryPage", () => {
   it("renders an empty state, and no chart, when there is no history", async () => {
     fetchHistoryChartMock.mockResolvedValue(EMPTY_PAYLOAD);
 
-    render(<HistoryPage />);
+    renderPage();
 
     await waitFor(() => expect(screen.getByText(/no history yet/i)).toBeInTheDocument());
     expect(screen.queryByTestId("chart")).not.toBeInTheDocument();
@@ -201,7 +213,7 @@ describe("HistoryPage", () => {
   it("shows an error banner when the fetch fails", async () => {
     fetchHistoryChartMock.mockRejectedValue(new Error("boom"));
 
-    render(<HistoryPage />);
+    renderPage();
 
     await waitFor(() => expect(screen.getByText(/couldn't load/i)).toBeInTheDocument());
     expect(screen.queryByTestId("chart")).not.toBeInTheDocument();
@@ -209,7 +221,7 @@ describe("HistoryPage", () => {
 
   it("recovers from an error when a new window loads", async () => {
     fetchHistoryChartMock.mockRejectedValueOnce(new Error("boom"));
-    render(<HistoryPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText(/couldn't load/i)).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText(/minutes/i), { target: { value: "15" } });
@@ -248,7 +260,7 @@ describe("HistoryPage", () => {
       return d.promise;
     });
 
-    render(<HistoryPage />);
+    renderPage();
     await waitFor(() => expect(reqs.length).toBe(1));
     reqs[0].d.resolve({ ...PAYLOAD, minutes: 60 }); // initial load, unrelated window
     await waitFor(() => expect(screen.getByTestId("chart")).toBeInTheDocument());
@@ -313,7 +325,7 @@ describe("HistoryPage — auto refresh", () => {
     getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
     rs.useFakeTimers();
 
-    render(<HistoryPage />);
+    renderPage();
     await settle();
     expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
 
@@ -330,7 +342,7 @@ describe("HistoryPage — auto refresh", () => {
     getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
     rs.useFakeTimers();
 
-    render(<HistoryPage />);
+    renderPage();
     await settle();
     fireEvent.change(screen.getByLabelText(/minutes/i), { target: { value: "120" } });
     await settle();
@@ -348,7 +360,7 @@ describe("HistoryPage — auto refresh", () => {
     getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
     rs.useFakeTimers();
 
-    render(<HistoryPage />);
+    renderPage();
     await settle();
     const before = chartEl().getAttribute("data-instance");
 
@@ -362,7 +374,7 @@ describe("HistoryPage — auto refresh", () => {
     getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "off" } });
     rs.useFakeTimers();
 
-    render(<HistoryPage />);
+    renderPage();
     await settle();
     expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
 
@@ -375,7 +387,7 @@ describe("HistoryPage — auto refresh", () => {
     getSettingsMock.mockRejectedValue(new Error("boom"));
     rs.useFakeTimers();
 
-    render(<HistoryPage />);
+    renderPage();
     await settle();
 
     await tick(REFRESH_MS * 4);
@@ -387,7 +399,7 @@ describe("HistoryPage — auto refresh", () => {
     getSettingsMock.mockResolvedValue({ history_page: { autorefresh: "on" } });
     rs.useFakeTimers();
 
-    const view = render(<HistoryPage />);
+    const view = renderPage();
     await settle();
     expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
 
@@ -405,7 +417,7 @@ describe("HistoryPage — auto refresh", () => {
     rs.useFakeTimers();
     fetchHistoryChartMock.mockReturnValue(new Promise(() => {})); // never settles
 
-    render(<HistoryPage />);
+    renderPage();
     await settle();
     expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
 
@@ -416,8 +428,18 @@ describe("HistoryPage — auto refresh", () => {
 
   it("renders the saved-cook list below the chart, as the Flask page does", async () => {
     fetchHistoryChartMock.mockResolvedValue(PAYLOAD);
-    render(<HistoryPage />);
+    renderPage();
     expect(await screen.findByTestId("cookfile-list")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Saved cooks" })).toBeInTheDocument();
+  });
+
+  it("links to the metrics page", async () => {
+    //  Ported from blueprints/history/templates/history/index.html:47, the only
+    //  link into /metrics anywhere in the Flask tree -- the navbar has never
+    //  carried one. Dropping it in the first history port left the React
+    //  /metrics unreachable by clicking.
+    renderPage();
+    const link = await screen.findByRole("link", { name: "Metrics" });
+    expect(link).toHaveAttribute("href", "/metrics");
   });
 });
