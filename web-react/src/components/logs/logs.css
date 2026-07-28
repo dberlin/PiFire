@@ -60,21 +60,11 @@
   border-color: var(--color-accent);
   @apply text-text;
 }
-/* The follow toggle and family picker sitting above the viewer. */
+/* The follow toggle and family picker sitting above the viewer. The controls
+   inside it are .pf-field / .pf-input / .pf-admin-btn, borrowed from the
+   settings and admin surfaces the way admin.css already borrows .pf-field --
+   a picker and a download button on this page should not look like a second
+   app's picker and download button. */
 .pf-log-controls {
   @apply flex flex-wrap items-center gap-[16px];
-}
-.pf-log-control-label {
-  @apply flex items-center gap-[8px] text-label;
-  font: 600 13px "Barlow";
-}
-.pf-log-select {
-  @apply rounded-[10px] bg-inset px-[10px] py-[6px] text-text;
-  border: 1px solid var(--color-card-border);
-  font: 500 14px "Barlow";
-}
-.pf-log-size {
-  @apply text-text-dim;
-  font: 500 13px "Barlow";
-  font-variant-numeric: tabular-nums;
 }
