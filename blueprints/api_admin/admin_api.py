@@ -13,6 +13,7 @@ power the machine off, and it stays that way.
 
 import datetime
 import os
+import re
 import tempfile
 import zipfile
 
@@ -57,6 +58,42 @@ def list_logs(folder=None):
         return sorted(n for n in os.listdir(folder) if n.endswith(".log"))
     except OSError:
         return []
+
+
+#: A log family member is `<stem>.log`, or `<stem>.log.<n>` once rotated.
+#: Anything else in the folder -- logfiles.txt, stray notes -- is not a log and
+#: is not offered.
+_LOG_MEMBER = re.compile(r"^(?P<stem>.+)\.log(?:\.(?P<index>\d+))?$")
+
+
+def list_log_families(folder=None):
+    """{stem: [member filenames, OLDEST FIRST]}.
+
+    RotatingFileHandler shifts suffixes upward on rollover -- `x.log` becomes
+    `x.log.1`, `x.log.1` becomes `x.log.2` -- so the highest-numbered member is
+    the oldest and sorts first. `x.log` itself is index 0 and sorts last.
+
+    list_logs() above deliberately keeps its flat `.log`-only contract: the
+    admin page's LogsCard is built against it. This is the view that can see a
+    rotated file.
+
+    `folder` resolves at call time; see list_logs.
+    """
+    folder = folder or LOG_FOLDER
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return {}
+    families = {}
+    for name in names:
+        match = _LOG_MEMBER.match(name)
+        if match:
+            index = int(match["index"] or 0)
+            families.setdefault(match["stem"], []).append((index, name))
+    return {
+        stem: [name for _, name in sorted(members, key=lambda pair: -pair[0])]
+        for stem, members in sorted(families.items())
+    }
 
 
 def state_payload(settings, control, backup_folder):
