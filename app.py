@@ -85,6 +85,7 @@ from blueprints.api_wizard import api_wizard_bp
 from blueprints.api_history import api_history_bp
 from blueprints.api_files import api_files_bp
 from blueprints.api_admin import api_admin_bp
+from blueprints.api_metrics import api_metrics_bp
 from blueprints.update import update_bp
 
 """ Register Flask Blueprints """
@@ -108,6 +109,7 @@ app.register_blueprint(api_wizard_bp, url_prefix="/api/wizard")
 app.register_blueprint(api_history_bp, url_prefix="/api/history")
 app.register_blueprint(api_files_bp, url_prefix="/api/files")
 app.register_blueprint(api_admin_bp, url_prefix="/api/admin")
+app.register_blueprint(api_metrics_bp, url_prefix="/api/metrics")
 app.register_blueprint(update_bp, url_prefix="/update")
 
 """
