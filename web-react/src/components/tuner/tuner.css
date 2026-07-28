@@ -34,6 +34,24 @@
   }
 }
 
+/* The auto-tune card: one reference selector, two live readouts, a progress
+   line. Shares .pf-tuner-segment-title / .pf-tuner-field-label / .pf-tuner-input
+   / .pf-tuner-reading with the manual segment cards. */
+.pf-tuner-auto {
+  @apply flex flex-col gap-[8px] rounded-card bg-card p-[16px] text-text;
+  border: 1px solid var(--color-card-border);
+}
+.pf-tuner-auto-readings {
+  @apply mt-[8px] flex flex-wrap gap-[24px];
+}
+.pf-tuner-auto-reading {
+  @apply flex flex-col gap-[2px];
+}
+.pf-tuner-auto-progress {
+  @apply m-0 mt-[4px] text-label;
+  font: 500 13px "Barlow";
+}
+
 /* One of the three tuning points. */
 .pf-tuner-segment {
   @apply flex flex-col gap-[8px] rounded-card bg-card p-[16px] text-text;
