@@ -147,3 +147,67 @@ def test_the_surface_registers_no_write():
         if rule.endpoint.startswith("api_metrics_bp.") and "POST" in rule.methods
     ]
     assert writes == []
+
+
+def test_export_streams_a_csv_attachment(ds, client):
+    from common.datastore_accessors import flush_metrics
+
+    flush_metrics()
+    seed()
+
+    resp = client.get("/api/metrics/export")
+    assert resp.status_code == 200
+    disposition = resp.headers.get("Content-Disposition", "")
+    assert "attachment" in disposition
+    #  Werkzeug leaves the filename UNQUOTED when it needs no quoting, so this
+    #  is a containment check: asserting a trailing quote fails on a header
+    #  that is perfectly correct.
+    assert "-PiFire-Metrics-Export.csv" in disposition
+    #  Once, not twice. The Flask route hands prepare_metrics_csv a name that
+    #  already ends in -PiFire-Metrics-Export, and the helper appends its own.
+    assert disposition.count("PiFire-Metrics-Export") == 1
+
+    body = resp.get_data(as_text=True)
+    #  The header row is metrics_items' keys, in order.
+    assert body.splitlines()[0].startswith("id, starttime, starttime_c,")
+    assert "Smoke" in body
+
+
+def test_export_of_an_empty_table_says_so(ds, client):
+    from common.datastore_accessors import flush_metrics
+
+    flush_metrics()
+    resp = client.get("/api/metrics/export")
+    assert resp.status_code == 200
+    assert resp.get_data(as_text=True).strip() == "No Data"
+
+
+def test_export_carries_the_derived_columns(ds, client):
+    """prepare_metrics_csv writes every metrics_items key, so the export
+    inherits process_metrics' derived values -- which is why the route exports
+    processed_metrics() and not read_all_metrics()."""
+    from common.datastore_accessors import flush_metrics
+
+    flush_metrics()
+    seed()
+
+    body = client.get("/api/metrics/export").get_data(as_text=True)
+    assert "30 grams" in body
+    assert "60 s" in body
+
+
+def test_export_takes_no_client_supplied_name(ds, client):
+    """The filename is composed from the clock, never from the request.
+
+    prepare_metrics_csv joins its argument under /tmp; common/app.py's
+    _export_temp_path basenames it, but the right answer is to never let a
+    client string reach it at all. A query string must not change the name.
+    """
+    from common.datastore_accessors import flush_metrics
+
+    flush_metrics()
+    resp = client.get("/api/metrics/export?filename=../../etc/passwd")
+    assert resp.status_code == 200
+    disposition = resp.headers["Content-Disposition"]
+    assert "passwd" not in disposition
+    assert "-PiFire-Metrics-Export.csv" in disposition

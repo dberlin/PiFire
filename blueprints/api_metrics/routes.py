@@ -15,9 +15,11 @@ of converter rules -- but that is an accident of routing order rather than a
 statement, so tests/web/test_api_metrics.py pins the resolved endpoint.
 """
 
-from flask import jsonify
+import datetime
 
-from common.app import api_response
+from flask import jsonify, send_file
+
+from common.app import api_response, prepare_metrics_csv
 from common.common import process_metrics
 from common.datastore_accessors import read_all_metrics, read_settings
 
@@ -58,3 +60,26 @@ def metrics_listing():
             },
         )
     ), 200
+
+
+@api_metrics_bp.route("/export", methods=["GET"])
+def metrics_export():
+    """The whole table as a CSV attachment.
+
+    The filename is composed here from the clock and NOTHING else: no request
+    value reaches prepare_metrics_csv, which joins its argument under /tmp.
+    common/app.py's _export_temp_path basenames what it is given, but the
+    request is not the place to find out whether that held.
+
+    The stamp is passed bare. blueprints/metrics appends "-PiFire-Metrics-Export"
+    to it before calling the same helper, which appends that suffix itself --
+    so the legacy download arrives named -PiFire-Metrics-Export twice.
+
+    Exports processed_metrics() rather than read_all_metrics() so the CSV
+    carries the same derived columns the page shows -- an export that
+    disagreed with the screen would be worse than no export.
+    """
+    settings = read_settings()
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    path = prepare_metrics_csv(processed_metrics(settings), stamp)
+    return send_file(path, mimetype="text/csv", as_attachment=True, max_age=0)
