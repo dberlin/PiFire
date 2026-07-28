@@ -18,6 +18,7 @@ from common.app import api_response
 from common.common import WriteKind, generate_uuid
 from common.control_delta import control_delta
 from common.datastore_accessors import (
+    flush_autotune,
     read_control,
     read_settings,
     read_tr,
@@ -89,6 +90,11 @@ def tuner_session():
         if moved:
             values.update({"mode": Mode.MONITOR, "updated": True})
         set_control(**values)
+        #  Start every tuning session from an empty autotune store. Flask
+        #  flushed on the first auto-status poll -- the moment it enabled tuning
+        #  mode -- which is this call now. Manual tuning never reads this queue,
+        #  so the flush is a no-op there.
+        flush_autotune()
         return jsonify(api_response("OK", None, {"open": True, "mode": Mode.MONITOR, "restored": moved})), 200
 
     control = read_control()
