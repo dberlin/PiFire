@@ -61,6 +61,25 @@ export interface SavedProfile {
   applied: string | null;
 }
 
+/** One auto-tuning poll's result. Each poll records a sample server-side and
+ * returns the running selection. `current_*` are the live readings (null when
+ * a probe is not reporting); the high/medium/low points are 0 until `ready`,
+ * at which point they are the three the solve will use. */
+export interface AutoStatus {
+  current_tr: number | null;
+  current_temp: number | null;
+  high_tr: number;
+  high_temp: number;
+  medium_tr: number;
+  medium_temp: number;
+  low_tr: number;
+  low_temp: number;
+  /** How many samples have accumulated so far. */
+  samples: number;
+  /** True once the high−low temperature spread is wide enough to solve. */
+  ready: boolean;
+}
+
 /** Resolves rather than throws, matching helpers/admin/adminApi.ts: a refusal
  * is an expected outcome on this page (the grill is lit; the maths did not
  * converge), so every caller renders the reason instead of escaping past it. */

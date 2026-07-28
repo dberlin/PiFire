@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
   closeSession,
   computeCoefficients,
+  fetchAutoStatus,
   fetchTr,
   openSession,
   saveProfile,
@@ -109,5 +110,55 @@ describe("tunerErrorText", () => {
     expect(tunerErrorText({ ok: false, status: 500, message: "kaboom", data: null })).toBe(
       "kaboom",
     );
+  });
+});
+
+describe("fetchAutoStatus", () => {
+  const status = (over = {}) => ({
+    current_tr: 41000,
+    current_temp: 225,
+    high_tr: 0,
+    high_temp: 0,
+    medium_tr: 0,
+    medium_temp: 0,
+    low_tr: 0,
+    low_temp: 0,
+    samples: 1,
+    ready: false,
+    ...over,
+  });
+
+  it("posts both probe labels", async () => {
+    fetchMock.mockResolvedValue(OK(status()));
+    await fetchAutoStatus("Grill", "Probe1", "");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/tuner/auto-status");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      probe: "Grill",
+      reference: "Probe1",
+    });
+  });
+
+  it("keeps a null reading null", async () => {
+    fetchMock.mockResolvedValue(OK(status({ current_temp: null, samples: 0 })));
+    const result = await fetchAutoStatus("Grill", "Missing", "");
+    expect(result.data?.current_temp).toBeNull();
+  });
+
+  it("surfaces the ready selection", async () => {
+    fetchMock.mockResolvedValue(
+      OK(
+        status({
+          high_tr: 30000,
+          high_temp: 240,
+          low_tr: 50000,
+          low_temp: 100,
+          samples: 12,
+          ready: true,
+        }),
+      ),
+    );
+    const result = await fetchAutoStatus("Grill", "Probe1", "");
+    expect(result.data?.ready).toBe(true);
+    expect(result.data?.high_temp).toBe(240);
   });
 });

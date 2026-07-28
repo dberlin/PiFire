@@ -5,6 +5,7 @@
 // for why the session and the reading are separate endpoints.
 
 import type {
+  AutoStatus,
   Coefficients,
   ProfileInput,
   SavedProfile,
@@ -98,3 +99,11 @@ export const computeCoefficients = (points: TunerPoint[], baseUrl = BASE_URL) =>
 
 export const saveProfile = (profile: ProfileInput, baseUrl = BASE_URL) =>
   post<SavedProfile>(baseUrl, "profile", profile);
+
+/** Record one auto-tune sample and read the running selection.
+ *
+ * A POST, not a GET: each poll captures a datapoint. It writes only the
+ * autotune queue server-side, never control -- the session calls remain the
+ * sole writers of grill state. */
+export const fetchAutoStatus = (probe: string, reference: string, baseUrl = BASE_URL) =>
+  post<AutoStatus>(baseUrl, "auto-status", { probe, reference });
