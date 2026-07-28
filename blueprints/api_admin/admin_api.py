@@ -169,25 +169,32 @@ def clear_events_log(folder=None):
 
 
 def delete_logs(folder=None):
-    """Delete every .log in the folder, reporting what went.
+    """Delete every member of every log family, reporting what went.
 
     Flask runs `os.system("rm logs/*.log")` inside a bare `except:`, so a
-    failure is indistinguishable from success. This globs server-side and names
-    what it removed. `folder` resolves at call time; see list_logs.
+    failure is indistinguishable from success. This enumerates server-side and
+    names what it removed.
+
+    Rotated members are included. Deleting only `*.log` left the backups on
+    disk, so the log viewer still had content to show after a "Delete All" --
+    the operation reported success while the user could see it had not worked.
+
+    `folder` resolves at call time; see list_logs.
     """
     folder = folder or LOG_FOLDER
     removed = []
-    for name in list_logs(folder):
-        try:
-            os.remove(os.path.join(folder, name))
-            removed.append(name)
-        except OSError:
-            continue
-    return removed
+    for members in list_log_families(folder).values():
+        for name in members:
+            try:
+                os.remove(os.path.join(folder, name))
+                removed.append(name)
+            except OSError:
+                continue
+    return sorted(removed)
 
 
 def build_log_archive(folder=None):
-    """Zip every .log into a temp file and return its path.
+    """Zip every log family member into a temp file and return its path.
 
     Staged in a private mkdtemp rather than a predictable /tmp name: a
     world-writable, guessable path is how an attacker plants or reads content
@@ -198,8 +205,9 @@ def build_log_archive(folder=None):
     staging = tempfile.mkdtemp(prefix="pifire-logs-")
     archive = os.path.join(staging, f"PiFire_Logs_{stamp}.zip")
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name in list_logs(folder):
-            zf.write(os.path.join(folder, name), arcname=name)
+        for members in list_log_families(folder).values():
+            for name in members:
+                zf.write(os.path.join(folder, name), arcname=name)
     return archive
 
 

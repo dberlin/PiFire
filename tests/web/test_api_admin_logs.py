@@ -93,6 +93,36 @@ def test_delete_with_no_logs_is_success_not_an_error(env):
     assert resp.get_json()["data"]["removed"] == []
 
 
+def test_delete_removes_rotated_members_too(env):
+    """Before this, delete_logs filtered on endswith(".log") and left every
+    rotated file behind -- so "Delete All" did not delete what the viewer shows,
+    and the page kept displaying content after the user had cleared it."""
+    _seed(env, "events.log", "events.log.1", "events.log.2", "control.log")
+
+    with mock.patch("os.system") as m_system:
+        resp = env["client"].post("/api/admin/logs/delete", json={})
+
+    assert resp.status_code == 200
+    assert sorted(resp.get_json()["data"]["removed"]) == [
+        "control.log",
+        "events.log",
+        "events.log.1",
+        "events.log.2",
+    ]
+    assert list(env["dir"].iterdir()) == []
+    m_system.assert_not_called()
+
+
+def test_download_archives_rotated_members_too(env):
+    _seed(env, "events.log", "events.log.1")
+    (env["dir"] / "notes.txt").write_text("not a log")
+
+    resp = env["client"].get("/api/admin/logs/download")
+    with zipfile.ZipFile(BytesIO(resp.data)) as archive:
+        assert sorted(archive.namelist()) == ["events.log", "events.log.1"]
+        assert "notes.txt" not in archive.namelist()
+
+
 def test_a_missing_log_folder_lists_empty(env, monkeypatch):
     monkeypatch.setattr(admin_api, "LOG_FOLDER", "/nonexistent-log-folder/")
     resp = env["client"].get("/api/admin/logs")
