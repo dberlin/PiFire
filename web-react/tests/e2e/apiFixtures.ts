@@ -116,6 +116,27 @@ export async function stubProbeModules(page: Page): Promise<void> {
  * cannot follow, so the listing route can never swallow a detail request
  * whatever order they are installed in.
  */
+/**
+ * The whole admin page, from its one read.
+ *
+ * The fixture deliberately leaves `backups.pelletdb` empty and fills
+ * `backups.settings`: both the populated list and the "no backups yet" note
+ * are styled surfaces, and a fixture with two full lists would leave the empty
+ * branch uncovered by any baseline.
+ *
+ * `mode` is "Stop" so the destructive controls render ENABLED. The disabled
+ * variant is what a baseline would silently start encoding if this ever
+ * changed, which is why admin.spec.ts asserts the mode gate separately rather
+ * than leaving it to the fidelity gate.
+ *
+ * Nothing else on this page is stubbed because nothing else is fetched: every
+ * write endpoint is reached only by a click, and admin.spec.ts never confirms
+ * one.
+ */
+export async function stubAdmin(page: Page): Promise<void> {
+  await page.route("**/api/admin/state", (r) => json(r, body("admin-state.json")));
+}
+
 export async function stubRecipes(page: Page): Promise<void> {
   await page.route("**/api/files/recipes/detail*", (r) => json(r, body("recipe-detail.json")));
   await page.route("**/api/files/recipes*", (r) => json(r, body("recipe-listing.json")));

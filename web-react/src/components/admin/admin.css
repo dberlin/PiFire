@@ -112,6 +112,38 @@
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   font: 600 13px "Barlow";
 }
+/* One backup kind and its files. */
+.pf-admin-backup-group {
+  @apply flex flex-col gap-[6px] pb-[12px];
+}
+.pf-admin-backup-head {
+  @apply flex items-center gap-[8px];
+}
+.pf-admin-subtitle {
+  @apply m-0 text-text;
+  font: 600 14px "Barlow";
+}
+.pf-admin-backup-head > .pf-admin-btn {
+  margin-left: auto;
+}
+.pf-admin-backup-list {
+  @apply m-0 flex list-none flex-col gap-[4px] p-0;
+}
+.pf-admin-backup-row {
+  @apply flex items-center gap-[8px];
+}
+/* The filename takes the slack so the two buttons stay put down the list
+   rather than sliding with the length of each name. */
+.pf-admin-backup-name {
+  @apply text-text;
+  flex: 1;
+  min-width: 0;
+  font: 400 13px "Barlow";
+  overflow-wrap: anywhere;
+}
+.pf-admin-upload {
+  @apply flex flex-col gap-[6px];
+}
 /* The system readings: a two-column label/value list that reflows to one
    column when the card is narrow. */
 .pf-admin-facts {

@@ -1,4 +1,4 @@
-import { stubCookFiles, stubProbeModules, stubRecipes } from "./apiFixtures";
+import { stubAdmin, stubCookFiles, stubProbeModules, stubRecipes } from "./apiFixtures";
 import type { PageSpec, StyleProbe } from "./layoutBaseline";
 
 // The two viewports the fidelity gate is defined at. 1280x720 is the desktop
@@ -313,6 +313,60 @@ export const PAGE_SPECS: PageSpec[] = [
       ".pf-modal-btn",
     ],
   },
+  // The admin page. Written out rather than generated for the same reason as
+  // the recipe and cook-file specs: it needs its own fixture, since the demo
+  // server has no /api/admin backend and an unstubbed read would render the
+  // failure branch -- a baseline of an error message, not of the page.
+  //
+  // `.pf-admin-note` is reachable here only because the fixture leaves the
+  // pellet-database backup list empty; with two full lists the empty branch
+  // would go unmeasured. `.pf-admin-notice` is NOT reachable at all -- it
+  // appears only after a write lands -- so it is probed in CHROME_PROBES.
+  {
+    name: "admin",
+    path: "/admin",
+    //  The Logs card is rendered last, so its heading proves the whole page
+    //  painted rather than just the shell and the first card.
+    ready: 'h2:text-is("Logs")',
+    root: ".pf-shell",
+    stubs: stubAdmin,
+    landmarks: [
+      ...SHELL,
+      ".pf-admin",
+      ".pf-admin-error",
+      ".pf-admin-header",
+      ".pf-admin-title",
+      ".pf-admin-mode",
+      ".pf-admin-btn",
+      ".pf-admin-card",
+      ".pf-admin-card-title",
+      ".pf-admin-wide",
+      ".pf-admin-scroll",
+      ".pf-admin-facts",
+      ".pf-admin-fact",
+      // The label and value own rules (a spaced uppercase label, a wrapping
+      // value) that the .pf-admin-fact box cannot report, the same way
+      // `.pf-cf-dl dt`/`dd` do above.
+      ".pf-admin-fact-label",
+      ".pf-admin-fact-value",
+      ".pf-admin-actions",
+      ".pf-admin-note",
+      ".pf-admin-toggles",
+      ".pf-admin-backup-group",
+      ".pf-admin-backup-head",
+      ".pf-admin-subtitle",
+      ".pf-admin-backup-list",
+      ".pf-admin-backup-row",
+      ".pf-admin-backup-name",
+      ".pf-admin-upload",
+      // Borrowed from settings.css by the toggles and the upload picker, and
+      // never before measured outside a .pf-settings ancestor.
+      ".pf-field",
+      ".pf-field-label",
+      ".pf-input",
+      ".pf-switch",
+    ],
+  },
 ];
 
 const NEXT = 'button:text-is("Next")';
@@ -404,4 +458,7 @@ export const CHROME_PROBES: StyleProbe[] = [
   // them to utilities in JSX -- which this migration does not do.
   { name: "badge-ok", className: "pf-badge pf-badge-ok" },
   { name: "badge-warn", className: "pf-badge pf-badge-warn" },
+  // Reachable only after an admin write lands, so no page baseline can cover
+  // it: the admin spec never confirms an action, deliberately.
+  { name: "admin-notice", className: "pf-admin-notice" },
 ];

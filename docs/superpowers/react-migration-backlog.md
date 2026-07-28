@@ -19,7 +19,7 @@ it by path and line number; those citations point here.
 
 - **Dashboard** (`/`) — live socket data.
 - **App shell / global navigation** — navbar with all six destinations
-  (Recipes, Events, Admin rendered disabled, being unported), shared layout
+  (Events alone still rendered disabled, being unported), shared layout
   route, timer bar + modal, and the `Banners` alert strip hoisted out of
   Dashboard. The shell owns the single socket subscription and passes it down
   through Outlet context; a structural test enforces the one-call rule, because
@@ -97,6 +97,57 @@ it by path and line number; those citations point here.
   members throughout. The step editor derives each enable switch from
   `value > 0` so the switch and the value cannot disagree, and the view renders
   `0` as "—" rather than as a temperature.
+- **Admin** (`/admin`) — SHIPPED 2026-07-27
+  (`plans/2026-07-27-react-admin.md`, 15 tasks in two slices). System readings,
+  reboot/shutdown/restart, factory reset, the four clears, the two toggles,
+  backups and logs. A new `blueprints/api_admin/` answers all of it; the whole
+  page is built from ONE read, `GET /api/admin/state`, because that read calls
+  `gather_system_info()`, which probes the platform and writes the readings back
+  into control.
+
+  **No route here accepts a path**, in either direction: backups are named by
+  bare filename and resolved through `resolve_managed_file`, the log endpoints
+  take no name at all, and responses carry basenames only. Nothing in
+  `blueprints/api_admin/` reaches a shell — the two `os.system` calls in Flask's
+  admin blueprint (`rm ./logs/events.log`, `rm logs/*.log`, the second inside a
+  bare `except:` where a failure was indistinguishable from success) are not
+  inherited. `POST /logs/delete` globs server-side and answers with the names
+  that actually went, and the card renders that list rather than its own.
+
+  Three pre-existing hazards were closed on the way, each with a regression
+  test:
+
+  - **`/api/cmd/*` answered a bare GET**, so any link or prefetch was enough to
+    power the box off. It now requires POST. No in-repo client used GET.
+  - **Flask's backup restore built `backup_path + request.form["localfile"]`**
+    by concatenation at four sites. Since a restore reads a file and writes it
+    over live settings, that was an arbitrary-file-LOAD, not merely a read. All
+    four now go through `resolve_managed_file`.
+  - **`restart_control()` and `restart_webapp()` ran unconditionally**; they are
+    now gated on `is_real_hardware()`.
+
+  Deliberate divergence from Flask: every destructive endpoint refuses with
+  **409 `not_stopped`** unless the grill is stopped, matching the guard
+  `POST /api/probe_map` and `POST /api/files/recipes/run` already apply. Flask
+  offered them from any mode. The maintenance clears are deliberately NOT gated,
+  also matching Flask — clearing a pellet log mid-cook is recoverable.
+
+  Deliberately left alone: **the Socket.IO admin door**
+  (`blueprints/mobile/socket_io.py`), which is the mobile app's API, carries its
+  own duplicate `os.system` fallbacks, and is independently tested — Task 4's
+  gate is the only thing that reaches it; and **the wizard's hard links to
+  Flask's `/admin/reboot` and `/admin/restart`**, which still point at the old
+  blueprint. `blueprints/admin/` stays live until the general retirement pass
+  (ruling 5).
+
+  **A payload assumption that only a live read could disprove:** `os_info` is
+  `/etc/os-release` as a MAP, and the RAM, core-count and frequency readings are
+  NUMBERS. `gather_system_info()`'s fallback literals are all strings
+  (`"Unknown"`), and typing the payload from those alone produced a page that
+  crashed React on contact with a real machine. Every unit test passed, because
+  the fixture had been written from the same wrong assumption as the type. The
+  live-backend `tests/e2e/admin.spec.ts` is what found it; both fixtures are now
+  copied from an actual response.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
   polling, and an Exit control. Functionally complete; styling is being
@@ -566,10 +617,13 @@ Roughly ordered by daily-use value:
 - [x] **pellets** — SHIPPED 2026-07-25 (`plans/2026-07-25-react-pellets-page.md`,
       13 tasks). Listed here as open until 2026-07-26 purely because this entry
       was never struck; see the SHIPPED section for what landed.
-- [ ] **admin** — restart/reboot/shutdown, backups. Every action shells out, so
-      the tests for it MUST neutralize `os.system`/`subprocess` before anything
-      runs — an `is_real_hardware()` flag is not enough, and this repo has
-      really rebooted the developer's machine twice that way.
+- [x] **admin** — SHIPPED 2026-07-27 (`plans/2026-07-27-react-admin.md`, 15
+      tasks in two slices). The warning this entry used to carry still stands
+      for anything that touches these paths: the tests MUST neutralize
+      `os.system`/`subprocess` before anything runs, an `is_real_hardware()`
+      flag is not enough, and this repo has really rebooted the developer's
+      machine three times that way. See the SHIPPED section for what landed and
+      what was deliberately left alone.
 - [x] **recipes** — SHIPPED 2026-07-27 (`plans/2026-07-27-react-recipes.md`, 18
       tasks in two slices). See the SHIPPED section for what landed and item 11
       for what was deliberately left out. The 17-row outline at the bottom of
@@ -806,8 +860,9 @@ which said it was owed).
 - **Probe config as a React surface** — the single most-deferred item in the
   project: it appears five separate times across specs and plans as "next" and
   was never started. Now planned (see item 8).
-- ~~Recipes~~ — SHIPPED 2026-07-27; the navbar entry is a real link now. Events
-  and Admin remain rendered disabled — two whole Flask pages unported.
+- ~~Recipes~~ — SHIPPED 2026-07-27; the navbar entry is a real link now.
+  ~~Admin~~ — SHIPPED 2026-07-27, same. **Events** is now the last navbar entry
+  rendered disabled — one whole Flask page unported.
 - Cook-file list / upload / delete (D4) — History shipped the chart only.
 - Recipe unpause payload not ported — a paused recipe cannot be resumed. **Still
   open after the 2026-07-27 recipes slice**, which shipped run/status but not
@@ -901,7 +956,10 @@ Back/Next with inert step indicators; tables have no column headers and device
 - `/scan`'s `vid`/`pid` are unwired — Flask hex-parses them, the React endpoint
   does not.
 - `/admin/restart` and `/admin/reboot` are same-origin and hit the dev server
-  rather than Flask.
+  rather than Flask. **Still open after the 2026-07-27 admin slice**, which
+  deliberately did not repoint them: `POST /api/admin/system` now exists and is
+  what these should call, but the wizard's own links were out of that slice's
+  scope.
 - No e2e coverage of Exit Setup / `POST /api/wizard/cancel`.
 - The reboot-modal flow has never run on real Pi hardware, and the assumption
   that `raspi-config nonint do_onewire 0` writes `dtoverlay=w1-gpio` is

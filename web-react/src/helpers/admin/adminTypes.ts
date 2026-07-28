@@ -1,8 +1,11 @@
 // Shapes the /api/admin/* surface reads and writes.
 //
-// `system` mirrors common/system.py's gather_system_info() return value, which
-// falls back to the literal string "Unknown" for anything the platform could
-// not probe -- there is no null here, so a card renders these straight.
+// `system` mirrors common/system.py's gather_system_info(). Read its members
+// from the LIVE endpoint, not from that function's fallback literals: the
+// fallbacks are all strings ("Unknown"), but a platform module that answers for
+// real returns numbers for the RAM, core and frequency readings. Typing them
+// from the fallbacks alone produced a page that crashed the moment it met a
+// real machine.
 
 /** One entry of gather_system_info()'s `network_info` map, keyed by interface. */
 export interface NetworkInterface {
@@ -10,24 +13,45 @@ export interface NetworkInterface {
   mac_address: string;
 }
 
+/** A probed value, or the literal "Unknown" the fallback substitutes for one
+ * the platform could not answer. Never null: gather_system_info() deliberately
+ * writes a stated unknown rather than dropping the key. */
+export type Reading = string | number;
+
+/** /etc/os-release, verbatim, plus the ARCHITECTURE and BITS members
+ * get_display_os_info() adds. NOT a display string -- the six keys below are
+ * the only ones it guarantees, and a host contributes many more. */
+export interface OsInfo {
+  PRETTY_NAME: string;
+  NAME: string;
+  VERSION: string;
+  VERSION_ID: string;
+  VERSION_CODENAME: string;
+  ARCHITECTURE: string;
+  BITS: string;
+  [key: string]: string;
+}
+
 export interface CpuInfo {
-  hardware: string;
-  model: string;
-  model_name: string;
-  cores: string;
-  frequency: string;
+  hardware: Reading;
+  model: Reading;
+  model_name: Reading;
+  cores: Reading;
+  /** MHz. A float from the live probe, "Unknown" from the fallback. */
+  frequency: Reading;
 }
 
 export interface HardwareInfo {
-  total_ram: string;
-  available_ram: string;
+  /** Bytes, as the kernel reports them. */
+  total_ram: Reading;
+  available_ram: Reading;
   cpu_info: CpuInfo;
 }
 
 export interface SystemInfo {
   /** Raw `uptime(1)` output, newline included. */
   uptime: string;
-  os_info: string;
+  os_info: OsInfo;
   network_info: Record<string, NetworkInterface>;
   hardware_info: HardwareInfo;
 }

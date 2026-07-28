@@ -1,0 +1,42 @@
+{
+  "data": {
+    "system": {
+      "uptime": " 14:02:11 up 3 days,  1:14,  1 user,  load average: 0.08, 0.12, 0.09\n",
+      "os_info": {
+        "PRETTY_NAME": "Debian GNU/Linux 12 (bookworm)",
+        "NAME": "Debian GNU/Linux",
+        "VERSION": "12 (bookworm)",
+        "VERSION_ID": "12",
+        "VERSION_CODENAME": "bookworm",
+        "ID": "debian",
+        "HOME_URL": "https://www.debian.org/",
+        "ARCHITECTURE": "aarch64",
+        "BITS": "64-Bit"
+      },
+      "network_info": {
+        "eth0": { "ip_address": "10.0.0.9", "mac_address": "de:ad:be:ef:00:01" },
+        "wlan0": { "ip_address": "10.0.0.24", "mac_address": "de:ad:be:ef:00:02" }
+      },
+      "hardware_info": {
+        "total_ram": 8232370176,
+        "available_ram": 6442450944,
+        "cpu_info": {
+          "hardware": "BCM2712",
+          "model": "Raspberry Pi 5 Model B Rev 1.0",
+          "model_name": "Cortex-A76",
+          "cores": 4,
+          "frequency": 2400.0
+        }
+      }
+    },
+    "settings": { "debug_mode": false, "boot_to_monitor": true },
+    "backups": {
+      "settings": ["PiFire_07-04-26_101500.json", "PiFire_07-12-26_183000.json"],
+      "pelletdb": []
+    },
+    "logs": ["control.log", "events.log"],
+    "mode": "Stop"
+  },
+  "message": "Command was accepted successfully.",
+  "result": "OK"
+}

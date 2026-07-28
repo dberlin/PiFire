@@ -22,24 +22,41 @@ rs.mock("../../helpers/admin/adminApi", () => ({
   factoryReset: refuse("factoryReset"),
   maintenanceAction: refuse("maintenanceAction"),
   saveAdminSettings: refuse("saveAdminSettings"),
+  createBackup: refuse("createBackup"),
+  restoreBackup: refuse("restoreBackup"),
+  uploadBackup: refuse("uploadBackup"),
+  deleteLogs: refuse("deleteLogs"),
 }));
 
 const { AdminPage } = await import("./AdminPage");
 
+//  Copied from a REAL /api/admin/state response, not composed from the type.
+//  The first version of this fixture had os_info as a display string and the
+//  RAM readings as strings, matching a type that was also wrong; every test
+//  passed and the page crashed on a live machine. A fixture written from the
+//  same assumption as the code under test proves only that they agree.
 const STATE: AdminState = {
   system: {
     uptime: " 14:02:11 up 3 days,  1:14,  1 user\n",
-    os_info: "Debian GNU/Linux 12 (bookworm)",
+    os_info: {
+      PRETTY_NAME: "Debian GNU/Linux 12 (bookworm)",
+      NAME: "Debian GNU/Linux",
+      VERSION: "12 (bookworm)",
+      VERSION_ID: "12",
+      VERSION_CODENAME: "bookworm",
+      ARCHITECTURE: "aarch64",
+      BITS: "64-Bit",
+    },
     network_info: { eth0: { ip_address: "10.0.0.9", mac_address: "de:ad:be:ef:00:01" } },
     hardware_info: {
-      total_ram: "8GB",
-      available_ram: "6GB",
+      total_ram: 8232370176,
+      available_ram: 6442450944,
       cpu_info: {
         hardware: "BCM2712",
-        model: "Raspberry Pi 5",
+        model: "Raspberry Pi 5 Model B Rev 1.0",
         model_name: "Cortex-A76",
-        cores: "4",
-        frequency: "2400MHz",
+        cores: 4,
+        frequency: 2400.0,
       },
     },
   },
@@ -81,9 +98,20 @@ describe("AdminPage", () => {
     //  Library collapses the interior runs of spaces before matching, so this
     //  is the single-spaced form of the fixture's raw line.)
     expect(await screen.findByText("14:02:11 up 3 days, 1:14, 1 user")).toBeTruthy();
+    //  PRETTY_NAME, not the os_info map -- rendering the map itself throws.
     expect(screen.getByText("Debian GNU/Linux 12 (bookworm)")).toBeTruthy();
+    expect(screen.getByText("aarch64 (64-Bit)")).toBeTruthy();
     expect(screen.getByText("Cortex-A76")).toBeTruthy();
-    expect(screen.getByText("8GB")).toBeTruthy();
+  });
+
+  it("renders the numeric readings as units, not as raw bytes and floats", async () => {
+    //  The live platform module answers with byte counts and an unrounded
+    //  megahertz float; only gather_system_info()'s FALLBACKS are strings.
+    render(<AdminPage />);
+    expect(await screen.findByText("7.7 GiB")).toBeTruthy();
+    expect(screen.getByText("6.0 GiB")).toBeTruthy();
+    expect(screen.getByText("2400 MHz")).toBeTruthy();
+    expect(screen.getByText("4")).toBeTruthy();
   });
 
   it("names each network interface with its address pair", async () => {
@@ -98,9 +126,10 @@ describe("AdminPage", () => {
     expect(await screen.findByText("Grill mode: Hold")).toBeTruthy();
   });
 
-  it("renders an unprobed reading as the server's Unknown, not as a blank", async () => {
+  it("passes the server's Unknown through every formatter untouched", async () => {
     //  gather_system_info() falls back to the literal string rather than null,
-    //  and a stale-looking blank would be worse than an honest Unknown.
+    //  and a stale-looking blank would be worse than an honest Unknown. The
+    //  byte and megahertz formatters have to survive it, not produce "NaN GiB".
     const unknown: AdminState = {
       ...STATE,
       system: {
@@ -122,6 +151,7 @@ describe("AdminPage", () => {
     render(<AdminPage />);
     await screen.findByText("Admin");
     expect(screen.getAllByText("Unknown").length).toBe(7);
+    expect(screen.queryByText(/NaN/)).toBeNull();
   });
 
   it("refetches on demand, since nothing pushes a new reading", async () => {

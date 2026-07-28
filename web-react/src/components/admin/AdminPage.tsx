@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { adminErrorText, fetchAdminState } from "../../helpers/admin/adminApi";
-import type { AdminResult, AdminState } from "../../helpers/admin/adminTypes";
+import type { AdminResult, AdminState, Reading } from "../../helpers/admin/adminTypes";
 import "./admin.css";
+import { BackupsCard } from "./BackupsCard";
+import { LogsCard } from "./LogsCard";
 import { MaintenanceCard } from "./MaintenanceCard";
 import { SystemCard } from "./SystemCard";
 
@@ -14,6 +16,24 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 /** Human copy for a control mode. The server reports the raw mode string. */
 function modeLabel(mode: string): string {
   return mode || "Unknown";
+}
+
+/** Bytes as the kernel reports them, in the units it counts in.
+ *
+ * 1024-based and labelled GiB rather than dividing by 1024 and calling the
+ * result GB, which is the common way to be wrong by 7%. "Unknown" passes
+ * straight through -- the fallback substitutes that string for a reading the
+ * platform could not take. */
+function formatBytes(value: Reading): string {
+  if (typeof value !== "number") return String(value);
+  const gib = value / 1024 ** 3;
+  return gib >= 1 ? `${gib.toFixed(1)} GiB` : `${(value / 1024 ** 2).toFixed(0)} MiB`;
+}
+
+/** MHz, rounded. The live probe reports a float with fifteen decimals of
+ * precision it does not have. */
+function formatFrequency(value: Reading): string {
+  return typeof value === "number" ? `${Math.round(value)} MHz` : String(value);
 }
 
 /** One label/value row of the system panel. */
@@ -33,6 +53,11 @@ function Fact({ label, value }: { label: string; value: string }) {
  * platform could not answer, so nothing here is conditional -- an unprobed
  * reading shows as Unknown rather than vanishing, which is what the Flask page
  * did and is the honest answer to "we asked and got nothing".
+ *
+ * `os_info` is /etc/os-release as a MAP, not a display string. Rendering it
+ * directly crashed React, and no unit test caught it, because the fixture had
+ * been written from the same wrong assumption as the type. tests/e2e's
+ * admin.spec.ts reads the live endpoint, which is what found it.
  */
 function SystemInfo({ state }: { state: AdminState }) {
   const { system } = state;
@@ -51,14 +76,18 @@ function SystemInfo({ state }: { state: AdminState }) {
         <dl className="pf-admin-facts">
           {/* uptime(1) output arrives with its trailing newline attached. */}
           <Fact label="Uptime" value={system.uptime.trim()} />
-          <Fact label="OS" value={system.os_info} />
-          <Fact label="Model" value={cpu.model} />
-          <Fact label="CPU" value={cpu.model_name} />
-          <Fact label="Cores" value={cpu.cores} />
-          <Fact label="Frequency" value={cpu.frequency} />
-          <Fact label="Hardware" value={cpu.hardware} />
-          <Fact label="Total RAM" value={system.hardware_info.total_ram} />
-          <Fact label="Available RAM" value={system.hardware_info.available_ram} />
+          <Fact label="OS" value={system.os_info.PRETTY_NAME} />
+          <Fact
+            label="Architecture"
+            value={`${system.os_info.ARCHITECTURE} (${system.os_info.BITS})`}
+          />
+          <Fact label="CPU" value={String(cpu.model_name)} />
+          <Fact label="CPU Model" value={String(cpu.model)} />
+          <Fact label="Cores" value={String(cpu.cores)} />
+          <Fact label="Frequency" value={formatFrequency(cpu.frequency)} />
+          <Fact label="Hardware" value={String(cpu.hardware)} />
+          <Fact label="Total RAM" value={formatBytes(system.hardware_info.total_ram)} />
+          <Fact label="Available RAM" value={formatBytes(system.hardware_info.available_ram)} />
           {interfaces.map(([name, iface]) => (
             <Fact key={name} label={name} value={`${iface.ip_address} · ${iface.mac_address}`} />
           ))}
@@ -158,6 +187,8 @@ export function AdminPage() {
       <SystemInfo state={state} />
       <SystemCard mode={state.mode} />
       <MaintenanceCard settings={state.settings} onChanged={reload} />
+      <BackupsCard backups={state.backups} mode={state.mode} onChanged={reload} />
+      <LogsCard logs={state.logs} onChanged={reload} />
     </div>
   );
 }
