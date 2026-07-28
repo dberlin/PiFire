@@ -50,14 +50,19 @@ describe("NavBar", () => {
     expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe("/settings");
     expect(screen.getByRole("link", { name: "Recipes" }).getAttribute("href")).toBe("/recipes");
     expect(screen.getByRole("link", { name: "Admin" }).getAttribute("href")).toBe("/admin");
+    expect(screen.getByRole("link", { name: "Events" }).getAttribute("href")).toBe("/events");
   });
 
-  it("renders the one remaining unported destination as a disabled non-link", () => {
+  it("renders every destination as a link, none disabled", () => {
+    //  This replaces "renders the one remaining unported destination as a
+    //  disabled non-link", which named Events. Events now has a route, so no
+    //  entry is unported and the disabled span is gone from NavBar entirely.
     renderNav();
-    const el = screen.getByText("Events");
-    expect(el.tagName).not.toBe("A");
-    expect(el.getAttribute("aria-disabled")).toBe("true");
-    expect(screen.queryByRole("link", { name: "Events" })).toBeNull();
+    for (const label of ["Dashboard", "Recipes", "History", "Pellets", "Events", "Settings"]) {
+      const el = screen.getByText(label);
+      expect(el.tagName).toBe("A");
+      expect(el.getAttribute("aria-disabled")).toBeNull();
+    }
   });
 
   it("marks the dashboard item active at /", () => {

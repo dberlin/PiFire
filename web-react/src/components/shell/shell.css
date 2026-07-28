@@ -119,17 +119,13 @@
   text-decoration: none;
   font: 600 15px "Barlow";
 }
-.pf-nav-link:hover:not(.disabled) {
+.pf-nav-link:hover {
   @apply text-text;
   background: rgba(255, 255, 255, 0.05);
 }
 .pf-nav-link.active {
   @apply text-text;
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-}
-.pf-nav-link.disabled {
-  @apply cursor-not-allowed;
-  color: color-mix(in srgb, var(--text-dim) 55%, transparent);
 }
 
 @media (max-width: 720px) {

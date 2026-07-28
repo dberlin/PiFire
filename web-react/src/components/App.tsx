@@ -7,6 +7,7 @@ import { AdminPage } from "./admin/AdminPage";
 import { CookFilePage } from "./cookfiles/CookFilePage";
 import { DashboardRoute } from "./DashboardRoute";
 import { HistoryPage } from "./history/HistoryPage";
+import { EventsPage } from "./logs/EventsPage";
 import { PelletsPage } from "./pellets/PelletsPage";
 import { RecipeList } from "./recipes/RecipeList";
 import { RecipePage } from "./recipes/RecipePage";
@@ -83,6 +84,10 @@ export const routes = [
       // the readings back into control, so it belongs behind a mount effect the
       // page can retry, not in front of the first paint.
       { path: "/admin", element: <AdminPage /> },
+      // The event feed and the log-file browser. No loader: the page reads its
+      // own families and log text, and a loader would hold the shell on a file
+      // read that is measured in megabytes on a grill that has been running.
+      { path: "/events", element: <EventsPage /> },
       {
         path: "/settings",
         element: <SettingsShell />,
