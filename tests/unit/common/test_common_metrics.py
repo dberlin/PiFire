@@ -149,3 +149,30 @@ def test_metrics_roundtrip_all_fields(ds):
     assert isinstance(result2["auger_cycle_time"], float)
     assert result2["auger_cycle_time"] == 0.3
     assert isinstance(result2["starttime"], float)  # stamped by new_metric=True via time.time()
+
+
+def test_process_metrics_uses_the_supplied_auger_rate():
+    """The pellet-usage estimate is a function of the grill's configured auger
+    rate, not of process_metrics' 0.3 g/s default.
+
+    settings["globals"]["augerrate"] has been settable since
+    blueprints/settings/routes.py:679 and is what common/app.py:175 already
+    uses for the dashboard's own estimate. The metrics page ignored it, so a
+    grill tuned to any other rate read its pellet usage off a stranger's auger.
+    Pinned here before the call site changes, so a later refactor cannot
+    quietly restore the hardcoded rate.
+    """
+    from common.common import process_metrics
+
+    row = defaults.default_metrics()
+    row["mode"] = "Smoke"
+    row["starttime"] = 1_700_000_000_000
+    row["endtime"] = 1_700_000_060_000
+    row["augerontime"] = 100
+
+    #  process_metrics mutates in place, so each call gets its own copy.
+    default_rate = process_metrics([dict(row)])[0]["estusage_m"]
+    doubled = process_metrics([dict(row)], augerrate=0.6)[0]["estusage_m"]
+
+    assert default_rate == "30 grams"
+    assert doubled == "60 grams"
