@@ -1184,12 +1184,12 @@ references. What remains open:
   accumulation and the session lifecycle only; the `ready` selection path is
   covered by `test_api_tuner_auto.py`'s seeded twelve-sample test. Nothing
   drives the full converge-and-solve loop end to end against a real grill.
-- **`history-390x844.json` keeps re-capturing with the tuner baselines.** Not a
-  tuner change: the `/history` saved-cooks list is not stubbed by the fidelity
-  harness (it is a pre-Tailwind immutable reference), so its section height
-  floats with the demo server's live cook-file data — the same drift the
-  metrics and manual-tuner slices absorbed. Only `.pf-section#1`'s height moves;
-  no position does. This will keep recurring until that list is stubbed.
+- ~~**`history-390x844.json` keeps re-capturing with the tuner baselines.**~~
+  FIXED 2026-07-28: the `history` fidelity spec now stubs `/api/files/cookfiles`
+  (`stubs: stubCookFiles`), so the saved-cooks section renders fixture rows
+  instead of the demo backend's live cook files. Both history baselines are now
+  byte-deterministic across captures — verified by capturing twice. This closes
+  the drift the metrics and both tuner slices had been absorbing.
 
 #### UI parity, minor-graded
 

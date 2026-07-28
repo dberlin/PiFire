@@ -129,6 +129,14 @@ export const PAGE_SPECS: PageSpec[] = [
     path: "/history",
     ready: ".pf-history-chart",
     root: ".pf-shell",
+    //  Stub the saved-cook list, not just the chart. stubApi covers the chart
+    //  but NOT /api/files/cookfiles, so the "Saved cooks" section (.pf-section#1)
+    //  rendered live cook-file rows off the demo backend and its height floated
+    //  with whatever cooks were on the machine -- re-drifting this baseline on
+    //  every capture (absorbed by the metrics and both tuner slices). Pinned to
+    //  the same fixture the cookfile-list spec uses, both history baselines are
+    //  now deterministic.
+    stubs: stubCookFiles,
     landmarks: [
       ...SHELL,
       ".pf-settings",
