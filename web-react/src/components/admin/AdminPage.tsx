@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { adminErrorText, fetchAdminState } from "../../helpers/admin/adminApi";
 import type { AdminResult, AdminState } from "../../helpers/admin/adminTypes";
 import "./admin.css";
+import { MaintenanceCard } from "./MaintenanceCard";
+import { SystemCard } from "./SystemCard";
 
 // Same-origin, matching every other module. Deliberately NOT `targetUrl` from
 // the shell context: that value is absolute so ConnectionStatus has something
@@ -154,6 +156,8 @@ export function AdminPage() {
       </header>
 
       <SystemInfo state={state} />
+      <SystemCard mode={state.mode} />
+      <MaintenanceCard settings={state.settings} onChanged={reload} />
     </div>
   );
 }

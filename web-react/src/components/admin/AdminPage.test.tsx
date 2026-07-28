@@ -8,9 +8,20 @@ import type { AdminState } from "../../helpers/admin/adminTypes";
 // failure is to render its output, and a stub would let a wrong token pass
 // unnoticed.
 const fetchAdminStateMock = rs.fn();
+//  The cards render inside the page, so every write door they own is stubbed
+//  here too even though no test below clicks one. Leaving them live would put
+//  this file one future assertion away from a real power-off or a real clear
+//  against whatever backend the runner can see.
+const refuse = (name: string) => () => {
+  throw new Error(`${name} must never be reached from AdminPage.test`);
+};
 rs.mock("../../helpers/admin/adminApi", () => ({
   ...actualAdminApi,
   fetchAdminState: (...a: unknown[]) => fetchAdminStateMock(...a),
+  systemAction: refuse("systemAction"),
+  factoryReset: refuse("factoryReset"),
+  maintenanceAction: refuse("maintenanceAction"),
+  saveAdminSettings: refuse("saveAdminSettings"),
 }));
 
 const { AdminPage } = await import("./AdminPage");

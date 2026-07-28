@@ -88,6 +88,30 @@
   flex: 1;
   min-height: 0;
 }
+/* A card's stack of action buttons. Wraps rather than scrolling: an action
+   pushed out of sight by a sibling is an action the user cannot reach. */
+.pf-admin-actions {
+  @apply flex flex-wrap gap-[8px];
+}
+/* The switch rows under a card's actions. .pf-field (settings.css) is already
+   a label/control row, so this only has to stack them. */
+.pf-admin-toggles {
+  @apply flex flex-col gap-[4px];
+}
+/* Why a control is unavailable. Muted, because it explains a disabled state
+   rather than reporting a failure -- .pf-settings-error-text is for the
+   latter and would cry wolf here. */
+.pf-admin-note {
+  @apply m-0 text-label;
+  font: 400 13px "Barlow";
+}
+/* An accepted request whose result cannot be observed, because the server is
+   on its way down. */
+.pf-admin-notice {
+  @apply m-0 rounded-[10px] p-[8px] text-text;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font: 600 13px "Barlow";
+}
 /* The system readings: a two-column label/value list that reflows to one
    column when the card is narrow. */
 .pf-admin-facts {
