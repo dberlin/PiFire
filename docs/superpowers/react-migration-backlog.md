@@ -1074,8 +1074,8 @@ their audit number:
   parity with Flask's WLED card; `mode_presets`/`event_presets` are preserved on
   Save but not rendered (zero Flask UI — parity boundary). Spec/plan:
   `specs/2026-07-28-react-wled-editor-design.md`, `plans/2026-07-28-react-wled-editor.md`.
-- **Still genuinely open, its own slice:** **#5** Flask serves no React build (no
-  SPA catch-all / `send_from_directory` in `app.py`) — the whole deployment path.
+- **#5 — SHIPPED 2026-07-29** by the Flask-retirement pass (see the SHIPPED block
+  below). Flask now serves the React build via a `spa` blueprint.
 - **Sweep 2 (2026-07-28) — the rest of the audit's STILL-OPEN labels, verified
   vs live code.** Stale labels now closed: **#33** (limit shutdown fires —
   `notifications.py` fixed), **#45** (`sleep_timeout` rendered — GeneralTab),
@@ -1103,10 +1103,70 @@ their audit number:
     **#58** (recipe *unpause* — `recipeUnpause` posts the minimal
     `{recipe:{step_data:{pause:false}}}`; `buttonsForMode` branches the Next Step
     button paused→unpause), **#67** (`pellets_load_profile` now calls
-    `backup_pellet_db`). Genuinely still open after this: **#5** and **#71** —
-    both fold into the Flask-retirement pass. Full disposition of every finding
-    (incl. accepted divergences and UNCLEAR/browser-only items) is in the audit's
-    *sweep 2* block.
+    `backup_pellet_db`). **#5** and **#71** were the last two — both SHIPPED
+    2026-07-29 by the Flask-retirement pass (see its SHIPPED block below). Full
+    disposition of every finding (incl. accepted divergences and
+    UNCLEAR/browser-only items) is in the audit's *sweep 2* block.
+
+#### Flask-retirement pass — SHIPPED 2026-07-29 (ruling 5: #5 + #71)
+
+Spec/plan: `specs/2026-07-29-flask-retirement-design.md`,
+`plans/2026-07-29-flask-retirement.md`. Executed subagent-driven; final gate green
+(Python `tests/web` 622 + `tests/unit` 1707; web-react typecheck/lint/build + 1623
+tests).
+
+- **#5 — SHIPPED.** New `blueprints/spa/` (registered last) serves
+  `web-react/dist/index.html` for `/` and every client-side deep link, and serves
+  the React bundle's `/static/{js,css,font}` via rules that shadow Flask's default
+  static. Unknown `/api` and `/mobile` paths return a JSON 404, not the SPA shell.
+  `app.py`'s `index()` redirect was removed (React owns first-run routing).
+  **Load-bearing subtlety:** Flask's `static_folder` was deliberately NOT repointed
+  — `/static/img/**` stays on the default handler because it is a KEPT tree
+  (`api_files` uploads under `static/img/tmp` + React vendor images
+  `/static/img/wizard/*`, `/static/img/pifire-cf-thumb.png`). Regression-pinned by
+  `test_spa.py::test_static_img_still_served_by_flask_default`.
+- **#71 — SHIPPED.** Deregistered AND deleted the 14 legacy page blueprints
+  (admin, events, logs, history, metrics, dash, pellets, cookfile, probeconfig,
+  recipes, settings, update, manual, manifest) plus the `wizard`/`tuner` page
+  routes/templates — the `wizard.py`/`tuner.py` helper modules survive because
+  `api_wizard`/`api_tuner` import them. Deleted the dead shared templates
+  (`base.html`, the `_macro_*`/`_log_list` partials, `shutdown.html`) and the
+  legacy `static/{css,font,js}`. Every retired page's characterization/straggler
+  test was deleted or (for mixed files) surgically trimmed, coverage confirmed on
+  the kept surface first — including the admin-restore **path-traversal
+  containment** security guarantee (preserved on `test_api_admin_backups.py`).
+- **"Still reachable until ruling 5" items — now CLOSED.** The traversal /
+  template-injection doors on the retired pages (e.g. the logs-folder request-field
+  path, the tuner `render_template_string` fragment) are unreachable because the
+  routes no longer exist. `shutdown.html` (admin reboot/shutdown/restart splash) is
+  covered in React by `SystemCard` → `api_admin` `_ADMIN_DISPATCH` (same
+  `common/system.py` calls) + an inline `role="status"` notice.
+- **/mobile — KEPT, fate settled.** `blueprints/mobile/socket_io.py` is Socket.IO
+  only (no HTTP routes) and is React's live backend feed; it stays registered and
+  untouched. It was never a page to retire. (The separate "mobile responsiveness"
+  line below remains its own open concern, unrelated to the socket.)
+- **Dead-code cleanup (this pass).** Removed 4 helpers orphaned by the retirement
+  (`add_line_numbers`, `get_display_info`, `is_checked`, `is_not_blank`) after
+  serena-verifying zero production callers, plus a dead test and an orphaned
+  import. A "think-hard" audit of every function the deleted pages called
+  (`dead-function-audit.md`) found exactly ONE behavioral gap (below); everything
+  else was replicated on a kept surface or pure-dead.
+
+**Deferred by the Flask-retirement pass (recorded, not built):**
+- **Warnings never auto-clear in React (behavioral gap).** `drain_warnings()` — the
+  destructive read that cleared `list_warnings` on view — had its sole caller
+  (Flask `dash_page`) deleted. React reads warnings non-destructively via
+  `socket_io.py::read_warnings()` → `AppShell`/`Banners`, and nothing flushes the
+  queue anymore, so warning banners now **persist forever and stack**. `read`/`drain`
+  were split precisely because `list_warnings` has independent consumers, so the
+  socket read must stay non-destructive. Fix (its own slice): a React "dismiss"
+  control + a `POST /api/...` clear endpoint that calls the retained
+  `drain_warnings()` primitive. `drain_warnings()` was deliberately kept for this.
+- **Pre-existing e2e baseline drift (NOT from this pass).** `web-react` e2e
+  `fidelity-pages` has 6 pixel/geometry baseline failures for admin/settings/wizard
+  pages, introduced by earlier commits (`9620bb6c`, `a5225a3c`); this pass changes
+  no `web-react/src`, so they predate it. Needs a baseline refresh, separately.
+
 - **#1 / #2 — RESOLVED by ruling (2026-07-28), not a web-react target.** The QML
   kiosk is the on-device touchscreen UI (a fullscreen Wayland kiosk on the Pi's
   attached screen) and it STAYS; the React app was never going to reimplement
