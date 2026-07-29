@@ -66,8 +66,6 @@ app.config.from_object(ProductionConfig)
 
 """ Flask Blueprints """
 from blueprints.api import api_bp
-from blueprints.tuner import tuner_bp
-from blueprints.wizard import wizard_bp
 from blueprints.api_wizard import api_wizard_bp
 from blueprints.api_history import api_history_bp
 from blueprints.api_files import api_files_bp
@@ -78,8 +76,6 @@ from blueprints.api_update import api_update_bp
 
 """ Register Flask Blueprints """
 app.register_blueprint(api_bp, url_prefix="/api")
-app.register_blueprint(tuner_bp, url_prefix="/tuner")
-app.register_blueprint(wizard_bp, url_prefix="/wizard")
 app.register_blueprint(api_wizard_bp, url_prefix="/api/wizard")
 app.register_blueprint(api_history_bp, url_prefix="/api/history")
 app.register_blueprint(api_files_bp, url_prefix="/api/files")

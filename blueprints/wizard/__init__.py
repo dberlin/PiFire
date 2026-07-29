@@ -1,5 +1,3 @@
-from flask import Blueprint
-
-wizard_bp = Blueprint("wizard_bp", __name__, template_folder="templates", static_folder="static", url_prefix="/wizard")
-
-from . import routes  # noqa: F401  # side-effect import: registers blueprint routes
+# The Flask wizard page blueprint was retired (React serves the wizard UI via
+# api_wizard). This package survives only for wizard.py, imported by
+# blueprints.api_wizard.
