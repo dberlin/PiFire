@@ -10,6 +10,7 @@ from common.datastore_accessors import (
     read_current,
     read_status,
     read_probe_status,
+    clear_warnings_through,
 )
 from common.api_commands import process_command
 from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update, api_response
@@ -443,6 +444,22 @@ def _api_post_probe_map(settings, request_json):
     return jsonify({"result": "success", "message": "Probe map applied.", "data": {"probe_map": probe_map}}), 200
 
 
+def _api_post_dismiss_warnings(settings, request_json):
+    """Clear the warnings the client was showing, and only those.
+
+    The client posts back the high-water mark it received with the banner
+    (socket_dash_data's warningsMaxId), so a warning written between that
+    payload and the click keeps a larger id and survives the clear.
+    """
+    through_id = request_json.get("through_id")
+    # bool is an int subclass, so it has to be excluded explicitly or True
+    # would silently clear id 1.
+    if isinstance(through_id, bool) or not isinstance(through_id, int):
+        return jsonify(api_response("ERROR", "through_id must be an integer.")), 400
+    clear_warnings_through(through_id)
+    return jsonify(api_response("OK", "Warnings dismissed.")), 200
+
+
 _API_POST_ACTIONS = {
     "settings": _api_post_settings,
     "settings_update": _api_post_settings_update,
@@ -451,6 +468,7 @@ _API_POST_ACTIONS = {
     "probe_map": _api_post_probe_map,
     "wled_push_profiles": _api_post_wled_push_profiles,
     "wled_test_profile": _api_post_wled_test_profile,
+    "dismiss_warnings": _api_post_dismiss_warnings,
 }
 
 
