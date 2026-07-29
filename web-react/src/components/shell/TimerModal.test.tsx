@@ -48,6 +48,7 @@ function stubCommand() {
     manualOutput: rs.fn(async () => OK),
     manualPwm: rs.fn(async () => OK),
     recipeNextStep: rs.fn(async () => OK),
+    recipeUnpause: rs.fn(async () => OK),
   };
   return { command, calls };
 }

@@ -274,6 +274,34 @@ describe("createCommand.recipeNextStep", () => {
   });
 });
 
+// recipeUnpause resumes a recipe stopped at a step whose `pause` flag is set.
+// Flask's single "Next Step" button branches: paused -> cpRecipeUnpause (posts
+// the step_data with pause:false, control_panel.js:382-392); otherwise the bare
+// {updated:true} advance. Unlike Flask, which reposts the WHOLE step_data (and
+// so can revert a `triggered`/`notify` the control loop set in the same cycle),
+// this sends only the scalar leaf -- RFC-7396 merges it in place. The controller
+// advances the step once `pause` is false (base.py::_handle_recipe_end).
+describe("createCommand.recipeUnpause", () => {
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  it('POSTs /api/control with exactly {"recipe": {"step_data": {"pause": false}}}', async () => {
+    const fetchMock: ReturnType<typeof rs.fn> = rs.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({ result: "success" }),
+    }));
+    rs.stubGlobal("fetch", fetchMock);
+
+    await expect(createCommand("").recipeUnpause()).resolves.toEqual({ ok: true, message: "" });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/control");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ recipe: { step_data: { pause: false } } });
+  });
+});
+
 // createCommand no longer exposes hopperCheck. Its only caller was the hopper
 // card's Refresh Status button, removed once the control loop started
 // refreshing the level on a timer (distance/intervals.py) -- an exported

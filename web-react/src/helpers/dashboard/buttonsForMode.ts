@@ -102,7 +102,10 @@ export function buttonsForMode(dash: LiveState): ControlButton[] {
         // Flask makes this a glowbutton while the recipe is paused waiting on a
         // trigger (control_panel.js:207-217).
         variant: dash.recipeStatus.paused ? "accent" : undefined,
-        action: cmd((c) => c.recipeNextStep()),
+        // Flask's one button branches the same way (control_panel.js:520-533): a
+        // paused step ignores {updated:true}, so it must have its `pause` flag
+        // cleared (recipeUnpause) to move on; an unpaused step just advances.
+        action: cmd((c) => (dash.recipeStatus?.paused ? c.recipeUnpause() : c.recipeNextStep())),
       },
       { label: "Shutdown", action: confirm("Shut down the grill?", (c) => c.setMode("shutdown")) },
       STOP,

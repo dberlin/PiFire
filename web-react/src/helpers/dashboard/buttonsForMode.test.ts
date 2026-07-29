@@ -24,6 +24,7 @@ function stubCommand(): CommandClient {
     manualOutput: rs.fn(async () => OK),
     manualPwm: rs.fn(async () => OK),
     recipeNextStep: rs.fn(async () => OK),
+    recipeUnpause: rs.fn(async () => OK),
   };
 }
 
@@ -294,21 +295,25 @@ describe("buttonsForMode during a recipe", () => {
     expect(labels).toEqual(["Smoke", "Hold", "Smoke+", "Shutdown", "Stop"]);
   });
 
-  it("Next Step advances the recipe", async () => {
+  it("Next Step advances the recipe when it is not paused", async () => {
     const command = stubCommand();
     const next = buttonsForMode(inRecipe())[0];
     if (next.action.type === "command") await next.action.run(command);
     expect(command.recipeNextStep).toHaveBeenCalled();
+    expect(command.recipeUnpause).not.toHaveBeenCalled();
   });
 
-  it("glows Next Step while the recipe is paused, and sends the same command", async () => {
+  it("glows Next Step while the recipe is paused, and unpauses instead of advancing", async () => {
     const paused = buttonsForMode(inRecipe({ paused: true }))[0];
     expect(paused.variant).toBe("accent");
     expect(buttonsForMode(inRecipe({ paused: false }))[0].variant).toBeUndefined();
 
+    // Paused sends recipeUnpause (clears the pause flag), NOT recipeNextStep --
+    // {updated:true} is ignored by a paused step, so advancing would do nothing.
     const command = stubCommand();
     if (paused.action.type === "command") await paused.action.run(command);
-    expect(command.recipeNextStep).toHaveBeenCalled();
+    expect(command.recipeUnpause).toHaveBeenCalled();
+    expect(command.recipeNextStep).not.toHaveBeenCalled();
   });
 
   it("keeps Shutdown behind its confirmation, and Stop behind its own", () => {

@@ -85,6 +85,10 @@ export interface CommandClient {
   // this module's post() tests for -- see controlPatch below.
   /** Advance a running recipe to its next step (control_panel.js:530). */
   recipeNextStep(): Promise<CommandResult>;
+  /** Resume a recipe halted at a step whose `pause` flag is set
+   *  (control_panel.js:382-392). Distinct from recipeNextStep: a paused step
+   *  ignores {updated:true}, so it must have `pause` cleared to move on. */
+  recipeUnpause(): Promise<CommandResult>;
 }
 
 /** Bridge POST /api/control into this module's CommandResult envelope.
@@ -198,6 +202,12 @@ export function createCommand(baseUrl: string): CommandClient {
     // merges the whole posted object, so any extra key is a value patched back
     // over whatever the control loop set meanwhile.
     recipeNextStep: () => controlPatch(baseUrl, { updated: true }),
+    // Only the scalar leaf, not Flask's whole-step_data repost: POST /api/control
+    // merges the object (RFC 7396), so { recipe: { step_data: { pause: false } } }
+    // clears exactly the pause flag and leaves `triggered`/`notify`/`mode` as the
+    // control loop has them. Reposting the whole step_data (control_panel.js:386)
+    // would patch a stale `triggered`/`notify` back over a fresh controller write.
+    recipeUnpause: () => controlPatch(baseUrl, { recipe: { step_data: { pause: false } } }),
     // No hopperCheck here on purpose. Flask posts hopper_check and re-reads
     // GET /api/hopper 500ms later (dash_default.js:878-897); this UI has no
     // Refresh Status button to post it from, because the control loop refreshes
