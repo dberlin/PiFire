@@ -12,6 +12,7 @@ export const FIXTURE_DASH: LiveState = {
   uuid: "91a66346-7e6a-11f1-b29c-84470959a251",
   errors: [],
   warnings: [],
+  warningsMaxId: null,
   status: "inactive",
   criticalError: false,
   grillName: "BOOT_PATH_SENTINEL_GRILL",

@@ -44,6 +44,9 @@ export interface LiveState {
   uuid: string;
   errors: string[];
   warnings: string[];
+  /** High-water mark of the warnings above; null when there are none. Posted
+   *  back to dismiss exactly the warnings this payload carried. */
+  warningsMaxId: number | null;
   criticalError: boolean;
   grillName: string;
   currentMode: string;
