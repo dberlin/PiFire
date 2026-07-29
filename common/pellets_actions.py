@@ -22,6 +22,7 @@ that accepts a whole pellet database.
 from datetime import datetime
 
 from common.app import api_response
+from common.backups import backup_pellet_db
 from common.common import WriteKind
 from common.control_delta import control_delta
 from common.datastore_accessors import write_control, write_pellet_db
@@ -58,6 +59,10 @@ def pellets_load_profile(pelletdb, action_data):
         # other member through the queue, and a delta says only what it means.
         write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
         write_pellet_db(pelletdb)
+        # Snapshot the new load, exactly as Flask's _pellets_loadprofile does
+        # (blueprints/pellets/routes.py). The React "Load New Pellets" path
+        # reaches this handler and previously left no restore point.
+        backup_pellet_db(action="backup")
         return api_response(result="OK")
     else:
         return api_response(result="Error", message="Error: Profile not included in request")
