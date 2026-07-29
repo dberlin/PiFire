@@ -309,6 +309,20 @@ it by path and line number; those citations point here.
   coefficients/close/chart/save path manual uses — the maths, the session
   lifetime and the profile save are reused unchanged. The DS18B20 warm-up guard
   (skip a cold probe's leading zeros) is preserved.
+- **Update** (`/update`) — SHIPPED 2026-07-29
+  (`plans/2026-07-29-react-updater.md`, 7 tasks), behind a new
+  `blueprints/api_update`. Reads (state/check/log) and mutations
+  (branches/refresh, branch, pull, upgrade) are gated behind
+  `is_real_hardware()` and refuse with 409 while the grill is not in STOP
+  mode. The page shows current version/branch/remote, a branch switcher, the
+  pull/upgrade actions, an update log viewer, and a progress panel that polls
+  `GET /api/update/status` until the `101`/`142` sentinel (done vs.
+  reboot-required, matching `wizard/InstallProgress.tsx` and
+  `updater.py:548`). A `SystemUpdateCard` on `/admin` surfaces the same
+  check/upgrade action. Not ported: the post-update "what's new"
+  release-notes modal — that is app-shell chrome triggered by a settings flag
+  on any route, not a control on this page; see "Deferred by the updater
+  slice" below.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
   polling, and an Exit control. Functionally complete; styling is being
@@ -906,7 +920,16 @@ Roughly ordered by daily-use value:
       `plans/2026-07-28-react-tuner-manual.md` (slice 1, 11 tasks). Auto
       accumulation flow: `plans/2026-07-28-react-tuner-auto.md` (slice 2, 6
       tasks). See the SHIPPED section.
-- [ ] **update** — software updater (shells out; `is_real_hardware()`-gated)
+- [x] **update** — SHIPPED 2026-07-29 (`plans/2026-07-29-react-updater.md`, 7
+      tasks). New `blueprints/api_update` (read: state/check/log; mutations:
+      branches/refresh, branch, pull, upgrade, all gated behind
+      `is_real_hardware()` and the STOP-mode 409 the running `_fire` seam
+      already enforces) backs a new `/update` page (state, branch switcher,
+      pull/upgrade actions, log viewer, and a progress panel that polls
+      `GET /api/update/status` to the `101`/`142` done/reboot-required
+      sentinel) plus a `SystemUpdateCard` on `/admin`. The post-update
+      "what's new" release-notes modal was deliberately left out of scope —
+      see "Deferred by the updater slice" below.
 - [x] **metrics** — SHIPPED 2026-07-28 as `/metrics`, behind a new read-only
       `blueprints/api_metrics` (`plans/2026-07-28-react-metrics-page.md`,
       9 tasks). Correction to what this line implied: it is not a "stats" page.
@@ -1263,11 +1286,11 @@ references. What remains open:
   byte-deterministic across captures — verified by capturing twice. This closes
   the drift the metrics and both tuner slices had been absorbing.
 
-#### Deferred by the updater slice (design, 2026-07-29)
+#### Deferred by the updater slice (SHIPPED 2026-07-29)
 
-The `/update` page design (`specs/2026-07-29-react-updater-*`, in progress) is
-scoped to the updater page itself. One piece of the Flask updater experience is
-**global chrome, not the page**, and is deliberately excluded:
+The `/update` page (`specs/2026-07-29-react-updater-*`, `plans/2026-07-29-react-updater.md`)
+is scoped to the updater page itself. One piece of the Flask updater experience
+is **global chrome, not the page**, and is deliberately excluded:
 
 - **The post-update "what's new" release-notes modal is not ported.** After an
   update, Flask sets `settings["globals"]["updated_message"]` and every page
