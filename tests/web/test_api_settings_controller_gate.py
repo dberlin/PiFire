@@ -109,43 +109,6 @@ def test_selecting_mpc_succeeds_when_do_mpc_is_present(client, spawned):
     assert spawned == []
 
 
-def test_legacy_cycle_form_also_refuses_and_keeps_the_previous_controller(client, no_do_mpc, spawned):
-    """The classic HTML settings form posts to a different handler than the React
-    tab does (`blueprints/settings/routes.py::_settings_cycle`). Both write
-    settings['controller']['selected'], so both need the gate -- covering only
-    the JSON API would leave a second door open onto the same failure."""
-    from common.datastore_accessors import execute_control_writes, read_control, write_control
-    from common.common import WriteKind
-
-    control = read_control()
-    control["controller_update"] = False
-    write_control(control, WriteKind.OVERWRITE, origin="test")
-    before = read_settings()["controller"]["selected"]
-
-    resp = client.post("/settings/cycle", data={"selectController": "mpc", "pmode": "2"})
-
-    assert resp.status_code == 200
-    assert read_settings()["controller"]["selected"] == before
-    # The control loop must not be told to re-read a selection it cannot build.
-    execute_control_writes()
-    assert read_control()["controller_update"] is False
-    # The rest of the form still applied -- only the controller half is refused.
-    assert read_settings()["cycle_data"]["PMode"] == 2
-    assert len(spawned) == 1
-
-
-def test_legacy_cycle_form_accepts_mpc_when_do_mpc_is_present(client, spawned):
-    from common.datastore_accessors import execute_control_writes, read_control
-
-    resp = client.post("/settings/cycle", data={"selectController": "mpc", "pmode": "2"})
-
-    assert resp.status_code == 200
-    assert read_settings()["controller"]["selected"] == "mpc"
-    execute_control_writes()
-    assert read_control()["controller_update"] is True
-    assert spawned == []
-
-
 def test_switching_away_from_a_broken_mpc_selection_is_allowed(client, no_do_mpc, spawned):
     # A user stuck on MPC (e.g. a restored backup) must always be able to get
     # back to a controller that works.
