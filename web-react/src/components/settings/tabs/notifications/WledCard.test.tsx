@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  discoverWled,
+  pushWledProfiles,
+  testWledProfile,
+} from "../../../../helpers/notify/wledApi";
 import { WledCard } from "./WledCard";
+
+rs.mock("../../../../helpers/notify/wledApi", () => ({
+  discoverWled: rs.fn(),
+  pushWledProfiles: rs.fn(),
+  testWledProfile: rs.fn(),
+}));
 
 afterEach(cleanup);
 
@@ -87,5 +98,59 @@ describe("WledCard editor fields", () => {
       <WledCard wled={{ ...wledFixture(), use_suggested_presets: true }} onChange={rs.fn()} />,
     );
     expect(screen.getByLabelText(/idle brightness/i)).toBeInTheDocument();
+  });
+});
+
+describe("WledCard actions", () => {
+  it("Push and Test are blocked with an inline error when the address is empty", async () => {
+    render(<WledCard wled={{ ...wledFixture(), device_address: "" }} onChange={rs.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /push profiles/i }));
+    expect(await screen.findByText(/enter a wled device address/i)).toBeInTheDocument();
+    expect(pushWledProfiles).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /test profile/i }));
+    expect(testWledProfile).not.toHaveBeenCalled();
+  });
+
+  it("Push sends the live device_address and profile_numbers, then shows success", async () => {
+    (pushWledProfiles as ReturnType<typeof rs.fn>).mockResolvedValue({
+      result: "success",
+      message: "done",
+      profiles_pushed: 12,
+    });
+    render(<WledCard wled={wledFixture()} onChange={rs.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /push profiles/i }));
+    expect(pushWledProfiles).toHaveBeenCalledWith(
+      "wled.local",
+      expect.objectContaining({ cooking: 203, idle: 200 }),
+    );
+    expect(await screen.findByText(/12/)).toBeInTheDocument();
+  });
+
+  it("Test sends the cooking profile number", async () => {
+    (testWledProfile as ReturnType<typeof rs.fn>).mockResolvedValue({
+      result: "success",
+      message: "ok",
+    });
+    render(<WledCard wled={wledFixture()} onChange={rs.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /test profile/i }));
+    expect(testWledProfile).toHaveBeenCalledWith("wled.local", 203);
+  });
+
+  it("Discover renders a pick-list and Use fills the device address", async () => {
+    (discoverWled as ReturnType<typeof rs.fn>).mockResolvedValue({
+      result: "success",
+      message: "Found 1",
+      devices: [{ ip: "10.0.0.9", led_count: 30, name: "WLED-Kitchen" }],
+    });
+    const onChange = rs.fn();
+    render(
+      <WledCard wled={{ ...wledFixture(), use_suggested_presets: true }} onChange={onChange} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /find wled devices/i }));
+    const use = await screen.findByRole("button", { name: /^use$/i });
+    fireEvent.click(use);
+    const next = onChange.mock.calls.at(-1)?.[0];
+    expect(next.device_address).toBe("10.0.0.9");
+    expect(next.suggested_config.led_count).toBe(30);
   });
 });

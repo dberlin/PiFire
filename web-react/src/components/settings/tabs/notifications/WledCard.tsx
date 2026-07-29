@@ -1,3 +1,10 @@
+import { useState } from "react";
+import {
+  discoverWled,
+  pushWledProfiles,
+  testWledProfile,
+  type WledDevice,
+} from "../../../../helpers/notify/wledApi";
 import { NumberField } from "../../fields/NumberField";
 import { Section } from "../../fields/Section";
 import { Select } from "../../fields/Select";
@@ -49,6 +56,65 @@ export function WledCard({ wled, onChange }: WledCardProps) {
   const setSuggested = (key: string, val: unknown) =>
     onChange({ ...wled, suggested_config: { ...suggested, [key]: val } });
 
+  const [busy, setBusy] = useState<null | "discover" | "push" | "test">(null);
+  const [status, setStatus] = useState<{ kind: "info" | "success" | "error"; text: string } | null>(
+    null,
+  );
+  const [devices, setDevices] = useState<WledDevice[] | null>(null);
+
+  const address = asStr(wled.device_address).trim();
+  // The live (unsaved) profile numbers the buttons push/test, resolved to real
+  // integers with the same defaults the grid shows -- Flask's buttons read the
+  // form fields, not the store, so nothing here needs a Save first.
+  const profileNums = Object.fromEntries(
+    PROFILE_STATES.map(([state, def]) => [state, asNum(profileNumbers[state], def)]),
+  );
+
+  const requireAddress = (): boolean => {
+    if (address) return true;
+    setStatus({ kind: "error", text: "Enter a WLED device address first." });
+    return false;
+  };
+
+  const onDiscover = async () => {
+    setBusy("discover");
+    setStatus({ kind: "info", text: "Searching for WLED devices…" });
+    const res = await discoverWled();
+    setDevices(res.devices);
+    setStatus({ kind: res.result === "success" ? "success" : "error", text: res.message });
+    setBusy(null);
+  };
+
+  const onPush = async () => {
+    if (!requireAddress()) return;
+    setBusy("push");
+    setStatus({ kind: "info", text: "Pushing profiles to WLED device…" });
+    const res = await pushWledProfiles(address, profileNums);
+    setStatus({
+      kind: res.result === "success" ? "success" : "error",
+      text:
+        res.result === "success"
+          ? `Pushed ${res.profiles_pushed ?? 0} profiles to WLED.`
+          : res.message,
+    });
+    setBusy(null);
+  };
+
+  const onTest = async () => {
+    if (!requireAddress()) return;
+    setBusy("test");
+    const res = await testWledProfile(address, profileNums.cooking);
+    setStatus({ kind: res.result === "success" ? "success" : "error", text: res.message });
+    setBusy(null);
+  };
+
+  const selectDevice = (dev: WledDevice) =>
+    onChange({
+      ...wled,
+      device_address: dev.ip,
+      suggested_config: { ...suggested, led_count: dev.led_count },
+    });
+
   return (
     <Section title="WLED">
       <Toggle
@@ -61,6 +127,33 @@ export function WledCard({ wled, onChange }: WledCardProps) {
         value={asStr(wled.device_address)}
         onChange={(val) => setKey("device_address", val)}
       />
+      <div className="pf-settings-actions">
+        <button
+          type="button"
+          className="pf-modal-btn"
+          disabled={busy !== null}
+          onClick={() => void onDiscover()}
+        >
+          {busy === "discover" ? "Searching…" : "Find WLED Devices"}
+        </button>
+      </div>
+      {devices && devices.length > 0 && (
+        <ul className="pf-wled-results">
+          {devices.map((dev) => (
+            <li key={dev.ip} className="pf-wled-result-row">
+              <span>
+                {dev.name} — {dev.ip} ({dev.led_count} LEDs)
+              </span>
+              <button type="button" className="pf-modal-btn" onClick={() => selectDevice(dev)}>
+                Use
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {devices && devices.length === 0 && (
+        <p className="pf-wled-subhead">No WLED devices found on your network.</p>
+      )}
       <NumberField
         label="WLED Notify Duration"
         value={asNum(wled.notify_duration, 120)}
@@ -117,6 +210,24 @@ export function WledCard({ wled, onChange }: WledCardProps) {
       />
       {useProfiles && (
         <>
+          <div className="pf-settings-actions">
+            <button
+              type="button"
+              className="pf-modal-btn accent"
+              disabled={busy !== null}
+              onClick={() => void onPush()}
+            >
+              {busy === "push" ? "Pushing…" : "Push Profiles to WLED"}
+            </button>
+            <button
+              type="button"
+              className="pf-modal-btn"
+              disabled={busy !== null}
+              onClick={() => void onTest()}
+            >
+              {busy === "test" ? "Testing…" : "Test Profile"}
+            </button>
+          </div>
           <h3 className="pf-wled-subhead">Profile Numbers</h3>
           <div className="pf-wled-grid">
             {PROFILE_STATES.map(([state, def]) => (
@@ -132,6 +243,8 @@ export function WledCard({ wled, onChange }: WledCardProps) {
           </div>
         </>
       )}
+
+      {status && <div className={`pf-wled-status ${status.kind}`}>{status.text}</div>}
     </Section>
   );
 }

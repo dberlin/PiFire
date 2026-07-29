@@ -405,3 +405,27 @@
   @apply grid gap-x-[16px] gap-y-[8px];
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+/* Discovery results: one row per WLED device the discover call found, each with
+   a "Use" button that fills the address field. A non-field child, so line 97
+   spans it full width. */
+.pf-wled-results {
+  @apply m-0 flex list-none flex-col gap-[6px] p-0;
+}
+.pf-wled-result-row {
+  @apply flex items-center justify-between gap-[16px] rounded-[10px] px-[12px] py-[8px];
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font: 600 14px "Barlow";
+}
+/* Action status line for the three network buttons. The base colour is the
+   neutral "info"; .success/.error recolour it. All three kinds are reachable
+   (info on start, success/error on the result), so each has a consumer. */
+.pf-wled-status {
+  @apply text-text-dim;
+  font: 600 14px "Barlow";
+}
+.pf-wled-status.success {
+  @apply text-ok;
+}
+.pf-wled-status.error {
+  @apply text-danger;
+}
