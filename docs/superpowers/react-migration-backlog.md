@@ -1068,9 +1068,14 @@ their audit number:
     real unit change, skipping the `target: 0` off-sentinel. Helper
     `common/common.py::notify_target_conversion_ops`; tests in
     `tests/unit/common/test_set_units_notify_conversion.py`.
-  - Genuinely still open after this correction: **#5**, **#44**, **#58**,
-    **#67**, **#71**. Full disposition of every finding (incl. accepted
-    divergences and UNCLEAR/browser-only items) is in the audit's *sweep 2* block.
+  - Fixed 2026-07-29: **#44** (Barlow self-hosted via `@fontsource`, no CDN),
+    **#58** (recipe *unpause* — `recipeUnpause` posts the minimal
+    `{recipe:{step_data:{pause:false}}}`; `buttonsForMode` branches the Next Step
+    button paused→unpause), **#67** (`pellets_load_profile` now calls
+    `backup_pellet_db`). Genuinely still open after this: **#5** and **#71** —
+    both fold into the Flask-retirement pass. Full disposition of every finding
+    (incl. accepted divergences and UNCLEAR/browser-only items) is in the audit's
+    *sweep 2* block.
 - **#1 / #2 — RESOLVED by ruling (2026-07-28), not a web-react target.** The QML
   kiosk is the on-device touchscreen UI (a fullscreen Wayland kiosk on the Pi's
   attached screen) and it STAYS; the React app was never going to reimplement

@@ -48,12 +48,13 @@ several have since gone stale. Current disposition of every remaining finding:
   probe; Shutdown/Re-ignite actions Primary-only). See items 31/32/34 below.
   **#35 is FIXED** (2026-07-29): `_cmd_set_units` now converts armed
   `control["notify_data"]` targets via addressed `notify.set` ops.
+- **Fixed 2026-07-29:** **#44** Barlow self-hosted via `@fontsource` (no CDN),
+  **#58** recipe *unpause* ported (`recipeUnpause` minimal patch), **#67**
+  `backup_pellet_db` now called on the React load path. See items 44/58/67.
 - **Confirmed STILL-OPEN after the correction (genuine, re-verified):** **#5**
-  (SPA serve — deferred to the Flask-retirement pass by request), **#44** Barlow
-  still loaded from `fonts.googleapis.com` (`web-react/index.html:7-10`), **#58**
-  recipe *unpause* not ported, **#67** `backup_pellet_db` not called on a React
-  "Load New Pellets", **#71** every legacy Flask blueprint still registered
-  (`app.py:68-93` — the general Flask-retirement pass, ruling 5).
+  (SPA serve — deferred to the Flask-retirement pass by request), **#71** every
+  legacy Flask blueprint still registered (`app.py:68-93` — the general
+  Flask-retirement pass, ruling 5).
 - **Accepted divergences / by-decision / won't-do — already dispositioned, no
   code action:** #26, #36, #37, #47, #50, #54, #56, #59, #60, #63, #68, #72, #73.
 - **UNCLEAR — needs a browser look or a live observation, not a code read:**
@@ -458,8 +459,11 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
       to whoever owns Slice 7."
     - Second consequence, recorded in `2026-07-25-react-dashboard-slice.md:81`: it is why the fidelity
       screenshot cannot be a `toHaveScreenshot()` gate.
-    - Status: STILL-OPEN — `web-react/index.html:7-10` still preconnects and `<link>`s to
-      `fonts.googleapis.com`. PiFire runs on a grill that may be offline.
+    - Status: **FIXED 2026-07-29**. Barlow is self-hosted via `@fontsource/barlow` +
+      `@fontsource/barlow-semi-condensed` (same weights: 400/500/600/700 and 500/600/700/800),
+      imported in `web-react/src/main.tsx` and bundled by rsbuild (`dist/static/font/*.woff2`); the
+      `fonts.googleapis.com` `<link>`/preconnects are gone from `index.html`. Offline-safe, and the
+      fidelity screenshot can now become a real gate.
 
 45. **I13 — `display.sleep_timeout` is not rendered by React at all**
     - Source: Coordination table, "Slice 6" row (line 373) — "Out of scope — the field is not rendered
@@ -581,9 +585,13 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
     - Detail: Flask's `#recipe_group` unpause posts `{recipe:{step_data:{…pause:false}}}`
       (`control_panel.js:382-392`), which rewrites the whole `step_data` object through an
       array-replacing `json_patch` merge.
-    - Status: STILL-OPEN — `web-react/src/helpers/command.ts:195-200` `recipeNextStep` posts only
-      `{ updated: true }`, with a comment saying anything extra would be patched back over the control
-      loop. A paused recipe therefore cannot be resumed from React.
+    - Status: **FIXED 2026-07-29**. `command.ts` gains `recipeUnpause`, which posts the minimal
+      `{ recipe: { step_data: { pause: false } } }` — the scalar leaf only, not Flask's whole-step_data
+      repost (RFC-7396 merges it in place, so a controller-set `triggered`/`notify` in the same cycle
+      is not reverted). `buttonsForMode.ts` branches the "Next Step" button exactly as Flask's does
+      (`control_panel.js:520-533`): paused → `recipeUnpause`, otherwise → `recipeNextStep`. The
+      controller advances the step once `pause` is false (`base.py::_handle_recipe_end`). Tests in
+      `command.test.ts` and `buttonsForMode.test.ts`.
 
 59. **M8 — the hopper "Manager" link to `/pellets` deliberately dropped**
     - Source: the findings table, M8 row (line 137) and Task 10 Step 1 (line 760) — "**Assert there is
@@ -650,9 +658,10 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
     - Detail: Flask's `blueprints/pellets/routes.py:40` snapshots the pellet DB on the load-profile path
       only. Porting it means porting `common/backups.py`'s file surface, which belongs with the admin
       page.
-    - Status: STILL-OPEN and CONFIRMED — `backup_pellet_db` callers are
-      `blueprints/pellets/routes.py:40` and `blueprints/admin/routes.py:244` only; the new
-      `common/pellets_actions.py` load handler does not call it.
+    - Status: **FIXED 2026-07-29**. `common/pellets_actions.py::pellets_load_profile` now calls
+      `backup_pellet_db(action="backup")` after `write_pellet_db`, mirroring Flask's ordering, so the
+      React `POST /api/pellets` `load_profile` path leaves a restore point. Test:
+      `tests/unit/common/test_pellets_load_profile_backup.py`.
 
 68. **Residual clobber window on the pellet blob (no optimistic concurrency)**
     - Source: Hazard 1 "Residual, honestly stated" (line 261) and "Out of scope, deliberately" bullet 4
