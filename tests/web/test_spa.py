@@ -61,3 +61,20 @@ def test_server_error_template_renders():
     with flask_app.test_request_context():
         html = render_template("server_error.html")
     assert html
+
+
+def test_retired_page_routes_are_gone():
+    rules = {r.rule for r in flask_app.url_map.iter_rules()}
+    for prefix in (
+        "/dash", "/admin/", "/settings/", "/tuner/", "/history/", "/metrics/",
+        "/pellets/", "/recipes/", "/cookfile/", "/probeconfig/", "/manual/",
+        "/events/", "/logs/", "/manifest/", "/wizard/", "/update/",
+    ):
+        stale = [r for r in rules if r.startswith(prefix)]
+        assert not stale, f"{prefix} still routed: {stale}"
+    assert any(r.startswith("/api/") for r in rules)   # kept
+    # mobile has no HTTP routes of its own (socketio-only namespace) -- the spa
+    # catch-all special-cases "mobile/" paths to a JSON 404 (see
+    # blueprints/spa/routes.py), so assert the blueprint itself is kept.
+    assert "mobile" in flask_app.blueprints
+    assert "/<path:path>" in rules                       # SPA catch-all
