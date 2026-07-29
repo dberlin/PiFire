@@ -1025,10 +1025,12 @@ their audit number:
   by the wizard; **#29** no `/manual` route — manual outputs live on the
   dashboard button row; **#30** `allowManualOutputs` deliberately unused, pinned
   by `buttonsForMode.test.ts`.
-- **#19 is NOT a parity gap.** Flask renders all six credential fields as
-  `type="text"` too (`index.html:1515,1536,1543,1577,1714,1790`), so React
-  matches Flask. Masking secrets would be a NEW feature, not a port — it needs a
-  product decision, not a fix, and porting-not-inventing is the standing rule.
+- **#19 is NOT a parity gap — now an accepted enhancement (2026-07-28).** Flask
+  renders all six credential fields as `type="text"` too
+  (`index.html:1515,1536,1543,1577,1714,1790`), so React already matches Flask;
+  masking is net-new UX, not a port. The user has accepted it as an enhancement
+  beyond Flask parity — tracked under *Enhancements accepted beyond Flask parity*
+  below.
 - **#26 — accepted unmonitored risk.** The Flask Chart.js history page still
   consumes `prepare_chartdata` at `data_points=10000` with LTTB's per-series
   union possibly exceeding it; no cap is warranted until the slow page is
@@ -1045,6 +1047,20 @@ their audit number:
   look, which shipped as `display/qml/Theme.qml` → `theme.css` (guarded by
   `themeTokens.test.ts`). So the "kiosk screens never built in React" framing is
   a category error the spike plan introduced; closed as won't-do. See ruling 8.
+
+#### Enhancements accepted beyond Flask parity — 2026-07-28
+
+Net-new UX the user has accepted even though Flask never had it (so these are
+NOT parity ports — they will not be caught by any fidelity gate, and each needs
+its own slice when scheduled).
+
+- **Credential masking (#19).** The six secret-bearing fields — WLED/OneSignal
+  keys, MQTT/InfluxDB/PushBullet/PushOver tokens — currently render as plain
+  `type="text"` (matching Flask). Enhancement: render them masked with a
+  show/hide (eye) toggle, so a shoulder-surfer or a shared screenshot does not
+  leak the secret. Field-level only; no change to storage or transport, which
+  already send these in clear. Sizing: a small, self-contained field-component
+  slice.
 
 #### Whole surfaces never built
 
