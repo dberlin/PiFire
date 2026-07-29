@@ -51,3 +51,13 @@ def test_unknown_mobile_path_is_json_404(client):
     r = client.get("/mobile/does-not-exist-xyz")
     assert r.status_code == 404
     assert "text/html" not in r.content_type
+
+
+def test_server_error_template_renders():
+    # render_template must still find server_error.html after the base.html
+    # purge -- it no longer extends base.html, so this must keep passing.
+    from flask import render_template
+
+    with flask_app.test_request_context():
+        html = render_template("server_error.html")
+    assert html
