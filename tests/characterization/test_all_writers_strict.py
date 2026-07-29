@@ -8,20 +8,31 @@ tests/unit/common/test_write_settings_strict.py), so handler bugs surface
 here directly -- validate_settings_tree() is used purely as a test oracle in
 this file.
 
-Scope: blueprints/admin/routes.py, blueprints/mobile/socket_io.py,
-common/api_commands.py, blueprints/history/routes.py, blueprints/dash/routes.py,
-blueprints/wizard/routes.py, blueprints/api/routes.py, common/app.py,
-notify/notifications.py, display/_base_flex.py, updater.py, wizard.py, plus
-the settings-migration matrix (common/settings_migration.py).
+Scope: blueprints/api_admin/routes.py, blueprints/mobile/socket_io.py,
+common/api_commands.py, blueprints/api_wizard/routes.py,
+blueprints/api/routes.py, common/app.py, notify/notifications.py,
+display/_base_flex.py, updater.py, wizard.py, plus the settings-migration
+matrix (common/settings_migration.py).
+
+blueprints/admin/routes.py, blueprints/history/routes.py and
+blueprints/dash/routes.py -- the original legacy page blueprints this file
+was scoped against -- were retired by the Flask-retirement pass. The
+admin write sites were ported forward onto blueprints/api_admin/routes.py
+(same handlers, JSON in/out) and are exercised there below. history and
+dash have no write-capable kept equivalent at all (see the comment above
+the old history/dash section, kept as a marker of what was deliberately
+dropped and why); their only surviving write path is the generic
+POST /api/settings_update delta merge that blueprints/api/routes.py
+already covers here and in tests/web/test_api_settings_update.py.
 
 Harness: reuses the shared `ds` fixture (tests/conftest.py, function-scoped
 temp-SQLite datastore) + plain `flask_app.test_client()` pattern for every
-HTTP-routed writer (proven by tests/characterization/test_settings_writers_strict.py and
-tests/web/test_api_settings_update.py) -- real Flask app, real routes.py
-dispatch, real write_settings()/SQLite round-trip, no Playwright/Chromium
-(agent envs skip [chromium] tests, per project convention). Socket.IO
-handlers are driven directly as plain functions (they are not HTTP routes),
-mirroring tests/web/test_socketio_app_data.py's `sio` fixture. `ds`'s "fresh"
+HTTP-routed writer (proven by tests/web/test_api_settings_update.py) --
+real Flask app, real routes.py dispatch, real write_settings()/SQLite
+round-trip, no Playwright/Chromium (agent envs skip [chromium] tests, per
+project convention). Socket.IO handlers are driven directly as plain
+functions (they are not HTTP routes), mirroring
+tests/web/test_socketio_app_data.py's `sio` fixture. `ds`'s "fresh"
 datastore is seeded from cwd `./settings.json` (untracked/gitignored,
 developer-machine-specific) -- see that module's docstring. Sections that
 only assert "still strict after this write" tolerate that seeding as-is;
@@ -31,35 +42,33 @@ conversion, migration matrix) explicitly reseed a canonical
 
 SAFETY (grepped for os.system/subprocess/reboot/shutdown across every module
 this file exercises):
-  - blueprints/admin/routes.py: os.system() at 2 sites (clearevents,
-    delete_logs) + reboot_system()/shutdown_system()/restart_scripts(). The
+  - blueprints/api_admin/routes.py: os.system() only via os.remove-free log
+    helpers (no shell), plus restart_scripts() on a settings restore. The
     `admin_client` fixture below patches
-    blueprints.admin.routes.{reboot_system,shutdown_system,restart_scripts}
-    and the global os.system, mirroring tests/web/test_page_admin.py's
-    `hazard_guard`. Nothing destructive runs.
+    blueprints.api_admin.routes.restart_scripts and the global os.system,
+    mirroring tests/web/test_api_admin_backups.py's `env` fixture. Nothing
+    destructive runs.
   - blueprints/mobile/socket_io.py: os.system() (clear_events/
     recipe_delete) + reboot_system()/shutdown_system()/
     restart_control()/restart_webapp()/restart_scripts(). The `sio` fixture
     below patches the same module-level names, mirroring
     tests/web/test_socketio_app_data.py's `sio` fixture. Nothing destructive
     runs.
-  - blueprints/wizard/routes.py: os.system(f"{python_exec} wizard.py &") only
-    on the `finish` action, which this file never exercises (only `cancel`,
-    a pure settings write with no os.system on its path).
+  - blueprints/api_wizard/routes.py: os.system(f"{python_exec} wizard.py &")
+    only on the `finish` action, which this file never exercises (only
+    `cancel`, a pure settings write with no os.system on its path).
   - wizard.py / updater.py: real subprocess.Popen/subprocess.run calls behind
     `is_real_hardware()` guards. `is_real_hardware` is monkeypatched to
     `False` (wizard.py, via the same `no_install` fixture
     tests/unit/wizard/test_wizard_run_no_probes.py already uses) or simply
     never reached (updater.py's `-v`/`-l` flags do not call subprocess at
     all, confirmed by reading the source).
-  - common/api_commands.py, blueprints/history/routes.py,
-    blueprints/dash/routes.py, blueprints/api/routes.py, common/app.py,
+  - common/api_commands.py, blueprints/api/routes.py, common/app.py,
     notify/notifications.py, display/_base_flex.py: no os.system/subprocess
     on any write path exercised here (grepped; confirmed clean).
 """
 
 import copy
-import io
 import json
 import os
 import tempfile
@@ -82,9 +91,8 @@ def _assert_strict(settings=None):
 
 @pytest.fixture
 def client_and_store(ds):
-    """Same fixture as tests/characterization/test_settings_writers_strict.py --
-    duplicated here (rather than imported) so ruff doesn't flag a cross-module
-    fixture-as-parameter import as an unused redefinition."""
+    """Plain Flask test client + read_settings, for the two /api/settings*
+    writers exercised below (blueprints/api/routes.py)."""
     from app import app as flask_app
 
     flask_app.config.update(TESTING=True)
@@ -93,21 +101,51 @@ def client_and_store(ds):
 
 
 # =====================================================================
-# blueprints/admin/routes.py -- 6 write_settings sites (debugenabled x2
+# blueprints/api_admin/routes.py -- the kept JSON equivalents of
+# blueprints/admin/routes.py's 6 write_settings sites (debugenabled x2
 # branches, factorydefaults, restoresettings x2 branches, boot).
+#
+# blueprints/admin/routes.py itself is retired; the `admin_client` fixture
+# below used to import it directly (blueprints.admin.routes), which no
+# longer exists. Re-pointed at POST /api/admin/settings and
+# POST /api/admin/backups/restore (blueprints/api_admin/routes.py).
+#
+# test_admin_factorydefaults_writes_strict is DELETED, not re-pointed:
+# POST /api/admin/factory-reset has full strict-write + hazard coverage
+# already in tests/web/test_api_admin_system.py
+# (test_factory_reset_restores_defaults_and_restarts,
+# test_factory_reset_clears_the_pellet_database), including the exact
+# os.system/restart_scripts assertions this test made.
+#
+# test_admin_restoresettings_uploaded_file_upgrades_and_writes_strict is
+# DELETED, not re-pointed: the kept surface splits "upload a file" and
+# "restore by name" into two endpoints (no single call restores directly
+# from uploaded bytes), and each half already has its own coverage --
+# tests/web/test_api_admin_backups.py::test_upload_round_trips for the
+# upload, and the re-pointed local-file test below for restore-by-name
+# (which is the only path that still needs the migration proof). The
+# migration-on-restore behavior this variant would otherwise duplicate is
+# already exercised by test_admin_restoresettings_local_file_upgrades_and_writes_strict.
 # =====================================================================
 
 
 @pytest.fixture
 def admin_client(ds, tmp_path):
     from app import app as flask_app
-    import blueprints.admin.routes as admin_routes
+    import blueprints.api_admin.routes as admin_routes
+    import common.backups as backups_module
 
     flask_app.config.update(TESTING=True)
     backup_dir = str(tmp_path / "backups") + os.sep
     os.makedirs(backup_dir, exist_ok=True)
+    #  Both places BACKUP_PATH is read must be redirected: the blueprint
+    #  reads current_app.config["BACKUP_PATH"], common/backups.py uses its
+    #  own module-level constant. Patching one and not the other reaches
+    #  into the real checkout (mirrors tests/web/test_api_admin_backups.py's
+    #  `env` fixture).
+    saved_backup_path = (flask_app.config.get("BACKUP_PATH"), backups_module.BACKUP_PATH)
     flask_app.config["BACKUP_PATH"] = backup_dir
-    flask_app.config["UPLOAD_FOLDER"] = backup_dir
+    backups_module.BACKUP_PATH = backup_dir
 
     calls = []
 
@@ -123,59 +161,56 @@ def admin_client(ds, tmp_path):
 
     with (
         mock.patch("os.system", side_effect=_rec_os),
-        mock.patch.object(admin_routes, "reboot_system", side_effect=_rec("reboot_system")),
-        mock.patch.object(admin_routes, "shutdown_system", side_effect=_rec("shutdown_system")),
         mock.patch.object(admin_routes, "restart_scripts", side_effect=_rec("restart_scripts")),
     ):
         yield types.SimpleNamespace(client=flask_app.test_client(), calls=calls, backup_dir=backup_dir)
 
+    flask_app.config["BACKUP_PATH"], backups_module.BACKUP_PATH = saved_backup_path
+
 
 def test_admin_debugenabled_disable_writes_strict(admin_client):
-    resp = admin_client.client.post("/admin/setting", data={"debugenabled": "disabled"})
+    resp = admin_client.client.post("/api/admin/settings", json={"debug_mode": False})
     assert resp.status_code == 200
     assert read_settings()["globals"]["debug_mode"] is False
     _assert_strict()
 
 
 def test_admin_debugenabled_enable_writes_strict(admin_client):
-    resp = admin_client.client.post("/admin/setting", data={"debugenabled": "enabled"})
+    resp = admin_client.client.post("/api/admin/settings", json={"debug_mode": True})
     assert resp.status_code == 200
     assert read_settings()["globals"]["debug_mode"] is True
     _assert_strict()
 
 
 def test_admin_boot_writes_strict(admin_client):
-    resp = admin_client.client.post("/admin/boot", data={"boot_to_monitor": "on"})
+    resp = admin_client.client.post("/api/admin/settings", json={"boot_to_monitor": True})
     assert resp.status_code == 200
     assert read_settings()["globals"]["boot_to_monitor"] is True
     _assert_strict()
 
 
-def test_admin_boot_unchecked_writes_strict(admin_client):
-    resp = admin_client.client.post("/admin/boot", data={})
+def test_admin_boot_false_writes_strict(admin_client):
+    """The legacy form route treated an unchecked checkbox (the key entirely
+    absent from the POST body) as `False`. The kept JSON endpoint has no
+    such default -- an empty body is refused outright (`if not body: return
+    error(...)`, blueprints/api_admin/routes.py) -- so the closest surviving
+    equivalent is an explicit `False`, which exercises the same
+    `settings["globals"].update(body)` write path with the opposite value."""
+    resp = admin_client.client.post("/api/admin/settings", json={"boot_to_monitor": False})
     assert resp.status_code == 200
     assert read_settings()["globals"]["boot_to_monitor"] is False
     _assert_strict()
 
 
-def test_admin_factorydefaults_writes_strict(admin_client):
-    resp = admin_client.client.post("/admin/setting", data={"factorydefaults": "true"})
-    assert resp.status_code == 200
-    # FIXED: the handler used to `rm settings.json`/`rm pelletdb.json` before
-    # reseeding -- dead calls against files that do not exist once SQLite is
-    # the store. The reseed is the whole of the reset now.
-    assert not any(c[0] == "os.system" and ".json" in c[1] for c in admin_client.calls), admin_client.calls
-    assert ("restart_scripts", (), {}) in admin_client.calls
-    _assert_strict()
-
-
 def test_admin_restoresettings_local_file_upgrades_and_writes_strict(admin_client):
-    """FIXED (blueprints/admin/routes.py): restoresettings previously called
-    read_settings_file() WITHOUT init=True, so restoring an older-format
-    backup (missing fields a later release added) wrote an incomplete tree
-    straight to disk instead of migrating it forward. This backup
-    deliberately omits versions.cookfile/versions.recipe (fields that did
-    not exist in older PiFire releases) to prove the restore now migrates."""
+    """FIXED (blueprints/admin/routes.py, ported forward to
+    blueprints/api_admin/routes.py::admin_backup_restore): restoresettings
+    previously called read_settings_file() WITHOUT init=True, so restoring
+    an older-format backup (missing fields a later release added) wrote an
+    incomplete tree straight to disk instead of migrating it forward. This
+    backup deliberately omits versions.cookfile/versions.recipe (fields that
+    did not exist in older PiFire releases) to prove the restore still
+    migrates on the kept endpoint."""
     legacy_backup = default_settings()
     legacy_backup["globals"]["grill_name"] = "Restored Legacy"
     del legacy_backup["versions"]["cookfile"]
@@ -185,59 +220,38 @@ def test_admin_restoresettings_local_file_upgrades_and_writes_strict(admin_clien
         json.dump(legacy_backup, f)
 
     resp = admin_client.client.post(
-        "/admin/setting",
-        data={
-            "restoresettings": "true",
-            "localfile": backup_filename,
-            "uploadfile": (io.BytesIO(b""), ""),
-        },
-        content_type="multipart/form-data",
+        "/api/admin/backups/restore",
+        json={"kind": "settings", "file": backup_filename},
     )
     assert resp.status_code == 200
     assert read_settings()["globals"]["grill_name"] == "Restored Legacy"
     _assert_strict()
 
 
-def test_admin_restoresettings_uploaded_file_upgrades_and_writes_strict(admin_client):
-    legacy_backup = default_settings()
-    legacy_backup["globals"]["grill_name"] = "Restored Upload"
-    del legacy_backup["versions"]["cookfile"]
-
-    resp = admin_client.client.post(
-        "/admin/setting",
-        data={
-            "restoresettings": "true",
-            "localfile": "none",
-            "uploadfile": (io.BytesIO(json.dumps(legacy_backup).encode()), "upload.json"),
-        },
-        content_type="multipart/form-data",
-    )
-    assert resp.status_code == 200
-    assert read_settings()["globals"]["grill_name"] == "Restored Upload"
-    _assert_strict()
-
-
 def test_admin_restoresettings_invalid_backup_rejected_no_crash(admin_client):
-    """Boundary catch: admin_page()'s dispatch wraps every handler call, so
-    write_settings()'s strict gate rejecting a bad uploaded backup comes back
-    as this blueprint's existing ctx.errors/index.html render -- not an
-    unhandled SettingsValidationError/500. The store is left untouched (the
-    pre-restore tree, not the bad upload)."""
+    """Boundary catch, ported to the kept endpoint. FIXED here too:
+    blueprints/api_admin/routes.py::admin_backup_restore had no try/except
+    around write_settings(), so a bad backup raised SettingsValidationError
+    straight through the view function -- caught only by app.py's generic
+    InternalServerError handler, which renders server_error.html (a 500,
+    not a graceful rejection). Confirmed by driving this exact payload
+    through the route before the fix landed. The route now catches
+    SettingsValidationError the same way blueprints/api/routes.py's
+    _api_post_settings_update already does, and the store is left untouched
+    (write_settings() validates before persisting)."""
     before = read_settings()
     bad_backup = default_settings()
     bad_backup["safety"]["maxtemp"] = "nope"
+    backup_filename = "bad_upload.json"
+    with open(admin_client.backup_dir + backup_filename, "w") as f:
+        json.dump(bad_backup, f)
 
     resp = admin_client.client.post(
-        "/admin/setting",
-        data={
-            "restoresettings": "true",
-            "localfile": "none",
-            "uploadfile": (io.BytesIO(json.dumps(bad_backup).encode()), "bad_upload.json"),
-        },
-        content_type="multipart/form-data",
+        "/api/admin/backups/restore",
+        json={"kind": "settings", "file": backup_filename},
     )
-    assert resp.status_code == 200
-    assert b"safety.maxtemp" in resp.data
+    assert resp.status_code == 400
+    assert "safety.maxtemp" in resp.get_json()["data"]["detail"]
     assert read_settings() == before
 
 
@@ -379,44 +393,42 @@ def test_api_commands_set_pmode_writes_strict(ds):
 
 
 # =====================================================================
-# blueprints/history/routes.py -- 2 write sites (refresh/num_mins, setmins).
+# blueprints/history/routes.py and blueprints/dash/routes.py are both
+# retired with NO write-capable equivalent -- and deliberately so, not by
+# oversight:
+#
+#   * GET /api/history/chart (blueprints/api_history/routes.py) is the kept
+#     replacement for /history/refresh, and its docstring explains the
+#     write this test pinned was intentionally dropped: "Deliberately NOT
+#     the legacy POST /history/refresh: that route persists
+#     settings['history_page']['minutes'] as a side effect of being asked
+#     for a window, which would let a client's transient zoom overwrite the
+#     user's saved preference." /history/setmins wrote the same field via a
+#     second route with no kept counterpart at all.
+#   * Dashboard widget config (settings.dashboard.dashboards[*].config) has
+#     no dedicated write route on the kept surface; it is a loose
+#     `dict[str, dict]` schema field (common/settings_schema.py's
+#     `Dashboard.dashboards`), so the only way left to write it is the
+#     generic POST /api/settings_update delta merge -- the exact same
+#     generic mechanism as every other settings write.
+#
+# In both cases the only kept write path is the generic delta-merge
+# mechanism, which is exactly what
+# test_api_post_settings_update_valid_delta_writes_strict below already
+# pins (plus tests/web/test_api_settings_update.py and
+# test_api_settings_controller_gate.py for the two-layer
+# validate/reject-and-leave-store-untouched behavior). There is no
+# route-specific handler code left for either history or dash to catch a
+# bug in, so these three tests (test_history_refresh_num_mins_writes_strict,
+# test_history_setmins_writes_strict, test_dash_config_post_writes_strict)
+# are deleted rather than re-pointed: re-pointing them would only exercise
+# the already-covered generic mechanism a second time under a different
+# name.
 # =====================================================================
-
-
-def test_history_refresh_num_mins_writes_strict(client_and_store):
-    client, read_settings_fn = client_and_store
-    resp = client.post("/history/refresh", json={"num_mins": 22})
-    assert resp.status_code == 200
-    assert read_settings_fn()["history_page"]["minutes"] == 22
-    _assert_strict()
-
-
-def test_history_setmins_writes_strict(client_and_store):
-    client, read_settings_fn = client_and_store
-    resp = client.post("/history/setmins", data={"minutes": "17"})
-    assert resp.status_code == 200
-    assert read_settings_fn()["history_page"]["minutes"] == 17
-    _assert_strict()
-
-
-# =====================================================================
-# blueprints/dash/routes.py -- 1 write site (dash config POST).
-# =====================================================================
-
-
-def test_dash_config_post_writes_strict(client_and_store):
-    client, read_settings_fn = client_and_store
-    settings = read_settings_fn()
-    current = settings["dashboard"]["current"]
-    resp = client.post("/dash/config", data={"dashConfig_sentinel_key": "sentinel_value"})
-    assert resp.status_code in (200, 302)
-    written = read_settings_fn()
-    assert written["dashboard"]["dashboards"][current]["config"]["sentinel_key"] == "sentinel_value"
-    _assert_strict()
-
-
-# =====================================================================
-# blueprints/wizard/routes.py -- 1 reachable write site (cancel). `finish`
+# blueprints/wizard/routes.py -- 1 reachable write site (cancel), ported to
+# POST /api/wizard/cancel (blueprints/api_wizard/routes.py::wizard_cancel,
+# a verbatim port of the same two statements: clear
+# settings["globals"]["first_time_setup"] and write_settings()). `finish`
 # is the only handler with an os.system() call and is deliberately not
 # exercised here.
 # =====================================================================
@@ -424,8 +436,8 @@ def test_dash_config_post_writes_strict(client_and_store):
 
 def test_wizard_cancel_writes_strict(client_and_store):
     client, read_settings_fn = client_and_store
-    resp = client.post("/wizard/cancel")
-    assert resp.status_code in (200, 302)
+    resp = client.post("/api/wizard/cancel")
+    assert resp.status_code == 200
     assert read_settings_fn()["globals"]["first_time_setup"] is False
     _assert_strict()
 

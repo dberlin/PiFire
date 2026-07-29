@@ -24,6 +24,7 @@ from common.common import WriteKind, write_log
 from common.control_delta import control_delta
 from common.file_browser import resolve_managed_file
 from common.settings_migration import read_settings_file
+from common.settings_schema import SettingsValidationError
 from common.datastore_accessors import (
     flush_control,
     flush_history,
@@ -301,6 +302,14 @@ def admin_backup_restore():
     Settings restore restarts the server and the pellet one does not, matching
     Flask exactly -- settings are read once at boot by processes this request
     cannot reach, whereas the pellet database is re-read on demand.
+
+    A settings backup that fails strict validation (hand-edited, or from a
+    build old enough that migration can't fully repair it) is rejected with
+    the same error envelope every other write endpoint uses -- matching
+    legacy admin_page()'s dispatch-level try/except, which caught exactly
+    this and re-rendered with ctx.errors instead of 500ing. write_settings()
+    validates before persisting, so a rejection here leaves the store
+    untouched and never restarts.
     """
     body = json_body()
     kind = body.get("kind")
@@ -312,10 +321,14 @@ def admin_backup_restore():
         refusal = require_stopped()
         if refusal:
             return refusal
-        #  init=True runs the same version-overlay/upgrade_settings() pipeline a
-        #  live boot applies; without it an older-format backup is written
-        #  straight to disk instead of being migrated forward.
-        write_settings(read_settings_file(filename=path, init=True))
+        try:
+            #  init=True runs the same version-overlay/upgrade_settings()
+            #  pipeline a live boot applies; without it an older-format
+            #  backup is written straight to disk instead of being migrated
+            #  forward.
+            write_settings(read_settings_file(filename=path, init=True))
+        except SettingsValidationError as exc:
+            return error("invalid_backup", 400, detail="; ".join(exc.errors))
         write_log(f"Admin: restored settings from {os.path.basename(path)}")
         set_server_status("restarting")
         restart_scripts()
