@@ -55,6 +55,28 @@ class SqliteQueue:
             return values[start:]
         return values[start : end + 1]
 
+    def list_with_ids(self, start=0, end=-1):
+        """Return [(id, value)] in insertion order.
+
+        The id is the row's monotonic INTEGER PRIMARY KEY. Callers that clear
+        what they have shown a user need it as a high-water mark, which plain
+        list() cannot provide because it drops the id.
+        """
+        rows = datastore.connection().execute(f"SELECT id, value FROM {self.table} ORDER BY id").fetchall()
+        values = [(r[0], self._decode(r[1])) for r in rows]
+        if end == -1:
+            return values[start:]
+        return values[start : end + 1]
+
+    def clear_through(self, max_id):
+        """Delete every row with id <= max_id.
+
+        Bounded counterpart to flush(): a row inserted after the caller read its
+        high-water mark has a larger id and survives, so a concurrent writer's
+        entry is never discarded unread.
+        """
+        datastore.execute_write(f"DELETE FROM {self.table} WHERE id <= ?", (max_id,))
+
     def flush(self):
         datastore.execute_write(f"DELETE FROM {self.table}")
 
