@@ -16,7 +16,15 @@ import json
 import time
 
 from common import server_revision
-from common.common import MODE_MAP, WriteKind, convert_settings_units, epoch_to_time, is_float, write_log
+from common.common import (
+    MODE_MAP,
+    WriteKind,
+    convert_settings_units,
+    epoch_to_time,
+    is_float,
+    notify_target_conversion_ops,
+    write_log,
+)
 from common.control_delta import control_delta
 from common.modes import Mode
 from common.datastore_accessors import (
@@ -379,6 +387,12 @@ def _cmd_set_units(data, control, settings, arglist, origin, kind):
     /api/set/units/{C/F}
     """
     if arglist[1] in ["C", "F"]:
+        # Captured before convert_settings_units rewrites settings.globals.units.
+        # A REAL change is the gate for the notify conversion below: units_change
+        # is raised even on a redundant same-unit write, and convert_temp assumes
+        # its input is in the OTHER unit, so converting on a no-op switch would
+        # corrupt an already-correct target.
+        units_changed = arglist[1] != settings["globals"]["units"]
         settings = convert_settings_units(arglist[1], settings)
         write_settings(settings)
         control["settings_update"] = True
@@ -389,6 +403,15 @@ def _cmd_set_units(data, control, settings, arglist, origin, kind):
         # re-sent settings_update as well, which was harmless but was also the
         # shape that let any writer re-impose a flag it never set.
         _write_control_delta(control, control_delta(set_values={"updated": True, "units_change": True}), kind, origin)
+        # Notify targets live in control["notify_data"], which convert_settings_units
+        # cannot reach, so a 203 F target used to read as 203 after a switch to C.
+        # Convert them here as addressed notify.set ops (never a whole-array replace,
+        # which would revert a concurrent notify write). Emitted only when something
+        # is armed, so a units change on default control adds no delta.
+        if units_changed:
+            notify_ops = notify_target_conversion_ops(control.get("notify_data", []), arglist[1])
+            if notify_ops:
+                _write_control_delta(control, control_delta(ops=notify_ops), kind, origin)
         # print(f'Settings Units Changed to {arglist[1]}')
     else:
         data["result"] = "ERROR"

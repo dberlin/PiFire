@@ -518,6 +518,44 @@ def convert_settings_units(units, settings):
     return settings
 
 
+def notify_target_conversion_ops(notify_data, units):
+    """Build notify.set ops that convert every armed notify target to `units`.
+
+    A notify target lives in `control["notify_data"]`, not in settings, so
+    `convert_settings_units` never touches it. Each armed entry (probe,
+    probe_limit_high, probe_limit_low) carries a `target` in the CURRENT units;
+    on a units change it must be converted like every other temperature.
+
+    Returned as addressed `notify.set` ops rather than a whole-array replace so
+    a notify write landing in the same control cycle survives the drain.
+
+    A `target` of 0 is the "off" sentinel, not a temperature -- converting it
+    (convert_temp("C", 0) == -17) would fabricate a garbage below-freezing
+    target -- so it is skipped, as are timer/hopper entries that carry no
+    `target` key at all. `convert_temp` assumes its input is in the OTHER unit,
+    which for a real change is exactly the old unit; the caller therefore gates
+    this on an ACTUAL unit change so a redundant same-unit write cannot
+    double-convert.
+
+    :param notify_data: control["notify_data"], the notify entry list
+    :param units: the NEW units, C or F
+    :return: a list of notify.set op dicts (empty when nothing is armed)
+    """
+    ops = []
+    for entry in notify_data:
+        target = entry.get("target")
+        if target:
+            ops.append(
+                {
+                    "op": "notify.set",
+                    "label": entry["label"],
+                    "type": entry["type"],
+                    "fields": {"target": convert_temp(units, target)},
+                }
+            )
+    return ops
+
+
 def read_wizard(filename="wizard/wizard_manifest.json"):
     """
     Read Wizard Manifest Data from file
