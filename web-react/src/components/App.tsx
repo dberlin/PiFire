@@ -28,6 +28,7 @@ import { UnitsTab } from "./settings/tabs/UnitsTab";
 import { WorkModeTab } from "./settings/tabs/WorkModeTab";
 import { AppShell } from "./shell/AppShell";
 import { TunerPage } from "./tuner/TunerPage";
+import { UpdatePage } from "./update/UpdatePage";
 import {
   WizardError,
   HydrateFallback as WizardHydrateFallback,
@@ -96,6 +97,7 @@ export const routes = [
       // the readings back into control, so it belongs behind a mount effect the
       // page can retry, not in front of the first paint.
       { path: "/admin", element: <AdminPage /> },
+      { path: "/update", element: <UpdatePage /> },
       // The event feed and the log-file browser. No loader: the page reads its
       // own families and log text, and a loader would hold the shell on a file
       // read that is measured in megabytes on a grill that has been running.

@@ -1,0 +1,12 @@
+@reference "../../theme.css";
+
+.pf-update-note {
+  @apply text-danger;
+  margin-top: 0.5rem;
+}
+
+.pf-update-log {
+  @apply overflow-auto whitespace-pre-wrap text-[0.85rem];
+  max-height: 20rem;
+  font-family: monospace;
+}
