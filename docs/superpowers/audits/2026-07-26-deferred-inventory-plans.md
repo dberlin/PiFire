@@ -13,6 +13,49 @@ moved to the RESOLVED section below — #1, #2, #6, #9, #18, #21, #22, #25, #27,
 #29, #30. Still open from that set: #5, #17 (each its own slice), #19
 (matches Flask — masking is a new feature, not a port), #26 (accepted risk).
 
+**Reconciled 2026-07-28 — sweep 2 (the rest of the STILL-OPEN labels vs live
+code).** The per-finding `Status:` lines below were verified at 2026-07-26 and
+several have since gone stale. Current disposition of every remaining finding:
+
+- **SHIPPED since the sweep / stale STILL-OPEN labels — nothing to do:**
+  - **#17** WLED preset/profile editor — BUILT 2026-07-28 (`WledCard.tsx` +
+    `helpers/notify/wledApi.ts`, all three action buttons). See the backlog.
+  - **#33** limit "Shutdown PiFire" — FIXED: `notify/notifications.py` now gates
+    a limit's shutdown on `triggered` (not `not req`); the dead-checkbox bug the
+    audit confirmed is gone, and the code comment documents it.
+  - **#45** `display.sleep_timeout` — RENDERED: `GeneralTab.tsx` shows "Screen
+    Sleep Timeout", bound and saved via `display.sleep_timeout` (ruling 4;
+    seam-pinned by `test_settings_update_sleep_timeout_*`).
+  - **#46** per-tab Save losing unsaved edits — FIXED: drafts are held on
+    `SettingsShell` (`useSettingsDraftStore`, passed via Outlet context), so an
+    edit survives a trip to another tab. (The Flask-persists-immediately
+    *divergence* is a separate deliberate choice, not a gap.)
+  - **#48** `pf-section-note` / `pf-kv` unstyled — RESOLVED with #22: `pf-kv`
+    rules shipped; `pf-section-note` is intentionally unstyled (allowlisted).
+  - **#57** errors blob write-only / `_check_control_status` false-positive —
+    FIXED 2026-07-26 (item 4): reads are non-destructive; liveness is a
+    non-sticky in-memory signal.
+  - **#69** `clear_pelletdb` shelling `os.system("rm pelletdb.json")` — FIXED:
+    it calls `clear_pellet_db()`; `test_page_admin.py:366` /
+    `test_socketio_app_data.py:349` assert the `os.system` rm is gone.
+  - **#70** dashboard hopper → `/pellets` shortcut — SHIPPED: `HopperGauge.tsx`
+    renders `<Link to="/pellets">` (the 2026-07-26 ruling).
+- **Confirmed STILL-OPEN (genuine, re-verified against live code):** **#5**
+  (SPA serve — deferred to the Flask-retirement pass by request), **#31** probe
+  High/Low Limit Alerts Slice 2 (backend ready; a React slice), **#32** (rides
+  #31), **#34** (a Flask-asymmetry decision that blocks #31's UI shape), **#35**
+  notify targets not converted on a units change (`convert_settings_units` only
+  touches settings; targets live in `control.notify_data`), **#44** Barlow still
+  loaded from `fonts.googleapis.com` (`web-react/index.html:7-10`), **#58**
+  recipe *unpause* not ported, **#67** `backup_pellet_db` not called on a React
+  "Load New Pellets", **#71** every legacy Flask blueprint still registered
+  (`app.py:68-93` — the general Flask-retirement pass, ruling 5).
+- **Accepted divergences / by-decision / won't-do — already dispositioned, no
+  code action:** #26, #36, #37, #47, #50, #54, #56, #59, #60, #63, #68, #72, #73.
+- **UNCLEAR — needs a browser look or a live observation, not a code read:**
+  #49, #55, #61, #62, #74, #75.
+- **Enhancement beyond Flask parity (accepted, tracked in the backlog):** #19.
+
 ---
 
 ## RESOLVED 2026-07-28 (reconciliation)

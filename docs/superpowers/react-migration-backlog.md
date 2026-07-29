@@ -1045,6 +1045,16 @@ their audit number:
   `specs/2026-07-28-react-wled-editor-design.md`, `plans/2026-07-28-react-wled-editor.md`.
 - **Still genuinely open, its own slice:** **#5** Flask serves no React build (no
   SPA catch-all / `send_from_directory` in `app.py`) — the whole deployment path.
+- **Sweep 2 (2026-07-28) — the rest of the audit's STILL-OPEN labels, verified
+  vs live code.** Stale labels now closed: **#33** (limit shutdown fires —
+  `notifications.py` fixed), **#45** (`sleep_timeout` rendered — GeneralTab),
+  **#46** (drafts held on SettingsShell, survive tab nav), **#48** (= #22),
+  **#57** (errors blob reads non-destructive — item 4), **#69** (`clear_pelletdb`
+  no longer `os.system rm`), **#70** (HopperGauge `<Link to="/pellets">`).
+  Genuinely still open: **#5**, **#31**/#32/#34 (probe High/Low Limit Alerts
+  Slice 2 — backend ready, a React slice + one decision), **#35**, **#44**,
+  **#58**, **#67**, **#71**. Full disposition of every finding (incl. accepted
+  divergences and UNCLEAR/browser-only items) is in the audit's *sweep 2* block.
 - **#1 / #2 — RESOLVED by ruling (2026-07-28), not a web-react target.** The QML
   kiosk is the on-device touchscreen UI (a fullscreen Wayland kiosk on the Pi's
   attached screen) and it STAYS; the React app was never going to reimplement
