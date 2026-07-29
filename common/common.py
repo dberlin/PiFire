@@ -19,7 +19,6 @@ import copy
 import datetime
 import os
 import json
-import re
 import uuid
 import random
 import logging
@@ -157,46 +156,6 @@ def display_sleep_timeout(settings):
     except KeyError, TypeError, ValueError:
         return 300
     return value if value > 0 else 0
-
-
-def get_display_info(settings):
-    """Return human-readable info about the currently selected display.
-
-    Used by the admin GPIO info page, where a DSI/HDMI (or other non-SPI)
-    display has no dc/led/rst GPIO pins worth showing -- its resolution and
-    type are the meaningful facts instead.
-
-    :param settings: The settings dictionary.
-    :return: dict with 'module', 'type' (friendly name) and 'resolution'
-             ('WxH' string, or None when unknown).
-    """
-    display_module = settings.get("modules", {}).get("display", "none")
-    info = {"module": display_module, "type": display_module, "resolution": None}
-
-    # Prefer the wizard manifest's friendly name for the display type.
-    manifest = read_generic_json("./wizard/wizard_manifest.json")
-    module_meta = manifest.get("modules", {}).get("display", {}).get(display_module, {})
-    if module_meta.get("friendly_name"):
-        info["type"] = module_meta["friendly_name"]
-
-    # Resolution comes from the display's data JSON metadata when it has one
-    # (DSI/HDMI and pygame-style displays), otherwise fall back to a WxH token
-    # embedded in the module name (e.g. 'st7789_240x320' -> '240x320').
-    display_config = settings.get("display", {}).get("config", {}).get(display_module, {})
-    data_filename = display_config.get("display_data_filename")
-    if data_filename:
-        display_data = read_generic_json(data_filename)
-        metadata = display_data.get("metadata", {}) if isinstance(display_data, dict) else {}
-        width = metadata.get("screen_width")
-        height = metadata.get("screen_height")
-        if width and height:
-            info["resolution"] = f"{width}x{height}"
-    if info["resolution"] is None:
-        match = re.search(r"(\d+x\d+)", display_module)
-        if match:
-            info["resolution"] = match.group(1)
-
-    return info
 
 
 def get_probe_list(settings):
@@ -356,13 +315,6 @@ def read_log_file(filepath):
         return []
 
     return log_file_lines
-
-
-def add_line_numbers(event_list):
-    event_lines = []
-    for index, line in enumerate(event_list):
-        event_lines.append([index, line])
-    return event_lines
 
 
 def write_log(event, loggername="events"):
