@@ -125,7 +125,12 @@ describe("AppShell chrome", () => {
   });
 
   it("renders the global alert strip on every page, not just the dashboard", () => {
-    mountShell({ errors: ["control down"], warnings: ["lid open"], criticalError: false });
+    mountShell({
+      errors: ["control down"],
+      warnings: ["lid open"],
+      warningsMaxId: 1,
+      criticalError: false,
+    });
 
     expect(screen.getByText("control down")).toHaveClass("pf-banner--error");
     expect(screen.getByText("lid open")).toHaveClass("pf-banner--warning");

@@ -261,3 +261,10 @@
   border: 1px solid var(--danger);
   color: #ffd0cb;
 }
+.pf-banner-dismiss {
+  @apply cursor-pointer self-end rounded-[4px] px-[10px] py-[3px];
+  background: none;
+  border: 1px solid currentColor;
+  color: inherit;
+  font: inherit;
+}

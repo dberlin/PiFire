@@ -40,6 +40,7 @@ export function AppShell() {
       <Banners
         errors={live.errors ?? []}
         warnings={live.warnings ?? []}
+        warningsMaxId={live.warningsMaxId ?? null}
         criticalError={live.criticalError}
       />
       <main className="pf-shell-main">
