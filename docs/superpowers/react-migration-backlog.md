@@ -591,6 +591,8 @@ Checked against live code, not the docs:
   `common/datastore_accessors.py`, `dash_page` is `drain_warnings()`'s only
   caller, and `tests/web/test_warnings_cross_consumer.py` pins it. The
   cross-consumer bug this entry described as open had already been fixed.
+  (Both accessors were subsequently retired by the 2026-07-29 warnings-dismiss
+  slice, superseded by `read_warnings_snapshot()` and `clear_warnings_through()`.)
 - `get_system_command_output()` discarding other consumers' queue entries —
   **already done.** It peeks and pushes back;
   `tests/unit/common/test_system_command_output_queue.py`. (Backlog item 4 also

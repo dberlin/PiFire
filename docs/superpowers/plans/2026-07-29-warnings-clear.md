@@ -6,7 +6,9 @@
 
 **Architecture:** `list_warnings` rows carry a monotonic `id`. One query returns both the warning strings and their `max_id`; the Socket.IO payload carries that id as `warningsMaxId`; dismissing POSTs the id back and the server deletes `WHERE id <= through_id`. A warning written *after* the client's snapshot has a higher id and survives. The read-and-burn primitives (`read_warnings`, `drain_warnings`) and the frozen Valkey-era oracle scenario that pinned them are deleted in the same change.
 
-**Tech Stack:** Python 3.14 / Flask / SQLite (`SqliteQueue`), Flask-SocketIO, React + TypeScript (`web-react`, bun + Biome + Vitest/RTL).
+**Tech Stack:** Python 3.14 / Flask / SQLite (`SqliteQueue`), Flask-SocketIO, React + TypeScript (`web-react`, bun + Biome + `@rstest/core`/RTL).
+
+> **Correction applied during execution:** the two TypeScript test snippets below were originally written against **Vitest** (`import … from "vitest"`, `vi.*`). This repo has no vitest package — the runner is **`@rstest/core`** and its mock API is **`rs`** (`rs.fn`, `rs.mock`, `rs.stubGlobal`, `rs.spyOn`). The snippets are corrected here. Two things to know: `bun test` invokes bun's OWN runner and fails with `Rstest API 'describe' is not registered yet` — use **`bun run test`**; and a `Cannot find module 'vitest'` error superficially resembles a TDD-red, so it can fool you into thinking a test failed for the right reason. Prefer a neighbouring real test file over any snippet when the two disagree on framework mechanics.
 
 **Spec:** `docs/superpowers/specs/2026-07-29-warnings-clear-design.md`
 
@@ -14,7 +16,7 @@
 
 - Python tests run as `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest <paths>`. A bare `python`/`pytest` gives false failures.
 - Format Python with `.venv/bin/ruff format <changed files>` before every commit. NEVER `uvx ruff` (the repo pins ruff <0.16).
-- `web-react` uses **bun**, never npm. Gates: `bun run lint` (Biome format — required, not just typecheck), `bun run typecheck`, `bun test`, `bun run build`.
+- `web-react` uses **bun**, never npm. Gates: `bun run lint` (Biome format — required, not just typecheck), `bun run typecheck`, `bun run test`, `bun run build`.
 - Commit with **jj**, not git: `jj new` BEFORE the first Write, then `jj describe -m "..."`. Never `jj squash` after editing (the edits are already in `@`).
 - The Socket.IO read path MUST stay non-destructive. `list_warnings` has independent consumers; a repeating poll that consumed warnings would land them in one payload and lose them for every client that reconnects after.
 - **Deletions are bounded to exactly these five:** `read_warnings()`, `drain_warnings()`, `scenario_warnings`, `tests/oracle/fixtures/warnings.json`, `test_warnings_drain_and_clear_matches_oracle`. No other test may be deleted to make this slice fit — a test that fails is rewritten onto the new accessors, or the design is wrong.
@@ -545,39 +547,33 @@ In `web-react/src/helpers/types.ts`, beside `warnings: string[];` (line ~46) add
 Create `web-react/src/helpers/shell/warningsApi.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { dismissWarnings } from "./warningsApi";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => rs.unstubAllGlobals());
 
 describe("dismissWarnings", () => {
-  it("posts the high-water mark and resolves true on success", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(JSON.stringify({ result: "OK" }), { status: 200 }));
-    await expect(dismissWarnings(7)).resolves.toBe(true);
-    const [, init] = fetchMock.mock.calls[0];
-    expect(JSON.parse(String(init?.body))).toEqual({ through_id: 7 });
-  });
-
-  it("resolves false on a refusal rather than throwing", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ result: "ERROR" }), { status: 400 }),
-    );
-    await expect(dismissWarnings(7)).resolves.toBe(false);
-  });
-
-  it("resolves false when the request fails outright", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
-    await expect(dismissWarnings(7)).resolves.toBe(false);
-  });
+  // Stub fetch with rs.fn() + rs.stubGlobal (the idiom in
+  // helpers/notify/wledApi.test.ts), NOT a namespace spy.
+  //
+  // Assert THREE things, because the first two were originally missed and a
+  // reviewer's mutation testing caught it: the URL is exactly
+  // "/api/dismiss_warnings", the method is exactly "POST", and the body is
+  // {through_id: 7}. Without the first two, a typo'd path or a GET still
+  // passes -- and its failure is silent (404/405 -> res.ok false -> resolves
+  // false -> the banner simply never dismisses, with no error surfaced).
+  it("posts the high-water mark to the right endpoint and resolves true on success");
+  it("resolves false on a refusal rather than throwing");
+  it("resolves false when the request fails outright");
 });
 ```
 
+**Shipped version:** `web-react/src/helpers/shell/warningsApi.test.ts` — read it rather than reconstructing from this sketch; it is the mutation-verified form.
+
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `cd web-react && bun test src/helpers/shell/warningsApi.test.ts`
-Expected: FAIL — cannot resolve `./warningsApi`.
+Run: `cd web-react && bun run test warningsApi`
+Expected: FAIL — cannot resolve `./warningsApi`. (Use `bun run test`, never `bun test`.)
 
 - [ ] **Step 4: Write the client**
 
@@ -612,7 +608,7 @@ export async function dismissWarnings(throughId: number): Promise<boolean> {
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `cd web-react && bun test src/helpers/shell/warningsApi.test.ts`
+Run: `cd web-react && bun run test warningsApi`
 Expected: PASS (3 tests)
 
 - [ ] **Step 6: Fix the fixture the new required field breaks**
@@ -622,7 +618,7 @@ A required field on the live-state type breaks every full-literal fixture. Run `
 - [ ] **Step 7: Gate and commit**
 
 ```bash
-cd web-react && bun run lint && bun run typecheck && bun test
+cd web-react && bun run lint && bun run typecheck && bun run test
 jj describe -m "feat(web-react): warnings dismiss client and payload field
 
 Types the high-water mark the socket now publishes and posts it back to clear
@@ -649,57 +645,48 @@ Add to `web-react/src/components/shell/Banners.test.tsx` (keep every existing te
 
 ```tsx
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, rs } from "@rstest/core";
 import { Banners } from "./Banners";
 import * as warningsApi from "../../helpers/shell/warningsApi";
 
-afterEach(() => vi.restoreAllMocks());
+// Mock the module with rs.mock(path, factory) -- the idiom used by
+// components/admin/SystemUpdateCard.test.tsx. Namespace-import spying has no
+// precedent here.
+afterEach(() => rs.resetAllMocks());
 
 it("shows no dismiss control when there are no warnings", () => {
   render(<Banners errors={["boom"]} warnings={[]} warningsMaxId={null} criticalError={false} />);
   expect(screen.queryByRole("button", { name: /dismiss warnings/i })).toBeNull();
 });
 
-it("posts the high-water mark and hides the warnings on dismiss", async () => {
-  const spy = vi.spyOn(warningsApi, "dismissWarnings").mockResolvedValue(true);
-  render(<Banners errors={[]} warnings={["hopper low"]} warningsMaxId={5} criticalError={false} />);
-  fireEvent.click(screen.getByRole("button", { name: /dismiss warnings/i }));
-  await waitFor(() => expect(screen.queryByText("hopper low")).toBeNull());
-  expect(spy).toHaveBeenCalledWith(5);
-});
-
-it("keeps the warnings up when the dismiss is refused", async () => {
-  vi.spyOn(warningsApi, "dismissWarnings").mockResolvedValue(false);
-  render(<Banners errors={[]} warnings={["hopper low"]} warningsMaxId={5} criticalError={false} />);
-  fireEvent.click(screen.getByRole("button", { name: /dismiss warnings/i }));
-  await waitFor(() => expect(screen.getByText("hopper low")).toBeTruthy());
-});
-
-it("shows a newer warning that arrives after a dismiss", async () => {
-  vi.spyOn(warningsApi, "dismissWarnings").mockResolvedValue(true);
-  const { rerender } = render(
-    <Banners errors={[]} warnings={["hopper low"]} warningsMaxId={5} criticalError={false} />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: /dismiss warnings/i }));
-  await waitFor(() => expect(screen.queryByText("hopper low")).toBeNull());
-  // A higher mark means the backend raised something new -- it must not be
-  // swallowed by the earlier dismiss.
-  rerender(<Banners errors={[]} warnings={["auger jam"]} warningsMaxId={6} criticalError={false} />);
-  expect(screen.getByText("auger jam")).toBeTruthy();
-});
-
-it("still renders errors after warnings are dismissed", async () => {
-  vi.spyOn(warningsApi, "dismissWarnings").mockResolvedValue(true);
-  render(<Banners errors={["boom"]} warnings={["hopper low"]} warningsMaxId={5} criticalError={false} />);
-  fireEvent.click(screen.getByRole("button", { name: /dismiss warnings/i }));
-  await waitFor(() => expect(screen.queryByText("hopper low")).toBeNull());
-  expect(screen.getByText("boom")).toBeTruthy();
-});
+it("posts the high-water mark and hides the warnings on dismiss");
+it("keeps the warnings up when the dismiss is refused");
+it("shows a newer warning that arrives after a dismiss");
+it("still renders errors after warnings are dismissed");
+it("offers no dismiss control when a max id arrives with no warnings");
 ```
+
+Behaviors each must pin, and the traps found while pinning them:
+
+- **Dismiss** posts exactly `warningsMaxId` (not a recomputed or off-by-one value) and hides the group.
+- **Refusal keeps the banner up.** This one was VACUOUS on the first attempt:
+  `await waitFor(() => expect(screen.getByText(...)).toBeTruthy())` is satisfied by
+  `waitFor`'s first synchronous check, so it asserts the PRE-click DOM and passes
+  even against `await dismissWarnings(id); setDismissedThroughId(id);` — i.e. code
+  that ignores the server's answer. Wait for the mock to have been called, THEN
+  flush the continuation inside `act`, THEN assert.
+- **A newer warning reappears** after a dismiss (higher mark). This is the test that
+  proves the design: it fails against a boolean `dismissed` flag, which is exactly
+  the bug the high-water mark exists to prevent.
+- **Errors always render**, dismissed or not.
+- **No dismiss button when a mark arrives with an empty warnings list** — you cannot
+  offer to clear rows nobody saw.
+
+**Shipped version:** `web-react/src/components/shell/Banners.test.tsx` — read it rather than reconstructing from this sketch; every one of these was mutation-verified (each mutant kills exactly one test).
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd web-react && bun test src/components/shell/Banners.test.tsx`
+Run: `cd web-react && bun run test Banners`
 Expected: FAIL — no dismiss button; `warningsMaxId` is not a prop.
 
 - [ ] **Step 3: Implement the control**
@@ -796,13 +783,13 @@ In `web-react/src/components/shell/shell.css`, add beside the existing `.pf-bann
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd web-react && bun test src/components/shell/`
+Run: `cd web-react && bun run test shell`
 Expected: PASS — the 5 new tests plus every pre-existing `Banners`/`AppShell` test.
 
 - [ ] **Step 6: Full gate**
 
 ```bash
-cd web-react && bun run lint && bun run typecheck && bun test && bun run build
+cd web-react && bun run lint && bun run typecheck && bun run test && bun run build
 ```
 Expected: all green. Fix any `AppShell.test.tsx` fixture that the new prop breaks by supplying `warningsMaxId`, not by loosening the type.
 
@@ -842,7 +829,7 @@ Expected: all green. `tests/ui` must stay at its full pass count — it renders 
 - [ ] **Step 2: Run the web-react gate**
 
 ```bash
-cd web-react && bun run lint && bun run typecheck && bun test && bun run build
+cd web-react && bun run lint && bun run typecheck && bun run test && bun run build
 ```
 Expected: all green.
 

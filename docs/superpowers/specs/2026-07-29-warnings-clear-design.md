@@ -27,14 +27,17 @@ never cleared errors on view (they clear only on device rebuild via
 An **explicit dismiss control** (not an auto-clear-on-view port). Flask's SPA
 successor has no per-view render and the banner now lives in the shell (shown on
 every page), so "clears when you view the dashboard" does not translate. A user
-clicks a single **×** on the warning group to clear it.
+clicks a single **"Dismiss warnings" text button** (not a bare ×) on the
+warning group to clear it. A visible label matching the accessible name
+(`aria-label="Dismiss warnings"`) avoids a WCAG 2.5.3 ("Label in Name")
+mismatch that a bare × icon would risk.
 
 ### The data-loss trap and the fix
 
 A naive dismiss that calls `drain_warnings()` (flush-all) would delete any
 warning `write_warning()` pushed **after** the client rendered its banner but
-**before** the user clicked ×. Those warnings were never shown — flushing them
-loses data.
+**before** the user clicked dismiss. Those warnings were never shown — flushing
+them loses data.
 
 `list_warnings` rows carry a monotonic `id` (INTEGER PRIMARY KEY;
 `SqliteQueue.push` inserts, `pop`/`list` order by `id`). That `id` is a natural
@@ -64,7 +67,7 @@ socket tick: read_warnings_snapshot()  ── ONE query ──▶ (["Hopper low"
                               │    warningsMaxId: number|null (NEW)
                               ▼
    Banners renders strings; remembers warningsMaxId = 5
-   user clicks ×  ──▶  POST /api/dismiss_warnings { through_id: 5 }
+   user clicks Dismiss  ──▶  POST /api/dismiss_warnings { through_id: 5 }
                               ▼
    clear_warnings_through(5): DELETE FROM list_warnings WHERE id <= 5
    ── a warning with id 6 (pushed after the snapshot) is NOT deleted ──
@@ -152,7 +155,7 @@ still pin live behavior.
     is hidden immediately (optimistic), and a newer warning (higher id) makes
     the group reappear without re-showing dismissed ones (the server has already
     deleted them, so the next payload omits them).
-  - One **×** control on the warning group. On click: call
+  - One **"Dismiss warnings"** button on the warning group. On click: call
     `dismissWarnings(warningsMaxId)`; on success set
     `dismissedThroughId = warningsMaxId`.
   - Errors always render (unchanged, not dismissable).
@@ -196,9 +199,10 @@ behavior and MUST survive, rewritten onto the new accessors:
   producer (`socket_io` payload) and the React type — using a fixture built from
   a real payload, not hand-written literals.
 
-**React (`web-react`, Vitest + RTL):**
-- `×` renders only when warnings are present and undismissed.
-- Clicking `×` POSTs `warningsMaxId`; on success the group hides (optimistic).
+**React (`web-react`, `@rstest/core` + RTL — NOT Vitest; the repo has no vitest
+package, and its mock API is `rs`, not `vi`):**
+- The dismiss button renders only when warnings are present and undismissed.
+- Clicking it POSTs `warningsMaxId`; on success the group hides (optimistic).
 - A subsequent payload with a higher `warningsMaxId` re-shows the group; one
   with `warningsMaxId <= dismissedThroughId` (or `null`) keeps it hidden.
 - Errors render regardless of warning dismissal.

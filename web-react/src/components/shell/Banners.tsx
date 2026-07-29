@@ -30,7 +30,7 @@ export function Banners({
   // warnings rather than swallow them; the dismiss button needs a real mark and
   // is gated separately below.
   const showWarnings = warningsMaxId === null || warningsMaxId > dismissedThroughId;
-  const canDismiss = showWarnings && warningsMaxId !== null;
+  const canDismiss = showWarnings && warningsMaxId !== null && warnings.length > 0;
   const items: { t: string; level: "critical" | "error" | "warning" }[] = [
     ...errors.map((t) => ({ t, level: errorLevel })),
     ...(showWarnings ? warnings.map((t) => ({ t, level: "warning" as const })) : []),

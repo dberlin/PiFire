@@ -73,6 +73,17 @@ describe("Banners", () => {
     expect(screen.queryByRole("button", { name: /dismiss warnings/i })).toBeNull();
   });
 
+  it("offers no dismiss control when a max id arrives with no warnings", () => {
+    // The backend's single-query snapshot couples max_id === null to
+    // warnings === [], so {warnings: [], warningsMaxId: 5} is unreachable
+    // today. Guard it anyway: the dismiss button must never appear with
+    // nothing behind it, since clicking it would clear rows the user never
+    // saw.
+    render(<Banners errors={["boom"]} warnings={[]} warningsMaxId={5} criticalError={false} />);
+    expect(screen.getByText("boom")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /dismiss warnings/i })).toBeNull();
+  });
+
   it("posts the high-water mark and hides the warnings on dismiss", async () => {
     (warningsApi.dismissWarnings as ReturnType<typeof rs.fn>).mockResolvedValue(true);
     render(
@@ -92,6 +103,14 @@ describe("Banners", () => {
     // Wait for the call, then let the click handler's continuation and any state
     // update it queues run. Asserting before that flush would only re-check the
     // pre-click DOM and would pass even if the refusal were ignored.
+    //
+    // The single `act(async () => { await Promise.resolve(); })` below flushes
+    // exactly one microtask turn past the mock call, which is only enough if
+    // `onDismiss` has exactly one `await` between calling dismissWarnings and
+    // deciding whether to update state. If onDismiss changes, re-verify this
+    // test's power by temporarily mutating its production line to
+    // `await dismissWarnings(warningsMaxId); setDismissedThroughId(warningsMaxId);`
+    // (an extra await) — this test MUST fail under that mutant.
     await waitFor(() =>
       expect(warningsApi.dismissWarnings as ReturnType<typeof rs.fn>).toHaveBeenCalledWith(5),
     );
