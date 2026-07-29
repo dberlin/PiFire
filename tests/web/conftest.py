@@ -88,6 +88,24 @@ requires_chromium = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_server_status():
+    """`set_server_status` stores on `current_app`, which is the same `app.py`
+    singleton every test module imports -- so a mocked-restart test (restart
+    is never mocked at the set_server_status call site, only the process-level
+    restart_scripts/reboot_system/shutdown_system it triggers) leaves
+    "restarting"/"rebooting"/"shutdown" sitting on the shared app object for
+    every test that runs afterward, in any module, for the rest of the
+    session. In production this self-heals: the real restart replaces the
+    process and app.py re-sets "available" at the next boot. Tests never
+    restart the process, so nothing ever heals it here -- reset explicitly.
+    """
+    yield
+    from app import app as flask_app
+
+    flask_app.server_status = "available"
+
+
 def _seed_fresh_db(db_path, grill_name):
     """Point the datastore singleton at a fresh temp-SQLite file and seed it
     with the standard default_settings/default_control/default_pellets +
