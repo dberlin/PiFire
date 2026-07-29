@@ -1,5 +1,4 @@
-from common.common import read_wizard
-from common.datastore_accessors import read_settings, load_wizard_install_info
+from common.datastore_accessors import read_settings
 
 
 def parse_bt_device_info(bt_devices):
@@ -116,36 +115,6 @@ def wizardInstallInfoExisting(wizardData, settings):
             wizardInstallInfo["modules"][module]["config"] = settings["display"]["config"][
                 settings["modules"]["display"]
             ]
-    return wizardInstallInfo
-
-
-def prepare_wizard_data(form_data):
-    wizardData = read_wizard()
-
-    wizardInstallInfo = load_wizard_install_info()
-
-    wizardInstallInfo["modules"] = {
-        "grillplatform": {"profile_selected": [form_data["grillplatformSelect"]], "settings": {}, "config": {}},
-        "display": {"profile_selected": [form_data["displaySelect"]], "settings": {}, "config": {}},
-        "distance": {"profile_selected": [form_data["distanceSelect"]], "settings": {}, "config": {}},
-        "probes": {"profile_selected": [], "settings": {"units": form_data["probes_units"]}, "config": {}},
-    }
-
-    for device in wizardInstallInfo["probe_map"]["probe_devices"]:
-        wizardInstallInfo["modules"]["probes"]["profile_selected"].append(device["module"])
-
-    for module in ["grillplatform", "display", "distance"]:
-        module_ = module + "_"
-        moduleSelect = module + "Select"
-        selected = form_data[moduleSelect]
-        for setting in wizardData["modules"][module][selected]["settings_dependencies"]:
-            settingName = module_ + setting
-            if settingName in form_data:
-                wizardInstallInfo["modules"][module]["settings"][setting] = form_data[settingName]
-        for config, value in form_data.items():
-            if config.startswith(module_ + "config_"):
-                wizardInstallInfo["modules"][module]["config"][config.replace(module_ + "config_", "")] = value
-
     return wizardInstallInfo
 
 

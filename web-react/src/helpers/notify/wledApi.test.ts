@@ -67,4 +67,53 @@ describe("wledApi", () => {
     expect(res.result).toBe("error");
     expect(res.devices).toEqual([]);
   });
+
+  // The paths below run when PiFire is unreachable or answers with something
+  // that is not JSON -- a proxy's HTML error page, a dropped connection. Each
+  // must still hand the card one displayable {result, message}, because the UI
+  // renders the message rather than catching an escape.
+  const nonJsonRes = (status: number) => ({
+    ok: false,
+    status,
+    json: async () => {
+      throw new SyntaxError("Unexpected token < in JSON");
+    },
+  });
+
+  it("discoverWled falls back to the HTTP status when the body is not JSON", async () => {
+    fetchMock.mockResolvedValue(nonJsonRes(502));
+    const res = await discoverWled();
+    expect(res.result).toBe("error");
+    expect(res.message).toBe("HTTP 502");
+    expect(res.devices).toEqual([]);
+  });
+
+  it("pushWledProfiles falls back to the HTTP status when the body is not JSON", async () => {
+    fetchMock.mockResolvedValue(nonJsonRes(500));
+    const res = await pushWledProfiles("wled.local", { idle: 200 });
+    expect(res.result).toBe("error");
+    expect(res.message).toBe("HTTP 500");
+    expect(res.profiles_pushed).toBeUndefined();
+  });
+
+  it("testWledProfile falls back to the HTTP status when the body is not JSON", async () => {
+    fetchMock.mockResolvedValue(nonJsonRes(404));
+    const res = await testWledProfile("wled.local", 203);
+    expect(res.result).toBe("error");
+    expect(res.message).toBe("HTTP 404");
+  });
+
+  it("pushWledProfiles synthesizes an error result when fetch rejects", async () => {
+    fetchMock.mockRejectedValue(new Error("network down"));
+    const res = await pushWledProfiles("wled.local", { idle: 200 });
+    expect(res.result).toBe("error");
+    expect(res.message).toBe("Could not reach PiFire to push profiles.");
+  });
+
+  it("testWledProfile synthesizes an error result when fetch rejects", async () => {
+    fetchMock.mockRejectedValue(new Error("network down"));
+    const res = await testWledProfile("wled.local", 203);
+    expect(res.result).toBe("error");
+    expect(res.message).toBe("Could not reach PiFire to test the profile.");
+  });
 });
