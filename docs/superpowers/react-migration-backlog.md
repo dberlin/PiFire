@@ -1263,6 +1263,27 @@ references. What remains open:
   byte-deterministic across captures — verified by capturing twice. This closes
   the drift the metrics and both tuner slices had been absorbing.
 
+#### Deferred by the updater slice (design, 2026-07-29)
+
+The `/update` page design (`specs/2026-07-29-react-updater-*`, in progress) is
+scoped to the updater page itself. One piece of the Flask updater experience is
+**global chrome, not the page**, and is deliberately excluded:
+
+- **The post-update "what's new" release-notes modal is not ported.** After an
+  update, Flask sets `settings["globals"]["updated_message"]` and every page
+  shows a one-time modal on next load, rendered by `templates/base.html:165-230`
+  (`updater_message_modal` + `updater_message.js`), whose body comes from
+  `GET /update/post-message` (`_update_get_post_message`, which reads
+  `./updater/post-update-message.html` and `render_template_string`s it — a
+  template-injection surface the React port would drop, not reproduce). It is
+  **app-shell chrome triggered by a settings flag on ANY route**, not a control
+  on the updater page, so it belongs with the shell, not this slice. This is the
+  same class as the other `base.html` cross-cutting items the standing rule says
+  to surface before calling the migration done (see the base.html sweep at the
+  end of this file). The one-line "updater release-notes modal dropped" note
+  under *UI parity, minor-graded* below is the same item; this is its full
+  disposition and the reason it is shell-owned.
+
 #### UI parity, minor-graded
 
 History Stream toggle and 5 s poll vs Flask's ~1 s; chart annotations fetched
