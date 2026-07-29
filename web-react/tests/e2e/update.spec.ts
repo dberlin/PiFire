@@ -38,6 +38,27 @@ test.describe("updater", () => {
         body: JSON.stringify({ result: "OK", data: { output: "abc123 fix" } }),
       }),
     );
+    await page.route("**/api/update/branch", (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ result: "OK", data: { started: true } }),
+      }),
+    );
+    await page.route("**/api/update/branches/refresh", (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ result: "OK", data: { started: true } }),
+      }),
+    );
+    await page.route("**/api/update/pull", (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ result: "OK", data: { started: true } }),
+      }),
+    );
     await page.route("**/api/update/upgrade", (r) =>
       r.fulfill({
         status: 200,

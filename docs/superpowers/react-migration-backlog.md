@@ -311,18 +311,22 @@ it by path and line number; those citations point here.
   (skip a cold probe's leading zeros) is preserved.
 - **Update** (`/update`) — SHIPPED 2026-07-29
   (`plans/2026-07-29-react-updater.md`, 7 tasks), behind a new
-  `blueprints/api_update`. Reads (state/check/log) and mutations
-  (branches/refresh, branch, pull, upgrade) are gated behind
-  `is_real_hardware()` and refuse with 409 while the grill is not in STOP
-  mode. The page shows current version/branch/remote, a branch switcher, the
+  `blueprints/api_update`. All four mutations (`branches/refresh`, `branch`,
+  `pull`, `upgrade`) fire the underlying `updater.py` process only under
+  `is_real_hardware()` (the `_fire` seam); beyond that the gates differ per
+  route — only `pull` and `upgrade` refuse with 409 unless
+  `control.mode == STOP`, `branch` instead returns 400 for a target outside
+  the branch allowlist, and `branches/refresh` has no mode gate at all. The
+  page shows current version/branch/remote, a branch switcher, the
   pull/upgrade actions, an update log viewer, and a progress panel that polls
   `GET /api/update/status` until the `101`/`142` sentinel (done vs.
   reboot-required, matching `wizard/InstallProgress.tsx` and
-  `updater.py:548`). A `SystemUpdateCard` on `/admin` surfaces the same
-  check/upgrade action. Not ported: the post-update "what's new"
-  release-notes modal — that is app-shell chrome triggered by a settings flag
-  on any route, not a control on this page; see "Deferred by the updater
-  slice" below.
+  `updater.py:548`). A `SystemUpdateCard` on `/admin` fetches
+  `GET /api/update/check` to show the current version and commits-behind and
+  links to `/update` — it has no upgrade action of its own. Not ported: the
+  post-update "what's new" release-notes modal — that is app-shell chrome
+  triggered by a settings flag on any route, not a control on this page; see
+  "Deferred by the updater slice" below.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
   polling, and an Exit control. Functionally complete; styling is being
@@ -922,12 +926,16 @@ Roughly ordered by daily-use value:
       tasks). See the SHIPPED section.
 - [x] **update** — SHIPPED 2026-07-29 (`plans/2026-07-29-react-updater.md`, 7
       tasks). New `blueprints/api_update` (read: state/check/log; mutations:
-      branches/refresh, branch, pull, upgrade, all gated behind
-      `is_real_hardware()` and the STOP-mode 409 the running `_fire` seam
-      already enforces) backs a new `/update` page (state, branch switcher,
-      pull/upgrade actions, log viewer, and a progress panel that polls
+      branches/refresh, branch, pull, upgrade — all fire only under
+      `is_real_hardware()`, but the gates differ per route: `pull`/`upgrade`
+      refuse 409 unless `control.mode == STOP`, `branch` returns 400 for a
+      target outside the branch allowlist, and `branches/refresh` has no mode
+      gate) backs a new `/update` page (state, branch switcher, pull/upgrade
+      actions, log viewer, and a progress panel that polls
       `GET /api/update/status` to the `101`/`142` done/reboot-required
-      sentinel) plus a `SystemUpdateCard` on `/admin`. The post-update
+      sentinel) plus a `SystemUpdateCard` on `/admin` (fetches
+      `GET /api/update/check` for version/commits-behind and links to
+      `/update`; no upgrade action of its own). The post-update
       "what's new" release-notes modal was deliberately left out of scope —
       see "Deferred by the updater slice" below.
 - [x] **metrics** — SHIPPED 2026-07-28 as `/metrics`, behind a new read-only
