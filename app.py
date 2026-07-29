@@ -19,7 +19,7 @@ Description:
 ==============================================================================
 """
 
-from flask import Flask, render_template, redirect
+from flask import Flask, render_template
 from flask_mobility import Mobility
 from flask_socketio import SocketIO
 from flask_qrcode import QRcode
@@ -141,16 +141,6 @@ def inject_theme_and_grill_name():
     }
 
 
-@app.route("/")
-def index():
-    settings = read_settings()
-
-    if settings["globals"]["first_time_setup"]:
-        return redirect("/wizard/welcome")
-    else:
-        return redirect("/dash")
-
-
 """
 ==============================================================================
  Register Mobile Blueprint
@@ -162,6 +152,16 @@ from blueprints.mobile import mobile_bp
 
 mobile_bp.socketio = socketio
 app.register_blueprint(mobile_bp, url_prefix="/mobile")
+
+"""
+==============================================================================
+ Register SPA Blueprint (serves the React build; must be registered LAST so
+ real backend routes win over the catch-all)
+==============================================================================
+"""
+from blueprints.spa import spa_bp
+
+app.register_blueprint(spa_bp)
 
 """
 ==============================================================================
