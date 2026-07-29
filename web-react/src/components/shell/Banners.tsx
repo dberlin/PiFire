@@ -26,7 +26,11 @@ export function Banners({
   // Ids start at 1, so 0 means "nothing dismissed yet".
   const [dismissedThroughId, setDismissedThroughId] = useState(0);
   const errorLevel: "critical" | "error" = criticalError ? "critical" : "error";
-  const showWarnings = warningsMaxId !== null && warningsMaxId > dismissedThroughId;
+  // A null mark means the payload carried no id to dismiss through, so show the
+  // warnings rather than swallow them; the dismiss button needs a real mark and
+  // is gated separately below.
+  const showWarnings = warningsMaxId === null || warningsMaxId > dismissedThroughId;
+  const canDismiss = showWarnings && warningsMaxId !== null;
   const items: { t: string; level: "critical" | "error" | "warning" }[] = [
     ...errors.map((t) => ({ t, level: errorLevel })),
     ...(showWarnings ? warnings.map((t) => ({ t, level: "warning" as const })) : []),
@@ -47,7 +51,7 @@ export function Banners({
           {it.t}
         </div>
       ))}
-      {showWarnings ? (
+      {canDismiss ? (
         <button
           type="button"
           className="pf-banner-dismiss"

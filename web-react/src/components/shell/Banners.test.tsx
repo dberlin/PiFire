@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as warningsApi from "../../helpers/shell/warningsApi";
 import { Banners } from "./Banners";
 
@@ -62,6 +62,17 @@ describe("Banners", () => {
     expect(screen.queryByRole("button", { name: /dismiss warnings/i })).toBeNull();
   });
 
+  it("shows a warning with no id and offers no dismiss control", () => {
+    // The backend only reports a null max id when there are no warnings, so this
+    // payload is impossible today. If that invariant ever breaks, the warning
+    // must surface undismissable rather than be silently swallowed.
+    render(
+      <Banners errors={[]} warnings={["orphan"]} warningsMaxId={null} criticalError={false} />,
+    );
+    expect(screen.getByText("orphan")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /dismiss warnings/i })).toBeNull();
+  });
+
   it("posts the high-water mark and hides the warnings on dismiss", async () => {
     (warningsApi.dismissWarnings as ReturnType<typeof rs.fn>).mockResolvedValue(true);
     render(
@@ -78,7 +89,17 @@ describe("Banners", () => {
       <Banners errors={[]} warnings={["hopper low"]} warningsMaxId={5} criticalError={false} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /dismiss warnings/i }));
-    await waitFor(() => expect(screen.getByText("hopper low")).toBeTruthy());
+    // Wait for the call, then let the click handler's continuation and any state
+    // update it queues run. Asserting before that flush would only re-check the
+    // pre-click DOM and would pass even if the refusal were ignored.
+    await waitFor(() =>
+      expect(warningsApi.dismissWarnings as ReturnType<typeof rs.fn>).toHaveBeenCalledWith(5),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("hopper low")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /dismiss warnings/i })).toBeTruthy();
   });
 
   it("shows a newer warning that arrives after a dismiss", async () => {
