@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { behindText } from "../../helpers/update/behindText";
 import {
   changeBranch,
   fetchUpdateCheck,
@@ -18,8 +19,11 @@ import type {
 } from "../../helpers/update/updateTypes";
 import "./update.css";
 
-const refusalText = (r: UpdateResult<unknown>): string =>
-  r.status === 409 ? "Stop the grill before updating." : r.message;
+const refusalText = (r: UpdateResult<unknown>): string => {
+  if (r.status === 409) return "Stop the grill before updating.";
+  if (r.status === 400) return "That branch is no longer available — refresh the branch list.";
+  return r.message;
+};
 
 // Matches wizard/InstallProgress.tsx and updater.py:548 -- the backend pins
 // percent at 142 to mean "finished, but a reboot is required" rather than a
@@ -60,11 +64,14 @@ export function UpdatePage() {
     };
   }, [apply]);
 
-  // Polls GET /api/update/status once a mutation has started a run. The
-  // effect only starts/stops the interval; setProgress/setDone happen from
-  // the interval callback (an event), not from render.
+  // Polls GET /api/update/status once a mutation has started a run. Gated on
+  // a stable boolean rather than the `progress` object itself, so the
+  // interval is created ONCE per run and not torn down/recreated on every
+  // tick's setProgress; it clears itself from inside the callback when the
+  // run finishes, and on unmount via the cleanup function.
+  const polling = progress !== null && done === null;
   useEffect(() => {
-    if (progress === null || done !== null) return;
+    if (!polling) return;
     const id = setInterval(async () => {
       const r = await fetchUpdateStatus();
       if (!r.ok || !r.data) return;
@@ -72,10 +79,11 @@ export function UpdatePage() {
       if (r.data.percent > 100) {
         setDone(r.data.percent === REBOOT_REQUIRED_PERCENT ? "reboot" : "ok");
         void load();
+        clearInterval(id);
       }
     }, 250); // matches wizard/InstallProgress.tsx's polling cadence
     return () => clearInterval(id);
-  }, [progress, done, load]);
+  }, [polling, load]);
 
   const run = async (fn: () => Promise<UpdateResult<UpdateStarted>>) => {
     setNote(null);
@@ -84,6 +92,10 @@ export function UpdatePage() {
     setBusy(false);
     if (!r.ok) {
       setNote(refusalText(r));
+      return;
+    }
+    if (!r.data?.started) {
+      setNote("Updates run on PiFire hardware.");
       return;
     }
     setProgress({ percent: 0, status: "Starting…", output: "" });
@@ -105,13 +117,7 @@ export function UpdatePage() {
           Current: <strong>{state.version}</strong> on branch <strong>{state.branch}</strong>
         </p>
         <p>Remote: {state.remote_version}</p>
-        <p>
-          {behind === null
-            ? "Update status unavailable"
-            : behind > 0
-              ? `${behind} commits behind`
-              : "Up to date"}
-        </p>
+        <p>{behindText(behind)}</p>
       </section>
 
       <section className="pf-admin-card">

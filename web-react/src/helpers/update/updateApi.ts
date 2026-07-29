@@ -18,6 +18,11 @@ const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
 const url = (baseUrl: string, path: string) => `${baseUrl}/api/update/${path}`;
 
+/** Unpack the envelope into an UpdateResult, whatever the status.
+ *
+ * A body that is not JSON (a proxy's HTML 404, a dropped connection) must not
+ * mask the status the caller branches on, so the parse failure falls back to
+ * the status rather than propagating. */
 async function unpack<T>(res: Response): Promise<UpdateResult<T>> {
   const body = (await res.json().catch(() => ({}))) as {
     result?: string;
@@ -32,6 +37,7 @@ async function unpack<T>(res: Response): Promise<UpdateResult<T>> {
   };
 }
 
+/** GET a path under /api/update and unpack its envelope. */
 async function get<T>(baseUrl: string, path: string): Promise<UpdateResult<T>> {
   try {
     return await unpack<T>(await fetch(url(baseUrl, path)));
@@ -40,6 +46,7 @@ async function get<T>(baseUrl: string, path: string): Promise<UpdateResult<T>> {
   }
 }
 
+/** POST a JSON body to a path under /api/update and unpack its envelope. */
 async function post<T>(
   baseUrl: string,
   path: string,

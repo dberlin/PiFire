@@ -93,8 +93,7 @@ def update_status():
 def update_branches_refresh():
     settings = read_settings()
     set_updater_install_status(0, "Refreshing remote branches...", "")
-    _fire(settings, f"{_python_exec(settings)} updater.py -r &")
-    return _ok({"started": True})
+    return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -r &")})
 
 
 @api_update_bp.route("/branch", methods=["POST"])
@@ -106,8 +105,7 @@ def update_branch():
     if target not in branches:
         return _error("invalid_branch", 400, branches=branches)
     set_updater_install_status(0, "Starting Branch Change...", "")
-    _fire(settings, f"{_python_exec(settings)} updater.py -b {target} &")
-    return _ok({"started": True})
+    return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -b {target} &")})
 
 
 @api_update_bp.route("/pull", methods=["POST"])
@@ -119,8 +117,7 @@ def update_pull():
     if error_msg:
         return _error(error_msg, 502)
     set_updater_install_status(0, "Starting Update...", "")
-    _fire(settings, f"{_python_exec(settings)} updater.py -u {branch} -p &")
-    return _ok({"started": True})
+    return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -u {branch} -p &")})
 
 
 @api_update_bp.route("/upgrade", methods=["POST"])
@@ -129,5 +126,4 @@ def update_upgrade():
     if read_control().get("mode") != Mode.STOP:
         return _error("system_active", 409)
     set_updater_install_status(0, "Starting Upgrade...", "")
-    _fire(settings, f"{_python_exec(settings)} updater.py -i &")
-    return _ok({"started": True})
+    return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -i &")})

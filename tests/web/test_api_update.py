@@ -128,8 +128,8 @@ def test_mutations_do_not_fire_off_real_hardware(ds, client, monkeypatch):
     _set_real_hw(False)
     resp = client.post("/api/update/branches/refresh")
     assert resp.status_code == 200
-    assert resp.get_json()["data"] == {"started": True}
-    assert fired == []  # gated: no process on a non-Pi
+    assert resp.get_json()["data"] == {"started": False}  # gated: nothing fired off a Pi
+    assert fired == []
 
 
 def test_change_branch_validates_against_the_branch_list(ds, client, monkeypatch):

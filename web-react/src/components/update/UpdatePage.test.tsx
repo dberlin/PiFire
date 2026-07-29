@@ -83,6 +83,25 @@ describe("UpdatePage", () => {
     expect(await screen.findByText(/stop the grill/i)).toBeInTheDocument();
   });
 
+  it("shows an informational note instead of polling when nothing actually started", async () => {
+    seed({ pullUpdate: { ok: true, status: 200, message: "", data: { started: false } } });
+    renderPage();
+    await screen.findByText(/v1\.8\.0/);
+    fireEvent.click(screen.getByRole("button", { name: /update to latest/i }));
+    expect(await screen.findByText(/updates run on pifire hardware/i)).toBeInTheDocument();
+    expect(api.fetchUpdateStatus).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a 400 branch refusal as a friendly message", async () => {
+    seed({ changeBranch: { ok: false, status: 400, message: "invalid_branch", data: null } });
+    renderPage();
+    await screen.findByText(/v1\.8\.0/);
+    fireEvent.click(screen.getByRole("button", { name: /change branch/i }));
+    expect(
+      await screen.findByText(/branch is no longer available.*refresh the branch list/i),
+    ).toBeInTheDocument();
+  });
+
   it("Show log fetches and renders the git log", async () => {
     seed({
       fetchUpdateLog: { ok: true, status: 200, message: "", data: { output: "abc123 fix" } },
