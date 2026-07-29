@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import * as actualAdminApi from "../../helpers/admin/adminApi" with { rstest: "importActual" };
 import type { AdminState } from "../../helpers/admin/adminTypes";
 
@@ -29,6 +30,11 @@ rs.mock("../../helpers/admin/adminApi", () => ({
 }));
 
 const { AdminPage } = await import("./AdminPage");
+
+// SystemUpdateCard renders a react-router <Link>, which throws outside a
+// Router context -- every render below needs one even though none of these
+// tests navigate.
+const renderPage = () => render(<AdminPage />, { wrapper: MemoryRouter });
 
 //  Copied from a REAL /api/admin/state response, not composed from the type.
 //  The first version of this fixture had os_info as a display string and the
@@ -75,7 +81,7 @@ beforeEach(() => {
 
 describe("AdminPage", () => {
   it("reads the whole page from one request", async () => {
-    render(<AdminPage />);
+    renderPage();
     await screen.findByText("Admin");
     expect(fetchAdminStateMock).toHaveBeenCalledTimes(1);
   });
@@ -87,13 +93,13 @@ describe("AdminPage", () => {
         resolve = r;
       }),
     );
-    render(<AdminPage />);
+    renderPage();
     expect(screen.getByText("Loading system information…")).toBeTruthy();
     resolve(ok());
   });
 
   it("renders the system readings", async () => {
-    render(<AdminPage />);
+    renderPage();
     //  The trailing newline uptime(1) emits must not reach the DOM. (Testing
     //  Library collapses the interior runs of spaces before matching, so this
     //  is the single-spaced form of the fixture's raw line.)
@@ -107,7 +113,7 @@ describe("AdminPage", () => {
   it("renders the numeric readings as units, not as raw bytes and floats", async () => {
     //  The live platform module answers with byte counts and an unrounded
     //  megahertz float; only gather_system_info()'s FALLBACKS are strings.
-    render(<AdminPage />);
+    renderPage();
     expect(await screen.findByText("7.7 GiB")).toBeTruthy();
     expect(screen.getByText("6.0 GiB")).toBeTruthy();
     expect(screen.getByText("2400 MHz")).toBeTruthy();
@@ -115,14 +121,14 @@ describe("AdminPage", () => {
   });
 
   it("names each network interface with its address pair", async () => {
-    render(<AdminPage />);
+    renderPage();
     expect(await screen.findByText("eth0")).toBeTruthy();
     expect(screen.getByText("10.0.0.9 · de:ad:be:ef:00:01")).toBeTruthy();
   });
 
   it("shows the grill mode the server judged the request against", async () => {
     fetchAdminStateMock.mockResolvedValue(ok({ ...STATE, mode: "Hold" }));
-    render(<AdminPage />);
+    renderPage();
     expect(await screen.findByText("Grill mode: Hold")).toBeTruthy();
   });
 
@@ -148,7 +154,7 @@ describe("AdminPage", () => {
       },
     };
     fetchAdminStateMock.mockResolvedValue(ok(unknown));
-    render(<AdminPage />);
+    renderPage();
     await screen.findByText("Admin");
     expect(screen.getAllByText("Unknown").length).toBe(7);
     expect(screen.queryByText(/NaN/)).toBeNull();
@@ -156,7 +162,7 @@ describe("AdminPage", () => {
 
   it("refetches on demand, since nothing pushes a new reading", async () => {
     fetchAdminStateMock.mockResolvedValueOnce(ok());
-    render(<AdminPage />);
+    renderPage();
     await screen.findByText("Admin");
 
     fetchAdminStateMock.mockResolvedValue(ok({ ...STATE, mode: "Hold" }));
@@ -169,7 +175,7 @@ describe("AdminPage", () => {
     //  Otherwise a transient network blip leaves a permanent alert over a page
     //  that is now showing good data.
     fetchAdminStateMock.mockResolvedValueOnce(ok());
-    render(<AdminPage />);
+    renderPage();
     await screen.findByText("Admin");
 
     fetchAdminStateMock.mockResolvedValueOnce({
@@ -195,7 +201,7 @@ describe("AdminPage", () => {
       message: "Failed to fetch",
       data: null,
     });
-    render(<AdminPage />);
+    renderPage();
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toBe("Failed to fetch");
     });
@@ -210,7 +216,7 @@ describe("AdminPage", () => {
       data: null,
       mode: "Hold",
     });
-    render(<AdminPage />);
+    renderPage();
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("must be stopped first");
     });

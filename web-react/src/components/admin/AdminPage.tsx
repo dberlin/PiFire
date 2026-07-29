@@ -6,6 +6,7 @@ import { BackupsCard } from "./BackupsCard";
 import { LogsCard } from "./LogsCard";
 import { MaintenanceCard } from "./MaintenanceCard";
 import { SystemCard } from "./SystemCard";
+import { SystemUpdateCard } from "./SystemUpdateCard";
 
 // Same-origin, matching every other module. Deliberately NOT `targetUrl` from
 // the shell context: that value is absolute so ConnectionStatus has something
@@ -186,6 +187,7 @@ export function AdminPage() {
 
       <SystemInfo state={state} />
       <SystemCard mode={state.mode} />
+      <SystemUpdateCard />
       <MaintenanceCard settings={state.settings} onChanged={reload} />
       <BackupsCard backups={state.backups} mode={state.mode} onChanged={reload} />
       <LogsCard logs={state.logs} onChanged={reload} />
