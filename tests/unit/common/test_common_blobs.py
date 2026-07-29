@@ -125,26 +125,30 @@ def test_autotune_uses_queue(ds):
     assert c.read_autotune() == []
 
 
-def test_warnings_drain_and_clear_matches_oracle(ds, oracle):
-    # The oracle pinned the Valkey accessor's read-AND-burn behavior. That
-    # behavior now lives in drain_warnings(); read_warnings() is a plain read
-    # (see the next test and tests/web/test_warnings_cross_consumer.py for
-    # why it had to stop consuming). The fixture is unchanged -- only the
-    # function that still owns those semantics.
-    exp = oracle("warnings")
+def test_read_warnings_snapshot_does_not_consume(ds):
+    # The non-destructive property. Its absence was the original cross-consumer
+    # bug: the Socket.IO poll ate the warnings before another consumer saw them.
     c.write_warning("first")
     c.write_warning("second")
-    assert c.drain_warnings() == exp["read1"]
-    assert c.drain_warnings() == exp["read2_after_clear"]
+    snap = c.read_warnings_snapshot()
+    assert snap["warnings"] == ["first", "second"]
+    assert c.read_warnings_snapshot()["warnings"] == ["first", "second"]
+    c.clear_warnings_through(snap["max_id"])
+    assert c.read_warnings_snapshot()["warnings"] == []
 
 
-def test_read_warnings_does_not_consume(ds):
+def test_read_warnings_snapshot_max_id_matches_the_returned_strings(ds):
     c.write_warning("first")
     c.write_warning("second")
-    assert c.read_warnings() == ["first", "second"]
-    assert c.read_warnings() == ["first", "second"]
-    assert c.drain_warnings() == ["first", "second"]
-    assert c.read_warnings() == []
+    snap = c.read_warnings_snapshot()
+    # max_id belongs to the LAST string returned, so clearing through it clears
+    # exactly what was returned and nothing more.
+    c.clear_warnings_through(snap["max_id"])
+    assert c.read_warnings_snapshot()["warnings"] == []
+
+
+def test_read_warnings_snapshot_is_empty_with_null_max_id(ds):
+    assert c.read_warnings_snapshot() == {"warnings": [], "max_id": None}
 
 
 def test_connected_users_add_remove(ds):

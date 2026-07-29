@@ -93,9 +93,9 @@ def test_successful_install_records_done_and_tells_the_user(ds):
     assert seen["command"] == ["uv", "sync", "--frozen", "--inexact", "--no-dev", "--extra", "mpc"]
     assert cd.install_state("mpc")["state"] == "done"
 
-    from common.datastore_accessors import read_warnings
+    from common.datastore_accessors import read_warnings_snapshot
 
-    banners = read_warnings()
+    banners = read_warnings_snapshot()["warnings"]
     assert any("finished installing" in w for w in banners)
     assert any("your grill is unaffected" in w.lower() for w in banners)
 

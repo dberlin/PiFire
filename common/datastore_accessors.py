@@ -210,37 +210,37 @@ def write_errors(errors):
     _write_json_blob("errors", errors)
 
 
-def read_warnings():
+def read_warnings_snapshot():
     """
-    Read the outstanding warnings from SQLite DB, without consuming them.
+    Read the outstanding warnings together with their high-water mark id.
+
+    One query, so ``max_id`` always belongs to the last string in ``warnings``
+    -- a caller that clears through it clears exactly what it was handed. Two
+    separate reads could not promise that.
 
     Non-destructive, matching :func:`read_errors`. Consumed by the Socket.IO
-    feed (``blueprints/mobile/socket_io.py``), which packs the result into the
-    ``socket_dash_data`` payload for the React dashboard's warning banners.
+    feed (``blueprints/mobile/socket_io.py``), which packs it into the
+    ``socket_dash_data`` payload for the React warning banners.
 
-    :return: warnings
+    :return: {"warnings": [str], "max_id": int | None} -- max_id is None when
+        there are no outstanding warnings.
     """
-    return SqliteQueue("list_warnings", raw=True).list()
+    rows = SqliteQueue("list_warnings", raw=True).list_with_ids()
+    return {"warnings": [v for _, v in rows], "max_id": rows[-1][0] if rows else None}
 
 
-def drain_warnings():
+def clear_warnings_through(max_id):
     """
-    Return the outstanding warnings AND clear them.
+    Clear the warnings up to and including ``max_id``.
 
-    The one-shot half of :func:`read_warnings`. Currently has no caller --
-    retained as the clear-primitive for a planned React "dismiss warnings"
-    follow-up, where a POST /api endpoint will call this to let a user
-    explicitly clear the banner. The Socket.IO emitter must never call this
-    directly: it is a repeating poll, so a warning consumed there would land
-    in a single payload and be lost to every client that reconnects
-    afterwards.
+    The dismiss primitive: a user clears the banner they were shown, identified
+    by the high-water mark that came with it. A warning written after that
+    snapshot has a larger id and survives, so it is never discarded unread --
+    which is why this is bounded rather than a flush.
 
-    :return: The warnings that were outstanding before the clear.
+    :param max_id: High-water mark from :func:`read_warnings_snapshot`.
     """
-    q = SqliteQueue("list_warnings", raw=True)
-    warnings = q.list()
-    q.flush()
-    return warnings
+    SqliteQueue("list_warnings", raw=True).clear_through(max_id)
 
 
 def write_warning(warning):

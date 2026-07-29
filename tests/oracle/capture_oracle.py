@@ -57,21 +57,10 @@ def scenario_metrics_replace_last():
     return {"last": datastore_accessors.read_metrics(), "all_len": len(datastore_accessors.read_all_metrics())}
 
 
-def scenario_warnings():
-    c.cmdsts.delete("warnings")
-    datastore_accessors.write_warning("first")
-    datastore_accessors.write_warning("second")
-    # drain_warnings() carries the read-AND-burn semantics the original
-    # accessor had; read_warnings() is now a plain read, so capturing with it
-    # would no longer reproduce the committed fixtures/warnings.json.
-    return {"read1": datastore_accessors.drain_warnings(), "read2_after_clear": datastore_accessors.drain_warnings()}
-
-
 def main():
     _dump("control_merge", scenario_control_merge())
     _dump("history_cap", scenario_history_cap())
     _dump("metrics_replace_last", scenario_metrics_replace_last())
-    _dump("warnings", scenario_warnings())
     print("wrote fixtures to", FIX)
 
 
