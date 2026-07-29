@@ -43,7 +43,7 @@ from common.datastore_accessors import (
     read_status,
     read_current,
     read_errors,
-    read_warnings,
+    read_warnings_snapshot,
     read_generic_key,
     write_control,
     flush_history,
@@ -269,7 +269,7 @@ def _get_dash_data(settings, pelletdb):
     # itself the moment control answers again. Copy rather than append: the
     # blob is not ours to write.
     errors = read_errors() + ([] if _control_alive else [CONTROL_DOWN_ERROR])
-    warnings = read_warnings()
+    warnings_snapshot = read_warnings_snapshot()
     notify_data = control["notify_data"]
     probe_device_info = read_generic_key("probe_device_info")
 
@@ -280,7 +280,10 @@ def _get_dash_data(settings, pelletdb):
     dash_data = {
         "uuid": settings["server_info"]["uuid"],
         "errors": errors,
-        "warnings": warnings,
+        "warnings": warnings_snapshot["warnings"],
+        # High-water mark for the dismiss control: the client posts it back to
+        # clear exactly the warnings it displayed (blueprints/api dismiss_warnings).
+        "warningsMaxId": warnings_snapshot["max_id"],
         "status": control["status"],
         "criticalError": control["critical_error"],
         "grillName": settings["globals"]["grill_name"],
