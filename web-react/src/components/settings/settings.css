@@ -388,3 +388,20 @@
 .pf-probes-card {
   @apply relative;
 }
+
+/* WLED card. The subhead labels a sub-group (suggested config, profile
+   numbers) inside the one WLED <Section>; it is a non-field direct child of
+   .pf-section-body, so line 97 already spans it full width. The grid lays the
+   twelve profile-number fields out two-up instead of as a tall single column;
+   its .pf-field children are grandchildren of .pf-section-body, so they render
+   with the base .pf-field flex row, not the section subgrid. */
+.pf-wled-subhead {
+  @apply text-text-dim uppercase;
+  font: 700 12px "Barlow";
+  letter-spacing: 0.04em;
+  margin: 8px 0 2px;
+}
+.pf-wled-grid {
+  @apply grid gap-x-[16px] gap-y-[8px];
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}

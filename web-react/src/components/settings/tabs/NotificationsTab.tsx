@@ -3,12 +3,12 @@ import type { Settings } from "../../../helpers/settings/settingsApi";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
-import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
 import { StringListField } from "../fields/StringListField";
 import { TextField } from "../fields/TextField";
 import { Toggle } from "../fields/Toggle";
 import { SaveBar } from "../SaveBar";
+import { WledCard } from "./notifications/WledCard";
 
 // Each notify service is a loosely-typed bag: the tab only reads/writes the
 // scalar fields the legacy `_settings_notify` form submits, and rebuilds the
@@ -29,10 +29,6 @@ function str(o: NotifyService, key: string): string {
 }
 function bool(o: NotifyService, key: string): boolean {
   return !!o[key];
-}
-function num(o: NotifyService, key: string, fallback: number): number {
-  const v = o[key];
-  return typeof v === "number" ? v : fallback;
 }
 
 // OneSignal devices self-register from the mobile app; only friendly_name is
@@ -312,26 +308,7 @@ export function NotificationsTab() {
         />
       </Section>
 
-      <Section title="WLED">
-        <Toggle
-          label="WLED Enabled"
-          checked={bool(wled, "enabled")}
-          onChange={(b) => setField("wled", "enabled", b)}
-        />
-        <TextField
-          label="WLED Device Address"
-          value={str(wled, "device_address")}
-          onChange={(val) => setField("wled", "device_address", val)}
-        />
-        <NumberField
-          label="WLED Notify Duration"
-          value={num(wled, "notify_duration", 120)}
-          onChange={(n) => setField("wled", "notify_duration", n)}
-          // index.html:2003. UI-only: the schema has ge=0 and no upper bound.
-          min={0}
-          max={3600}
-        />
-      </Section>
+      <WledCard wled={wled} onChange={(next) => setV((s) => ({ ns: { ...s.ns, wled: next } }))} />
 
       <ConfirmAction
         open={pendingDevice !== null}
