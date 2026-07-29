@@ -141,10 +141,12 @@ def test_read_warnings_snapshot_max_id_matches_the_returned_strings(ds):
     c.write_warning("first")
     c.write_warning("second")
     snap = c.read_warnings_snapshot()
-    # max_id belongs to the LAST string returned, so clearing through it clears
-    # exactly what was returned and nothing more.
+    c.write_warning("third")  # raised after the snapshot; must outlive the clear
+    # max_id belongs to the LAST string in the snapshot, so clearing through it
+    # clears exactly what was returned and nothing more -- not "third", which
+    # any over-large id (e.g. an unbounded clear) would also have caught.
     c.clear_warnings_through(snap["max_id"])
-    assert c.read_warnings_snapshot()["warnings"] == []
+    assert c.read_warnings_snapshot()["warnings"] == ["third"]
 
 
 def test_read_warnings_snapshot_is_empty_with_null_max_id(ds):

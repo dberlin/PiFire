@@ -92,11 +92,12 @@ thread = None
 # the control process started". Liveness is the opposite kind of fact: it is
 # about right now, it is observed by THIS process, and it stops being true the
 # moment control answers again. Filed in the blob it became permanent, because
-# read_errors() is a plain non-destructive read (unlike `warnings` on the very
-# same payload, which drains and self-heals frame to frame) and no route, socket
-# action or API command could clear it -- so one missed answer, from a control
-# process that was merely slow, rode every socket_dash_data frame until the
-# control process restarted.
+# read_errors() is a plain non-destructive read (like `warnings` on the very
+# same payload, but `warnings` has an explicit clear path -- POST
+# /api/dismiss_warnings, keyed to a high-water mark -- while errors has none)
+# and no route, socket action or API command could clear it -- so one missed
+# answer, from a control process that was merely slow, rode every
+# socket_dash_data frame until the control process restarted.
 #
 # Nor is it in the datastore: persisting a statement about "right now" is what
 # made this sticky in the first place, and a persisted copy would outlive the

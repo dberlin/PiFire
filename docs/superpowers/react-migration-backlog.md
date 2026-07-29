@@ -1153,15 +1153,15 @@ tests).
   else was replicated on a kept surface or pure-dead.
 
 **Deferred by the Flask-retirement pass (recorded, not built):**
-- **Warnings never auto-clear in React (behavioral gap).** `drain_warnings()` — the
-  destructive read that cleared `list_warnings` on view — had its sole caller
-  (Flask `dash_page`) deleted. React reads warnings non-destructively via
-  `socket_io.py::read_warnings()` → `AppShell`/`Banners`, and nothing flushes the
-  queue anymore, so warning banners now **persist forever and stack**. `read`/`drain`
-  were split precisely because `list_warnings` has independent consumers, so the
-  socket read must stay non-destructive. Fix (its own slice): a React "dismiss"
-  control + a `POST /api/...` clear endpoint that calls the retained
-  `drain_warnings()` primitive. `drain_warnings()` was deliberately kept for this.
+- **Warnings never auto-clear in React — SHIPPED (2026-07-29 warnings-clear
+  slice).** React now has a dismiss control: `POST /api/dismiss_warnings
+  {through_id}` clears `SqliteQueue` rows `WHERE id <= through_id` — a
+  high-water-mark clear, keyed to the `warningsMaxId` the socket payload
+  publishes alongside `warnings`, so a warning raised after the client's
+  snapshot was taken is never deleted unseen. `read_warnings()` and
+  `drain_warnings()` (the read-and-burn accessors this gap was originally
+  filed against) are retired, along with the Valkey-era `scenario_warnings`
+  oracle fixture and its now-meaningless drain/clear-parity test.
 - **Pre-existing e2e baseline drift (NOT from this pass).** `web-react` e2e
   `fidelity-pages` has 6 pixel/geometry baseline failures for admin/settings/wizard
   pages, introduced by earlier commits (`9620bb6c`, `a5225a3c`); this pass changes
