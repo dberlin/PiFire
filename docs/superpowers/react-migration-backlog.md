@@ -1051,10 +1051,26 @@ their audit number:
   **#46** (drafts held on SettingsShell, survive tab nav), **#48** (= #22),
   **#57** (errors blob reads non-destructive — item 4), **#69** (`clear_pelletdb`
   no longer `os.system rm`), **#70** (HopperGauge `<Link to="/pellets">`).
-  Genuinely still open: **#5**, **#31**/#32/#34 (probe High/Low Limit Alerts
-  Slice 2 — backend ready, a React slice + one decision), **#35**, **#44**,
-  **#58**, **#67**, **#71**. Full disposition of every finding (incl. accepted
-  divergences and UNCLEAR/browser-only items) is in the audit's *sweep 2* block.
+- **Sweep-2 correction (2026-07-29).** Two of sweep 2's "genuinely still open"
+  labels were already closed and one was fixed this session:
+  - **#31 / #32 / #34 — SHIPPED** by a concurrent session (`08071c7e` model
+    high/low limit alert edits, `21f2d977` the modal UI), wired in
+    `Dashboard.tsx` (`readNotifyEdit` / `saveNotifyEdit`). #32's `triggered`
+    pre-arm lives in `notifyState.ts::limitEditFields`; #34's Flask asymmetry
+    was *decided* (limit temperatures for every probe, Shutdown/Re-ignite
+    actions Primary-only — `ProbeNotifyModal.tsx:158-168`), not blindly ported.
+    Covered by `notifyState.test.ts`, `ProbeNotifyModal.test.tsx`,
+    `Dashboard.test.tsx`, `deriveView.test.ts`, `notify.spec.ts`. The sweep-2
+    label was stale — the code landed while the reconciliation was being written.
+  - **#35 — FIXED 2026-07-29** (`fix(api_commands): convert notify targets on a
+    units change`). `_cmd_set_units` now converts every armed
+    `control["notify_data"]` target via addressed `notify.set` ops, gated on a
+    real unit change, skipping the `target: 0` off-sentinel. Helper
+    `common/common.py::notify_target_conversion_ops`; tests in
+    `tests/unit/common/test_set_units_notify_conversion.py`.
+  - Genuinely still open after this correction: **#5**, **#44**, **#58**,
+    **#67**, **#71**. Full disposition of every finding (incl. accepted
+    divergences and UNCLEAR/browser-only items) is in the audit's *sweep 2* block.
 - **#1 / #2 — RESOLVED by ruling (2026-07-28), not a web-react target.** The QML
   kiosk is the on-device touchscreen UI (a fullscreen Wayland kiosk on the Pi's
   attached screen) and it STAYS; the React app was never going to reimplement

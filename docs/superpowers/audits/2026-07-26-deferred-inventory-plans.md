@@ -40,13 +40,17 @@ several have since gone stale. Current disposition of every remaining finding:
     `test_socketio_app_data.py:349` assert the `os.system` rm is gone.
   - **#70** dashboard hopper → `/pellets` shortcut — SHIPPED: `HopperGauge.tsx`
     renders `<Link to="/pellets">` (the 2026-07-26 ruling).
-- **Confirmed STILL-OPEN (genuine, re-verified against live code):** **#5**
-  (SPA serve — deferred to the Flask-retirement pass by request), **#31** probe
-  High/Low Limit Alerts Slice 2 (backend ready; a React slice), **#32** (rides
-  #31), **#34** (a Flask-asymmetry decision that blocks #31's UI shape), **#35**
-  notify targets not converted on a units change (`convert_settings_units` only
-  touches settings; targets live in `control.notify_data`), **#44** Barlow still
-  loaded from `fonts.googleapis.com` (`web-react/index.html:7-10`), **#58**
+- **Sweep-2 CORRECTION (2026-07-29) — three of the labels below were wrong.**
+  **#31 / #32 / #34 are SHIPPED**, not open: a concurrent session landed Slice 2
+  (`08071c7e`, `21f2d977`) while this reconciliation was being written — full
+  high/low limit alerts in `ProbeNotifyModal`, wired in `Dashboard.tsx`, with
+  #32's `triggered` pre-arm and #34's asymmetry *decided* (limit temps for every
+  probe; Shutdown/Re-ignite actions Primary-only). See items 31/32/34 below.
+  **#35 is FIXED** (2026-07-29): `_cmd_set_units` now converts armed
+  `control["notify_data"]` targets via addressed `notify.set` ops.
+- **Confirmed STILL-OPEN after the correction (genuine, re-verified):** **#5**
+  (SPA serve — deferred to the Flask-retirement pass by request), **#44** Barlow
+  still loaded from `fonts.googleapis.com` (`web-react/index.html:7-10`), **#58**
   recipe *unpause* not ported, **#67** `backup_pellet_db` not called on a React
   "Load New Pellets", **#71** every legacy Flask blueprint still registered
   (`app.py:68-93` — the general Flask-retirement pass, ruling 5).
@@ -349,20 +353,24 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
     - Deferred: the `probe_limit_high` (`condition: equal_above`) and `probe_limit_low`
       (`equal_below`) notify entries — a second pure reducer plus two accordion cards in
       `ProbeNotifyModal`, with per-type asymmetric controls (Shutdown + Attempt Re-ignite).
-    - Status: STILL-OPEN — `web-react/src/helpers/notify/notifyState.ts` exports only
-      `targetRange`/`readTargetEdit`/`targetEditFields`/`saveTargetEdit`; nothing touches
-      `probe_limit_*`. The wire fields exist unread in `helpers/types.ts:25-35`
-      (`highLimitTemp`, `lowLimitReq`, `lowLimitReignite`, `highLimitTriggered`, …).
+    - Status: **SHIPPED** (correction 2026-07-29). A concurrent session landed Slice 2:
+      `08071c7e` (the reducer — `notifyState.ts` now exports `readLimitEdit`/`readNotifyEdit`/
+      `limitEditFields`/`notifyEditUpdates`/`saveNotifyEdit`) and `21f2d977` (the three-section
+      `ProbeNotifyModal`), wired in `Dashboard.tsx` (`readNotifyEdit` :369, `saveNotifyEdit` :142).
+      Covered by `notifyState.test.ts`, `ProbeNotifyModal.test.tsx`, `Dashboard.test.tsx`,
+      `deriveView.test.ts`, `notify.spec.ts`. The STILL-OPEN label was stale on the day it was written.
 
 32. **Slice 2 groundwork: the client must pre-arm `triggered` or the alarm fires instantly**
     - Source: "## Slice 2 groundwork" bullet 2 (line 479).
     - Deferred: on save, set `triggered = current > target` (high) / `current < target` (low), as
       `dash_default.js:721-725, 763-767` does, so `notifications.py:112` stays quiet until the
       temperature leaves and re-enters the range.
-    - Status: STILL-OPEN (rides with #31). Note the plan's claim that Slice 2 is "forced onto
-      `POST /api/control`" is now stale in mechanism: the `notify_updates` op
-      (`helpers/notify/notifyApi.ts:39-70`, `common/control_delta.py`) is the modern path and can carry
-      `triggered`.
+    - Status: **SHIPPED** (correction 2026-07-29, with #31). `limitEditFields`
+      (`notifyState.ts`) computes `triggered = currentTemp >= target` (high) / `<= target` (low)
+      at save time, using the SAME comparison the backend fires on. Pinned by
+      `notifyState.test.ts` ("pre-arms at exactly the limit…") and `notify.spec.ts`
+      ("a high limit the probe has already passed is saved pre-armed"). It uses the modern
+      `notify_updates` op, exactly as this note predicted.
 
 33. **Suspected live Flask/backend bug: high/low-limit "Shutdown PiFire" appears never to fire**
     - Source: "## Slice 2 groundwork → Two live Flask bugs to decide about" item 2 (line 484) —
@@ -381,14 +389,23 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
     - Decision needed: high/low temperature sliders render for every probe, but "Shutdown PiFire"
       (`_macro_dash_default.html:238-244, 284-289`) and "Attempt Re-ignite" (`:290-293`) render only
       for Primary, with JS-enforced mutual exclusion (`:294-308`). Port the asymmetry or normalise it?
-    - Status: STILL-OPEN — no decision recorded anywhere; blocks #31's UI shape.
+    - Status: **DECIDED & SHIPPED** (correction 2026-07-29). The asymmetry was *normalised*, not
+      blindly ported: limit *temperatures* render for every probe, but the Shutdown/Re-ignite
+      *actions* are Primary-only, with a rationale in `ProbeNotifyModal.tsx:158-168` ("only the
+      primary probe measures the fire"). A food probe reading low is cold meat, not a dead fire.
 
 35. **Notify targets are never converted on a temperature-units change**
     - Source: "### Units" (line 115) — "Pre-existing; out of scope; do not 'fix' it here."
     - Detail: `_cmd_set_units` converts *settings* and raises `units_change`;
       `controller.py:346-354` stops the grill and flushes history but never touches `notify_data`.
       A 203 °F target stays the number 203 after switching to °C.
-    - Status: STILL-OPEN — no `notify_data` handling in `common/api_commands.py`'s units path.
+    - Status: **FIXED 2026-07-29**. `_cmd_set_units` (`common/api_commands.py`) now converts every
+      armed `control["notify_data"]` target via addressed `notify.set` ops, built by
+      `common/common.py::notify_target_conversion_ops`. Gated on a REAL unit change (the command
+      raises `units_change` even on a redundant same-unit write, and `convert_temp` assumes its
+      input is in the OTHER unit), and skips the `target: 0` off-sentinel. Tests:
+      `tests/unit/common/test_set_units_notify_conversion.py`. The units golden is untouched —
+      default control carries no armed target, so the writer emits no extra delta.
 
 36. **Accepted divergence: React's modal "Cancel" closes without writing; Flask's wipes the limits**
     - Source: Landmine 7 (line 157) and Task 2 Step 1 (line 280).
