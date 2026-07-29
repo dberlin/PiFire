@@ -87,3 +87,47 @@ def update_log():
 def update_status():
     percent, status, output = get_updater_install_status()
     return _ok({"percent": percent, "status": status, "output": output})
+
+
+@api_update_bp.route("/branches/refresh", methods=["POST"])
+def update_branches_refresh():
+    settings = read_settings()
+    set_updater_install_status(0, "Refreshing remote branches...", "")
+    _fire(settings, f"{_python_exec(settings)} updater.py -r &")
+    return _ok({"started": True})
+
+
+@api_update_bp.route("/branch", methods=["POST"])
+def update_branch():
+    settings = read_settings()
+    body = request.get_json(silent=True) or {}
+    target = body.get("target")
+    branches = get_update_data(settings)["branches"]
+    if target not in branches:
+        return _error("invalid_branch", 400, branches=branches)
+    set_updater_install_status(0, "Starting Branch Change...", "")
+    _fire(settings, f"{_python_exec(settings)} updater.py -b {target} &")
+    return _ok({"started": True})
+
+
+@api_update_bp.route("/pull", methods=["POST"])
+def update_pull():
+    settings = read_settings()
+    if read_control().get("mode") != Mode.STOP:
+        return _error("system_active", 409)
+    branch, error_msg = get_branch()
+    if error_msg:
+        return _error(error_msg, 502)
+    set_updater_install_status(0, "Starting Update...", "")
+    _fire(settings, f"{_python_exec(settings)} updater.py -u {branch} -p &")
+    return _ok({"started": True})
+
+
+@api_update_bp.route("/upgrade", methods=["POST"])
+def update_upgrade():
+    settings = read_settings()
+    if read_control().get("mode") != Mode.STOP:
+        return _error("system_active", 409)
+    set_updater_install_status(0, "Starting Upgrade...", "")
+    _fire(settings, f"{_python_exec(settings)} updater.py -i &")
+    return _ok({"started": True})
