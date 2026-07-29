@@ -92,4 +92,36 @@ describe("UpdatePage", () => {
     fireEvent.click(screen.getByRole("button", { name: /show log/i }));
     expect(await screen.findByText(/abc123 fix/)).toBeInTheDocument();
   });
+
+  it("polls status after a mutation starts and reports completion", async () => {
+    seed({ upgradeDeps: { ok: true, status: 200, message: "", data: { started: true } } });
+    let calls = 0;
+    (api.fetchUpdateStatus as ReturnType<typeof rs.fn>).mockImplementation(async () => {
+      calls += 1;
+      return {
+        ok: true,
+        status: 200,
+        message: "",
+        data: { percent: calls < 2 ? 40 : 101, status: "Working", output: "line" },
+      };
+    });
+    renderPage();
+    await screen.findByText(/v1\.8\.0/);
+    fireEvent.click(screen.getByRole("button", { name: /upgrade dependencies/i }));
+    expect(await screen.findByText(/complete/i)).toBeInTheDocument();
+  });
+
+  it("shows a reboot notice when the run ends at 142", async () => {
+    seed({ upgradeDeps: { ok: true, status: 200, message: "", data: { started: true } } });
+    (api.fetchUpdateStatus as ReturnType<typeof rs.fn>).mockResolvedValue({
+      ok: true,
+      status: 200,
+      message: "",
+      data: { percent: 142, status: "Done", output: "" },
+    });
+    renderPage();
+    await screen.findByText(/v1\.8\.0/);
+    fireEvent.click(screen.getByRole("button", { name: /upgrade dependencies/i }));
+    expect(await screen.findByText(/reboot/i)).toBeInTheDocument();
+  });
 });

@@ -10,3 +10,8 @@
   max-height: 20rem;
   font-family: monospace;
 }
+
+.pf-update-progress {
+  @apply bg-accent rounded;
+  height: 0.5rem;
+}
