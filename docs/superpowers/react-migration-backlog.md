@@ -1035,11 +1035,16 @@ their audit number:
   consumes `prepare_chartdata` at `data_points=10000` with LTTB's per-series
   union possibly exceeding it; no cap is warranted until the slow page is
   actually observed. No code change.
-- **Still genuinely open, each its own slice:** **#5** Flask serves no React
-  build (no SPA catch-all / `send_from_directory` in `app.py`) — the whole
-  deployment path; **#17** the WLED preset/profile grid editor
-  (`NotificationsTab.tsx` round-trips the subtree but renders only
-  `enabled`/`device_address`/`notify_duration`).
+- **#17 — SHIPPED 2026-07-28.** The WLED preset/profile editor is built:
+  `WledCard.tsx` (`components/settings/tabs/notifications/`) renders the two mode
+  toggles, the suggested-config block, and the 12-row `profile_numbers` grid, and
+  wires the three action buttons (Discover pick-list, Push Profiles, Test Profile)
+  through `helpers/notify/wledApi.ts` to the existing `/api/wled_*` endpoints. Full
+  parity with Flask's WLED card; `mode_presets`/`event_presets` are preserved on
+  Save but not rendered (zero Flask UI — parity boundary). Spec/plan:
+  `specs/2026-07-28-react-wled-editor-design.md`, `plans/2026-07-28-react-wled-editor.md`.
+- **Still genuinely open, its own slice:** **#5** Flask serves no React build (no
+  SPA catch-all / `send_from_directory` in `app.py`) — the whole deployment path.
 - **#1 / #2 — RESOLVED by ruling (2026-07-28), not a web-react target.** The QML
   kiosk is the on-device touchscreen UI (a fullscreen Wayland kiosk on the Pi's
   attached screen) and it STAYS; the React app was never going to reimplement
@@ -1079,9 +1084,11 @@ its own slice when scheduled).
   React does not.
 - `global_control_panel` neither read nor offered: no way to stop the grill
   from anywhere but the dashboard.
-- WLED preset/profile grids (backend and schema are already ready).
+- ~~WLED preset/profile grids (backend and schema are already ready).~~ SHIPPED
+  2026-07-28 (#17) — see the reconciliation above.
 - OneSignal: no "add device"; `uuid`/`app_id` not editable.
-- "Send Test Notification" and all three WLED action buttons.
+- "Send Test Notification" (Apprise/OneSignal test). ~~All three WLED action
+  buttons~~ SHIPPED 2026-07-28 (#17): Discover, Push Profiles, Test Profile.
 - PlatformTab is read-only — no React editor for `platform.*`.
 - ~~QML kiosk screens (Splash, Menu, Keypad, Hold/Notify overlays, QR, Sleep).~~
   **RULED 2026-07-28 (ruling 8): NOT a web-react target.** The QML kiosk is the
