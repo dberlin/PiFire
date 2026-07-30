@@ -313,11 +313,11 @@ def test_read_all_ports_skips_unmapped_port_and_applies_time_delay(monkeypatch):
 class _FixedKalman:
     """Stub replacing TempKalman so apply_filters' output/logging is deterministic."""
 
-    def __init__(self, output, x, v, gated=False, none_streak=0):
+    def __init__(self, output, x, v, outlier=False, none_streak=0):
         self.output = output
         self.x = x
         self.v = v
-        self.gated = gated
+        self.outlier = outlier
         self.none_streak = none_streak
 
     def update(self, raw):
@@ -341,7 +341,7 @@ def test_apply_filters_updates_output_and_dedups_debug_log(caplog):
     device_info = _device_info(["P1"])
     probe_info = [_probe("P1", "Primary1", "Primary")]
     obj = _make_probe(probe_info, device_info)
-    obj.port_filters["P1"] = _FixedKalman(output=200.5, x=200.5, v=0.1, gated=False, none_streak=0)
+    obj.port_filters["P1"] = _FixedKalman(output=200.5, x=200.5, v=0.1, outlier=False, none_streak=0)
     data = {"primary": {"Primary1": 199.9}, "food": {}, "aux": {}}
 
     with caplog.at_level(logging.DEBUG, logger="control"):

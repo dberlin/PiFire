@@ -4,17 +4,36 @@
 Constant-velocity Kalman filter for smoothing probe temperature readings.
 
 Estimates both temperature and its rate of change, so it tracks ramps with
-little lag while smoothing noise. Applied centrally to every probe module's
-output in ProbesMain.read_probes() via ProbeInterface.apply_filters().
+little lag while smoothing noise. A Hampel prefilter drops outliers before they
+reach the estimator. Applied centrally to every probe module's output in
+ProbesMain.read_probes() via ProbeInterface.apply_filters().
 """
 
+import statistics
 import time
 
 # Tuning constants selected by units at construction.
-#   R    : measurement variance (sensor noise squared)
-#   q    : white-acceleration process-noise spectral density
-#   gate : reject readings farther than this many sigma from the prediction
-_TUNING = {"F": {"R": 4.0, "q": 0.5, "gate": 5.0}, "C": {"R": 1.25, "q": 0.15, "gate": 5.0}}
+#   R         : measurement variance (sensor noise squared)
+#   q         : white-acceleration process-noise spectral density
+#   mad_floor : smallest spread the outlier test will assume, so a sensor that
+#               reads perfectly steady (a median absolute deviation of zero)
+#               does not go on to reject every reading that follows
+_TUNING = {
+    "F": {"R": 4.0, "q": 0.5, "mad_floor": 0.5},
+    "C": {"R": 1.25, "q": 0.15, "mad_floor": 0.28},
+}
+
+# Outlier rejection. A reading further than _HAMPEL_SIGMAS robust sigmas from
+# the median of its window is replaced by that median. The window length sets
+# both halves of the trade at once: it absorbs up to (_HAMPEL_WINDOW - 1) // 2
+# consecutive bad samples, and admits a change that persists for
+# (_HAMPEL_WINDOW + 1) // 2 samples. Judging a reading against its neighbours
+# rather than against the estimate is what keeps a real jump from being
+# suppressed indefinitely -- the window fills with the new level and the median
+# follows it, whichever way the estimate happens to be pointing.
+_HAMPEL_WINDOW = 11
+_HAMPEL_SIGMAS = 3.0
+_MAD_TO_SIGMA = 1.4826
 
 _DT_MIN = 0.01
 _DT_MAX = 1.0
@@ -27,7 +46,7 @@ class TempKalman:
         self.units = units
         self.R = tuning["R"]
         self.q = tuning["q"]
-        self.gate2 = tuning["gate"] ** 2
+        self.mad_floor = tuning["mad_floor"]
         self.reset()
 
     def reset(self):
@@ -36,7 +55,27 @@ class TempKalman:
         self.P = [[self.R, 0.0], [0.0, self.R]]
         self.last_time = None
         self.none_streak = 0
-        self.gated = False  # True if the last reading was rejected by the gate (debug)
+        self.window = []  # recent raw readings, for the Hampel test
+        self.outlier = False  # True if the last reading was replaced (debug)
+
+    def _prefilter(self, reading):
+        """Replace a reading that disagrees with its neighbours by the median of
+        the window, so a glitch never reaches the estimator. Readings pass
+        through untested until the window fills, which costs the first
+        _HAMPEL_WINDOW samples after a start or a reset."""
+        self.window.append(reading)
+        if len(self.window) > _HAMPEL_WINDOW:
+            self.window.pop(0)
+        if len(self.window) < _HAMPEL_WINDOW:
+            return reading
+
+        median = statistics.median(self.window)
+        mad = statistics.median([abs(w - median) for w in self.window])
+        spread = max(_MAD_TO_SIGMA * mad, self.mad_floor)
+        if abs(reading - median) > _HAMPEL_SIGMAS * spread:
+            self.outlier = True
+            return median
+        return reading
 
     def update(self, reading, now=None):
         if reading is None:
@@ -46,13 +85,14 @@ class TempKalman:
             return None
 
         self.none_streak = 0
-        self.gated = False
+        self.outlier = False
         if now is None:
             now = time.monotonic()
+        reading = self._prefilter(float(reading))
 
         # First valid reading (fresh or post-reset): initialize, don't predict.
         if self.x is None or self.last_time is None:
-            self.x = float(reading)
+            self.x = reading
             self.v = 0.0
             self.P = [[self.R, 0.0], [0.0, self.R]]
             self.last_time = now
@@ -80,18 +120,9 @@ class TempKalman:
         p10 += self.q * dt3 / 2.0
         p11 += self.q * dt2
 
-        # --- Gate: reject readings too far from the prediction ---
-        # The gate cannot latch open: on a reject we keep the predicted P (grown
-        # by Q), so s grows and the next reading's y^2/s shrinks -- a sustained
-        # real change is admitted within a sample or two.
+        # --- Update (measure temperature only, H = [1, 0]) ---
         y = reading - self.x
         s = p00 + self.R
-        if (y * y) / s > self.gate2:
-            self.gated = True
-            self.P = [[p00, p01], [p10, p11]]
-            return round(self.x, 1)
-
-        # --- Update (measure temperature only, H = [1, 0]) ---
         k0 = p00 / s
         k1 = p10 / s
         self.x += k0 * y

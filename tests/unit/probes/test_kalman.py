@@ -80,6 +80,64 @@ def test_rejects_single_spike():
     assert abs(after - before) < 1.0
 
 
+def test_absorbs_a_burst_of_consecutive_glitches():
+    """Outlier rejection has to survive a run of bad samples, not just one: the
+    window absorbs up to half its length, so five in a row must not move the
+    output. This is the property being traded for prompt admission of real
+    changes, so it is pinned rather than assumed."""
+    kf = TempKalman(units="F")
+    _, t = _feed_constant(kf, 250.0, steps=40)
+    for _ in range(5):
+        t += 0.05
+        out = kf.update(850.0, now=t)
+    assert abs(out - 250.0) < 2.0, f"burst dragged output to {out}"
+
+
+def test_admits_a_sustained_step_within_a_few_seconds():
+    """A probe moved between foods, or reseated, steps by tens of degrees in one
+    sample. The filter must reach the new level promptly rather than treating a
+    change that persists as an outlier."""
+    rng = random.Random(3)
+    kf = TempKalman(units="F")
+    t = 0.0
+    for _ in range(400):
+        t += 0.05
+        kf.update(250.0 + rng.gauss(0, 2.0), now=t)
+
+    settled = None
+    for i in range(400):  # up to 20 s
+        t += 0.05
+        out = kf.update(200.0 + rng.gauss(0, 2.0), now=t)
+        if abs(out - 200.0) < 2.0:
+            settled = i
+            break
+    assert settled is not None and settled < 60, f"settled after {settled} samples"
+
+
+def test_tracks_a_fast_sustained_ramp():
+    """A probe pushed into hot food climbs far faster than a pit ramp. Trailing
+    it while the rate estimate spins up is expected; stalling at the old
+    temperature with a rate estimate stuck near zero is not."""
+    rng = random.Random(4)
+    kf = TempKalman(units="F")
+    t = 0.0
+    for _ in range(400):
+        t += 0.05
+        kf.update(250.0 + rng.gauss(0, 2.0), now=t)
+
+    worst, final = 0.0, 0.0
+    for i in range(100):  # 5 s at 20 F/s
+        t += 0.05
+        truth = 250.0 + 20.0 * (i + 1) * 0.05
+        out = kf.update(truth + rng.gauss(0, 2.0), now=t)
+        worst = max(worst, abs(out - truth))
+        final = abs(out - truth)
+
+    assert kf.v > 17.0, f"rate estimate {kf.v:.1f} F/s never caught the 20 F/s ramp"
+    assert final < 10.0, f"still {final:.1f} F behind after 5 s"
+    assert worst < 20.0, f"worst tracking error {worst:.1f} F"
+
+
 def test_none_reading_returns_none():
     kf = TempKalman(units="F")
     kf.update(250.0, now=0.05)

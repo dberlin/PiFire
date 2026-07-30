@@ -378,7 +378,7 @@ class ProbeInterface:
                 msg = (
                     f"Kalman[{label}] raw={raw} output={output_value} "
                     f"est={round(kalman.x, 2) if kalman.x is not None else None} "
-                    f"rate={round(kalman.v, 3)}/s gated={kalman.gated} none_streak={kalman.none_streak}"
+                    f"rate={round(kalman.v, 3)}/s outlier={kalman.outlier} none_streak={kalman.none_streak}"
                 )
                 if msg != self._last_kalman_log.get(port):
                     self.logger.debug(msg)

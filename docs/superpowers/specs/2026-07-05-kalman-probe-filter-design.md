@@ -1,5 +1,10 @@
 # Constant-velocity Kalman probe filter
 
+> The innovation gate described below was replaced by a Hampel prefilter on
+> 2026-07-30 -- it froze the output for ~19 s on a real 50 F step. See
+> [2026-07-30-hampel-prefilter-design.md](2026-07-30-hampel-prefilter-design.md).
+> The constant-velocity estimator chosen here is unchanged.
+
 ## Problem
 
 Probe temperatures on the dashboard/history appear to "jump" rather than move
