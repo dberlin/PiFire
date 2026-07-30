@@ -117,7 +117,13 @@ class _DistanceDeviceConfig(_Section):
     trig: int = 23
     i2c_bus_kind: str = "basic"
     i2c_bus_num: str = "CP2112"
-    address: int | None = None
+    # Optional I2C address override. distance/_tof_base.py accepts a hex
+    # string ("0x29"), a plain int, or None (fall back to the driver's
+    # default_address), and the wizard writes the hex-string form -- so an
+    # int-only annotation here rejects every real configured value, and with
+    # it every subsequent settings write (the gate below only repairs
+    # unmodeled keys, never a wrong type). Matches _FanControllerConfig.address.
+    address: str | int | None = None
     device: str = "/dev/ttyACM0"
 
 
@@ -660,6 +666,51 @@ def validate_partial_settings(delta: dict) -> list[str]:
     return []
 
 
+#: Settings that were RENAMED rather than removed, as
+#: {old dotted path: new dotted path}. The repair gate below strips every
+#: unmodeled key, which for a rename would silently discard the user's
+#: configured value; carrying it across first makes repair lossless.
+#: `upgrade_settings()` cannot do this job -- it is gated on `prev_ver`, so it
+#: never fires for an install already sitting on the current version, which is
+#: exactly where an un-migrated rename strands the old key.
+_RENAMED_SETTINGS = {
+    "globals.page_theme": "globals.bootstrap_page_theme",
+}
+
+
+def _carry_renamed_keys(tree: dict) -> list[tuple[str, str]]:
+    """Move each `_RENAMED_SETTINGS` value to its new path, in place.
+
+    Only fills a destination that is absent or None -- a value already written
+    under the new name wins over the stale one. Returns the (old, new) pairs
+    actually carried, for logging. Caller passes a COPY (see
+    validate_settings_tree); this mutates `tree` directly.
+    """
+    carried = []
+    for old_path, new_path in _RENAMED_SETTINGS.items():
+        *old_parents, old_key = old_path.split(".")
+        *new_parents, new_key = new_path.split(".")
+        src = tree
+        for part in old_parents:
+            src = src.get(part) if isinstance(src, dict) else None
+            if not isinstance(src, dict):
+                break
+        if not isinstance(src, dict) or old_key not in src:
+            continue
+        value = src.pop(old_key)
+        dst = tree
+        for part in new_parents:
+            dst = dst.get(part) if isinstance(dst, dict) else None
+            if not isinstance(dst, dict):
+                break
+        if not isinstance(dst, dict):
+            continue
+        if dst.get(new_key) is None:
+            dst[new_key] = value
+            carried.append((old_path, new_path))
+    return carried
+
+
 def _strip_error_locs(tree: dict, errors: list[ErrorDetails]) -> None:
     """Delete each error's `loc` path from `tree` in place.
 
@@ -669,13 +720,20 @@ def _strip_error_locs(tree: dict, errors: list[ErrorDetails]) -> None:
     is always a plain string key in a dict reachable by walking `loc[:-1]`
     through `tree`. Caller is responsible for passing a COPY of the real
     input (see validate_settings_tree) -- this mutates `tree` directly.
+
+    Tolerant of an already-absent path: `_carry_renamed_keys()` runs first and
+    pops the old name of any renamed setting, so that key's `extra_forbidden`
+    error is still in `errors` but no longer in `tree`.
     """
     for err in errors:
         loc = err["loc"]
         cur = tree
         for part in loc[:-1]:
-            cur = cur[part]
-        del cur[loc[-1]]
+            cur = cur.get(part) if isinstance(cur, dict) else None
+            if not isinstance(cur, dict):
+                break
+        if isinstance(cur, dict):
+            cur.pop(loc[-1], None)
 
 
 def validate_settings_tree(settings: dict) -> dict:
@@ -712,6 +770,7 @@ def validate_settings_tree(settings: dict) -> dict:
             raise SettingsValidationError(format_validation_errors(exc)) from exc
 
         repaired = copy.deepcopy(settings)
+        carried = _carry_renamed_keys(repaired)
         _strip_error_locs(repaired, errors)
 
         try:
@@ -719,8 +778,13 @@ def validate_settings_tree(settings: dict) -> dict:
         except ValidationError as retry_exc:
             raise SettingsValidationError(format_validation_errors(retry_exc)) from retry_exc
 
+        carried_olds = {old for old, _ in carried}
+        for old_path, new_path in carried:
+            write_log(f"settings: carried renamed key '{old_path}' -> '{new_path}' during write-time repair")
         for err in errors:
             dotted = ".".join(str(part) for part in err["loc"])
+            if dotted in carried_olds:
+                continue
             write_log(f"settings: stripped unmodeled key '{dotted}' during write-time repair (was: {err['msg']})")
     # by_alias=True: platform.system.one_wire must dump back out as "1WIRE"
     # (its defaults.py/on-disk key) -- see the alias comment on _SystemConfig.

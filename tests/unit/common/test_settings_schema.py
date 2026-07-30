@@ -733,3 +733,101 @@ def test_repair_does_not_mask_real_error_when_extra_key_in_different_section(_ca
         validate_settings_tree(s)
     assert any("startup.pwm_duty_cycle must be within" in m for m in ei.value.errors)
     assert _captured_write_log == []
+
+
+# ---------------------------------------------------------------------------
+# platform.devices.distance.address: the wizard writes a HEX STRING ("0x29")
+# and distance/_tof_base.py accepts str | int | None. An int-only annotation
+# here rejected every real configured value -- and because a wrong TYPE is not
+# an extra_forbidden error, the repair gate above correctly refused to touch
+# it, so the failure escalated to "every settings write on the install 500s".
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("address", ["0x29", "0x2f", 41, None])
+def test_distance_address_accepts_every_form_the_tof_driver_reads(address, _captured_write_log):
+    s = default_settings()
+    s["platform"]["devices"]["distance"]["address"] = address
+    out = validate_settings_tree(s)
+    assert out["platform"]["devices"]["distance"]["address"] == address
+    assert _captured_write_log == []
+
+
+def test_distance_address_rejects_a_type_the_driver_cannot_read(_captured_write_log):
+    s = default_settings()
+    s["platform"]["devices"]["distance"]["address"] = 41.5
+    with pytest.raises(SettingsValidationError) as ei:
+        validate_settings_tree(s)
+    assert any("platform.devices.distance.address" in m for m in ei.value.errors)
+
+
+# ---------------------------------------------------------------------------
+# Renamed settings. The repair gate strips unmodeled keys, which for a RENAME
+# would discard the user's configured value. _carry_renamed_keys() moves it to
+# the new name first, so repair stays lossless.
+# ---------------------------------------------------------------------------
+
+
+def test_repair_carries_renamed_key_preserving_the_users_value(_captured_write_log):
+    s = default_settings()
+    s["globals"].pop("bootstrap_page_theme", None)
+    s["globals"]["page_theme"] = "dark"  # the pre-rename name, still holding the value
+
+    out = validate_settings_tree(s)
+
+    assert out["globals"]["bootstrap_page_theme"] == "dark"
+    assert "page_theme" not in out["globals"]
+    # Logged as a carry, not as a silent strip.
+    assert len(_captured_write_log) == 1
+    assert "carried renamed key" in _captured_write_log[0]
+    assert "globals.page_theme" in _captured_write_log[0]
+    assert "globals.bootstrap_page_theme" in _captured_write_log[0]
+
+
+def test_repair_rename_does_not_clobber_a_value_already_under_the_new_name(_captured_write_log):
+    s = default_settings()
+    s["globals"]["bootstrap_page_theme"] = "dark"  # already migrated
+    s["globals"]["page_theme"] = "light"  # stale leftover
+
+    out = validate_settings_tree(s)
+
+    assert out["globals"]["bootstrap_page_theme"] == "dark"
+    assert "page_theme" not in out["globals"]
+    # Nothing was carried, so the stale key is reported as an ordinary strip.
+    assert len(_captured_write_log) == 1
+    assert "stripped unmodeled key" in _captured_write_log[0]
+
+
+def test_repair_leaves_the_callers_tree_unmutated_when_carrying(_captured_write_log):
+    s = default_settings()
+    s["globals"].pop("bootstrap_page_theme", None)
+    s["globals"]["page_theme"] = "dark"
+    original = copy.deepcopy(s)
+
+    validate_settings_tree(s)
+
+    assert s == original
+
+
+def test_live_install_shape_validates_end_to_end(_captured_write_log):
+    """The exact combination found on a real install: two settings deleted from
+    the schema, one renamed without a migration, one dead unmodeled section,
+    and a correctly-configured hex I2C address. Every settings write on that
+    install failed until the address annotation was widened -- the dead keys
+    alone were always repairable, but the address type error vetoed the repair.
+    """
+    s = default_settings()
+    s["globals"].pop("bootstrap_page_theme", None)
+    s["globals"]["page_theme"] = "dark"
+    s["globals"]["global_control_panel"] = False
+    s["platform"]["emc2301"] = {"address": "0x2f", "i2c_bus_kind": "basic", "i2c_bus_num": 1}
+    s["platform"]["devices"]["distance"]["address"] = "0x29"
+    s["platform"]["fan_controller"]["address"] = "0x2f"
+
+    out = validate_settings_tree(s)
+
+    assert out["globals"]["bootstrap_page_theme"] == "dark"  # carried, not lost
+    assert "global_control_panel" not in out["globals"]  # stripped
+    assert "emc2301" not in out["platform"]  # stripped
+    assert out["platform"]["devices"]["distance"]["address"] == "0x29"  # kept
+    assert out["platform"]["fan_controller"]["address"] == "0x2f"  # kept
