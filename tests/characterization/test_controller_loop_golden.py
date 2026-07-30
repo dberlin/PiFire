@@ -644,3 +644,82 @@ def test_tick_tolerates_a_control_blob_without_the_new_flag(monkeypatch):
     c.setup()
     c.tick()  # must not raise
     assert ctx.devices.probe_complex.update_probe_map_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Which sessions earn a cook file.
+#
+# The Stop branch used to ask "was the LAST metric's mode Prime?" and archive
+# whenever the answer was no -- a test for one specific non-cook rather than a
+# test for a cook. A Monitor session -- temperatures watched, nothing ever lit
+# -- answered "no" and wrote a full .pifire on its way out: toggling Monitor on
+# and off twice left two of them in ./history/, the second suffixed "-1"
+# because the first already existed.
+#
+# The trap in fixing it is that create_cookfile() ends with flush_history()
+# (which clears metrics and current as well), so simply not calling it also
+# stops the session being cleared -- and a Monitor session would then bleed its
+# temperatures into the chart of the next real cook. Each test below therefore
+# asserts BOTH halves: whether a file was written, and whether the session was
+# flushed.
+# ---------------------------------------------------------------------------
+
+
+def _stop_after(monkeypatch, modes):
+    """Run one Stop tick for a session that recorded `modes`, in order."""
+    sent = _neutralize_externals(monkeypatch)
+    control_data = base_control(mode="Stop")
+    control_data["updated"] = True
+    c, ctx, store, grill, dist, notifier = make_controller(base_settings(), control_data, base_pellet_db())
+    for mode in modes:
+        store.append_metric(dict(default_metrics(), mode=mode))
+    store.write_history({"probe": 225})
+    _spy_dispatch(c)
+    c.setup()
+    c.tick()
+    archived = ("create_cookfile",) in sent
+    return archived, store
+
+
+def test_a_monitor_only_session_is_not_archived_but_is_still_flushed(monkeypatch):
+    archived, store = _stop_after(monkeypatch, ["Monitor"])
+    assert not archived, "watching temperatures is not a cook and must not write a .pifire"
+    assert store.read_history() == [], (
+        "the session was not flushed -- create_cookfile() is what normally flushes, so "
+        "skipping it must not also skip the flush, or Monitor's temperatures ride into "
+        "the next real cook's chart"
+    )
+    assert store.read_all_metrics() == []
+
+
+def test_a_real_cook_is_archived(monkeypatch):
+    archived, _store = _stop_after(monkeypatch, ["Startup", "Smoke", "Hold"])
+    assert archived
+
+
+def test_a_cook_that_ends_in_monitor_is_still_archived(monkeypatch):
+    # Regression guard, not a bug proof: the old last-mode test archived this
+    # one correctly too (Monitor != Prime). It is here because the new test
+    # looks at the whole session, and "any cook mode present" must not become
+    # "the last mode must be a cook mode" in some later edit.
+    archived, _store = _stop_after(monkeypatch, ["Startup", "Smoke", "Hold", "Monitor"])
+    assert archived
+
+
+def test_a_monitor_session_before_a_cook_does_not_suppress_the_archive(monkeypatch):
+    archived, _store = _stop_after(monkeypatch, ["Monitor", "Startup", "Smoke"])
+    assert archived
+
+
+def test_a_prime_only_session_keeps_its_carry_over(monkeypatch):
+    # "Prime, then start up" is deliberately ONE session: Prime is neither
+    # archived nor flushed, so its history joins the cook that follows.
+    archived, store = _stop_after(monkeypatch, ["Prime"])
+    assert not archived
+    assert store.read_history() != [], "Prime's carry-over into the following cook was dropped"
+
+
+def test_manual_counts_as_a_cook(monkeypatch):
+    # Manual drives the relays directly -- it can absolutely be a cook.
+    archived, _store = _stop_after(monkeypatch, ["Manual"])
+    assert archived

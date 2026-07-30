@@ -24,7 +24,7 @@ import os
 
 from common.common import WriteKind
 from common.defaults import default_control
-from common.modes import Mode, StatusState
+from common.modes import COOK_MODES, Mode, StatusState
 from notify.notifications import check_notify, send_notifications
 from file_mgmt.cookfile import create_cookfile
 from file_mgmt.recipes import convert_recipe_units
@@ -427,7 +427,15 @@ class Controller:
                     metrics = store.read_metrics()
                     metrics["mode"] = Mode.STOP
                     store.update_metrics(metrics)
-                    if metrics_list[-1]["mode"] != Mode.PRIME:
+                    # Archive the session only if a cook actually happened.
+                    # This used to ask "was the LAST mode Prime?", which is a
+                    # test for one specific non-cook rather than for a cook: a
+                    # Monitor session -- temperatures watched, nothing ever lit
+                    # -- answered "no" and wrote a full .pifire on its way out.
+                    # Ask what the session CONTAINED instead, which also stops
+                    # the verdict depending on which mode happened to be last.
+                    cooked = any(entry.get("mode") in COOK_MODES for entry in metrics_list)
+                    if cooked:
                         # A failed cookfile write must not take down grill control --
                         # on a real grill an uncaught exception here kills the whole
                         # control loop and crash-loops the controller at every
@@ -452,6 +460,19 @@ class Controller:
                             errors = store.read_errors()
                             errors.append("Cook file could not be created — see Logs")
                             store.write_errors(errors)
+                    elif metrics_list[-1].get("mode") != Mode.PRIME:
+                        # Nothing worth archiving, but the session's history and
+                        # metrics still have to go: create_cookfile() ends with
+                        # flush_history() (which clears metrics and current
+                        # too), so skipping the archive silently skips the flush
+                        # as well, and a Monitor session would bleed its
+                        # temperatures into the chart of the next real cook.
+                        #
+                        # Prime keeps its long-standing carry-over -- the whole
+                        # point of "prime, then start up" is that the two are
+                        # one session -- so it is the one case that is
+                        # deliberately NOT flushed here.
+                        store.flush_history()
 
                 self.status["p_mode"] = 0
                 self.status["mode"] = Mode.STOP
