@@ -1164,10 +1164,36 @@ tests).
   `drain_warnings()` (the read-and-burn accessors this gap was originally
   filed against) are retired, along with the Valkey-era `scenario_warnings`
   oracle fixture and its now-meaningless drain/clear-parity test.
-- **Pre-existing e2e baseline drift (NOT from this pass).** `web-react` e2e
-  `fidelity-pages` has 6 pixel/geometry baseline failures for admin/settings/wizard
-  pages, introduced by earlier commits (`9620bb6c`, `a5225a3c`); this pass changes
-  no `web-react/src`, so they predate it. Needs a baseline refresh, separately.
+- ~~**Pre-existing e2e baseline drift.**~~ **RESOLVED 2026-07-29.** `fidelity-pages`
+  was 106 passed / 6 failed; it is now **112 passed**. Each failure was diagnosed
+  to an *intended* change that landed after its baseline was captured — no
+  regression was hiding in the set, which is why the baselines were recaptured
+  rather than the code changed:
+  - **`b5bf2631` self-hosted Barlow (#44)** is the newest commit of the set and the
+    unifying cause of every `+14`/`+20px` height shift (`settings-probes-390`,
+    `wizard-probes-390`). The baselines were captured while Barlow came over the
+    network; self-hosting changed which font actually rendered, so text-driven
+    boxes changed size. This is why `wizard-probes` drifted even though nothing
+    under `src/components/wizard` had changed since its baseline — the cause was a
+    shared font, not the page.
+  - **`489a4231` added `SystemUpdateCard` to `/admin`** — the x-coordinates cycling
+    `33 → 158 → 282 → 33` is one card entering a grid and shifting every sibling a
+    slot.
+  - **`ce3106cf` added the WLED profile grid** to the notifications tab — the
+    `+522px` on `.pf-section#7` and ~2500 net-new landmark lines.
+
+  Recapture was scoped with `--grep` so passing baselines were not silently moved.
+  Two that were recaptured — `settings-probes-1280x720` and `wizard-probes-1280x720`
+  — came back **byte-identical**, which is the evidence that the capture is
+  deterministic and the diffs above are real signal rather than noise. Verified
+  green twice, and `fidelity`/`reflow`/`panel`/`fidelity-chrome` all still pass.
+
+  **Recapture procedure**, for the next time an intended change moves a landmark:
+  `PF_CAPTURE=1 bunx playwright test --project=fidelity-pages --grep '<page names>'`,
+  then confirm `jj diff --summary` lists only the baselines you expected, and that
+  any recaptured-but-passing baseline is unchanged. Diagnose *before* recapturing:
+  a baseline refresh that has not been traced to an intended change will happily
+  bake in a regression.
 
 - **#1 / #2 — RESOLVED by ruling (2026-07-28), not a web-react target.** The QML
   kiosk is the on-device touchscreen UI (a fullscreen Wayland kiosk on the Pi's

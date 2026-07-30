@@ -50,9 +50,11 @@ async function settle(page: Page): Promise<void> {
 // The fidelity gate for every REST-fed surface, at both viewports.
 //
 // Deliberately NOT a toHaveScreenshot() gate, and it must not be "upgraded"
-// into one: index.html loads Barlow from fonts.googleapis.com, so pixels depend
-// on the network and the host font stack, and masking the volatile regions
-// would mask exactly the typography the gate exists to protect.
+// into one: pixels still depend on the host's rasteriser and on the fallback
+// stack behind Barlow, and masking the volatile regions would mask exactly the
+// typography the gate exists to protect. (Barlow itself is self-hosted via
+// @fontsource -- see index.html -- so it no longer depends on the network. What
+// remains host-dependent is how glyphs rasterise, not which font loads.)
 //
 // What it records instead, per landmark: the box (x/y/w/h relative to the
 // page's root, +/-2px), the type (fontSize/fontWeight, exact), and 32 computed
