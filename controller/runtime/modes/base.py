@@ -17,6 +17,7 @@ from common.common import WriteKind
 from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
 from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
+from controller.runtime.heartbeat import stamp_control_heartbeat
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
@@ -642,6 +643,8 @@ class ControlMode:
         # ============ Main Work Cycle ============
         while status == "Active":
             now = ctx.clock.now()
+
+            stamp_control_heartbeat(ctx)
 
             ctx.store.execute_control_writes()
             control = ctx.store.read_control()

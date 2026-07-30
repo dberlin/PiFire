@@ -656,6 +656,12 @@ def _is_output_for(entry, requested):
         return False
 
 
+#: How long to wait between peeks at queue_systemo. Small enough that a
+#: prompt answer is still picked up promptly, large enough that a full
+#: timeout costs ~40 SELECTs instead of tens of thousands.
+_SYSTEM_OUTPUT_POLL_INTERVAL = 0.025
+
+
 def get_system_command_output(requested="supported_commands", timeout=1):
     """Wait (up to `timeout` seconds) for the control process's answer to `requested`.
 
@@ -671,6 +677,14 @@ def get_system_command_output(requested="supported_commands", timeout=1):
     returned the "could not be found" envelope for a command the control
     process had actually answered. Entries that are not ours are now left
     where they are.
+
+    The wait between peeks is a real sleep. It used to be a bare `continue`,
+    which spun this loop as fast as the interpreter would go -- and since the
+    peek is a SQLite SELECT, that meant hammering the datastore with queries
+    for the whole timeout, on the same database the control loop is using to
+    time the auger and the igniter. Whenever the control process was slow or
+    down (exactly when this function runs out its full timeout) the web process
+    answered by making it slower.
     """
     system_output = SqliteQueue("queue_systemo")
     endtime = timeout + time.time()
@@ -679,6 +693,7 @@ def get_system_command_output(requested="supported_commands", timeout=1):
         # (the common case while waiting) the queue is left completely
         # undisturbed, rather than being churned pop-by-pop every iteration.
         if not any(_is_output_for(entry, requested) for entry in system_output.list()):
+            time.sleep(_SYSTEM_OUTPUT_POLL_INTERVAL)
             continue
         # SqliteQueue is pop-from-head only, so reach our entry by popping the
         # ones ahead of it and pushing them back, preserving their order.

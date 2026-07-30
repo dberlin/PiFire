@@ -33,6 +33,7 @@ from os.path import exists
 
 from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 
+from controller.runtime.heartbeat import stamp_control_heartbeat
 from controller.runtime.state import WorkCycleState
 from controller.runtime.system_commands import process_system_commands
 from controller.runtime.transitions import request_transition, should_keep_power_on, TransitionKind
@@ -266,6 +267,8 @@ class Controller:
         store = ctx.store
         grill_platform = self.grill_platform
         settings = self.settings
+
+        stamp_control_heartbeat(ctx)
 
         # Check the On/Off switch for changes
         if not settings["platform"]["standalone"] and self.last != grill_platform.get_input_status():

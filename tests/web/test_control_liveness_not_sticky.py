@@ -1,10 +1,9 @@
 """Control-process liveness is an observation, not a durable error.
 
-``blueprints/mobile/socket_io.py::_check_control_status`` polls the control
-process every 30s and, when it does not answer within
-``get_system_command_output``'s 1s timeout, reports "The control process did
-not respond...". That string used to be **appended to the errors blob**, which
-is the wrong store for it:
+``blueprints/mobile/socket_io.py::_check_control_status`` reads the heartbeat
+the control loop stamps as it works and, when that stamp has gone stale,
+reports "The control process did not respond...". That string used to be
+**appended to the errors blob**, which is the wrong store for it:
 
 * Every other writer of that blob is the control process or one of its
   subprocesses (``controller/runtime/devices.py``, ``runner.py``,
@@ -32,6 +31,7 @@ the same string to the local list it hands the template and persists nothing.
 These tests pin both consumers.
 """
 
+import time
 import types
 from unittest import mock
 
@@ -40,6 +40,8 @@ import pytest
 from common.app import CONTROL_DOWN_ERROR
 from common.common import WriteKind
 from common.datastore_accessors import (
+    CONTROL_HEARTBEAT_KEY,
+    CONTROL_HEARTBEAT_STALE_AFTER,
     default_control,
     init_status,
     read_errors,
@@ -76,17 +78,10 @@ def consumers(ds):
 
 
 def _check(consumers, alive):
-    """Run one real liveness check with a control process that does/doesn't answer."""
-    with (
-        mock.patch.object(consumers.sio, "process_command") as m_pc,
-        mock.patch.object(
-            consumers.sio,
-            "get_system_command_output",
-            return_value={"result": "OK" if alive else "ERROR"},
-        ),
-    ):
-        consumers.sio._check_control_status()
-    m_pc.assert_called_once_with(action="sys", arglist=["check_alive"], origin="app-socketio")
+    """Run one real liveness check against a fresh / stale control heartbeat."""
+    age = 0 if alive else CONTROL_HEARTBEAT_STALE_AFTER + 5
+    write_generic_key(CONTROL_HEARTBEAT_KEY, time.time() - age)
+    consumers.sio._check_control_status()
 
 
 def _socket_tick(consumers):

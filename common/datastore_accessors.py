@@ -873,6 +873,37 @@ def read_generic_key(key):
     return json.loads(datastore.get_blob(key))
 
 
+#: Datastore key carrying the control process's liveness stamp. Written by the
+#: control process only, through its Store, from BOTH the idle tick and the
+#: per-mode work cycle -- a cook never returns to the idle tick, so a stamp in
+#: only one of the two would read as "control is down" for the whole cook.
+CONTROL_HEARTBEAT_KEY = "control:heartbeat"
+
+#: How stale the stamp may get before a reader calls the control process down.
+#: Deliberately several times the write interval
+#: (controller.runtime.heartbeat.HEARTBEAT_WRITE_INTERVAL): the stamp is written
+#: BY the control loop, so it measures "the loop is servicing work", not merely
+#: "the process exists" -- which is the property worth reporting, but it does
+#: mean a legitimately blocking tick (a mode transition drives the output relays
+#: and can write a cookfile) must not read as a failure. Detection is therefore
+#: this slow; RECOVERY is not, and recovery is the half users notice.
+#: Lives here, beside the key, because the writer and the reader are different
+#: PROCESSES -- the web process must not import from controller.runtime.
+CONTROL_HEARTBEAT_STALE_AFTER = 15.0
+
+
+def read_control_heartbeat():
+    """Epoch seconds of the control process's last heartbeat, or None if it has
+    never stamped one (fresh DB, or a control process too old to publish it).
+
+    A read, not a round trip: callers decide liveness by comparing this against
+    their own clock, so a stopped control process needs no cooperation to be
+    detected -- which is the whole point, since a stopped process cannot answer
+    a request.
+    """
+    return _read_json_blob(CONTROL_HEARTBEAT_KEY, lambda: None)
+
+
 def read_probe_status(probe_info):
     """
     Creates a structured status report for all probes in the system by combining probe configuration

@@ -39,6 +39,7 @@ import base64
 import builtins
 import json
 import threading
+import time
 import types
 from unittest import mock
 
@@ -49,6 +50,8 @@ from app import app as flask_app
 from common import datastore
 from common.common import WriteKind
 from common.datastore_accessors import (
+    CONTROL_HEARTBEAT_KEY,
+    CONTROL_HEARTBEAT_STALE_AFTER,
     execute_control_writes,
     read_connected_users,
     read_control,
@@ -1317,40 +1320,65 @@ def test_encode_img_success_reads_and_b64_encodes(sio, tmp_path):
 # =====================================================================
 
 
+def _stamp_heartbeat(age_seconds):
+    """Write a control heartbeat `age_seconds` old, as the control loop would."""
+    write_generic_key(CONTROL_HEARTBEAT_KEY, time.time() - age_seconds)
+
+
 def test_check_control_status_records_a_failure_without_writing_the_blob(sio):
     # The check records its verdict in memory; the errors blob belongs to the
     # control process. See tests/web/test_control_liveness_not_sticky.py for
     # the full contract (payload composition + self-healing).
-    with (
-        mock.patch.object(sio.mod, "process_command") as m_pc,
-        mock.patch.object(sio.mod, "get_system_command_output", return_value={"result": "Error"}),
-    ):
-        sio.mod._check_control_status()
-    m_pc.assert_called_once_with(action="sys", arglist=["check_alive"], origin="app-socketio")
+    _stamp_heartbeat(CONTROL_HEARTBEAT_STALE_AFTER + 5)
+    sio.mod._check_control_status()
     assert sio.mod._control_alive is False
     assert read_errors() == []
 
 
 def test_check_control_status_alive_records_success_and_writes_nothing(sio):
     sio.mod._set_control_alive(False)
-    with (
-        mock.patch.object(sio.mod, "process_command"),
-        mock.patch.object(sio.mod, "get_system_command_output", return_value={"result": "OK"}),
-    ):
-        sio.mod._check_control_status()
+    _stamp_heartbeat(0)
+    sio.mod._check_control_status()
     assert sio.mod._control_alive is True
     assert read_errors() == []
+
+
+def test_check_control_status_needs_no_cooperation_from_the_control_process(sio):
+    """The whole point of the heartbeat shape: liveness is decided by READING a
+    stamp, so a control process that is gone (and therefore cannot answer a
+    request) is still detected -- and a restarted one is trusted again on its
+    very next stamp, with no probe/response round trip in either direction.
+    """
+    _stamp_heartbeat(CONTROL_HEARTBEAT_STALE_AFTER + 60)
+    sio.mod._check_control_status()
+    assert sio.mod._control_alive is False
+
+    _stamp_heartbeat(0)  # control restarts, stamps on its first tick
+    sio.mod._check_control_status()
+    assert sio.mod._control_alive is True
+
+
+def test_check_control_status_stays_optimistic_when_never_stamped(sio):
+    # Fresh datastore, or a control process too old to publish a heartbeat:
+    # do not flash a control-down banner mid-upgrade.
+    sio.mod._set_control_alive(True)
+    sio.mod._check_control_status()
+    assert sio.mod._control_alive is True
+
+
+def test_check_control_status_treats_a_stamp_just_inside_the_window_as_alive(sio):
+    sio.mod._set_control_alive(False)
+    _stamp_heartbeat(CONTROL_HEARTBEAT_STALE_AFTER - 1)
+    sio.mod._check_control_status()
+    assert sio.mod._control_alive is True
 
 
 def test_check_control_status_leaves_a_control_process_error_alone(sio):
     # Durable errors written by the control process are not this check's to
     # clear, in either direction.
     write_errors(["Grill Platform Error: Could not load the grill platform module."])
-    with (
-        mock.patch.object(sio.mod, "process_command"),
-        mock.patch.object(sio.mod, "get_system_command_output", return_value={"result": "OK"}),
-    ):
-        sio.mod._check_control_status()
+    _stamp_heartbeat(0)
+    sio.mod._check_control_status()
     assert read_errors() == ["Grill Platform Error: Could not load the grill platform module."]
 
 
@@ -1583,18 +1611,14 @@ def test_emit_app_data_force_refresh_emits_all_three_once(sio):
     assert sio.mod.thread is None
 
 
-def test_emit_app_data_periodic_control_status_check(sio):
-    # The `if (now - check_control_time) > 30: _check_control_status()`
-    # branch only fires once 30+ (mocked) seconds have elapsed between
-    # iterations. Drive `time.time()` directly to cross that threshold on
-    # the 2nd of 2 iterations.
+def test_emit_app_data_checks_control_status_every_pass(sio):
+    # The check is now a single SELECT against a stamp the control loop keeps
+    # fresh, so it runs once per broadcast pass rather than behind a 30s
+    # throttle. That throttle was what made a RECOVERED control process keep
+    # reading as down for up to half a minute.
     event = threading.Event()
     event.set()
-    time_values = iter([1000.0, 1000.0, 1040.0])
     sleep_calls = {"n": 0}
-
-    def fake_time():
-        return next(time_values)
 
     def fake_sleep(_seconds):
         sleep_calls["n"] += 1
@@ -1605,12 +1629,11 @@ def test_emit_app_data_periodic_control_status_check(sio):
         mock.patch.object(sio.mod, "_get_dash_data", return_value={"sentinel": "dash"}),
         mock.patch.object(sio.mod.socketio, "emit"),
         mock.patch.object(sio.mod.socketio, "sleep", side_effect=fake_sleep),
-        mock.patch.object(sio.mod.time, "time", side_effect=fake_time),
         mock.patch.object(sio.mod, "_check_control_status") as m_check,
     ):
         sio.mod._emit_app_data(event, True)
 
-    m_check.assert_called_once()
+    assert m_check.call_count == 2  # one per loop pass, no elapsed-time gate
 
 
 def test_emit_app_data_skips_emit_when_data_unchanged(sio):

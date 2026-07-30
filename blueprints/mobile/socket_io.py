@@ -30,7 +30,6 @@ from common.common import (
     write_log,
     convert_settings_units,
     epoch_to_time,
-    get_system_command_output,
 )
 from common.control_delta import NOTIFY_POST_KEYS, ControlDeltaError, control_delta, notify_ops_from_post
 from common.datastore_accessors import (
@@ -45,6 +44,8 @@ from common.datastore_accessors import (
     read_errors,
     read_warnings_snapshot,
     read_generic_key,
+    read_control_heartbeat,
+    CONTROL_HEARTBEAT_STALE_AFTER,
     write_control,
     flush_history,
     write_pellet_db,
@@ -62,7 +63,6 @@ from common.system import (
     restart_scripts,
     gather_system_info,
 )
-from common.api_commands import process_command
 from common.modes import Mode
 from common.pellets_actions import PELLETS_DISPATCH, clear_pellet_db
 from common.app import CONTROL_DOWN_ERROR, update_probe_config, save_settings_and_flag_update, api_response
@@ -79,8 +79,8 @@ thread_lock = threading.Lock()
 thread_event = Event()
 thread = None
 
-# Whether the control process answered the last `check_alive` probe
-# (_check_control_status, run by the broadcast loop every 30s). Consumed by
+# Whether the control process's heartbeat was fresh at the last check
+# (_check_control_status, run by the broadcast loop every second). Consumed by
 # _get_dash_data, which composes CONTROL_DOWN_ERROR into the payload it is
 # already building.
 #
@@ -102,7 +102,7 @@ thread = None
 # Nor is it in the datastore: persisting a statement about "right now" is what
 # made this sticky in the first place, and a persisted copy would outlive the
 # web process that observed it. Starting each web process optimistic is correct
-# -- the first check either confirms it or corrects it within 30s.
+# -- the first check either confirms it or corrects it within a second.
 #
 # blueprints/dash/routes.py::dash_page needs no equivalent: it probes live on
 # every render and appends to the local list it hands the template.
@@ -190,18 +190,19 @@ def post_app_data(action=None, type=None, json_data=None):
 def _emit_app_data(event, force_refresh):
     global thread
 
-    check_control_time = time.time()
-
     previous_dash = ""
     previous_event = ""
     previous_pellet = ""
 
     try:
         while event.is_set():
-            now = time.time()
-            if (now - check_control_time) > 30:
-                check_control_time = now
-                _check_control_status()
+            # Once per loop pass, not on a 30s timer: _check_control_status()
+            # is now a single SELECT against a stamp the control loop keeps
+            # fresh, so the every-30-seconds throttle it used to need (it
+            # blocked for a full second waiting on an answer a stopped process
+            # could never send) is gone -- and with it the up-to-30s lag before
+            # a recovered control process was reported as back.
+            _check_control_status()
 
             settings = read_settings_store()
             pelletdb = read_pellets_store()
@@ -1031,14 +1032,33 @@ def _write_settings(settings, control):
 
 
 def _check_control_status():
-    """Ask the control process to prove it is alive; record the verdict.
+    """Record whether the control process's heartbeat is still fresh.
 
     The verdict is kept in `_control_alive` -- process-local, in memory -- and
     NOT written to the errors blob. See that global's comment for why.
+
+    This used to push a "check_alive" system command and wait for the control
+    process to answer it. That shape is self-defeating for a liveness check: a
+    stopped process cannot answer, so the down case -- the one the check exists
+    for -- always cost the caller a full get_system_command_output() timeout.
+    Being expensive, it could only run every 30 seconds, which made BOTH
+    detection and recovery take up to half a minute; the recovery half is what
+    users notice, because a control process that has come back stays reported
+    as down until the next probe lands.
+
+    Reading a stamp the control loop already refreshes as it goes needs no
+    cooperation from a process that may be gone, costs one SELECT, and lets
+    this run every second. A restarted control process stamps on its first
+    tick, so recovery is now immediate rather than eventual.
     """
-    process_command(action="sys", arglist=["check_alive"], origin="app-socketio")
-    data = get_system_command_output(requested="check_alive")
-    _set_control_alive(data["result"] == "OK")
+    heartbeat = read_control_heartbeat()
+    if heartbeat is None:
+        # Never stamped: either a fresh datastore whose control process has not
+        # completed a tick yet, or a control process too old to publish one.
+        # Stay optimistic -- the same reason _control_alive starts True -- so an
+        # upgrade in progress does not flash a control-down banner.
+        return
+    _set_control_alive((time.time() - heartbeat) < CONTROL_HEARTBEAT_STALE_AFTER)
 
 
 # `_response` relocated to `common/app.py` as `api_response`.
