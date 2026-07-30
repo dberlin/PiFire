@@ -1195,6 +1195,28 @@ tests).
   a baseline refresh that has not been traced to an intended change will happily
   bake in a regression.
 
+  **The gate is not fully hermetic, and the one time that mattered it found a real
+  bug (2026-07-29).** `stubApi` intercepts `/api/**` and `/static/img/tmp/**`, but
+  NOT `/static/img/wizard/**` — the board and module photos. So those `<img>`
+  elements load from the live backend when one is running and fail when one is
+  not, and the two states can measure differently. `settings-probes-390x844` and
+  `wizard-probes-390x844` went red with no relevant source change, purely because
+  a dev-server restart put a backend in the picture; chasing it down found that
+  the devices-table photo was collapsing to 0x0 whenever it actually loaded
+  (Preflight's `max-width:100%`/`height:auto` beating the width/height
+  attributes, circular in an auto-layout table). Pinning the size in CSS fixed
+  the bug and made that table measure identically either way, so the existing
+  baselines needed no recapture.
+
+  What is still exposed: `.pf-module-image` (`width: 132px; height: auto`) on the
+  wizard's grillplatform/probes steps takes its HEIGHT from the loaded photo's
+  aspect ratio, so those baselines do still depend on a reachable backend.
+  Stubbing the route would trade that for a different divergence — one stub image
+  cannot carry every real photo's aspect ratio, so the gate would stop matching
+  production. Left as a known dependence rather than papered over. **If a probes
+  or wizard baseline goes red with no plausible source change, check whether a
+  backend is running before you touch the baseline.**
+
 - **#1 / #2 — RESOLVED by ruling (2026-07-28), not a web-react target.** The QML
   kiosk is the on-device touchscreen UI (a fullscreen Wayland kiosk on the Pi's
   attached screen) and it STAYS; the React app was never going to reimplement
@@ -1209,31 +1231,59 @@ Net-new UX the user has accepted even though Flask never had it (so these are
 NOT parity ports — they will not be caught by any fidelity gate, and each needs
 its own slice when scheduled).
 
-- **Credential masking (#19).** The six secret-bearing fields — WLED/OneSignal
-  keys, MQTT/InfluxDB/PushBullet/PushOver tokens — currently render as plain
-  `type="text"` (matching Flask). Enhancement: render them masked with a
-  show/hide (eye) toggle, so a shoulder-surfer or a shared screenshot does not
-  leak the secret. Field-level only; no change to storage or transport, which
-  already send these in clear. Sizing: a small, self-contained field-component
-  slice.
+- ~~**Credential masking (#19).**~~ SHIPPED 2026-07-29. `SecretField.tsx` masks
+  the value and reveals it only while the user holds it open with a Show/Hide
+  toggle. Field-level only: storage and transport still send these in clear,
+  because hiding the value on screen is the only thing a field component can
+  address.
+
+  The six fields are the IFTTT, Pushbullet and Pushover **API keys**, the
+  Pushover **user keys**, the **InfluxDB token** and the **MQTT password** —
+  which is a correction to this entry's own list. It said "WLED/OneSignal keys":
+  WLED's only text field is `device_address` (not a secret), and OneSignal's
+  `uuid`/`app_id` are deliberately not rendered by the tab at all, so neither
+  contributed a field. The count of six was right for the wrong reasons.
+
+  Two mechanical details worth carrying forward. A wrapping `<label>` cannot hold
+  the toggle — its text content would become "MQTT PasswordShow" and break every
+  `getByLabelText` — so the component uses an explicit `htmlFor`/`id` pair.
+  And because the toggle is named after its field (so six of them stay
+  distinguishable to a screen reader), Playwright's `getByLabel` matches it too:
+  locators for a masked field need `{ exact: true }`.
 
 #### Whole surfaces never built
 
-- **Probe config as a React surface** — the single most-deferred item in the
-  project: it appears five separate times across specs and plans as "next" and
-  was never started. Now planned (see item 8).
+- ~~**Probe config as a React surface**~~ — SHIPPED 2026-07-26 as the
+  `/settings/probes` tab (`ProbesTab.tsx`,
+  `plans/2026-07-26-react-probeconfig-page.md`, 9 tasks); see the SHIPPED entry
+  at item 8. It had been the single most-deferred item in the project, named
+  "next" five separate times across specs and plans before it was started.
+  Corrected 2026-07-29: this line still read "was never started" three days
+  after the tab shipped, and reading it cold was enough to reopen a finished
+  slice.
 - ~~Recipes~~ — SHIPPED 2026-07-27; the navbar entry is a real link now.
   ~~Admin~~ — SHIPPED 2026-07-27, same. ~~Events~~ — SHIPPED 2026-07-28, and it
   was the last one: **no navbar entry renders disabled any more**, and no whole
   Flask page in the navbar is unported.
 - Cook-file list / upload / delete (D4) — History shipped the chart only.
-- Recipe unpause payload not ported — a paused recipe cannot be resumed. **Still
-  open after the 2026-07-27 recipes slice**, which shipped run/status but not
-  resume: `RecipeRunStatus` reads `paused` off the socket and displays it, and
-  nothing writes the unpause. This is the one run-time capability Flask has and
-  React does not.
-- `global_control_panel` neither read nor offered: no way to stop the grill
-  from anywhere but the dashboard.
+- ~~Recipe unpause payload not ported~~ — SHIPPED 2026-07-29 (#58).
+  `helpers/command.ts:210`'s `recipeUnpause` posts the minimal
+  `{recipe:{step_data:{pause:false}}}`, and `buttonsForMode.ts:107-108` branches
+  the single Next Step button on `recipeStatus.paused` — unpause when paused,
+  advance when not — exactly as Flask's one button does. Covered by
+  `command.test.ts` and `buttonsForMode.test.ts`. Corrected 2026-07-29: this
+  line still claimed the gap was open while the sweep-2 reconciliation above
+  recorded the fix on the same day, so the file contradicted itself.
+- ~~`global_control_panel` neither read nor offered~~ — the SETTING IS GONE,
+  deleted 2026-07-29 rather than implemented. "Show Control Panel on Most Pages"
+  was a Flask-era layout switch for Jinja templates that no longer exist; no
+  Python, React or QML read it and no UI in either stack ever offered a way to
+  set it, so it had never been anything but a stored `False`. Removed from
+  `defaults.py` and `settings_schema.py`, with the schema and generated types
+  regenerated. An existing tree still carrying the key sheds it through
+  `validate_settings_tree()`'s repair pass on its next validated write.
+  (Stopping the grill from any page remains possible only from the dashboard —
+  that was never what this flag delivered.)
 - ~~WLED preset/profile grids (backend and schema are already ready).~~ SHIPPED
   2026-07-28 (#17) — see the reconciliation above.
 - OneSignal: no "add device"; `uuid`/`app_id` not editable.
