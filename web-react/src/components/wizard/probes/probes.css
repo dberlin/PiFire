@@ -147,8 +147,21 @@
 .pf-probes-table td:last-child {
   @apply text-right whitespace-nowrap;
 }
+/* The size has to be in CSS, not left to DevicesCard's width/height attributes:
+   Preflight's `img { max-width: 100%; height: auto }` outranks them, and inside
+   an auto-width table that pair resolves to 0x0 -- so the module photo vanished
+   the moment it actually loaded, while a photo that FAILED to load still drew a
+   48x48 placeholder box from the attributes. The visible bug was therefore
+   invisible to any check that ran without a backend serving
+   /static/img/wizard/. object-fit keeps a non-square photo from stretching. */
 .pf-probes-table img {
-  @apply rounded-[8px] bg-inset;
+  @apply h-[48px] w-[48px] rounded-[8px] bg-inset;
+  /* Preflight's max-width:100% has to go too, not just be out-specified: in an
+     auto-layout table the column's width is computed FROM its content, so an
+     image capped at 100% of that column is a circular constraint that settles
+     at zero however wide `width` says it is. */
+  max-width: none;
+  object-fit: contain;
 }
 /* Edit/Delete are bare <button type="button"> with no class of their own
    (PortsCard, DevicesCard). Same recipe as settings.css's
