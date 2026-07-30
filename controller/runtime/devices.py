@@ -160,7 +160,7 @@ def build_devices(settings, *, errors, event_log, control_log):
 
     try:
         grill_platform = GrillPlatModule.GrillPlatform(platform_config)
-    except:
+    except Exception as exc:
         control = read_control()
         control["critical_error"] = True
         write_control(control, WriteKind.OVERWRITE, origin="control")
@@ -170,8 +170,14 @@ def build_devices(settings, *, errors, event_log, control_log):
         from grillplat.prototype import GrillPlatform  # Simulated Library for controlling the grill platform
 
         grill_platform = GrillPlatform(platform_config)
+        # The driver's own message is carried into the banner. The generic
+        # advice below covers the common misconfiguration, but a driver that
+        # knows exactly what is wrong -- "the device on /dev/ttyACM0 is not a
+        # Numato relay" -- should not have that diagnosis stop at control.log,
+        # which is the one place a user is least likely to look.
         error_event = (
-            f"An error occurred configuring the [{settings['modules']['grillplat']}] platform object.  The "
+            f"An error occurred configuring the [{settings['modules']['grillplat']}] platform object: "
+            f"{exc}  The "
             f"prototype module has been loaded instead.  This sometimes means that the hardware is not "
             f"connected properly, or the module is not configured.  Please run the configuration wizard "
             f"again from the admin panel to fix this issue."

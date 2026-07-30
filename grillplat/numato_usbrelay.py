@@ -81,6 +81,20 @@ class NumatoResponseError(NumatoError):
     pass
 
 
+class NumatoIdentifyError(NumatoError):
+    """Raised when the device at the configured path is not a Numato board.
+
+    A USB CDC path like /dev/ttyACM0 is assigned in enumeration order, so it can
+    belong to a completely different device -- and opening one succeeds, writing
+    to one succeeds, and reading from one simply returns nothing. Without this
+    check the driver "worked": every command silently ran out the full read
+    timeout instead, which on a grill meant a whole second per relay operation
+    and several seconds per mode change, with nothing anywhere saying why.
+    """
+
+    pass
+
+
 """
 *****************************************
  Class Definitions
@@ -118,6 +132,46 @@ class NumatoUSBRelay:
             stopbits=serial.STOPBITS_ONE,
             timeout=timeout,
         )
+        self.firmware_version = self._identify()
+
+    def _identify(self):
+        """Confirm a Numato board is actually answering, and return its version.
+
+        Opening a USB CDC path proves nothing: the path is assigned in
+        enumeration order, so /dev/ttyACM0 may be some other device entirely,
+        and writing to the wrong one still "succeeds" -- the write lands, the
+        read returns nothing, and `_read_until_prompt` waits out the full
+        timeout. Every command then costs a silent second, which is exactly how
+        this failed in the field: relays that never actuated and a control loop
+        spending seconds on a mode change, with no error raised anywhere.
+
+        So ask the board to identify itself once, at construction, and refuse to
+        hand back a driver that is talking to nothing.
+
+        Deliberately checks only that a response CAME BACK, not its shape:
+        firmware version strings vary across Numato models and revisions, so
+        pattern-matching one would reject working hardware to catch a case that
+        an empty response already catches.
+        """
+        # Read before any close(): the port is what carries this value.
+        timeout = self._serial.timeout
+        try:
+            version = self.version()
+        except Exception as exc:
+            self.close()
+            raise NumatoIdentifyError(
+                f"No Numato relay board responded on {self.device}: {exc}. "
+                f"Check that this is the relay's tty and not another USB serial device."
+            ) from exc
+        if not version:
+            self.close()
+            raise NumatoIdentifyError(
+                f"No Numato relay board responded on {self.device} -- the port opened and "
+                f"accepted a 'ver' command but returned nothing within {timeout}s. "
+                f"This path is almost certainly a different USB serial device; check "
+                f"`ls -l /dev/serial/by-id/` and set platform.numato.device accordingly."
+            )
+        return version
 
     """
 	*****************************************

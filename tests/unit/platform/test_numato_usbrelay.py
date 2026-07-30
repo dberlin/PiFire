@@ -32,16 +32,29 @@ from grillplat.numato_usbrelay import (
 # ---------------------------------------------------------------------------
 
 
+#: What the board answers the construction-time `ver` probe with. Any non-empty
+#: response satisfies the identity check; this is a realistic one.
+FIRMWARE_VERSION = "00000008"
+
+
 @pytest.fixture
 def serial_mock():
     """Patch the `serial` module referenced by numato_usbrelay.py so no real
     tty is opened. `serial.Serial(...)` returns a fresh Mock instance that
     stands in for the open port; instance.read(1) is driven per-test via
     `_respond()` below.
+
+    The port answers a `ver` exchange by default because `__init__` now probes
+    the board's version to prove something is actually there (see
+    _identify()). Tests construct first and call `_respond()` second, so that
+    default is consumed by construction and re-armed for the command under
+    test.
     """
     with mock.patch.object(numato, "serial") as serial_module:
         instance = mock.Mock()
         instance.is_open = True
+        instance.timeout = 1.0
+        _arm(instance, "ver", FIRMWARE_VERSION)
         serial_module.Serial.return_value = instance
         yield serial_module, instance
 
@@ -50,15 +63,43 @@ def _one_byte_chunks(data: bytes):
     return [data[i : i + 1] for i in range(len(data))]
 
 
-def _respond(instance, command, response=None):
-    """Queue the next `instance.read(1)` call sequence to represent the
-    board's echo of `command` (plus an optional response line), followed by
-    the '>' prompt that terminates `_read_until_prompt`.
-    """
+def _arm(instance, command, response=None):
+    """Queue one board exchange onto `instance.read(1)` without touching the
+    recorded write/flush calls -- used for the construction-time probe, which
+    happens before a test has anything to assert."""
     text = command + "\r\n"
     if response is not None:
         text += response + "\r\n"
     instance.read.side_effect = _one_byte_chunks(text.encode("ascii") + b">")
+
+
+def _open(instance, *args, **kwargs):
+    """Construct a relay and forget the construction-time `ver` exchange.
+
+    For tests that assert nothing reached the wire: an argument the driver
+    rejects must not produce a write, and the identity probe is not the write
+    they mean.
+    """
+    relay = NumatoUSBRelay(*args, **kwargs)
+    instance.write.reset_mock()
+    instance.flush.reset_mock()
+    instance.reset_input_buffer.reset_mock()
+    return relay
+
+
+def _respond(instance, command, response=None):
+    """Queue the next `instance.read(1)` call sequence to represent the
+    board's echo of `command` (plus an optional response line), followed by
+    the '>' prompt that terminates `_read_until_prompt`.
+
+    Also clears the write/flush/reset_input_buffer call records, because
+    construction now issues a `ver` of its own first and the callers here
+    assert `assert_called_once_with` against the command under test.
+    """
+    _arm(instance, command, response)
+    instance.write.reset_mock()
+    instance.flush.reset_mock()
+    instance.reset_input_buffer.reset_mock()
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +154,81 @@ def test_context_manager_returns_self_and_closes_on_exit(serial_mock):
 
 
 # ---------------------------------------------------------------------------
+# Identity probe.
+#
+# A USB CDC path is assigned in enumeration order, so /dev/ttyACM0 can belong
+# to a completely different device -- and the driver could not tell, because
+# opening the wrong device succeeds and writing to it succeeds; only the READ
+# comes back empty, and `_read_until_prompt` treats empty as "wait for the
+# timeout". So the driver reported no error at all while every relay operation
+# silently burned a full second and no relay ever actuated. Construction now
+# asks the board to identify itself and refuses to return a driver that is
+# talking to nothing.
+# ---------------------------------------------------------------------------
+
+
+def _silent_port(instance):
+    """A port that opens and accepts writes but never answers -- exactly how
+    the wrong USB serial device behaves."""
+    instance.read.side_effect = None
+    instance.read.return_value = b""
+
+
+def test_init_probes_the_board_version_and_keeps_it(serial_mock):
+    _, instance = serial_mock
+    relay = NumatoUSBRelay("/dev/ttyACM0")
+    assert relay.firmware_version == FIRMWARE_VERSION
+    instance.write.assert_called_once_with(b"ver\r")
+
+
+def test_init_raises_when_the_device_never_answers(serial_mock):
+    _, instance = serial_mock
+    _silent_port(instance)
+    with pytest.raises(numato.NumatoIdentifyError):
+        NumatoUSBRelay("/dev/ttyACM0")
+
+
+def test_the_identify_error_names_the_device_and_says_what_to_check(serial_mock):
+    _, instance = serial_mock
+    _silent_port(instance)
+    with pytest.raises(numato.NumatoIdentifyError) as ei:
+        NumatoUSBRelay("/dev/ttyWRONG")
+    message = str(ei.value)
+    assert "/dev/ttyWRONG" in message
+    # The whole point is that the person reading it can act on it.
+    assert "by-id" in message
+
+
+def test_a_failed_identify_closes_the_port(serial_mock):
+    # Otherwise a controller that falls back to the prototype platform leaves
+    # an open handle on a device that is not even ours.
+    _, instance = serial_mock
+    _silent_port(instance)
+    with pytest.raises(numato.NumatoIdentifyError):
+        NumatoUSBRelay("/dev/ttyACM0")
+    instance.close.assert_called_once()
+
+
+def test_init_raises_when_the_probe_itself_errors(serial_mock):
+    _, instance = serial_mock
+    instance.read.side_effect = OSError("device disappeared")
+    with pytest.raises(numato.NumatoIdentifyError) as ei:
+        NumatoUSBRelay("/dev/ttyACM0")
+    assert "device disappeared" in str(ei.value)
+    instance.close.assert_called_once()
+
+
+def test_a_board_that_answers_is_not_rejected_for_its_version_format(serial_mock):
+    # Version strings vary by model and revision; the check is "something came
+    # back", not a pattern. Rejecting an unfamiliar-looking version would fail
+    # working hardware to catch a case the empty response already catches.
+    _, instance = serial_mock
+    _arm(instance, "ver", "v9.9-beta")
+    relay = NumatoUSBRelay("/dev/ttyACM0")
+    assert relay.firmware_version == "v9.9-beta"
+
+
+# ---------------------------------------------------------------------------
 # Relay control: relay_on / relay_off / relay_set
 # ---------------------------------------------------------------------------
 
@@ -153,7 +269,7 @@ def test_relay_set_false_delegates_to_relay_off():
 
 def test_relay_on_rejects_out_of_range_index(serial_mock):
     _, instance = serial_mock
-    relay = NumatoUSBRelay("/dev/ttyACM0")
+    relay = _open(instance, "/dev/ttyACM0")
     with pytest.raises(ValueError, match="relay index"):
         relay.relay_on(4)
     instance.write.assert_not_called()
@@ -228,7 +344,7 @@ def test_relay_write_all_accepts_iterable_of_booleans(serial_mock):
 
 def test_relay_write_all_rejects_too_many_states(serial_mock):
     _, instance = serial_mock
-    relay = NumatoUSBRelay("/dev/ttyACM0")
+    relay = _open(instance, "/dev/ttyACM0")
     with pytest.raises(ValueError, match="at most"):
         relay.relay_write_all([True, True, True, True, True])
     instance.write.assert_not_called()
@@ -236,7 +352,7 @@ def test_relay_write_all_rejects_too_many_states(serial_mock):
 
 def test_relay_write_all_rejects_out_of_range_int_mask(serial_mock):
     _, instance = serial_mock
-    relay = NumatoUSBRelay("/dev/ttyACM0")
+    relay = _open(instance, "/dev/ttyACM0")
     with pytest.raises(ValueError, match="relay mask"):
         relay.relay_write_all(16)
     instance.write.assert_not_called()
@@ -371,7 +487,7 @@ def test_id_set_sends_id_set_command(serial_mock):
 
 def test_id_set_rejects_ids_of_wrong_length(serial_mock):
     _, instance = serial_mock
-    relay = NumatoUSBRelay("/dev/ttyACM0")
+    relay = _open(instance, "/dev/ttyACM0")
     with pytest.raises(ValueError, match="8 alphanumeric"):
         relay.id_set("short")
     instance.write.assert_not_called()
@@ -379,7 +495,7 @@ def test_id_set_rejects_ids_of_wrong_length(serial_mock):
 
 def test_id_set_rejects_non_alphanumeric_ids(serial_mock):
     _, instance = serial_mock
-    relay = NumatoUSBRelay("/dev/ttyACM0")
+    relay = _open(instance, "/dev/ttyACM0")
     with pytest.raises(ValueError, match="8 alphanumeric"):
         relay.id_set("AB-D123!")
     instance.write.assert_not_called()
