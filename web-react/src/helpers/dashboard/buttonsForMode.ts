@@ -82,6 +82,45 @@ const startupButton = (dash: LiveState): ControlButton => ({
       : cmd((c) => c.setMode("startup")),
 });
 
+// Nothing is lit in Monitor, so leaving it has no cook to lose and does not
+// earn a confirmation step. The attached display's Stop is unconfirmed in every
+// mode (display/_base_flex.py routes cmd_stop straight through); this UI keeps
+// the confirmation where it means something -- an active cook.
+const STOP_IDLE: ControlButton = {
+  label: "Stop",
+  variant: "danger",
+  action: cmd((c) => c.setMode("stop")),
+};
+
+// The idle row: the ways INTO a cook, plus the mode you are in.
+//
+// Monitor shares this row with Stop rather than collapsing to Startup/Stop. The
+// attached display does the same -- display/_base_flex.py:523 falls through to
+// one "Prime / Startup / Monitor / Stop" list for Stop, Prime AND Monitor, and
+// marks the running mode via `button_active` -- so in both UIs the row reads as
+// a mode selector rather than changing shape underneath the press.
+const idleRow = (dash: LiveState, mode: string): ControlButton[] => {
+  const monitoring = mode === "Monitor";
+  return [
+    startupButton(dash),
+    PRIME,
+    {
+      label: "Monitor",
+      // Same "this one is active" idiom the Manual row uses for an energised
+      // relay, which is what the display paints green via button_active.
+      variant: monitoring ? "accent" : undefined,
+      // Pressing the mode you are already in leaves it. The display has no such
+      // toggle (its cmd_monitor unconditionally sets Monitor), but the row it
+      // draws looks like one, and without it the only way out of Monitor is a
+      // Stop button that reads as "stop the cook" for a mode that never lit
+      // anything.
+      action: cmd((c) => c.setMode(monitoring ? "stop" : "monitor")),
+    },
+    { label: "Manual", action: cmd((c) => c.setMode("manual")) },
+    ...(monitoring ? [STOP_IDLE] : []),
+  ];
+};
+
 export function buttonsForMode(dash: LiveState): ControlButton[] {
   const mode = dash.currentMode;
 
@@ -112,17 +151,8 @@ export function buttonsForMode(dash: LiveState): ControlButton[] {
     ];
   }
 
-  if (mode === "Stop" || mode === "Error" || mode === "") {
-    return [
-      startupButton(dash),
-      PRIME,
-      { label: "Monitor", action: cmd((c) => c.setMode("monitor")) },
-      { label: "Manual", action: cmd((c) => c.setMode("manual")) },
-    ];
-  }
-
-  if (mode === "Monitor") {
-    return [startupButton(dash), STOP];
+  if (mode === "Stop" || mode === "Error" || mode === "" || mode === "Monitor") {
+    return idleRow(dash, mode);
   }
 
   // Manual mode: the button row becomes the output control panel, mirroring

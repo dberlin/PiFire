@@ -654,6 +654,40 @@
   gap: 12px;
   height: var(--pf-btn-h);
   flex: 0 0 var(--pf-btn-h);
+  position: relative;
+}
+
+/* Command failures. Absolutely positioned ABOVE the row rather than placed in
+   it: this grid is grid-auto-flow:column with grid-auto-columns:1fr, so an
+   in-flow child would take a column of its own and resize every button. */
+.pf-dash-control-error {
+  @apply absolute left-0 right-0 rounded-[10px] px-[12px] py-[6px] text-[13px] font-semibold;
+  bottom: calc(100% + 8px);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, var(--inset));
+  border: 1px solid var(--danger);
+}
+
+.pf-btn[data-pending="true"] {
+  /* The press is acknowledged immediately; the grill catches up a beat later. */
+  animation: pf-btn-pending 1.2s ease-in-out infinite;
+}
+
+@keyframes pf-btn-pending {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-btn[data-pending="true"] {
+    animation: none;
+    opacity: 0.7;
+  }
 }
 
 /* ---- probe card ---- */

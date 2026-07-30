@@ -102,24 +102,69 @@ describe("buttonsForMode", () => {
     });
   });
 
-  it("Monitor mode renders Startup (command) / Stop (confirm, danger)", async () => {
+  // Monitor keeps the whole idle row instead of collapsing to Startup/Stop, so
+  // the row reads as a mode selector rather than changing shape underneath the
+  // press -- matching the attached display, whose _button_row_for_mode falls
+  // through to one list for Stop, Prime AND Monitor and marks the active mode.
+  it("Monitor mode renders the idle row plus Stop, not a collapsed Startup/Stop", () => {
     const buttons = buttonsForMode(at("Monitor", { startupCheck: false }));
-    expect(buttons.map((b) => b.label)).toEqual(["Startup", "Stop"]);
-    expect(buttons[0].action.type).toBe("command");
-    expect(buttons[1].action.type).toBe("confirm");
-    expect(buttons[1].variant).toBe("danger");
+    expect(buttons.map((b) => b.label)).toEqual(["Startup", "Prime", "Monitor", "Manual", "Stop"]);
+  });
+
+  it("marks Monitor as the active mode while monitoring, and not while stopped", () => {
+    const monitoring = buttonsForMode(at("Monitor", { startupCheck: false }));
+    expect(monitoring.find((b) => b.label === "Monitor")?.variant).toBe("accent");
+
+    const stopped = buttonsForMode(at("Stop", { startupCheck: false }));
+    expect(stopped.find((b) => b.label === "Monitor")?.variant).toBeUndefined();
+  });
+
+  it("pressing Monitor while monitoring leaves Monitor rather than re-entering it", async () => {
+    const monitor = buttonsForMode(at("Monitor", { startupCheck: false })).find(
+      (b) => b.label === "Monitor",
+    );
+    const command = stubCommand();
+    if (monitor?.action.type !== "command") throw new Error("Monitor is not a command action");
+    await monitor.action.run(command);
+    expect(command.setMode).toHaveBeenCalledWith("stop");
+  });
+
+  it("pressing Monitor while stopped enters Monitor", async () => {
+    const monitor = buttonsForMode(at("Stop", { startupCheck: false })).find(
+      (b) => b.label === "Monitor",
+    );
+    const command = stubCommand();
+    if (monitor?.action.type !== "command") throw new Error("Monitor is not a command action");
+    await monitor.action.run(command);
+    expect(command.setMode).toHaveBeenCalledWith("monitor");
+  });
+
+  it("Stop is unconfirmed in Monitor -- nothing was ever lit to lose", async () => {
+    const buttons = buttonsForMode(at("Monitor", { startupCheck: false }));
+    const stop = buttons.find((b) => b.label === "Stop");
+    expect(stop?.variant).toBe("danger");
+    expect(stop?.action.type).toBe("command");
 
     const command = stubCommand();
-    const startup = buttons[0];
-    if (startup.action.type === "command") await startup.action.run(command);
-    expect(command.setMode).toHaveBeenCalledWith("startup");
-
-    const stop = buttons[1];
-    if (stop.action.type === "confirm") {
-      expect(stop.action.title).toBe("Stop the cook?");
-      await stop.action.run(command);
-    }
+    if (stop?.action.type !== "command") throw new Error("Stop is not a command action");
+    await stop.action.run(command);
     expect(command.setMode).toHaveBeenCalledWith("stop");
+  });
+
+  it("Stop stays behind a confirmation during an active cook", () => {
+    const stop = buttonsForMode(at("Smoke")).find((b) => b.label === "Stop");
+    expect(stop?.action.type).toBe("confirm");
+    if (stop?.action.type === "confirm") expect(stop.action.title).toBe("Stop the cook?");
+  });
+
+  it("Startup still works from Monitor", async () => {
+    const startup = buttonsForMode(at("Monitor", { startupCheck: false })).find(
+      (b) => b.label === "Startup",
+    );
+    const command = stubCommand();
+    if (startup?.action.type !== "command") throw new Error("Startup is not a command action");
+    await startup.action.run(command);
+    expect(command.setMode).toHaveBeenCalledWith("startup");
   });
 
   it.each(["Startup", "Smoke", "Hold", "Prime", "Reignite", "Shutdown", "SomeUnknownMode"])(

@@ -1092,7 +1092,7 @@
     }
   },
   ".pf-dash-clock": {
-    "x": 961,
+    "x": 960,
     "y": 67,
     "w": 75,
     "h": 30,
@@ -1883,7 +1883,7 @@
       "gap": "12px",
       "justify-content": "normal",
       "align-items": "normal",
-      "position": "static",
+      "position": "relative",
       "z-index": "auto",
       "overflow": "visible",
       "transform": "none"

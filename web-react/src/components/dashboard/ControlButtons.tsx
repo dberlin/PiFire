@@ -58,18 +58,39 @@ export function ControlButtons({
   // Derived when the button is pressed, never mirrored from `dash` in an effect.
   const [startupPrompt, setStartupPrompt] = useState<StartupPrompt>("none");
   const [startupError, setStartupError] = useState<string | null>(null);
+  const [commandError, setCommandError] = useState<string | null>(null);
+  // Which button is waiting for the grill to catch up, and what the mode was
+  // when it was pressed. A command's effect is not visible until the control
+  // loop has applied it and the next socket frame carries the result, which is
+  // most of a second at best and several seconds across a mode change (the
+  // transition drives the output relays and can write a cookfile). Without this
+  // the press produces no acknowledgement at all and the row simply changes
+  // shape later, so the natural read is that nothing happened.
+  const [pending, setPending] = useState<{ label: string; mode: string } | null>(null);
 
-  const fire = async (run: (c: CommandClient) => Promise<CommandResult>) => {
+  // Render-phase transition, not an effect: the awaited command has landed once
+  // the mode moves off what it was at press time.
+  if (pending !== null && pending.mode !== dash.currentMode) setPending(null);
+
+  const fire = async (run: (c: CommandClient) => Promise<CommandResult>, label?: string) => {
     setBusy(true);
+    setCommandError(null);
+    if (label !== undefined) setPending({ label, mode: dash.currentMode });
     try {
-      await run(command);
+      const res = await run(command);
+      if (!res.ok) {
+        // Previously discarded. A rejected command -- or a 500 from a settings
+        // write that cannot validate -- looked exactly like a successful one.
+        setCommandError(res.message || "the grill did not accept that command");
+        setPending(null);
+      }
     } finally {
       setBusy(false);
     }
   };
 
-  const onClick = (action: ButtonAction) => {
-    if (action.type === "command") fire(action.run);
+  const onClick = (action: ButtonAction, label?: string) => {
+    if (action.type === "command") fire(action.run, label);
     else if (action.type === "setpoint") setSetpointOpen(true);
     else if (action.type === "pwm") setPwmOpen(true);
     else if (action.type === "menu")
@@ -143,23 +164,31 @@ export function ControlButtons({
         // withhold the exits. `busy` still gates everything -- that one is a
         // real in-flight request, not a guess about the backend.
         const off = (disabled && !SAFETY_LABELS.has(b.label)) || busy;
+        const waiting = pending?.label === b.label;
         return (
           <button
             key={b.label}
             className="pf-btn"
+            data-pending={waiting ? "true" : undefined}
+            aria-busy={waiting || undefined}
             disabled={off}
             style={{
-              borderColor: border,
+              borderColor: waiting ? "var(--accent)" : border,
               background: bg,
               color,
               opacity: disabled || busy ? 0.5 : 1,
             }}
-            onClick={() => onClick(b.action)}
+            onClick={() => onClick(b.action, b.label)}
           >
-            {b.label}
+            {waiting ? `${b.label}…` : b.label}
           </button>
         );
       })}
+      {commandError !== null && (
+        <div role="alert" className="pf-dash-control-error">
+          {commandError}
+        </div>
+      )}
 
       <SetpointEntry
         open={setpointOpen}

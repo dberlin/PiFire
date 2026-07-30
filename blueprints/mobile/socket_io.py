@@ -108,6 +108,20 @@ thread = None
 # every render and appends to the local list it hands the template.
 _control_alive = True
 
+#: How long the broadcast loop waits between passes.
+#:
+#: This is the floor on how long a button press takes to become VISIBLE: the
+#: control loop applies a command within ~50-100ms, but the result does not
+#: reach the browser until the next pass reads it and emits. At the previous 1s
+#: that floor was ~0.5s on average and 1s at worst, for a command the backend
+#: had already finished -- which reads as "the UI is slow" even when nothing is.
+#:
+#: A pass is a handful of SQLite reads and, thanks to the change-dedup below,
+#: emits nothing at all when nothing moved -- so the cost of shortening it is
+#: reads, not traffic. Sharpening it further has diminishing returns: the reads
+#: hit the same database the control loop uses to time the auger.
+BROADCAST_INTERVAL = 0.25
+
 
 def _set_control_alive(alive):
     global _control_alive
@@ -232,7 +246,7 @@ def _emit_app_data(event, force_refresh):
                     socketio.emit("socket_dash_data", dash_data)
                     previous_dash = dash_data
 
-            socketio.sleep(1)
+            socketio.sleep(BROADCAST_INTERVAL)
     finally:
         event.clear()
         thread = None

@@ -45,13 +45,98 @@ describe("ControlButtons", () => {
     expect(screen.getByRole("button", { name: "Monitor" })).toBeInTheDocument();
   });
 
-  it("Monitor mode renders Startup / Stop", () => {
+  // A command's result used to be awaited and thrown away, so a rejected
+  // command -- or a 500 from a settings write that could not validate -- looked
+  // exactly like a successful one: nothing on screen changed, ever.
+  describe("command feedback", () => {
+    it("surfaces a rejected command instead of swallowing it", async () => {
+      const command = stubCommand();
+      command.setMode = rs.fn(async () => ({ ok: false, message: "HTTP 500" }));
+      render(<ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Monitor" }));
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("HTTP 500");
+    });
+
+    it("falls back to a plain message when the failure carries none", async () => {
+      const command = stubCommand();
+      command.setMode = rs.fn(async () => ({ ok: false, message: "" }));
+      render(<ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Monitor" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "the grill did not accept that command",
+      );
+    });
+
+    it("says nothing when the command is accepted", async () => {
+      const command = stubCommand();
+      render(<ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Monitor" }));
+
+      await waitFor(() => expect(command.setMode).toHaveBeenCalled());
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("marks the pressed button as waiting until the mode actually moves", async () => {
+      const command = stubCommand();
+      const { rerender } = render(
+        <ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />,
+      );
+
+      await userEvent.click(screen.getByRole("button", { name: /^Monitor/ }));
+
+      // The control loop has not applied it yet -- the socket still says Stop.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^Monitor/ })).toHaveAttribute(
+          "data-pending",
+          "true",
+        ),
+      );
+
+      rerender(
+        <ControlButtons apiBase="" dash={at("Monitor")} command={command} disabled={false} />,
+      );
+
+      expect(screen.getByRole("button", { name: /^Monitor/ })).not.toHaveAttribute("data-pending");
+    });
+
+    it("does not leave a failed command looking like it is still working", async () => {
+      const command = stubCommand();
+      command.setMode = rs.fn(async () => ({ ok: false, message: "nope" }));
+      render(<ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />);
+
+      await userEvent.click(screen.getByRole("button", { name: /^Monitor/ }));
+
+      await screen.findByRole("alert");
+      expect(screen.getByRole("button", { name: /^Monitor/ })).not.toHaveAttribute("data-pending");
+    });
+
+    it("clears a previous error when the next command is accepted", async () => {
+      const command = stubCommand();
+      command.setMode = rs.fn(async () => ({ ok: false, message: "nope" }));
+      render(<ControlButtons apiBase="" dash={at("Stop")} command={command} disabled={false} />);
+      await userEvent.click(screen.getByRole("button", { name: /^Monitor/ }));
+      await screen.findByRole("alert");
+
+      command.setMode = rs.fn(async () => OK);
+      await userEvent.click(screen.getByRole("button", { name: /^Manual/ }));
+
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    });
+  });
+
+  it("Monitor mode keeps the idle row and adds Stop", () => {
     render(
       <ControlButtons apiBase="" dash={at("Monitor")} command={stubCommand()} disabled={false} />,
     );
-    expect(screen.getByRole("button", { name: "Startup" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Prime" })).not.toBeInTheDocument();
+    for (const name of ["Startup", "Prime", "Monitor", "Manual", "Stop"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
   });
 
   it("Cooking mode renders Smoke / Hold / Smoke+ / Shutdown / Stop", () => {
