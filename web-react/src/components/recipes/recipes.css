@@ -122,6 +122,21 @@
 .pf-rcp-star {
   @apply border-0 bg-transparent p-0 text-inherit;
   font-size: inherit;
+  /* The glyph is a literal U+2605, and Barlow has no U+2605 -- so the character
+     is drawn by whichever fallback font on the machine happens to carry it, and
+     its ADVANCE WIDTH came with it. That made the rating (and the grid column
+     containing it) measure differently per machine: the committed fidelity
+     baseline recorded 17px stars, this hardware renders 14px ones, and neither
+     number is wrong. Pin the box so the layout stops depending on which fonts
+     are installed; the glyph still centres in whatever width it is given. */
+  display: inline-block;
+  width: 1em;
+  /* inline-block takes its height from the line box rather than from the
+     glyph's content area, so pin that too -- otherwise the fallback font's
+     metrics leak back in through the height instead of the width. 1.2 keeps
+     the box the size the inline glyph had. */
+  line-height: 1.2;
+  text-align: center;
 }
 .pf-rcp-star--filled {
   @apply text-warn;
