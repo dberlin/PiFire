@@ -128,6 +128,43 @@ describe("NotificationsTab", () => {
     expect(screen.getByText("WLED")).toBeInTheDocument();
   });
 
+  // Which fields are secret is a decision about THIS tab, not about SecretField,
+  // so it is pinned here: swapping any one of the six back to a plain TextField
+  // -- or masking a field that is not a credential -- fails.
+  it("masks exactly the six credential fields", () => {
+    renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES));
+
+    const secret = [
+      "IFTTT API Key",
+      "Pushbullet API Key",
+      "Pushover API Key",
+      "Pushover User Keys",
+      "InfluxDB Token",
+      "MQTT Password",
+    ];
+    for (const label of secret) {
+      expect(screen.getByLabelText(label), label).toHaveAttribute("type", "password");
+    }
+    expect(screen.getAllByRole("button", { name: /^Show / })).toHaveLength(secret.length);
+
+    // The non-secret neighbours in the same sections stay readable -- a URL or a
+    // bucket name is not a credential, and masking one only costs the user the
+    // ability to check what they typed.
+    for (const label of [
+      "Pushbullet Public URL",
+      "Pushover Public URL",
+      "InfluxDB URL",
+      "InfluxDB Org",
+      "InfluxDB Bucket",
+      "MQTT Client ID",
+      "MQTT Broker",
+      "MQTT Username",
+      "WLED Device Address",
+    ]) {
+      expect(screen.getByLabelText(label), label).toHaveAttribute("type", "text");
+    }
+  });
+
   it("renders loaded values for each service", () => {
     renderRoute(<NotificationsTab />, contextWithNotifyServices(NOTIFY_SERVICES));
 

@@ -372,19 +372,31 @@ test("IFTTT enabled + APIKey save and round-trip on the notifications tab", asyn
 
   await page.goto("/settings/notifications");
   const toggle = page.getByRole("button", { name: "IFTTT Enabled" });
-  const apiKeyField = page.getByLabel("IFTTT API Key");
+  // exact, because getByLabel matches accessible names by SUBSTRING: the field
+  // is a SecretField, and its reveal button is named "Show IFTTT API Key" so a
+  // screen-reader user can tell which of the six secrets it uncovers. Without
+  // exact:true that button is a second match and the locator is ambiguous.
+  const apiKeyField = page.getByLabel("IFTTT API Key", { exact: true });
   await expect(toggle).toBeVisible();
+  // Masked, so read the value off the input rather than the rendered text.
+  await expect(apiKeyField).toHaveAttribute("type", "password");
   await expect(apiKeyField).toHaveValue(originalApiKey);
 
   const nextApiKey = `e2e-key-${Date.now().toString().slice(-6)}`;
   const nextEnabled = !originalEnabled;
   await toggle.click();
   await apiKeyField.fill(nextApiKey);
+  // The one browser-level check on the reveal: jsdom will report whatever type
+  // attribute React wrote, so it cannot show that a real input actually swaps
+  // between masked and readable.
+  await page.getByRole("button", { name: "Show IFTTT API Key" }).click();
+  await expect(apiKeyField).toHaveAttribute("type", "text");
+  await expect(apiKeyField).toHaveValue(nextApiKey);
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved ✓")).toBeVisible({ timeout: 10000 });
 
   await page.reload();
-  await expect(page.getByLabel("IFTTT API Key")).toHaveValue(nextApiKey);
+  await expect(page.getByLabel("IFTTT API Key", { exact: true })).toHaveValue(nextApiKey);
   await expect(page.getByRole("button", { name: "IFTTT Enabled" })).toHaveAttribute(
     "aria-pressed",
     String(nextEnabled),
@@ -392,7 +404,7 @@ test("IFTTT enabled + APIKey save and round-trip on the notifications tab", asyn
 
   // Restore the original enabled/APIKey so the backend is left as found.
   const restoreToggle = page.getByRole("button", { name: "IFTTT Enabled" });
-  const restoreApiKeyField = page.getByLabel("IFTTT API Key");
+  const restoreApiKeyField = page.getByLabel("IFTTT API Key", { exact: true });
   const currentPressed = await restoreToggle.getAttribute("aria-pressed");
   if (currentPressed !== String(originalEnabled)) {
     await restoreToggle.click();

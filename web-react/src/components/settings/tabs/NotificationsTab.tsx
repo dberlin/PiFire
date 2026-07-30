@@ -3,6 +3,7 @@ import type { Settings } from "../../../helpers/settings/settingsApi";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
+import { SecretField } from "../fields/SecretField";
 import { Section } from "../fields/Section";
 import { StringListField } from "../fields/StringListField";
 import { TextField } from "../fields/TextField";
@@ -135,7 +136,7 @@ export function NotificationsTab() {
           checked={bool(ifttt, "enabled")}
           onChange={(b) => setField("ifttt", "enabled", b)}
         />
-        <TextField
+        <SecretField
           label="IFTTT API Key"
           value={str(ifttt, "APIKey")}
           onChange={(val) => setField("ifttt", "APIKey", val)}
@@ -148,7 +149,7 @@ export function NotificationsTab() {
           checked={bool(pushbullet, "enabled")}
           onChange={(b) => setField("pushbullet", "enabled", b)}
         />
-        <TextField
+        <SecretField
           label="Pushbullet API Key"
           value={str(pushbullet, "APIKey")}
           onChange={(val) => setField("pushbullet", "APIKey", val)}
@@ -166,12 +167,12 @@ export function NotificationsTab() {
           checked={bool(pushover, "enabled")}
           onChange={(b) => setField("pushover", "enabled", b)}
         />
-        <TextField
+        <SecretField
           label="Pushover API Key"
           value={str(pushover, "APIKey")}
           onChange={(val) => setField("pushover", "APIKey", val)}
         />
-        <TextField
+        <SecretField
           label="Pushover User Keys"
           value={str(pushover, "UserKeys")}
           onChange={(val) => setField("pushover", "UserKeys", val)}
@@ -246,7 +247,7 @@ export function NotificationsTab() {
           value={str(influxdb, "url")}
           onChange={(val) => setField("influxdb", "url", val)}
         />
-        <TextField
+        <SecretField
           label="InfluxDB Token"
           value={str(influxdb, "token")}
           onChange={(val) => setField("influxdb", "token", val)}
@@ -290,7 +291,7 @@ export function NotificationsTab() {
           value={str(mqtt, "username")}
           onChange={(val) => setField("mqtt", "username", val)}
         />
-        <TextField
+        <SecretField
           label="MQTT Password"
           value={str(mqtt, "password")}
           onChange={(val) => setField("mqtt", "password", val)}
