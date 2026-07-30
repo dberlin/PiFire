@@ -254,7 +254,6 @@ class GlobalSettings(_Section):
     augerrate: float = 0.3
     first_time_setup: bool = True
     ext_data: bool = False
-    global_control_panel: bool = False
     boot_to_monitor: bool = False
     prime_ignition: bool = False
     updated_message: bool = False

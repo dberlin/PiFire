@@ -22,7 +22,6 @@ export type DebugMode = boolean;
 export type DispRotation = number;
 export type ExtData = boolean;
 export type FirstTimeSetup = boolean;
-export type GlobalControlPanel = boolean;
 export type GrillName = string;
 export type PrimeIgnition = boolean;
 export type PythonExec = string;
@@ -277,7 +276,6 @@ export interface GlobalSettings {
   disp_rotation?: DispRotation;
   ext_data?: ExtData;
   first_time_setup?: FirstTimeSetup;
-  global_control_panel?: GlobalControlPanel;
   grill_name?: GrillName;
   prime_ignition?: PrimeIgnition;
   python_exec?: PythonExec;

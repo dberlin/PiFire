@@ -199,11 +199,6 @@
           "title": "First Time Setup",
           "type": "boolean"
         },
-        "global_control_panel": {
-          "default": false,
-          "title": "Global Control Panel",
-          "type": "boolean"
-        },
         "grill_name": {
           "default": "",
           "title": "Grill Name",
@@ -1956,7 +1951,6 @@
         "disp_rotation": 0,
         "ext_data": false,
         "first_time_setup": true,
-        "global_control_panel": false,
         "grill_name": "",
         "prime_ignition": false,
         "python_exec": ".venv/bin/python",
