@@ -1663,7 +1663,11 @@
           },
           "numato_device": {
             "friendly_name": "Numato Serial Device",
-            "description": "Path to the Numato USB relay serial device (e.g. /dev/ttyACM0).",
+            "description": "Path to the Numato USB relay board's serial device (e.g. /dev/ttyACM0). Use Discover to scan for connected Numato relay boards. The path is assigned in USB enumeration order, so it moves when devices are replugged or added, and pointing it at the wrong device stops the relays working.",
+            "type": "usb_serial_device",
+            "vid": "0x2a19",
+            "pid": "0x0c0c",
+            "default": "/dev/ttyACM0",
             "options": {
               "/dev/ttyACM0": "/dev/ttyACM0",
               "/dev/ttyACM1": "/dev/ttyACM1"

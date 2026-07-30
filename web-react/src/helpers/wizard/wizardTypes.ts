@@ -8,6 +8,13 @@ export interface SettingsDependency {
   options?: Record<string, string>;
   /** Manifest fallback (e.g. "CP2112"). Present on every i2c_bus_num dep. */
   default?: string;
+  /** USB vendor/product ID to narrow a `usb_serial_device` Discover scan to
+   *  one kind of board, written the way the manifest writes them ("0x2a19").
+   *  Omitted or null means "list every serial device", which is the right
+   *  answer for a device whose IDs we do not know. The backend coerces the
+   *  hex string to the int pyserial reports -- see common/usb_serial.py. */
+  vid?: string | number | null;
+  pid?: string | number | null;
   hidden?: boolean;
   settings: string[];
 }

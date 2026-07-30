@@ -40,3 +40,37 @@ def test_x86_fan_bus_kind_includes_usb_hid():
     deps = numato["settings_dependencies"]
     options = set(deps["i2c_bus_kind"]["options"])
     assert {"basic", "extended", "ft232h", "mcp2221"} <= options
+
+
+def test_numato_device_offers_discovery_scoped_to_the_relay_board():
+    """The Numato serial path is discoverable, and the scan is narrowed to the
+    board's own USB IDs.
+
+    /dev/ttyACM* is assigned in enumeration order, so the right path moves when
+    devices are replugged -- a hardcoded two-item dropdown cannot tell the user
+    which one is the relay, and picking the wrong one makes every relay
+    operation time out silently (see grillplat/numato_usbrelay.py's identity
+    probe, which now refuses that case outright).
+
+    The IDs are the Numato Lab 4 Channel USB Solid State Relay Module's, and
+    they are written the way USB IDs are written; common/usb_serial.py coerces
+    the hex string to the int pyserial reports.
+    """
+    deps = _manifest()["modules"]["grillplatform"]["x86_numato"]["settings_dependencies"]
+    dep = deps["numato_device"]
+    assert dep["type"] == "usb_serial_device"
+    assert dep["vid"] == "0x2a19"
+    assert dep["pid"] == "0x0c0c"
+    assert dep["settings"] == ["platform", "numato", "device"]
+    # The picker falls back to this when nothing is configured yet.
+    assert dep["default"] == "/dev/ttyACM0"
+
+
+def test_numato_device_vid_pid_match_the_driver_the_wizard_configures():
+    """Guard against the manifest and the driver drifting apart: these IDs are
+    the whole basis for claiming a discovered port IS the relay board."""
+    from common.usb_serial import _as_usb_id
+
+    dep = _manifest()["modules"]["grillplatform"]["x86_numato"]["settings_dependencies"]["numato_device"]
+    assert _as_usb_id(dep["vid"]) == 0x2A19
+    assert _as_usb_id(dep["pid"]) == 0x0C0C

@@ -183,7 +183,45 @@ describe("ModuleCard", () => {
     expect(discoverButton).toBeInTheDocument();
 
     fireEvent.click(discoverButton);
-    expect(scan).toHaveBeenCalledWith("", { kind: "usb_serial" });
+    expect(scan).toHaveBeenCalledWith("", {
+      kind: "usb_serial",
+      vid: undefined,
+      pid: undefined,
+    });
+  });
+
+  it("narrows the Discover scan to the dependency's USB IDs when the manifest names them", async () => {
+    // The manifest declared vid/pid for the Numato relay and the call site
+    // dropped them, so Discover listed every serial device on the machine --
+    // including the one that had been mistaken for the relay. The IDs are
+    // forwarded verbatim; common/usb_serial.py coerces the hex string.
+    const { scan } = await import("../../helpers/wizard/wizardApi");
+    // A local module fixture, not a mutation of the shared `modules` object --
+    // baseProps() hands out the same one to every test in this file.
+    const identified: Record<string, WizardModuleData> = {
+      usb_serial: {
+        friendly_name: "USB Serial Module",
+        settings_dependencies: {
+          usb_device: {
+            friendly_name: "USB Device",
+            type: "usb_serial_device",
+            options: { "/dev/ttyUSB0": "ttyUSB0" },
+            settings: ["usb_device"],
+            vid: "0x2a19",
+            pid: "0x0c0c",
+          },
+        },
+      },
+    };
+
+    render(<ModuleCard {...baseProps()} modules={identified} selectedModule="usb_serial" />);
+    fireEvent.click(screen.getByRole("button", { name: /discover/i }));
+
+    expect(scan).toHaveBeenCalledWith("", {
+      kind: "usb_serial",
+      vid: "0x2a19",
+      pid: "0x0c0c",
+    });
   });
 
   it("resolves the manifest's bare image filename against PiFire's static path", () => {

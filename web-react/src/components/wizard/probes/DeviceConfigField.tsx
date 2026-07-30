@@ -132,6 +132,13 @@ export function DeviceConfigField({
           dep={dep}
           value={String(value ?? "")}
           onChange={set}
+          // Unfiltered on purpose, unlike ModuleCard's usb_serial_device: `dep`
+          // here is synthesized from a ProbeConfigField, which carries no
+          // vid/pid, and no probe module declares a usb_serial_device field
+          // today. Passing dep.vid would read as a filter while always being
+          // undefined -- the exact shape of the bug this scan already had.
+          // Give ProbeConfigField vid/pid, and carry them into `dep` above,
+          // when a probe module actually needs one.
           onScan={() => scan(baseUrl, { kind: "usb_serial" })}
         />
       );

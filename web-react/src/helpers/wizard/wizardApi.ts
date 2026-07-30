@@ -43,7 +43,11 @@ export async function cancelWizard(baseUrl: string): Promise<boolean> {
 
 export async function scan(
   baseUrl: string,
-  body: { kind: string; vid?: number; pid?: number },
+  // vid/pid are passed through from the manifest as written ("0x2a19"); the
+  // backend coerces them to the int pyserial reports. Typing them as `number`
+  // here would have forced every caller to parse hex first, which is how they
+  // ended up being dropped entirely.
+  body: { kind: string; vid?: string | number | null; pid?: string | number | null },
 ): Promise<ScanResult> {
   const r = await fetch(url(baseUrl, "scan"), {
     method: "POST",

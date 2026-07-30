@@ -70,7 +70,11 @@ export function ModuleCard({
           dep={dep}
           value={value}
           onChange={onChange}
-          onScan={() => scan(baseUrl, { kind: "usb_serial" })}
+          // Narrow the scan to this dependency's board when the manifest names
+          // one. Without these the Discover list is every serial device on the
+          // machine, which on the box that prompted this included the very
+          // device that had been misidentified as the relay.
+          onScan={() => scan(baseUrl, { kind: "usb_serial", vid: dep.vid, pid: dep.pid })}
         />
       );
     }
