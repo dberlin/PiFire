@@ -52,6 +52,42 @@ def _test_mode_config(monkeypatch, tmp_path):
     return config_txt
 
 
+def test_prototype_never_touches_the_boot_config_on_a_debian_12_or_13_host(monkeypatch, tmp_path):
+    """A 'prototype' system has no Pi firmware config, whatever the OS reports.
+
+    Reproduces the wizard failure on a Debian 13 container: VERSION_ID alone
+    chose /boot/firmware/config.txt, which is not there, and every pin setting
+    came back "FAILED".
+    """
+    monkeypatch.setattr(board_config, "probe_os_info", lambda *a, **k: {"VERSION_ID": "13"})
+    monkeypatch.setattr(board_config, "read_settings", lambda: _settings())
+    monkeypatch.chdir(tmp_path)  # no local/ -- exactly the container's state
+
+    message, changed = board_config.enable_spi()
+
+    assert "FAILED" not in message
+    assert changed is True
+    # Written to the stand-in, which is also proof /boot was never the target.
+    assert "dtparam=spi=on" in (tmp_path / "local" / "config.txt").read_text()
+    assert board_config.config_txt_path("prototype") == board_config.TEST_MODE_CONFIG
+
+
+def test_a_missing_boot_config_reports_why_it_failed(monkeypatch, tmp_path):
+    """On a real Pi the path stands, and a failure has to name its reason --
+    a bare "FAILED" in the wizard log is nothing an operator can act on."""
+    monkeypatch.setattr(board_config, "probe_os_info", lambda *a, **k: {"VERSION_ID": "13"})
+    monkeypatch.setattr(board_config, "read_settings", lambda: _settings(system_type="raspberry_pi_all"))
+    missing = tmp_path / "nowhere" / "config.txt"
+    monkeypatch.setattr(board_config, "config_txt_path", lambda *a, **k: str(missing))
+
+    message, changed = board_config.enable_spi()
+
+    assert changed is False
+    assert "FAILED" in message
+    assert str(missing) in message  # the path that could not be opened
+    assert "No such file" in message  # and the reason
+
+
 def test_enable_spi_first_run_changes_and_writes_line(monkeypatch, _test_mode_config):
     monkeypatch.setattr(board_config, "read_settings", lambda: _settings())
 

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { adminErrorText, systemAction } from "../../helpers/admin/adminApi";
+import type { SystemAction } from "../../helpers/admin/adminTypes";
 import { getInstallStatus } from "../../helpers/wizard/wizardApi";
 import type { InstallStatus } from "../../helpers/wizard/wizardTypes";
 
@@ -25,6 +27,7 @@ export function InstallProgress({ baseUrl, onDone }: InstallProgressProps) {
     output: "",
   });
   const [rebootRequired, setRebootRequired] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   // Keep the latest onDone without re-running the polling effect on every
   // render caused by a caller passing a fresh callback identity.
   const onDoneRef = useRef(onDone);
@@ -54,6 +57,16 @@ export function InstallProgress({ baseUrl, onDone }: InstallProgressProps) {
     };
   }, [baseUrl]);
 
+  // POSTs to the admin API rather than linking. /admin/reboot and
+  // /admin/restart were Flask page routes, and they went with the rest of the
+  // Flask pages -- a link to either just 404s. The API is also POST-only on
+  // purpose, so a link could not have done this even if the path had survived.
+  async function runSystemAction(action: SystemAction) {
+    setActionError(null);
+    const result = await systemAction(action);
+    if (!result.ok) setActionError(adminErrorText(result));
+  }
+
   if (rebootRequired) {
     return (
       <div
@@ -65,13 +78,22 @@ export function InstallProgress({ baseUrl, onDone }: InstallProgressProps) {
         <p className="pf-install-reboot-message">
           Installation finished. A reboot is required to load the new configuration.
         </p>
+        {actionError && (
+          <p className="pf-settings-error-text" role="alert">
+            {actionError}
+          </p>
+        )}
         <div className="pf-install-reboot-actions">
-          <a className="pf-btn pf-btn-primary" href="/admin/reboot">
+          <button
+            type="button"
+            className="pf-btn pf-btn-primary"
+            onClick={() => runSystemAction("reboot")}
+          >
             Reboot Now
-          </a>
-          <a className="pf-btn" href="/admin/restart">
+          </button>
+          <button type="button" className="pf-btn" onClick={() => runSystemAction("restart")}>
             Restart Service Only
-          </a>
+          </button>
         </div>
       </div>
     );

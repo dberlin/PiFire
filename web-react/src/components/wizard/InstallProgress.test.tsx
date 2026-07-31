@@ -3,15 +3,22 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { InstallProgress } from "./InstallProgress";
 
 const getStatusMock = rs.fn();
+const systemActionMock = rs.fn();
 
 rs.mock("../../helpers/wizard/wizardApi", () => ({
   getInstallStatus: (...args: unknown[]) => getStatusMock(...args),
+}));
+
+rs.mock("../../helpers/admin/adminApi", () => ({
+  systemAction: (...args: unknown[]) => systemActionMock(...args),
+  adminErrorText: () => "could not restart",
 }));
 
 afterEach(() => {
   cleanup();
   rs.useRealTimers();
   getStatusMock.mockReset();
+  systemActionMock.mockReset();
 });
 
 describe("InstallProgress", () => {
@@ -36,14 +43,12 @@ describe("InstallProgress", () => {
     });
 
     expect(screen.getByRole("dialog", { name: "Reboot required" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Reboot Now" })).toHaveAttribute(
-      "href",
-      "/admin/reboot",
-    );
-    expect(screen.getByRole("link", { name: "Restart Service Only" })).toHaveAttribute(
-      "href",
-      "/admin/restart",
-    );
+    // Buttons that POST, not links: /admin/reboot and /admin/restart were
+    // Flask page routes and 404 now, and the API that replaced them refuses
+    // GET outright.
+    expect(screen.getByRole("button", { name: "Reboot Now" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restart Service Only" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Reboot Now" })).toBeNull();
     expect(onDone).not.toHaveBeenCalled();
     expect(getStatusMock).toHaveBeenCalledTimes(2);
 
@@ -165,5 +170,42 @@ describe("InstallProgress", () => {
       // biome-ignore lint/suspicious/noExplicitAny: undo the stub above.
       (window as any).matchMedia = undefined;
     }
+  });
+
+  it("posts the system action rather than navigating to a dead /admin route", async () => {
+    rs.useFakeTimers();
+    getStatusMock.mockResolvedValue({ percent: 142, status: "Waiting for reboot", output: "" });
+    systemActionMock.mockResolvedValue({ ok: true });
+
+    render(<InstallProgress baseUrl="http://x" onDone={rs.fn()} />);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(250);
+    });
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Restart Service Only" }).click();
+    });
+    expect(systemActionMock).toHaveBeenCalledWith("restart");
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Reboot Now" }).click();
+    });
+    expect(systemActionMock).toHaveBeenCalledWith("reboot");
+  });
+
+  it("surfaces a refused system action instead of leaving the modal silent", async () => {
+    rs.useFakeTimers();
+    getStatusMock.mockResolvedValue({ percent: 142, status: "Waiting for reboot", output: "" });
+    systemActionMock.mockResolvedValue({ ok: false, error: "not_stopped" });
+
+    render(<InstallProgress baseUrl="http://x" onDone={rs.fn()} />);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(250);
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Reboot Now" }).click();
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("could not restart");
   });
 });

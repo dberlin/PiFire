@@ -54,7 +54,9 @@ def set_pwm_gpio():
         if system_type == "raspberry_pi_all" or system_type == "prototype":
             # "dtoverlay=pwm-2chan,pin=13,func=4"
             pin = int(pin) if pin != None else None
-            msg, changed = rpi_config_write("dtoverlay", "pwm-2chan", add_config={"func": "4"}, pin=pin, pin_type="pin")
+            msg, changed = rpi_config_write(
+                "dtoverlay", "pwm-2chan", add_config={"func": "4"}, pin=pin, pin_type="pin", system_type=system_type
+            )
             result += msg
         else:
             result += "NA - No system defined"
@@ -79,7 +81,9 @@ def set_onewire_gpio():
         if system_type == "raspberry_pi_all" or system_type == "prototype":
             # "dtoverlay=w1-gpio,pin=6"
             pin = int(pin) if pin != None else None
-            msg, changed = rpi_config_write("dtoverlay", "w1-gpio", pin=pin, pin_type="gpiopin")
+            msg, changed = rpi_config_write(
+                "dtoverlay", "w1-gpio", pin=pin, pin_type="gpiopin", system_type=system_type
+            )
             result += msg
         else:
             result += "NA - No system defined"
@@ -126,7 +130,7 @@ def enable_spi():
     try:
         if system_type == "raspberry_pi_all" or system_type == "prototype":
             # "dtparam=spi=on"
-            msg, changed = rpi_config_write("dtparam", "spi")
+            msg, changed = rpi_config_write("dtparam", "spi", system_type=system_type)
             result += msg
         else:
             result += "NA - No system defined"
@@ -149,7 +153,7 @@ def enable_i2c():
     try:
         if system_type == "raspberry_pi_all":
             # dtparam=i2c_arm=on
-            msg, dtparam_changed = rpi_config_write("dtparam", "i2c_arm")
+            msg, dtparam_changed = rpi_config_write("dtparam", "i2c_arm", system_type=system_type)
             result += msg
             # To enable userspace access to I2C ensure that /etc/modules contains "i2c-dev"
             msg, modules_changed = append_file("/etc/modules", "i2c-dev\n")
@@ -177,7 +181,7 @@ def set_i2c_speed(baud=100000):
     try:
         if system_type == "raspberry_pi_all" or system_type == "prototype":
             # dtparam=i2c_arm_baudrate=100000
-            msg, changed = rpi_config_write("dtparam", "i2c_arm_baudrate", param=baud)
+            msg, changed = rpi_config_write("dtparam", "i2c_arm_baudrate", param=baud, system_type=system_type)
             result += msg
         else:
             result += "NA - No system defined"
@@ -205,7 +209,12 @@ def enable_gpio_shutdown():
             add_config = {"active_low": "1", "gpio_pull": "up"}
             pin = int(pin) if pin != None else None
             msg, changed = rpi_config_write(
-                "dtoverlay", "gpio-shutdown", add_config=add_config, pin=pin, pin_type="gpio_pin"
+                "dtoverlay",
+                "gpio-shutdown",
+                add_config=add_config,
+                pin=pin,
+                pin_type="gpio_pin",
+                system_type=system_type,
             )
             result += msg
         else:
@@ -223,9 +232,22 @@ def enable_gpio_shutdown():
 """
 
 
-def rpi_config_write(config_type, feature, add_config={}, pin=0, param="", pin_type="gpio_pin"):
-    result = "SUCCESS"
-    changed = False
+#: Where a system with no Raspberry Pi firmware config keeps its stand-in.
+TEST_MODE_CONFIG = "./local/config.txt"
+
+
+def config_txt_path(system_type=None):
+    """The config.txt this system's device-tree settings belong in.
+
+    `system_type` decides first, and "prototype" means development testing --
+    a machine with no Pi firmware config to edit, so it gets the local
+    stand-in. Picking on OS version ALONE is what sent every Debian 12/13
+    machine that is not a Pi (a container, an x86 build) at
+    /boot/firmware/config.txt, which does not exist there.
+    """
+    if system_type == "prototype":
+        return TEST_MODE_CONFIG
+
     """ Check OS version, so we can get the correct location of config.txt """
     # probe_, not refresh_: this wants one value (VERSION_ID) to pick a path.
     # It used to take get_os_info()'s persist=True default and refresh the
@@ -234,13 +256,28 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param="", pin_t
     version = os_info.get("VERSION_ID", None)
     if version in ["12", "13"]:
         """ Version 12 Bookworm or Version 13 Trixie """
-        config_filename = "/boot/firmware/config.txt"
-    elif version == "11":
+        return "/boot/firmware/config.txt"
+    if version == "11":
         """ Version 11 Bullseye """
-        config_filename = "/boot/config.txt"
-    else:
-        """ Test Mode """
-        config_filename = "./local/config.txt"
+        return "/boot/config.txt"
+    """ Test Mode """
+    return TEST_MODE_CONFIG
+
+
+def rpi_config_write(config_type, feature, add_config={}, pin=0, param="", pin_type="gpio_pin", system_type=None):
+    result = "SUCCESS"
+    changed = False
+    config_filename = config_txt_path(system_type)
+
+    # The stand-in is ours to create; a missing /boot config.txt is a real
+    # problem to report, not something to invent a file for.
+    if config_filename == TEST_MODE_CONFIG and not os.path.exists(config_filename):
+        try:
+            os.makedirs(os.path.dirname(config_filename), exist_ok=True)
+            with open(config_filename, "w"):
+                pass
+        except OSError as exc:
+            return f"FAILED (cannot create {config_filename}: {exc}) ", False
 
     """ Modify the configuration file """
     try:
@@ -325,8 +362,12 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param="", pin_t
             with open(config_filename, "w") as config_txt:
                 config_txt.writelines(config_data)
 
-    except:
-        result = "FAILED "
+    except Exception as exc:
+        # The reason, not just the verdict: a bare "FAILED" in the wizard's
+        # install log gives an operator nothing to act on, and the usual cause
+        # -- the config.txt for this OS version not being there at all -- says
+        # exactly what to fix once it is printed.
+        result = f"FAILED ({config_filename}: {exc}) "
         changed = False
 
     return result, changed

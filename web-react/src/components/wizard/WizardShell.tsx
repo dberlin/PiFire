@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLoaderData, useNavigate } from "react-router";
+import { systemAction } from "../../helpers/admin/adminApi";
 import { cancelWizard, finishWizard, saveDraft } from "../../helpers/wizard/wizardApi";
 import { BASE_URL } from "../../helpers/wizard/wizardRoutes";
 import { initialWorking } from "../../helpers/wizard/wizardState";
@@ -132,8 +133,14 @@ export function WizardShell() {
       return (
         <InstallProgress
           baseUrl={BASE_URL}
-          onDone={() => {
-            window.location.href = "/admin/restart";
+          onDone={async () => {
+            // The install wrote new module selections; control and the webapp
+            // have to come back up before they take effect. /admin/restart was
+            // a Flask page route and 404s now -- this is the API that replaced
+            // it. Land on the dashboard either way: on success the server is
+            // going down mid-request, so there is nothing to wait for.
+            await systemAction("restart");
+            window.location.href = "/";
           }}
         />
       );
