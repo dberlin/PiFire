@@ -120,7 +120,9 @@ fi
 # Setup VENV
 echo " + Setting up VENV" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 cd /usr/local/bin/pifire
-uv venv --system-site-packages
+# --allow-existing: on an upgrade the venv ALWAYS exists, so without this the
+# command fails every single time and the upgrade continues past it.
+uv venv --system-site-packages --allow-existing
 
 # Activate VENV
 source .venv/bin/activate
@@ -182,8 +184,18 @@ python board-config.py -ov 2>&1 | tee -a ~/logs/pifire_install.log
 # them up on upgrade rather than only on a reinstall.
 echo " - Rebuilding the web UI" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 LOG=/usr/local/bin/pifire/logs/upgrade.log
+PIFIRE_COMMON=/usr/local/bin/pifire/auto-install/pifire-install-common.sh
+if [ ! -r "$PIFIRE_COMMON" ]; then
+	# Fatal, and deliberately so: sourcing a missing file only warns, and the
+	# upgrade then runs to completion with every shared step silently skipped
+	# -- including the web UI build, leaving the previous bundle in place
+	# against a backend that has moved.
+	echo " !! $PIFIRE_COMMON is missing or unreadable." | tee -a "$LOG"
+	echo " !! Nothing after this point would work. Aborting." | tee -a "$LOG"
+	exit 1
+fi
 # shellcheck source=../auto-install/pifire-install-common.sh
-source /usr/local/bin/pifire/auto-install/pifire-install-common.sh
+source "$PIFIRE_COMMON"
 
 pifire_add_hardware_groups "$USERNAME" root
 pifire_install_udev_rules /usr/local/bin/pifire

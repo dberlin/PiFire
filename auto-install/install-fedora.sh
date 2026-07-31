@@ -195,21 +195,64 @@ $SUDO systemctl enable --now bluetooth 2>&1 | tee -a "$LOG" || log " ! bluetooth
 log "*************************************************************************"
 log "**  Cloning PiFire from GitHub...                                     **"
 log "*************************************************************************"
+PIFIRE_REPO_URL="https://github.com/dberlin/pifire"
+PIFIRE_BRANCH="massive-reworks-and-new-ui"
 cd /usr/local/bin
-if [[ -d /usr/local/bin/pifire ]]; then
-	log " ! /usr/local/bin/pifire already exists; leaving it in place."
-elif [[ "$DEV_REPO" == "true" ]]; then
-	log " + Cloning massive-reworks-and-new-ui branch..."
-	$SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a "$LOG"
+if [[ ! -d /usr/local/bin/pifire ]]; then
+	log " + Cloning $PIFIRE_BRANCH branch..."
+	# --progress: the pipe into tee makes git think it has no terminal, and it
+	# then stays silent for the whole download. This is the slowest step in the
+	# install, so it is the one that most needs to show where it has got to.
+	$SUDO git clone --progress --branch "$PIFIRE_BRANCH" "$PIFIRE_REPO_URL" 2>&1 | tee -a "$LOG"
+elif [[ ! -d /usr/local/bin/pifire/.git ]]; then
+	log " !! /usr/local/bin/pifire exists but is not a git checkout."
+	log " !! Move it aside and re-run -- this installer will not overwrite it."
+	exit 1
 else
-	log " + Cloning massive-reworks-and-new-ui branch..."
-	$SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a "$LOG"
+	# An existing checkout is brought to the branch tip, never assumed to be
+	# at it. Left in place, one from an earlier release goes on to source a
+	# shared library that release did not ship, and every call into it fails
+	# as "command not found" while the install carries on regardless.
+	branch="$($SUDO git -C /usr/local/bin/pifire rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+	if [[ "$branch" != "$PIFIRE_BRANCH" ]]; then
+		log " !! /usr/local/bin/pifire is on '$branch', not '$PIFIRE_BRANCH'."
+		log " !! Switch it or move it aside, then re-run. Nothing was changed."
+		exit 1
+	fi
+	log " + Updating the existing checkout to the tip of $PIFIRE_BRANCH"
+	if ! (
+		set -o pipefail
+		$SUDO git -C /usr/local/bin/pifire fetch --progress origin "$PIFIRE_BRANCH" 2>&1 | tee -a "$LOG"
+	); then
+		log " !! Could not fetch $PIFIRE_BRANCH. Check the network and re-run."
+		exit 1
+	fi
+	# --ff-only, not reset --hard: an update must not silently discard work
+	# somebody has in that directory.
+	if ! (
+		set -o pipefail
+		$SUDO git -C /usr/local/bin/pifire merge --ff-only FETCH_HEAD 2>&1 | tee -a "$LOG"
+	); then
+		log " !! /usr/local/bin/pifire cannot be fast-forwarded -- it has local"
+		log " !! commits or modified files an update would lose. Nothing has been"
+		log " !! changed there. Resolve it (git -C /usr/local/bin/pifire status)"
+		log " !! or move the directory aside, then re-run."
+		exit 1
+	fi
 fi
 
 # Shared install steps (device access, web UI build). Sourced rather than
 # inlined now that the repo is on disk -- see auto-install/pifire-install-common.sh.
+PIFIRE_COMMON=/usr/local/bin/pifire/auto-install/pifire-install-common.sh
+if [[ ! -r "$PIFIRE_COMMON" ]]; then
+	# Fatal, and deliberately so: sourcing a missing file only warns, and the
+	# install then runs to completion with every shared step silently skipped.
+	log " !! $PIFIRE_COMMON is missing or unreadable."
+	log " !! Nothing after this point would work. Aborting."
+	exit 1
+fi
 # shellcheck source=pifire-install-common.sh
-source /usr/local/bin/pifire/auto-install/pifire-install-common.sh
+source "$PIFIRE_COMMON"
 
 # --- pifire group / ownership / sudoers -----------------------------------
 log " + Setting up the pifire group and permissions"
@@ -274,7 +317,9 @@ fi
 
 cd /usr/local/bin/pifire
 log " + Creating venv (system-site-packages, for python3-scipy)"
-uv venv --system-site-packages 2>&1 | tee -a "$LOG"
+# --allow-existing so a re-run reuses the venv instead of failing with
+# "a virtual environment already exists" and carrying on regardless.
+uv venv --system-site-packages --allow-existing 2>&1 | tee -a "$LOG"
 # shellcheck disable=SC1091
 source .venv/bin/activate
 

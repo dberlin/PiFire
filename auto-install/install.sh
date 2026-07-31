@@ -282,15 +282,49 @@ echo "**                                                                     **"
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
 cd /usr/local/bin
 
-# Check if -devrepo option is used
-if [[ $DEV_REPO == "true" ]]; then
-	echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log
-	# Replace the below command to fetch development branch
-	$SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire 2>&1 | tee -a ~/logs/pifire_install.log
+PIFIRE_REPO_URL="https://github.com/dberlin/pifire"
+PIFIRE_BRANCH="massive-reworks-and-new-ui"
+if [[ ! -d /usr/local/bin/pifire ]]; then
+	echo " + Cloning $PIFIRE_BRANCH branch..." | tee -a ~/logs/pifire_install.log
+	# --progress: the pipe into tee makes git think it has no terminal, and it
+	# then stays silent for the whole download. This is the slowest step in the
+	# install, so it is the one that most needs to show where it has got to.
+	$SUDO git clone --progress --branch "$PIFIRE_BRANCH" "$PIFIRE_REPO_URL" 2>&1 | tee -a ~/logs/pifire_install.log
+elif [[ ! -d /usr/local/bin/pifire/.git ]]; then
+	echo " !! /usr/local/bin/pifire exists but is not a git checkout." | tee -a ~/logs/pifire_install.log
+	echo " !! Move it aside and re-run -- this installer will not overwrite it." | tee -a ~/logs/pifire_install.log
+	exit 1
 else
-	echo " + Cloning massive-reworks-and-new-ui branch..." | tee -a ~/logs/pifire_install.log 2>&1 | tee -a ~/logs/pifire_install.log
-	# Use a shallow clone to reduce download size
-	$SUDO git clone --branch massive-reworks-and-new-ui https://github.com/dberlin/pifire
+	# An existing checkout is brought to the branch tip, never assumed to be
+	# at it. Left in place, one from an earlier release goes on to source a
+	# shared library that release did not ship, and every call into it fails
+	# as "command not found" while the install carries on regardless.
+	branch="$($SUDO git -C /usr/local/bin/pifire rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+	if [[ "$branch" != "$PIFIRE_BRANCH" ]]; then
+		echo " !! /usr/local/bin/pifire is on '$branch', not '$PIFIRE_BRANCH'." | tee -a ~/logs/pifire_install.log
+		echo " !! Switch it or move it aside, then re-run. Nothing was changed." | tee -a ~/logs/pifire_install.log
+		exit 1
+	fi
+	echo " + Updating the existing checkout to the tip of $PIFIRE_BRANCH" | tee -a ~/logs/pifire_install.log
+	if ! (
+		set -o pipefail
+		$SUDO git -C /usr/local/bin/pifire fetch --progress origin "$PIFIRE_BRANCH" 2>&1 | tee -a ~/logs/pifire_install.log
+	); then
+		echo " !! Could not fetch $PIFIRE_BRANCH. Check the network and re-run." | tee -a ~/logs/pifire_install.log
+		exit 1
+	fi
+	# --ff-only, not reset --hard: an update must not silently discard work
+	# somebody has in that directory.
+	if ! (
+		set -o pipefail
+		$SUDO git -C /usr/local/bin/pifire merge --ff-only FETCH_HEAD 2>&1 | tee -a ~/logs/pifire_install.log
+	); then
+		echo " !! /usr/local/bin/pifire cannot be fast-forwarded -- it has local" | tee -a ~/logs/pifire_install.log
+		echo " !! commits or modified files an update would lose. Nothing has been" | tee -a ~/logs/pifire_install.log
+		echo " !! changed there. Resolve it (git -C /usr/local/bin/pifire status)" | tee -a ~/logs/pifire_install.log
+		echo " !! or move the directory aside, then re-run." | tee -a ~/logs/pifire_install.log
+		exit 1
+	fi
 fi
 
 # Setup Python VENV & Install Python dependencies
@@ -306,9 +340,17 @@ cd /usr/local/bin
 
 # Shared install steps (device access, web UI build). Sourced rather than
 # inlined now that the repo is on disk -- see auto-install/pifire-install-common.sh.
-# shellcheck source=pifire-install-common.sh
 LOG=~/logs/pifire_install.log
-source /usr/local/bin/pifire/auto-install/pifire-install-common.sh
+PIFIRE_COMMON=/usr/local/bin/pifire/auto-install/pifire-install-common.sh
+if [[ ! -r "$PIFIRE_COMMON" ]]; then
+	# Fatal, and deliberately so: sourcing a missing file only warns, and the
+	# install then runs to completion with every shared step silently skipped.
+	echo " !! $PIFIRE_COMMON is missing or unreadable." | tee -a "$LOG"
+	echo " !! Nothing after this point would work. Aborting." | tee -a "$LOG"
+	exit 1
+fi
+# shellcheck source=pifire-install-common.sh
+source "$PIFIRE_COMMON"
 
 # Seat access for the sway Wayland compositor (QtQuick displays).
 $SUDO systemctl enable --now seatd 2>&1 | tee -a ~/logs/pifire_install.log
@@ -381,7 +423,9 @@ fi
 
 echo " + Setting up VENV" | tee -a ~/logs/pifire_install.log
 cd /usr/local/bin/pifire
-uv venv --system-site-packages
+# --allow-existing so a re-run reuses the venv instead of failing with
+# "a virtual environment already exists" and carrying on regardless.
+uv venv --system-site-packages --allow-existing
 
 # Activate VENV
 source .venv/bin/activate
