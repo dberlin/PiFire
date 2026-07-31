@@ -102,6 +102,35 @@ else
 fi
 
 # Detect OS architecture
+# --- Required tools --------------------------------------------------------
+# Checked before anything is installed, cloned or changed, so a PATH problem
+# costs nothing but a message. groupadd/usermod/useradd live in /usr/sbin,
+# which is on root's PATH but not on an ordinary user's -- and this script is
+# meant to run as that ordinary user (it calls sudo itself).
+PIFIRE_MISSING=()
+for cmd in git curl groupadd usermod getent install udevadm; do
+	command -v "$cmd" >/dev/null 2>&1 || PIFIRE_MISSING+=("$cmd")
+done
+if [[ ${#PIFIRE_MISSING[@]} -gt 0 ]]; then
+	echo "" | tee -a ~/logs/pifire_install.log
+	echo " !! =====================================================================" | tee -a ~/logs/pifire_install.log
+	echo " !! Required command(s) not found on PATH: ${PIFIRE_MISSING[*]}" | tee -a ~/logs/pifire_install.log
+	echo " !! =====================================================================" | tee -a ~/logs/pifire_install.log
+	echo " !! Nothing has been changed." | tee -a ~/logs/pifire_install.log
+	echo " !!" | tee -a ~/logs/pifire_install.log
+	echo " !! If those are user-management tools (groupadd/usermod/useradd), they" | tee -a ~/logs/pifire_install.log
+	echo " !! are in /usr/sbin, which a normal user's PATH omits. Do NOT re-run" | tee -a ~/logs/pifire_install.log
+	echo " !! this installer as root -- it uses sudo where it needs to, and" | tee -a ~/logs/pifire_install.log
+	echo " !! running the whole thing as root leaves the PiFire checkout owned by" | tee -a ~/logs/pifire_install.log
+	echo " !! root rather than by you. Add sbin to PATH for this run instead:" | tee -a ~/logs/pifire_install.log
+	echo " !!" | tee -a ~/logs/pifire_install.log
+	echo " !!     PATH=\"/usr/local/sbin:/usr/sbin:/sbin:$PATH\" bash install.sh" | tee -a ~/logs/pifire_install.log
+	echo " !!" | tee -a ~/logs/pifire_install.log
+	echo " !! Anything else listed is genuinely missing; install it first." | tee -a ~/logs/pifire_install.log
+	echo " !! =====================================================================" | tee -a ~/logs/pifire_install.log
+	exit 1
+fi
+
 ARCH=$(uname -m)
 echo " + Detecting system architecture: $ARCH" | tee -a ~/logs/pifire_install.log
 
@@ -223,7 +252,7 @@ echo "**      Installing Dependencies... (This could take several minutes)   **"
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
 # Install dependencies, exit if failed
-$SUDO apt install python3-dev python3-pip python3-venv python3-scipy nginx git supervisor ttf-mscorefonts-installer gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev bluetooth bluez sway seatd -y 2>&1 | tee -a ~/logs/pifire_install.log
+$SUDO apt install python3-dev python3-pip python3-venv python3-scipy nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev bluetooth bluez sway seatd -y 2>&1 | tee -a ~/logs/pifire_install.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
 	echo " !! Failed to install dependencies. Installation cannot continue." | tee -a ~/logs/pifire_install.log
 	exit 1
@@ -274,15 +303,18 @@ echo "*************************************************************************"
 echo ""
 echo " + Setting Up PiFire Group"
 cd /usr/local/bin
-$SUDO groupadd pifire
-$SUDO usermod -a -G pifire $USER
-$SUDO usermod -a -G pifire root
+
+# Shared install steps (device access, web UI build). Sourced rather than
+# inlined now that the repo is on disk -- see auto-install/pifire-install-common.sh.
+# shellcheck source=pifire-install-common.sh
+LOG=~/logs/pifire_install.log
+source /usr/local/bin/pifire/auto-install/pifire-install-common.sh
+
 # Seat access for the sway Wayland compositor (QtQuick displays).
 $SUDO systemctl enable --now seatd 2>&1 | tee -a ~/logs/pifire_install.log
-for grp in video input render seat; do
-	$SUDO usermod -a -G "$grp" $USER 2>/dev/null || true
-	$SUDO usermod -a -G "$grp" root 2>/dev/null || true
-done
+
+pifire_add_hardware_groups $USER root
+pifire_install_udev_rules /usr/local/bin/pifire
 # Change ownership to group=pifire for all files/directories in pifire
 $SUDO chown -R $USER:pifire pifire
 # Change ability for pifire group to read/write/execute
@@ -402,6 +434,20 @@ python updater.py --piplist 2>&1 | tee -a ~/logs/pifire_install.log
 # Get OS Information into JSON file
 echo " - Getting OS Information into JSON file" | tee -a ~/logs/pifire_install.log
 python board-config.py -ov 2>&1 | tee -a ~/logs/pifire_install.log
+
+echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
+echo "**      Building the web UI...                                         **" | tee -a ~/logs/pifire_install.log
+echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
+# Fatal: web-react/dist is what Flask serves the whole interface from
+# (blueprints/spa/routes.py) and is not checked in, so without this the install
+# finishes "successfully" with nothing to browse to.
+if ! pifire_build_web_ui /usr/local/bin/pifire; then
+	echo " !! The web UI could not be built, so PiFire would have no interface." | tee -a ~/logs/pifire_install.log
+	echo " !! Fix the cause and re-run, or build it by hand with:" | tee -a ~/logs/pifire_install.log
+	echo " !!     cd /usr/local/bin/pifire/web-react && bun install && bun run build" | tee -a ~/logs/pifire_install.log
+	exit 1
+fi
+$SUDO chown -R $USER:pifire /usr/local/bin/pifire/web-react
 
 ### Setup nginx to proxy to gunicorn
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log

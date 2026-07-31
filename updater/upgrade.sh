@@ -92,7 +92,10 @@ echo " * Setting up Python VENV and Installing Modules..." | tee -a /usr/local/b
 sleep 1
 echo " - Setting Up PiFire Group" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 cd /usr/local/bin
-$SUDO groupadd pifire
+# -f -r: idempotent, and a SYSTEM group (GID below the login range). udev
+# warns that device node ownership by non-system accounts is deprecated,
+# and auto-install/udev/99-pifire.rules hands this group device nodes.
+$SUDO groupadd -f -r pifire
 USERNAME=$(id -un)
 $SUDO usermod -a -G pifire $USERNAME
 $SUDO usermod -a -G pifire root
@@ -168,6 +171,33 @@ python updater.py --piplist
 # Get OS Information into JSON file
 echo " - Getting OS Information into JSON file" | tee -a ~/logs/pifire_install.log
 python board-config.py -ov 2>&1 | tee -a ~/logs/pifire_install.log
+
+# Rebuild the web UI.
+#
+# web-react/dist is a build artifact and is git-ignored, so the update that
+# just landed brought NEW React sources and left the OLD bundle in place. Every
+# page would keep serving the previous release's UI -- against a backend that
+# has already moved -- until someone rebuilt it by hand. Device access and
+# group setup are refreshed here too, so an install predating those rules picks
+# them up on upgrade rather than only on a reinstall.
+echo " - Rebuilding the web UI" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+LOG=/usr/local/bin/pifire/logs/upgrade.log
+# shellcheck source=../auto-install/pifire-install-common.sh
+source /usr/local/bin/pifire/auto-install/pifire-install-common.sh
+
+pifire_add_hardware_groups "$USERNAME" root
+pifire_install_udev_rules /usr/local/bin/pifire
+
+if ! pifire_build_web_ui /usr/local/bin/pifire; then
+	# Fatal, unlike most steps here: supervisor is restarted at the end of the
+	# upgrade, and letting it come back against a bundle built from the
+	# PREVIOUS release -- talking to a backend that just changed -- is worse
+	# than stopping with the old version still running and a clear reason why.
+	echo " !! Web UI build failed. The upgrade is incomplete." | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !! Rebuild it by hand and restart PiFire:" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	echo " !!   cd /usr/local/bin/pifire/web-react && bun install && bun run build" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	exit 1
+fi
 
 ### Setup Supervisor to Start Apps on Boot / Restart on Failures
 echo " + Configuring Supervisord..." | tee -a /usr/local/bin/pifire/logs/upgrade.log

@@ -1,0 +1,92 @@
+# PiFire device access rules
+#
+# Installed to /etc/udev/rules.d/99-pifire.rules by the auto-install scripts.
+#
+# PiFire's control and display processes run as an ordinary user, not root, so
+# every device they drive has to be reachable by that user. Group membership
+# alone is not enough for most of these: a USB-serial board's tty comes up
+# root:dialout, a USB-HID device's /dev/hidraw* node comes up root:root mode
+# 0600 (which no group can open), and /dev/i2c-* is root-only on distros that
+# do not ship an i2c group. These rules hand each one to the `pifire` group
+# that the installer creates and adds the user to.
+#
+# The SYMLINK entries matter as much as the permissions. A USB device's
+# /dev/ttyACM<N> is assigned in enumeration order, so it moves when devices are
+# replugged, when a second adapter is added, or simply across a reboot -- and
+# pointing PiFire at the wrong tty is not loud. It opens, it accepts writes,
+# and every read times out, so the relays never actuate while nothing reports
+# an error. A symlink derived from what the device IS cannot drift that way.
+#
+# After editing:  sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# --- Numato Lab USB relay boards -------------------------------------------
+# 4 Channel USB Solid State Relay Module (grillplat/numato_usbrelay.py). This
+# is the board that drives auger/igniter/fan/power on the x86_numato platform.
+# Point platform.numato.device at /dev/pifire-numato to make it stable.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2a19", ATTRS{idProduct}=="0c0c", GROUP="pifire", MODE="0660", SYMLINK+="pifire-numato", TAG+="uaccess"
+
+# --- USB-to-I2C bridges ----------------------------------------------------
+# These enumerate as USB HID and are opened through /dev/hidraw*, which is
+# root-only by default -- the single most common reason a CP2112 or MCP2221
+# "is not detected" by a non-root process.
+
+# Silicon Labs CP2112 (HID-to-SMBus); the fan controller and distance sensor
+# reach their I2C bus through one of these on the x86 build.
+KERNEL=="hidraw*", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea90", GROUP="pifire", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea90", GROUP="pifire", MODE="0660", TAG+="uaccess"
+
+# Microchip MCP2221 / MCP2221A (grillplat/mcp2221.py)
+KERNEL=="hidraw*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="00dd", GROUP="pifire", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="00dd", GROUP="pifire", MODE="0660", TAG+="uaccess"
+
+# FTDI FT232H (grillplat/ft232h.py) -- driven through libusb, so the rule has
+# to land on the usb device node rather than a tty.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014", GROUP="pifire", MODE="0660", TAG+="uaccess"
+
+# --- Other USB serial adapters ---------------------------------------------
+# CP2102/CP2102N and FT232R serial bridges, used for probe boards and the
+# SEN0628 distance sensor. Given the pifire group as well, so the control
+# process does not depend on dialout membership having taken effect.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", GROUP="pifire", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", GROUP="pifire", MODE="0660", TAG+="uaccess"
+
+# --- HID touchscreens ------------------------------------------------------
+# A USB HID touch panel needs its /dev/hidraw* node, and the panel's VID:PID is
+# whatever the user happened to buy -- so this cannot be enumerated the way the
+# bridges above are.
+#
+# Deliberately broad: on a dedicated appliance every hidraw node belongs to
+# PiFire's own hardware, and the alternative is a touchscreen that silently
+# does not work until someone finds its ID. It grants the pifire group, NOT the
+# world -- so on a machine that is also someone's desktop, narrow this to the
+# panel's own idVendor/idProduct (`sudo lsusb` to find them).
+KERNEL=="hidraw*", GROUP="pifire", MODE="0660", TAG+="uaccess"
+
+# libinput reads the touchscreen through /dev/input/event*, which the `input`
+# group already owns on every distro PiFire targets; uaccess additionally hands
+# it to whoever is logged in on the seat, which is what lets sway claim it.
+SUBSYSTEM=="input", KERNEL=="event*", TAG+="uaccess"
+
+# --- I2C -------------------------------------------------------------------
+# Fan controller (EMC2101/EMC2301), ToF distance sensors, ADC probe boards.
+# /dev/i2c-* is root-only unless the distro ships an i2c group and a rule for
+# it; Raspberry Pi OS does, most x86 distros do not.
+SUBSYSTEM=="i2c-dev", GROUP="pifire", MODE="0660", TAG+="uaccess"
+
+# --- SPI / GPIO ------------------------------------------------------------
+# MAX31865/MAX31856 probe boards and SPI displays. Harmless where absent.
+SUBSYSTEM=="spidev", GROUP="pifire", MODE="0660"
+SUBSYSTEM=="gpio", GROUP="pifire", MODE="0660"
+
+# --- Rendering and seat ----------------------------------------------------
+# sway needs the DRM card node and Qt needs the render node. Both are normally
+# video:/render: already -- restated here so a distro that ships neither group
+# still leaves a working display, and tagged uaccess so seatd can hand them to
+# the logged-in session.
+SUBSYSTEM=="drm", KERNEL=="card*", GROUP="video", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0660", TAG+="uaccess"
+
+# --- Display backlight -----------------------------------------------------
+# The display process sets panel brightness by writing sysfs. Supersedes the
+# one-off updater/bl_udev_170.sh, which chmod 666'd these world-writable.
+SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/chgrp pifire /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power", RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power"
