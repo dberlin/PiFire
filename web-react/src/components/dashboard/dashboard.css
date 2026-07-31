@@ -153,9 +153,10 @@
 }
 .pf-dash {
   @apply w-full max-w-[1280px] min-h-[720px] flex flex-col text-text;
-  /* Containing block for the decorative glow and for .pf-modal-scrim, both of
-     which are position: absolute. The old .pf-stage got this from being
-     absolutely positioned itself. */
+  /* Containing block for the decorative glow, which is position: absolute.
+     The old .pf-stage got this from being absolutely positioned itself.
+     The modal scrim no longer resolves against this -- see
+     `.pf-dash .pf-modal-scrim`, which anchors to the viewport. */
   position: relative;
   /* KEEP. The glow sits at bottom: -160px and relies on this to stay inside
      the dashboard; without it the glow bleeds over the rest of the page. What
@@ -220,6 +221,17 @@
   @apply absolute inset-0 grid z-10;
   background: rgba(0, 0, 0, 0.6);
   place-items: center;
+}
+/* On the dashboard the scrim anchors to the viewport, not to .pf-dash.
+   .pf-dash is min-height:720px, so on anything shorter its box runs past the
+   bottom of the screen -- and an absolute scrim centres the dialog on THAT
+   box, putting it below the control buttons and sometimes off screen. The
+   wizard already anchors its own scrim this way (wizard.css).
+   Scoped to .pf-dash on purpose: the admin, pellets and settings cards make
+   themselves position:relative so their scrims stay inside the card, which is
+   deliberate and documented at each of those rules. */
+.pf-dash .pf-modal-scrim {
+  @apply fixed z-30;
 }
 .pf-modal {
   @apply bg-card rounded-[18px] p-[22px] min-w-[320px] flex flex-col gap-[16px];
@@ -317,10 +329,9 @@
 /* Per-probe notification modal (ProbeNotifyModal). It sits inside the shared
    .pf-modal shell above; these rules only style its body. */
 
-/* Three sections -- target, high limit, low limit -- do not fit in a 720px
-   stage the way one did, and .pf-modal-scrim is position: absolute inside that
-   stage, so an over-tall modal is clipped rather than scrolled by the page.
-   Cap it against the scrim and let the body scroll instead. */
+/* Three sections -- target, high limit, low limit -- do not fit the way one
+   did, and the modal cannot grow past its scrim. Cap it against the scrim,
+   now the viewport, and let the body scroll instead. */
 .pf-notify-modal {
   max-height: 88%;
   @apply overflow-y-auto;

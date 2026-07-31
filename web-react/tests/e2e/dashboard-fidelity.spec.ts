@@ -117,3 +117,37 @@ test("nothing is clipped or scrolled off a 1280x720 window", async ({ page }) =>
   });
   expect(clipped, clipped.join("\n")).toEqual([]);
 });
+
+test("a confirmation dialog opens clear of the control buttons, fully on screen", async ({
+  page,
+}) => {
+  // .pf-modal-scrim was position:absolute, and its nearest positioned ancestor
+  // is .pf-dash-controls -- the control-button ROW. So `place-items: center`
+  // centred the dialog on the buttons, not on the page. Measured at 1280x720
+  // before the fix: the button row spans y=628..703, and the dialog opened at
+  // y=628..749 -- starting on top of the buttons and running 29px past the
+  // bottom edge of a 720px screen.
+  await page.goto("/");
+  await expect(page.locator('[data-pf="stage"]')).toBeVisible();
+
+  const buttonRowTop = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(".pf-btn");
+    if (el === null) throw new Error("no control buttons on the dashboard");
+    return el.getBoundingClientRect().top;
+  });
+
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  const modal = page.locator(".pf-modal");
+  await expect(modal).toBeVisible();
+
+  const box = await modal.boundingBox();
+  if (box === null) throw new Error("the dialog has no box");
+  const viewport = page.viewportSize();
+  if (viewport === null) throw new Error("no viewport");
+
+  // Wholly on screen -- this is what failed before, by 29px.
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  // And clear of the buttons it used to be pinned to.
+  expect(box.y + box.height).toBeLessThanOrEqual(buttonRowTop);
+});
