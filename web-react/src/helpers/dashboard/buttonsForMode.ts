@@ -75,7 +75,11 @@ const STOP: ControlButton = {
 // is not enough -- it only fires when the configured post-startup mode is Hold.
 const startupButton = (dash: LiveState): ControlButton => ({
   label: "Startup",
-  variant: "accent",
+  // No accent. In this row accent means "this is the mode you are in" -- the
+  // display's button_active, which is only ever the running mode
+  // (display/_base_flex.py:523). A permanent accent on Startup put a second lit
+  // border in the row next to the real one, so Monitor read as "monitoring, and
+  // also starting up".
   action:
     dash.startupCheck || (dash.startToHoldPrompt && dash.startupGotoMode === "Hold")
       ? { type: "startup" }
