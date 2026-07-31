@@ -9,18 +9,7 @@
         "image": "custom.png",
         "py_dependencies": ["rpi-hardware-pwm>=0.2.2"],
         "apt_dependencies": [],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-pwm",
-            "-ow",
-            "-bl",
-            "-s",
-            "-i"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-pwm", "-ow", "-bl", "-s", "-i"]],
         "settings_dependencies": {
           "current": {
             "friendly_name": "Platform Selected",
@@ -657,9 +646,7 @@
         "image": "pcb_2.00a.png",
         "py_dependencies": ["rpi-hardware-pwm>=0.2.2"],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-ow", "-s", "-i"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-ow", "-s", "-i"]],
         "settings_dependencies": {
           "current": {
             "friendly_name": "Platform Selected",
@@ -947,9 +934,7 @@
         "image": "pcb_3.01a.png",
         "py_dependencies": ["rpi-hardware-pwm>=0.2.2"],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-ow", "-s", "-i"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-ow", "-s", "-i"]],
         "settings_dependencies": {
           "current": {
             "friendly_name": "Platform Selected",
@@ -1178,9 +1163,7 @@
         "image": "pcb_pwm.png",
         "py_dependencies": ["rpi-hardware-pwm>=0.2.2"],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-pwm", "-s", "-i"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-pwm", "-s", "-i"]],
         "settings_dependencies": {
           "current": {
             "friendly_name": "Platform Selected",
@@ -1403,17 +1386,7 @@
         "py_dependencies": ["rpi-hardware-pwm>=0.2.2"],
         "apt_dependencies": [],
         "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-pwm",
-            "-ow",
-            "-bl",
-            "-s",
-            "-i",
-            "-gs"
-          ]
+          ["sudo", "python", "board-config.py", "-pwm", "-ow", "-bl", "-s", "-i", "-gs"]
         ],
         "settings_dependencies": {
           "current": {
@@ -1786,10 +1759,7 @@
         "description": "Host-agnostic build. PiFire outputs (power/igniter/auger/fan) drive an IO-triggered relay board via FT232H GPIO pins over USB. The fan is either a plain relay (on/off) or variable-speed via an EMC2101/EMC2301 fan controller on the FT232H's I2C bus. Requires USB access to the FT232H (libusb; on Linux add a udev rule so it is reachable without root, and ensure the ftdi_sio kernel driver does not claim the device).",
         "default": false,
         "image": "custom.png",
-        "py_dependencies": [
-          "pyftdi",
-          "adafruit-circuitpython-emc2101"
-        ],
+        "py_dependencies": ["pyftdi", "adafruit-circuitpython-emc2101"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -1879,9 +1849,18 @@
             "friendly_name": "Power Output Pin",
             "description": "FT232H GPIO pin driving the power relay.",
             "options": {
-              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
-              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
-              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
+              "C0": "C0",
+              "C1": "C1",
+              "C2": "C2",
+              "C3": "C3",
+              "C4": "C4",
+              "C5": "C5",
+              "C6": "C6",
+              "C7": "C7",
+              "D4": "D4",
+              "D5": "D5",
+              "D6": "D6",
+              "D7": "D7"
             },
             "settings": ["platform", "outputs", "power"]
           },
@@ -1889,9 +1868,18 @@
             "friendly_name": "Igniter Output Pin",
             "description": "FT232H GPIO pin driving the igniter relay.",
             "options": {
-              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
-              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
-              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
+              "C0": "C0",
+              "C1": "C1",
+              "C2": "C2",
+              "C3": "C3",
+              "C4": "C4",
+              "C5": "C5",
+              "C6": "C6",
+              "C7": "C7",
+              "D4": "D4",
+              "D5": "D5",
+              "D6": "D6",
+              "D7": "D7"
             },
             "settings": ["platform", "outputs", "igniter"]
           },
@@ -1899,9 +1887,18 @@
             "friendly_name": "Auger Output Pin",
             "description": "FT232H GPIO pin driving the auger relay.",
             "options": {
-              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
-              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
-              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
+              "C0": "C0",
+              "C1": "C1",
+              "C2": "C2",
+              "C3": "C3",
+              "C4": "C4",
+              "C5": "C5",
+              "C6": "C6",
+              "C7": "C7",
+              "D4": "D4",
+              "D5": "D5",
+              "D6": "D6",
+              "D7": "D7"
             },
             "settings": ["platform", "outputs", "auger"]
           },
@@ -1909,9 +1906,18 @@
             "friendly_name": "Fan Output Pin",
             "description": "FT232H GPIO pin driving the fan relay (gates fan power in both modes).",
             "options": {
-              "C0": "C0", "C1": "C1", "C2": "C2", "C3": "C3",
-              "C4": "C4", "C5": "C5", "C6": "C6", "C7": "C7",
-              "D4": "D4", "D5": "D5", "D6": "D6", "D7": "D7"
+              "C0": "C0",
+              "C1": "C1",
+              "C2": "C2",
+              "C3": "C3",
+              "C4": "C4",
+              "C5": "C5",
+              "C6": "C6",
+              "C7": "C7",
+              "D4": "D4",
+              "D5": "D5",
+              "D6": "D6",
+              "D7": "D7"
             },
             "settings": ["platform", "outputs", "fan"]
           }
@@ -1925,7 +1931,10 @@
         "description": "This is the default module supporting ALL of the ADS1115 16-Bit ADC's and is based on Adafruit's Circuit Python implementation/module.  This version is still actively updated and may support a wider range of hardware.  There has been rumors of sellers shipping ADS1015 12-Bit ADC's instead of the ADS1115 16-Bit ADC's.  If you got one of these, you can try the ADS1015 Adafruit library instead.",
         "default": true,
         "image": "ads1115.png",
-        "py_dependencies": ["adafruit-circuitpython-ads1x15>=2.4.3", "adafruit-extended-bus>=1.0.2"],
+        "py_dependencies": [
+          "adafruit-circuitpython-ads1x15>=2.4.3",
+          "adafruit-extended-bus>=1.0.2"
+        ],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -1956,7 +1965,12 @@
               "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
               "type": "list",
               "list_values": ["basic", "extended", "ft232h", "mcp2221"],
-              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)", "FT232H (USB)", "MCP2221 (USB)"],
+              "list_labels": [
+                "Basic (native I2C)",
+                "Extended (USB / other bus)",
+                "FT232H (USB)",
+                "MCP2221 (USB)"
+              ],
               "default": "basic",
               "hidden": false
             },
@@ -2029,10 +2043,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -2045,7 +2056,10 @@
         "description": "This module supports the ADS1015 12-Bit ADC based on Adafruit's Circuit Python implementation/module.  This version can also be used with the ADS1115, as it is backward compatible.  Some fidelity may be lost due to the fact that the ADC has less bits to measure with, however in testing it seems to be reasonably good.  Use this if you are having issues with the default ADS1115 module.",
         "default": false,
         "image": "ads1115.png",
-        "py_dependencies": ["adafruit-circuitpython-ads1x15>=2.4.3", "adafruit-extended-bus>=1.0.2"],
+        "py_dependencies": [
+          "adafruit-circuitpython-ads1x15>=2.4.3",
+          "adafruit-extended-bus>=1.0.2"
+        ],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -2076,7 +2090,12 @@
               "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
               "type": "list",
               "list_values": ["basic", "extended", "ft232h", "mcp2221"],
-              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)", "FT232H (USB)", "MCP2221 (USB)"],
+              "list_labels": [
+                "Basic (native I2C)",
+                "Extended (USB / other bus)",
+                "FT232H (USB)",
+                "MCP2221 (USB)"
+              ],
               "default": "basic",
               "hidden": false
             },
@@ -2149,10 +2168,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -2228,10 +2244,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -2244,11 +2257,7 @@
         "description": "This SPI device reads RTD style probes, such as the Traeger PT100(PT1000) RTD probe.  This version uses the Adafruit CircuitPython modules.  It should be noted that this module does not allow the use of CE0 or CE1, thus another GPIO should be used for the CS pin. Note that special care may need to be taken if this is used with another SPI device (i.e. SPI Display) on the system.",
         "default": false,
         "image": "max31865.png",
-        "py_dependencies": [
-          "adafruit-circuitpython-max31865>=2.2.24",
-          "mcp2210",
-          "hid>=1.0.4"
-        ],
+        "py_dependencies": ["adafruit-circuitpython-max31865>=2.2.24", "mcp2210", "hid>=1.0.4"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -2269,16 +2278,68 @@
               "description": "SPI Chip Select pin. For Basic (native SPI) pick a board GPIO (D2-D27). For MCP2210 pick the bridge's GP0-GP8.",
               "type": "list",
               "list_values": [
-                "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO12", "GPIO13",
-                "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO19", "GPIO20",
-                "GPIO21", "GPIO22", "GPIO23", "GPIO24", "GPIO25", "GPIO26", "GPIO27",
-                "0", "1", "2", "3", "4", "5", "6", "7", "8"
+                "GPIO2",
+                "GPIO3",
+                "GPIO4",
+                "GPIO5",
+                "GPIO6",
+                "GPIO12",
+                "GPIO13",
+                "GPIO14",
+                "GPIO15",
+                "GPIO16",
+                "GPIO17",
+                "GPIO18",
+                "GPIO19",
+                "GPIO20",
+                "GPIO21",
+                "GPIO22",
+                "GPIO23",
+                "GPIO24",
+                "GPIO25",
+                "GPIO26",
+                "GPIO27",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8"
               ],
               "list_labels": [
-                "D2", "D3", "D4", "D5", "D6", "D12", "D13", "D14", "D15", "D16", "D17",
-                "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27",
-                "MCP2210 GP0", "MCP2210 GP1", "MCP2210 GP2", "MCP2210 GP3", "MCP2210 GP4",
-                "MCP2210 GP5", "MCP2210 GP6", "MCP2210 GP7", "MCP2210 GP8"
+                "D2",
+                "D3",
+                "D4",
+                "D5",
+                "D6",
+                "D12",
+                "D13",
+                "D14",
+                "D15",
+                "D16",
+                "D17",
+                "D18",
+                "D19",
+                "D20",
+                "D21",
+                "D22",
+                "D23",
+                "D24",
+                "D25",
+                "D26",
+                "D27",
+                "MCP2210 GP0",
+                "MCP2210 GP1",
+                "MCP2210 GP2",
+                "MCP2210 GP3",
+                "MCP2210 GP4",
+                "MCP2210 GP5",
+                "MCP2210 GP6",
+                "MCP2210 GP7",
+                "MCP2210 GP8"
               ],
               "default": "GPIO2",
               "hidden": false
@@ -2288,14 +2349,8 @@
               "friendly_name": "SPI Bus Type",
               "description": "Use the board's native SPI (Basic) or an MCP2210 USB-to-SPI bridge. MCP2210 is required on hosts without native SPI (e.g. x86).",
               "type": "list",
-              "list_values": [
-                "basic",
-                "mcp2210"
-              ],
-              "list_labels": [
-                "Basic (native SPI)",
-                "MCP2210 (USB-to-SPI bridge)"
-              ],
+              "list_values": ["basic", "mcp2210"],
+              "list_labels": ["Basic (native SPI)", "MCP2210 (USB-to-SPI bridge)"],
               "default": "basic",
               "hidden": false
             },
@@ -2345,10 +2400,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -2361,11 +2413,7 @@
         "description": "This SPI device reads thermocouple probes (types B, E, J, K, N, R, S, T) using the Adafruit CircuitPython MAX31856 module. Supports native SPI or an MCP2210 USB-to-SPI bridge. Use a GPIO other than CE0/CE1 for the chip select.",
         "default": false,
         "image": "max31865.png",
-        "py_dependencies": [
-          "adafruit-circuitpython-max31856",
-          "mcp2210",
-          "hid>=1.0.4"
-        ],
+        "py_dependencies": ["adafruit-circuitpython-max31856", "mcp2210", "hid>=1.0.4"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -2376,16 +2424,11 @@
               "F": "Fahrenheit",
               "C": "Celsius"
             },
-            "settings": [
-              "globals",
-              "units"
-            ]
+            "settings": ["globals", "units"]
           }
         },
         "device_specific": {
-          "ports": [
-            "TC0"
-          ],
+          "ports": ["TC0"],
           "type": "thermocouple",
           "config": [
             {
@@ -2394,16 +2437,68 @@
               "description": "SPI Chip Select pin. For Basic (native SPI) pick a board GPIO (D2-D27). For MCP2210 pick the bridge's GP0-GP8.",
               "type": "list",
               "list_values": [
-                "GPIO2", "GPIO3", "GPIO4", "GPIO5", "GPIO6", "GPIO12", "GPIO13",
-                "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO19", "GPIO20",
-                "GPIO21", "GPIO22", "GPIO23", "GPIO24", "GPIO25", "GPIO26", "GPIO27",
-                "0", "1", "2", "3", "4", "5", "6", "7", "8"
+                "GPIO2",
+                "GPIO3",
+                "GPIO4",
+                "GPIO5",
+                "GPIO6",
+                "GPIO12",
+                "GPIO13",
+                "GPIO14",
+                "GPIO15",
+                "GPIO16",
+                "GPIO17",
+                "GPIO18",
+                "GPIO19",
+                "GPIO20",
+                "GPIO21",
+                "GPIO22",
+                "GPIO23",
+                "GPIO24",
+                "GPIO25",
+                "GPIO26",
+                "GPIO27",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8"
               ],
               "list_labels": [
-                "D2", "D3", "D4", "D5", "D6", "D12", "D13", "D14", "D15", "D16", "D17",
-                "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27",
-                "MCP2210 GP0", "MCP2210 GP1", "MCP2210 GP2", "MCP2210 GP3", "MCP2210 GP4",
-                "MCP2210 GP5", "MCP2210 GP6", "MCP2210 GP7", "MCP2210 GP8"
+                "D2",
+                "D3",
+                "D4",
+                "D5",
+                "D6",
+                "D12",
+                "D13",
+                "D14",
+                "D15",
+                "D16",
+                "D17",
+                "D18",
+                "D19",
+                "D20",
+                "D21",
+                "D22",
+                "D23",
+                "D24",
+                "D25",
+                "D26",
+                "D27",
+                "MCP2210 GP0",
+                "MCP2210 GP1",
+                "MCP2210 GP2",
+                "MCP2210 GP3",
+                "MCP2210 GP4",
+                "MCP2210 GP5",
+                "MCP2210 GP6",
+                "MCP2210 GP7",
+                "MCP2210 GP8"
               ],
               "default": "GPIO2",
               "hidden": false
@@ -2413,14 +2508,8 @@
               "friendly_name": "SPI Bus Type",
               "description": "Use the board's native SPI (Basic) or an MCP2210 USB-to-SPI bridge. MCP2210 is required on hosts without native SPI (e.g. x86).",
               "type": "list",
-              "list_values": [
-                "basic",
-                "mcp2210"
-              ],
-              "list_labels": [
-                "Basic (native SPI)",
-                "MCP2210 (USB-to-SPI bridge)"
-              ],
+              "list_values": ["basic", "mcp2210"],
+              "list_labels": ["Basic (native SPI)", "MCP2210 (USB-to-SPI bridge)"],
               "default": "basic",
               "hidden": false
             },
@@ -2437,11 +2526,16 @@
               "friendly_name": "Thermocouple Type",
               "description": "Thermocouple type. Type K is the most common for cooking.",
               "type": "list",
-              "list_values": [
-                "B", "E", "J", "K", "N", "R", "S", "T"
-              ],
+              "list_values": ["B", "E", "J", "K", "N", "R", "S", "T"],
               "list_labels": [
-                "Type B", "Type E", "Type J", "Type K", "Type N", "Type R", "Type S", "Type T"
+                "Type B",
+                "Type E",
+                "Type J",
+                "Type K",
+                "Type N",
+                "Type R",
+                "Type S",
+                "Type T"
               ],
               "default": "K",
               "hidden": false
@@ -2451,12 +2545,8 @@
               "friendly_name": "Averaging Samples",
               "description": "Number of samples averaged per reading. More samples = smoother but slower.",
               "type": "list",
-              "list_values": [
-                "1", "2", "4", "8", "16"
-              ],
-              "list_labels": [
-                "1", "2", "4", "8", "16"
-              ],
+              "list_values": ["1", "2", "4", "8", "16"],
+              "list_labels": ["1", "2", "4", "8", "16"],
               "default": "1",
               "hidden": false
             },
@@ -2465,12 +2555,8 @@
               "friendly_name": "Noise Rejection",
               "description": "Mains noise rejection filter frequency. Use 60 Hz in North America, 50 Hz in most of Europe/Asia.",
               "type": "list",
-              "list_values": [
-                "60", "50"
-              ],
-              "list_labels": [
-                "60 Hz (US)", "50 Hz (EU)"
-              ],
+              "list_values": ["60", "50"],
+              "list_labels": ["60 Hz (US)", "50 Hz (EU)"],
               "default": "60",
               "hidden": false
             },
@@ -2479,14 +2565,8 @@
               "friendly_name": "Transient",
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
-              "list_values": [
-                "False",
-                "True"
-              ],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_values": ["False", "True"],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -2499,7 +2579,10 @@
         "description": "This I2C device reads K-Type thermocouples / probes. Moreover the MCP9600 can interface with just about any thermocouple type: K, J, T, N, S, E, B and R type are all supported.  This version uses the Adafruit CircuitPython modules.  Note that this device can be intolerant of higher i2c bus speeds, so you may need to reduce the i2c bus speed manually.",
         "default": false,
         "image": "mcp9600.png",
-        "py_dependencies": ["adafruit-circuitpython-mcp9600>=2.0.6", "adafruit-extended-bus>=1.0.2"],
+        "py_dependencies": [
+          "adafruit-circuitpython-mcp9600>=2.0.6",
+          "adafruit-extended-bus>=1.0.2"
+        ],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -2519,26 +2602,8 @@
               "friendly_name": "I2C Bus Address",
               "description": "Select the I2C bus address to use for this device.  Default is 0x67.  If you have more than one MCP9600, you can assign unique device bus address for up to five devices.",
               "type": "list",
-              "list_values": [
-                "0x67",
-                "0x66",
-                "0x65",
-                "0x64",
-                "0x63",
-                "0x62",
-                "0x61",
-                "0x60"
-              ],
-              "list_labels": [
-                "0x67",
-                "0x66",
-                "0x65",
-                "0x64",
-                "0x63",
-                "0x62",
-                "0x61",
-                "0x60"
-              ],
+              "list_values": ["0x67", "0x66", "0x65", "0x64", "0x63", "0x62", "0x61", "0x60"],
+              "list_labels": ["0x67", "0x66", "0x65", "0x64", "0x63", "0x62", "0x61", "0x60"],
               "default": "0x67",
               "hidden": false
             },
@@ -2547,16 +2612,7 @@
               "friendly_name": "Thermocouple Type",
               "description": "Thermocouple type. Type K is the most common for cooking.",
               "type": "list",
-              "list_values": [
-                "B",
-                "E",
-                "J",
-                "K",
-                "N",
-                "R",
-                "S",
-                "T"
-              ],
+              "list_values": ["B", "E", "J", "K", "N", "R", "S", "T"],
               "list_labels": [
                 "Type B",
                 "Type E",
@@ -2576,7 +2632,12 @@
               "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
               "type": "list",
               "list_values": ["basic", "extended", "ft232h", "mcp2221"],
-              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)", "FT232H (USB)", "MCP2221 (USB)"],
+              "list_labels": [
+                "Basic (native I2C)",
+                "Extended (USB / other bus)",
+                "FT232H (USB)",
+                "MCP2221 (USB)"
+              ],
               "default": "basic",
               "hidden": false
             },
@@ -2594,10 +2655,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -2612,9 +2670,7 @@
         "image": "bt_ibbq.png",
         "py_dependencies": ["bluepy>=1.3.0"],
         "apt_dependencies": ["libglib2.0-dev"],
-        "command_list": [
-          ["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]
-        ],
+        "command_list": [["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
@@ -2641,10 +2697,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["True", "False"],
-              "list_labels": [
-                "Transient (sometimes detached)",
-                "Fixed (always attached)"
-              ],
+              "list_labels": ["Transient (sometimes detached)", "Fixed (always attached)"],
               "default": "True",
               "hidden": true
             },
@@ -2670,9 +2723,7 @@
         "image": "bt_ibt6xs.png",
         "py_dependencies": ["bluepy>=1.3.0"],
         "apt_dependencies": ["libglib2.0-dev"],
-        "command_list": [
-          ["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]
-        ],
+        "command_list": [["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
@@ -2699,10 +2750,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["True", "False"],
-              "list_labels": [
-                "Transient (sometimes detached)",
-                "Fixed (always attached)"
-              ],
+              "list_labels": ["Transient (sometimes detached)", "Fixed (always attached)"],
               "default": "True",
               "hidden": true
             },
@@ -2728,9 +2776,7 @@
         "image": "bt_meater.png",
         "py_dependencies": ["bluepy>=1.3.0"],
         "apt_dependencies": ["libglib2.0-dev"],
-        "command_list": [
-          ["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]
-        ],
+        "command_list": [["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]],
         "settings_dependencies": {
           "units": {
             "friendly_name": "Temp Units",
@@ -2757,10 +2803,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["True", "False"],
-              "list_labels": [
-                "Transient (sometimes detached)",
-                "Fixed (always attached)"
-              ],
+              "list_labels": ["Transient (sometimes detached)", "Fixed (always attached)"],
               "default": "True",
               "hidden": true
             }
@@ -2802,10 +2845,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["True", "False"],
-              "list_labels": [
-                "Transient (sometimes detached)",
-                "Fixed (always attached)"
-              ],
+              "list_labels": ["Transient (sometimes detached)", "Fixed (always attached)"],
               "default": "True",
               "hidden": true
             }
@@ -2989,10 +3029,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": false
             }
@@ -3109,10 +3146,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -3146,10 +3180,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "True",
               "hidden": false
             }
@@ -3190,10 +3221,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -3234,10 +3262,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -3278,10 +3303,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -3322,10 +3344,7 @@
               "description": "Select whether this device is fixed/always attached (default) or if it is transient/sometimes detached.",
               "type": "list",
               "list_values": ["False", "True"],
-              "list_labels": [
-                "Fixed (always attached)",
-                "Transient (sometimes detached)"
-              ],
+              "list_labels": ["Fixed (always attached)", "Transient (sometimes detached)"],
               "default": "False",
               "hidden": true
             }
@@ -3341,11 +3360,7 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "ili9341-ky040.png",
-        "py_dependencies": [
-          "luma.lcd>=2.11.0",
-          "pyky040>=0.1.4",
-          "pillow>=11.1.0"
-        ],
+        "py_dependencies": ["luma.lcd>=2.11.0", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [
           ["sudo", "python", "board-config.py", "-s"],
@@ -3359,12 +3374,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 1, 2, 3],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -3387,11 +3397,7 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "ili9341-ky040.png",
-        "py_dependencies": [
-          "luma.lcd>=2.11.0",
-          "pyky040>=0.1.4",
-          "pillow>=11.1.0"
-        ],
+        "py_dependencies": ["luma.lcd>=2.11.0", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [
           ["sudo", "python", "board-config.py", "-s"],
@@ -3405,12 +3411,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 1, 2, 3],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -3444,12 +3445,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 1, 2, 3],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -3472,11 +3468,7 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": true,
         "image": "ili9341b.png",
-        "py_dependencies": [
-          "luma.lcd>=2.11.0",
-          "pillow>=11.1.0",
-          "gpiozero>=2.0.1"
-        ],
+        "py_dependencies": ["luma.lcd>=2.11.0", "pillow>=11.1.0", "gpiozero>=2.0.1"],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {
@@ -3494,12 +3486,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 1, 2, 3],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -3548,12 +3535,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 1, 2, 3],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -3562,10 +3544,7 @@
             "option_friendly_name": "Screen Dimensions",
             "option_description": "Select the screen dimensions (width, height) in pixels. (default is 320x240)",
             "option_type": "list",
-            "list_values": [
-              "./display/ili9341f_320x240.json",
-              "./display/ili9341f_480x320.json"
-            ],
+            "list_values": ["./display/ili9341f_320x240.json", "./display/ili9341f_480x320.json"],
             "list_labels": ["320x240", "480x320"],
             "default": "./display/ili9341f_320x240.json",
             "hidden": false
@@ -3613,11 +3592,7 @@
         "notes": "Pinout: Display - MISO = MISO(Pin 21), LED = GPIO05, SCK = SCLK(Pin 23), MOSI = MOSI(Pin 19), DC = GPIO24, RST = GPIO25, CS = CE0(Pin 24).  Encoder - CLK = GPIO16, DT = GPIO20, SW = GPIO21, GND = GND, VCC/+ = 3.3V",
         "default": false,
         "image": "ili9488-ky040.png",
-        "py_dependencies": [
-          "luma.lcd>=2.11.0",
-          "pyky040>=0.1.4",
-          "pillow>=11.1.0"
-        ],
+        "py_dependencies": ["luma.lcd>=2.11.0", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [
           ["sudo", "python", "board-config.py", "-s"],
@@ -3631,12 +3606,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 1, 2, 3],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -3659,11 +3629,7 @@
         "notes": "Pinout: Display - MISO = MISO(Pin 21), LED = GPIO12, SCK = SCLK(Pin 23), MOSI = MOSI(Pin 19), DC = GPIO16, RST = GPIO20, CS = CE0(Pin 24). Encoder - CLK = GPIO25, DT = GPIO24, SW = GPIO23, GND = GND, VCC/+ = 3.3V",
         "default": false,
         "image": "ili9488-ky040.png",
-        "py_dependencies": [
-          "luma.lcd>=2.11.0",
-          "pyky040>=0.1.4",
-          "pillow>=11.1.0"
-        ],
+        "py_dependencies": ["luma.lcd>=2.11.0", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [
           ["sudo", "python", "board-config.py", "-s"],
@@ -3677,12 +3643,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 1, 2, 3],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -3716,12 +3677,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 1, 2, 3],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -3762,12 +3718,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 1, 2, 3],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -3831,12 +3782,7 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "st7789e.png",
-        "py_dependencies": [
-          "numpy>=1.26.4",
-          "st7789>=1.0.1",
-          "pyky040>=0.1.4",
-          "pillow>=11.1.0"
-        ],
+        "py_dependencies": ["numpy>=1.26.4", "st7789>=1.0.1", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [
           ["sudo", "python", "board-config.py", "-s"],
@@ -3907,10 +3853,7 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "st7789p.png",
-        "py_dependencies": [
-          "numpy>=1.26.4",
-          "git+https://github.com/mander1000/st7789-python"
-        ],
+        "py_dependencies": ["numpy>=1.26.4", "git+https://github.com/mander1000/st7789-python"],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
@@ -4031,12 +3974,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 90, 180, 270],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           }
@@ -4059,12 +3997,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 90, 180, 270],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           }
@@ -4108,11 +4041,7 @@
         "notes": "Pinout: Display - MISO = MISO(Pin 21), LED = GPIO05, SCK = SCLK(Pin 23), MOSI = MOSI(Pin 19), DC = GPIO24, RST = GPIO25, CS = CE0(Pin 24).  Encoder - CLK = GPIO16, DT = GPIO20, SW = GPIO21, GND = GND, VCC/+ = 3.3V",
         "default": false,
         "image": "st7789p.png",
-        "py_dependencies": [
-          "luma.lcd>=2.11.0",
-          "pyky040>=0.1.4",
-          "pillow>=11.1.0"
-        ],
+        "py_dependencies": ["luma.lcd>=2.11.0", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [
           ["sudo", "python", "board-config.py", "-s"],
@@ -4126,12 +4055,7 @@
             "option_description": "Select the display rotation angle depending on your mounting position.",
             "option_type": "list",
             "list_values": [0, 1, 2, 3],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -4188,11 +4112,7 @@
         "notes": "This display module is resolution-agnostic and is the recommended choice for testing and development: it runs fine in a desktop window on non-DSI hardware, so no physical DSI display is required to preview or build dashboard layouts.",
         "default": false,
         "image": "dsi_touch.png",
-        "py_dependencies": [
-          "rpi-backlight>=2.6.0",
-          "pillow>=11.1.0",
-          "pygame-ce>=2.5.7"
-        ],
+        "py_dependencies": ["rpi-backlight>=2.6.0", "pillow>=11.1.0", "pygame-ce>=2.5.7"],
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
         "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
@@ -4210,12 +4130,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 90, 180, 270],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -4260,11 +4175,7 @@
         "notes": "",
         "default": false,
         "image": "dsi_touch.png",
-        "py_dependencies": [
-          "rpi-backlight>=2.6.0",
-          "pillow>=11.1.0",
-          "pygame-ce>=2.5.7"
-        ],
+        "py_dependencies": ["rpi-backlight>=2.6.0", "pillow>=11.1.0", "pygame-ce>=2.5.7"],
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
         "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
@@ -4282,12 +4193,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 90, 180, 270],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -4429,14 +4335,7 @@
           "libgl1",
           "libxcb-cursor0"
         ],
-        "command_list": [
-          [
-            "sudo",
-            "python",
-            "board-config.py",
-            "-bl"
-          ]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
@@ -4445,10 +4344,7 @@
               "HIGH": "Pullups",
               "LOW": "Pulldowns"
             },
-            "settings": [
-              "platform",
-              "buttonslevel"
-            ]
+            "settings": ["platform", "buttonslevel"]
           }
         },
         "config": [
@@ -4457,18 +4353,8 @@
             "option_friendly_name": "Screen Rotation",
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
-            "list_values": [
-              0,
-              90,
-              180,
-              270
-            ],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_values": [0, 90, 180, 270],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -4486,26 +4372,12 @@
             "option_description": "List of input types supported.  Separate multiple types with a comma.",
             "option_type": "list",
             "list_values": [
-              [
-                "button"
-              ],
-              [
-                "encoder"
-              ],
-              [
-                "touch"
-              ],
-              [
-                "button",
-                "touch"
-              ],
-              [
-                "encoder",
-                "touch"
-              ],
-              [
-                "none"
-              ]
+              ["button"],
+              ["encoder"],
+              ["touch"],
+              ["button", "touch"],
+              ["encoder", "touch"],
+              ["none"]
             ],
             "list_labels": [
               "Button",
@@ -4515,10 +4387,7 @@
               "Touch + Encoder",
               "No Input"
             ],
-            "default": [
-              "button",
-              "touch"
-            ],
+            "default": ["button", "touch"],
             "hidden": false
           },
           {
@@ -4526,16 +4395,8 @@
             "option_friendly_name": "Accent Theme",
             "option_description": "Dashboard accent color theme.",
             "option_type": "list",
-            "list_values": [
-              "Ember",
-              "Ice",
-              "Crimson"
-            ],
-            "list_labels": [
-              "Ember",
-              "Ice",
-              "Crimson"
-            ],
+            "list_values": ["Ember", "Ice", "Crimson"],
+            "list_labels": ["Ember", "Ice", "Crimson"],
             "default": "Ember",
             "hidden": false
           }
@@ -4548,11 +4409,7 @@
         "notes": "",
         "default": false,
         "image": "dsi_touch.png",
-        "py_dependencies": [
-          "rpi-backlight>=2.6.0",
-          "pillow>=11.1.0",
-          "pygame-ce>=2.5.7"
-        ],
+        "py_dependencies": ["rpi-backlight>=2.6.0", "pillow>=11.1.0", "pygame-ce>=2.5.7"],
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
         "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
@@ -4570,12 +4427,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 90, 180, 270],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -4630,11 +4482,7 @@
         "notes": "",
         "default": false,
         "image": "dsi_touch.png",
-        "py_dependencies": [
-          "rpi-backlight>=2.6.0",
-          "pillow>=11.1.0",
-          "pygame-ce>=2.5.7"
-        ],
+        "py_dependencies": ["rpi-backlight>=2.6.0", "pillow>=11.1.0", "pygame-ce>=2.5.7"],
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
         "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
@@ -4652,12 +4500,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 90, 180, 270],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -4712,11 +4555,7 @@
         "notes": "",
         "default": false,
         "image": "dsi_320x240t.png",
-        "py_dependencies": [
-          "rpi-backlight>=2.6.0",
-          "pillow>=11.1.0",
-          "pygame-ce>=2.5.7"
-        ],
+        "py_dependencies": ["rpi-backlight>=2.6.0", "pillow>=11.1.0", "pygame-ce>=2.5.7"],
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
         "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
@@ -4734,12 +4573,7 @@
             "option_description": "Select the display rotation angle (Usually 0 degrees).",
             "option_type": "list",
             "list_values": [0, 90, 180, 270],
-            "list_labels": [
-              "0 Degrees",
-              "90 Degrees",
-              "180 Degrees",
-              "270 Degrees"
-            ],
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
             "default": 0,
             "hidden": false
           },
@@ -4763,13 +4597,7 @@
               ["button", "encoder", "touch"],
               ["none"]
             ],
-            "list_labels": [
-              "Button",
-              "Encoder",
-              "Touch",
-              "Button/Encoder/Touch",
-              "No Input"
-            ],
+            "list_labels": ["Button", "Encoder", "Touch", "Button/Encoder/Touch", "No Input"],
             "default": ["button", "encoder", "touch"],
             "hidden": false
           }

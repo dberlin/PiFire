@@ -1,72 +1,72 @@
-{	
-    "name" : "Default",
-    "friendly_name" : "Default Dashboard",
-    "description" : "The default PiFire dashboard displays all food probes as gauges, includes a hopper card, status card and elapsed time card.",
-    "author" : "Ben Parmeter", 
-    "html_name" : "dash_default.html",
-    "metadata" : "default.json",
-    "link" : "https://github.com/nebhead/pifire", 
-    "contributors" : ["Ben Parmeter"],
-    "attributions" : [],
-    "thumbnail" : "",
-    "screenshot" : "screenshot.png",
-    "custom" : {
-        "hidden_cards" : []
+{
+  "name": "Default",
+  "friendly_name": "Default Dashboard",
+  "description": "The default PiFire dashboard displays all food probes as gauges, includes a hopper card, status card and elapsed time card.",
+  "author": "Ben Parmeter",
+  "html_name": "dash_default.html",
+  "metadata": "default.json",
+  "link": "https://github.com/nebhead/pifire",
+  "contributors": ["Ben Parmeter"],
+  "attributions": [],
+  "thumbnail": "",
+  "screenshot": "screenshot.png",
+  "custom": {
+    "hidden_cards": []
+  },
+  "config": [
+    {
+      "name": "max_primary_temp_F",
+      "friendly_name": "Max Primary Probe Display Temp F",
+      "description": "This is the maximum primary probe (grill probe) display temperature (F). The primary gauge will max out at this temperature.",
+      "hidden": false,
+      "type": "float",
+      "min": 0,
+      "max": 10000,
+      "step": 1,
+      "default": 600
     },
-    "config" : [
-        {
-            "name": "max_primary_temp_F",
-            "friendly_name": "Max Primary Probe Display Temp F",
-            "description": "This is the maximum primary probe (grill probe) display temperature (F). The primary gauge will max out at this temperature.",
-            "hidden": false,
-            "type": "float",
-            "min": 0,
-            "max": 10000,
-            "step": 1,
-            "default": 600
-        },
-        {
-            "name": "max_food_temp_F",
-            "friendly_name": "Max Food Probe Display Temp F",
-            "description": "This is the maximum food probe display temperature (F). The food gauges will max out at this temperature.",
-            "hidden": false,
-            "type": "float",
-            "min": 0,
-            "max": 10000,
-            "step": 1,
-            "default": 300
-        },
-        {
-            "name": "max_primary_temp_C",
-            "friendly_name": "Max Primary Probe Display Temp C",
-            "description": "This is the maximum primary probe (grill probe) display temperature (C). The primary gauge will max out at this temperature.",
-            "hidden": false,
-            "type": "float",
-            "min": 0,
-            "max": 10000,
-            "step": 1,
-            "default": 300
-        },
-        {
-            "name": "max_food_temp_C",
-            "friendly_name": "Max Food Probe Display Temp C",
-            "description": "This is the maximum food probe display temperature (C). The food gauges will max out at this temperature.",
-            "hidden": false,
-            "type": "float",
-            "min": 0,
-            "max": 10000,
-            "step": 1,
-            "default": 150
-        },
-        {
-            "name": "touch_screen_mode",
-            "friendly_name": "Touch Screen Mode",
-            "description": "Changes some visual elements to be more compatible with a touch screen display.",
-            "hidden": false,
-            "type": "list",
-            "list_values": ["Off", "On"],
-            "list_labels": ["Off", "On"],
-            "default": "Off"
-        }
-    ]
+    {
+      "name": "max_food_temp_F",
+      "friendly_name": "Max Food Probe Display Temp F",
+      "description": "This is the maximum food probe display temperature (F). The food gauges will max out at this temperature.",
+      "hidden": false,
+      "type": "float",
+      "min": 0,
+      "max": 10000,
+      "step": 1,
+      "default": 300
+    },
+    {
+      "name": "max_primary_temp_C",
+      "friendly_name": "Max Primary Probe Display Temp C",
+      "description": "This is the maximum primary probe (grill probe) display temperature (C). The primary gauge will max out at this temperature.",
+      "hidden": false,
+      "type": "float",
+      "min": 0,
+      "max": 10000,
+      "step": 1,
+      "default": 300
+    },
+    {
+      "name": "max_food_temp_C",
+      "friendly_name": "Max Food Probe Display Temp C",
+      "description": "This is the maximum food probe display temperature (C). The food gauges will max out at this temperature.",
+      "hidden": false,
+      "type": "float",
+      "min": 0,
+      "max": 10000,
+      "step": 1,
+      "default": 150
+    },
+    {
+      "name": "touch_screen_mode",
+      "friendly_name": "Touch Screen Mode",
+      "description": "Changes some visual elements to be more compatible with a touch screen display.",
+      "hidden": false,
+      "type": "list",
+      "list_values": ["Off", "On"],
+      "list_labels": ["Off", "On"],
+      "default": "Off"
+    }
+  ]
 }

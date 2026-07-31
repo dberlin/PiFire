@@ -1,0 +1,38 @@
+{
+  "$schema": "./web-react/node_modules/@biomejs/biome/configuration_schema.json",
+  // Formats JSON everywhere outside web-react/, which has its own nested
+  // config (web-react/biome.jsonc, "root": false) covering its JS, TS, CSS
+  // and JSON together. Formatter only -- linting JSON would add nothing.
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": [
+      "**/*.json",
+      "!**/node_modules/**",
+      "!web-react/**",
+      "!static/**",
+      "!htmlcov/**",
+      "!docs/**",
+      "!.superpowers/**",
+
+      // The rest are excluded because they carry byte-level contracts that a
+      // formatter breaks -- not because anyone chose their style.
+      //
+      // Emitted by tools/generate_dsi_layout.py; tests/ui/
+      // test_dsi_layout_generator.py asserts the committed files reproduce
+      // byte for byte, so reformatting them fails the suite until the
+      // generator agrees.
+      "!display/dsi_1024x768t.json",
+      "!display/dsi_1280x720t.json",
+      "!display/dsi_1024x600t.json",
+      // Digest-pinned by tests/characterization/test_process_command_golden.py.
+      "!tests/characterization/fixtures/**"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": { "enabled": false }
+}
