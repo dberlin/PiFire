@@ -222,6 +222,8 @@ pifire_install_udev_rules /usr/local/bin/pifire
 
 $SUDO chown -R "$USER":pifire /usr/local/bin/pifire
 $SUDO chmod -R 775 /usr/local/bin/pifire
+# After the recursive chmod, which would otherwise drop the setgid bit.
+pifire_prepare_log_dir /usr/local/bin/pifire "$USER"
 
 # Sudoers drop-in so the pifire group can run the system commands PiFire needs
 # without a password. Fedora paths / package manager (no Raspberry Pi vcgencmd).

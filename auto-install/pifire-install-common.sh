@@ -364,3 +364,32 @@ pifire_install_udev_rules() {
 	$SUDO udevadm control --reload-rules 2>&1 | tee -a "$LOG" || log " ! udevadm reload failed (continuing)."
 	$SUDO udevadm trigger 2>&1 | tee -a "$LOG" || log " ! udevadm trigger failed (continuing)."
 }
+
+# pifire_prepare_log_dir <repo> <user>
+#
+# The three supervisor programs do not all run as the same user: control and
+# webapp run as the install user, display runs as root, because it needs the
+# seat sway and seatd hand out. They write the SAME files -- control.py and
+# display_process.py both open logs/control.log and logs/events.log -- so
+# whichever starts first decides who owns them, and on a fresh install that is
+# display, as root. control then cannot append to its own log and dies.
+#
+# Setgid on the directory, plus umask=002 on the programs (see
+# auto-install/supervisor/*.conf), makes the start order stop mattering: every
+# log lands group pifire and group-writable whoever creates it, including the
+# files RotatingFileHandler opens on rollover.
+#
+# Call this AFTER any recursive chmod of the install tree, which would strip
+# the setgid bit back off.
+pifire_prepare_log_dir() {
+	local logs="$1/logs" user="$2"
+
+	log " + Making $logs writable by both root and $user"
+	$SUDO mkdir -p "$logs" || return 1
+	$SUDO chown "$user":pifire "$logs" || return 1
+	$SUDO chmod 2775 "$logs" || return 1
+	# Repair logs an earlier install left owned by root alone. Ownership is
+	# left as it is -- group access is what the other process needs.
+	$SUDO find "$logs" -maxdepth 1 -type f -exec chgrp pifire {} + -exec chmod g+w {} + 2>/dev/null
+	return 0
+}

@@ -319,6 +319,8 @@ pifire_install_udev_rules /usr/local/bin/pifire
 $SUDO chown -R $USER:pifire pifire
 # Change ability for pifire group to read/write/execute
 $SUDO chmod -R 777 /usr/local/bin
+# After the recursive chmod, which would otherwise drop the setgid bit.
+pifire_prepare_log_dir /usr/local/bin/pifire "$USER"
 
 # Install sudoers drop-in so the pifire group can run required system commands
 # without a password prompt (needed on Raspberry Pi OS Trixie+ which removed

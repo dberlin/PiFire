@@ -187,6 +187,8 @@ source /usr/local/bin/pifire/auto-install/pifire-install-common.sh
 
 pifire_add_hardware_groups "$USERNAME" root
 pifire_install_udev_rules /usr/local/bin/pifire
+# Repairs an install whose logs root already owns outright.
+pifire_prepare_log_dir /usr/local/bin/pifire "$USERNAME"
 
 if ! pifire_build_web_ui /usr/local/bin/pifire; then
 	# Fatal, unlike most steps here: supervisor is restarted at the end of the
