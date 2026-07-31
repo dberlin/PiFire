@@ -7,7 +7,7 @@
         "description": "Choose this configuration if you have a custom configuration and need to modify all available platform settings.",
         "default": false,
         "image": "custom.png",
-        "py_dependencies": ["rpi-hardware-pwm==0.2.2"],
+        "py_dependencies": ["rpi-hardware-pwm>=0.2.2"],
         "apt_dependencies": [],
         "command_list": [
           [
@@ -655,7 +655,7 @@
         "description": "Default settings/configuration for the PiFire PCB v2.00a designed by Ben Parmeter.",
         "default": false,
         "image": "pcb_2.00a.png",
-        "py_dependencies": ["rpi-hardware-pwm==0.2.2"],
+        "py_dependencies": ["rpi-hardware-pwm>=0.2.2"],
         "apt_dependencies": [],
         "command_list": [
           ["sudo", "python", "board-config.py", "-ow", "-s", "-i"]
@@ -945,7 +945,7 @@
         "description": "Default settings/configuration for the PiFire PCB v3.01a designed by James Weber.",
         "default": false,
         "image": "pcb_3.01a.png",
-        "py_dependencies": ["rpi-hardware-pwm==0.2.2"],
+        "py_dependencies": ["rpi-hardware-pwm>=0.2.2"],
         "apt_dependencies": [],
         "command_list": [
           ["sudo", "python", "board-config.py", "-ow", "-s", "-i"]
@@ -1176,7 +1176,7 @@
         "description": "Default settings/configuration for the PiFire PCB PWM designed by James Weber.",
         "default": false,
         "image": "pcb_pwm.png",
-        "py_dependencies": ["rpi-hardware-pwm==0.2.2"],
+        "py_dependencies": ["rpi-hardware-pwm>=0.2.2"],
         "apt_dependencies": [],
         "command_list": [
           ["sudo", "python", "board-config.py", "-pwm", "-s", "-i"]
@@ -1400,7 +1400,7 @@
         "description": "Default settings/configuration for the PiFire PCB v4.x.x modular PCB.  This PCB aims to provide modular options to the user for probe inputs and relay outputs.",
         "default": true,
         "image": "pcb_4.x.x.png",
-        "py_dependencies": ["rpi-hardware-pwm==0.2.2"],
+        "py_dependencies": ["rpi-hardware-pwm>=0.2.2"],
         "apt_dependencies": [],
         "command_list": [
           [
@@ -1925,7 +1925,7 @@
         "description": "This is the default module supporting ALL of the ADS1115 16-Bit ADC's and is based on Adafruit's Circuit Python implementation/module.  This version is still actively updated and may support a wider range of hardware.  There has been rumors of sellers shipping ADS1015 12-Bit ADC's instead of the ADS1115 16-Bit ADC's.  If you got one of these, you can try the ADS1015 Adafruit library instead.",
         "default": true,
         "image": "ads1115.png",
-        "py_dependencies": ["adafruit-circuitpython-ads1x15==2.4.3", "adafruit-extended-bus==1.0.2"],
+        "py_dependencies": ["adafruit-circuitpython-ads1x15>=2.4.3", "adafruit-extended-bus>=1.0.2"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -2045,7 +2045,7 @@
         "description": "This module supports the ADS1015 12-Bit ADC based on Adafruit's Circuit Python implementation/module.  This version can also be used with the ADS1115, as it is backward compatible.  Some fidelity may be lost due to the fact that the ADC has less bits to measure with, however in testing it seems to be reasonably good.  Use this if you are having issues with the default ADS1115 module.",
         "default": false,
         "image": "ads1115.png",
-        "py_dependencies": ["adafruit-circuitpython-ads1x15==2.4.3", "adafruit-extended-bus==1.0.2"],
+        "py_dependencies": ["adafruit-circuitpython-ads1x15>=2.4.3", "adafruit-extended-bus>=1.0.2"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -2245,7 +2245,7 @@
         "default": false,
         "image": "max31865.png",
         "py_dependencies": [
-          "adafruit-circuitpython-max31865==2.2.24",
+          "adafruit-circuitpython-max31865>=2.2.24",
           "mcp2210",
           "hid>=1.0.4"
         ],
@@ -2499,7 +2499,7 @@
         "description": "This I2C device reads K-Type thermocouples / probes. Moreover the MCP9600 can interface with just about any thermocouple type: K, J, T, N, S, E, B and R type are all supported.  This version uses the Adafruit CircuitPython modules.  Note that this device can be intolerant of higher i2c bus speeds, so you may need to reduce the i2c bus speed manually.",
         "default": false,
         "image": "mcp9600.png",
-        "py_dependencies": ["adafruit-circuitpython-mcp9600==2.0.6", "adafruit-extended-bus==1.0.2"],
+        "py_dependencies": ["adafruit-circuitpython-mcp9600>=2.0.6", "adafruit-extended-bus>=1.0.2"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -2610,7 +2610,7 @@
         "description": "This device module supports Bluetooth LE iBBQ devices such as the Inkbird IBT-4XS four probe thermometer.  Note that the device can take up to a minute to be discovered and to start streaming data once turned on.  This has only been tested with the Inkbird IBT-4XS, but it may also work with other iBBQ models.  This module is still experimental, so feedback is welcome.",
         "default": false,
         "image": "bt_ibbq.png",
-        "py_dependencies": ["bluepy==1.3.0"],
+        "py_dependencies": ["bluepy>=1.3.0"],
         "apt_dependencies": ["libglib2.0-dev"],
         "command_list": [
           ["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]
@@ -2668,7 +2668,7 @@
         "description": "This device module supports Bluetooth LE iBBQ devices such as the Inkbird IBT-6XS six probe thermometer.  Note that the device can take up to a minute to be discovered and to start streaming data once turned on.  This has only been tested with the Inkbird IBT-6XS, but it may also work with other iBBQ models.  This module is still experimental, so feedback is welcome.",
         "default": false,
         "image": "bt_ibt6xs.png",
-        "py_dependencies": ["bluepy==1.3.0"],
+        "py_dependencies": ["bluepy>=1.3.0"],
         "apt_dependencies": ["libglib2.0-dev"],
         "command_list": [
           ["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]
@@ -2726,7 +2726,7 @@
         "description": "This device module supports Bluetooth LE Meater probe thermometer devices (Original Meater and Meater Plus supported).  At this time the Meater Pro (Meater 2 Plus) devices are not supported. ",
         "default": false,
         "image": "bt_meater.png",
-        "py_dependencies": ["bluepy==1.3.0"],
+        "py_dependencies": ["bluepy>=1.3.0"],
         "apt_dependencies": ["libglib2.0-dev"],
         "command_list": [
           ["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]
@@ -2773,7 +2773,7 @@
         "description": "This device module supports Bluetooth LE Meater probe thermometer devices and is experimental. Not that this module relies on the simplepyble module and will not co-exist with other bluetooth modules based on bluepy.  This is not recommended for production use.",
         "default": false,
         "image": "bt_meater.png",
-        "py_dependencies": ["simplepyble==0.7.3", "icecream==2.1.4"],
+        "py_dependencies": ["simplepyble>=0.7.3", "icecream>=2.1.4"],
         "apt_dependencies": ["libdbus-1-dev"],
         "command_list": [],
         "settings_dependencies": {
@@ -3005,7 +3005,7 @@
         "description": "WARNING: This module is no longer the default due to reports of issues.  If you experience trouble with this module, use the Adafruit modules.  This is an alternative PiFire module supporting the ADS1115 16-Bit ADC and should only be used if you are experiencing difficulty with the Adafruit module.",
         "default": false,
         "image": "ads1115.png",
-        "py_dependencies": ["ADS1115==0.2.1"],
+        "py_dependencies": ["ADS1115>=0.2.1"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {
@@ -3125,7 +3125,7 @@
         "description": "The DS18B20 digital thermometer provides Celsius temperature measurements over a 1-wire communication bus.  This module is currently experimental, but may be useful for calibrating probe profiles for other probes as itself has been factory calibrated.",
         "default": false,
         "image": "ds18b20.png",
-        "py_dependencies": ["w1thermsensor==2.3.0"],
+        "py_dependencies": ["w1thermsensor>=2.3.0"],
         "apt_dependencies": [],
         "command_list": [["sudo", "bash", "wizard/ds18b20.sh"]],
         "settings_dependencies": {
@@ -3342,9 +3342,9 @@
         "default": false,
         "image": "ili9341-ky040.png",
         "py_dependencies": [
-          "luma.lcd==2.11.0",
-          "pyky040==0.1.4",
-          "pillow==11.1.0"
+          "luma.lcd>=2.11.0",
+          "pyky040>=0.1.4",
+          "pillow>=11.1.0"
         ],
         "apt_dependencies": [],
         "command_list": [
@@ -3388,9 +3388,9 @@
         "default": false,
         "image": "ili9341-ky040.png",
         "py_dependencies": [
-          "luma.lcd==2.11.0",
-          "pyky040==0.1.4",
-          "pillow==11.1.0"
+          "luma.lcd>=2.11.0",
+          "pyky040>=0.1.4",
+          "pillow>=11.1.0"
         ],
         "apt_dependencies": [],
         "command_list": [
@@ -3433,7 +3433,7 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "ili9341.png",
-        "py_dependencies": ["luma.lcd==2.11.0", "pillow==11.1.0"],
+        "py_dependencies": ["luma.lcd>=2.11.0", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
@@ -3473,9 +3473,9 @@
         "default": true,
         "image": "ili9341b.png",
         "py_dependencies": [
-          "luma.lcd==2.11.0",
-          "pillow==11.1.0",
-          "gpiozero==2.0.1"
+          "luma.lcd>=2.11.0",
+          "pillow>=11.1.0",
+          "gpiozero>=2.0.1"
         ],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-s"]],
@@ -3523,10 +3523,10 @@
         "default": false,
         "image": "ili9341.png",
         "py_dependencies": [
-          "luma.lcd==2.11.0",
-          "pillow==11.1.0",
-          "gpiozero==2.0.1",
-          "pyky040==0.1.4"
+          "luma.lcd>=2.11.0",
+          "pillow>=11.1.0",
+          "gpiozero>=2.0.1",
+          "pyky040>=0.1.4"
         ],
         "apt_dependencies": [],
         "command_list": [
@@ -3614,9 +3614,9 @@
         "default": false,
         "image": "ili9488-ky040.png",
         "py_dependencies": [
-          "luma.lcd==2.11.0",
-          "pyky040==0.1.4",
-          "pillow==11.1.0"
+          "luma.lcd>=2.11.0",
+          "pyky040>=0.1.4",
+          "pillow>=11.1.0"
         ],
         "apt_dependencies": [],
         "command_list": [
@@ -3660,9 +3660,9 @@
         "default": false,
         "image": "ili9488-ky040.png",
         "py_dependencies": [
-          "luma.lcd==2.11.0",
-          "pyky040==0.1.4",
-          "pillow==11.1.0"
+          "luma.lcd>=2.11.0",
+          "pyky040>=0.1.4",
+          "pillow>=11.1.0"
         ],
         "apt_dependencies": [],
         "command_list": [
@@ -3705,7 +3705,7 @@
         "notes": "Pinout: MISO = MISO(Pin 21), LED = GPIO05, SCK = SCLK(Pin 23), MOSI = MOSI(Pin 19), DC = GPIO24, RST = GPIO25, CS = CE0(Pin 24)",
         "default": false,
         "image": "ili9488.png",
-        "py_dependencies": ["luma.lcd==2.11.0", "pillow==11.1.0"],
+        "py_dependencies": ["luma.lcd>=2.11.0", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
@@ -3744,7 +3744,7 @@
         "notes": "Pinout:  Display - MISO = MISO(Pin 21), LED = GPIO05, SCK = SCLK(Pin 23), MOSI = MOSI(Pin 19), DC = GPIO24, RST = GPIO25, CS = CE0(Pin 24). Buttons - UP = GPIO16, DOWN = GPIO20, ENTER = GPIO21, GND = GND, VCC = 3.3V",
         "default": false,
         "image": "ili9488b.png",
-        "py_dependencies": ["luma.lcd==2.11.0", "pillow==11.1.0", "gpiozero"],
+        "py_dependencies": ["luma.lcd>=2.11.0", "pillow>=11.1.0", "gpiozero"],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {
@@ -3790,7 +3790,7 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "st7789b.png",
-        "py_dependencies": ["numpy==1.26.4", "st7789==1.0.1", "pillow==11.1.0"],
+        "py_dependencies": ["numpy>=1.26.4", "st7789>=1.0.1", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {
@@ -3832,10 +3832,10 @@
         "default": false,
         "image": "st7789e.png",
         "py_dependencies": [
-          "numpy==1.26.4",
-          "st7789==1.0.1",
-          "pyky040==0.1.4",
-          "pillow==11.1.0"
+          "numpy>=1.26.4",
+          "st7789>=1.0.1",
+          "pyky040>=0.1.4",
+          "pillow>=11.1.0"
         ],
         "apt_dependencies": [],
         "command_list": [
@@ -3873,7 +3873,7 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "st7789p.png",
-        "py_dependencies": ["numpy==1.26.4", "st7789==1.0.1", "pillow==11.1.0"],
+        "py_dependencies": ["numpy>=1.26.4", "st7789>=1.0.1", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
@@ -3908,7 +3908,7 @@
         "default": false,
         "image": "st7789p.png",
         "py_dependencies": [
-          "numpy==1.26.4",
+          "numpy>=1.26.4",
           "git+https://github.com/mander1000/st7789-python"
         ],
         "apt_dependencies": [],
@@ -3945,9 +3945,9 @@
         "default": false,
         "image": "st7789e.png",
         "py_dependencies": [
-          "numpy==1.26.4",
+          "numpy>=1.26.4",
           "git+https://github.com/mander1000/st7789-python",
-          "pyky040==0.1.4"
+          "pyky040>=0.1.4"
         ],
         "apt_dependencies": [],
         "command_list": [
@@ -4020,7 +4020,7 @@
         "description": "This is the test module for display using Pygame.  This should be used for development & debug only.",
         "default": false,
         "image": "pygame.png",
-        "py_dependencies": ["pygame-ce>=2.5.7", "pillow==11.1.0"],
+        "py_dependencies": ["pygame-ce>=2.5.7", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {},
@@ -4048,7 +4048,7 @@
         "description": "This is the test module for display using Pygame.  This should be used for development & debug only.",
         "default": false,
         "image": "pygame.png",
-        "py_dependencies": ["pygame-ce>=2.5.7", "pillow==11.1.0"],
+        "py_dependencies": ["pygame-ce>=2.5.7", "pillow>=11.1.0"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {},
@@ -4076,7 +4076,7 @@
         "description": "These displays are small, only about 1\" diagonal, but very readable due to the high contrast of an OLED display. This display is made of 128x64 individual white OLED pixels, each one is turned on or off by the controller chip.",
         "default": false,
         "image": "ssd1306.png",
-        "py_dependencies": ["luma.oled==3.14.0"],
+        "py_dependencies": ["luma.oled>=3.14.0"],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-i"]],
         "settings_dependencies": {},
@@ -4088,7 +4088,7 @@
         "description": "These displays are small, only about 1\" diagonal, but very readable due to the high contrast of an OLED display. This display is made of 128x64 individual white OLED pixels, each one is turned on or off by the controller chip.",
         "default": false,
         "image": "ssd1306b.png",
-        "py_dependencies": ["luma.oled==3.14.0"],
+        "py_dependencies": ["luma.oled>=3.14.0"],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-i"]],
         "settings_dependencies": {
@@ -4109,9 +4109,9 @@
         "default": false,
         "image": "st7789p.png",
         "py_dependencies": [
-          "luma.lcd==2.11.0",
-          "pyky040==0.1.4",
-          "pillow==11.1.0"
+          "luma.lcd>=2.11.0",
+          "pyky040>=0.1.4",
+          "pillow>=11.1.0"
         ],
         "apt_dependencies": [],
         "command_list": [
@@ -4154,7 +4154,7 @@
         "notes": "See documentation for pinout. (http://docs.pifire.io/hardware)",
         "default": false,
         "image": "st7789p.png",
-        "py_dependencies": ["numpy==1.26.4", "st7789==1.0.1"],
+        "py_dependencies": ["numpy>=1.26.4", "st7789>=1.0.1"],
         "apt_dependencies": [],
         "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
@@ -4189,8 +4189,8 @@
         "default": false,
         "image": "dsi_touch.png",
         "py_dependencies": [
-          "rpi-backlight==2.6.0",
-          "pillow==11.1.0",
+          "rpi-backlight>=2.6.0",
+          "pillow>=11.1.0",
           "pygame-ce>=2.5.7"
         ],
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
@@ -4261,8 +4261,8 @@
         "default": false,
         "image": "dsi_touch.png",
         "py_dependencies": [
-          "rpi-backlight==2.6.0",
-          "pillow==11.1.0",
+          "rpi-backlight>=2.6.0",
+          "pillow>=11.1.0",
           "pygame-ce>=2.5.7"
         ],
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
@@ -4333,8 +4333,8 @@
         "default": false,
         "image": "dsi_touch.png",
         "py_dependencies": [
-          "rpi-backlight==2.6.0",
-          "pillow==11.1.0",
+          "rpi-backlight>=2.6.0",
+          "pillow>=11.1.0",
           "pygame-ce>=2.5.7",
           "pyside6>=6.11.1"
         ],
@@ -4417,8 +4417,8 @@
         "default": false,
         "image": "dsi_touch.png",
         "py_dependencies": [
-          "rpi-backlight==2.6.0",
-          "pillow==11.1.0",
+          "rpi-backlight>=2.6.0",
+          "pillow>=11.1.0",
           "pygame-ce>=2.5.7",
           "pyside6>=6.11.1"
         ],
@@ -4549,8 +4549,8 @@
         "default": false,
         "image": "dsi_touch.png",
         "py_dependencies": [
-          "rpi-backlight==2.6.0",
-          "pillow==11.1.0",
+          "rpi-backlight>=2.6.0",
+          "pillow>=11.1.0",
           "pygame-ce>=2.5.7"
         ],
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
@@ -4631,8 +4631,8 @@
         "default": false,
         "image": "dsi_touch.png",
         "py_dependencies": [
-          "rpi-backlight==2.6.0",
-          "pillow==11.1.0",
+          "rpi-backlight>=2.6.0",
+          "pillow>=11.1.0",
           "pygame-ce>=2.5.7"
         ],
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
@@ -4713,8 +4713,8 @@
         "default": false,
         "image": "dsi_320x240t.png",
         "py_dependencies": [
-          "rpi-backlight==2.6.0",
-          "pillow==11.1.0",
+          "rpi-backlight>=2.6.0",
+          "pillow>=11.1.0",
           "pygame-ce>=2.5.7"
         ],
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
@@ -4783,7 +4783,7 @@
         "description": "This economical sensor provides 2cm to 400cm of non-contact measurement functionality with a ranging accuracy that can reach up to 3mm.",
         "default": false,
         "image": "hcsr04.png",
-        "py_dependencies": ["hcsr04sensor==1.7"],
+        "py_dependencies": ["hcsr04sensor>=1.7"],
         "apt_dependencies": [],
         "command_list": [],
         "settings_dependencies": {}

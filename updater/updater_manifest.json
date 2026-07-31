@@ -44,7 +44,7 @@
           "py_dependencies": [
             "apprise",
             "scikit-fuzzy",
-            "scikit-learn==1.4.2"
+            "scikit-learn>=1.4.2"
           ],
           "apt_dependencies": [
             "libatlas-base-dev"
@@ -102,7 +102,7 @@
           "command_list" : [["sudo", "cp", "./auto-install/supervisor/*.conf", "/etc/supervisor/conf.d"]]
         },
         "control": {
-          "py_dependencies": ["rpi-hardware-pwm", "scikit-learn==1.4.2"],
+          "py_dependencies": ["rpi-hardware-pwm", "scikit-learn>=1.4.2"],
           "apt_dependencies": [],
           "command_list" : []
         }
@@ -119,7 +119,7 @@
           "command_list" : [["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]]
         },
         "control": {
-          "py_dependencies": ["numpy==1.24.2"],
+          "py_dependencies": ["numpy>=1.24.2"],
           "apt_dependencies": [],
           "command_list" : []
         }
@@ -131,7 +131,7 @@
       "reboot_required" : true,
       "dependencies" : {
         "app": {
-          "py_dependencies": ["netifaces==0.11.0"],
+          "py_dependencies": ["netifaces>=0.11.0"],
           "apt_dependencies": [],
           "command_list" : []
         },
@@ -153,7 +153,7 @@
           "command_list" : []
         },
         "control": {
-          "py_dependencies": ["bleak==3.0.1"],
+          "py_dependencies": ["bleak>=3.0.1"],
           "apt_dependencies": ["bluetooth", "bluez"],
           "command_list" : [["sudo", "rfkill", "unblock", "bluetooth"]]
         }
