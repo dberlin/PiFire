@@ -168,7 +168,7 @@ $SUDO dnf -y install \
 	nginx git supervisor sway seatd \
 	nodejs \
 	bluez bluez-libs-devel \
-	cabextract curl dejavu-sans-fonts fontconfig 2>&1 | tee -a "$LOG"
+	cabextract curl unzip dejavu-sans-fonts fontconfig 2>&1 | tee -a "$LOG"
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
 	log " !! Failed to install dependencies. Installation cannot continue."
 	exit 1

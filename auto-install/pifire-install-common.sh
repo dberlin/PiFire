@@ -112,6 +112,16 @@ pifire_get_bun() {
 		return 0
 	fi
 
+	# bun ships as a zip and its installer shells out to unzip. The installers
+	# put it in the package list, but an install predating that -- upgrading
+	# through updater/upgrade.sh, which installs no packages -- will not have
+	# it, and the failure surfaces only as an unzip error buried in the log.
+	if ! command -v unzip >/dev/null 2>&1; then
+		log " !! 'unzip' is required to unpack bun, and is not on PATH."
+		log " !! Install it (apt install unzip / dnf install unzip) and re-run."
+		return 1
+	fi
+
 	log " + Fetching a temporary bun to build the web UI (not installed system-wide)"
 	PIFIRE_BUN_TMPDIR="$(mktemp -d -t pifire-bun-XXXXXX)" || {
 		log " !! Could not create a temp directory for bun."

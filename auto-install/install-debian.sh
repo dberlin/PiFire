@@ -182,7 +182,7 @@ $SUDO apt install -y \
 	libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev \
 	nginx git supervisor nodejs \
 	bluetooth bluez sway seatd \
-	openssl curl 2>&1 | tee -a "$LOG"
+	openssl curl unzip 2>&1 | tee -a "$LOG"
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
 	log " !! Failed to install dependencies. Installation cannot continue."
 	exit 1

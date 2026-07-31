@@ -252,7 +252,7 @@ echo "**      Installing Dependencies... (This could take several minutes)   **"
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
 # Install dependencies, exit if failed
-$SUDO apt install python3-dev python3-pip python3-venv python3-scipy nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev bluetooth bluez sway seatd -y 2>&1 | tee -a ~/logs/pifire_install.log
+$SUDO apt install python3-dev python3-pip python3-venv python3-scipy nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev bluetooth bluez sway seatd unzip -y 2>&1 | tee -a ~/logs/pifire_install.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
 	echo " !! Failed to install dependencies. Installation cannot continue." | tee -a ~/logs/pifire_install.log
 	exit 1
