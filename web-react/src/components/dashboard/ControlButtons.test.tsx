@@ -45,6 +45,27 @@ describe("ControlButtons", () => {
     expect(screen.getByRole("button", { name: "Monitor" })).toBeInTheDocument();
   });
 
+  // The two marks have to stay visually distinct, not merely differently
+  // named: primary is a FILL and accent a lit BORDER. Startup carrying accent
+  // is what made Monitor read as "monitoring, and also starting up".
+  it("draws Startup as a fill and the running mode as a lit border", () => {
+    render(
+      <ControlButtons
+        apiBase=""
+        dash={at("Monitor", { startupCheck: false })}
+        command={stubCommand()}
+        disabled={false}
+      />,
+    );
+    const startup = screen.getByRole("button", { name: "Startup" });
+    expect(startup.style.background).toBe("var(--accent)");
+    expect(startup.style.borderColor).toBe("transparent");
+
+    const monitor = screen.getByRole("button", { name: "Monitor" });
+    expect(monitor.style.borderColor).toBe("var(--accent)");
+    expect(monitor.style.background).not.toBe("var(--accent)");
+  });
+
   // A command's result used to be awaited and thrown away, so a rejected
   // command -- or a 500 from a settings write that could not validate -- looked
   // exactly like a successful one: nothing on screen changed, ever.

@@ -25,7 +25,12 @@ export interface MenuItem {
 
 export interface ControlButton {
   label: string;
-  variant?: "accent" | "danger";
+  /** `accent` is the row's "this is the mode you are in" mark -- the display's
+   *  button_active (display/_base_flex.py:523). `primary` is "the way in from
+   *  here", which is a different claim and so gets a different look: a fill
+   *  rather than a lit border. Sharing one look made an always-primary Startup
+   *  read as a second active mode. */
+  variant?: "accent" | "danger" | "primary";
   action: ButtonAction;
 }
 
@@ -75,11 +80,10 @@ const STOP: ControlButton = {
 // is not enough -- it only fires when the configured post-startup mode is Hold.
 const startupButton = (dash: LiveState): ControlButton => ({
   label: "Startup",
-  // No accent. In this row accent means "this is the mode you are in" -- the
-  // display's button_active, which is only ever the running mode
-  // (display/_base_flex.py:523). A permanent accent on Startup put a second lit
-  // border in the row next to the real one, so Monitor read as "monitoring, and
-  // also starting up".
+  // Primary, never accent: lighting a fire is what this row is FOR, but it is
+  // not a mode you are in. Carrying accent put a second lit border next to the
+  // real one, so Monitor read as "monitoring, and also starting up".
+  variant: "primary",
   action:
     dash.startupCheck || (dash.startToHoldPrompt && dash.startupGotoMode === "Hold")
       ? { type: "startup" }

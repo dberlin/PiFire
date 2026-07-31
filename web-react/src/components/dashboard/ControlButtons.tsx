@@ -25,6 +25,25 @@ const HOLD_PROMPT_RANGE: Record<"F" | "C", { min: number; max: number }> = {
 /** Which variant of Flask's single #startupModal is on screen, if any. */
 type StartupPrompt = "none" | "hold" | "confirm";
 
+/** The row's marked states. `accent` is a lit BORDER and `primary` a FILL, and
+ *  the difference is the point: accent says "this is the mode you are in" and
+ *  primary says "this is the way in". The fill repeats `.pf-modal-btn.accent`
+ *  (dashboard.css:302-306) so the surface has one primary-action look. */
+const VARIANT_STYLE = {
+  primary: { border: "transparent", bg: "var(--accent)", color: "#1a0f04" },
+  accent: {
+    border: "var(--accent)",
+    bg: "color-mix(in srgb, var(--accent) 16%, transparent)",
+    color: "#e8dfd1",
+  },
+  danger: {
+    border: "var(--danger)",
+    bg: "color-mix(in srgb, var(--danger) 14%, transparent)",
+    color: "var(--danger)",
+  },
+  plain: { border: "rgba(255,255,255,0.14)", bg: "var(--inset)", color: "#e8dfd1" },
+} as const;
+
 // Mode-driven control row, styled to the design's button grid. Each press
 // dispatches a `ButtonAction` (command / setpoint / confirm / startup) against
 // the REST `CommandClient` (see buttonsForMode.ts / command.ts).
@@ -142,19 +161,7 @@ export function ControlButtons({
   return (
     <div data-pf="controls" className="pf-dash-controls">
       {buttons.map((b) => {
-        const danger = b.variant === "danger";
-        const accent = b.variant === "accent";
-        const border = danger
-          ? "var(--danger)"
-          : accent
-            ? "var(--accent)"
-            : "rgba(255,255,255,0.14)";
-        const bg = danger
-          ? "color-mix(in srgb, var(--danger) 14%, transparent)"
-          : accent
-            ? "color-mix(in srgb, var(--accent) 16%, transparent)"
-            : "var(--inset)";
-        const color = danger ? "var(--danger)" : "#e8dfd1";
+        const look = VARIANT_STYLE[b.variant ?? "plain"];
         // `disabled` means "the control process is unreachable" -- which is
         // exactly when a user most needs to stop the grill, and a state this
         // flag can be stuck in on a HEALTHY system (see
@@ -173,9 +180,12 @@ export function ControlButtons({
             aria-busy={waiting || undefined}
             disabled={off}
             style={{
-              borderColor: waiting ? "var(--accent)" : border,
-              background: bg,
-              color,
+              // A primary button is already filled with the accent, so lighting
+              // its border in the same colour would say nothing. Its pending cue
+              // is the pulse and the ellipsis, which read on either look.
+              borderColor: waiting && b.variant !== "primary" ? "var(--accent)" : look.border,
+              background: look.bg,
+              color: look.color,
               opacity: disabled || busy ? 0.5 : 1,
             }}
             onClick={() => onClick(b.action, b.label)}

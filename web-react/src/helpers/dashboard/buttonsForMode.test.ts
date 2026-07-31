@@ -120,18 +120,16 @@ describe("buttonsForMode", () => {
   });
 
   // Accent is the row's one "you are in this mode" mark. Startup used to carry
-  // it unconditionally, so pressing Monitor lit two borders at once and the
-  // grill looked like it was starting up.
-  it.each(["Stop", "Monitor"])(
-    "leaves Startup unmarked in %s -- it is not a mode you are in",
-    (mode) => {
-      const buttons = buttonsForMode(at(mode, { startupCheck: false }));
-      expect(buttons.find((b) => b.label === "Startup")?.variant).toBeUndefined();
-      expect(buttons.filter((b) => b.variant === "accent").map((b) => b.label)).toEqual(
-        mode === "Monitor" ? ["Monitor"] : [],
-      );
-    },
-  );
+  // it unconditionally, so pressing Monitor marked two buttons at once and the
+  // grill looked like it was starting up. It is primary instead -- the way in,
+  // not a mode -- and primary is drawn as a fill, never as a lit border.
+  it.each(["Stop", "Monitor"])("marks Startup primary in %s, never accent", (mode) => {
+    const buttons = buttonsForMode(at(mode, { startupCheck: false }));
+    expect(buttons.find((b) => b.label === "Startup")?.variant).toBe("primary");
+    expect(buttons.filter((b) => b.variant === "accent").map((b) => b.label)).toEqual(
+      mode === "Monitor" ? ["Monitor"] : [],
+    );
+  });
 
   it("pressing Monitor while monitoring leaves Monitor rather than re-entering it", async () => {
     const monitor = buttonsForMode(at("Monitor", { startupCheck: false })).find(
