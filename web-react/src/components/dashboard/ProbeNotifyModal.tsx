@@ -134,7 +134,7 @@ export function ProbeNotifyModal({
 
   return (
     <div className="pf-modal-scrim" onClick={onCancel}>
-      <div className="pf-modal pf-notify-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="pf-modal" onClick={(e) => e.stopPropagation()}>
         <div className="pf-modal-title">{probeName} Notifications</div>
 
         <NotifySection

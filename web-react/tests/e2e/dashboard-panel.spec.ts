@@ -182,3 +182,74 @@ test("every control button is a usable touch target", async ({ page }) => {
   expect(heights.length).toBeGreaterThan(0);
   for (const h of heights) expect(h).toBeGreaterThanOrEqual(44);
 });
+
+test("an over-tall dialog stays on screen and every item stays reachable", async ({ page }) => {
+  // Nothing bounded a dialog's height. The real Prime menu fits everywhere
+  // (measured: 457px against this 480px panel), but only by 12px -- one more
+  // item, a wrapped label or a larger font and it would have gone over, and
+  // .pf-dash is overflow:hidden so the excess is clipped rather than scrolled.
+  // Verified in a real browser at 30 items: without the cap the dialog
+  // measured 0..487 in a 480px viewport; with it, 0..480.
+  //
+  // The markup is what ActionMenu renders -- the component cannot be driven
+  // here because demoData pins the grill to Hold, and Prime only appears when
+  // it is stopped.
+  const scrimSel = ".pf-modal-scrim";
+  await page.evaluate(() => {
+    const host = document.querySelector(".pf-dash-controls");
+    if (host === null) throw new Error("no control row to host the scrim");
+    const scrim = document.createElement("div");
+    scrim.className = "pf-modal-scrim";
+    const items = Array.from({ length: 30 }, (_, i) => `Prime ${i}g & Startup`);
+    scrim.innerHTML =
+      '<div class="pf-modal"><div class="pf-modal-title">Prime</div>' +
+      '<div class="pf-menu-list">' +
+      items.map((l) => `<button class="pf-modal-btn pf-menu-item">${l}</button>`).join("") +
+      '</div><div class="pf-modal-actions">' +
+      '<button class="pf-modal-btn">Cancel</button></div></div>';
+    host.appendChild(scrim);
+  });
+
+  const read = () =>
+    page.evaluate(() => {
+      const modal = document.querySelector<HTMLElement>(".pf-modal");
+      const list = document.querySelector<HTMLElement>(".pf-menu-list");
+      const items = [...document.querySelectorAll<HTMLElement>(".pf-menu-item")];
+      const cancel = [...document.querySelectorAll<HTMLElement>(".pf-modal-actions .pf-modal-btn")];
+      if (modal === null || list === null) throw new Error("no dialog");
+      const onScreen = (el: HTMLElement) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.bottom <= window.innerHeight;
+      };
+      const r = modal.getBoundingClientRect();
+      return {
+        modalTop: r.top,
+        modalBottom: r.bottom,
+        viewportH: window.innerHeight,
+        lastItemOnScreen: onScreen(items[items.length - 1]),
+        cancelOnScreen: onScreen(cancel[cancel.length - 1]),
+        listScrolls: list.scrollHeight > list.clientHeight,
+      };
+    });
+
+  const before = await read();
+  // The dialog itself never leaves the screen, however tall its content.
+  expect(before.modalTop).toBeGreaterThanOrEqual(0);
+  expect(before.modalBottom).toBeLessThanOrEqual(before.viewportH);
+  // Too tall to show at once, so the list -- not the whole dialog -- scrolls.
+  expect(before.listScrolls).toBe(true);
+  expect(before.lastItemOnScreen).toBe(false);
+
+  await page.locator(".pf-menu-list").hover();
+  await page.mouse.wheel(0, 2000);
+  await page.waitForTimeout(200);
+
+  const after = await read();
+  // The far end is reachable, and Cancel never went with it: the list scrolls
+  // inside a fixed frame, so the title and the buttons stay put.
+  expect(after.lastItemOnScreen).toBe(true);
+  expect(after.cancelOnScreen).toBe(true);
+  expect(before.cancelOnScreen).toBe(true);
+
+  await page.evaluate((sel) => document.querySelector(sel)?.remove(), scrimSel);
+});

@@ -233,6 +233,21 @@
 .pf-dash .pf-modal-scrim {
   @apply fixed z-30;
 }
+/* Nothing else bounds a dialog's height, and .pf-dash is overflow:hidden, so
+   one taller than the scrim would be CLIPPED rather than scrolled -- with the
+   top and bottom equally out of reach, because the scrim centres it.
+   The margin the tallest dialog had was luck, not design: the Prime menu
+   (six items) measures 457px against the 480px-tall panel, 12px to spare.
+   One more item, a wrapped label or a larger font and it would have gone over.
+   Cap every dashboard dialog against its scrim and let the body scroll. */
+/* 100%, not a value with breathing room subtracted: the Prime menu measures
+   457px against the 480px panel, so any margin worth having would put a
+   scrollbar on a dialog that fits. A dialog only reaches the screen edges in
+   the case this exists for, where the room matters more than the margin. */
+.pf-dash .pf-modal {
+  max-height: 100%;
+  @apply overflow-y-auto;
+}
 .pf-modal {
   @apply bg-card rounded-[18px] p-[22px] min-w-[320px] flex flex-col gap-[16px];
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -329,13 +344,11 @@
 /* Per-probe notification modal (ProbeNotifyModal). It sits inside the shared
    .pf-modal shell above; these rules only style its body. */
 
-/* Three sections -- target, high limit, low limit -- do not fit the way one
-   did, and the modal cannot grow past its scrim. Cap it against the scrim,
-   now the viewport, and let the body scroll instead. */
-.pf-notify-modal {
-  max-height: 88%;
-  @apply overflow-y-auto;
-}
+/* This modal's three sections -- target, high limit, low limit -- were the
+   first to outgrow their scrim, and it carried its own cap under a
+   .pf-notify-modal class. Every dashboard dialog is capped now
+   (`.pf-dash .pf-modal`), so that rule went, and the class with it: it had
+   nothing left to say. */
 /* A rule, not a gap: the divider is what tells the three master switches apart
    at a glance, since each section repeats the same three controls. */
 .pf-notify-section {
