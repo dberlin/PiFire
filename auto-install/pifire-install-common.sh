@@ -224,18 +224,94 @@ PIFIRE_OPTIONAL_GROUPS=(
 	spi     # /dev/spidev*   (Raspberry Pi OS)
 )
 
+# The highest GID that still counts as a system group. login.defs is
+# authoritative; 999 is the Debian/Fedora default when it does not say.
+pifire_sys_gid_max() {
+	local v
+	v=$(awk '/^[[:space:]]*SYS_GID_MAX[[:space:]]/ {print $2}' /etc/login.defs 2>/dev/null | tail -1)
+	[[ "$v" =~ ^[0-9]+$ ]] && echo "$v" || echo 999
+}
+
+# First unused GID in the system range, or empty if the range is full.
+pifire_free_system_gid() {
+	local min max gid
+	min=$(awk '/^[[:space:]]*SYS_GID_MIN[[:space:]]/ {print $2}' /etc/login.defs 2>/dev/null | tail -1)
+	[[ "$min" =~ ^[0-9]+$ ]] || min=100
+	max=$(pifire_sys_gid_max)
+	# Downwards from the top of the range: the low end is where the distro's
+	# own long-established groups live, so starting there maximises collisions
+	# with GIDs a future package might expect to claim.
+	for ((gid = max; gid >= min; gid--)); do
+		getent group "$gid" >/dev/null 2>&1 || {
+			echo "$gid"
+			return 0
+		}
+	done
+}
+
+# pifire_ensure_system_group NAME
+#
+# Create NAME as a system group, or convert an existing non-system one.
+#
+# The conversion exists because earlier PiFire installers ran a plain
+# `groupadd pifire`, which allocates from the LOGIN range -- and udev warns
+# that "device node ownership by non-system accounts is deprecated and will be
+# removed in the future", while auto-install/udev/99-pifire.rules hands this
+# group device nodes. An install that predates those rules would otherwise keep
+# a group that stops working at some future systemd release.
+#
+# Changing a GID renumbers the group, and file ownership is stored NUMERICALLY
+# -- so every file still carrying the old GID becomes owned by a group that no
+# longer exists. Files under the PiFire install are re-grouped here; anything
+# outside it is reported rather than guessed at, because a filesystem-wide
+# chgrp is not something an installer should do unasked.
+pifire_ensure_system_group() {
+	local grp="$1" old_gid new_gid sys_max repo
+
+	if ! getent group "$grp" >/dev/null 2>&1; then
+		log "   - creating system group $grp"
+		$SUDO groupadd -f -r "$grp" 2>/dev/null || true
+		return 0
+	fi
+
+	old_gid=$(getent group "$grp" | cut -d: -f3)
+	sys_max=$(pifire_sys_gid_max)
+	if [[ ! "$old_gid" =~ ^[0-9]+$ ]] || ((old_gid <= sys_max)); then
+		return 0 # already a system group -- nothing to do
+	fi
+
+	new_gid=$(pifire_free_system_gid)
+	if [[ -z "$new_gid" ]]; then
+		log " ! Group '$grp' has GID $old_gid (not a system group) and the system"
+		log " ! GID range is full, so it cannot be converted. udev may refuse to"
+		log " ! apply device ownership to it in a future release."
+		return 0
+	fi
+
+	log "   - converting '$grp' from GID $old_gid to system GID $new_gid"
+	if ! $SUDO groupmod -g "$new_gid" "$grp" 2>&1 | tee -a "$LOG"; then
+		log " ! Could not renumber '$grp'; leaving it at GID $old_gid."
+		return 0
+	fi
+
+	# Re-group what the old GID owned inside the install. The installers chown
+	# the tree right after this anyway; the updater does not, which is exactly
+	# the path where a stale numeric group would otherwise survive.
+	repo="${PIFIRE_REPO_DIR:-/usr/local/bin/pifire}"
+	[[ -d "$repo" ]] && $SUDO find "$repo" -gid "$old_gid" -exec chgrp "$grp" {} + 2>/dev/null
+
+	# Anything else on the box that carried the old GID is now orphaned. Say
+	# so with the command to find it rather than sweeping the filesystem.
+	log " ! '$grp' was renumbered $old_gid -> $new_gid. Files OUTSIDE $repo that"
+	log " ! belonged to it now show a numeric group. Find them with:"
+	log " !     sudo find / -xdev -gid $old_gid"
+}
+
 # pifire_add_hardware_groups user...
 pifire_add_hardware_groups() {
 	local user grp
 	for grp in "${PIFIRE_CREATE_GROUPS[@]}"; do
-		getent group "$grp" >/dev/null 2>&1 || {
-			# -r: a SYSTEM group (GID below the login range). udev warns that
-			# "device node ownership by non-system accounts is deprecated and
-			# will be removed", and the rules below hand it device nodes --
-			# so a plain groupadd here buys a future breakage.
-			log "   - creating system group $grp"
-			$SUDO groupadd -f -r "$grp" 2>/dev/null || true
-		}
+		pifire_ensure_system_group "$grp"
 	done
 
 	for user in "$@"; do

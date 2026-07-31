@@ -216,6 +216,23 @@ def wizard_cancel():
     return jsonify({"result": "success"}), 200
 
 
+def _usb_serial_label(dev):
+    """One picker row for a discovered USB serial device.
+
+    Names the description, the kernel device, and -- when the value being saved
+    is a stable alias rather than that kernel device -- says so explicitly.
+    Without the last part the picker would silently write a path the user never
+    saw, which is the sort of surprise that gets "fixed" by typing the kernel
+    name back in and reintroducing the problem the alias exists to solve.
+    """
+    device = dev["device"]
+    description = dev.get("description") or device
+    stable = dev.get("stable_device")
+    if stable and stable != device:
+        return f"{description} — {device} (saved as {stable})"
+    return f"{description} — {device}" if description != device else device
+
+
 @api_wizard_bp.route("/scan", methods=["POST"])
 def wizard_scan():
     """Hardware discovery delegation for the wizard's probe-config module
@@ -279,10 +296,23 @@ def wizard_scan():
             ]
         elif kind == "usb_serial":
             devs = discover_usb_serial_devices(payload.get("vid"), payload.get("pid"))
+            # Offer the STABLE alias as the value to save when the device has
+            # one (common/usb_serial.py::_stable_device_path). The kernel name
+            # this scan is built from -- /dev/ttyACM0 -- is assigned in USB
+            # enumeration order, so saving it is what leaves a configured
+            # install pointing at some other device after a replug or a reboot,
+            # silently. The label still shows the kernel name, because that is
+            # what the user sees in dmesg and in every other tool.
             groups = [
                 {
                     "title": "USB Serial Devices",
-                    "items": [{"value": d["device"], "label": d.get("description") or d["device"]} for d in devs],
+                    "items": [
+                        {
+                            "value": d.get("stable_device") or d["device"],
+                            "label": _usb_serial_label(d),
+                        }
+                        for d in devs
+                    ],
                 }
             ]
         else:

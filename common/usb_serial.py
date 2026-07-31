@@ -13,7 +13,47 @@
 #
 # *****************************************
 
+import glob
+import os
+
 from serial.tools import list_ports
+
+#: Where to look for a stable alias of a /dev/ttyACM<N>, best first.
+#:
+#: pyserial reports the kernel's own name -- /dev/ttyACM0 -- which is assigned
+#: in USB enumeration order and therefore moves when devices are replugged,
+#: when another adapter is added, or across a reboot. Configuring PiFire
+#: against that name is what makes it point at the wrong device later, and the
+#: failure is silent: the port opens, writes succeed, reads time out.
+#:
+#: /dev/pifire-* comes first because auto-install/udev/99-pifire.rules creates
+#: those and they say what the device IS ("pifire-numato"); /dev/serial/by-id
+#: is the distro-provided equivalent and exists without our rules installed.
+_STABLE_LINK_GLOBS = ("/dev/pifire-*", "/dev/serial/by-id/*")
+
+
+def _stable_device_path(device):
+    """A stable symlink pointing at `device`, or None if there is not one.
+
+    Never raises: discovery runs behind a wizard button, and a /dev that cannot
+    be listed should cost the caller the alias, not the scan.
+    """
+    try:
+        target = os.path.realpath(device)
+    except OSError:
+        return None
+    for pattern in _STABLE_LINK_GLOBS:
+        try:
+            candidates = sorted(glob.glob(pattern))
+        except OSError:
+            continue
+        for link in candidates:
+            try:
+                if os.path.islink(link) and os.path.realpath(link) == target:
+                    return link
+            except OSError:
+                continue
+    return None
 
 
 def _as_usb_id(value):
@@ -65,6 +105,10 @@ def discover_usb_serial_devices(vid=None, pid=None):
         results.append(
             {
                 "device": port.device,
+                # A stable alias for the same hardware, when one exists.
+                # Callers offering a device to be SAVED should prefer this --
+                # see _stable_device_path for why the kernel name is a trap.
+                "stable_device": _stable_device_path(port.device),
                 "description": port.description or "",
                 "manufacturer": getattr(port, "manufacturer", None) or "",
                 "serial_number": port.serial_number or "",

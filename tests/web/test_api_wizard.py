@@ -589,3 +589,74 @@ def test_module_values_unknown_section_is_400(ds, client):
     )
     assert resp.status_code == 400
     assert resp.get_json()["message"] == "unknown_module"
+
+
+# ---------------------------------------------------------------------------
+# usb_serial scan: which path the picker actually saves.
+#
+# The value the wizard writes into settings is whatever this endpoint puts in
+# `value`. Saving the kernel name (/dev/ttyACM0) is what leaves a configured
+# install pointing at a different device after a replug or a reboot, silently:
+# the port opens, writes succeed, reads time out. When udev has given the board
+# a stable alias, that is what has to be offered.
+# ---------------------------------------------------------------------------
+
+
+def _numato(stable=None, device="/dev/ttyACM1"):
+    return {
+        "device": device,
+        "stable_device": stable,
+        "description": "Numato Lab 4 Channel USB Relay",
+        "manufacturer": "Numato Lab",
+        "serial_number": "",
+        "vid": 0x2A19,
+        "pid": 0x0C0C,
+    }
+
+
+def _scan_usb_serial(client, devices, monkeypatch, body=None):
+    import blueprints.api_wizard.routes as wr
+
+    monkeypatch.setattr(wr, "discover_usb_serial_devices", lambda *a, **k: devices)
+    resp = client.post(
+        "/api/wizard/scan",
+        data=json.dumps(body or {"kind": "usb_serial"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    return resp.get_json()
+
+
+def test_usb_serial_scan_saves_the_stable_alias_when_there_is_one(ds, client, monkeypatch):
+    body = _scan_usb_serial(client, [_numato(stable="/dev/pifire-numato")], monkeypatch)
+    item = body["groups"][0]["items"][0]
+    assert item["value"] == "/dev/pifire-numato"
+    # The kernel name still appears, because that is what dmesg and every other
+    # tool calls it -- and the label says which one is being saved.
+    assert "/dev/ttyACM1" in item["label"]
+    assert "/dev/pifire-numato" in item["label"]
+
+
+def test_usb_serial_scan_falls_back_to_the_kernel_name(ds, client, monkeypatch):
+    body = _scan_usb_serial(client, [_numato(stable=None)], monkeypatch)
+    item = body["groups"][0]["items"][0]
+    assert item["value"] == "/dev/ttyACM1"
+    assert "saved as" not in item["label"]
+
+
+def test_usb_serial_scan_passes_vid_pid_through_to_discovery(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    seen = {}
+
+    def _capture(vid=None, pid=None):
+        seen["vid"], seen["pid"] = vid, pid
+        return [_numato()]
+
+    monkeypatch.setattr(wr, "discover_usb_serial_devices", _capture)
+    client.post(
+        "/api/wizard/scan",
+        data=json.dumps({"kind": "usb_serial", "vid": "0x2a19", "pid": "0x0c0c"}),
+        content_type="application/json",
+    )
+    assert seen == {"vid": "0x2a19", "pid": "0x0c0c"}
