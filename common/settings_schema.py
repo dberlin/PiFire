@@ -117,7 +117,7 @@ class _DistanceDeviceConfig(_Section):
     echo: int = 27
     trig: int = 23
     i2c_bus_kind: str = "basic"
-    i2c_bus_num: str = "CP2112"
+    i2c_bus_num: str = ""
     # Optional I2C address override. distance/_tof_base.py accepts a hex
     # string ("0x29"), a plain int, or None (fall back to the driver's
     # default_address), and the wizard writes the hex-string form -- so an

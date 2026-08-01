@@ -46,7 +46,7 @@ export function DeviceConfigField({
 
   // The pickers take a SettingsDependency; a probe device's ProbeConfigField is
   // the same information under different key names. `default` must be carried
-  // across or the picker loses its placeholder ("CP2112") -- 5 probe modules
+  // across or the picker loses its placeholder -- 5 probe modules
   // (ads1115_adafruit, ads1015_adafruit, mcp9600_adafruit, prototype, ads1115)
   // ship an i2c_bus_num field and NONE of them carries an option list.
   const dep: SettingsDependency = {

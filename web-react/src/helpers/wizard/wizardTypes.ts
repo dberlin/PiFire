@@ -6,7 +6,9 @@ export interface SettingsDependency {
   description?: string;
   type?: "i2c_bus_num" | "usb_serial_device";
   options?: Record<string, string>;
-  /** Manifest fallback (e.g. "CP2112"). Present on every i2c_bus_num dep. */
+  /** Manifest fallback, shown as the field's placeholder. Present on every
+   *  i2c_bus_num dep, blank on all of them -- the bus is the operator's to
+   *  name, and for ft232h/mcp2221 blank already means "the first one found". */
   default?: string;
   /** USB vendor/product ID to narrow a `usb_serial_device` Discover scan to
    *  one kind of board, written the way the manifest writes them ("0x2a19").

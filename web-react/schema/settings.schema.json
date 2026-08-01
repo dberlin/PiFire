@@ -644,7 +644,7 @@
               "device": "/dev/ttyACM0",
               "echo": 27,
               "i2c_bus_kind": "basic",
-              "i2c_bus_num": "CP2112",
+              "i2c_bus_num": "",
               "trig": 23
             },
             "input": {
@@ -1644,7 +1644,7 @@
             "device": "/dev/ttyACM0",
             "echo": 27,
             "i2c_bus_kind": "basic",
-            "i2c_bus_num": "CP2112",
+            "i2c_bus_num": "",
             "trig": 23
           }
         },
@@ -1716,7 +1716,7 @@
           "type": "string"
         },
         "i2c_bus_num": {
-          "default": "CP2112",
+          "default": "",
           "title": "I2C Bus Num",
           "type": "string"
         },
@@ -2183,7 +2183,7 @@
             "device": "/dev/ttyACM0",
             "echo": 27,
             "i2c_bus_kind": "basic",
-            "i2c_bus_num": "CP2112",
+            "i2c_bus_num": "",
             "trig": 23
           },
           "input": {

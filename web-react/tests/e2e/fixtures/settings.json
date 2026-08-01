@@ -434,7 +434,7 @@
           "device": "/dev/ttyACM0",
           "echo": 27,
           "i2c_bus_kind": "basic",
-          "i2c_bus_num": "CP2112",
+          "i2c_bus_num": "",
           "trig": 23
         },
         "input": {

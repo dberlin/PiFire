@@ -75,7 +75,7 @@ def default_settings():
                 "echo": 27,  # HCSR04 Distance Sensor
                 "trig": 23,  # HCSR04 Distance Sensor
                 "i2c_bus_kind": "basic",  # VL53L0X/VL53L4CD/VL53L1X: "basic" | "extended"
-                "i2c_bus_num": "CP2112",  # VL53L0X/VL53L4CD/VL53L1X: numbered bus or adapter-name match
+                "i2c_bus_num": "",  # VL53L0X/VL53L4CD/VL53L1X: extended/ft232h/mcp2221 selector, blank until chosen
                 "address": None,  # VL53L0X/VL53L4CD/VL53L1X: optional I2C address override (hex string or int)
                 "device": "/dev/ttyACM0",  # SEN0628: USB-serial device path
             },
