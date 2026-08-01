@@ -32,6 +32,7 @@ export type ProbeFieldType =
   | "float"
   | "string"
   | "i2c_bus_num"
+  | "i2c_bus"
   | "probes_list"
   | "bt_address"
   | "usb_serial_device";

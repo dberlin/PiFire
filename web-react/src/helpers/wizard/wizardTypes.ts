@@ -1,15 +1,17 @@
+import type { I2cBusValue } from "./i2cBusTypes";
 import type { ProbeMap, ProbeModuleData, ProbeProfile } from "./probeTypes";
 
 export type WizardSection = "grillplatform" | "display" | "distance" | "probes";
 export interface SettingsDependency {
   friendly_name: string;
   description?: string;
-  type?: "i2c_bus_num" | "usb_serial_device";
+  type?: "i2c_bus_num" | "usb_serial_device" | "i2c_bus";
   options?: Record<string, string>;
-  /** Manifest fallback, shown as the field's placeholder. Present on every
-   *  i2c_bus_num dep, blank on all of them -- the bus is the operator's to
-   *  name, and for ft232h/mcp2221 blank already means "the first one found". */
-  default?: string;
+  /** Manifest fallback. Present on every i2c_bus_num dep, blank on all of
+   *  them -- the bus is the operator's to name, and for ft232h/mcp2221 blank
+   *  already means "the first one found". An `i2c_bus` dep's fallback is
+   *  instead the object `{kind: "basic"}`. */
+  default?: string | I2cBusValue;
   /** USB vendor/product ID to narrow a `usb_serial_device` Discover scan to
    *  one kind of board, written the way the manifest writes them ("0x2a19").
    *  Omitted or null means "list every serial device", which is the right
@@ -46,7 +48,7 @@ export interface WizardState {
     probes: Record<string, ProbeModuleData>;
   };
   selections: Record<WizardSection, string | null>;
-  settings_dep_values: Record<WizardSection, Record<string, string | null>>;
+  settings_dep_values: Record<WizardSection, Record<string, string | I2cBusValue | null>>;
   display_config: Record<string, Record<string, unknown>>;
   probe_map: ProbeMap;
   probe_profiles: ProbeProfile[];
@@ -57,7 +59,7 @@ export interface WizardState {
   has_draft: boolean;
 }
 export interface ModuleValues {
-  settings: Record<string, string | null>;
+  settings: Record<string, string | I2cBusValue | null>;
   config: Record<string, unknown>;
 }
 export interface ScanGroup {
@@ -66,7 +68,7 @@ export interface ScanGroup {
 }
 export interface ScanResult {
   groups: ScanGroup[];
-  error: string | null;
+  error?: string | null;
 }
 export interface InstallStatus {
   percent: number;
@@ -87,7 +89,7 @@ export interface InstallLog {
 // Client working state (mutable subset submitted at draft/finish):
 export interface WizardWorking {
   selections: Record<WizardSection, string | null>;
-  settings_dep_values: Record<WizardSection, Record<string, string | null>>;
+  settings_dep_values: Record<WizardSection, Record<string, string | I2cBusValue | null>>;
   display_config: Record<string, Record<string, unknown>>;
   probe_map: ProbeMap;
   probes_units: string;

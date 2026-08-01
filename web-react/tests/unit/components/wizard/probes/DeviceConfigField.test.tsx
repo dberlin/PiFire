@@ -125,58 +125,56 @@ describe("remaining dispatch branches", () => {
     expect(onChange).toHaveBeenCalledWith("name", "b");
   });
 
-  it("renders i2c_bus_num via I2cBusPicker, forwarding kind and scan", async () => {
+  it("renders i2c_bus via I2cBusField, forwarding the bus kind to scan", async () => {
     (scan as ReturnType<typeof rs.fn>).mockResolvedValue({
-      groups: [{ title: "By Bus", items: [{ value: "3", label: "i2c-3" }] }],
+      groups: [{ title: "By Bus Number", items: [{ value: "3", label: "i2c-3" }] }],
       error: null,
     });
-    const f: ProbeConfigField = { ...base, label: "i2c_bus_num", type: "i2c_bus_num" };
+    const f: ProbeConfigField = { ...base, label: "i2c_bus", type: "i2c_bus" };
     const onChange = rs.fn();
     render(
       <DeviceConfigField
         field={f}
-        value="1"
-        allValues={{ i2c_bus_kind: "mcp23017" }}
+        value={{ kind: "kernel", bus_num: null }}
+        allValues={{}}
         availableProbes={[]}
         baseUrl=""
         onChange={onChange}
       />,
     );
-    expect(screen.getByText(/mcp23017/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /discover/i }));
     expect(await screen.findByRole("button", { name: "i2c-3" })).toBeInTheDocument();
-    expect(scan).toHaveBeenCalledWith("", { kind: "mcp23017" });
+    expect(scan).toHaveBeenCalledWith("", { kind: "kernel" });
 
     fireEvent.click(screen.getByRole("button", { name: "i2c-3" }));
-    expect(onChange).toHaveBeenCalledWith("i2c_bus_num", "3");
+    expect(onChange).toHaveBeenCalledWith("i2c_bus", { kind: "kernel", bus_num: 3 });
   });
 
-  it("carries an i2c_bus_num field's manifest default into the picker as a free-text placeholder", () => {
-    // 5 probe modules ship an i2c_bus_num field and none of them carries an
-    // option list, so the control has to be fillable free text or a fresh
-    // install cannot configure its ADC at all.
+  it("defaults an unset i2c_bus field's value to basic, so a fresh probe device is well-formed", () => {
+    // 5 probe modules ship an i2c_bus field with a manifest default of
+    // {kind: "basic"}; DeviceConfigField must fall back to the same shape when
+    // the device's own config carries no value yet, rather than crashing on an
+    // undefined `.kind`.
     const f: ProbeConfigField = {
       ...base,
-      label: "i2c_bus_num",
+      label: "i2c_bus",
       friendly_name: "I2C Bus",
-      type: "i2c_bus_num",
-      default: "CP2112",
+      type: "i2c_bus",
+      default: { kind: "basic" },
     };
-    const { container } = render(
+    render(
       <DeviceConfigField
         field={f}
         value={undefined}
-        allValues={{ i2c_bus_kind: "extended" }}
+        allValues={{}}
         availableProbes={[]}
         baseUrl=""
         onChange={rs.fn()}
       />,
     );
-    const input = screen.getByLabelText("I2C Bus");
-    expect(input.tagName).toBe("INPUT");
-    expect(input).toHaveAttribute("placeholder", "CP2112");
-    expect(container.querySelector("select")).toBeNull();
+    expect(screen.getByLabelText("I2C Bus")).toHaveValue("basic");
+    expect(screen.queryByRole("radio")).toBe(null);
   });
 
   it("renders bt_address via BluetoothPicker", () => {

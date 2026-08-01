@@ -43,7 +43,7 @@ export function UsbSerialPicker({ dep, value, onChange, onScan }: UsbSerialPicke
           className="pf-input"
           type="text"
           value={value}
-          placeholder={dep.default ?? ""}
+          placeholder={typeof dep.default === "string" ? dep.default : ""}
           list={suggestions.length > 0 ? listId : undefined}
           onChange={(e) => onChange(e.target.value)}
         />

@@ -1,3 +1,4 @@
+import type { I2cBusValue } from "../../helpers/wizard/i2cBusTypes";
 import { scan } from "../../helpers/wizard/wizardApi";
 import { moduleImageUrl } from "../../helpers/wizard/wizardAssets";
 import type {
@@ -6,7 +7,7 @@ import type {
   WizardSection,
 } from "../../helpers/wizard/wizardTypes";
 import { ConfigOptionField } from "./ConfigOptionField";
-import { I2cBusPicker } from "./fields/I2cBusPicker";
+import { I2cBusField } from "./fields/I2cBusField";
 import { SelectField } from "./fields/SelectField";
 import { UsbSerialPicker } from "./fields/UsbSerialPicker";
 
@@ -16,11 +17,11 @@ export interface ModuleCardProps {
   section: WizardSection;
   modules: Record<string, WizardModuleData>;
   selectedModule: string | null;
-  depValues: Record<string, string | null>;
+  depValues: Record<string, string | I2cBusValue | null>;
   configValues: Record<string, unknown>;
   configSource: WizardConfigSource;
   onSelectModule: (moduleName: string) => void;
-  onDepChange: (key: string, value: string) => void;
+  onDepChange: (key: string, value: string | I2cBusValue) => void;
   onConfigChange: (optionName: string, value: string) => void;
   baseUrl: string;
   disabled?: boolean;
@@ -43,25 +44,25 @@ export function ModuleCard({
 
   function renderDep(key: string, dep: SettingsDependency) {
     if (dep.hidden) return null;
-    const value = depValues[key] ?? "";
-    const onChange = (v: string) => onDepChange(key, v);
+    const rawValue = depValues[key];
 
-    if (dep.type === "i2c_bus_num") {
-      const kindKey = key.replace("_num", "_kind");
+    if (dep.type === "i2c_bus") {
+      const bus = (
+        typeof rawValue === "object" && rawValue !== null ? rawValue : { kind: "basic" }
+      ) as I2cBusValue;
       return (
-        <I2cBusPicker
+        <I2cBusField
           key={key}
           dep={dep}
-          value={value}
-          kindValue={depValues[kindKey] ?? ""}
-          onChange={onChange}
-          // The i2c discovery kind is the paired i2c_bus_kind field's value
-          // (extended/mcp2221/ft232h) -- NOT the literal "i2c_bus_num", which
-          // the backend /scan endpoint rejects as an unknown kind.
-          onScan={() => scan(baseUrl, { kind: depValues[kindKey] ?? "" })}
+          value={bus}
+          onChange={(v) => onDepChange(key, v)}
+          onScan={(kind) => scan(baseUrl, { kind })}
         />
       );
     }
+
+    const value = typeof rawValue === "string" ? rawValue : "";
+    const onChange = (v: string) => onDepChange(key, v);
 
     if (dep.type === "usb_serial_device") {
       return (

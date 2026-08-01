@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ModuleCard } from "../../../../src/components/wizard/ModuleCard";
+import type { I2cBusValue } from "../../../../src/helpers/wizard/i2cBusTypes";
 import type { WizardModuleData } from "../../../../src/helpers/wizard/wizardTypes";
 
 rs.mock("../../../../src/helpers/wizard/wizardApi", () => ({
@@ -36,11 +37,11 @@ const moduleWithHiddenDep: WizardModuleData = {
 const moduleWithI2c: WizardModuleData = {
   friendly_name: "I2C Module",
   settings_dependencies: {
-    i2c_bus_num: {
+    i2c_bus: {
       friendly_name: "I2C Bus",
-      type: "i2c_bus_num",
-      options: { "1": "Bus 1" },
-      settings: ["i2c_bus_num"],
+      type: "i2c_bus",
+      default: { kind: "basic" },
+      settings: ["i2c_bus"],
     },
   },
 };
@@ -94,7 +95,7 @@ function baseProps() {
     section: "distance" as const,
     modules,
     selectedModule: null as string | null,
-    depValues: {} as Record<string, string | null>,
+    depValues: {} as Record<string, string | I2cBusValue | null>,
     configValues: {} as Record<string, unknown>,
     configSource: "none" as const,
     onSelectModule: rs.fn(),
@@ -155,16 +156,18 @@ describe("ModuleCard", () => {
     expect(screen.queryByText("Secret")).not.toBeInTheDocument();
   });
 
-  it("renders the I2cBusPicker (with Discover button) for an i2c_bus_num dependency", async () => {
+  it("renders the I2cBusField (with Discover button) for an i2c_bus dependency", async () => {
     const { scan } = await import("../../../../src/helpers/wizard/wizardApi");
-    // The paired i2c_bus_kind field's value is what the Discover scan uses as
-    // its kind -- assert the real kind is forwarded, not the literal field type.
+    // The scan kind comes from the bus value's own `kind`, not from a paired
+    // field -- an I2cBusValue carries its kind, so there is nothing else to
+    // forward.
+    const bus: I2cBusValue = { kind: "kernel", adapter: "CP2112" };
     render(
       <ModuleCard
         {...baseProps()}
         baseUrl="http://localhost"
         selectedModule="i2c"
-        depValues={{ i2c_bus_kind: "extended" }}
+        depValues={{ i2c_bus: bus }}
       />,
     );
     expect(screen.getByText("I2C Bus")).toBeInTheDocument();
@@ -172,7 +175,7 @@ describe("ModuleCard", () => {
     expect(discoverButton).toBeInTheDocument();
 
     fireEvent.click(discoverButton);
-    expect(scan).toHaveBeenCalledWith("http://localhost", { kind: "extended" });
+    expect(scan).toHaveBeenCalledWith("http://localhost", { kind: "kernel" });
   });
 
   it("renders the UsbSerialPicker (with Discover button) for a usb_serial_device dependency", async () => {

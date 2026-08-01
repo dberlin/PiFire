@@ -216,6 +216,23 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* The composite field stacks its kind select above the kind-specific
+ * controls, unlike the module-deps row layout .pf-field otherwise gets. */
+.pf-i2c-bus-field {
+  @apply flex-col items-stretch;
+}
+.pf-i2c-bus-kernel {
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+}
+.pf-field-error {
+  color: var(--pf-danger, #c0392b);
+}
+
 /* The probes step's own vocabulary -- the two cards, their add/edit dialogs and
    the discovery panels -- is in probes/probes.css, imported by the cards so it
    also reaches /settings/probes. */

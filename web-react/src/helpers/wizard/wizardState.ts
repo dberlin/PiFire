@@ -1,3 +1,4 @@
+import type { I2cBusValue } from "./i2cBusTypes";
 import type { ProbeMap } from "./probeTypes";
 import type { WizardSection, WizardState, WizardWorking } from "./wizardTypes";
 
@@ -23,7 +24,7 @@ export function setDepValue(
   w: WizardWorking,
   section: WizardSection,
   key: string,
-  value: string | null,
+  value: string | I2cBusValue | null,
 ): WizardWorking {
   return {
     ...w,
@@ -75,7 +76,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
 export function setSectionDepValues(
   w: WizardWorking,
   section: WizardSection,
-  values: Record<string, string | null>,
+  values: Record<string, string | I2cBusValue | null>,
 ): WizardWorking {
   return {
     ...w,

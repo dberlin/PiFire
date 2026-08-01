@@ -1,7 +1,8 @@
+import type { I2cBusValue } from "../../../helpers/wizard/i2cBusTypes";
 import type { ProbeConfigField } from "../../../helpers/wizard/probeTypes";
 import { scan } from "../../../helpers/wizard/wizardApi";
 import type { SettingsDependency } from "../../../helpers/wizard/wizardTypes";
-import { I2cBusPicker } from "../fields/I2cBusPicker";
+import { I2cBusField } from "../fields/I2cBusField";
 import { SelectField } from "../fields/SelectField";
 import { UsbSerialPicker } from "../fields/UsbSerialPicker";
 import { BluetoothPicker } from "./BluetoothPicker";
@@ -46,9 +47,7 @@ export function DeviceConfigField({
 
   // The pickers take a SettingsDependency; a probe device's ProbeConfigField is
   // the same information under different key names. `default` must be carried
-  // across or the picker loses its placeholder -- 5 probe modules
-  // (ads1115_adafruit, ads1015_adafruit, mcp9600_adafruit, prototype, ads1115)
-  // ship an i2c_bus_num field and NONE of them carries an option list.
+  // across as a string or a usb_serial_device picker loses its placeholder.
   const dep: SettingsDependency = {
     friendly_name: field.friendly_name,
     description: field.description,
@@ -107,16 +106,19 @@ export function DeviceConfigField({
         </label>
       );
     }
-    case "i2c_bus_num":
+    case "i2c_bus": {
+      const bus = (
+        typeof value === "object" && value !== null ? value : { kind: "basic" }
+      ) as I2cBusValue;
       return (
-        <I2cBusPicker
+        <I2cBusField
           dep={dep}
-          value={String(value ?? "")}
-          kindValue={String(allValues.i2c_bus_kind ?? "")}
+          value={bus}
           onChange={set}
-          onScan={() => scan(baseUrl, { kind: String(allValues.i2c_bus_kind ?? "") })}
+          onScan={(kind) => scan(baseUrl, { kind })}
         />
       );
+    }
     case "bt_address":
       return (
         <BluetoothPicker
