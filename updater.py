@@ -535,6 +535,43 @@ def run_branch_change(branch):
     publish_finished(reboot)
 
 
+def record_installed_version(manifest=None):
+    """Bring the stored version up to the manifest's. Returns whether it moved.
+
+    settings["versions"] is the migration CURSOR: install_dependencies runs every
+    updater_manifest entry above it, and skips everything at or below. Nothing
+    wrote it back on a SQLite install -- the only code that does lives in
+    common/settings_migration.py, reached exclusively through
+    read_settings_file(), the JSON-file reader that now runs on first boot and a
+    backup restore and nowhere else. So an updated grill kept the version it was
+    first installed with: the updater page reported that version forever, and
+    every update re-ran every migration above it.
+
+    Forward only. A branch change onto older code leaves the cursor where it is,
+    which is what install_dependencies' own walk already assumes; unwinding a
+    version is settings_migration's downgrade path, not this.
+    """
+    manifest = manifest if manifest is not None else read_updater_manifest()
+    target = manifest.get("metadata", {}).get("versions")
+    if not target or "server" not in target:
+        logger.error("updater_manifest.json has no metadata.versions.server; leaving the version alone")
+        return False
+
+    settings = read_settings()
+    stored = settings["versions"]["server"]
+    stored_build = settings["versions"].get("build", 0)
+    target_build = target.get("build", 0)
+    if semantic_ver_is_lower(target["server"], stored) or (target["server"] == stored and target_build <= stored_build):
+        return False
+
+    settings["versions"] = dict(target)
+    write_settings(settings)
+    logger.info(
+        f"Recorded installed version {target['server']} build {target_build} (was {stored} build {stored_build})"
+    )
+    return True
+
+
 def install_dependencies(current_version_string="0.0.0", current_build=None):
     result = 0
     percent = 30
@@ -740,6 +777,14 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
         print(f"Output:  {output}")
 
     time.sleep(4)
+
+    # Only once every migration above the stored version has actually run. The
+    # version IS the cursor those migrations are selected by, so recording it
+    # after a failed step would skip them permanently on the next run.
+    if result == 0:
+        record_installed_version(updaterInfo)
+    else:
+        logger.error(f"Dependency steps returned {result}; leaving the recorded version alone so they run again")
 
     # The terminal sentinel is the CALLER's to publish, not this function's.
     # An update runs the web UI rebuild after this returns, and that rebuild

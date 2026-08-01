@@ -9,6 +9,7 @@ updater_manifest.json under 1.10.0, so no current install still reaches it.
 No test here runs a real build; rebuild_web_ui takes an injected runner.
 """
 
+import io
 import os
 
 import pytest
@@ -400,3 +401,160 @@ def test_a_failed_pull_ends_negative_and_never_rebuilds(quiet_updater, monkeypat
         updater.run_update("main")
 
     assert quiet_updater[-1][0] < 0
+
+
+# ---------------------------------------------------------------------------
+# The version the updater records after installing. settings["versions"] is the
+# cursor install_dependencies selects migrations by, and nothing wrote it back
+# on a SQLite install: the only code that does is in settings_migration.py,
+# reached through read_settings_file(), the JSON reader that now runs on first
+# boot and a backup restore and nowhere else. So a grill kept the version it was
+# first installed with -- the page reported it forever, and every update re-ran
+# every migration above it.
+
+
+@pytest.fixture
+def version_store(monkeypatch):
+    """A stored settings dict the recorder can read and write. Returns it, so a
+    test can assert on what was written."""
+    import updater
+
+    stored = {"versions": {"server": "1.10.10", "cookfile": "1.5.0", "recipe": "1.0.0", "build": 70}}
+    monkeypatch.setattr(updater, "logger", logging.getLogger("t"), raising=False)
+    monkeypatch.setattr(updater, "read_settings", lambda: stored)
+    monkeypatch.setattr(updater, "write_settings", lambda s: stored.update(s))
+    return stored
+
+
+def manifest(server, build):
+    return {"metadata": {"versions": {"server": server, "cookfile": "1.5.0", "recipe": "1.0.0", "build": build}}}
+
+
+def test_a_newer_manifest_version_is_recorded(version_store):
+    import updater
+
+    assert updater.record_installed_version(manifest("1.11.0", 71)) is True
+    assert version_store["versions"]["server"] == "1.11.0"
+    assert version_store["versions"]["build"] == 71
+
+
+def test_a_build_bump_alone_is_recorded(version_store):
+    """Releases move the build without the version far more often than not."""
+    import updater
+
+    assert updater.record_installed_version(manifest("1.10.10", 71)) is True
+    assert version_store["versions"]["build"] == 71
+
+
+def test_the_same_version_and_build_is_left_alone(version_store):
+    import updater
+
+    assert updater.record_installed_version(manifest("1.10.10", 70)) is False
+    assert version_store["versions"]["build"] == 70
+
+
+def test_an_older_manifest_does_not_wind_the_version_back(version_store):
+    """A branch change onto older code. install_dependencies' own walk already
+    skips entries at or below the cursor, and unwinding one is
+    settings_migration's downgrade path, not this."""
+    import updater
+
+    assert updater.record_installed_version(manifest("1.9.0", 23)) is False
+    assert version_store["versions"]["server"] == "1.10.10"
+
+
+def test_a_manifest_with_no_versions_is_refused_not_crashed(version_store):
+    import updater
+
+    assert updater.record_installed_version({"metadata": {}}) is False
+    assert version_store["versions"]["server"] == "1.10.10"
+
+
+def test_the_whole_versions_block_is_carried_over(version_store):
+    """cookfile and recipe move with the release; settings_migration assigns the
+    block wholesale and this matches it."""
+    import updater
+
+    updater.record_installed_version(
+        {"metadata": {"versions": {"server": "1.11.0", "cookfile": "1.6.0", "recipe": "1.1.0", "build": 71}}}
+    )
+
+    assert version_store["versions"] == {
+        "server": "1.11.0",
+        "cookfile": "1.6.0",
+        "recipe": "1.1.0",
+        "build": 71,
+    }
+
+
+class _FakeProcess:
+    """Enough of Popen for install_dependencies' command loop, and nothing that
+    could reach a real shell."""
+
+    def __init__(self, code):
+        self._code = code
+        self.stdout = io.StringIO("a line of output\n")
+
+    def poll(self):
+        return self._code
+
+
+@pytest.fixture
+def one_command_update(monkeypatch, version_store):
+    """install_dependencies with a single manifest command, no real subprocess.
+
+    Returns a setter for that command's exit code."""
+    import updater
+
+    codes = {"exit": 0}
+    version_store["globals"] = {"python_exec": "python", "uv": False}
+    monkeypatch.setattr(updater, "DEBUG", False, raising=False)
+    monkeypatch.setattr(updater, "set_updater_install_status", lambda *a: None)
+    monkeypatch.setattr(updater, "set_wizard_install_status", lambda *a: None)
+    monkeypatch.setattr(updater, "time", type("_", (), {"sleep": staticmethod(lambda _: None)}))
+    monkeypatch.setattr(
+        updater,
+        "read_updater_manifest",
+        lambda: {
+            "metadata": {"versions": {"server": "1.11.0", "cookfile": "1.5.0", "recipe": "1.0.0", "build": 71}},
+            "versions": [
+                {
+                    "version": "1.11.0",
+                    "build": 71,
+                    "reboot_required": False,
+                    "dependencies": {
+                        "app": {"py_dependencies": [], "apt_dependencies": [], "command_list": [["true"]]}
+                    },
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda *a, **k: _FakeProcess(codes["exit"]))
+    monkeypatch.setattr(
+        updater.subprocess, "call", lambda *a, **k: pytest.fail("a real subprocess escaped the test harness")
+    )
+    return codes
+
+
+def test_a_clean_install_records_the_manifest_version(one_command_update, version_store):
+    import updater
+
+    result, _ = updater.install_dependencies("1.10.10", 70)
+
+    assert result == 0
+    assert version_store["versions"]["server"] == "1.11.0"
+    assert version_store["versions"]["build"] == 71
+
+
+def test_a_failed_dependency_step_leaves_the_version_alone(one_command_update, version_store):
+    """The cursor is what makes the next run retry those migrations. Recording it
+    after a failure would skip them permanently."""
+    import updater
+
+    one_command_update["exit"] = 1
+
+    result, _ = updater.install_dependencies("1.10.10", 70)
+
+    assert result != 0
+    assert version_store["versions"]["server"] == "1.10.10", "a failed run must not claim the new version"
+    assert version_store["versions"]["build"] == 70
