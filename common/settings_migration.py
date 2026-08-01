@@ -143,6 +143,77 @@ def read_settings_file(filename="settings.json", init=False, retry_count=0):
     return settings
 
 
+def _legacy_bus_to_config(section):
+    """The tagged i2c_bus object a legacy (i2c_bus_kind, i2c_bus_num) pair meant.
+
+    String parsing only -- this runs during settings load, long before any
+    adapter can be probed, so an adapter name stays an adapter name rather than
+    being resolved to the serial behind it.
+    """
+    kind = str(section.get("i2c_bus_kind", "")).strip().lower()
+    # Pre basic/extended installs stored only the bridge name.
+    selector = section.get("i2c_bus_num", section.get("i2c_bus_match", ""))
+    selector = "" if selector is None else str(selector).strip()
+
+    if not kind:
+        kind = "extended" if selector else "basic"
+
+    if kind == "extended":
+        if not selector:
+            # find_i2c_bus("") substring-matches every adapter and raises, so
+            # this configuration could never open a bus. The board's own pins
+            # are the honest repair.
+            write_log("I2C bus: 'extended' with no bus selected; falling back to the integrated bus.")
+            return {"kind": "basic"}
+        if selector.lower().startswith("serial:"):
+            return {"kind": "kernel", "serial": selector.split(":", 1)[1].strip()}
+        if selector.isdigit():
+            return {"kind": "kernel", "bus_num": int(selector)}
+        return {"kind": "kernel", "adapter": selector}
+
+    if kind in ("ft232h", "mcp2221"):
+        field = "url" if kind == "ft232h" else "serial"
+        # A selector naming a kernel adapter cannot address a USB-HID device.
+        # Dropping it leaves "the first one found", which is what a fresh
+        # install of this kind means.
+        stranded = selector.lower().startswith("serial:") or not (
+            selector == "" or selector.lower().startswith("ftdi://") or kind == "mcp2221"
+        )
+        if kind == "mcp2221" and selector.lower() in ("cp2112", "mcp2221"):
+            stranded = True
+        if selector == "1" and kind == "ft232h":
+            selector = ""
+        if stranded:
+            write_log(f"I2C bus: dropping {selector!r}, which does not name a {kind} device.")
+            selector = ""
+        return {"kind": kind, field: selector}
+
+    return {"kind": "basic"}
+
+
+def _i2c_bus_sections(settings):
+    """Every mapping in the tree that stores one I2C bus configuration."""
+    platform = settings.get("platform", {}) or {}
+    yield (platform.get("devices", {}) or {}).get("distance")
+    yield platform.get("fan_controller")
+    probe_map = (settings.get("probe_settings", {}) or {}).get("probe_map", {}) or {}
+    for device in probe_map.get("probe_devices", []) or []:
+        yield device.get("config")
+
+
+def _migrate_i2c_buses(settings):
+    """Rewrite every legacy (i2c_bus_kind, i2c_bus_num) pair as one i2c_bus
+    object. Idempotent: a section that already has i2c_bus is left alone."""
+    for section in _i2c_bus_sections(settings):
+        if not isinstance(section, dict):
+            continue
+        legacy = {"i2c_bus_kind", "i2c_bus_num", "i2c_bus_match"} & set(section)
+        if "i2c_bus" not in section and legacy:
+            section["i2c_bus"] = _legacy_bus_to_config(section)
+        for key in legacy:
+            section.pop(key, None)
+
+
 def upgrade_settings(prev_ver, settings, settings_default):
     """Check if upgrading from v1.4.x or earlier"""
     if prev_ver[0] <= 1 and prev_ver[1] <= 4:
@@ -304,6 +375,12 @@ def upgrade_settings(prev_ver, settings, settings_default):
             settings["probe_settings"]["probe_profiles"][profile] = settings_default["probe_settings"][
                 "probe_profiles"
             ][profile]
+
+    """ Check if upgrading from previous to v1.11 or from v1.11.0 build 71 """
+    if (prev_ver[0] == 1 and prev_ver[1] == 11 and settings["versions"].get("build", 0) <= 71) or (
+        prev_ver[0] == 1 and prev_ver[1] < 11
+    ):
+        _migrate_i2c_buses(settings)
 
     settings["globals"]["updated_message"] = True  # Display updated message after reset/reboot
     return settings
