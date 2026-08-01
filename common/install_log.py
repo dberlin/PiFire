@@ -27,6 +27,13 @@ RUN_MARKER = "=== wizard install run started ==="
 #: file stays available under /api/admin/logs/view for anyone who wants it.
 MAX_BYTES = 256 * 1024
 
+#: Published as the install status percent when the installer raises. The
+#: browser polls percent and reads anything above 100 as "finished", so a
+#: failure had no way to say so: the detached process just stopped writing and
+#: the bar sat wherever it had got to, forever. Negative, because every real
+#: percent -- including the 101/142 finished sentinels -- is positive.
+INSTALL_FAILED_PERCENT = -1
+
 
 def _run_start(data):
     """Byte offset of the current run's first line within `data`."""

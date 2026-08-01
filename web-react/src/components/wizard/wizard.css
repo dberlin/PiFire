@@ -279,6 +279,28 @@
   }
 }
 
+/* A failed install replaces the bar rather than sitting above it: a striped
+   progress bar reads as "still working", which is exactly the wrong thing to
+   leave on screen next to an error. */
+.pf-install-failed-title {
+  @apply m-0 text-danger;
+  font: 700 22px "Barlow";
+}
+.pf-install-failed {
+  @apply flex flex-col gap-[8px] rounded-card p-[16px] text-left;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.pf-install-failed-detail {
+  @apply m-0 text-text;
+  font: 600 14px / 1.5 "Barlow";
+  overflow-wrap: anywhere;
+}
+.pf-install-failed-hint {
+  @apply m-0 text-label;
+  font: 400 13px / 1.5 "Barlow";
+}
+
 /* The installer's transcript, closed by default: an install that goes to plan
    needs a bar and a status line, and nothing here competes with them until
    someone asks. .pf-install-progress is text-center for the bar and status, so

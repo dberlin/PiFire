@@ -212,6 +212,51 @@ describe("InstallProgress", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("could not restart");
   });
 
+  it("reports a failed install instead of leaving the bar running", async () => {
+    /* The installer runs detached. Before it published a negative percent, an
+       exception just stopped the status updates, and a striped progress bar sat
+       at whatever percent it had reached -- reading as "still working" forever. */
+    rs.useFakeTimers();
+    // Any installer failure; the banner renders whatever it is handed. An apt
+    // failure rather than a settings one on purpose -- settings that the
+    // manifest can produce are checked against the schema at build time by
+    // tests/unit/wizard/test_manifest_schema_conformance.py.
+    getStatusMock.mockResolvedValue({
+      percent: -1,
+      status: "Installation failed",
+      output: "E: Unable to locate package python3-libgpiod",
+    });
+    getInstallLogMock.mockResolvedValue({ text: "", offset: 0, reset: false });
+
+    const onDone = rs.fn();
+    render(<InstallProgress baseUrl="http://x" onDone={onDone} />);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(250);
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "E: Unable to locate package python3-libgpiod",
+    );
+    expect(screen.getByText("Installation failed")).toBeInTheDocument();
+    // No progress bar: a failure is not a percentage.
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    // Not a completion, either.
+    expect(onDone).not.toHaveBeenCalled();
+
+    // The transcript is opened for them -- it is where the installer said what
+    // went wrong.
+    const details = screen.getByText("Show output").closest("details") as HTMLDetailsElement;
+    expect(details.open).toBe(true);
+    expect(getInstallLogMock).toHaveBeenCalled();
+
+    // Polling stops: nothing more is coming from a dead installer.
+    getStatusMock.mockClear();
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2000);
+    });
+    expect(getStatusMock).not.toHaveBeenCalled();
+  });
+
   it("offers the output panel but reads nothing until it is opened", async () => {
     rs.useFakeTimers();
     getStatusMock.mockResolvedValue({ percent: 20, status: "Installing…", output: "" });

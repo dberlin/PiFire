@@ -29,7 +29,8 @@ NEW constraint must trace the same way.
 
 import copy
 import json
-from typing import Any, Literal
+from types import UnionType
+from typing import Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_serializer, model_validator
 from pydantic_core import ErrorDetails
@@ -139,18 +140,28 @@ class _DevicesConfig(_Section):
     input: _InputDeviceConfig = _InputDeviceConfig()
 
 
+# A pin is an identifier or nothing, and the identifier is not always a number.
+# The Raspberry Pi platforms address pins by BCM number, but ft232h_relay
+# addresses them by NAME (C0-C7 / D4-D7 -- grillplat/ft232h.py:136,158) and
+# every board offers "None" for the pins it does not wire (wizard_manifest.json:
+# pcb_2.00a output_dc_fan/output_pwm/input_shutdown, pcb_4.x.x input_selector,
+# and custom's inputs). Typing these as plain int meant a legitimate ft232h or
+# unwired-pin selection could not be written at all: write_settings raised
+# SettingsValidationError inside the DETACHED installer, which has no handler,
+# so the install died with the browser still polling a status frozen at
+# "Installing Dependencies...".
 class _InputsConfig(_Section):
-    selector: int = 17
-    shutdown: int = 17
+    selector: int | None = 17
+    shutdown: int | None = 17
 
 
 class _OutputsConfig(_Section):
-    auger: int = 14
-    dc_fan: int = 26
-    fan: int = 15
-    igniter: int = 18
-    power: int = 4
-    pwm: int = 13
+    auger: int | str | None = 14
+    dc_fan: int | str | None = 26
+    fan: int | str | None = 15
+    igniter: int | str | None = 18
+    power: int | str | None = 4
+    pwm: int | str | None = 13
 
 
 class _SPI0Config(_Section):
@@ -621,6 +632,74 @@ def _format_errors(errs: list[ErrorDetails]) -> list[str]:
 def format_validation_errors(exc: ValidationError) -> list[str]:
     """Dotted-path `"section.field: reason"` strings for a pydantic ValidationError."""
     return _format_errors(exc.errors())
+
+
+def _declared_types(annotation: Any) -> set[type]:
+    """The concrete scalar types an annotation admits, unwrapping unions and
+    Literals (`Literal["F", "C"]` admits str)."""
+    origin = get_origin(annotation)
+    if origin is Literal:
+        return {type(arg) for arg in get_args(annotation)}
+    if origin is Union or origin is UnionType:
+        types: set[type] = set()
+        for arg in get_args(annotation):
+            types |= _declared_types(arg)
+        return types
+    return {annotation}
+
+
+def declared_types_for_path(path) -> set[type]:
+    """The types the schema declares at a dotted settings path, or an empty set
+    if nothing is modelled there."""
+    model: Any = SettingsSchema
+    annotation: Any = None
+    for key in path:
+        fields = getattr(model, "model_fields", None)
+        if not fields:
+            return set()
+        info = fields.get(key) or next((f for f in fields.values() if f.alias == key), None)
+        if info is None:
+            return set()
+        annotation = info.annotation
+        model = annotation
+    return _declared_types(annotation) if annotation is not None else set()
+
+
+def coerce_setting_value(path, value, fallback):
+    """Convert a wizard manifest option string to the type the schema declares
+    for `path`, deferring to `fallback` where the schema says nothing useful.
+
+    The manifest can only carry strings -- its options are JSON object KEYS --
+    so something has to turn "14" into an int. Guessing from the string's shape
+    alone (the wizard's own _convert_value) gets that right only when the target
+    happens to be numeric: it turned the ft232h url option "1" into int 1 for a
+    field the schema declares `str`, and the write failed inside the detached
+    installer. Asking the schema what the field IS makes the answer depend on
+    the destination rather than on how the value happens to look.
+
+    Order matters: a value is converted to the most specific declared type it
+    can satisfy, so a pin field of `int | str | None` still yields int 14 for
+    the Pi's "14" and keeps "C0" a string for the FT232H.
+    """
+    declared = declared_types_for_path(path)
+    if not declared or not isinstance(value, str):
+        return fallback(value)
+    if type(None) in declared and value == "None":
+        return None
+    if bool in declared and value in ("True", "False"):
+        return value == "True"
+    if int in declared and (value.isdigit() or (value.startswith("-") and value[1:].isdigit())):
+        return int(value)
+    if float in declared:
+        try:
+            return float(value)
+        except ValueError:
+            pass
+    if str in declared:
+        return value
+    # Nothing declared here can hold a string (a list or nested model). Let the
+    # caller's shape-based guess have it -- and validation catch it if wrong.
+    return fallback(value)
 
 
 def validate_partial_settings(delta: dict) -> list[str]:

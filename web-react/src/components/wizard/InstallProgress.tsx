@@ -16,6 +16,13 @@ export interface InstallProgressProps {
 // just needs the pifire service restarted" -- no reboot required.
 const REBOOT_REQUIRED_PERCENT = 142;
 
+// The installer publishes a NEGATIVE percent when it raises
+// (common/install_log.py's INSTALL_FAILED_PERCENT). Every real percent is
+// positive, the finished sentinels included, so before this a failed install
+// was indistinguishable from a slow one: the detached process simply stopped
+// writing and the bar stayed where it had got to.
+const isFailure = (percent: number) => percent < 0;
+
 function prefersReducedMotion(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -43,7 +50,12 @@ export function InstallProgress({ baseUrl, onDone }: InstallProgressProps) {
       getInstallStatus(baseUrl).then((next) => {
         if (cancelled) return;
         setStatus(next);
-        if (next.percent > 100) {
+        if (isFailure(next.percent)) {
+          window.clearInterval(id);
+          // Opened for them rather than offered: the installer has already
+          // logged what went wrong, and the transcript is where it says so.
+          setShowOutput(true);
+        } else if (next.percent > 100) {
           window.clearInterval(id);
           if (next.percent === REBOOT_REQUIRED_PERCENT) {
             setRebootRequired(true);
@@ -101,28 +113,44 @@ export function InstallProgress({ baseUrl, onDone }: InstallProgressProps) {
     );
   }
 
-  const percent = Math.min(status.percent, 100);
+  const failed = isFailure(status.percent);
+  const percent = Math.min(Math.max(status.percent, 0), 100);
   const barClassName = prefersReducedMotion()
     ? "pf-install-progress-bar pf-install-progress-bar-reduced-motion"
     : "pf-install-progress-bar";
 
   return (
     <div className="pf-install-progress">
-      <p className="pf-install-progress-status">{status.status}</p>
-      <div
-        className="pf-install-progress-track"
-        role="progressbar"
-        aria-valuenow={percent}
-        aria-valuemin={0}
-        aria-valuemax={100}
-      >
-        <div className={barClassName} style={{ width: `${percent}%` }} />
-      </div>
+      <p className={failed ? "pf-install-failed-title" : "pf-install-progress-status"}>
+        {status.status}
+      </p>
+      {failed ? (
+        <div className="pf-install-failed" role="alert">
+          <p className="pf-install-failed-detail">{status.output}</p>
+          <p className="pf-install-failed-hint">
+            The grill was not changed past this point. The output below has the details, and the
+            full traceback is in logs/wizard.log.
+          </p>
+        </div>
+      ) : (
+        <div
+          className="pf-install-progress-track"
+          role="progressbar"
+          aria-valuenow={percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div className={barClassName} style={{ width: `${percent}%` }} />
+        </div>
+      )}
       {/* A native <details>, like MetricCard's raw-data panel: the disclosure
           state, keyboard handling and find-in-page all come from the browser,
-          and the summary is a real control without being wired up as one. */}
+          and the summary is a real control without being wired up as one.
+          `open` is bound so a failed install can open it -- the transcript is
+          where the installer said what went wrong. */}
       <details
         className="pf-install-output"
+        open={showOutput}
         onToggle={(e) => setShowOutput((e.currentTarget as HTMLDetailsElement).open)}
       >
         <summary className="pf-install-output-summary">Show output</summary>

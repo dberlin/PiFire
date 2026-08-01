@@ -35,11 +35,13 @@ from common.datastore_accessors import (
     load_wizard_install_info,
 )
 from common.defaults import set_probe_map
-from common.install_log import RUN_MARKER, WIZARD_LOG_NAME
+from common.install_log import INSTALL_FAILED_PERCENT, RUN_MARKER, WIZARD_LOG_NAME
+from common.settings_schema import coerce_setting_value
 from common.system import is_real_hardware
 import subprocess
 import argparse
 import logging
+import traceback
 
 #: Replaced by the file-backed logger under __main__. Named here so run_wizard()
 #: works when imported -- by the tests, and by anything else that drives an
@@ -235,6 +237,28 @@ def _run_install_commands(command_list, percent, increment, status, python_exec)
     return percent, reboot_required
 
 
+def run_wizard_reporting_failure(settings, WizardData, WizardInstallInfo):
+    """run_wizard, with any failure published where the browser can see it.
+
+    Nothing above this catches: the wizard runs detached, so an exception used
+    to end the process with the install-status blob holding whatever line it had
+    reached. The browser polls that blob and reads only "above 100" as finished,
+    so a dead installer was indistinguishable from a slow one -- the bar simply
+    stopped at 15% and stayed there. Reported on the blob AND in the log, so it
+    reaches both the status line and the "Show output" panel.
+    """
+    try:
+        run_wizard(settings, WizardData, WizardInstallInfo)
+    except Exception as exc:
+        logger.error("Install failed: %s", exc)
+        # The traceback goes to the log rather than the status line: the panel
+        # can hold it, a one-line status cannot.
+        logger.error(traceback.format_exc())
+        set_wizard_install_status(INSTALL_FAILED_PERCENT, "Installation failed", str(exc))
+        return 1
+    return 0
+
+
 def run_wizard(settings, WizardData, WizardInstallInfo):
     settings = read_settings()
 
@@ -303,9 +327,6 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
         for setting in WizardInstallInfo["modules"][module]["settings"]:
             selected_setting = WizardInstallInfo["modules"][module]["settings"][setting]
 
-            # Convert Strings to the correct type
-            selected_setting = _convert_value(selected_setting)
-
             # Special Handling for Units
             if setting == "units":
                 units = WizardInstallInfo["modules"][module]["settings"][setting]
@@ -342,7 +363,16 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
                     # at its last status line forever.
                     set_wizard_install_status(percent, status, f"   - Skipped unknown setting {setting}")
                     continue
-                settings = set_nested_key_value(settings, dependency["settings"], selected_setting)
+                # Converted HERE, not when the value was read, because the
+                # destination is what decides the type: the same "1" is int 1
+                # for a GPIO pin and the string "1" for the FT232H url. Guessing
+                # from the string's shape alone wrote an int into that str field
+                # and the install died on validation.
+                settings = set_nested_key_value(
+                    settings,
+                    dependency["settings"],
+                    coerce_setting_value(dependency["settings"], selected_setting, _convert_value),
+                )
             output = f"   + Set {setting}"
             set_wizard_install_status(percent, status, output)
         if module == "display":
@@ -542,8 +572,7 @@ if __name__ == "__main__":
             exit(1)
         else:
             print("Found existing wizard install info.")
-            run_wizard(settings, WizardData, WizardInstallInfo)
-            exit(0)
+            exit(run_wizard_reporting_failure(settings, WizardData, WizardInstallInfo))
     else:
         WizardInstallInfo = load_wizard_install_info()
         if WizardInstallInfo is None:
@@ -551,5 +580,4 @@ if __name__ == "__main__":
             exit(1)
         else:
             print("Found existing wizard install info.")
-            run_wizard(settings, WizardData, WizardInstallInfo)
-            exit(0)
+            exit(run_wizard_reporting_failure(settings, WizardData, WizardInstallInfo))

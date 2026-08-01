@@ -1794,14 +1794,28 @@
       "additionalProperties": false,
       "properties": {
         "selector": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 17,
-          "title": "Selector",
-          "type": "integer"
+          "title": "Selector"
         },
         "shutdown": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 17,
-          "title": "Shutdown",
-          "type": "integer"
+          "title": "Shutdown"
         }
       },
       "title": "_InputsConfig",
@@ -1828,34 +1842,94 @@
       "additionalProperties": false,
       "properties": {
         "auger": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 14,
-          "title": "Auger",
-          "type": "integer"
+          "title": "Auger"
         },
         "dc_fan": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 26,
-          "title": "Dc Fan",
-          "type": "integer"
+          "title": "Dc Fan"
         },
         "fan": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 15,
-          "title": "Fan",
-          "type": "integer"
+          "title": "Fan"
         },
         "igniter": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 18,
-          "title": "Igniter",
-          "type": "integer"
+          "title": "Igniter"
         },
         "power": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 4,
-          "title": "Power",
-          "type": "integer"
+          "title": "Power"
         },
         "pwm": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 13,
-          "title": "Pwm",
-          "type": "integer"
+          "title": "Pwm"
         }
       },
       "title": "_OutputsConfig",
