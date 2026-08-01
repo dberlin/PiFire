@@ -457,6 +457,84 @@ def _publish(percent, status, line):
     logger.info(line)
 
 
+#: The percent the browser reads as "this run is over". Anything above 100
+#: means finished; 142 additionally means a reboot is needed before the new
+#: code can load.
+FINISHED_PERCENT = 101
+REBOOT_REQUIRED_PERCENT = 142
+
+
+def publish_finished(reboot):
+    """End a run so the page stops polling.
+
+    Published by whatever ran LAST, not by install_dependencies: an update
+    rebuilds the web UI after the dependencies, and that rebuild publishes
+    progress of its own. Ending inside install_dependencies left every update
+    sitting at percent 95 -- "Checking Web UI..." -- against a process that had
+    already exited.
+    """
+    percent = REBOOT_REQUIRED_PERCENT if reboot else FINISHED_PERCENT
+    set_updater_install_status(percent, "Finished!", " - Finished!  Restarting Server...")
+
+
+def report_failure(status, output):
+    """End a run on a step that failed, rather than carrying on to report a
+    version that was never installed."""
+    logger.error(output)
+    set_updater_install_status(INSTALL_FAILED_PERCENT, status, output)
+    sys.exit(1)
+
+
+def run_update(branch):
+    """The -u flow: pull, install dependencies, rebuild the bundle, finish."""
+    settings = read_settings()
+    current_version = settings["versions"]["server"]
+    current_build = settings["versions"].get("build", 0)
+
+    set_updater_install_status(10, f"Attempting Update on {branch}...", f" - Attempting an update on branch {branch}")
+    time.sleep(2)
+
+    success, status, output = install_update()
+    set_updater_install_status(20, status, output)
+    if not success:
+        # git did not move the checkout, so the dependencies and the bundle
+        # below would be installed for code that never arrived -- and the run
+        # would go on to publish "Finished!" over the reason it failed.
+        report_failure(status, output)
+    time.sleep(4)
+
+    _, reboot = install_dependencies(current_version, current_build)
+    # After the dependencies, so a rebuild sees any new node/bun the migration
+    # step installed -- and so an upgrade.sh that already built the bundle
+    # leaves nothing for this to do.
+    rebuild_web_ui_if_stale()
+    publish_finished(reboot)
+
+
+def run_branch_change(branch):
+    """The -b flow. Same shape as run_update, with a checkout instead of a pull."""
+    settings = read_settings()
+    current_version = settings["versions"]["server"]
+    current_build = settings["versions"].get("build", 0)
+
+    set_updater_install_status(10, f"Changing Branch to {branch}...", f" - Changing to selected branch {branch}")
+    time.sleep(2)
+
+    success, status, output = change_branch(branch)
+    set_updater_install_status(20, status, output)
+    if not success:
+        # The checkout is still on the branch it started on. Rebuilding for a
+        # branch this run never reached would serve the wrong bundle.
+        report_failure(status, output)
+    time.sleep(4)
+
+    _, reboot = install_dependencies(current_version, current_build)
+    # A branch change swaps the React sources wholesale; the bundle from the
+    # branch just left is exactly what must not keep being served.
+    rebuild_web_ui_if_stale()
+    publish_finished(reboot)
+
+
 def install_dependencies(current_version_string="0.0.0", current_build=None):
     result = 0
     percent = 30
@@ -663,10 +741,12 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
 
     time.sleep(4)
 
-    percent = 142 if reboot else 101
-    set_updater_install_status(percent, status, output)
-
-    return result
+    # The terminal sentinel is the CALLER's to publish, not this function's.
+    # An update runs the web UI rebuild after this returns, and that rebuild
+    # publishes progress of its own -- so ending here left every update sitting
+    # at percent 95 ("Checking Web UI...") with the browser polling a run that
+    # had already finished.
+    return result, reboot
 
 
 """
@@ -734,78 +814,23 @@ if __name__ == "__main__":
 
     sys.excepthook = report_crash
 
-    def report_failure(status, output):
-        """End the run on a step that failed, rather than carrying on to report
-        a version that was never installed."""
-        logger.error(output)
-        set_updater_install_status(INSTALL_FAILED_PERCENT, status, output)
-        exit(1)
-
     # num_args = number of arguments passed to the script
     num_args = 0
 
     if args.update:
         num_args += 1
-        settings = read_settings()
-        current_version = settings["versions"]["server"]
-        current_build = settings["versions"].get("build", 0)
-
-        percent = 10
-        status = f"Attempting Update on {args.update}..."
-        output = f" - Attempting an update on branch {args.update}"
-        set_updater_install_status(percent, status, output)
-        time.sleep(2)
-
-        success, status, output = install_update()
-
-        percent = 20
-        set_updater_install_status(percent, status, output)
-        if not success:
-            # git did not move the checkout, so the dependencies and the bundle
-            # below would be installed for code that never arrived -- and the
-            # run would go on to publish "Finished!" over the reason it failed.
-            report_failure(status, output)
-        time.sleep(4)
-
-        install_dependencies(current_version, current_build)
-        # After the dependencies, so a rebuild sees any new node/bun the
-        # migration step installed -- and so an upgrade.sh that already built
-        # the bundle leaves nothing for this to do.
-        rebuild_web_ui_if_stale()
+        run_update(args.update)
 
     elif args.branch:
         num_args += 1
-        settings = read_settings()
-        current_version = settings["versions"]["server"]
-        current_build = settings["versions"].get("build", 0)
-
-        percent = 10
-        status = f"Changing Branch to {args.branch}..."
-        output = f" - Changing to selected branch {args.branch}"
-        set_updater_install_status(percent, status, output)
-        time.sleep(2)
-
-        success, status, output = change_branch(args.branch)
-
-        percent = 20
-        set_updater_install_status(percent, status, output)
-        if not success:
-            # The checkout is still on the branch it started on. Rebuilding for
-            # a branch this run never reached would serve the wrong bundle.
-            report_failure(status, output)
-        time.sleep(4)
-
-        install_dependencies(current_version, current_build)
-        # A branch change swaps the React sources wholesale; the bundle from
-        # the branch just left is exactly what must not keep being served.
-        rebuild_web_ui_if_stale()
+        run_branch_change(args.branch)
 
     elif args.rebuildwebui:
         num_args += 1
         # Forced: the caller asked for this build explicitly, so it runs even
         # when the mtime check would call the bundle current.
         if rebuild_web_ui_if_stale(force=True):
-            set_updater_install_status(101, "Finished!", " - Web UI rebuild finished")
+            set_updater_install_status(FINISHED_PERCENT, "Finished!", " - Web UI rebuild finished")
         else:
             # The negative sentinel is what the browser reads as "this run
             # ended, and it ended badly" -- percent above 100 means finished, so
@@ -833,7 +858,8 @@ if __name__ == "__main__":
         output = f" - APT, Python and Command Dependencies for version {current_version} ({current_build})"
         set_updater_install_status(percent, status, output)
 
-        install_dependencies(current_version, current_build)
+        _, reboot = install_dependencies(current_version, current_build)
+        publish_finished(reboot)
 
     if args.piplist:
         num_args += 1

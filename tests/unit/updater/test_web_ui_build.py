@@ -315,3 +315,88 @@ def test_the_rebuild_writes_the_markers_the_reader_looks_for(repo, tmp_path, mon
     assert "could not resolve dependencies" in text, "the reason must survive into what is offered"
 
     logger.handlers.clear()
+
+
+# ---------------------------------------------------------------------------
+# How a run ENDS. The browser polls until percent goes above 100, so whatever
+# publishes last decides whether the page ever stops.
+
+
+@pytest.fixture
+def quiet_updater(monkeypatch):
+    """updater.py's -u and -b flows with every side effect replaced, and the
+    status blob captured. Returns the list of (percent, status, output)."""
+    import updater
+
+    published = []
+    monkeypatch.setattr(updater, "logger", logging.getLogger("t"), raising=False)
+    monkeypatch.setattr(updater, "set_updater_install_status", lambda p, s, o: published.append((p, s, o)))
+    monkeypatch.setattr(updater, "read_settings", lambda: {"versions": {"server": "1.10.10", "build": 70}})
+    monkeypatch.setattr(updater, "time", type("_", (), {"sleep": staticmethod(lambda _: None)}))
+    monkeypatch.setattr(updater, "install_update", lambda: (True, "Update Completed Successfully", " - ok"))
+    monkeypatch.setattr(updater, "change_branch", lambda b: (True, "Branch Changed Successfully", " - ok"))
+    monkeypatch.setattr(updater, "install_dependencies", lambda v, b: (0, False))
+    monkeypatch.setattr(updater, "rebuild_web_ui_if_stale", lambda *a, **k: True)
+    return published
+
+
+def test_an_update_ends_above_100_so_the_page_stops_polling(quiet_updater):
+    """The rebuild runs AFTER install_dependencies and publishes progress of its
+    own, so install_dependencies ending the run left every update parked at
+    percent 95 -- "Checking Web UI..." -- against a process that had exited."""
+    import updater
+
+    updater.run_update("main")
+
+    assert quiet_updater[-1][0] > 100, quiet_updater[-3:]
+
+
+def test_a_branch_change_ends_above_100_too(quiet_updater):
+    import updater
+
+    updater.run_branch_change("dev")
+
+    assert quiet_updater[-1][0] > 100, quiet_updater[-3:]
+
+
+def test_an_up_to_date_web_ui_does_not_swallow_the_finish(quiet_updater, monkeypatch):
+    """The reported case: the rebuild is skipped, publishes "Web UI is already
+    up to date with its sources" at 95, and that was the last word."""
+    import updater
+
+    def skipped(*a, **k):
+        updater.set_updater_install_status(95, "Checking Web UI...", " - Web UI is already up to date with its sources")
+        return True
+
+    monkeypatch.setattr(updater, "rebuild_web_ui_if_stale", skipped)
+
+    updater.run_update("main")
+
+    assert any("already up to date" in entry[2] for entry in quiet_updater), "the skip should still be reported"
+    assert quiet_updater[-1][0] > 100, quiet_updater[-3:]
+
+
+def test_a_reboot_required_run_ends_on_the_reboot_sentinel(quiet_updater, monkeypatch):
+    """142 rather than a plain finish, or the page tells the operator to restart
+    a service when the machine needs a reboot."""
+    import updater
+
+    monkeypatch.setattr(updater, "install_dependencies", lambda v, b: (0, True))
+
+    updater.run_update("main")
+
+    assert quiet_updater[-1][0] == updater.REBOOT_REQUIRED_PERCENT
+
+
+def test_a_failed_pull_ends_negative_and_never_rebuilds(quiet_updater, monkeypatch):
+    import updater
+
+    monkeypatch.setattr(updater, "install_update", lambda: (False, "ERROR Performing Update.", " - detached"))
+    monkeypatch.setattr(
+        updater, "rebuild_web_ui_if_stale", lambda *a, **k: pytest.fail("a failed pull must not rebuild")
+    )
+
+    with pytest.raises(SystemExit):
+        updater.run_update("main")
+
+    assert quiet_updater[-1][0] < 0
