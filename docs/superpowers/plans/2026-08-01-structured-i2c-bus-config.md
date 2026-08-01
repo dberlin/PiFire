@@ -1015,21 +1015,27 @@ def _legacy_bus_to_config(section):
 
     if kind in ("ft232h", "mcp2221"):
         field = "url" if kind == "ft232h" else "serial"
+        # '1' is the historical ft232h default and means "the first one found",
+        # the same as blank. Normalize before deciding anything, so a legitimate
+        # default is never mistaken for a leftover.
+        if kind == "ft232h" and selector == "1":
+            selector = ""
         # A selector naming a kernel adapter cannot address a USB-HID device.
         # Dropping it leaves "the first one found", which is what a fresh
         # install of this kind means.
-        stranded = selector.lower().startswith("serial:") or not (
-            selector == "" or selector.lower().startswith("ftdi://") or kind == "mcp2221"
-        )
-        if kind == "mcp2221" and selector.lower() in ("cp2112", "mcp2221"):
-            stranded = True
-        if selector == "1" and kind == "ft232h":
-            selector = ""
+        if kind == "ft232h":
+            stranded = bool(selector) and not selector.lower().startswith("ftdi://")
+        else:
+            stranded = selector.lower().startswith("serial:") or selector.lower() in ("cp2112", "mcp2221")
         if stranded:
             write_log(f"I2C bus: dropping {selector!r}, which does not name a {kind} device.")
             selector = ""
         return {"kind": kind, field: selector}
 
+    # A kind we do not recognize (including an explicit None or a non-string)
+    # cannot tell us what its selector meant, so the selector goes with it.
+    if selector:
+        write_log(f"I2C bus: kind {section.get('i2c_bus_kind')!r} is not a bus kind; dropping {selector!r}.")
     return {"kind": "basic"}
 
 

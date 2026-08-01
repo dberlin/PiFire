@@ -95,3 +95,32 @@ def test_the_migrated_tree_validates():
     settings = _legacy_settings({"i2c_bus_kind": "extended", "i2c_bus_num": "serial:AB12"})
     _migrate_i2c_buses(settings)
     validate_settings_tree(settings)
+
+
+def test_the_historical_ft232h_default_is_not_reported_as_dropped(monkeypatch):
+    """'1' means "the first FT232H", the same as blank -- an operator upgrading a
+    working FT232H install must not be told their selector was discarded."""
+    logged = []
+    monkeypatch.setattr("common.settings_migration.write_log", lambda msg: logged.append(msg))
+    settings = _legacy_settings({"i2c_bus_kind": "ft232h", "i2c_bus_num": "1"})
+    _migrate_i2c_buses(settings)
+    assert settings["platform"]["fan_controller"]["i2c_bus"] == {"kind": "ft232h", "url": ""}
+    assert logged == []
+
+
+def test_a_stranded_ft232h_selector_is_still_reported_with_its_value(monkeypatch):
+    logged = []
+    monkeypatch.setattr("common.settings_migration.write_log", lambda msg: logged.append(msg))
+    settings = _legacy_settings({"i2c_bus_kind": "ft232h", "i2c_bus_num": "CP2112"})
+    _migrate_i2c_buses(settings)
+    assert settings["platform"]["fan_controller"]["i2c_bus"] == {"kind": "ft232h", "url": ""}
+    assert any("CP2112" in msg for msg in logged)
+
+
+def test_an_unrecognized_kind_reports_the_selector_it_discards(monkeypatch):
+    logged = []
+    monkeypatch.setattr("common.settings_migration.write_log", lambda msg: logged.append(msg))
+    settings = _legacy_settings({"i2c_bus_kind": None, "i2c_bus_num": "3"})
+    _migrate_i2c_buses(settings)
+    assert settings["platform"]["fan_controller"]["i2c_bus"] == {"kind": "basic"}
+    assert any("'3'" in msg for msg in logged)
