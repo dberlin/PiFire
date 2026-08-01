@@ -3,6 +3,7 @@ from unittest import mock
 import pytest
 
 from common import i2c_bus
+from common.i2c_bus_config import BasicBus, FT232HBus
 from grillplat import ft232h
 
 
@@ -58,7 +59,7 @@ def _patch_controller():
 def test_construct_i2c_bus_returns_locked_i2c():
     controller, patch = _patch_controller()
     with patch:
-        bus = i2c_bus.open_i2c_bus("ft232h", "")
+        bus = i2c_bus.open_i2c_bus(FT232HBus())
     assert isinstance(bus, i2c_bus._LockedI2C)
 
 
@@ -72,8 +73,8 @@ def test_scan_uses_poll():
 def test_blank_and_one_selector_share_one_controller():
     controller, patch = _patch_controller()
     with patch as new_controller:
-        a = i2c_bus.open_i2c_bus("ft232h", "")
-        b = i2c_bus.open_i2c_bus("ft232h", "1")
+        a = i2c_bus.open_i2c_bus(FT232HBus())
+        b = i2c_bus.open_i2c_bus(FT232HBus(url="1"))
     assert a is b
     assert new_controller.call_count == 1  # one physical controller
 
@@ -87,7 +88,7 @@ def test_blank_selector_produces_a_real_pyftdi_url():
     # exact case.
     controller, patch = _patch_controller()
     with patch as new_controller:
-        i2c_bus.open_i2c_bus("ft232h", "")
+        i2c_bus.open_i2c_bus(FT232HBus())
     called_url = new_controller.call_args[0][0]
     assert called_url.startswith("ftdi://"), called_url
 
@@ -121,9 +122,9 @@ def test_i2c_nack_becomes_oserror():
 def test_runtime_rejects_basic_after_ft232h():
     controller, patch = _patch_controller()
     with patch:
-        i2c_bus.open_i2c_bus("ft232h", "")
+        i2c_bus.open_i2c_bus(FT232HBus())
         with pytest.raises(i2c_bus.I2CBusConfigError):
-            i2c_bus.open_i2c_bus("basic")
+            i2c_bus.open_i2c_bus(BasicBus())
 
 
 class FakeGpioPort:
@@ -197,7 +198,7 @@ def test_reserved_i2c_pin_raises():
 def test_gpio_and_i2c_share_one_controller():
     controller, port = _controller_with_gpio()
     with mock.patch.object(ft232h, "_new_controller", return_value=controller) as new_controller:
-        bus = i2c_bus.open_i2c_bus("ft232h", "")
+        bus = i2c_bus.open_i2c_bus(FT232HBus())
         gpio = ft232h.open_gpio("1")  # '' and '1' alias
     assert new_controller.call_count == 1
     assert isinstance(bus, i2c_bus._LockedI2C)

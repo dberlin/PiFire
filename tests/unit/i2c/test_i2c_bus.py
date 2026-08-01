@@ -5,13 +5,9 @@ import pytest
 from EasyMCP2221.exceptions import LowSCLError, LowSDAError, NotAckError, TimeoutError
 
 import common.i2c_bus as i2c_bus
-from common.i2c_bus import I2CBusConfigError, assert_clean_blinka_env, resolve_i2c_bus, validate_bus_kinds
+from common.i2c_bus import I2CBusConfigError, assert_clean_blinka_env, validate_bus_kinds
+from common.i2c_bus_config import BasicBus, FT232HBus, MCP2221Bus
 from grillplat import mcp2221
-
-
-def test_resolve_i2c_bus_numeric_returns_int():
-    assert resolve_i2c_bus("3") == 3
-    assert resolve_i2c_bus(3) == 3
 
 
 def test_validate_bus_kinds_allows_workable_combos():
@@ -233,7 +229,7 @@ def _fake_easymcp2221_module(not_found_serials=frozenset()):
 def test_open_mcp2221_no_selector_constructs_backend():
     modules, FakeDevice = _fake_easymcp2221_module()
     with mock.patch.dict("sys.modules", modules):
-        bus = i2c_bus.open_i2c_bus("mcp2221", "")
+        bus = i2c_bus.open_i2c_bus(MCP2221Bus(serial=""))
     assert isinstance(bus, i2c_bus._LockedI2C)
     assert len(FakeDevice.instances) == 1
     assert FakeDevice.instances[0].usbserial is None
@@ -243,7 +239,7 @@ def test_open_mcp2221_no_selector_constructs_backend():
 def test_open_mcp2221_selector_opens_matching_serial():
     modules, FakeDevice = _fake_easymcp2221_module()
     with mock.patch.dict("sys.modules", modules):
-        bus = i2c_bus.open_i2c_bus("mcp2221", "BBBB")
+        bus = i2c_bus.open_i2c_bus(MCP2221Bus(serial="BBBB"))
     assert isinstance(bus, i2c_bus._LockedI2C)
     assert len(FakeDevice.instances) == 1
     assert FakeDevice.instances[0].usbserial == "BBBB"
@@ -254,7 +250,7 @@ def test_open_mcp2221_selector_not_found_raises():
     modules, FakeDevice = _fake_easymcp2221_module(not_found_serials={"ZZZZ"})
     with mock.patch.dict("sys.modules", modules):
         with pytest.raises(i2c_bus.I2CBusConfigError):
-            i2c_bus.open_i2c_bus("mcp2221", "ZZZZ")
+            i2c_bus.open_i2c_bus(MCP2221Bus(serial="ZZZZ"))
 
 
 def test_open_mcp2221_two_selectors_stay_independently_live():
@@ -265,8 +261,8 @@ def test_open_mcp2221_two_selectors_stay_independently_live():
     produce two distinct, independently-live Device instances."""
     modules, FakeDevice = _fake_easymcp2221_module()
     with mock.patch.dict("sys.modules", modules):
-        bus_a = i2c_bus.open_i2c_bus("mcp2221", "AAAA")
-        bus_b = i2c_bus.open_i2c_bus("mcp2221", "BBBB")
+        bus_a = i2c_bus.open_i2c_bus(MCP2221Bus(serial="AAAA"))
+        bus_b = i2c_bus.open_i2c_bus(MCP2221Bus(serial="BBBB"))
     assert bus_a is not bus_b
     assert len(FakeDevice.instances) == 2
     dev_a, dev_b = FakeDevice.instances
@@ -321,8 +317,8 @@ def test_open_mcp2221_blank_and_explicit_serial_alias_share_one_bus():
     locked wrappers around one physical adapter."""
     modules, FakeDevice = _fake_easymcp2221_module_with_catalog(first_device_serial="FIRST")
     with mock.patch.dict("sys.modules", modules):
-        bus_blank = i2c_bus.open_i2c_bus("mcp2221", "")
-        bus_serial = i2c_bus.open_i2c_bus("mcp2221", "FIRST")
+        bus_blank = i2c_bus.open_i2c_bus(MCP2221Bus(serial=""))
+        bus_serial = i2c_bus.open_i2c_bus(MCP2221Bus(serial="FIRST"))
     assert bus_blank is bus_serial
     assert len(FakeDevice.catalog) == 1
 
@@ -333,8 +329,8 @@ def test_open_mcp2221_explicit_serial_and_blank_alias_share_one_bus_reverse_orde
     first."""
     modules, FakeDevice = _fake_easymcp2221_module_with_catalog(first_device_serial="FIRST")
     with mock.patch.dict("sys.modules", modules):
-        bus_serial = i2c_bus.open_i2c_bus("mcp2221", "FIRST")
-        bus_blank = i2c_bus.open_i2c_bus("mcp2221", "")
+        bus_serial = i2c_bus.open_i2c_bus(MCP2221Bus(serial="FIRST"))
+        bus_blank = i2c_bus.open_i2c_bus(MCP2221Bus(serial=""))
     assert bus_blank is bus_serial
     assert len(FakeDevice.catalog) == 1
 
@@ -346,18 +342,10 @@ def test_open_mcp2221_non_aliasing_selectors_stay_independent():
     mcp2221 bus indiscriminately."""
     modules, FakeDevice = _fake_easymcp2221_module_with_catalog(first_device_serial="FIRST")
     with mock.patch.dict("sys.modules", modules):
-        bus_blank = i2c_bus.open_i2c_bus("mcp2221", "")
-        bus_other = i2c_bus.open_i2c_bus("mcp2221", "SECOND")
+        bus_blank = i2c_bus.open_i2c_bus(MCP2221Bus(serial=""))
+        bus_other = i2c_bus.open_i2c_bus(MCP2221Bus(serial="SECOND"))
     assert bus_blank is not bus_other
     assert len(FakeDevice.catalog) == 2
-
-
-def test_probes_base_reexports_bus_helpers():
-    import common.i2c_bus as cib
-    import probes.base as base
-
-    assert base.resolve_i2c_bus is cib.resolve_i2c_bus
-    assert base.find_i2c_bus is cib.find_i2c_bus
 
 
 def test_find_i2c_bus_debug_logs_match_and_result(tmp_path, caplog):
@@ -379,7 +367,7 @@ def test_open_i2c_bus_debug_logs_kind_and_selector(caplog):
     fake_controller = type("FakeController", (), {})()
     with mock.patch.object(ft232h, "_new_controller", return_value=fake_controller):
         with caplog.at_level(logging.DEBUG, logger="control"):
-            i2c_bus.open_i2c_bus("ft232h", "ftdi://ftdi:232h:FT9/1")
+            i2c_bus.open_i2c_bus(FT232HBus(url="ftdi://ftdi:232h:FT9/1"))
 
     text = caplog.text
     assert "ft232h" in text  # the kind being opened
@@ -485,12 +473,6 @@ def test_find_i2c_bus_by_serial_is_exact_not_substring(tmp_path):
         i2c_bus.find_i2c_bus_by_serial("AB12", devices_path=str(devices_dir))
 
 
-def test_resolve_i2c_bus_serial_prefix_dispatches(monkeypatch):
-    monkeypatch.setattr(i2c_bus, "find_i2c_bus_by_serial", lambda serial: 42 if serial == "AB12" else None)
-    assert resolve_i2c_bus("serial:AB12") == 42
-    assert resolve_i2c_bus("SERIAL:AB12") == 42  # prefix keyword is case-insensitive
-
-
 def test_discover_extended_i2c_buses_wraps_enumeration(tmp_path):
     usb_device = tmp_path / "devices" / "usb1" / "1-1"
     usb_device.mkdir(parents=True)
@@ -588,3 +570,66 @@ def test_discover_ft232h_devices_sorts_by_serial_and_handles_missing_serial():
 def test_discover_ft232h_devices_empty_without_pyftdi():
     with mock.patch.dict("sys.modules", {"pyftdi.ftdi": None}):
         assert i2c_bus.discover_ft232h_devices() == []
+
+
+def test_open_i2c_bus_takes_a_bus_object(monkeypatch):
+    from common.i2c_bus_config import KernelBusNumber
+
+    i2c_bus.reset_bus_state()
+    monkeypatch.setattr(i2c_bus, "_construct_bus", lambda bus: f"bus-{bus.describe()}")
+    assert i2c_bus.open_i2c_bus(KernelBusNumber(bus_num=3)) == "bus-/dev/i2c-3"
+
+
+def test_open_i2c_bus_accepts_the_stored_mapping(monkeypatch):
+    i2c_bus.reset_bus_state()
+    monkeypatch.setattr(i2c_bus, "_construct_bus", lambda bus: f"bus-{bus.kind}")
+    assert i2c_bus.open_i2c_bus({"kind": "basic"}) == "bus-basic"
+
+
+def test_open_i2c_bus_caches_on_the_bus_object(monkeypatch):
+    """Two devices naming the same hardware share one open bus."""
+    from common.i2c_bus_config import KernelAdapterName
+
+    i2c_bus.reset_bus_state()
+    calls = []
+    monkeypatch.setattr(i2c_bus, "_construct_bus", lambda bus: calls.append(bus) or object())
+    a = i2c_bus.open_i2c_bus(KernelAdapterName(adapter="CP2112"))
+    b = i2c_bus.open_i2c_bus({"kind": "kernel", "adapter": "CP2112"})
+    assert a is b
+    assert len(calls) == 1
+
+
+def test_open_i2c_bus_still_refuses_basic_beside_a_usb_hid_bus(monkeypatch):
+    from common.i2c_bus_config import FT232HBus
+
+    i2c_bus.reset_bus_state()
+    monkeypatch.setattr(i2c_bus, "_construct_bus", lambda bus: object())
+    i2c_bus.open_i2c_bus(FT232HBus())
+    with pytest.raises(I2CBusConfigError):
+        i2c_bus.open_i2c_bus(BasicBus())
+
+
+def test_configured_bus_kinds_reads_the_bus_objects():
+    settings = {
+        "platform": {
+            "devices": {"distance": {"i2c_bus": {"kind": "kernel", "adapter": "CP2112"}}},
+            "fan_controller": {"i2c_bus": {"kind": "basic"}},
+        }
+    }
+    probe_map = {"probe_devices": [{"device": "ADS1115_0", "config": {"i2c_bus": {"kind": "ft232h", "url": ""}}}]}
+    assert i2c_bus.configured_bus_kinds(settings, probe_map) == {"kernel", "basic", "ft232h"}
+
+
+def test_configured_bus_kinds_skips_a_device_with_no_bus():
+    assert i2c_bus.configured_bus_kinds({}, None) == set()
+    assert i2c_bus.configured_bus_kinds(None, {"probe_devices": [{"device": "SPI_0", "config": {}}]}) == set()
+
+
+def test_probes_base_no_longer_reexports_resolve_i2c_bus():
+    """resolve_i2c_bus is gone; find_i2c_bus stays a discovery primitive."""
+    import common.i2c_bus as cib
+    import probes.base as base
+
+    assert base.find_i2c_bus is cib.find_i2c_bus
+    assert not hasattr(base, "resolve_i2c_bus")
+    assert not hasattr(cib, "resolve_i2c_bus")
