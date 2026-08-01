@@ -244,13 +244,12 @@
     "globals": {
       "augerrate": 0.3,
       "boot_to_monitor": false,
+      "bootstrap_page_theme": "light",
       "debug_mode": false,
       "disp_rotation": 0,
       "ext_data": false,
-      "first_time_setup": false,
-      "global_control_panel": false,
+      "first_time_setup": true,
       "grill_name": "",
-      "page_theme": "light",
       "prime_ignition": false,
       "python_exec": ".venv/bin/python",
       "units": "F",
@@ -318,7 +317,7 @@
       "temp": 165
     },
     "lastupdated": {
-      "time": 1785080900
+      "time": 1785628386
     },
     "modules": {
       "display": "none",
@@ -355,7 +354,7 @@
         "app_id": "",
         "devices": {},
         "enabled": false,
-        "uuid": "6d234e56-8909-11f1-96f4-84470959a246"
+        "uuid": "243abce5-8e04-11f1-b13e-844709826766"
       },
       "pushbullet": {
         "APIKey": "",
@@ -433,8 +432,9 @@
           "address": null,
           "device": "/dev/ttyACM0",
           "echo": 27,
-          "i2c_bus_kind": "basic",
-          "i2c_bus_num": "",
+          "i2c_bus": {
+            "kind": "basic"
+          },
           "trig": 23
         },
         "input": {
@@ -446,8 +446,9 @@
       "fan_controller": {
         "address": "0x4c",
         "chip": "emc2101",
-        "i2c_bus_kind": "basic",
-        "i2c_bus_num": "1"
+        "i2c_bus": {
+          "kind": "basic"
+        }
       },
       "ft232h": {
         "url": "1"
@@ -661,7 +662,7 @@
       "startup_check": true
     },
     "server_info": {
-      "uuid": "6d22f58b-8909-11f1-8c37-84470959a26a"
+      "uuid": "243a8cd5-8e04-11f1-a005-84470982675e"
     },
     "shutdown": {
       "auto_power_off": false,
@@ -715,10 +716,10 @@
       "startup_exit_temp": 0
     },
     "versions": {
-      "build": 70,
+      "build": 71,
       "cookfile": "1.5.0",
       "recipe": "1.0.0",
-      "server": "1.10.10"
+      "server": "1.11.0"
     }
   }
 }

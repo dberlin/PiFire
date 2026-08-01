@@ -19,27 +19,14 @@
               "type": "list"
             },
             {
-              "default": "basic",
-              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-              "friendly_name": "I2C Bus Type",
+              "default": {
+                "kind": "basic"
+              },
+              "description": "How this device's I2C bus is reached.",
+              "friendly_name": "I2C Bus",
               "hidden": false,
-              "label": "i2c_bus_kind",
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)",
-                "FT232H (USB)",
-                "MCP2221 (USB)"
-              ],
-              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
-              "type": "list"
-            },
-            {
-              "default": "",
-              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-              "friendly_name": "Extended I2C Bus",
-              "hidden": false,
-              "label": "i2c_bus_num",
-              "type": "i2c_bus_num"
+              "label": "i2c_bus",
+              "type": "i2c_bus"
             },
             {
               "default": 10000,
@@ -114,8 +101,8 @@
         "friendly_name": "ADS1015 Adafruit",
         "image": "ads1115.png",
         "py_dependencies": [
-          "adafruit-circuitpython-ads1x15==2.4.3",
-          "adafruit-extended-bus==1.0.2"
+          "adafruit-circuitpython-ads1x15>=2.4.3",
+          "adafruit-extended-bus>=1.0.2"
         ],
         "settings_dependencies": {
           "units": {
@@ -147,22 +134,14 @@
               "type": "list"
             },
             {
-              "default": "basic",
-              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-              "friendly_name": "I2C Bus Type",
+              "default": {
+                "kind": "basic"
+              },
+              "description": "How this device's I2C bus is reached.",
+              "friendly_name": "I2C Bus",
               "hidden": false,
-              "label": "i2c_bus_kind",
-              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)"],
-              "list_values": ["basic", "extended"],
-              "type": "list"
-            },
-            {
-              "default": "",
-              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected); a number selects /dev/i2c-N explicitly. Use the Discover button to scan for connected devices. Ignored when Basic.",
-              "friendly_name": "Extended I2C Bus",
-              "hidden": false,
-              "label": "i2c_bus_num",
-              "type": "i2c_bus_num"
+              "label": "i2c_bus",
+              "type": "i2c_bus"
             },
             {
               "default": 10000,
@@ -236,7 +215,7 @@
         "filename": "ads1115",
         "friendly_name": "Legacy ADS1115",
         "image": "ads1115.png",
-        "py_dependencies": ["ADS1115==0.2.1"],
+        "py_dependencies": ["ADS1115>=0.2.1"],
         "settings_dependencies": {
           "units": {
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
@@ -267,27 +246,14 @@
               "type": "list"
             },
             {
-              "default": "basic",
-              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-              "friendly_name": "I2C Bus Type",
+              "default": {
+                "kind": "basic"
+              },
+              "description": "How this device's I2C bus is reached.",
+              "friendly_name": "I2C Bus",
               "hidden": false,
-              "label": "i2c_bus_kind",
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)",
-                "FT232H (USB)",
-                "MCP2221 (USB)"
-              ],
-              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
-              "type": "list"
-            },
-            {
-              "default": "",
-              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-              "friendly_name": "Extended I2C Bus",
-              "hidden": false,
-              "label": "i2c_bus_num",
-              "type": "i2c_bus_num"
+              "label": "i2c_bus",
+              "type": "i2c_bus"
             },
             {
               "default": 10000,
@@ -362,8 +328,8 @@
         "friendly_name": "ADS1115 Adafruit",
         "image": "ads1115.png",
         "py_dependencies": [
-          "adafruit-circuitpython-ads1x15==2.4.3",
-          "adafruit-extended-bus==1.0.2"
+          "adafruit-circuitpython-ads1x15>=2.4.3",
+          "adafruit-extended-bus>=1.0.2"
         ],
         "settings_dependencies": {
           "units": {
@@ -420,7 +386,7 @@
         "filename": "bt_ibbq",
         "friendly_name": "Bluetooth - iBBQ / Inkbird BT (4 Probes)",
         "image": "bt_ibbq.png",
-        "py_dependencies": ["bluepy==1.3.0"],
+        "py_dependencies": ["bluepy>=1.3.0"],
         "settings_dependencies": {
           "units": {
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
@@ -476,7 +442,7 @@
         "filename": "bt_ibbq",
         "friendly_name": "Bluetooth - iBBQ / Inkbird BT (6 Probes)",
         "image": "bt_ibt6xs.png",
-        "py_dependencies": ["bluepy==1.3.0"],
+        "py_dependencies": ["bluepy>=1.3.0"],
         "settings_dependencies": {
           "units": {
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
@@ -521,7 +487,7 @@
         "filename": "bt_meater",
         "friendly_name": "Bluetooth - Meater",
         "image": "bt_meater.png",
-        "py_dependencies": ["bluepy==1.3.0"],
+        "py_dependencies": ["bluepy>=1.3.0"],
         "settings_dependencies": {
           "units": {
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
@@ -566,7 +532,7 @@
         "filename": "bt_meater_exp",
         "friendly_name": "BT - Meater Experimental",
         "image": "bt_meater.png",
-        "py_dependencies": ["simplepyble==0.7.3", "icecream==2.1.4"],
+        "py_dependencies": ["simplepyble>=0.7.3", "icecream>=2.1.4"],
         "settings_dependencies": {
           "units": {
             "description": "Select the temperature units to use for PiFire globally.  (This can be modified in settings later)",
@@ -603,7 +569,7 @@
         "filename": "ds18b20",
         "friendly_name": "DS18B20 1-Wire Digital Thermometer",
         "image": "ds18b20.png",
-        "py_dependencies": ["w1thermsensor==2.3.0"],
+        "py_dependencies": ["w1thermsensor>=2.3.0"],
         "settings_dependencies": {
           "units": {
             "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
@@ -1007,7 +973,7 @@
         "filename": "max31865_adafruit",
         "friendly_name": "MAX31865 RTD Adafruit",
         "image": "max31865.png",
-        "py_dependencies": ["adafruit-circuitpython-max31865==2.2.24", "mcp2210", "hid>=1.0.4"],
+        "py_dependencies": ["adafruit-circuitpython-max31865>=2.2.24", "mcp2210", "hid>=1.0.4"],
         "settings_dependencies": {
           "units": {
             "description": "Select the temperature units to use for PiFire globally.  (this can be modified in settings later)",
@@ -1057,27 +1023,14 @@
               "type": "list"
             },
             {
-              "default": "basic",
-              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-              "friendly_name": "I2C Bus Type",
+              "default": {
+                "kind": "basic"
+              },
+              "description": "How this device's I2C bus is reached.",
+              "friendly_name": "I2C Bus",
               "hidden": false,
-              "label": "i2c_bus_kind",
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)",
-                "FT232H (USB)",
-                "MCP2221 (USB)"
-              ],
-              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
-              "type": "list"
-            },
-            {
-              "default": "",
-              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-              "friendly_name": "Extended I2C Bus",
-              "hidden": false,
-              "label": "i2c_bus_num",
-              "type": "i2c_bus_num"
+              "label": "i2c_bus",
+              "type": "i2c_bus"
             },
             {
               "default": "False",
@@ -1097,8 +1050,8 @@
         "friendly_name": "MCP9600 Thermocouple Amplifier Adafruit",
         "image": "mcp9600.png",
         "py_dependencies": [
-          "adafruit-circuitpython-mcp9600==2.0.6",
-          "adafruit-extended-bus==1.0.2"
+          "adafruit-circuitpython-mcp9600>=2.0.6",
+          "adafruit-extended-bus>=1.0.2"
         ],
         "settings_dependencies": {
           "units": {
@@ -1130,22 +1083,14 @@
               "type": "list"
             },
             {
-              "default": "basic",
-              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-              "friendly_name": "I2C Bus Type",
+              "default": {
+                "kind": "basic"
+              },
+              "description": "How this device's I2C bus is reached.",
+              "friendly_name": "I2C Bus",
               "hidden": false,
-              "label": "i2c_bus_kind",
-              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)"],
-              "list_values": ["basic", "extended"],
-              "type": "list"
-            },
-            {
-              "default": "",
-              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected); a number selects /dev/i2c-N explicitly. Use the Discover button to scan for connected devices. Ignored when Basic.",
-              "friendly_name": "Extended I2C Bus",
-              "hidden": false,
-              "label": "i2c_bus_num",
-              "type": "i2c_bus_num"
+              "label": "i2c_bus",
+              "type": "i2c_bus"
             },
             {
               "default": 10000,

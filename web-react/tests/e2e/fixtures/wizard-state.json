@@ -1983,23 +1983,14 @@
             },
             "settings": ["platform", "devices", "distance", "echo"]
           },
-          "device_distance_i2c_bus_kind": {
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
-            "friendly_name": "Distance Sensor I2C Bus Type",
-            "options": {
-              "basic": "Basic (integrated I2C bus)",
-              "extended": "Extended (numbered / bridge bus)",
-              "ft232h": "FT232H (USB)",
-              "mcp2221": "MCP2221 (USB)"
+          "device_distance_i2c_bus": {
+            "default": {
+              "kind": "basic"
             },
-            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
-          },
-          "device_distance_i2c_bus_num": {
-            "default": "",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-            "friendly_name": "Distance Sensor Extended I2C Bus",
-            "settings": ["platform", "devices", "distance", "i2c_bus_num"],
-            "type": "i2c_bus_num"
+            "description": "How the I2C distance sensor (VL53L0X/VL53L4CD/VL53L1X) is reached. Ignored by the HCSR04.",
+            "friendly_name": "Distance Sensor I2C Bus",
+            "settings": ["platform", "devices", "distance", "i2c_bus"],
+            "type": "i2c_bus"
           },
           "device_distance_trig": {
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor Trigger",
@@ -2490,23 +2481,14 @@
             },
             "settings": ["platform", "devices", "distance", "address"]
           },
-          "device_distance_i2c_bus_kind": {
-            "description": "Use the FT232H's own I2C bus (Basic) or an extended bus such as a numbered /dev/i2c-N or USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
-            "friendly_name": "Distance Sensor I2C Bus Type",
-            "options": {
-              "basic": "Basic (integrated I2C bus)",
-              "extended": "Extended (numbered / bridge bus)",
-              "ft232h": "FT232H (USB)",
-              "mcp2221": "MCP2221 (USB)"
+          "device_distance_i2c_bus": {
+            "default": {
+              "kind": "basic"
             },
-            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
-          },
-          "device_distance_i2c_bus_num": {
-            "default": "",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-            "friendly_name": "Distance Sensor Extended I2C Bus",
-            "settings": ["platform", "devices", "distance", "i2c_bus_num"],
-            "type": "i2c_bus_num"
+            "description": "How the I2C distance sensor (VL53L0X/VL53L4CD/VL53L1X) is reached. Ignored by the HCSR04.",
+            "friendly_name": "Distance Sensor I2C Bus",
+            "settings": ["platform", "devices", "distance", "i2c_bus"],
+            "type": "i2c_bus"
           },
           "fan_controller_address": {
             "description": "I2C address of the fan controller when a PWM fan mode is selected (EMC2101: fixed at 0x4C; EMC2301: 0x2F). Ignored in Relay mode.",
@@ -2718,23 +2700,14 @@
             },
             "settings": ["platform", "devices", "distance", "echo"]
           },
-          "device_distance_i2c_bus_kind": {
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
-            "friendly_name": "Distance Sensor I2C Bus Type",
-            "options": {
-              "basic": "Basic (integrated I2C bus)",
-              "extended": "Extended (numbered / bridge bus)",
-              "ft232h": "FT232H (USB)",
-              "mcp2221": "MCP2221 (USB)"
+          "device_distance_i2c_bus": {
+            "default": {
+              "kind": "basic"
             },
-            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
-          },
-          "device_distance_i2c_bus_num": {
-            "default": "",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-            "friendly_name": "Distance Sensor Extended I2C Bus",
-            "settings": ["platform", "devices", "distance", "i2c_bus_num"],
-            "type": "i2c_bus_num"
+            "description": "How the I2C distance sensor (VL53L0X/VL53L4CD/VL53L1X) is reached. Ignored by the HCSR04.",
+            "friendly_name": "Distance Sensor I2C Bus",
+            "settings": ["platform", "devices", "distance", "i2c_bus"],
+            "type": "i2c_bus"
           },
           "device_distance_trig": {
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor Trigger",
@@ -3033,23 +3006,14 @@
             },
             "settings": ["platform", "devices", "distance", "echo"]
           },
-          "device_distance_i2c_bus_kind": {
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
-            "friendly_name": "Distance Sensor I2C Bus Type",
-            "options": {
-              "basic": "Basic (integrated I2C bus)",
-              "extended": "Extended (numbered / bridge bus)",
-              "ft232h": "FT232H (USB)",
-              "mcp2221": "MCP2221 (USB)"
+          "device_distance_i2c_bus": {
+            "default": {
+              "kind": "basic"
             },
-            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
-          },
-          "device_distance_i2c_bus_num": {
-            "default": "",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-            "friendly_name": "Distance Sensor Extended I2C Bus",
-            "settings": ["platform", "devices", "distance", "i2c_bus_num"],
-            "type": "i2c_bus_num"
+            "description": "How the I2C distance sensor (VL53L0X/VL53L4CD/VL53L1X) is reached. Ignored by the HCSR04.",
+            "friendly_name": "Distance Sensor I2C Bus",
+            "settings": ["platform", "devices", "distance", "i2c_bus"],
+            "type": "i2c_bus"
           },
           "device_distance_trig": {
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor Trigger",
@@ -3310,23 +3274,14 @@
             },
             "settings": ["platform", "devices", "distance", "echo"]
           },
-          "device_distance_i2c_bus_kind": {
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
-            "friendly_name": "Distance Sensor I2C Bus Type",
-            "options": {
-              "basic": "Basic (integrated I2C bus)",
-              "extended": "Extended (numbered / bridge bus)",
-              "ft232h": "FT232H (USB)",
-              "mcp2221": "MCP2221 (USB)"
+          "device_distance_i2c_bus": {
+            "default": {
+              "kind": "basic"
             },
-            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
-          },
-          "device_distance_i2c_bus_num": {
-            "default": "",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-            "friendly_name": "Distance Sensor Extended I2C Bus",
-            "settings": ["platform", "devices", "distance", "i2c_bus_num"],
-            "type": "i2c_bus_num"
+            "description": "How the I2C distance sensor (VL53L0X/VL53L4CD/VL53L1X) is reached. Ignored by the HCSR04.",
+            "friendly_name": "Distance Sensor I2C Bus",
+            "settings": ["platform", "devices", "distance", "i2c_bus"],
+            "type": "i2c_bus"
           },
           "device_distance_trig": {
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor Trigger",
@@ -3579,23 +3534,14 @@
             },
             "settings": ["platform", "devices", "distance", "echo"]
           },
-          "device_distance_i2c_bus_kind": {
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
-            "friendly_name": "Distance Sensor I2C Bus Type",
-            "options": {
-              "basic": "Basic (integrated I2C bus)",
-              "extended": "Extended (numbered / bridge bus)",
-              "ft232h": "FT232H (USB)",
-              "mcp2221": "MCP2221 (USB)"
+          "device_distance_i2c_bus": {
+            "default": {
+              "kind": "basic"
             },
-            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
-          },
-          "device_distance_i2c_bus_num": {
-            "default": "",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-            "friendly_name": "Distance Sensor Extended I2C Bus",
-            "settings": ["platform", "devices", "distance", "i2c_bus_num"],
-            "type": "i2c_bus_num"
+            "description": "How the I2C distance sensor (VL53L0X/VL53L4CD/VL53L1X) is reached. Ignored by the HCSR04.",
+            "friendly_name": "Distance Sensor I2C Bus",
+            "settings": ["platform", "devices", "distance", "i2c_bus"],
+            "type": "i2c_bus"
           },
           "device_distance_trig": {
             "description": "GPIO Pin for the HCSR04 Ultrasonic distance sensor Trigger",
@@ -3803,23 +3749,14 @@
             },
             "settings": ["platform", "devices", "distance", "address"]
           },
-          "device_distance_i2c_bus_kind": {
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Only applies to I2C-based distance sensors (VL53L0X/VL53L4CD/VL53L1X); ignored by the HCSR04.",
-            "friendly_name": "Distance Sensor I2C Bus Type",
-            "options": {
-              "basic": "Basic (integrated I2C bus)",
-              "extended": "Extended (numbered / bridge bus)",
-              "ft232h": "FT232H (USB)",
-              "mcp2221": "MCP2221 (USB)"
+          "device_distance_i2c_bus": {
+            "default": {
+              "kind": "basic"
             },
-            "settings": ["platform", "devices", "distance", "i2c_bus_kind"]
-          },
-          "device_distance_i2c_bus_num": {
-            "default": "",
-            "description": "Which value to use when Distance Sensor I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-            "friendly_name": "Distance Sensor Extended I2C Bus",
-            "settings": ["platform", "devices", "distance", "i2c_bus_num"],
-            "type": "i2c_bus_num"
+            "description": "How the I2C distance sensor (VL53L0X/VL53L4CD/VL53L1X) is reached. Ignored by the HCSR04.",
+            "friendly_name": "Distance Sensor I2C Bus",
+            "settings": ["platform", "devices", "distance", "i2c_bus"],
+            "type": "i2c_bus"
           },
           "fan_controller_address": {
             "description": "I2C address of the fan controller (EMC2101: 0x4C/0x4D, EMC2301: 0x2F).",
@@ -3840,32 +3777,27 @@
             },
             "settings": ["platform", "fan_controller", "chip"]
           },
-          "i2c_bus_kind": {
-            "description": "Use the board's integrated I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the fan controller is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-            "friendly_name": "Fan Controller I2C Bus Type",
-            "options": {
-              "basic": "Basic (integrated I2C bus)",
-              "extended": "Extended (numbered / bridge bus)",
-              "ft232h": "FT232H (USB)",
-              "mcp2221": "MCP2221 (USB)"
+          "i2c_bus": {
+            "default": {
+              "kind": "basic"
             },
-            "settings": ["platform", "fan_controller", "i2c_bus_kind"]
-          },
-          "i2c_bus_num": {
-            "default": "",
-            "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-            "friendly_name": "Fan Controller Extended Bus",
-            "settings": ["platform", "fan_controller", "i2c_bus_num"],
-            "type": "i2c_bus_num"
+            "description": "How the I2C fan controller is reached.",
+            "friendly_name": "Fan Controller I2C Bus",
+            "settings": ["platform", "fan_controller", "i2c_bus"],
+            "type": "i2c_bus"
           },
           "numato_device": {
-            "description": "Path to the Numato USB relay serial device (e.g. /dev/ttyACM0).",
+            "default": "/dev/ttyACM0",
+            "description": "Path to the Numato USB relay board's serial device (e.g. /dev/ttyACM0). Use Discover to scan for connected Numato relay boards. The path is assigned in USB enumeration order, so it moves when devices are replugged or added, and pointing it at the wrong device stops the relays working.",
             "friendly_name": "Numato Serial Device",
             "options": {
               "/dev/ttyACM0": "/dev/ttyACM0",
               "/dev/ttyACM1": "/dev/ttyACM1"
             },
-            "settings": ["platform", "numato", "device"]
+            "pid": "0x0c0c",
+            "settings": ["platform", "numato", "device"],
+            "type": "usb_serial_device",
+            "vid": "0x2a19"
           },
           "output_auger": {
             "description": "Numato relay index for the auger output.",
@@ -3942,27 +3874,14 @@
               "type": "list"
             },
             {
-              "default": "basic",
-              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-              "friendly_name": "I2C Bus Type",
+              "default": {
+                "kind": "basic"
+              },
+              "description": "How this device's I2C bus is reached.",
+              "friendly_name": "I2C Bus",
               "hidden": false,
-              "label": "i2c_bus_kind",
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)",
-                "FT232H (USB)",
-                "MCP2221 (USB)"
-              ],
-              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
-              "type": "list"
-            },
-            {
-              "default": "",
-              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-              "friendly_name": "Extended I2C Bus",
-              "hidden": false,
-              "label": "i2c_bus_num",
-              "type": "i2c_bus_num"
+              "label": "i2c_bus",
+              "type": "i2c_bus"
             },
             {
               "default": 10000,
@@ -4070,22 +3989,14 @@
               "type": "list"
             },
             {
-              "default": "basic",
-              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-              "friendly_name": "I2C Bus Type",
+              "default": {
+                "kind": "basic"
+              },
+              "description": "How this device's I2C bus is reached.",
+              "friendly_name": "I2C Bus",
               "hidden": false,
-              "label": "i2c_bus_kind",
-              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)"],
-              "list_values": ["basic", "extended"],
-              "type": "list"
-            },
-            {
-              "default": "",
-              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected); a number selects /dev/i2c-N explicitly. Use the Discover button to scan for connected devices. Ignored when Basic.",
-              "friendly_name": "Extended I2C Bus",
-              "hidden": false,
-              "label": "i2c_bus_num",
-              "type": "i2c_bus_num"
+              "label": "i2c_bus",
+              "type": "i2c_bus"
             },
             {
               "default": 10000,
@@ -4190,27 +4101,14 @@
               "type": "list"
             },
             {
-              "default": "basic",
-              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-              "friendly_name": "I2C Bus Type",
+              "default": {
+                "kind": "basic"
+              },
+              "description": "How this device's I2C bus is reached.",
+              "friendly_name": "I2C Bus",
               "hidden": false,
-              "label": "i2c_bus_kind",
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)",
-                "FT232H (USB)",
-                "MCP2221 (USB)"
-              ],
-              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
-              "type": "list"
-            },
-            {
-              "default": "",
-              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-              "friendly_name": "Extended I2C Bus",
-              "hidden": false,
-              "label": "i2c_bus_num",
-              "type": "i2c_bus_num"
+              "label": "i2c_bus",
+              "type": "i2c_bus"
             },
             {
               "default": 10000,
@@ -4980,27 +4878,14 @@
               "type": "list"
             },
             {
-              "default": "basic",
-              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-              "friendly_name": "I2C Bus Type",
+              "default": {
+                "kind": "basic"
+              },
+              "description": "How this device's I2C bus is reached.",
+              "friendly_name": "I2C Bus",
               "hidden": false,
-              "label": "i2c_bus_kind",
-              "list_labels": [
-                "Basic (native I2C)",
-                "Extended (USB / other bus)",
-                "FT232H (USB)",
-                "MCP2221 (USB)"
-              ],
-              "list_values": ["basic", "extended", "ft232h", "mcp2221"],
-              "type": "list"
-            },
-            {
-              "default": "",
-              "description": "Which value to use when I2C Bus Type is Extended, FT232H, or MCP2221. For Extended: 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers), 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected), or a number selects /dev/i2c-N explicitly. For FT232H: a pyftdi URL (blank = first). For MCP2221: a device serial (blank = first). Use the Discover button to scan for connected devices. Ignored when Basic.",
-              "friendly_name": "Extended I2C Bus",
-              "hidden": false,
-              "label": "i2c_bus_num",
-              "type": "i2c_bus_num"
+              "label": "i2c_bus",
+              "type": "i2c_bus"
             },
             {
               "default": "False",
@@ -5053,22 +4938,14 @@
               "type": "list"
             },
             {
-              "default": "basic",
-              "description": "Use the board's native I2C bus (Basic) or an extended bus such as a USB-to-I2C bridge (Extended). Extended is required when the device is on a USB-to-I2C adapter (e.g. CP2112) rather than the SBC's native I2C pins.",
-              "friendly_name": "I2C Bus Type",
+              "default": {
+                "kind": "basic"
+              },
+              "description": "How this device's I2C bus is reached.",
+              "friendly_name": "I2C Bus",
               "hidden": false,
-              "label": "i2c_bus_kind",
-              "list_labels": ["Basic (native I2C)", "Extended (USB / other bus)"],
-              "list_values": ["basic", "extended"],
-              "type": "list"
-            },
-            {
-              "default": "",
-              "description": "Which bus to use when I2C Bus Type is Extended. 'CP2112' or 'MCP2221' auto-discovers the matching USB-to-I2C bridge by adapter name (recommended -- robust to changing bus numbers); 'serial:<ISERIAL>' matches a specific USB device by its serial number (needed when multiple identical bridges are connected); a number selects /dev/i2c-N explicitly. Use the Discover button to scan for connected devices. Ignored when Basic.",
-              "friendly_name": "Extended I2C Bus",
-              "hidden": false,
-              "label": "i2c_bus_num",
-              "type": "i2c_bus_num"
+              "label": "i2c_bus",
+              "type": "i2c_bus"
             },
             {
               "default": 10000,
@@ -5554,32 +5431,33 @@
     },
     "distance": {},
     "grillplatform": {
-      "current": "custom",
-      "dc_fan": false,
-      "device_display_dc": 24,
-      "device_display_led": 5,
-      "device_display_rst": 25,
-      "device_distance_address": null,
-      "device_distance_echo": 27,
-      "device_distance_i2c_bus_kind": "basic",
-      "device_distance_i2c_bus_num": "",
-      "device_distance_trig": 23,
-      "device_input_down_dt": 20,
-      "device_input_enter_sw": 21,
-      "device_input_up_clk": 16,
-      "input_selector": 17,
-      "input_shutdown": 17,
-      "output_auger": 14,
-      "output_dc_fan": 26,
-      "output_fan": 15,
-      "output_igniter": 18,
-      "output_power": 4,
-      "output_pwm": 13,
-      "real_hw": true,
-      "standalone": true,
-      "system_1wire": null,
-      "system_spi0_ce0": 8,
-      "system_spi0_ce1": 7,
+      "current": "pcb_4.x.x",
+      "dc_fan": "False",
+      "device_display_dc": "24",
+      "device_display_led": "5",
+      "device_display_rst": "25",
+      "device_distance_address": "0x29",
+      "device_distance_echo": "27",
+      "device_distance_i2c_bus": {
+        "kind": "basic"
+      },
+      "device_distance_trig": "23",
+      "device_input_down_dt": "16",
+      "device_input_enter_sw": "15",
+      "device_input_up_clk": "14",
+      "input_selector": "None",
+      "input_shutdown": "17",
+      "output_auger": "23",
+      "output_dc_fan": "26",
+      "output_fan": "26",
+      "output_igniter": "18",
+      "output_power": "22",
+      "output_pwm": "13",
+      "real_hw": "True",
+      "standalone": "True",
+      "system_1wire": "4",
+      "system_spi0_ce0": "8",
+      "system_spi0_ce1": "7",
       "system_type": "prototype",
       "triggerlevel": "HIGH"
     },

@@ -31,7 +31,6 @@ export type ProbeFieldType =
   | "int"
   | "float"
   | "string"
-  | "i2c_bus_num"
   | "i2c_bus"
   | "probes_list"
   | "bt_address"
