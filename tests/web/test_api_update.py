@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 import pytest
 
@@ -37,11 +38,13 @@ def test_state_returns_the_update_data_shape(ds, client, monkeypatch):
     _stub_reads(monkeypatch)
     monkeypatch.setattr(ur, "web_ui_needs_rebuild", lambda root: False)
     monkeypatch.setattr(ur, "last_build_failed", lambda: False)
+    monkeypatch.setattr(ur, "detached_head", lambda: None)
     body = client.get("/api/update/state").get_json()
     assert body["result"] == "OK"
     assert body["data"] == {
         "version": "v1.8.0 (v1.8.0)",
         "branch": "main",
+        "detached": None,
         "branches": ["main", "dev", "prototype"],
         "remote_url": "https://github.com/nebhead/PiFire",
         "remote_version": "v1.8.1",
@@ -137,11 +140,19 @@ def _set_real_hw(value):
     write_settings_store(s)
 
 
-def _neutralize(monkeypatch):
+def _neutralize(monkeypatch, exit_code=0):
+    """Replace the one seam that shells out. The stub returns an exit status
+    because the routes now read it: os.system answers 0 when the shell accepted
+    the line, and the routes report a launch that never happened otherwise."""
     import blueprints.api_update.routes as ur
 
     fired = []
-    monkeypatch.setattr(ur.os, "system", lambda cmd: fired.append(cmd))
+
+    def system(cmd):
+        fired.append(cmd)
+        return exit_code
+
+    monkeypatch.setattr(ur.os, "system", system)
     return ur, fired
 
 
@@ -295,3 +306,95 @@ def test_buildlog_download_returns_the_transcript_as_an_attachment(ds, client, m
     assert "attachment" in resp.headers["Content-Disposition"]
     assert "web-ui-build.log" in resp.headers["Content-Disposition"]
     assert resp.get_data(as_text=True) == "+ building\n! failed\n"
+
+
+# ---------------------------------------------------------------------------
+# A checkout that is not on a branch. Everything the updater does resolves
+# `origin/<branch>`, and git's `(HEAD detached at abc1234)` placeholder used to
+# be handed out as that branch -- so the page fired a command whose parentheses
+# the shell would not parse, and then polled a status nothing would ever write.
+
+
+def test_state_reports_a_detached_checkout(ds, client, monkeypatch):
+    import blueprints.api_update.routes as ur
+
+    _stub_reads(monkeypatch)
+    monkeypatch.setattr(ur, "web_ui_needs_rebuild", lambda root: False)
+    monkeypatch.setattr(ur, "last_build_failed", lambda: False)
+    monkeypatch.setattr(ur, "detached_head", lambda: "30aaae0c")
+
+    data = client.get("/api/update/state").get_json()["data"]
+
+    assert data["detached"] == "30aaae0c"
+    # Not get_branch()'s error string: the page binds this to the branch picker.
+    assert data["branch"] == ""
+
+
+def test_state_reports_null_when_on_a_branch(ds, client, monkeypatch):
+    import blueprints.api_update.routes as ur
+
+    _stub_reads(monkeypatch)
+    monkeypatch.setattr(ur, "web_ui_needs_rebuild", lambda root: False)
+    monkeypatch.setattr(ur, "last_build_failed", lambda: False)
+    monkeypatch.setattr(ur, "detached_head", lambda: None)
+
+    data = client.get("/api/update/state").get_json()["data"]
+
+    assert data["detached"] is None
+    assert data["branch"] == "main"
+
+
+def test_pull_refuses_a_detached_checkout_without_firing_anything(ds, client, monkeypatch):
+    ur, fired = _neutralize(monkeypatch)
+    monkeypatch.setattr(
+        ur,
+        "get_branch",
+        lambda: ("ERROR Not On A Branch", "This checkout is not on a branch -- HEAD is detached at 30aaae0c."),
+    )
+    _set_real_hw(True)
+    _set_mode(Mode.STOP)
+
+    resp = client.post("/api/update/pull")
+
+    assert resp.status_code == 502
+    assert "detached" in resp.get_json()["message"]
+    assert fired == [], "a doomed command must not be fired at all"
+
+
+def test_a_branch_name_reaches_the_shell_quoted(ds, client, monkeypatch):
+    """Defence in depth behind get_branch()'s refusal: whatever a branch name
+    contains, it arrives as one argument rather than as shell syntax."""
+    ur, fired = _neutralize(monkeypatch)
+    monkeypatch.setattr(ur, "get_branch", lambda: ("weird (name)", ""))
+    _set_real_hw(True)
+    _set_mode(Mode.STOP)
+
+    client.post("/api/update/pull")
+
+    assert len(fired) == 1
+    probe = subprocess.run(["sh", "-n", "-c", fired[0]], capture_output=True, text=True)
+    assert probe.returncode == 0, f"the shell cannot parse it: {probe.stderr}"
+
+
+def test_a_launch_the_shell_refused_is_reported_not_reported_as_started(ds, client, monkeypatch):
+    """The command ends in `&`, so the shell backgrounds it and answers 0 at
+    once; a non-zero status means nothing ran, and the page would otherwise poll
+    an install status that nothing will ever write to again."""
+    _neutralize(monkeypatch, exit_code=2)
+    _set_real_hw(True)
+
+    resp = client.post("/api/update/branches/refresh")
+
+    assert resp.status_code == 500
+    assert "could not be started" in resp.get_json()["message"]
+
+
+def test_a_launch_that_worked_still_reports_started(ds, client, monkeypatch):
+    _, fired = _neutralize(monkeypatch, exit_code=0)
+    _set_real_hw(True)
+
+    resp = client.post("/api/update/branches/refresh")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"started": True}
+    assert len(fired) == 1

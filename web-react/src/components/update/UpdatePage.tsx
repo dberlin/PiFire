@@ -55,7 +55,10 @@ export function UpdatePage() {
   const apply = useCallback((s: UpdateResult<UpdateState>, c: UpdateResult<UpdateCheck>) => {
     if (s.ok && s.data) {
       setState(s.data);
-      setSelected(s.data.branch);
+      // Falls back to the first branch offered: a detached checkout has no
+      // current branch, and leaving the picker on "" would post an empty
+      // target the moment someone reached for the control that fixes it.
+      setSelected(s.data.branch || s.data.branches[0] || "");
     }
     setBehind(c.ok && c.data ? c.data.behind : null);
   }, []);
@@ -131,10 +134,29 @@ export function UpdatePage() {
       <section className="pf-admin-card pf-admin-wide">
         <h2>System Update</h2>
         <p>
-          Current: <strong>{state.version}</strong> on branch <strong>{state.branch}</strong>
+          Current: <strong>{state.version}</strong>{" "}
+          {state.detached ? (
+            <>
+              at detached commit <strong>{state.detached}</strong>
+            </>
+          ) : (
+            <>
+              on branch <strong>{state.branch}</strong>
+            </>
+          )}
         </p>
         <p>Remote: {state.remote_version}</p>
-        <p>{behindText(behind)}</p>
+        {/* An update is `git merge origin/<branch>`, so a checkout that is not
+            on a branch has nothing to update to. Said here rather than left for
+            the button to fail on, and paired with the control that fixes it. */}
+        {state.detached ? (
+          <p className="pf-update-note" role="alert">
+            This checkout is not on a branch, so there is nothing to update to. Pick a branch below
+            and change to it first.
+          </p>
+        ) : (
+          <p>{behindText(behind)}</p>
+        )}
       </section>
 
       <section className="pf-admin-card">
@@ -169,10 +191,13 @@ export function UpdatePage() {
 
       <section className="pf-admin-card">
         <h3>Actions</h3>
+        {/* Disabled while detached, alone among these: /pull is the only one
+            that needs a branch. Changing branch is the way out and upgrading
+            dependencies or rebuilding the bundle work wherever HEAD is. */}
         <button
           type="button"
           className="pf-admin-btn"
-          disabled={busy}
+          disabled={busy || state.detached !== null}
           onClick={() => void run(() => pullUpdate())}
         >
           Update to latest

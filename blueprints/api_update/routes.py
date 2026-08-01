@@ -10,6 +10,7 @@ come along, and their template-injection surface stays behind.
 """
 
 import os
+import shlex
 
 from flask import Response, jsonify, request
 
@@ -23,7 +24,14 @@ from common.datastore_accessors import (
 from common.modes import Mode
 from common.system import is_real_hardware
 from common.web_ui_build import last_build_failed, read_build_log, web_ui_needs_rebuild
-from updater import REPO_ROOT, get_available_updates, get_branch, get_log, get_update_data
+from updater import (
+    REPO_ROOT,
+    detached_head,
+    get_available_updates,
+    get_branch,
+    get_log,
+    get_update_data,
+)
 
 from . import api_update_bp
 
@@ -41,22 +49,51 @@ def _python_exec(settings):
 
 
 def _fire(settings, command):
-    """Fire a detached updater.py process, ONLY on real hardware. Returns
-    whether it fired. `os.system` is the single seam tests neutralize; nothing
-    else in this module shells out."""
-    if is_real_hardware(settings):
-        os.system(command)
-        return True
-    return False
+    """Fire a detached updater.py process, ONLY on real hardware.
+
+    Returns (started, error). `os.system` is the single seam tests neutralize;
+    nothing else in this module shells out.
+
+    Its exit status is CHECKED. The command ends in `&`, so the shell backgrounds
+    the updater and reports 0 straight away -- a non-zero status therefore means
+    the shell never got as far as running anything, and the caller is polling an
+    install status that nothing will ever write to again. That is what a branch
+    name interpolated unquoted into the command did on a detached HEAD: the
+    parentheses in git's `(HEAD detached at abc1234)` placeholder are shell
+    syntax, the shell refused the line, and the page sat on "Starting Update..."
+    for good.
+    """
+    if not is_real_hardware(settings):
+        return False, None
+    if os.system(command) != 0:
+        return False, "the updater could not be started -- see logs/update.log"
+    return True, None
+
+
+def _started(settings, command):
+    """One mutation's response: an error envelope when the launch failed, so a
+    refusal is never dressed up as a run in progress."""
+    started, error = _fire(settings, command)
+    if error:
+        return _error(error, 500)
+    return _ok({"started": started})
 
 
 @api_update_bp.route("/state", methods=["GET"])
 def update_state():
     d = get_update_data(read_settings())
+    # The commit HEAD is parked on when this checkout is not on a branch, else
+    # null. Everything the updater does is relative to `origin/<branch>`, so a
+    # detached HEAD has nothing to update TO -- and the page has to say that
+    # rather than offer an update that cannot work.
+    detached = detached_head()
     return _ok(
         {
             "version": d["version"],
-            "branch": d["branch_target"],
+            # Empty rather than get_branch()'s error string: the page binds this
+            # to the branch picker, and there is no current branch to bind.
+            "branch": "" if detached else d["branch_target"],
+            "detached": detached,
             "branches": d["branches"],
             "remote_url": d["remote_url"],
             "remote_version": d["remote_version"],
@@ -132,7 +169,7 @@ def update_status():
 def update_branches_refresh():
     settings = read_settings()
     set_updater_install_status(0, "Refreshing remote branches...", "")
-    return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -r &")})
+    return _started(settings, f"{_python_exec(settings)} updater.py -r &")
 
 
 @api_update_bp.route("/branch", methods=["POST"])
@@ -144,7 +181,7 @@ def update_branch():
     if target not in branches:
         return _error("invalid_branch", 400, branches=branches)
     set_updater_install_status(0, "Starting Branch Change...", "")
-    return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -b {target} &")})
+    return _started(settings, f"{_python_exec(settings)} updater.py -b {shlex.quote(target)} &")
 
 
 @api_update_bp.route("/pull", methods=["POST"])
@@ -156,7 +193,7 @@ def update_pull():
     if error_msg:
         return _error(error_msg, 502)
     set_updater_install_status(0, "Starting Update...", "")
-    return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -u {branch} -p &")})
+    return _started(settings, f"{_python_exec(settings)} updater.py -u {shlex.quote(branch)} -p &")
 
 
 @api_update_bp.route("/rebuild-web-ui", methods=["POST"])
@@ -171,7 +208,7 @@ def update_rebuild_web_ui():
     """
     settings = read_settings()
     set_updater_install_status(0, "Starting Web UI Rebuild...", "")
-    return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -w &")})
+    return _started(settings, f"{_python_exec(settings)} updater.py -w &")
 
 
 @api_update_bp.route("/upgrade", methods=["POST"])
@@ -180,4 +217,4 @@ def update_upgrade():
     if read_control().get("mode") != Mode.STOP:
         return _error("system_active", 409)
     set_updater_install_status(0, "Starting Upgrade...", "")
-    return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -i &")})
+    return _started(settings, f"{_python_exec(settings)} updater.py -i &")

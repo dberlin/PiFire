@@ -44,6 +44,7 @@ from importlib.metadata import version, PackageNotFoundError
 
 import os
 import subprocess
+import sys
 import argparse
 import logging
 
@@ -74,6 +75,11 @@ def get_available_branches():
             if "->" in line:
                 # Skip symbolic-ref lines like "remotes/origin/HEAD -> origin/<branch>"
                 continue
+            if line.startswith("("):
+                # `(HEAD detached at abc1234)`, and the same shape for a detached
+                # tag or an interrupted rebase. Prose describing where HEAD is,
+                # not a branch anyone can check out.
+                continue
             if "origin/main" in line:
                 # Skip this line
                 pass
@@ -103,22 +109,44 @@ def update_remote_branches():
     return error_msg
 
 
+def detached_head():
+    """The commit HEAD is parked on when the checkout is not on a branch, else None.
+
+    `symbolic-ref` is the question being asked -- does HEAD name a branch --
+    and it answers non-zero when it does not, which is the only reliable
+    signal. Reading it out of `git branch` cannot work: git prints the
+    placeholder `* (HEAD detached at abc1234)` on the starred line, which is
+    prose, not a ref, and nothing downstream can tell the two apart.
+    """
+    on_branch = subprocess.run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], capture_output=True, text=True)
+    if on_branch.returncode == 0:
+        return None
+    sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
+    return sha.stdout.strip() if sha.returncode == 0 else "an unknown commit"
+
+
+DETACHED_HEAD_ERROR = "ERROR Not On A Branch"
+
+
 def get_branch():
+    """(branch name, error). A detached HEAD is an ERROR, not a branch.
+
+    Every caller builds `origin/{branch}` out of this. Handing back git's
+    `(HEAD detached at abc1234)` placeholder made all of them ask git for a ref
+    named `origin/(HEAD detached at abc1234)` -- and made the updater page fire
+    that string, unquoted and full of parentheses and spaces, into a shell.
+    """
+    detached = detached_head()
+    if detached is not None:
+        return (
+            DETACHED_HEAD_ERROR,
+            f"This checkout is not on a branch -- HEAD is detached at {detached}. Check out a branch before updating.",
+        )
     # --show-current is only in later versions of git, and unfortunately buster does not have this
-    command = ["git", "branch", "-a"]
-    branches = subprocess.run(command, capture_output=True, text=True)
-    error_msg = ""
-    result = ""
-    if branches.returncode == 0:
-        input_list = branches.stdout.split("\n")
-        for line in input_list:
-            if "*" in line:
-                result = line.strip(" *")
-                break
-    else:
-        result = "ERROR Getting Current Branch"
-        error_msg = branches.stderr
-    return (result, error_msg)
+    on_branch = subprocess.run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], capture_output=True, text=True)
+    if on_branch.returncode != 0:
+        return ("ERROR Getting Current Branch", on_branch.stderr)
+    return (on_branch.stdout.strip(), "")
 
 
 def set_branch(branch_target):
@@ -149,6 +177,9 @@ def get_remote_url():
 def get_available_updates(branch=""):
     result = {}
     remote, error_msg1 = get_remote_url()
+    # Bound before the branch is looked up, not inside it: the error path below
+    # reads this whether or not a branch was passed in.
+    error_msg2 = ""
     if branch == "":
         branch, error_msg2 = get_branch()
 
@@ -209,7 +240,8 @@ def do_update():
                 fetch.stderr.replace("\n", "<br>") + "<br>" + reset.stderr.replace("\n", "<br>")
             )  # + '<br>' + merge.stderr.replace('\n', '<br>')
     else:
-        result = "ERROR Getting Remote URL."
+        result = "ERROR Getting Remote URL or Branch."
+        error_msg = " | ".join(m for m in (error_msg1, error_msg2) if m)
     return (result, error_msg)
 
 
@@ -338,8 +370,11 @@ def install_update():
             output = " - " + fetch.stdout + reset.stdout + merge.stdout
             success = False
     else:
-        status = "ERROR Getting Remote URL."
-        output = " - ERROR Getting Remote URL. Please check your git install"
+        # Reported rather than generalised to "check your git install": the
+        # ordinary cause is a detached HEAD, and that has a specific remedy the
+        # message from get_branch() spells out.
+        status = "ERROR Getting Remote URL or Branch."
+        output = " - " + " | ".join(m for m in (error_msg1, error_msg2) if m)
         success = False
     return (success, status, output)
 
@@ -675,6 +710,28 @@ if __name__ == "__main__":
         level=log_level,
     )
 
+    def report_crash(exc_type, exc, tb):
+        """Publish an unhandled exception as a terminal failure before dying.
+
+        This process is detached: nothing waits on it and nothing sees its
+        traceback. Its only channel to the browser is the install status, and a
+        run that raises simply stops writing to it -- leaving the page polling
+        "Starting Update..." forever, which is indistinguishable from a slow
+        update. The negative percent is what ends that poll.
+        """
+        logger.error("Update failed: %s", exc, exc_info=(exc_type, exc, tb))
+        set_updater_install_status(INSTALL_FAILED_PERCENT, "Update failed", f"{exc_type.__name__}: {exc}")
+        sys.__excepthook__(exc_type, exc, tb)
+
+    sys.excepthook = report_crash
+
+    def report_failure(status, output):
+        """End the run on a step that failed, rather than carrying on to report
+        a version that was never installed."""
+        logger.error(output)
+        set_updater_install_status(INSTALL_FAILED_PERCENT, status, output)
+        exit(1)
+
     # num_args = number of arguments passed to the script
     num_args = 0
 
@@ -694,6 +751,11 @@ if __name__ == "__main__":
 
         percent = 20
         set_updater_install_status(percent, status, output)
+        if not success:
+            # git did not move the checkout, so the dependencies and the bundle
+            # below would be installed for code that never arrived -- and the
+            # run would go on to publish "Finished!" over the reason it failed.
+            report_failure(status, output)
         time.sleep(4)
 
         install_dependencies(current_version, current_build)
@@ -718,6 +780,10 @@ if __name__ == "__main__":
 
         percent = 20
         set_updater_install_status(percent, status, output)
+        if not success:
+            # The checkout is still on the branch it started on. Rebuilding for
+            # a branch this run never reached would serve the wrong bundle.
+            report_failure(status, output)
         time.sleep(4)
 
         install_dependencies(current_version, current_build)

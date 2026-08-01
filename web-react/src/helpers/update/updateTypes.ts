@@ -1,6 +1,11 @@
 export interface UpdateState {
   version: string;
+  /** Empty when the checkout is not on a branch -- see `detached`. */
   branch: string;
+  /** The commit HEAD is parked on when this checkout is not on a branch, else
+   *  null. Everything the updater does is relative to `origin/<branch>`, so
+   *  there is nothing to update to until a branch is checked out. */
+  detached: string | null;
   branches: string[];
   remote_url: string;
   remote_version: string;

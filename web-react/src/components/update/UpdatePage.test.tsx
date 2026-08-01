@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import * as api from "../../helpers/update/updateApi";
@@ -35,6 +35,7 @@ const state = {
     branches: ["main", "dev"],
     remote_url: "u",
     remote_version: "v1.8.1",
+    detached: null,
     web_ui_stale: false,
     web_ui_build_failed: false,
   },
@@ -59,6 +60,17 @@ const renderPage = () =>
       <UpdatePage />
     </MemoryRouter>,
   );
+
+// Call history accumulates across a whole file otherwise, and seed() only ever
+// re-sets the resolved values -- so a `toHaveBeenCalledWith` here can be
+// satisfied by some earlier test's click and assert nothing at all. Cleared,
+// not reset: the implementations seed() installs have to survive.
+beforeEach(() => {
+  for (const fn of Object.values(api)) {
+    const maybeMock = fn as { mockClear?: () => void };
+    maybeMock.mockClear?.();
+  }
+});
 
 afterEach(cleanup);
 
@@ -272,8 +284,6 @@ describe("UpdatePage failed web UI rebuild", () => {
     });
     renderPage();
     await screen.findByText("Actions");
-    // Counted relatively: these mocks are shared across the file and never
-    // reset, so an absolute call count would depend on test order.
     const stateReads = (api.fetchUpdateState as ReturnType<typeof rs.fn>).mock.calls.length;
 
     fireEvent.click(screen.getByRole("button", { name: "Rebuild web UI" }));
@@ -293,5 +303,64 @@ describe("UpdatePage failed web UI rebuild", () => {
     expect((api.fetchUpdateStatus as ReturnType<typeof rs.fn>).mock.calls.length).toBe(
       callsAfterFinish,
     );
+  });
+});
+
+function seedDetached() {
+  (api.fetchUpdateState as ReturnType<typeof rs.fn>).mockResolvedValue({
+    ...state,
+    data: { ...state.data, branch: "", detached: "30aaae0c" },
+  });
+  (api.fetchUpdateCheck as ReturnType<typeof rs.fn>).mockResolvedValue({
+    ok: true,
+    status: 200,
+    message: "",
+    data: { current: "v1.8.0", behind: 0 },
+  });
+}
+
+describe("UpdatePage on a detached checkout", () => {
+  it("says there is nothing to update to, and names the commit", async () => {
+    /* An update is `git merge origin/<branch>`, so a checkout that is not on a
+       branch has nothing to update to. It used to fire anyway: the branch name
+       was git's `(HEAD detached at ...)` placeholder, the shell refused the
+       parentheses, and the page polled "Starting Update..." for ever. */
+    seedDetached();
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("not on a branch");
+    expect(screen.getByText("30aaae0c")).toBeInTheDocument();
+  });
+
+  it("disables only the action that needs a branch", async () => {
+    seedDetached();
+    renderPage();
+    await screen.findByRole("alert");
+
+    expect(screen.getByRole("button", { name: "Update to latest" })).toBeDisabled();
+    // Changing branch is the way out; the other two work wherever HEAD is.
+    expect(screen.getByRole("button", { name: "Change Branch" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Upgrade dependencies" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Rebuild web UI" })).toBeEnabled();
+  });
+
+  it("offers a real branch to change to, not the empty current one", async () => {
+    // `branch` is "" when detached, and posting that gets a 400 from the
+    // allowlist -- so the control that fixes the problem would refuse too.
+    seedDetached();
+    renderPage();
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Change Branch" }));
+
+    await waitFor(() => expect(api.changeBranch).toHaveBeenLastCalledWith("main"));
+  });
+
+  it("shows the branch, and the commits-behind line, when on one", async () => {
+    seed();
+    renderPage();
+
+    expect(await screen.findByText(/3 commits behind/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update to latest" })).toBeEnabled();
   });
 });
