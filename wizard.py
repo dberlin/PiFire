@@ -155,7 +155,13 @@ def wizardInstallInfoExisting(settings, wizardData):
             settingsValue = settings.copy()
             for index in range(0, len(settingsLocation)):
                 settingsValue = settingsValue[settingsLocation[index]]
-            wizardInstallInfo["modules"][module]["settings"][setting] = str(settingsValue)
+            # A composite dependency (i2c_bus) is an object, not a scalar --
+            # str()ing it would produce a Python repr the installer can never
+            # parse back. Every other setting still normalizes to its string
+            # form for the option-matching in _constrain_to_options.
+            wizardInstallInfo["modules"][module]["settings"][setting] = (
+                settingsValue if isinstance(settingsValue, dict) else str(settingsValue)
+            )
         if module == "display":
             wizardInstallInfo["modules"][module]["config"] = settings["display"]["config"][
                 settings["modules"]["display"]

@@ -117,13 +117,18 @@ def test_settings_dependency_values_matches_an_option_across_types():
     }
 
 
-def test_settings_dependency_values_passes_through_a_dep_with_no_options():
-    # Free-text deps (i2c_bus_num, usb_serial_device) have no option list, so
-    # there is nothing to impose -- the live value is the answer.
-    settings = {"platform": {"devices": {"distance": {"i2c_bus_num": "serial:0012AB34"}}}}
+def test_settings_dependency_values_passes_an_i2c_bus_object_through():
+    """An i2c_bus dep's value is an object, not a scalar; _constrain_to_options
+    must not stringify it on the way to the client."""
+    settings = {"platform": {"devices": {"distance": {"i2c_bus": {"kind": "kernel", "adapter": "CP2112"}}}}}
     module_data = {
         "settings_dependencies": {
-            "device_distance_i2c_bus_num": {"settings": ["platform", "devices", "distance", "i2c_bus_num"]}
+            "device_distance_i2c_bus": {
+                "type": "i2c_bus",
+                "settings": ["platform", "devices", "distance", "i2c_bus"],
+            }
         }
     }
-    assert get_settings_dependencies_values(settings, module_data) == {"device_distance_i2c_bus_num": "serial:0012AB34"}
+    assert get_settings_dependencies_values(settings, module_data) == {
+        "device_distance_i2c_bus": {"kind": "kernel", "adapter": "CP2112"}
+    }

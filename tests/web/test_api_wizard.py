@@ -509,7 +509,7 @@ def test_validate_bus_kinds_clean(ds, client):
         {
             "device": "D1",
             "module": "ads1115_adafruit",
-            "config": {"i2c_bus_kind": "basic"},
+            "config": {"i2c_bus": {"kind": "basic"}},
             "ports": ["ADC0"],
         }
     ]
@@ -532,7 +532,7 @@ def test_validate_bus_kinds_conflict(ds, client, monkeypatch):
     monkeypatch.setattr(wr, "validate_bus_kinds", _boom)
     resp = client.post(
         "/api/wizard/probes/validate-bus-kinds",
-        data=json.dumps({"probe_devices": [{"device": "D1", "config": {"i2c_bus_kind": "basic"}}]}),
+        data=json.dumps({"probe_devices": [{"device": "D1", "config": {"i2c_bus": {"kind": "basic"}}}]}),
         content_type="application/json",
     )
     body = resp.get_json()
@@ -540,27 +540,37 @@ def test_validate_bus_kinds_conflict(ds, client, monkeypatch):
     assert "USB-HID" in body["detail"]
 
 
-def test_validate_bus_kinds_rejects_an_extended_selector_on_a_usb_hid_bus(ds, client):
-    # Switching a device to FT232H while its bus field still holds the CP2112
-    # bridge name asks for a bus pyftdi cannot open. Said here, with the field
-    # still on screen, rather than at run time in the control process.
-    devs = [
-        {
-            "device": "D1",
-            "module": "ads1115_adafruit",
-            "config": {"i2c_bus_kind": "ft232h", "i2c_bus_num": "CP2112"},
-            "ports": ["ADC0"],
-        }
-    ]
-    resp = client.post(
-        "/api/wizard/probes/validate-bus-kinds",
-        data=json.dumps({"probe_devices": devs}),
-        content_type="application/json",
-    )
-    assert resp.status_code == 200
+def test_finish_rejects_a_real_basic_plus_ft232h_conflict(ds, client, monkeypatch):
+    # A probe on the FT232H beside a distance sensor left on 'basic' -- the one
+    # unworkable combo (Blinka's board backend is process-global) -- must be
+    # caught by the REAL (unmocked) wizard_bus_kinds/validate_bus_kinds path at
+    # /finish, not just by a test that monkeypatches the check away.
+    import blueprints.api_wizard.routes as wr
+
+    fired = []
+    monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))
+    payload = {
+        "selections": {"grillplatform": "custom", "display": "ili9341b", "distance": "hcsr04"},
+        "settings_dep_values": {"grillplatform": {"device_distance_i2c_bus": {"kind": "basic"}}},
+        "display_config": {},
+        "probe_map": {
+            "probe_devices": [
+                {
+                    "device": "D1",
+                    "module": "ads1115_adafruit",
+                    "config": {"i2c_bus": {"kind": "ft232h", "url": ""}},
+                    "ports": ["ADC0"],
+                }
+            ],
+            "probe_info": [],
+        },
+    }
+    resp = client.post("/api/wizard/finish", data=json.dumps(payload), content_type="application/json")
+    assert resp.status_code == 422
     body = resp.get_json()
-    assert body["ok"] is False
-    assert "D1" in body["detail"] and "CP2112" in body["detail"]
+    assert body["message"] == "bus_conflict"
+    assert "process-global" in body["detail"]
+    assert fired == []  # installer must NOT fire
 
 
 def test_module_values_grillplatform_returns_live_settings(ds, client):

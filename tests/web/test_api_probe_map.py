@@ -192,10 +192,10 @@ def test_apply_rejects_a_bus_kind_conflict(ds, client):
     config, so the live fan/distance kinds are exactly what it must consider."""
     _stop_mode()
     settings = read_settings()
-    settings["platform"].setdefault("devices", {}).setdefault("distance", {})["i2c_bus_kind"] = "basic"
+    settings["platform"].setdefault("devices", {}).setdefault("distance", {})["i2c_bus"] = {"kind": "basic"}
     write_settings_store(settings)
     adc = {
-        "config": {"i2c_bus_kind": "ft232h", "i2c_bus_num": "FT232H"},
+        "config": {"i2c_bus": {"kind": "ft232h", "url": ""}},
         "device": "Adc",
         "module": "prototype",
         "module_filename": "prototype",

@@ -24,9 +24,7 @@ from common.defaults import set_probe_map
 from common.i2c_bus import (
     I2CBusConfigError,
     configured_bus_kinds,
-    configured_bus_selectors,
     validate_bus_kinds,
-    validate_bus_selectors,
 )
 from common.modes import Mode
 from common.server_status import get_server_status
@@ -428,7 +426,6 @@ def _api_post_probe_map(settings, request_json):
 
     try:
         validate_bus_kinds(configured_bus_kinds(settings, probe_map))
-        validate_bus_selectors(configured_bus_selectors(settings, probe_map))
     except I2CBusConfigError as exc:
         return jsonify({"result": "error", "message": "bus_conflict", "detail": str(exc)}), 422
 

@@ -1,4 +1,5 @@
 from common.datastore_accessors import read_settings
+from common.i2c_bus_config import parse_i2c_bus
 
 
 def parse_bt_device_info(bt_devices):
@@ -50,8 +51,11 @@ def _constrain_to_options(value, options):
     str(value) and the KEY is returned -- the same normalization
     wizardInstallInfoExisting applies to every value, and what the installer's
     _convert_value reverses on the way back in.
+
+    A composite dependency (i2c_bus) reads as an object rather than a scalar and
+    carries no option list; it passes through untouched.
     """
-    if not options:
+    if not options or isinstance(value, dict):
         return value
     text = str(value)
     return text if text in options else next(iter(options))
@@ -136,7 +140,13 @@ def wizardInstallInfoExisting(wizardData, settings):
             settingsValue = settings.copy()
             for index in range(0, len(settingsLocation)):
                 settingsValue = settingsValue[settingsLocation[index]]
-            wizardInstallInfo["modules"][module]["settings"][setting] = str(settingsValue)
+            # A composite dependency (i2c_bus) is an object, not a scalar --
+            # str()ing it would produce a Python repr the installer can never
+            # parse back. Every other setting still normalizes to its string
+            # form for the option-matching in _constrain_to_options.
+            wizardInstallInfo["modules"][module]["settings"][setting] = (
+                settingsValue if isinstance(settingsValue, dict) else str(settingsValue)
+            )
         if module == "display":
             wizardInstallInfo["modules"][module]["config"] = settings["display"]["config"][
                 settings["modules"]["display"]
@@ -147,60 +157,23 @@ def wizardInstallInfoExisting(wizardData, settings):
 def wizard_bus_kinds(wizardInstallInfo, wizardData):
     """Collect every configured I2C bus kind from an assembled wizardInstallInfo,
     using the user's in-progress selections: each probe device's config
-    i2c_bus_kind, plus any grillplatform/distance settings-dependency whose
-    manifest `settings` path ends in 'i2c_bus_kind' (the fan controller and the
-    distance sensor). Used to validate the whole config at wizard finish."""
+    i2c_bus, plus any grillplatform/distance settings-dependency of type
+    i2c_bus (the fan controller and the distance sensor). Used to validate the
+    whole config at wizard finish."""
     kinds = set()
     for device in wizardInstallInfo.get("probe_map", {}).get("probe_devices", []):
-        kind = (device.get("config") or {}).get("i2c_bus_kind")
-        if kind:
-            kinds.add(kind)
+        bus = (device.get("config") or {}).get("i2c_bus")
+        if bus:
+            kinds.add(parse_i2c_bus(bus).kind)
     for module in ("grillplatform", "distance"):
         module_info = wizardInstallInfo.get("modules", {}).get(module, {}) or {}
         selected = (module_info.get("profile_selected") or [None])[0]
         module_settings = module_info.get("settings", {}) or {}
         module_manifest = (wizardData.get("modules", {}).get(module, {}) or {}).get(selected, {}) or {}
         for dep_name, dep in (module_manifest.get("settings_dependencies", {}) or {}).items():
-            path = dep.get("settings") or []
-            if path and path[-1] == "i2c_bus_kind":
-                value = module_settings.get(dep_name)
-                if value:
-                    kinds.add(value)
-    return kinds
-
-
-def wizard_bus_selectors(wizardInstallInfo, wizardData):
-    """The same sweep as wizard_bus_kinds, carrying each bus's selector with it:
-    [(where, kind, selector), ...] for common.i2c_bus.validate_bus_selectors.
-
-    A kind is paired with the i2c_bus_num that sits BESIDE it -- the dependency
-    whose manifest `settings` path is the same one with 'i2c_bus_kind' swapped
-    for 'i2c_bus_num'. Pairing on the settings path rather than on the
-    dependency's own name is what lets a module name its two fields whatever it
-    likes (the grillplatform entries prefix theirs with device_distance_, the
-    distance modules do not).
-    """
-    selectors = []
-    for device in wizardInstallInfo.get("probe_map", {}).get("probe_devices", []):
-        config = device.get("config") or {}
-        if config.get("i2c_bus_kind"):
-            selectors.append(
-                (device.get("device") or "probe device", config["i2c_bus_kind"], config.get("i2c_bus_num"))
-            )
-    for module in ("grillplatform", "distance"):
-        module_info = wizardInstallInfo.get("modules", {}).get(module, {}) or {}
-        selected = (module_info.get("profile_selected") or [None])[0]
-        module_settings = module_info.get("settings", {}) or {}
-        deps = ((wizardData.get("modules", {}).get(module, {}) or {}).get(selected, {}) or {}).get(
-            "settings_dependencies", {}
-        ) or {}
-        # path -> dep name, so a kind can find the num sharing its parent.
-        by_path = {tuple(dep.get("settings") or []): name for name, dep in deps.items()}
-        for path, dep_name in by_path.items():
-            if not path or path[-1] != "i2c_bus_kind":
+            if dep.get("type") != "i2c_bus":
                 continue
-            kind = module_settings.get(dep_name)
-            num_dep = by_path.get(path[:-1] + ("i2c_bus_num",))
-            if kind and num_dep:
-                selectors.append((f"{module}/{dep_name}", kind, module_settings.get(num_dep)))
-    return selectors
+            value = module_settings.get(dep_name)
+            if value:
+                kinds.add(parse_i2c_bus(value).kind)
+    return kinds

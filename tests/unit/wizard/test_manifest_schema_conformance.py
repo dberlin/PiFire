@@ -12,6 +12,7 @@ manifest says it goes, and validate the resulting tree.
 """
 
 import copy
+import json
 
 import pytest
 
@@ -43,7 +44,24 @@ def selectable_values():
                     yield section, module_name, dep, tuple(path), value
 
 
-CASES = sorted(set(selectable_values()))
+def _sort_key(case):
+    # An i2c_bus dep's value is a dict (unhashable, unorderable), so dedup and
+    # sort on its JSON form rather than the value itself.
+    section, module, dep, path, value = case
+    value_key = json.dumps(value, sort_keys=True) if isinstance(value, dict) else value
+    return section, module, dep, path, value_key
+
+
+def _deduped(cases):
+    seen = set()
+    for case in cases:
+        key = _sort_key(case)
+        if key not in seen:
+            seen.add(key)
+            yield case
+
+
+CASES = sorted(_deduped(selectable_values()), key=_sort_key)
 
 
 def test_the_manifest_offers_something_to_check():
@@ -67,3 +85,20 @@ def test_every_manifest_option_can_be_written(ds, section, module, dep, path, va
             f"{section}/{module}: picking {value!r} for '{dep}' writes {coerced!r} "
             f"to {'.'.join(path)}, which the schema rejects: {exc}"
         )
+
+
+def test_every_i2c_bus_dep_is_a_composite_with_an_object_default():
+    """The composite carries a dict default so the conformance sweep above
+    actually writes one into the tree and validates it."""
+    from common.common import read_wizard
+
+    found = 0
+    for modules in read_wizard().get("modules", {}).values():
+        for module in modules.values():
+            for dep, spec in (module.get("settings_dependencies") or {}).items():
+                if dep.endswith("i2c_bus"):
+                    found += 1
+                    assert spec["type"] == "i2c_bus"
+                    assert spec["default"] == {"kind": "basic"}
+                assert not dep.endswith(("i2c_bus_kind", "i2c_bus_num"))
+    assert found == 8
