@@ -147,7 +147,12 @@ for (const viewport of [DESKTOP, PHONE]) {
       }
       const baseline = readBaseline(path);
       expect(baseline, `${path} is missing. Run \`bun run baseline:capture\`.`).not.toBeNull();
-      const problems = compareToBaseline(actual, baseline ?? {}, PELLETS_SPEC.exact);
+      const problems = compareToBaseline(
+        actual,
+        baseline ?? {},
+        PELLETS_SPEC.exact,
+        PELLETS_SPEC.textSized,
+      );
       expect(problems, problems.join("\n")).toEqual([]);
     });
   });

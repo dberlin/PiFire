@@ -109,7 +109,12 @@ for (const viewport of [DESKTOP, PHONE]) {
           console.log(`[fidelity] captured ${path} (${Object.keys(actual).length} landmarks)`);
           return;
         }
-        const problems = compareToBaseline(actual, requireBaseline(path), spec.exact);
+        const problems = compareToBaseline(
+          actual,
+          requireBaseline(path),
+          spec.exact,
+          spec.textSized,
+        );
         expect(
           problems,
           `${spec.name} @ ${viewport.width}x${viewport.height}\n${problems.join("\n")}`,

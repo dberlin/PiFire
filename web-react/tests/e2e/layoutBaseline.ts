@@ -183,10 +183,17 @@ export const EXACT_TOL = 0.5;
 // design change and must be argued for.
 export const BOX_TOL = 2;
 
+/** Does `name` -- a baseline key, which is a selector or `selector#i` -- name
+ *  an entry declared text-sized by its PageSpec? */
+function isTextSized(name: string, textSized: string[]): boolean {
+  return textSized.some((sel) => name === sel || name.startsWith(`${sel}#`));
+}
+
 export function compareToBaseline(
   actual: LandmarkMap,
   baseline: LandmarkMap,
   exact: ExactTable = DASHBOARD_EXACT,
+  textSized: string[] = [],
 ): string[] {
   const problems: string[] = [];
   for (const name of Object.keys(baseline)) {
@@ -196,7 +203,13 @@ export function compareToBaseline(
       problems.push(`${name}: MISSING from the page`);
       continue;
     }
-    for (const k of ["x", "y", "w", "h"] as const) {
+    // A text-sized entry keeps every other assertion -- where it starts, its
+    // face and weight, and all of STYLE_PROPS. Only the two numbers that are
+    // its string's own extent go uncompared. See PageSpec.textSized.
+    const boxKeys = isTextSized(name, textSized)
+      ? (["x", "y"] as const)
+      : (["x", "y", "w", "h"] as const);
+    for (const k of boxKeys) {
       const tol = exact[name]?.[k as "w" | "h"] !== undefined ? EXACT_TOL : BOX_TOL;
       if (Math.abs(a[k] - b[k]) > tol) {
         problems.push(`${name}.${k}: ${b[k]} -> ${a[k]} (tolerance ${tol})`);
@@ -254,6 +267,17 @@ export interface PageSpec {
   stubs?: (page: Page) => Promise<void>;
   /** Dimensions that must not move at all, keyed by baseline entry name. */
   exact?: ExactTable;
+  /** Landmarks whose w/h are the extent of their own TEXT, where that text is
+   *  live data rather than layout. Their boxes are still recorded, and their
+   *  position, face, weight and every computed style are still compared -- only
+   *  w and h go uncompared, because on any machine but the one that captured
+   *  the reference they measure the data, not the stylesheet.
+   *
+   *  Use this only where the box has no blast radius, verified rather than
+   *  assumed: measure a landmark below it with the text at both extents and
+   *  confirm it does not move. If it does, the wrap IS layout and belongs in
+   *  the gate. */
+  textSized?: string[];
 }
 
 export async function measureSelectors(page: Page, spec: PageSpec): Promise<LandmarkMap> {

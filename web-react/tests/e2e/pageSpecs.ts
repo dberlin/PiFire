@@ -537,6 +537,26 @@ export const PELLETS_SPEC: PageSpec = {
     ".pf-pellets-actions",
     ".pf-pellets-profile",
   ],
+  // `.pf-pellets-usage` is `display: inline`, so its box is exactly the extent
+  // of the string formatUsage() returns -- and that string is the grill's
+  // running pellet-usage estimate, which the controller updates as it burns,
+  // rendered in whichever units settings say. Neither is layout.
+  //
+  // Measured rather than assumed. The desktop baseline's w:107 h:41 is the box
+  // of "11.42 kg" -- so the reference was captured in METRIC at ~11.4 kg used;
+  // this machine reads imperial at 1.51 ozs and measures 102. At 390 the
+  // element wraps once the string passes the 137px column, which is why the
+  // phone baseline records w:53 h:77 against an unwrapped 102x41 here. No value
+  // of est_usage reproduces both baselines, and none could: the number only
+  // grows.
+  //
+  // The wrap has no blast radius: driving the string through every shape
+  // formatUsage() emits, `.pf-pellets-actions` held one viewport offset per
+  // viewport (376 at 1280, 336 at 390) whether the box above it came out 41px
+  // tall or 77px. So dropping w/h costs the gate nothing -- this entry's
+  // position, its 34px/800 Barlow Semi Condensed, and all 32 computed styles
+  // are still compared, as is every neighbour's box.
+  textSized: [".pf-pellets-usage"],
 };
 
 /** Chrome that never renders under a fixed fixture, probed synthetically.
