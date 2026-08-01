@@ -660,3 +660,44 @@ def test_usb_serial_scan_passes_vid_pid_through_to_discovery(ds, client, monkeyp
         content_type="application/json",
     )
     assert seen == {"vid": "0x2a19", "pid": "0x0c0c"}
+
+
+def test_installlog_serves_the_current_run_incrementally(ds, client, monkeypatch):
+    """The panel behind "Show output" polls this while an install runs. It reads
+    the log file rather than the install-status blob, because that blob holds one
+    line at a time and a 250ms poll of it samples the output instead of
+    transcribing it."""
+    import blueprints.api_wizard.routes as wr
+
+    seen = []
+
+    def _fake_read(offset):
+        seen.append(offset)
+        return "Resolved 12 packages\n", 512, False
+
+    monkeypatch.setattr(wr, "read_install_log", _fake_read)
+    body = client.get("/api/wizard/installlog?offset=128").get_json()
+
+    assert seen == [128]
+    assert body == {"text": "Resolved 12 packages\n", "offset": 512, "reset": False}
+
+
+def test_installlog_without_an_offset_reads_from_the_start_of_the_run(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    seen = []
+    monkeypatch.setattr(wr, "read_install_log", lambda offset: (seen.append(offset), ("", 0, False))[1])
+
+    client.get("/api/wizard/installlog")
+    # A junk offset must not 500 -- type=int yields None, same as absent.
+    client.get("/api/wizard/installlog?offset=banana")
+
+    assert seen == [0, 0]
+
+
+def test_installlog_before_any_install_is_empty_rather_than_an_error(ds, client):
+    """First-time setup reaches this endpoint with no wizard.log on disk."""
+    body = client.get("/api/wizard/installlog").get_json()
+
+    assert body["text"] == ""
+    assert body["offset"] == 0

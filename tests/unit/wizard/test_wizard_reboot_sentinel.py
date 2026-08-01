@@ -4,11 +4,12 @@ _run_install_commands() replaces the old static-manifest-flag lookup: it runs ea
 command in command_list and ORs together whichever ones print a REBOOT_REQUIRED=true
 sentinel as (usually) their last line of stdout.
 
-Includes a regression test for a readline/poll ordering bug: the original loop checked
-`process.poll()` immediately after `readline()`, before processing the line just read.
-Since our sentinel line is always the last thing a script prints right before exiting,
-a process that has already exited by the time poll() is checked would have its final
-line silently discarded -- exactly when the sentinel matters most.
+These tests cover the sentinel logic. Whether the sentinel LINE survives at all is
+covered against a real exiting subprocess in test_stream_command.py: the loop that
+used to drop it read a line and then tested `process.poll()` before processing it, so
+a script that had already exited lost its final line -- exactly when the sentinel
+matters most. _stream_command now drains the pipe to exhaustion, which makes the
+ordering unrepresentable rather than merely tested.
 
 subprocess.Popen is always mocked here; no real command is ever executed.
 """
@@ -21,28 +22,20 @@ import wizard
 
 
 class _FakeProcess:
-    """Models `poll()` returning "still running" (None) as long as there are unread
-    lines, and "exited" (0) once the last line has been read -- i.e. the process exits
-    right as its final line becomes available, which is the real-world case that
-    drops the last line under the old (buggy) loop ordering."""
+    """The slice of Popen that _stream_command uses: a line-iterable `stdout` and a
+    `wait()`. Draining a pipe yields every line regardless of whether the child has
+    exited, so unlike the readline/poll double this replaces, there is no exit timing
+    for the fake to model."""
 
     def __init__(self, lines):
         self._lines = list(lines)
-        self._index = 0
 
     @property
     def stdout(self):
-        return self
+        return iter(self._lines)
 
-    def readline(self):
-        if self._index < len(self._lines):
-            line = self._lines[self._index]
-            self._index += 1
-            return line
-        return ""
-
-    def poll(self):
-        return 0 if self._index >= len(self._lines) else None
+    def wait(self):
+        return 0
 
 
 @pytest.fixture(autouse=True)

@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { InstallProgress } from "./InstallProgress";
 
 const getStatusMock = rs.fn();
 const systemActionMock = rs.fn();
+const getInstallLogMock = rs.fn();
 
 rs.mock("../../helpers/wizard/wizardApi", () => ({
   getInstallStatus: (...args: unknown[]) => getStatusMock(...args),
+  getInstallLog: (...args: unknown[]) => getInstallLogMock(...args),
 }));
 
 rs.mock("../../helpers/admin/adminApi", () => ({
@@ -19,6 +21,7 @@ afterEach(() => {
   rs.useRealTimers();
   getStatusMock.mockReset();
   systemActionMock.mockReset();
+  getInstallLogMock.mockReset();
 });
 
 describe("InstallProgress", () => {
@@ -207,5 +210,43 @@ describe("InstallProgress", () => {
     });
 
     expect(screen.getByRole("alert")).toHaveTextContent("could not restart");
+  });
+
+  it("offers the output panel but reads nothing until it is opened", async () => {
+    rs.useFakeTimers();
+    getStatusMock.mockResolvedValue({ percent: 20, status: "Installing…", output: "" });
+
+    render(<InstallProgress baseUrl="http://x" onDone={rs.fn()} />);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(screen.getByText("Show output")).toBeInTheDocument();
+    // The transcript costs nothing while the panel is shut -- and it loses
+    // nothing either, because the endpoint reads from an offset, so opening
+    // late still returns the run from its start.
+    expect(getInstallLogMock).not.toHaveBeenCalled();
+  });
+
+  it("starts reading the transcript when the panel is opened", async () => {
+    rs.useFakeTimers();
+    getStatusMock.mockResolvedValue({ percent: 20, status: "Installing…", output: "" });
+    getInstallLogMock.mockResolvedValue({ text: "", offset: 0, reset: false });
+
+    render(<InstallProgress baseUrl="http://x" onDone={rs.fn()} />);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(250);
+    });
+
+    // jsdom does not implement <summary>'s activation behaviour, so the toggle
+    // event a real click would raise is dispatched directly.
+    const details = screen.getByText("Show output").closest("details") as HTMLDetailsElement;
+    await act(async () => {
+      details.open = true;
+      fireEvent(details, new Event("toggle"));
+      await rs.advanceTimersByTimeAsync(0);
+    });
+
+    expect(getInstallLogMock).toHaveBeenCalledWith("http://x", 0);
   });
 });

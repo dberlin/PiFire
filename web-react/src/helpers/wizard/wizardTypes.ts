@@ -71,6 +71,17 @@ export interface InstallStatus {
   status: string;
   output: string;
 }
+/** A slice of the installer's transcript. `output` above is one line, replaced
+ *  faster than any poll can read it; this is the log file behind it, served
+ *  from a byte offset so a poll costs a tick's worth of output rather than the
+ *  whole run. `reset` means the offset the client sent no longer points into
+ *  the run it is showing (a second install, or rotation) and its buffer must be
+ *  replaced rather than appended to. */
+export interface InstallLog {
+  text: string;
+  offset: number;
+  reset: boolean;
+}
 // Client working state (mutable subset submitted at draft/finish):
 export interface WizardWorking {
   selections: Record<WizardSection, string | null>;

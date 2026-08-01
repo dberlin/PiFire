@@ -279,6 +279,38 @@
   }
 }
 
+/* The installer's transcript, closed by default: an install that goes to plan
+   needs a bar and a status line, and nothing here competes with them until
+   someone asks. .pf-install-progress is text-center for the bar and status, so
+   the log opts back out -- left-aligned is the only way to read one. */
+.pf-install-output {
+  @apply text-left;
+}
+.pf-install-output-summary {
+  @apply cursor-pointer select-none text-center text-label;
+  font: 600 13px "Barlow";
+}
+.pf-install-output-summary:hover {
+  color: var(--text);
+}
+/* .pf-log-frame (logs.css) carries the viewer's dress -- tokens over the
+   package's own dark palette -- but takes its height from flex-1 against the
+   events page's column. There is no such column here, and LazyLog's
+   height="auto" resolves against a definite height, so this supplies one. A
+   fixed height also means the page does not grow by a line every time one
+   arrives. */
+.pf-install-output-frame {
+  @apply mt-[12px] flex-none;
+  height: 320px;
+}
+/* Shown until the first line lands. Sized to the frame it is standing in for,
+   so the panel does not resize under the pointer the moment output starts. */
+.pf-install-output-waiting {
+  @apply m-0 mt-[12px] flex h-[320px] items-center justify-center rounded-card bg-inset text-label;
+  border: 1px solid var(--color-card-border);
+  font: 400 13px "Barlow";
+}
+
 /* ---- modals ---- */
 /* Three role="dialog" aria-modal="true" elements ship as bare <div>s with NO
    backdrop element of their own (WizardShell, InstallProgress) -- unlike the

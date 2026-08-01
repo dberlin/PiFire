@@ -3,6 +3,7 @@ import { adminErrorText, systemAction } from "../../helpers/admin/adminApi";
 import type { SystemAction } from "../../helpers/admin/adminTypes";
 import { getInstallStatus } from "../../helpers/wizard/wizardApi";
 import type { InstallStatus } from "../../helpers/wizard/wizardTypes";
+import { InstallOutput } from "./InstallOutput";
 
 export interface InstallProgressProps {
   baseUrl: string;
@@ -28,6 +29,7 @@ export function InstallProgress({ baseUrl, onDone }: InstallProgressProps) {
   });
   const [rebootRequired, setRebootRequired] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [showOutput, setShowOutput] = useState(false);
   // Keep the latest onDone without re-running the polling effect on every
   // render caused by a caller passing a fresh callback identity.
   const onDoneRef = useRef(onDone);
@@ -116,6 +118,18 @@ export function InstallProgress({ baseUrl, onDone }: InstallProgressProps) {
       >
         <div className={barClassName} style={{ width: `${percent}%` }} />
       </div>
+      {/* A native <details>, like MetricCard's raw-data panel: the disclosure
+          state, keyboard handling and find-in-page all come from the browser,
+          and the summary is a real control without being wired up as one. */}
+      <details
+        className="pf-install-output"
+        onToggle={(e) => setShowOutput((e.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary className="pf-install-output-summary">Show output</summary>
+        {/* Mounted only while open, so a closed panel starts no polling and the
+            viewer is never virtualizing rows nobody asked to see. */}
+        {showOutput && <InstallOutput baseUrl={baseUrl} />}
+      </details>
     </div>
   );
 }

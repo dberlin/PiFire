@@ -1,5 +1,6 @@
 import type { BtScanRow, ProbeDevice, RowsResult, ThermoworksRow } from "./probeTypes";
 import type {
+  InstallLog,
   InstallStatus,
   ModuleValues,
   ScanResult,
@@ -87,6 +88,14 @@ export async function finishWizard(
 export async function getInstallStatus(baseUrl: string): Promise<InstallStatus> {
   const r = await fetch(url(baseUrl, "installstatus"));
   return (await r.json()) as InstallStatus;
+}
+
+/** Everything the installer has logged since `offset` bytes. Offset 0 reads the
+ *  whole of the current run, which is what makes opening the output panel late
+ *  in an install show the install from its beginning. */
+export async function getInstallLog(baseUrl: string, offset: number): Promise<InstallLog> {
+  const r = await fetch(`${url(baseUrl, "installlog")}?offset=${offset}`);
+  return (await r.json()) as InstallLog;
 }
 
 export async function scanBluetooth(baseUrl: string): Promise<RowsResult<BtScanRow>> {

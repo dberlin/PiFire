@@ -22,6 +22,7 @@ from common.common import (  # Common Library for writing settings
     set_nested_key_value,
     read_wizard,
     create_logger,
+    log_path,
 )
 from common.control_delta import control_delta
 from common.datastore_accessors import (
@@ -34,10 +35,16 @@ from common.datastore_accessors import (
     load_wizard_install_info,
 )
 from common.defaults import set_probe_map
+from common.install_log import RUN_MARKER, WIZARD_LOG_NAME
 from common.system import is_real_hardware
 import subprocess
 import argparse
 import logging
+
+#: Replaced by the file-backed logger under __main__. Named here so run_wizard()
+#: works when imported -- by the tests, and by anything else that drives an
+#: install -- instead of raising NameError on its first log line.
+logger = logging.getLogger("wizard")
 
 
 def _convert_value(value):
@@ -154,6 +161,50 @@ def wizardInstallInfoExisting(settings, wizardData):
     return wizardInstallInfo
 
 
+def _stream_command(command, percent, status):
+    """Run `command`, publishing every output line to the install status and the
+    wizard log. Returns the list of lines seen.
+
+    stderr is folded into stdout because that is where the interesting output
+    actually is: uv writes its whole progress report ("Resolved N packages",
+    "Building ...", every error) to stderr, and apt warns there too. Piping only
+    stdout left the operator watching a bar with no way to tell a long build from
+    a hung one, and put nothing in logs/wizard.log to read afterwards.
+
+    Iterating the pipe to exhaustion -- rather than reading a line and then
+    testing poll() -- is what makes the tail of a command survive. poll() goes
+    non-None the moment the child exits, while its last lines are still sitting
+    in the pipe buffer, so a poll-first loop discards exactly the output that
+    says how the command ended.
+    """
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        encoding="utf-8",
+        errors="replace",
+    )
+    lines = []
+    for line in process.stdout:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lines.append(stripped)
+        set_wizard_install_status(percent, status, stripped)
+        logger.info(stripped)
+        print(stripped)
+    code = process.wait()
+    if code != 0:
+        # The old loops print()ed this to a stdout nobody reads -- the installer
+        # is detached -- so a package that failed to install left the panel
+        # showing its last ordinary line and moved on as if nothing happened.
+        failure = f"   ! {command[0]} exited with code {code}"
+        set_wizard_install_status(percent, status, failure)
+        logger.error(failure)
+    return lines
+
+
 def _run_install_commands(command_list, percent, increment, status, python_exec):
     """Run each command in command_list, updating install status as we go.
 
@@ -168,19 +219,10 @@ def _run_install_commands(command_list, percent, increment, status, python_exec)
             # replace "python" with python_exec in command list object
             command = [python_exec if item == "python" else item for item in command]
         if is_real_hardware():
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, encoding="utf-8")
-            while True:
-                output = process.stdout.readline()
-                if output:
-                    stripped = output.strip()
-                    set_wizard_install_status(percent, status, stripped)
-                    print(f"command output: {stripped}")
-                    logger.info(stripped)
-                    if stripped.lower().startswith("reboot_required="):
-                        if stripped.split("=", 1)[1].strip().lower() == "true":
-                            reboot_required = True
-                elif process.poll() is not None:
-                    break
+            for stripped in _stream_command(command, percent, status):
+                if stripped.lower().startswith("reboot_required="):
+                    if stripped.split("=", 1)[1].strip().lower() == "true":
+                        reboot_required = True
         else:
             # This path is for development/testing
             time.sleep(2)
@@ -195,6 +237,13 @@ def _run_install_commands(command_list, percent, increment, status, python_exec)
 
 def run_wizard(settings, WizardData, WizardInstallInfo):
     settings = read_settings()
+
+    # Marks where this run begins in a log the RotatingFileHandler carries
+    # across runs. /api/wizard/installlog serves the slice after the LAST
+    # marker, so the browser shows this install rather than replaying whichever
+    # ones came before it. Written into the log itself, not recorded beside it,
+    # so it holds for a wizard.py started from the command line too.
+    logger.info(RUN_MARKER)
 
     percent = 5
     status = "Setting Up Modules..."
@@ -370,17 +419,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
         command.append("-y")
 
         if is_real_hardware():
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, encoding="utf-8")
-            while True:
-                output = process.stdout.readline()
-                if process.poll() is not None:
-                    break
-                if output:
-                    set_wizard_install_status(percent, status, output.strip())
-                    logger.info(output.strip())
-                    print(output.strip())
-            return_code = process.poll()
-            print(f"Return Code: {return_code}")
+            _stream_command(command, percent, status)
         else:
             # This path is for development/testing
             time.sleep(2)
@@ -409,17 +448,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
         command.append(py_item)
 
         if is_real_hardware():
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, encoding="utf-8")
-            while True:
-                output = process.stdout.readline()
-                if process.poll() is not None:
-                    break
-                if output:
-                    set_wizard_install_status(percent, status, output.strip())
-                    logger.info(output.strip())
-                    print(output.strip())
-            return_code = process.poll()
-            print(f"Return Code: {return_code}")
+            _stream_command(command, percent, status)
         else:
             # This path is for development/testing
             time.sleep(2)
@@ -497,7 +526,10 @@ if __name__ == "__main__":
 
     logger = create_logger(
         "wizard",
-        filename="./logs/wizard.log",
+        # log_path, not a literal "./logs/...": the reader behind
+        # /api/wizard/installlog resolves the same way, so both sides follow a
+        # redirected PIFIRE_LOG_DIR together instead of only the writer moving.
+        filename=log_path(WIZARD_LOG_NAME),
         messageformat="%(asctime)s | %(levelname)s | %(message)s",
         level=log_level,
     )

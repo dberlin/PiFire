@@ -21,6 +21,7 @@ from common.datastore_accessors import (
     store_wizard_install_info,
     write_settings,
 )
+from common.install_log import read_install_log
 from common.i2c_bus import (
     I2CBusConfigError,
     configured_bus_kinds,
@@ -475,6 +476,20 @@ def wizard_finish():
 def wizard_installstatus():
     percent, status, output = get_wizard_install_status()
     return jsonify({"percent": percent, "status": status, "output": output}), 200
+
+
+@api_wizard_bp.route("/installlog", methods=["GET"])
+def wizard_installlog():
+    """The running install's command output, from `offset` bytes on.
+
+    Serves the log file rather than the install-status blob: that blob holds
+    one line, overwritten as fast as apt and uv emit output, so it can say what
+    the installer is doing but never what it has done. A non-integer or absent
+    offset reads from the start of the current run, which is also what the
+    client asks for when it first opens the panel.
+    """
+    text, offset, reset = read_install_log(request.args.get("offset", type=int) or 0)
+    return jsonify({"text": text, "offset": offset, "reset": reset}), 200
 
 
 @api_wizard_bp.route("/scan/bluetooth", methods=["POST"])
