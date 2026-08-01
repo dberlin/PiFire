@@ -41,6 +41,12 @@ logger = logging.getLogger("control")
 # USB-HID bus kinds that bypass Blinka's `board` singleton.
 USB_HID_KINDS = frozenset({"ft232h", "mcp2221"})
 
+# Adapter names the wizard offers as `extended` selectors, matched against
+# /sys/bus/i2c/devices/i2c-*/name by find_i2c_bus(). They are chip names, never
+# a device's own serial, which is what makes them recognizable as an extended
+# selector that outlived a change of bus type.
+_EXTENDED_ADAPTER_NAMES = frozenset({"cp2112", "mcp2221"})
+
 # Board/chip-forcing Blinka env vars. If any is set, `import board` is pinned to
 # that backend process-wide, which silently breaks `basic` and any later
 # `import board`. The MCP2221 entry is EXACT so the _HID_DELAY/_RESET_DELAY
@@ -220,6 +226,72 @@ def validate_bus_kinds(kinds):
         )
 
 
+def validate_bus_selector(kind, selector, where=None):
+    """Raise I2CBusConfigError if `selector` cannot name a bus of `kind`.
+
+    Each kind reads the selector in its own namespace, and only `extended`
+    reaches a kernel i2c-dev adapter -- by /dev/i2c-N number, by adapter name
+    ("CP2112"), or by USB iSerial ("serial:<ISERIAL>"). ft232h resolves a pyftdi
+    URL over libusb and mcp2221 a device serial over USB HID; an extended
+    selector left behind after a bus-type change names a bus neither of them can
+    ever open, and used to be accepted here and then fail inside the control
+    process with whatever pyftdi or EasyMCP2221 made of it.
+
+    `basic` ignores its selector entirely (board.SCL/SDA), so a leftover value
+    there is not a configuration error.
+    """
+    kind = (kind or "").strip().lower()
+    if kind not in USB_HID_KINDS:
+        return
+    selector = "" if selector is None else str(selector).strip()
+    if not selector:  # blank means "the first one found" for both USB-HID kinds
+        return
+
+    if kind == "ft232h":
+        if selector == "1" or selector.lower().startswith("ftdi://"):
+            return
+        accepted = "blank or '1' for the first FT232H, or a pyftdi URL (ftdi://ftdi:232h:SERIAL/1)"
+    else:
+        if not selector.lower().startswith("serial:") and selector.lower() not in _EXTENDED_ADAPTER_NAMES:
+            return
+        accepted = "blank for the first MCP2221, or the device's USB serial on its own"
+
+    subject = f"{where}: " if where else ""
+    raise I2CBusConfigError(
+        f"{subject}{selector!r} does not name an I2C bus of kind {kind!r}. That is an "
+        f"'extended' bus selector, which addresses a kernel /dev/i2c-N adapter; {kind} accepts "
+        f"{accepted}. Switch the bus type back to Extended, or clear the bus field."
+    )
+
+
+def validate_bus_selectors(selectors):
+    """Raise I2CBusConfigError for the first unworkable (where, kind, selector)
+    triple, as produced by configured_bus_selectors/wizard_bus_selectors."""
+    for where, kind, selector in selectors:
+        validate_bus_selector(kind, selector, where=where)
+
+
+def configured_bus_selectors(settings, probe_map):
+    """[(where, kind, selector), ...] for every configured I2C bus across probe
+    devices, the distance sensor, and the platform fan controller. `where` names
+    the surface so the error says which device to go fix."""
+    selectors = []
+    for device in (probe_map or {}).get("probe_devices", []):
+        config = device.get("config") or {}
+        if config.get("i2c_bus_kind"):
+            selectors.append(
+                (device.get("device") or "probe device", config["i2c_bus_kind"], config.get("i2c_bus_num"))
+            )
+    platform = (settings or {}).get("platform", {})
+    for where, section in (
+        ("distance sensor", (platform.get("devices", {}) or {}).get("distance", {}) or {}),
+        ("fan controller", platform.get("fan_controller", {}) or {}),
+    ):
+        if section.get("i2c_bus_kind"):
+            selectors.append((where, section["i2c_bus_kind"], section.get("i2c_bus_num")))
+    return selectors
+
+
 def configured_bus_kinds(settings, probe_map):
     """Collect every I2C bus kind across probe devices, the distance sensor, and
     the platform fan controller. Used to validate a whole wizard config."""
@@ -350,8 +422,14 @@ def open_i2c_bus(bus_kind="basic", bus_selector=None):
     match for `extended`, a pyftdi URL for `ft232h`, an MCP2221 serial for
     `mcp2221`; ignored for `basic`. Buses are cached per (kind, selector) for
     the process lifetime so every device on one physical bus shares one handle
-    and lock. Raises I2CBusConfigError for an unworkable combination."""
+    and lock. Raises I2CBusConfigError for an unworkable combination.
+
+    The selector is checked here as well as at the config boundaries, because a
+    config written before that check existed never passes through them again --
+    and this is the process where it would otherwise surface as a pyftdi URL
+    parse error."""
     kind = (bus_kind or "basic").strip().lower()
+    validate_bus_selector(kind, bus_selector)
     selector = _canonical_selector(kind, bus_selector)
     with _cache_lock:
         validate_bus_kinds(_opened_kinds | {kind})

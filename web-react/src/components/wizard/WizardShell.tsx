@@ -26,6 +26,7 @@ interface FinishResult {
   ok: boolean;
   status: number;
   message?: string;
+  detail?: string;
 }
 
 const STEP_LABELS: Record<Step, string> = {
@@ -42,7 +43,12 @@ function finishErrorMessage(result: FinishResult): string {
     case 400:
       return "Please choose a module for every hardware section before finishing.";
     case 422:
-      return "The selected I2C bus configuration conflicts — resolve it before finishing.";
+      // The backend's detail is already a full sentence and names the device;
+      // the fallback only has to cover a 422 that arrives without one.
+      return (
+        result.detail ??
+        "The selected I2C bus configuration conflicts — resolve it before finishing."
+      );
     default:
       return result.message ?? "Something went wrong finishing setup.";
   }

@@ -75,14 +75,17 @@ export async function fetchModuleValues(
 export async function finishWizard(
   baseUrl: string,
   working: WizardWorking,
-): Promise<{ ok: boolean; status: number; message?: string }> {
+): Promise<{ ok: boolean; status: number; message?: string; detail?: string }> {
   const r = await fetch(url(baseUrl, "finish"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(working),
   });
   const body = await r.json().catch(() => ({}));
-  return { ok: r.ok, status: r.status, message: body?.message };
+  // `detail` rides along with bus_conflict: common/i2c_bus.py raises full
+  // sentences naming the offending device and the values its bus kind accepts,
+  // which no message keyed off the code alone can reconstruct.
+  return { ok: r.ok, status: r.status, message: body?.message, detail: body?.detail };
 }
 
 export async function getInstallStatus(baseUrl: string): Promise<InstallStatus> {

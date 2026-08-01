@@ -7,6 +7,7 @@ from blueprints.wizard.wizard import (
     get_settings_dependencies_values,
     parse_bt_device_info,
     wizard_bus_kinds,
+    wizard_bus_selectors,
     wizardInstallInfoDefaults,
     wizardInstallInfoExisting,
 )
@@ -25,10 +26,12 @@ from common.install_log import read_install_log
 from common.i2c_bus import (
     I2CBusConfigError,
     configured_bus_kinds,
+    configured_bus_selectors,
     discover_extended_i2c_buses,
     discover_ft232h_devices,
     discover_mcp2221_devices,
     validate_bus_kinds,
+    validate_bus_selectors,
 )
 from common.modes import Mode
 from common.usb_serial import discover_usb_serial_devices
@@ -462,6 +465,7 @@ def wizard_finish():
     wizard_data = read_wizard()
     try:
         validate_bus_kinds(wizard_bus_kinds(wizard_install_info, wizard_data))
+        validate_bus_selectors(wizard_bus_selectors(wizard_install_info, wizard_data))
     except I2CBusConfigError as exc:
         return jsonify({"result": "error", "message": "bus_conflict", "detail": str(exc)}), 422
 
@@ -522,11 +526,17 @@ def wizard_probes_validate_bus_kinds():
     """Per-device bus-kind coexistence check for the in-progress probe device
     set only (settings=None) -- deliberately excludes the live fan/distance
     kinds so a mid-wizard edit doesn't false-positive against stale settings.
-    The FULL cross-subsystem check still runs at /finish."""
+    The FULL cross-subsystem check still runs at /finish.
+
+    Each device's bus SELECTOR is checked against its own kind here too: unlike
+    coexistence, that is a property of one device, so it is decidable from the
+    in-progress set alone and worth saying while the field is in front of the
+    user."""
     payload = request.get_json(silent=True) or {}
     probe_devices = payload.get("probe_devices") or []
     try:
         validate_bus_kinds(configured_bus_kinds(None, {"probe_devices": probe_devices}))
+        validate_bus_selectors(configured_bus_selectors(None, {"probe_devices": probe_devices}))
     except I2CBusConfigError as exc:
         return jsonify({"ok": False, "detail": str(exc)}), 200
     return jsonify({"ok": True}), 200

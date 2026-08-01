@@ -540,6 +540,29 @@ def test_validate_bus_kinds_conflict(ds, client, monkeypatch):
     assert "USB-HID" in body["detail"]
 
 
+def test_validate_bus_kinds_rejects_an_extended_selector_on_a_usb_hid_bus(ds, client):
+    # Switching a device to FT232H while its bus field still holds the CP2112
+    # bridge name asks for a bus pyftdi cannot open. Said here, with the field
+    # still on screen, rather than at run time in the control process.
+    devs = [
+        {
+            "device": "D1",
+            "module": "ads1115_adafruit",
+            "config": {"i2c_bus_kind": "ft232h", "i2c_bus_num": "CP2112"},
+            "ports": ["ADC0"],
+        }
+    ]
+    resp = client.post(
+        "/api/wizard/probes/validate-bus-kinds",
+        data=json.dumps({"probe_devices": devs}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is False
+    assert "D1" in body["detail"] and "CP2112" in body["detail"]
+
+
 def test_module_values_grillplatform_returns_live_settings(ds, client):
     resp = client.post(
         "/api/wizard/module-values",

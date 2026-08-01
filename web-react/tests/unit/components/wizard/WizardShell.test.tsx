@@ -276,6 +276,29 @@ describe("WizardShell", () => {
     ).toBeInTheDocument();
   });
 
+  it("{ok:false,status:422} prefers the backend's own detail", async () => {
+    // common/i2c_bus.py raises full sentences that name the offending device
+    // and the values that kind accepts. The generic message above cannot say
+    // which of a dozen I2C fields to go fix.
+    renderShell(fixtureState());
+    await screen.findByRole("heading", { name: "Welcome" });
+    await advanceToFinish();
+    finishWizardMock.mockResolvedValue({
+      ok: false,
+      status: 422,
+      message: "bus_conflict",
+      detail: "distance sensor: 'CP2112' does not name an I2C bus of kind 'ft232h'.",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(
+      await screen.findByText(
+        "distance sensor: 'CP2112' does not name an I2C bus of kind 'ft232h'.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("offers an Exit Setup control from the wizard chrome, on the very first step", async () => {
     renderShell(fixtureState());
     await screen.findByRole("heading", { name: "Welcome" });

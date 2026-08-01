@@ -167,3 +167,40 @@ def wizard_bus_kinds(wizardInstallInfo, wizardData):
                 if value:
                     kinds.add(value)
     return kinds
+
+
+def wizard_bus_selectors(wizardInstallInfo, wizardData):
+    """The same sweep as wizard_bus_kinds, carrying each bus's selector with it:
+    [(where, kind, selector), ...] for common.i2c_bus.validate_bus_selectors.
+
+    A kind is paired with the i2c_bus_num that sits BESIDE it -- the dependency
+    whose manifest `settings` path is the same one with 'i2c_bus_kind' swapped
+    for 'i2c_bus_num'. Pairing on the settings path rather than on the
+    dependency's own name is what lets a module name its two fields whatever it
+    likes (the grillplatform entries prefix theirs with device_distance_, the
+    distance modules do not).
+    """
+    selectors = []
+    for device in wizardInstallInfo.get("probe_map", {}).get("probe_devices", []):
+        config = device.get("config") or {}
+        if config.get("i2c_bus_kind"):
+            selectors.append(
+                (device.get("device") or "probe device", config["i2c_bus_kind"], config.get("i2c_bus_num"))
+            )
+    for module in ("grillplatform", "distance"):
+        module_info = wizardInstallInfo.get("modules", {}).get(module, {}) or {}
+        selected = (module_info.get("profile_selected") or [None])[0]
+        module_settings = module_info.get("settings", {}) or {}
+        deps = ((wizardData.get("modules", {}).get(module, {}) or {}).get(selected, {}) or {}).get(
+            "settings_dependencies", {}
+        ) or {}
+        # path -> dep name, so a kind can find the num sharing its parent.
+        by_path = {tuple(dep.get("settings") or []): name for name, dep in deps.items()}
+        for path, dep_name in by_path.items():
+            if not path or path[-1] != "i2c_bus_kind":
+                continue
+            kind = module_settings.get(dep_name)
+            num_dep = by_path.get(path[:-1] + ("i2c_bus_num",))
+            if kind and num_dep:
+                selectors.append((f"{module}/{dep_name}", kind, module_settings.get(num_dep)))
+    return selectors
