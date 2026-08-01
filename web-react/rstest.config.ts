@@ -1,6 +1,9 @@
 import { pluginReact } from "@rsbuild/plugin-react";
 import { defineConfig } from "@rstest/core";
 
+// Tests live in tests/unit, mirroring src/ -- out of the way of `tests/` at the
+// repo root, which is Python.
+//
 // Env split by naming convention (replaces the per-file
 // `// @vitest-environment jsdom` docblocks): *.test.tsx are component tests
 // and get jsdom; *.test.ts are pure-function tests and stay on fast node.
@@ -27,7 +30,7 @@ import { defineConfig } from "@rstest/core";
 // red suite for it. A unit test must not depend on which backend happens to be
 // running, so tests always see the unset case.
 const shared = {
-  setupFiles: ["./src/test-setup.ts"],
+  setupFiles: ["./tests/test-setup.ts"],
   exclude: ["**/node_modules/**", "tests/e2e/**"],
   plugins: [pluginReact()],
   source: {
@@ -43,23 +46,21 @@ export default defineConfig({
     provider: "istanbul",
     all: true,
     include: ["src/**/*.{ts,tsx}"],
-    exclude: [
-      "src/**/*.test.*",
-      "src/main.tsx",
-      "src/**/*.d.ts",
-      "src/test-setup.ts",
-      "src/test-utils.tsx",
-    ],
+    // No test excludes: the tests live in tests/, not src/, so `include`
+    // already covers only production sources.
+    exclude: ["src/main.tsx", "src/**/*.d.ts"],
     thresholds: {
       "src/**/*.{ts,tsx}": { lines: 75, perFile: true },
     },
   },
   projects: [
-    { ...shared, name: "unit-node", include: ["src/**/*.test.ts"], testEnvironment: "node" },
-    { ...shared, name: "unit-jsdom", include: ["src/**/*.test.tsx"], testEnvironment: "jsdom" },
-    // Config modules live at the package root, not under src/, because they are
-    // read by rsbuild/playwright rather than bundled into the app. Without this
-    // project their tests match no glob and are silently never run.
-    { ...shared, name: "unit-config", include: ["*.test.ts"], testEnvironment: "node" },
+    // tests/unit mirrors src/. tests/e2e is Playwright's and is excluded above.
+    { ...shared, name: "unit-node", include: ["tests/unit/**/*.test.ts"], testEnvironment: "node" },
+    {
+      ...shared,
+      name: "unit-jsdom",
+      include: ["tests/unit/**/*.test.tsx"],
+      testEnvironment: "jsdom",
+    },
   ],
 });

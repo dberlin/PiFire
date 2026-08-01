@@ -43,7 +43,7 @@ splash/sleep, responsive breakpoints — see the plan.
   exports (`buttonsForMode.ts`), never a case-variant of the component.
 - Tests: `*.test.tsx` = component tests (jsdom project), `*.test.ts` = pure
   tests (node project) — the rstest env split keys off exactly this.
-- Enforced by `src/structure.test.ts`, which fails on (a) any case-folded
+- Enforced by `tests/unit/structure.test.ts`, which fails on (a) any case-folded
   module collision — the only tripwire that fires on Linux, where the
   filesystem never surfaces the problem — and (b) any `helpers/` module that
   imports from `components/`, enforcing the one-way layering rule above.
