@@ -84,6 +84,7 @@ def test_the_migrated_tree_survives_a_validating_write(ds):
 
 def test_init_runs_the_upgrade(monkeypatch):
     """init() is the startup hook; the migration must be wired into it."""
+    monkeypatch.setattr(datastore, "_settings_upgraded", False)
     calls = []
     monkeypatch.setattr(datastore, "_first_boot_import", lambda: calls.append("import"))
     monkeypatch.setattr(datastore, "_upgrade_settings_in_store", lambda: calls.append("upgrade"))
@@ -92,3 +93,65 @@ def test_init_runs_the_upgrade(monkeypatch):
     datastore.init()
 
     assert calls == ["connect", "import", "upgrade"]
+
+
+def test_a_newer_stored_version_is_left_alone(ds):
+    """A downgrade must not run migrations backwards."""
+    settings = copy.deepcopy(default_settings())
+    # Both server and build ahead of the running code's own version: a genuine
+    # downgrade, where the code is older than the data it is now reading.
+    settings["versions"] = {"server": "99.0.0", "cookfile": "1.5.0", "recipe": "1.0.0", "build": 999999}
+    write_settings_store(settings)
+
+    datastore._upgrade_settings_in_store()
+
+    assert read_settings_store()["versions"] == settings["versions"]
+
+
+def test_an_equal_version_with_a_lower_build_migrates(ds):
+    settings = copy.deepcopy(default_settings())
+    settings["versions"]["build"] = default_settings()["versions"]["build"] - 1
+    write_settings_store(settings)
+
+    datastore._upgrade_settings_in_store()
+
+    assert read_settings_store()["versions"] == default_settings()["versions"]
+
+
+def test_a_missing_versions_block_is_left_alone(ds):
+    settings = copy.deepcopy(default_settings())
+    del settings["versions"]
+    write_settings_store(settings)
+
+    datastore._upgrade_settings_in_store()
+
+    assert "versions" not in read_settings_store()
+
+
+def test_reading_settings_migrates_even_without_init(ds):
+    """updater.py and wizard.py never call init(); they must still get a
+    migrated tree."""
+    _legacy_stored_settings(ds)
+    # Simulate a fresh process: init() never ran in it, so the lazy guard has
+    # never tripped.
+    datastore._settings_upgraded = False
+
+    from common.datastore_accessors import read_settings
+
+    settings = read_settings()
+
+    assert settings["platform"]["devices"]["distance"]["i2c_bus"] == {"kind": "kernel", "adapter": "CP2112"}
+
+
+def test_the_upgrade_runs_once_per_process(ds, monkeypatch):
+    datastore._settings_upgraded = False
+    calls = []
+    monkeypatch.setattr(datastore, "_upgrade_settings_in_store", lambda: calls.append(1))
+
+    from common.datastore_accessors import read_settings_store as _read
+
+    _read()
+    _read()
+    _read()
+
+    assert calls == [1]

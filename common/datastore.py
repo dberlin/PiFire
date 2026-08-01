@@ -13,6 +13,12 @@ _ORIGINAL_DB_PATH = DB_PATH
 
 _local = threading.local()
 
+#: Guards ensure_settings_upgraded() -- the migration cascade runs at most
+#: once per process. Module-level rather than per-connection: updater.py and
+#: wizard.py run as their own standalone processes and open their own
+#: connection, so this has to survive independently of _local.conn.
+_settings_upgraded = False
+
 # history table DDL (schema v4). `{name}` is templated so the pre-v4
 # migration below can rebuild it under a temporary name (history_new) with an
 # identical schema before swapping it in, preserving existing rows.
@@ -314,7 +320,7 @@ class transaction:
 def init():
     connection()
     _first_boot_import()
-    _upgrade_settings_in_store()
+    ensure_settings_upgraded()
 
 
 def _first_boot_import():
@@ -346,6 +352,24 @@ def _first_boot_import():
             conn.execute(upsert, ("pellets:general", json.dumps(pelletdb)))
 
 
+def ensure_settings_upgraded():
+    """Migrate the stored settings tree once per process, before it is served.
+
+    Every entry point that reads settings gets a migrated tree, whether or not
+    it called init() -- the upgrade script runs updater.py and wizard.py as
+    standalone processes, and a migration only some callers reach is the
+    defect this exists to close.
+    """
+    global _settings_upgraded
+    if _settings_upgraded:
+        return
+    # Set before doing the work: upgrade_settings() itself reads settings (it
+    # calls into read/write helpers for warnings, profiles, etc.), and that
+    # re-entrant call must see the guard as already tripped, not recurse.
+    _settings_upgraded = True
+    _upgrade_settings_in_store()
+
+
 def _upgrade_settings_in_store():
     """Bring the SQLite-stored settings tree up to the running code's version.
 
@@ -355,31 +379,45 @@ def _upgrade_settings_in_store():
     shape change leaves an existing install holding keys the schema no longer
     models, and the write-time repair strips them on the next save.
     """
+    import copy
     import json
 
     from common import settings_migration  # deferred to avoid import cycle
-    from common.common import semantic_ver_is_lower, semantic_ver_to_list
+    from common.common import semantic_ver_is_lower, semantic_ver_to_list, write_log
     from common.defaults import default_settings
+    from common.settings_schema import validate_settings_tree
 
     settings_default = default_settings()
     current = settings_default["versions"]
 
-    raw = get_blob("settings:general")
-    if raw is None:
-        return
-    settings = json.loads(raw)
-    stored = settings.get("versions") or {}
-    if not stored.get("server"):
-        return
-    if not semantic_ver_is_lower(stored["server"], current["server"]) and stored.get("build", 0) >= current.get(
-        "build", 0
-    ):
-        return
-
-    prev_ver = semantic_ver_to_list(stored["server"])
-    settings = settings_migration.upgrade_settings(prev_ver, settings, settings_default)
-    settings["versions"] = current
+    # Read and write inside one BEGIN IMMEDIATE, like _first_boot_import's
+    # check-then-write: a reader between the two would otherwise observe an
+    # unmigrated tree stamped with nothing to say it is about to change.
     with transaction() as conn:
+        row = conn.execute("SELECT value FROM kv WHERE key='settings:general'").fetchone()
+        if row is None:
+            return
+        settings = json.loads(row[0])
+        stored = settings.get("versions") or {}
+        if not stored.get("server"):
+            return
+        if not semantic_ver_is_lower(stored["server"], current["server"]) and stored.get("build", 0) >= current.get(
+            "build", 0
+        ):
+            return
+
+        prev_ver = semantic_ver_to_list(stored["server"])
+        settings = settings_migration.upgrade_settings(prev_ver, settings, settings_default)
+        settings["versions"] = current
+        try:
+            # Validated for the side effect of logging only -- write_settings()
+            # is not used here (see module docstring): its repair is exactly
+            # what strips a legacy key instead of letting the migration
+            # convert it. A deepcopy so the repair's normalized output can
+            # never replace what gets persisted.
+            validate_settings_tree(copy.deepcopy(settings))
+        except Exception as exc:
+            write_log(f"Settings migration produced a tree the schema rejects: {exc}")
         conn.execute(
             "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             ("settings:general", json.dumps(settings)),
@@ -387,13 +425,16 @@ def _upgrade_settings_in_store():
 
 
 def _reset_for_tests(path):
-    """Test hook: repoint DB_PATH and drop the cached thread-local connection."""
-    global DB_PATH
+    """Test hook: repoint DB_PATH, drop the cached thread-local connection, and
+    clear the once-per-process settings-upgrade guard so the next init()/read
+    in a test runs it again against the fresh (test) database."""
+    global DB_PATH, _settings_upgraded
     conn = getattr(_local, "conn", None)
     if conn is not None:
         conn.close()
         _local.conn = None
     DB_PATH = path if path is not None else _ORIGINAL_DB_PATH
+    _settings_upgraded = False
 
 
 def get_blob(key):
