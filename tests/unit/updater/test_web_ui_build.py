@@ -74,6 +74,16 @@ def test_the_bundle_does_not_make_itself_look_stale(repo):
     assert web_ui_needs_rebuild(repo) is False
 
 
+def test_the_downloaded_toolchain_does_not_make_the_bundle_look_stale(repo):
+    """web-react/.bun-toolchain is the bun downloaded to build WITH, so it is
+    newer than the bundle the moment it is fetched. Walked, it would leave the
+    UI permanently "older than the code on disk" -- and every rebuild would
+    refresh it and stay stale, forever."""
+    write(os.path.join(repo, "web-react", ".bun-toolchain", "bin", "bun"), mtime=9000)
+
+    assert web_ui_needs_rebuild(repo) is False
+
+
 def test_node_modules_does_not_make_the_bundle_look_stale(repo):
     """`bun install` restamps thousands of files without changing any source."""
     write(os.path.join(repo, "web-react", "node_modules", "react", "index.js"), mtime=9000)

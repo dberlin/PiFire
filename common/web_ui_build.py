@@ -33,11 +33,14 @@ BUILD_FAIL_MARKER = "=== web UI rebuild failed ==="
 #: Never walked when looking for the newest source. dist is the OUTPUT (walking
 #: it would make the bundle newer than itself and nothing would ever rebuild),
 #: node_modules is enormous and its mtimes track installs rather than edits,
-#: and the rest are test and cache artifacts.
+#: .bun-toolchain is the downloaded build tool -- newer than the bundle the
+#: moment it is fetched, which would leave the UI permanently "out of date" and
+#: rebuilding forever -- and the rest are test and cache artifacts.
 SKIP_DIRS = frozenset(
     {
         "dist",
         "node_modules",
+        ".bun-toolchain",
         ".rsbuild",
         "coverage",
         "test-results",

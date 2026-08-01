@@ -1,5 +1,9 @@
 node_modules/
 dist/
+
+# The bun downloaded to build with, kept between rebuilds so a grill does not
+# re-fetch ~90MB every time. Not a dependency of anything that runs.
+.bun-toolchain/
 *.local
 /test-results/
 /playwright-report/

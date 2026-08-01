@@ -76,82 +76,44 @@ pifire_require_commands() {
 # pulls new React sources keeps serving the OLD bundle until it runs again.
 # Both the installers and updater/upgrade.sh call it for that reason.
 
-# Where a throwaway bun gets unpacked, when one has to be fetched.
-PIFIRE_BUN_TMPDIR=""
-
 # The bun to build with. Set by pifire_get_bun.
 #
 # A global, NOT a value echoed on stdout for the caller to capture: `$(...)`
-# runs the function in a SUBSHELL, so the temp directory it recorded and the
-# EXIT trap it registered both belong to that subshell -- which means the trap
-# fires the instant the substitution closes and deletes the freshly downloaded
-# bun before the build can use it. That failure only appears on machines
-# WITHOUT bun already installed, i.e. every real install.
+# runs the function in a SUBSHELL, so anything it records belongs to that
+# subshell and is gone the instant the substitution closes.
 PIFIRE_BUN=""
 
-# Remove the throwaway toolchain. Registered as an EXIT trap by the fetch path
-# so an interrupted or failed build does not leave ~90MB behind.
-pifire_cleanup_bun() {
-	if [[ -n "$PIFIRE_BUN_TMPDIR" && -d "$PIFIRE_BUN_TMPDIR" ]]; then
-		rm -rf "$PIFIRE_BUN_TMPDIR"
-		PIFIRE_BUN_TMPDIR=""
-	fi
+# Where a downloaded bun is kept: inside web-react, gitignored, alongside the
+# node_modules and dist it exists to produce.
+#
+# Persistent, not a mktemp dir. bun is ~90MB and the previous arrangement
+# deleted it on exit, so every rebuild -- including one triggered from the web
+# UI to recover from a failed rebuild -- paid for the whole download again,
+# over whatever wifi a grill happens to have. A fresh clone re-downloading once
+# is a fair price for needing no root, no packaging and no writable directory
+# outside the checkout.
+pifire_bun_dir() {
+	echo "${1:-$PIFIRE_REPO_DIR}/web-react/.bun-toolchain"
+}
+
+# Is this a bun that will actually run? `-x` is not enough: an interrupted
+# download leaves an executable-but-truncated file, and the failure then
+# surfaces from inside the build as an unexplained non-zero exit.
+pifire_bun_works() {
+	[[ -n "$1" && -x "$1" ]] && "$1" --version >/dev/null 2>&1
 }
 
 # Sets $PIFIRE_BUN to a usable bun. Must be called WITHOUT command
 # substitution -- see the comment on PIFIRE_BUN.
 #
 # bun is a BUILD-TIME tool only: nothing PiFire runs needs it, so it is never
-# installed system-wide. An existing bun on PATH is used as-is (and never
-# removed); otherwise one is unpacked into a temp directory that
-# pifire_cleanup_bun deletes.
-# Where bun ends up when something other than PATH put it there.
+# installed system-wide.
 #
-# A rebuild triggered from the web UI runs in a process descended from the
-# service manager, whose PATH is the system default -- not the one an
-# interactive shell builds from ~/.profile, ~/.bashrc or a version manager's
-# activation hook. So a machine with a perfectly good bun a shell can see took
-# the download path anyway, and then failed on a network the shell also had.
-#
-# Real binaries, not shims: a mise or asdf shim re-execs its manager, which is
-# itself only on the interactive PATH.
-pifire_bun_candidates() {
-	local home="${HOME:-}"
-	# `:+` rather than `:-`: an unset BUN_INSTALL leaves an empty line the
-	# callers skip, instead of duplicating the ~/.bun default below it.
-	printf '%s\n' \
-		"${BUN_INSTALL:+$BUN_INSTALL/bin/bun}" \
-		"$home/.bun/bin/bun" \
-		"${MISE_DATA_DIR:-$home/.local/share/mise}/installs/bun/latest/bin/bun" \
-		"$home/.asdf/installs/bun/latest/bin/bun" \
-		/usr/local/bin/bun \
-		/opt/bun/bin/bun \
-		/usr/bin/bun
-}
-
-# Why the build has no toolchain, and what to do about it.
-#
-# The download is a fallback, so its failure is only half the story: the other
-# half is that nothing was found locally, and an operator who can run `bun`
-# themselves needs to know WHERE this looked before concluding the machine has
-# no bun. Both halves, and the two ways out, in one place.
-pifire_report_no_bun() {
-	local reason="$1"
-	log " !! $reason"
-	log " !! No existing bun was found either. Looked on PATH and at:"
-	local candidate
-	while read -r candidate; do
-		[[ -n "$candidate" ]] && log " !!   $candidate"
-	done < <(pifire_bun_candidates)
-	log " !! Either give this machine network access to bun.sh, or install bun"
-	log " !! somewhere above -- \`curl -fsSL https://bun.sh/install | bash\` puts"
-	log " !! it in ~/.bun/bin. A version manager's shim will not do: this runs"
-	log " !! without the PATH your login shell builds."
-}
-
-# Set $PIFIRE_BUN from a bun already on this machine, or return 1. Touches no
-# network -- kept separate from pifire_get_bun so it can be exercised without
-# one, and so the download stays visibly a fallback rather than a step.
+# Only EXPLICIT signals are honoured -- a bun on PATH, or $BUN_INSTALL, which
+# is bun's own documented variable. Nothing is inferred from $HOME or from a
+# version manager's private directory layout: this runs under a service
+# manager, so whose home that would even be is a guess, and executing a binary
+# found by guesswork is not something an install script should do.
 pifire_locate_bun() {
 	if command -v bun >/dev/null 2>&1; then
 		PIFIRE_BUN="$(command -v bun)"
@@ -159,23 +121,49 @@ pifire_locate_bun() {
 		return 0
 	fi
 
-	local candidate
-	while read -r candidate; do
-		[[ -n "$candidate" && -x "$candidate" ]] || continue
-		PIFIRE_BUN="$candidate"
-		# Its own directory goes on PATH for the same reason the downloaded
-		# one's does: package.json's "build" script re-invokes `bun`, resolved
-		# through PATH by the shell bun spawns.
-		export PATH="$(dirname "$candidate"):$PATH"
-		log " + Using the bun installed at $PIFIRE_BUN ($("$PIFIRE_BUN" --version 2>/dev/null))"
+	if [[ -n "${BUN_INSTALL:-}" ]] && pifire_bun_works "$BUN_INSTALL/bin/bun"; then
+		PIFIRE_BUN="$BUN_INSTALL/bin/bun"
+		pifire_put_bun_on_path
+		log " + Using the bun at \$BUN_INSTALL: $PIFIRE_BUN ($("$PIFIRE_BUN" --version 2>/dev/null))"
 		return 0
-	done < <(pifire_bun_candidates)
+	fi
+
+	local cached
+	cached="$(pifire_bun_dir "${1:-}")/bin/bun"
+	if pifire_bun_works "$cached"; then
+		PIFIRE_BUN="$cached"
+		pifire_put_bun_on_path
+		log " + Using the downloaded bun in $(dirname "$(dirname "$cached")") ($("$PIFIRE_BUN" --version 2>/dev/null))"
+		return 0
+	fi
 
 	return 1
 }
 
+# Required, not a convenience: package.json's "build" script is
+# `bun run typecheck && rsbuild build`, and that inner `bun` is resolved through
+# PATH by the shell bun spawns. Invoking the binary by absolute path alone gets
+# "bun: command not found" from inside its own script.
+pifire_put_bun_on_path() {
+	export PATH="$(dirname "$PIFIRE_BUN"):$PATH"
+}
+
+# What to do when there is no toolchain and no way to get one.
+pifire_report_no_bun() {
+	local reason="$1"
+	local toolchain="$2"
+	log " !! $reason"
+	log " !! No bun was found on PATH or at $toolchain/bin/bun either."
+	log " !! Either give this machine network access to bun.sh, or install bun"
+	log " !! yourself and point at it -- put it on the PATH the PiFire service"
+	log " !! runs with, or set BUN_INSTALL=<dir> so \$BUN_INSTALL/bin/bun resolves."
+	log " !! A version manager's shim will not do: this runs without the PATH"
+	log " !! your login shell builds."
+}
+
 pifire_get_bun() {
-	pifire_locate_bun && return 0
+	local repo="${1:-$PIFIRE_REPO_DIR}"
+	pifire_locate_bun "$repo" && return 0
 
 	# bun ships as a zip and its installer shells out to unzip. The installers
 	# put it in the package list, but an install predating that -- upgrading
@@ -187,34 +175,46 @@ pifire_get_bun() {
 		return 1
 	fi
 
-	log " + Fetching a temporary bun to build the web UI (not installed system-wide)"
-	PIFIRE_BUN_TMPDIR="$(mktemp -d -t pifire-bun-XXXXXX)" || {
-		log " !! Could not create a temp directory for bun."
+	local toolchain
+	toolchain="$(pifire_bun_dir "$repo")"
+	log " + Downloading bun into $toolchain (once; kept for later rebuilds)"
+	# Cleared first: locate_bun already rejected whatever is there, so it is a
+	# previous download that was interrupted or is broken, and unpacking on top
+	# of it would leave the two mixed.
+	rm -rf "$toolchain"
+	mkdir -p "$toolchain/home" || {
+		log " !! Could not create $toolchain."
 		return 1
 	}
-	# Cleans up if the script dies before pifire_build_web_ui finishes.
-	trap pifire_cleanup_bun EXIT
 
-	# BUN_INSTALL puts it at $BUN_INSTALL/bin/bun. No sudo: this is a
-	# throwaway under the invoking user's temp dir, which is also what lets
-	# the build run without root.
+	# A HOME inside the toolchain, never the operator's.
+	#
+	# bun's installer runs with `set -u` and dereferences $HOME twice: to
+	# pretty-print the destination in its success message, and to find the shell
+	# rc files it appends a PATH line to. A service manager need not set HOME,
+	# and this runs under one -- so the download SUCCEEDED and the installer
+	# then died with "HOME: unbound variable" while tidying up, leaving us to
+	# report only that bun had not landed.
+	#
+	# Neither use is wanted. The install location is ours via BUN_INSTALL, and
+	# an rc file edited for a toolchain the operator never invokes directly is
+	# pure litter -- which is what passing the real HOME through did, on every
+	# machine that had one.
 	if ! curl -fsSL https://bun.sh/install |
-		env BUN_INSTALL="$PIFIRE_BUN_TMPDIR" BUN_INSTALL_CACHE_DIR="$PIFIRE_BUN_TMPDIR/cache" bash >>"$LOG" 2>&1; then
-		pifire_report_no_bun "Could not download bun from https://bun.sh/install."
+		env HOME="$toolchain/home" BUN_INSTALL="$toolchain" \
+			BUN_INSTALL_CACHE_DIR="$toolchain/cache" bash >>"$LOG" 2>&1; then
+		rm -rf "$toolchain"
+		pifire_report_no_bun "Could not download bun from https://bun.sh/install." "$toolchain"
 		return 1
 	fi
-	if [[ ! -x "$PIFIRE_BUN_TMPDIR/bin/bun" ]]; then
-		pifire_report_no_bun "The bun installer ran but left nothing at $PIFIRE_BUN_TMPDIR/bin/bun."
+	if ! pifire_bun_works "$toolchain/bin/bun"; then
+		rm -rf "$toolchain"
+		pifire_report_no_bun "The bun installer ran but left nothing runnable behind." "$toolchain"
 		return 1
 	fi
-	PIFIRE_BUN="$PIFIRE_BUN_TMPDIR/bin/bun"
-	# On PATH for this process only -- nothing is written outside the temp dir.
-	# Required, not a convenience: package.json's "build" script is
-	# `bun run typecheck && rsbuild build`, and that inner `bun` is resolved
-	# through PATH by the shell bun spawns. Invoking the binary by absolute
-	# path alone gets "bun: command not found" from inside its own script.
-	export PATH="$PIFIRE_BUN_TMPDIR/bin:$PATH"
-	log " + Temporary bun ready ($("$PIFIRE_BUN" --version 2>/dev/null))"
+	PIFIRE_BUN="$toolchain/bin/bun"
+	pifire_put_bun_on_path
+	log " + bun ready ($("$PIFIRE_BUN" --version 2>/dev/null))"
 }
 
 # pifire_build_web_ui [repo_dir]
@@ -229,9 +229,9 @@ pifire_build_web_ui() {
 		return 1
 	fi
 
-	# Not `$(pifire_get_bun)` -- that subshell would take the temp dir and the
-	# cleanup trap with it. See PIFIRE_BUN.
-	pifire_get_bun || return 1
+	# Not `$(pifire_get_bun)` -- that subshell would take everything it set
+	# with it. See PIFIRE_BUN.
+	pifire_get_bun "$repo" || return 1
 
 	log " + Installing web UI dependencies"
 	# `set -o pipefail` inside each subshell is load-bearing: without it the
@@ -266,8 +266,6 @@ pifire_build_web_ui() {
 		return 1
 	fi
 	log " + Web UI built: $web/dist"
-
-	pifire_cleanup_bun
 }
 
 # ---------------------------------------------------------------------------
