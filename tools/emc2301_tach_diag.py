@@ -22,13 +22,10 @@
 
 import sys
 
-import board
-import busio
 from adafruit_bus_device.i2c_device import I2CDevice
-from adafruit_extended_bus import ExtendedI2C
 
 from common.datastore_accessors import read_settings
-from probes.base import resolve_i2c_bus
+from common.i2c_bus import open_i2c_bus
 
 # EMC2301/2/3/5 registers (DS20006532A).
 _REGS = {
@@ -61,18 +58,14 @@ def main():
     if str(fan_cfg.get("chip", "emc2101")).lower() != "emc2301":
         print(f"WARNING: configured fan chip is {fan_cfg.get('chip')!r}, not emc2301.")
 
-    bus_kind = fan_cfg.get("i2c_bus_kind", "basic")
-    bus_num = fan_cfg.get("i2c_bus_num", "1")
     address = fan_cfg.get("address", "0x2f")
     address = int(address, 16) if isinstance(address, str) else address
 
-    if bus_kind == "extended":
-        i2c = ExtendedI2C(resolve_i2c_bus(bus_num))
-    else:
-        i2c = busio.I2C(board.SCL, board.SDA)
+    bus_cfg = fan_cfg.get("i2c_bus") or {"kind": "basic"}
+    i2c = open_i2c_bus(bus_cfg)
     i2c_device = I2CDevice(i2c, address)
 
-    print(f"EMC2301 @ {hex(address)} on {bus_kind} bus ({bus_num})")
+    print(f"EMC2301 @ {hex(address)} on i2c bus {bus_cfg}")
     print("-" * 60)
     values = {}
     for reg, name in _REGS.items():

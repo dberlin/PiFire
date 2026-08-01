@@ -26,11 +26,13 @@ def x86_platform():
 
 def test_init_opens_relay_and_emc(x86_platform):
     # Relay opened on the default device; EMC2101 constructed on the default
-    # (basic / integrated) I2C bus, so the extended bus is not used here.
-    # Bus-kind selection itself is covered in test_x86_bus_discovery.
+    # (basic / integrated) I2C bus. Bus selection itself is covered in
+    # test_x86_bus_discovery.
+    from common.i2c_bus_config import BasicBus
+
     x86_platform._relay_cls.assert_called_once()
     assert x86_platform._relay_cls.call_args.args[0] == "/dev/ttyACM0"
-    x86_platform._open_bus.assert_called_once_with("basic", "CP2112")
+    x86_platform._open_bus.assert_called_once_with(BasicBus())
     x86_platform._emc_cls.assert_called_once()
 
 

@@ -23,34 +23,39 @@ def _build_platform(fan_cfg):
 
 
 def test_basic_bus_is_default_and_uses_integrated_i2c():
-    # No emc2101 config at all -> basic (integrated) bus, default selector.
+    # No fan_controller config at all -> basic (integrated) bus.
+    from common.i2c_bus_config import BasicBus
+
     _, open_bus = _build_platform(None)
-    open_bus.assert_called_once_with("basic", "CP2112")
+    open_bus.assert_called_once_with(BasicBus())
 
 
 def test_basic_bus_kind_uses_integrated_i2c():
-    _, open_bus = _build_platform({"i2c_bus_kind": "basic"})
-    open_bus.assert_called_once_with("basic", "CP2112")
+    from common.i2c_bus_config import BasicBus
+
+    _, open_bus = _build_platform({"i2c_bus": {"kind": "basic"}})
+    open_bus.assert_called_once_with(BasicBus())
 
 
-def test_extended_bus_with_numeric_bus_used_directly():
-    _, open_bus = _build_platform({"i2c_bus_kind": "extended", "i2c_bus_num": "3"})
-    # A plain number is a /dev/i2c-N index; resolution/discovery now happens
-    # inside common.i2c_bus, which is handed the raw selector.
-    open_bus.assert_called_once_with("extended", "3")
+def test_kernel_bus_by_number_is_used_directly():
+    from common.i2c_bus_config import KernelBusNumber
+
+    _, open_bus = _build_platform({"i2c_bus": {"kind": "kernel", "bus_num": 3}})
+    open_bus.assert_called_once_with(KernelBusNumber(bus_num=3))
 
 
-def test_extended_bus_with_name_match_is_discovered():
-    _, open_bus = _build_platform({"i2c_bus_kind": "extended", "i2c_bus_num": "CP2112"})
-    # A non-numeric spec is an adapter-name match; resolved by common.i2c_bus.
-    open_bus.assert_called_once_with("extended", "CP2112")
+def test_fan_controller_opens_the_configured_bus():
+    from common.i2c_bus_config import KernelAdapterName
+
+    _, open_bus = _build_platform({"i2c_bus": {"kind": "kernel", "adapter": "CP2112"}})
+    open_bus.assert_called_once_with(KernelAdapterName(adapter="CP2112"))
 
 
-def test_legacy_i2c_bus_match_config_stays_extended():
-    # Pre basic/extended installs only had i2c_bus_match (the CP2112 bridge name).
-    # They must keep using the bridge, not silently switch to the integrated bus.
-    _, open_bus = _build_platform({"i2c_bus_match": "CP2112"})
-    open_bus.assert_called_once_with("extended", "CP2112")
+def test_fan_controller_defaults_to_the_integrated_bus():
+    from common.i2c_bus_config import BasicBus
+
+    _, open_bus = _build_platform({})
+    open_bus.assert_called_once_with(BasicBus())
 
 
 def _make_bus(tmp_path, index, name):

@@ -14,6 +14,7 @@
 # *****************************************
 
 from common.i2c_bus import open_i2c_bus
+from common.i2c_bus_config import parse_i2c_bus
 from distance._sampled_base import SampledHopperLevel
 
 
@@ -26,8 +27,7 @@ class ToFHopperLevel(SampledHopperLevel):
         super().__init__(empty=empty, full=full, debug=debug)
 
         distance_pins = (dev_pins or {}).get("distance", {}) or {}
-        self.i2c_bus_kind = distance_pins.get("i2c_bus_kind", "basic")
-        self.i2c_bus_num = distance_pins.get("i2c_bus_num", "CP2112")
+        self.bus = parse_i2c_bus(distance_pins.get("i2c_bus") or {"kind": "basic"})
         address = distance_pins.get("address")
         if address is None:
             self.address = self.default_address
@@ -41,7 +41,7 @@ class ToFHopperLevel(SampledHopperLevel):
         self._start_sampling()
 
     def _open_i2c_bus(self):
-        return open_i2c_bus(self.i2c_bus_kind, self.i2c_bus_num)
+        return open_i2c_bus(self.bus)
 
     def _restart_sensor(self):
         i2c = self._open_i2c_bus()

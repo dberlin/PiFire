@@ -37,6 +37,7 @@ import adafruit_ads1x15.ads1115 as ADS
 from adafruit_ads1x15.analog_in import AnalogIn
 from probes.base import ProbeInterface
 from common.i2c_bus import open_i2c_bus
+from common.i2c_bus_config import BasicBus, parse_i2c_bus
 
 """
 *****************************************
@@ -48,10 +49,10 @@ from common.i2c_bus import open_i2c_bus
 class ADSDevice:
     """ADS1115 Device Based on the Adafruit Module"""
 
-    def __init__(self, i2c_bus_addr=0x48, i2c_bus_kind="basic", i2c_bus_num=0):
+    def __init__(self, i2c_bus_addr=0x48, bus=None):
         self.logger = logging.getLogger("control")
         # Create the I2C bus
-        self.i2c = open_i2c_bus(i2c_bus_kind, i2c_bus_num)
+        self.i2c = open_i2c_bus(bus or BasicBus())
         # Create the ADC object using the I2C bus
         self.ads = ADS.ADS1115(self.i2c, address=i2c_bus_addr)
         self.status = {}
@@ -78,13 +79,12 @@ class ReadProbes(ProbeInterface):
         self.time_delay = 0.008
         self.device_info["ports"] = ["ADC0", "ADC1", "ADC2", "ADC3"]
         i2c_bus_addr = int(self.device_info["config"].get("i2c_bus_addr", "0x48"), 16)
-        i2c_bus_kind = self.device_info["config"].get("i2c_bus_kind", "basic")
-        i2c_bus_num = self.device_info["config"].get("i2c_bus_num", 0)
+        bus = parse_i2c_bus(self.device_info["config"].get("i2c_bus") or {"kind": "basic"})
         try:
-            self.device = ADSDevice(i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num)
+            self.device = ADSDevice(i2c_bus_addr=i2c_bus_addr, bus=bus)
         except Exception:
             self.logger.error(
                 "Something went wrong when trying to initialize the ADS1115 device "
-                f"(i2c bus kind={i2c_bus_kind!r}, address=0x{i2c_bus_addr:02X}, bus={i2c_bus_num!r})."
+                f"(i2c bus {bus.describe()}, address=0x{i2c_bus_addr:02X})."
             )
             raise

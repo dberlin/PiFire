@@ -82,10 +82,25 @@ def _make_hopper(tof_mod, dev_pins=None, reading_mm=100, empty=22, full=4, read_
 
 
 def test_open_i2c_bus_delegates_to_factory(tof_mod):
-    hopper = _make_hopper(tof_mod, dev_pins={"distance": {"i2c_bus_kind": "ft232h", "i2c_bus_num": "1"}})
+    from common.i2c_bus_config import FT232HBus
+
+    hopper = _make_hopper(tof_mod, dev_pins={"distance": {"i2c_bus": {"kind": "ft232h", "url": "1"}}})
     try:
         assert hopper.opened_with[0] is mock.sentinel.bus
-        tof_mod.open_i2c_bus.assert_called_with("ft232h", "1")
+        tof_mod.open_i2c_bus.assert_called_with(FT232HBus(url="1"))
+    finally:
+        _stop(hopper)
+
+
+def test_tof_opens_the_configured_bus(monkeypatch):
+    import distance._tof_base as mod
+    from common.i2c_bus_config import KernelBusNumber
+
+    opened = []
+    monkeypatch.setattr(mod, "open_i2c_bus", lambda bus: opened.append(bus) or object())
+    hopper = _make_hopper(mod, dev_pins={"distance": {"i2c_bus": {"kind": "kernel", "bus_num": 3}}})
+    try:
+        assert opened == [KernelBusNumber(bus_num=3)]
     finally:
         _stop(hopper)
 

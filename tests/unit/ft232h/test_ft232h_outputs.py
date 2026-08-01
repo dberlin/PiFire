@@ -13,10 +13,12 @@ def _relay_config(**overrides):
 
 
 def test_relay_only_init_opens_shared_bus_but_no_emc():
+    from common.i2c_bus_config import FT232HBus
+
     with make_ft232h_platform(_relay_config()) as (plat, harness):
         assert plat.pwm_fan is False
         assert plat.emc is None
-        harness.open_bus.assert_called_once_with("ft232h", "1")
+        harness.open_bus.assert_called_once_with(FT232HBus(url="1"))
         harness.emc2101_cls.assert_not_called()
         harness.emc2301_cls.assert_not_called()
         assert set(plat.relays) == {"power", "igniter", "auger", "fan"}

@@ -15,9 +15,11 @@ def _emc_config(chip="emc2101", **overrides):
 
 
 def test_emc2101_init_opens_i2c_and_controller():
+    from common.i2c_bus_config import FT232HBus
+
     with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
         assert plat.pwm_fan is True
-        harness.open_bus.assert_called_once_with("ft232h", "1")
+        harness.open_bus.assert_called_once_with(FT232HBus(url="1"))
         harness.emc2101_cls.assert_called_once_with(mock.sentinel.ft232h_bus)
         harness.emc2301_cls.assert_not_called()
         assert plat.emc is harness.emc2101_cls.return_value

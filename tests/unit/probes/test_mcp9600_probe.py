@@ -100,22 +100,23 @@ def test_manifest_mcp9600_entry():
 
 def test_kttdevice_opens_bus_via_factory(monkeypatch):
     from unittest import mock
+    from common.i2c_bus_config import FT232HBus
 
     probe = _load_probe(monkeypatch)
 
     fake_bus = object()
     opened = {}
 
-    def fake_open(kind, selector):
-        opened["args"] = (kind, selector)
+    def fake_open(bus):
+        opened["bus"] = bus
         return fake_bus
 
     monkeypatch.setattr(probe, "open_i2c_bus", fake_open)
     monkeypatch.setattr(probe, "MCP9600", mock.Mock())
 
-    dev = probe.KTTDevice(i2c_bus_addr=0x67, i2c_bus_kind="ft232h", i2c_bus_num="1", tc_type="K")
+    dev = probe.KTTDevice(i2c_bus_addr=0x67, bus=FT232HBus(url="1"), tc_type="K")
     assert dev.i2c is fake_bus
-    assert opened["args"] == ("ft232h", "1")
+    assert opened["bus"] == FT232HBus(url="1")
     probe.MCP9600.assert_called_once()
 
 

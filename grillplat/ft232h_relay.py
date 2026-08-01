@@ -22,6 +22,7 @@ import threading
 from adafruit_emc2101.emc2101_lut import EMC2101_LUT
 
 from common.i2c_bus import open_i2c_bus
+from common.i2c_bus_config import FT232HBus
 from grillplat.emc2301 import EMC2301
 from grillplat.ft232h import open_gpio as open_ft232h_gpio
 from grillplat.system_commands import SystemCommandsMixin
@@ -101,7 +102,7 @@ class GrillPlatform(SystemCommandsMixin):
         # Open the FT232H I2C bus through the shared factory FIRST. This creates
         # (and caches) the single pyftdi I2cController, so the relay GPIO below
         # and any ft232h I2C probe reuse one controller and one MPSSE engine.
-        self._ft232h_bus = open_i2c_bus("ft232h", self.url)
+        self._ft232h_bus = open_i2c_bus(FT232HBus(url=self.url))
 
         # Relay GPIO comes off that same controller via pyftdi's get_gpio() --
         # no Adafruit Blinka `board`/`digitalio`, so no process-global board

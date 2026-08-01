@@ -32,7 +32,8 @@ Description:
 """
 import logging
 import ADS1115
-from probes.base import ProbeInterface, resolve_i2c_bus
+from probes.base import ProbeInterface
+from common.i2c_bus_config import BasicBus, KernelBus, parse_i2c_bus
 
 """
 *****************************************
@@ -44,20 +45,20 @@ from probes.base import ProbeInterface, resolve_i2c_bus
 class ADSDevice:
     """ADS1115 Device Based on the ADS1115 Python Module"""
 
-    def __init__(self, i2c_bus_addr=0x48, i2c_bus_kind="basic", i2c_bus_num=0):
+    def __init__(self, i2c_bus_addr=0x48, bus=None):
         self.logger = logging.getLogger("control")
         self.ads = ADS1115.ADS1115(address=i2c_bus_addr)
-        # Only set for the extended bus kind, where WE opened the handle; on the
-        # basic bus the ADS1115 library owns its own SMBus(1) and closing it is
-        # not ours to do.
+        bus = bus or BasicBus()
+        # Only set for a kernel bus, where WE opened the handle; on the basic
+        # bus the ADS1115 library owns its own SMBus(1) and closing it is not
+        # ours to do.
         self.smbus = None
-        if i2c_bus_kind == "extended":
+        if isinstance(bus, KernelBus):
             # The ADS1115 library hardcodes smbus2.SMBus(1); repoint it at the
-            # extended bus -- a /dev/i2c-N number or an adapter-name match (e.g.
-            # 'CP2112') resolved against the available i2c adapters.
+            # resolved /dev/i2c-N bus.
             import smbus2
 
-            self.smbus = smbus2.SMBus(resolve_i2c_bus(i2c_bus_num))
+            self.smbus = smbus2.SMBus(bus.resolve_bus_num())
             self.ads.i2c = self.smbus
         self.status = {}
 
@@ -89,14 +90,13 @@ class ReadProbes(ProbeInterface):
         self.time_delay = 0.008
         self.device_info["ports"] = ["ADC0", "ADC1", "ADC2", "ADC3"]
         i2c_bus_addr = int(self.device_info["config"].get("i2c_bus_addr", "0x48"), 16)
-        i2c_bus_kind = self.device_info["config"].get("i2c_bus_kind", "basic")
-        i2c_bus_num = self.device_info["config"].get("i2c_bus_num", 0)
+        bus = parse_i2c_bus(self.device_info["config"].get("i2c_bus") or {"kind": "basic"})
         try:
-            self.device = ADSDevice(i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num)
+            self.device = ADSDevice(i2c_bus_addr=i2c_bus_addr, bus=bus)
         except Exception:
             self.logger.error(
                 "Something went wrong when trying to initialize the ADS1115 device "
-                f"(i2c bus kind={i2c_bus_kind!r}, address=0x{i2c_bus_addr:02X}, bus={i2c_bus_num!r})."
+                f"(i2c bus {bus.describe()}, address=0x{i2c_bus_addr:02X})."
             )
             raise
 

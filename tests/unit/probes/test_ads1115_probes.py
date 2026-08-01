@@ -118,6 +118,8 @@ class TestADS1115:
         assert dev.get_status() == {}
 
     def test_adsdevice_extended_bus_repoints_i2c_via_smbus2(self, monkeypatch):
+        from common.i2c_bus_config import KernelBusNumber
+
         probe = self._load(monkeypatch, {0: 1500})
         fake_smbus2 = types.ModuleType("smbus2")
         captured = {}
@@ -128,39 +130,42 @@ class TestADS1115:
 
         fake_smbus2.SMBus = FakeSMBus
         monkeypatch.setitem(sys.modules, "smbus2", fake_smbus2)
-        monkeypatch.setattr(probe, "resolve_i2c_bus", lambda selector: 42)
 
-        dev = probe.ADSDevice(i2c_bus_addr=0x49, i2c_bus_kind="extended", i2c_bus_num="serial:ABC123")
+        dev = probe.ADSDevice(i2c_bus_addr=0x49, bus=KernelBusNumber(bus_num=42))
 
         assert captured["bus_num"] == 42
         assert isinstance(dev.ads.i2c, FakeSMBus)
 
-    def test_init_device_wires_address_and_bus_kind(self, monkeypatch):
+    def test_init_device_wires_address_and_bus(self, monkeypatch):
+        from common.i2c_bus_config import KernelAdapterName
+
         probe = self._load(monkeypatch, {0: 1500})
         captured = {}
 
         class SpyADSDevice:
-            def __init__(self, i2c_bus_addr, i2c_bus_kind, i2c_bus_num):
-                captured["args"] = (i2c_bus_addr, i2c_bus_kind, i2c_bus_num)
+            def __init__(self, i2c_bus_addr, bus):
+                captured["args"] = (i2c_bus_addr, bus)
 
         monkeypatch.setattr(probe, "ADSDevice", SpyADSDevice)
 
         obj = probe.ReadProbes.__new__(probe.ReadProbes)  # bypass heavy base __init__
         obj.logger = logging.getLogger("control")
-        obj.device_info = {"config": {"i2c_bus_addr": "0x49", "i2c_bus_kind": "extended", "i2c_bus_num": "3"}}
+        obj.device_info = {"config": {"i2c_bus_addr": "0x49", "i2c_bus": {"kind": "kernel", "adapter": "CP2112"}}}
         obj._init_device()
 
         assert obj.device_info["ports"] == ["ADC0", "ADC1", "ADC2", "ADC3"]
         assert obj.time_delay == 0.008
-        assert captured["args"] == (0x49, "extended", "3")
+        assert captured["args"] == (0x49, KernelAdapterName(adapter="CP2112"))
 
     def test_init_device_defaults(self, monkeypatch):
+        from common.i2c_bus_config import BasicBus
+
         probe = self._load(monkeypatch, {0: 1500})
         captured = {}
 
         class SpyADSDevice:
-            def __init__(self, i2c_bus_addr, i2c_bus_kind, i2c_bus_num):
-                captured["args"] = (i2c_bus_addr, i2c_bus_kind, i2c_bus_num)
+            def __init__(self, i2c_bus_addr, bus):
+                captured["args"] = (i2c_bus_addr, bus)
 
         monkeypatch.setattr(probe, "ADSDevice", SpyADSDevice)
 
@@ -169,7 +174,7 @@ class TestADS1115:
         obj.device_info = {"config": {}}
         obj._init_device()
 
-        assert captured["args"] == (0x48, "basic", 0)
+        assert captured["args"] == (0x48, BasicBus())
 
     def test_init_device_failure_logs_and_reraises(self, monkeypatch, caplog):
         probe = self._load(monkeypatch, {0: 1500})
@@ -205,11 +210,10 @@ class TestADS1115:
 
         fake_smbus2.SMBus = FakeSMBus
         monkeypatch.setitem(sys.modules, "smbus2", fake_smbus2)
-        monkeypatch.setattr(probe, "resolve_i2c_bus", lambda selector: 42)
 
         obj = probe.ReadProbes.__new__(probe.ReadProbes)
         obj.logger = logging.getLogger("control")
-        obj.device_info = {"config": {"i2c_bus_kind": "extended", "i2c_bus_num": "42"}}
+        obj.device_info = {"config": {"i2c_bus": {"kind": "kernel", "bus_num": 42}}}
         obj._init_device()
 
         obj.close()
@@ -279,7 +283,7 @@ class TestADS1115Adafruit:
         import probes.ads1115_adafruit as probe
 
         importlib.reload(probe)  # bind the fake adafruit_ads1x15
-        monkeypatch.setattr(probe, "open_i2c_bus", lambda kind, num: "FAKE_I2C_BUS")
+        monkeypatch.setattr(probe, "open_i2c_bus", lambda bus: "FAKE_I2C_BUS")
         return probe
 
     def test_read_all_ports_maps_known_adc_voltage_to_temperature(self, monkeypatch):
@@ -307,28 +311,32 @@ class TestADS1115Adafruit:
         assert "Exception occurred" in caplog.text
 
     def test_adsdevice_opens_bus_via_factory(self, monkeypatch):
+        from common.i2c_bus_config import FT232HBus
+
         probe = self._load(monkeypatch, {0: 1.5})
         opened = {}
 
-        def fake_open(kind, num):
-            opened["args"] = (kind, num)
+        def fake_open(bus):
+            opened["bus"] = bus
             return "FAKE_BUS"
 
         monkeypatch.setattr(probe, "open_i2c_bus", fake_open)
 
-        dev = probe.ADSDevice(i2c_bus_addr=0x49, i2c_bus_kind="ft232h", i2c_bus_num="1")
+        dev = probe.ADSDevice(i2c_bus_addr=0x49, bus=FT232HBus(url="1"))
 
-        assert opened["args"] == ("ft232h", "1")
+        assert opened["bus"] == FT232HBus(url="1")
         assert dev.i2c == "FAKE_BUS"
         assert dev.ads.address == 0x49
 
     def test_init_device_defaults(self, monkeypatch):
+        from common.i2c_bus_config import BasicBus
+
         probe = self._load(monkeypatch, {0: 1.5})
         captured = {}
 
         class SpyADSDevice:
-            def __init__(self, i2c_bus_addr, i2c_bus_kind, i2c_bus_num):
-                captured["args"] = (i2c_bus_addr, i2c_bus_kind, i2c_bus_num)
+            def __init__(self, i2c_bus_addr, bus):
+                captured["args"] = (i2c_bus_addr, bus)
 
         monkeypatch.setattr(probe, "ADSDevice", SpyADSDevice)
 
@@ -339,7 +347,7 @@ class TestADS1115Adafruit:
 
         assert obj.device_info["ports"] == ["ADC0", "ADC1", "ADC2", "ADC3"]
         assert obj.time_delay == 0.008
-        assert captured["args"] == (0x48, "basic", 0)
+        assert captured["args"] == (0x48, BasicBus())
 
     def test_init_device_failure_logs_and_reraises(self, monkeypatch, caplog):
         probe = self._load(monkeypatch, {0: 1.5})
@@ -370,7 +378,7 @@ class TestADS1015Adafruit:
         import probes.ads1015_adafruit as probe
 
         importlib.reload(probe)  # bind the fake adafruit_ads1x15
-        monkeypatch.setattr(probe, "open_i2c_bus", lambda kind, num: "FAKE_I2C_BUS")
+        monkeypatch.setattr(probe, "open_i2c_bus", lambda bus: "FAKE_I2C_BUS")
         return probe
 
     def test_read_all_ports_maps_known_adc_voltage_to_temperature(self, monkeypatch):
@@ -396,28 +404,32 @@ class TestADS1015Adafruit:
         assert "Exception occurred" in caplog.text
 
     def test_adsdevice_opens_bus_via_factory(self, monkeypatch):
+        from common.i2c_bus_config import MCP2221Bus
+
         probe = self._load(monkeypatch, {0: 1.5})
         opened = {}
 
-        def fake_open(kind, num):
-            opened["args"] = (kind, num)
+        def fake_open(bus):
+            opened["bus"] = bus
             return "FAKE_BUS"
 
         monkeypatch.setattr(probe, "open_i2c_bus", fake_open)
 
-        dev = probe.ADSDevice(i2c_bus_addr=0x49, i2c_bus_kind="mcp2221", i2c_bus_num="serial:XYZ")
+        dev = probe.ADSDevice(i2c_bus_addr=0x49, bus=MCP2221Bus(serial="XYZ"))
 
-        assert opened["args"] == ("mcp2221", "serial:XYZ")
+        assert opened["bus"] == MCP2221Bus(serial="XYZ")
         assert dev.i2c == "FAKE_BUS"
         assert dev.ads.address == 0x49
 
     def test_init_device_defaults(self, monkeypatch):
+        from common.i2c_bus_config import BasicBus
+
         probe = self._load(monkeypatch, {0: 1.5})
         captured = {}
 
         class SpyADSDevice:
-            def __init__(self, i2c_bus_addr, i2c_bus_kind, i2c_bus_num):
-                captured["args"] = (i2c_bus_addr, i2c_bus_kind, i2c_bus_num)
+            def __init__(self, i2c_bus_addr, bus):
+                captured["args"] = (i2c_bus_addr, bus)
 
         monkeypatch.setattr(probe, "ADSDevice", SpyADSDevice)
 
@@ -428,7 +440,7 @@ class TestADS1015Adafruit:
 
         assert obj.device_info["ports"] == ["ADC0", "ADC1", "ADC2", "ADC3"]
         assert obj.time_delay == 0.008
-        assert captured["args"] == (0x48, "basic", 0)
+        assert captured["args"] == (0x48, BasicBus())
 
     def test_init_device_failure_logs_and_reraises(self, monkeypatch, caplog):
         probe = self._load(monkeypatch, {0: 1.5})
