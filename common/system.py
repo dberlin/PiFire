@@ -58,44 +58,53 @@ def restart_webapp():
 
 
 def restart_scripts():
+    """Restart PiFire's supervisor programs: control, webapp and display.
+
+    `supervisorctl restart all`, not a restart of the supervisor SERVICE. The
+    unit is named `supervisor` on Debian / Raspberry Pi OS and `supervisord` on
+    Fedora / RHEL, and this had no way to tell which, so it tried every name in
+    turn. Each installer's sudoers grant names only its own unit, so the wrong
+    guess was not merely a missing unit -- it was outside NOPASSWD, and a sudo
+    that found a tty would sit at a password prompt until the timeout, which
+    then abandoned the remaining names entirely. `supervisorctl` is one name on
+    both platforms, and both installers already grant it.
+
+    It also stops short of bouncing supervisord itself, which is all that was
+    ever wanted: the three programs come back and the supervisor managing them
+    stays up.
+
+    No systemctl fallback. Reaching this means the webapp is answering requests,
+    and the webapp is one of the programs supervisord manages -- so a supervisord
+    that needs starting cannot be the one that just served this.
     """
-    Restart the Control and WebApp Scripts by restarting the supervisor service.
+    if not is_real_hardware():
+        return
 
-    The supervisor systemd unit is named 'supervisor' on Debian / Raspberry Pi OS
-    but 'supervisord' on Fedora / RHEL, so try each name in turn (systemctl first,
-    then the legacy 'service' command) until one succeeds.
-    """
-    if is_real_hardware():
+    def _restart():
+        try:
+            result = subprocess.run(
+                ["sudo", "supervisorctl", "restart", "all"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                # sudo must never reach a password prompt: given a tty on stdin
+                # it would block until the timeout and restart nothing.
+                stdin=subprocess.DEVNULL,
+                # Its own session, so that restarting `webapp` -- the program
+                # this call is running inside -- cannot take the client with it
+                # part-way through the sequence, leaving the rest stopped.
+                start_new_session=True,
+            )
+            if result.returncode != 0:
+                print(f"Failed to restart supervisor programs: {result.stderr.strip()}")
+        except subprocess.TimeoutExpired:
+            print("supervisorctl restart timed out")
+        except Exception as e:
+            print(f"Error running supervisorctl: {e}")
 
-        def _restart_supervisor():
-            service_names = ["supervisor", "supervisord"]
-            # Prefer systemctl (modern systemd systems)
-            for name in service_names:
-                try:
-                    result = subprocess.run(
-                        ["sudo", "systemctl", "restart", name], capture_output=True, text=True, timeout=10
-                    )
-                    if result.returncode == 0:
-                        return
-                except subprocess.TimeoutExpired:
-                    print("Supervisor restart command timed out")
-                    return
-                except Exception as e:
-                    print(f"Error restarting {name} via systemctl: {e}")
-            # Fall back to the legacy 'service' command for either name
-            for name in service_names:
-                try:
-                    result = subprocess.run(
-                        ["sudo", "service", name, "restart"], capture_output=True, text=True, timeout=10
-                    )
-                    if result.returncode == 0:
-                        return
-                except Exception as e:
-                    print(f"Error restarting {name} via service: {e}")
-            print("Failed to restart supervisor under any known service name")
-
-        # Run in background thread to avoid blocking
-        threading.Thread(target=_restart_supervisor, daemon=True).start()
+    # Off the request thread: this kills the webapp that is answering, so the
+    # response has to go out first.
+    threading.Thread(target=_restart, daemon=True).start()
 
 
 def reboot_system():

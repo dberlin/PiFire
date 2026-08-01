@@ -1471,7 +1471,15 @@ class DisplayBase:
             data = {"updated": True, "mode": "Stop"}
             write_control(control_delta(set_values=data), WriteKind.DELTA, origin="display")
             if self.real_hardware:
-                os.system("sleep 3 && sudo service supervisor restart &")
+                # supervisorctl, like common/system.py's restart_scripts and
+                # restart_webapp. `sudo service supervisor restart` named a unit
+                # that only exists on Debian -- and no installer grants the
+                # `service` command under NOPASSWD at all, so this asked for a
+                # password no one was there to type.
+                #
+                # The sleep stays: `restart all` includes the display, and this
+                # runs on the display's own thread.
+                os.system("sleep 3 && sudo supervisorctl restart all &")
             else:
                 pass
             self.display_active = "dash"

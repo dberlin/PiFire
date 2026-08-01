@@ -123,132 +123,83 @@ def test_restart_scripts_noop_when_not_real_hardware(sync_thread):
     run.assert_not_called()
 
 
-def test_restart_scripts_succeeds_via_systemctl_supervisor(sync_thread):
-    ok = mock.Mock(returncode=0)
+def test_restart_scripts_asks_supervisorctl_to_restart_the_programs(sync_thread):
+    """One command, not a walk through service names.
+
+    The supervisor UNIT is `supervisor` on Debian / Raspberry Pi OS and
+    `supervisord` on Fedora / RHEL, and this had no way to tell which -- so it
+    tried each in turn, and each installer's sudoers grant names only its own.
+    `supervisorctl` is one name on both, and both installers grant it.
+    """
+    ok = mock.Mock(returncode=0, stderr="")
     with (
         mock.patch.object(cc, "is_real_hardware", return_value=True),
         mock.patch.object(cc.subprocess, "run", return_value=ok) as run,
     ):
         cc.restart_scripts()
 
-    # First systemctl attempt ("supervisor") succeeds, so no further calls.
-    run.assert_called_once_with(
-        ["sudo", "systemctl", "restart", "supervisor"], capture_output=True, text=True, timeout=10
-    )
+    assert run.call_count == 1
+    assert run.call_args.args[0] == ["sudo", "supervisorctl", "restart", "all"]
 
 
-def test_restart_scripts_falls_back_through_service_names_and_commands(sync_thread):
-    """systemctl fails for both service names, then the legacy 'service' command
-    is tried for both names, succeeding on the second ('supervisord')."""
-    fail = mock.Mock(returncode=1, stderr="nope")
-    ok = mock.Mock(returncode=0)
-    calls = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        # succeed only on the final ('service', ..., 'supervisord', 'restart') call
-        if cmd == ["sudo", "service", "supervisord", "restart"]:
-            return ok
-        return fail
-
+def test_restart_scripts_never_lets_sudo_reach_a_password_prompt(sync_thread):
+    """With a tty on stdin, a sudo outside the NOPASSWD rule blocks at the
+    prompt until the timeout and restarts nothing."""
+    ok = mock.Mock(returncode=0, stderr="")
     with (
         mock.patch.object(cc, "is_real_hardware", return_value=True),
-        mock.patch.object(cc.subprocess, "run", side_effect=fake_run),
+        mock.patch.object(cc.subprocess, "run", return_value=ok) as run,
     ):
         cc.restart_scripts()
 
-    assert calls == [
-        ["sudo", "systemctl", "restart", "supervisor"],
-        ["sudo", "systemctl", "restart", "supervisord"],
-        ["sudo", "service", "supervisor", "restart"],
-        ["sudo", "service", "supervisord", "restart"],
-    ]
+    assert run.call_args.kwargs["stdin"] is subprocess.DEVNULL
 
 
-def test_restart_scripts_all_attempts_fail_does_not_raise(sync_thread, capsys):
-    fail = mock.Mock(returncode=1, stderr="nope")
+def test_restart_scripts_survives_restarting_the_webapp_it_runs_inside(sync_thread):
+    """`restart all` includes `webapp`, which is this very process. Without its
+    own session the client can be taken down part-way through the sequence,
+    leaving the remaining programs stopped."""
+    ok = mock.Mock(returncode=0, stderr="")
+    with (
+        mock.patch.object(cc, "is_real_hardware", return_value=True),
+        mock.patch.object(cc.subprocess, "run", return_value=ok) as run,
+    ):
+        cc.restart_scripts()
+
+    assert run.call_args.kwargs["start_new_session"] is True
+
+
+def test_restart_scripts_reports_a_refusal_without_raising(sync_thread, capsys):
+    fail = mock.Mock(returncode=1, stderr="unix:///var/run/supervisor.sock refused connection\n")
     with (
         mock.patch.object(cc, "is_real_hardware", return_value=True),
         mock.patch.object(cc.subprocess, "run", return_value=fail),
     ):
         cc.restart_scripts()  # must not raise
 
-    assert "Failed to restart supervisor under any known service name" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Failed to restart supervisor programs" in out
+    assert "refused connection" in out, "the reason is the only thing an operator can act on"
 
 
-def test_restart_scripts_systemctl_timeout_stops_without_service_fallback(sync_thread):
-    """A TimeoutExpired on the systemctl branch returns immediately -- the
-    'service' legacy fallback loop is only reached from the systemctl loop
-    completing (not timing out), per the explicit early `return` in the
-    except-TimeoutExpired handler."""
+def test_restart_scripts_survives_a_timeout(sync_thread, capsys):
     with (
         mock.patch.object(cc, "is_real_hardware", return_value=True),
-        mock.patch.object(
-            cc.subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd="systemctl", timeout=10)
-        ) as run,
-    ):
-        cc.restart_scripts()
-
-    # Only the first systemctl attempt is made before the timeout aborts everything.
-    run.assert_called_once_with(
-        ["sudo", "systemctl", "restart", "supervisor"], capture_output=True, text=True, timeout=10
-    )
-
-
-def test_restart_scripts_service_loop_generic_exception_is_swallowed(sync_thread):
-    """A non-timeout exception raised from the legacy 'service' fallback loop
-    (not just the systemctl loop) must also be caught per-attempt and the
-    loop must continue to the next name rather than propagating."""
-    fail = mock.Mock(returncode=1, stderr="nope")
-    ok = mock.Mock(returncode=0)
-    calls = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        if cmd[1] == "systemctl":
-            return fail
-        if cmd == ["sudo", "service", "supervisor", "restart"]:
-            raise FileNotFoundError("no service command")
-        return ok
-
-    with (
-        mock.patch.object(cc, "is_real_hardware", return_value=True),
-        mock.patch.object(cc.subprocess, "run", side_effect=fake_run),
+        mock.patch.object(cc.subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd="supervisorctl", timeout=60)),
     ):
         cc.restart_scripts()  # must not raise
 
-    assert calls == [
-        ["sudo", "systemctl", "restart", "supervisor"],
-        ["sudo", "systemctl", "restart", "supervisord"],
-        ["sudo", "service", "supervisor", "restart"],
-        ["sudo", "service", "supervisord", "restart"],
-    ]
+    assert "timed out" in capsys.readouterr().out
 
 
-def test_restart_scripts_generic_exception_is_swallowed_and_continues(sync_thread):
-    """A non-timeout exception (e.g. FileNotFoundError if sudo/systemctl is
-    missing) is caught per-attempt and the loop continues to the next name/
-    command rather than propagating."""
-    ok = mock.Mock(returncode=0)
-    calls = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        if cmd[1] == "systemctl":
-            raise FileNotFoundError("no systemctl")
-        return ok
-
+def test_restart_scripts_survives_a_missing_supervisorctl(sync_thread, capsys):
     with (
         mock.patch.object(cc, "is_real_hardware", return_value=True),
-        mock.patch.object(cc.subprocess, "run", side_effect=fake_run),
+        mock.patch.object(cc.subprocess, "run", side_effect=FileNotFoundError("no supervisorctl")),
     ):
         cc.restart_scripts()  # must not raise
 
-    assert calls == [
-        ["sudo", "systemctl", "restart", "supervisor"],
-        ["sudo", "systemctl", "restart", "supervisord"],
-        ["sudo", "service", "supervisor", "restart"],
-    ]
+    assert "Error running supervisorctl" in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------
