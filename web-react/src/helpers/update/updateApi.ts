@@ -7,6 +7,7 @@
 // throwing, since callers render the reason instead of catching an escape.
 
 import type {
+  BuildLog,
   UpdateCheck,
   UpdateResult,
   UpdateStarted,
@@ -77,3 +78,19 @@ export const changeBranch = (target: string, baseUrl = BASE_URL) =>
 export const pullUpdate = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "pull");
 export const upgradeDeps = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "upgrade");
 export const rebuildWebUi = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "rebuild-web-ui");
+
+/** One incremental read of the last web UI build's output.
+ *
+ * Rejects rather than resolving to ok:false, unlike the rest of this module:
+ * its caller is StreamingLogPanel, which treats a failed read as a tick to skip
+ * and retries on the next one. A refusal object would have to be unwrapped into
+ * exactly that. */
+export async function fetchBuildLog(offset: number, baseUrl = BASE_URL): Promise<BuildLog> {
+  const r = await get<BuildLog>(baseUrl, `buildlog?offset=${offset}`);
+  if (!r.ok || !r.data) throw new Error(r.message);
+  return r.data;
+}
+
+/** The same transcript as a file. A plain URL, for an <a download> -- there is
+ *  nothing to unwrap and nothing to hold in state. */
+export const buildLogDownloadUrl = (baseUrl = BASE_URL) => url(baseUrl, "buildlog/download");

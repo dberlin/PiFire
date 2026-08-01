@@ -9,11 +9,20 @@ rs.mock("../../helpers/update/updateApi", () => ({
   fetchUpdateCheck: rs.fn(),
   fetchUpdateLog: rs.fn(),
   fetchUpdateStatus: rs.fn(),
+  fetchBuildLog: rs.fn(),
+  buildLogDownloadUrl: () => "/api/update/buildlog/download",
   refreshBranches: rs.fn(),
   changeBranch: rs.fn(),
   pullUpdate: rs.fn(),
   upgradeDeps: rs.fn(),
   rebuildWebUi: rs.fn(),
+}));
+
+// The real panel renders through LazyLog, which virtualizes via virtua and so
+// draws zero rows in jsdom (LogViewer.test.tsx says why). What this file is
+// about is whether it is offered at all, not what it draws.
+rs.mock("../logs/StreamingLogPanel", () => ({
+  StreamingLogPanel: () => <div data-testid="build-log-panel" />,
 }));
 
 const state = {
@@ -27,6 +36,7 @@ const state = {
     remote_url: "u",
     remote_version: "v1.8.1",
     web_ui_stale: false,
+    web_ui_build_failed: false,
   },
 };
 
@@ -184,5 +194,104 @@ describe("UpdatePage web UI rebuild", () => {
     await screen.findByText("Actions");
 
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+function seedFailedBuild() {
+  (api.fetchUpdateState as ReturnType<typeof rs.fn>).mockResolvedValue({
+    ...state,
+    data: { ...state.data, web_ui_build_failed: true },
+  });
+  (api.fetchUpdateCheck as ReturnType<typeof rs.fn>).mockResolvedValue({
+    ok: true,
+    status: 200,
+    message: "",
+    data: { current: "v1.8.0", behind: 0 },
+  });
+}
+
+describe("UpdatePage failed web UI rebuild", () => {
+  it("offers the build log when the last rebuild failed", async () => {
+    /* The build runs detached and its output scrolls past in a status line
+       polled four times a second. Without this the only copy is a shell on the
+       grill. */
+    seedFailedBuild();
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The last web UI rebuild failed");
+    expect(screen.getByRole("button", { name: "Show build log" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download build log" })).toHaveAttribute(
+      "href",
+      "/api/update/buildlog/download",
+    );
+  });
+
+  it("offers nothing when the rebuild worked", async () => {
+    /* A build that worked has nothing to say that the interface itself does not
+       already show. */
+    seed();
+    renderPage();
+    await screen.findByText("Actions");
+
+    expect(screen.queryByRole("button", { name: "Show build log" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Download build log" })).toBeNull();
+  });
+
+  it("mounts the panel only once the log is asked for", async () => {
+    // Mounted while hidden it would poll for as long as the page was open, on
+    // a grill that just failed to build.
+    seedFailedBuild();
+    renderPage();
+    await screen.findByRole("alert");
+    expect(screen.queryByTestId("build-log-panel")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show build log" }));
+
+    expect(screen.getByTestId("build-log-panel")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide build log" }));
+    expect(screen.queryByTestId("build-log-panel")).toBeNull();
+  });
+
+  it("stops polling and reports the run when a forced rebuild fails", async () => {
+    /* updater.py publishes a NEGATIVE percent on failure. Only percents above
+       100 used to end the poll, so a failed rebuild left the page polling a
+       process that had already stopped writing, showing a bar that never
+       moved -- exactly what a hung build looks like. */
+    seed({
+      rebuildWebUi: { ok: true, status: 200, message: "", data: { started: true } },
+      fetchUpdateStatus: {
+        ok: true,
+        status: 200,
+        message: "",
+        data: {
+          percent: -1,
+          status: "Web UI rebuild failed",
+          output: " - The build did not complete.",
+        },
+      },
+    });
+    renderPage();
+    await screen.findByText("Actions");
+    // Counted relatively: these mocks are shared across the file and never
+    // reset, so an absolute call count would depend on test order.
+    const stateReads = (api.fetchUpdateState as ReturnType<typeof rs.fn>).mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Rebuild web UI" }));
+
+    await waitFor(() =>
+      expect(screen.getAllByText("Web UI rebuild failed").length).toBeGreaterThan(0),
+    );
+    // Reloading the state is what puts the build log on offer.
+    await waitFor(() =>
+      expect((api.fetchUpdateState as ReturnType<typeof rs.fn>).mock.calls.length).toBe(
+        stateReads + 1,
+      ),
+    );
+
+    const callsAfterFinish = (api.fetchUpdateStatus as ReturnType<typeof rs.fn>).mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect((api.fetchUpdateStatus as ReturnType<typeof rs.fn>).mock.calls.length).toBe(
+      callsAfterFinish,
+    );
   });
 });

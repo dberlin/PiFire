@@ -22,15 +22,24 @@ from common.common import (
     read_updater_manifest,
     semantic_ver_is_lower,
     create_logger,
+    log_path,
     write_generic_json,
 )
+from common.install_log import INSTALL_FAILED_PERCENT
 from common.datastore_accessors import (
     set_updater_install_status,
     read_settings,
     set_wizard_install_status,
     write_settings,
 )
-from common.web_ui_build import rebuild_web_ui, web_ui_needs_rebuild
+from common.web_ui_build import (
+    BUILD_FAIL_MARKER,
+    BUILD_LOG_NAME,
+    BUILD_OK_MARKER,
+    BUILD_RUN_MARKER,
+    rebuild_web_ui,
+    web_ui_needs_rebuild,
+)
 from importlib.metadata import version, PackageNotFoundError
 
 import os
@@ -40,6 +49,11 @@ import logging
 
 #: This file sits at the repo root, beside web-react/ and updater/.
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+#: The same logger __main__ attaches a file handler to -- logging caches by
+#: name, so both names are one object. Bound here as well so the functions below
+#: can log when they are called from an import rather than from the CLI.
+logger = logging.getLogger("updater")
 
 """
 ==============================================================================
@@ -372,9 +386,15 @@ def rebuild_web_ui_if_stale(repo_root=None, runner=None, force=False):
     logger.info(status)
     set_updater_install_status(95, status, " - Rebuilding the web UI from the updated sources")
 
+    # Bounds this build's lines within logs/update.log, which carries the whole
+    # update. The updater page reads back what lies between these markers, so a
+    # failed build can be shown on its own rather than as a needle in the
+    # update's git and apt output.
+    logger.info(BUILD_RUN_MARKER)
     code = rebuild_web_ui(repo_root, lambda line: _publish(95, status, line), runner=runner)
     if code == 0:
         logger.info("Web UI rebuilt")
+        logger.info(BUILD_OK_MARKER)
         return True
 
     # Not fatal to the update -- the backend is already on the new code and a
@@ -383,6 +403,7 @@ def rebuild_web_ui_if_stale(repo_root=None, runner=None, force=False):
     # different sources.
     output = f" - Web UI rebuild FAILED (exit {code}). The previous bundle is still being served."
     logger.error(output)
+    logger.error(BUILD_FAIL_MARKER)
     set_updater_install_status(95, "Web UI rebuild failed", output)
     return False
 
@@ -649,7 +670,7 @@ if __name__ == "__main__":
 
     logger = create_logger(
         "updater",
-        filename="./logs/update.log",
+        filename=log_path(BUILD_LOG_NAME),
         messageformat="%(asctime)s | %(levelname)s | %(message)s",
         level=log_level,
     )
@@ -708,8 +729,17 @@ if __name__ == "__main__":
         num_args += 1
         # Forced: the caller asked for this build explicitly, so it runs even
         # when the mtime check would call the bundle current.
-        rebuild_web_ui_if_stale(force=True)
-        set_updater_install_status(101, "Finished!", " - Web UI rebuild finished")
+        if rebuild_web_ui_if_stale(force=True):
+            set_updater_install_status(101, "Finished!", " - Web UI rebuild finished")
+        else:
+            # The negative sentinel is what the browser reads as "this run
+            # ended, and it ended badly" -- percent above 100 means finished, so
+            # reporting 101 here would have called a failed build a success.
+            set_updater_install_status(
+                INSTALL_FAILED_PERCENT,
+                "Web UI rebuild failed",
+                " - The build did not complete. The previously built interface is still being served.",
+            )
 
     elif args.remote:
         num_args += 1

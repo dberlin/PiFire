@@ -36,6 +36,7 @@ def test_state_returns_the_update_data_shape(ds, client, monkeypatch):
 
     _stub_reads(monkeypatch)
     monkeypatch.setattr(ur, "web_ui_needs_rebuild", lambda root: False)
+    monkeypatch.setattr(ur, "last_build_failed", lambda: False)
     body = client.get("/api/update/state").get_json()
     assert body["result"] == "OK"
     assert body["data"] == {
@@ -45,6 +46,7 @@ def test_state_returns_the_update_data_shape(ds, client, monkeypatch):
         "remote_url": "https://github.com/nebhead/PiFire",
         "remote_version": "v1.8.1",
         "web_ui_stale": False,
+        "web_ui_build_failed": False,
     }
 
 
@@ -55,7 +57,22 @@ def test_state_reports_a_bundle_older_than_its_sources(ds, client, monkeypatch):
 
     _stub_reads(monkeypatch)
     monkeypatch.setattr(ur, "web_ui_needs_rebuild", lambda root: True)
+    monkeypatch.setattr(ur, "last_build_failed", lambda: False)
     assert client.get("/api/update/state").get_json()["data"]["web_ui_stale"] is True
+
+
+def test_state_reports_a_failed_rebuild_independently_of_staleness(ds, client, monkeypatch):
+    """The two are not the same question. A forced rebuild of an already-current
+    bundle can fail and leave nothing stale, and only the failure should put the
+    build log on offer."""
+    import blueprints.api_update.routes as ur
+
+    _stub_reads(monkeypatch)
+    monkeypatch.setattr(ur, "web_ui_needs_rebuild", lambda root: False)
+    monkeypatch.setattr(ur, "last_build_failed", lambda: True)
+    data = client.get("/api/update/state").get_json()["data"]
+    assert data["web_ui_build_failed"] is True
+    assert data["web_ui_stale"] is False
 
 
 def test_check_reports_commits_behind(ds, client, monkeypatch):
@@ -219,3 +236,62 @@ def test_rebuild_web_ui_is_allowed_while_the_grill_runs(ds, client, monkeypatch)
 
     assert resp.status_code == 200
     assert len(fired) == 1
+
+
+def test_buildlog_serves_the_run_from_its_start_and_reports_the_next_offset(ds, client, monkeypatch):
+    import blueprints.api_update.routes as ur
+
+    monkeypatch.setattr(ur, "read_build_log", lambda offset: ("+ building\n", 11, True))
+
+    body = client.get("/api/update/buildlog").get_json()
+
+    assert body["result"] == "OK"
+    assert body["data"] == {"text": "+ building\n", "offset": 11, "reset": True}
+
+
+def test_buildlog_passes_the_offset_through(ds, client, monkeypatch):
+    """The panel polls once a second for as long as it is open; re-sending the
+    whole transcript each tick is what the offset exists to avoid."""
+    import blueprints.api_update.routes as ur
+
+    seen = []
+
+    def read(offset):
+        seen.append(offset)
+        return ("", offset, False)
+
+    monkeypatch.setattr(ur, "read_build_log", read)
+    client.get("/api/update/buildlog?offset=512")
+
+    assert seen == [512]
+
+
+def test_buildlog_treats_a_junk_offset_as_the_start_of_the_run(ds, client, monkeypatch):
+    import blueprints.api_update.routes as ur
+
+    seen = []
+
+    def read(offset):
+        seen.append(offset)
+        return ("", 0, True)
+
+    monkeypatch.setattr(ur, "read_build_log", read)
+    client.get("/api/update/buildlog?offset=nonsense")
+
+    assert seen == [0]
+
+
+def test_buildlog_download_returns_the_transcript_as_an_attachment(ds, client, monkeypatch):
+    import blueprints.api_update.routes as ur
+
+    monkeypatch.setattr(ur, "read_build_log", lambda: ("+ building\n! failed\n", 20, True))
+
+    resp = client.get("/api/update/buildlog/download")
+
+    assert resp.status_code == 200
+    assert resp.mimetype == "text/plain"
+    # Without this the browser renders it in a tab instead of saving it, and
+    # the point of the control is producing a file to attach to a bug report.
+    assert "attachment" in resp.headers["Content-Disposition"]
+    assert "web-ui-build.log" in resp.headers["Content-Disposition"]
+    assert resp.get_data(as_text=True) == "+ building\n! failed\n"

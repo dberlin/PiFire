@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { behindText } from "../../helpers/update/behindText";
 import {
+  buildLogDownloadUrl,
   changeBranch,
+  fetchBuildLog,
   fetchUpdateCheck,
   fetchUpdateLog,
   fetchUpdateState,
@@ -18,6 +20,7 @@ import type {
   UpdateState,
   UpdateStatus,
 } from "../../helpers/update/updateTypes";
+import { StreamingLogPanel } from "../logs/StreamingLogPanel";
 import "./update.css";
 
 const refusalText = (r: UpdateResult<unknown>): string => {
@@ -31,6 +34,13 @@ const refusalText = (r: UpdateResult<unknown>): string => {
 // plain > 100 "finished, service restart is enough".
 const REBOOT_REQUIRED_PERCENT = 142;
 
+// updater.py publishes a NEGATIVE percent when a run it owns end-to-end fails
+// (common/install_log.py's INSTALL_FAILED_PERCENT). Every real percent is
+// positive, the finished sentinels included, so without this a failed rebuild
+// left the poll below running forever against a process that had already
+// stopped writing.
+const isFailure = (percent: number) => percent < 0;
+
 export function UpdatePage() {
   const [state, setState] = useState<UpdateState | null>(null);
   const [behind, setBehind] = useState<number | null>(null);
@@ -39,7 +49,8 @@ export function UpdatePage() {
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<UpdateStatus | null>(null);
-  const [done, setDone] = useState<null | "ok" | "reboot">(null);
+  const [done, setDone] = useState<null | "ok" | "reboot" | "failed">(null);
+  const [showBuildLog, setShowBuildLog] = useState(false);
 
   const apply = useCallback((s: UpdateResult<UpdateState>, c: UpdateResult<UpdateCheck>) => {
     if (s.ok && s.data) {
@@ -77,11 +88,13 @@ export function UpdatePage() {
       const r = await fetchUpdateStatus();
       if (!r.ok || !r.data) return;
       setProgress(r.data);
-      if (r.data.percent > 100) {
-        setDone(r.data.percent === REBOOT_REQUIRED_PERCENT ? "reboot" : "ok");
-        void load();
-        clearInterval(id);
-      }
+      const failed = isFailure(r.data.percent);
+      if (r.data.percent <= 100 && !failed) return;
+      setDone(failed ? "failed" : r.data.percent === REBOOT_REQUIRED_PERCENT ? "reboot" : "ok");
+      // Reload the state the run just changed -- which is how the build-log
+      // offer below learns a rebuild failed.
+      void load();
+      clearInterval(id);
     }, 250); // matches wizard/InstallProgress.tsx's polling cadence
     return () => clearInterval(id);
   }, [polling, load]);
@@ -101,6 +114,9 @@ export function UpdatePage() {
     }
     setProgress({ percent: 0, status: "Starting…", output: "" });
     setDone(null);
+    // A new run writes a new transcript. Leaving the panel open would show the
+    // previous build's failure until the first line of this one lands.
+    setShowBuildLog(false);
   };
 
   const showLog = async () => {
@@ -186,6 +202,37 @@ export function UpdatePage() {
             The web interface is older than the code on disk. Rebuild it to pick up the update.
           </p>
         )}
+        {/* Offered only on failure. A build that worked has nothing to say that
+            the interface itself does not already show. */}
+        {state.web_ui_build_failed && (
+          <div className="pf-update-build-failed" role="alert">
+            <p>
+              The last web UI rebuild failed. The previously built interface is still being served.
+            </p>
+            <div className="pf-update-build-actions">
+              <button
+                type="button"
+                className="pf-admin-btn"
+                onClick={() => setShowBuildLog((open) => !open)}
+              >
+                {showBuildLog ? "Hide build log" : "Show build log"}
+              </button>
+              {/* A real link, not a fetch-and-blob: the browser streams it
+                  straight to disk and the file is a plain GET anyone can paste
+                  into a bug report. */}
+              <a className="pf-admin-btn" href={buildLogDownloadUrl()} download>
+                Download build log
+              </a>
+            </div>
+            {/* Mounted only while open, so a closed panel starts no polling. */}
+            {showBuildLog && (
+              <StreamingLogPanel
+                fetchDelta={fetchBuildLog}
+                waitingText="No build output was recorded."
+              />
+            )}
+          </div>
+        )}
         {note && <p className="pf-update-note">{note}</p>}
       </section>
 
@@ -193,12 +240,15 @@ export function UpdatePage() {
         <section className="pf-admin-card pf-admin-wide" aria-label="update progress">
           <div
             className="pf-update-progress"
-            style={{ width: `${Math.min(progress.percent, 100)}%` }}
+            // Clamped at both ends: the failure sentinel is a negative percent,
+            // which as a width is a bar that renders inside out.
+            style={{ width: `${Math.min(Math.max(progress.percent, 0), 100)}%` }}
           />
           <p>{progress.status}</p>
           <pre className="pf-update-log">{progress.output}</pre>
           {done === "ok" && <p>Update complete.</p>}
           {done === "reboot" && <p>Update complete — reboot required.</p>}
+          {done === "failed" && <p role="alert">{progress.status}</p>}
         </section>
       )}
 

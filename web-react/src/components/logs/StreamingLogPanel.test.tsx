@@ -2,11 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, render, screen } from "@testing-library/react";
 import * as React from "react" with { rstest: "importActual" };
 
-const getInstallLogMock = rs.fn();
-rs.mock("../../helpers/wizard/wizardApi", () => ({
-  getInstallLog: (...a: unknown[]) => getInstallLogMock(...a),
-}));
-
 // Same double, and for the same reason, as LogViewer.test.tsx: the real LazyLog
 // virtualizes through virtua, which drops every ResizeObserver entry whose
 // target has no offsetParent -- in jsdom, all of them -- so it renders zero
@@ -25,10 +20,15 @@ rs.mock("@melloware/react-logviewer", () => ({
   },
 }));
 
-const { InstallOutput } = await import("./InstallOutput");
+const { StreamingLogPanel } = await import("./StreamingLogPanel");
+
+const fetchDelta = rs.fn();
+const WAITING = "Waiting for the installer's first line…";
+
+const panel = () => <StreamingLogPanel fetchDelta={fetchDelta} waitingText={WAITING} />;
 
 beforeEach(() => {
-  getInstallLogMock.mockReset();
+  fetchDelta.mockReset();
   appended.length = 0;
 });
 
@@ -36,10 +36,10 @@ afterEach(() => {
   rs.useRealTimers();
 });
 
-describe("InstallOutput", () => {
+describe("StreamingLogPanel", () => {
   it("reads from offset 0 on mount, then polls from the offset the server returned", async () => {
     rs.useFakeTimers();
-    getInstallLogMock
+    fetchDelta
       .mockResolvedValueOnce({
         text: "2026-08-01 12:00:03 +0000 | INFO | first\n",
         offset: 40,
@@ -47,30 +47,30 @@ describe("InstallOutput", () => {
       })
       .mockResolvedValue({ text: "", offset: 40, reset: false });
 
-    render(<InstallOutput baseUrl="http://x" />);
+    render(panel());
     await act(async () => {
       await rs.advanceTimersByTimeAsync(0);
     });
 
-    expect(getInstallLogMock).toHaveBeenCalledWith("http://x", 0);
+    expect(fetchDelta).toHaveBeenCalledWith(0);
 
     await act(async () => {
       await rs.advanceTimersByTimeAsync(1000);
     });
     // The second poll must resume where the first ended, or the transcript
     // re-sends the whole run every tick.
-    expect(getInstallLogMock).toHaveBeenLastCalledWith("http://x", 40);
+    expect(fetchDelta).toHaveBeenLastCalledWith(40);
   });
 
   it("strips the logger prefix, keeping the clock", async () => {
     rs.useFakeTimers();
-    getInstallLogMock.mockResolvedValue({
+    fetchDelta.mockResolvedValue({
       text: "2026-08-01 12:00:03 +0000 | INFO | Resolved 12 packages\n",
       offset: 56,
       reset: true,
     });
 
-    render(<InstallOutput baseUrl="http://x" />);
+    render(panel());
     await act(async () => {
       await rs.advanceTimersByTimeAsync(0);
     });
@@ -83,12 +83,12 @@ describe("InstallOutput", () => {
 
   it("appends a delta rather than redrawing the whole log", async () => {
     rs.useFakeTimers();
-    getInstallLogMock
+    fetchDelta
       .mockResolvedValueOnce({ text: "one\n", offset: 4, reset: true })
       .mockResolvedValueOnce({ text: "two\nthree\n", offset: 14, reset: false })
       .mockResolvedValue({ text: "", offset: 14, reset: false });
 
-    render(<InstallOutput baseUrl="http://x" />);
+    render(panel());
     await act(async () => {
       await rs.advanceTimersByTimeAsync(0);
     });
@@ -98,20 +98,20 @@ describe("InstallOutput", () => {
 
     expect(appended).toEqual([["two", "three"]]);
     // The initial text is untouched by the append -- the delta went through the
-    // ref, which is what keeps a long install from re-rendering every tick.
+    // ref, which is what keeps a long run from re-rendering every tick.
     expect(screen.getByTestId("lazylog")).toHaveTextContent("one");
   });
 
   it("replaces the view when the server reports a reset", async () => {
-    /* A second install in the same session. Appending would splice the new
-       run's head onto the finished run's tail. */
+    /* A second run in the same session. Appending would splice the new run's
+       head onto the finished run's tail. */
     rs.useFakeTimers();
-    getInstallLogMock
+    fetchDelta
       .mockResolvedValueOnce({ text: "first run\n", offset: 10, reset: true })
       .mockResolvedValueOnce({ text: "second run\n", offset: 11, reset: true })
       .mockResolvedValue({ text: "", offset: 11, reset: false });
 
-    render(<InstallOutput baseUrl="http://x" />);
+    render(panel());
     await act(async () => {
       await rs.advanceTimersByTimeAsync(0);
     });
@@ -125,21 +125,21 @@ describe("InstallOutput", () => {
     expect(shown).not.toContain("first run");
   });
 
-  it("shows a placeholder, not an empty viewer, until the first line lands", async () => {
+  it("shows the waiting text, not an empty viewer, until the first line lands", async () => {
     // LazyLog ingests its `text` when it mounts and thereafter owns its rows,
     // so mounting it on placeholder text would bake that placeholder in as row
-    // one for the rest of the install -- and swallow the first read with it.
+    // one for the rest of the run -- and swallow the first read with it.
     rs.useFakeTimers();
-    getInstallLogMock
+    fetchDelta
       .mockResolvedValueOnce({ text: "", offset: 0, reset: true })
       .mockResolvedValue({ text: "first line\n", offset: 11, reset: false });
 
-    render(<InstallOutput baseUrl="http://x" />);
+    render(panel());
     await act(async () => {
       await rs.advanceTimersByTimeAsync(0);
     });
     expect(screen.queryByTestId("lazylog")).toBeNull();
-    expect(screen.getByText("Waiting for the installer's first line…")).toBeInTheDocument();
+    expect(screen.getByText(WAITING)).toBeInTheDocument();
 
     await act(async () => {
       await rs.advanceTimersByTimeAsync(1000);
@@ -153,7 +153,7 @@ describe("InstallOutput", () => {
        duplicated the whole overlap on screen. */
     rs.useFakeTimers();
     let resolveSlow: (v: unknown) => void = () => {};
-    getInstallLogMock
+    fetchDelta
       // Seed, so the reads that follow are appends -- which is where a
       // duplicate actually lands on screen.
       .mockResolvedValueOnce({ text: "one\n", offset: 4, reset: true })
@@ -164,7 +164,7 @@ describe("InstallOutput", () => {
       )
       .mockResolvedValue({ text: "two\n", offset: 8, reset: false });
 
-    render(<InstallOutput baseUrl="http://x" />);
+    render(panel());
     await act(async () => {
       await rs.advanceTimersByTimeAsync(0);
     });
@@ -189,11 +189,11 @@ describe("InstallOutput", () => {
 
   it("keeps polling after a failed read", async () => {
     rs.useFakeTimers();
-    getInstallLogMock
+    fetchDelta
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValue({ text: "recovered\n", offset: 10, reset: true });
 
-    render(<InstallOutput baseUrl="http://x" />);
+    render(panel());
     await act(async () => {
       await rs.advanceTimersByTimeAsync(0);
     });
@@ -204,21 +204,68 @@ describe("InstallOutput", () => {
     expect(screen.getByTestId("lazylog")).toHaveTextContent("recovered");
   });
 
+  it("does not restart its polling when the parent re-renders", async () => {
+    /* Both callers re-render on their own status poll, four times a second,
+       and both pass a fresh closure each time. Depending on that identity
+       tore the interval down and rebuilt it on every one of those renders. */
+    rs.useFakeTimers();
+    fetchDelta.mockResolvedValue({ text: "", offset: 0, reset: false });
+
+    const { rerender } = render(
+      <StreamingLogPanel fetchDelta={(o) => fetchDelta(o)} waitingText={WAITING} />,
+    );
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(0);
+    });
+    fetchDelta.mockClear();
+
+    // Four renders inside one poll interval. A restarted effect reads
+    // immediately, so each would show up as its own call.
+    for (let i = 0; i < 4; i++) {
+      rerender(<StreamingLogPanel fetchDelta={(o) => fetchDelta(o)} waitingText={WAITING} />);
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(100);
+      });
+    }
+
+    expect(fetchDelta).not.toHaveBeenCalled();
+  });
+
+  it("calls the newest fetcher, not the one it mounted with", async () => {
+    // The ref that stops the restart above must still be updated, or a caller
+    // whose base URL or credentials change would poll the old one forever.
+    rs.useFakeTimers();
+    const first = rs.fn().mockResolvedValue({ text: "", offset: 0, reset: false });
+    const second = rs.fn().mockResolvedValue({ text: "", offset: 0, reset: false });
+
+    const { rerender } = render(<StreamingLogPanel fetchDelta={first} waitingText={WAITING} />);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(0);
+    });
+
+    rerender(<StreamingLogPanel fetchDelta={second} waitingText={WAITING} />);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(second).toHaveBeenCalled();
+  });
+
   it("stops polling on unmount", async () => {
     rs.useFakeTimers();
-    getInstallLogMock.mockResolvedValue({ text: "", offset: 0, reset: false });
+    fetchDelta.mockResolvedValue({ text: "", offset: 0, reset: false });
 
-    const { unmount } = render(<InstallOutput baseUrl="http://x" />);
+    const { unmount } = render(panel());
     await act(async () => {
       await rs.advanceTimersByTimeAsync(0);
     });
     unmount();
-    getInstallLogMock.mockClear();
+    fetchDelta.mockClear();
 
     await act(async () => {
       await rs.advanceTimersByTimeAsync(5000);
     });
 
-    expect(getInstallLogMock).not.toHaveBeenCalled();
+    expect(fetchDelta).not.toHaveBeenCalled();
   });
 });

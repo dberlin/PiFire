@@ -169,3 +169,139 @@ def test_updater_reports_a_failed_rebuild_without_claiming_success(repo, monkeyp
 
     assert updater.rebuild_web_ui_if_stale(repo, runner=lambda c, o: 1) is False
     assert any("FAILED" in entry[2] for entry in published)
+
+
+# ---------------------------------------------------------------------------
+# The build transcript. logs/update.log carries the whole update -- git, apt,
+# pip -- so a failed build is offered scoped between the markers updater.py
+# writes around it, not as the whole file.
+
+
+import logging
+
+from common.web_ui_build import (
+    BUILD_FAIL_MARKER,
+    BUILD_OK_MARKER,
+    BUILD_RUN_MARKER,
+    last_build_failed,
+    read_build_log,
+)
+
+
+def build_log(tmp_path, *lines):
+    path = tmp_path / "update.log"
+    path.write_text("".join(f"2026-08-01 12:00:0{i} +0000 | INFO | {line}\n" for i, line in enumerate(lines)))
+    return str(path)
+
+
+def test_the_transcript_starts_at_the_build_not_at_the_top_of_the_update(tmp_path):
+    path = build_log(
+        tmp_path,
+        "Attempting an update on branch main",
+        "Fast-forwarded to abc1234",
+        BUILD_RUN_MARKER,
+        "+ Building the web UI",
+        BUILD_OK_MARKER,
+    )
+
+    text, _, _ = read_build_log(path=path)
+
+    assert "+ Building the web UI" in text
+    assert "Fast-forwarded" not in text, "the update's git output is not this build's output"
+
+
+def test_the_transcript_is_incremental_from_an_offset(tmp_path):
+    """A panel open on a running build polls once a second. Re-sending the whole
+    thing every tick is what the offset exists to avoid."""
+    path = build_log(tmp_path, BUILD_RUN_MARKER, "first")
+
+    whole, offset, reset = read_build_log(path=path)
+    assert reset is True
+    assert "first" in whole
+
+    with open(path, "a") as handle:
+        handle.write("2026-08-01 12:00:09 +0000 | INFO | second\n")
+
+    delta, _, again = read_build_log(offset=offset, path=path)
+
+    assert again is False
+    assert "second" in delta
+    assert "first" not in delta, "a delta that re-sends what the client has already drawn"
+
+
+def test_a_failed_build_is_reported_as_failed(tmp_path):
+    path = build_log(tmp_path, BUILD_RUN_MARKER, "+ Building the web UI", BUILD_FAIL_MARKER)
+
+    assert last_build_failed(path) is True
+
+
+def test_a_successful_build_is_not_reported_as_failed(tmp_path):
+    path = build_log(tmp_path, BUILD_RUN_MARKER, "+ Web UI built", BUILD_OK_MARKER)
+
+    assert last_build_failed(path) is False
+
+
+def test_a_build_still_running_is_not_reported_as_failed(tmp_path):
+    """It has an opening marker and no closing one. Reading that as a failure
+    would put the log on offer while the build was still writing it."""
+    path = build_log(tmp_path, BUILD_RUN_MARKER, "+ Building the web UI")
+
+    assert last_build_failed(path) is False
+
+
+def test_a_successful_rebuild_clears_a_previous_failure(tmp_path):
+    """The marker scan takes the LAST run. A failure that stayed on offer after
+    the operator fixed it and rebuilt would be worse than not reporting it."""
+    path = build_log(
+        tmp_path,
+        BUILD_RUN_MARKER,
+        "+ Building the web UI",
+        BUILD_FAIL_MARKER,
+        BUILD_RUN_MARKER,
+        "+ Web UI built",
+        BUILD_OK_MARKER,
+    )
+
+    assert last_build_failed(path) is False
+
+
+def test_a_log_with_no_build_in_it_is_not_a_failure(tmp_path):
+    path = build_log(tmp_path, "Attempting an update on branch main", "Fast-forwarded to abc1234")
+
+    assert last_build_failed(path) is False
+
+
+def test_a_missing_log_is_not_a_failure(tmp_path):
+    assert last_build_failed(str(tmp_path / "absent.log")) is False
+
+
+def test_the_rebuild_writes_the_markers_the_reader_looks_for(repo, tmp_path, monkeypatch):
+    """The two halves of this are in different files, and the transcript is
+    empty if either drifts: updater.py writes the boundaries, web_ui_build.py
+    reads them."""
+    import updater
+
+    path = tmp_path / "update.log"
+    logger = logging.getLogger("test_build_markers")
+    logger.handlers.clear()
+    handler = logging.FileHandler(str(path))
+    handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", "%Y-%m-%d %H:%M:%S %z"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+    monkeypatch.setattr(updater, "logger", logger, raising=False)
+    monkeypatch.setattr(updater, "web_ui_needs_rebuild", lambda root: True)
+    monkeypatch.setattr(updater, "set_updater_install_status", lambda *a: None)
+
+    def runner(command, on_line):
+        on_line("error: could not resolve dependencies")
+        return 1
+
+    assert updater.rebuild_web_ui_if_stale(repo, runner=runner) is False
+    handler.flush()
+
+    assert last_build_failed(str(path)) is True
+    text, _, _ = read_build_log(path=str(path))
+    assert "could not resolve dependencies" in text, "the reason must survive into what is offered"
+
+    logger.handlers.clear()

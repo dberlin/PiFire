@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { adminErrorText, systemAction } from "../../helpers/admin/adminApi";
 import type { SystemAction } from "../../helpers/admin/adminTypes";
-import { getInstallStatus } from "../../helpers/wizard/wizardApi";
+import { getInstallLog, getInstallStatus } from "../../helpers/wizard/wizardApi";
 import type { InstallStatus } from "../../helpers/wizard/wizardTypes";
-import { InstallOutput } from "./InstallOutput";
+import { StreamingLogPanel } from "../logs/StreamingLogPanel";
 
 export interface InstallProgressProps {
   baseUrl: string;
@@ -156,7 +156,12 @@ export function InstallProgress({ baseUrl, onDone }: InstallProgressProps) {
         <summary className="pf-install-output-summary">Show output</summary>
         {/* Mounted only while open, so a closed panel starts no polling and the
             viewer is never virtualizing rows nobody asked to see. */}
-        {showOutput && <InstallOutput baseUrl={baseUrl} />}
+        {showOutput && (
+          <StreamingLogPanel
+            fetchDelta={(offset) => getInstallLog(baseUrl, offset)}
+            waitingText="Waiting for the installer's first line…"
+          />
+        )}
       </details>
     </div>
   );

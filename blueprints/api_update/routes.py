@@ -11,7 +11,7 @@ come along, and their template-injection surface stays behind.
 
 import os
 
-from flask import jsonify, request
+from flask import Response, jsonify, request
 
 from common.app import api_response
 from common.datastore_accessors import (
@@ -22,7 +22,7 @@ from common.datastore_accessors import (
 )
 from common.modes import Mode
 from common.system import is_real_hardware
-from common.web_ui_build import web_ui_needs_rebuild
+from common.web_ui_build import last_build_failed, read_build_log, web_ui_needs_rebuild
 from updater import REPO_ROOT, get_available_updates, get_branch, get_log, get_update_data
 
 from . import api_update_bp
@@ -64,6 +64,11 @@ def update_state():
             # disk. Drives the updater page's Rebuild Web UI control, which is
             # the way back from a pull whose rebuild did not run or failed.
             "web_ui_stale": web_ui_needs_rebuild(REPO_ROOT),
+            # Whether the last rebuild attempt failed. Distinct from stale: a
+            # forced rebuild of an already-current bundle can fail and leave
+            # nothing out of date, and a stale bundle can simply never have
+            # been built. This is what puts the build log on offer.
+            "web_ui_build_failed": last_build_failed(),
         }
     )
 
@@ -86,6 +91,35 @@ def update_log():
     if error_msg:
         return _error(error_msg, 502)
     return _ok({"output": result})
+
+
+@api_update_bp.route("/buildlog", methods=["GET"])
+def update_build_log():
+    """The last web UI rebuild's output, from `offset` bytes on.
+
+    Scoped to the rebuild rather than serving logs/update.log whole: that file
+    also carries git, apt and pip output from the update around it, and the
+    question being asked here is why one build failed. A non-integer or absent
+    offset reads the run from its start, which is what the client asks for the
+    first time it opens the panel.
+    """
+    text, offset, reset = read_build_log(request.args.get("offset", type=int) or 0)
+    return _ok({"text": text, "offset": offset, "reset": reset})
+
+
+@api_update_bp.route("/buildlog/download", methods=["GET"])
+def update_build_log_download():
+    """The same transcript as a file, for attaching to a bug report.
+
+    Its own route rather than a flag on the one above so the page can hand the
+    URL straight to an <a download>, with no fetch and no envelope to unwrap.
+    """
+    text, _, _ = read_build_log()
+    return Response(
+        text,
+        mimetype="text/plain",
+        headers={"Content-Disposition": 'attachment; filename="web-ui-build.log"'},
+    )
 
 
 @api_update_bp.route("/status", methods=["GET"])

@@ -16,6 +16,20 @@ build, a dist removed by `git clean`.
 import os
 import subprocess
 
+from common.common import log_path
+from common.install_log import read_install_log
+
+#: The updater's own log, which every rebuild line already reaches: the build
+#: runs from updater.py and publishes through its logger.
+BUILD_LOG_NAME = "update.log"
+
+#: Boundaries updater.py writes around a rebuild. The log is shared with the
+#: rest of the update -- git output, apt, pip -- so the transcript offered for a
+#: failed build is scoped between these rather than being the whole file.
+BUILD_RUN_MARKER = "=== web UI rebuild started ==="
+BUILD_OK_MARKER = "=== web UI rebuild finished ==="
+BUILD_FAIL_MARKER = "=== web UI rebuild failed ==="
+
 #: Never walked when looking for the newest source. dist is the OUTPUT (walking
 #: it would make the bundle newer than itself and nothing would ever rebuild),
 #: node_modules is enormous and its mtimes track installs rather than edits,
@@ -98,3 +112,34 @@ def rebuild_web_ui(repo_root, on_line, runner=None):
         if stripped:
             on_line(stripped)
     return process.wait()
+
+
+def build_log_path():
+    return log_path(BUILD_LOG_NAME)
+
+
+def read_build_log(offset=0, path=None):
+    """The last rebuild's transcript from `offset` on, as (text, offset, reset).
+
+    Incremental by byte offset for the same reason the wizard's is: a build
+    reruns from the updater page, and re-sending the whole thing every second
+    to a browser on a grill's wifi is not worth what it buys.
+    """
+    return read_install_log(offset, path or build_log_path(), marker=BUILD_RUN_MARKER)
+
+
+def last_build_failed(path=None):
+    """Whether the most recent rebuild ended in failure.
+
+    Derived from the transcript rather than from the install-status blob: that
+    blob holds one line, and an update whose rebuild failed goes on to overwrite
+    it with "Finished!" seconds later. This still answers correctly after a
+    restart, a page reload, or a poll that missed the moment.
+
+    A build still running has an opening marker and no closing one, and is not
+    a failure. Neither is a log written before any rebuild ran.
+    """
+    text, _, _ = read_build_log(path=path)
+    if BUILD_RUN_MARKER not in text:
+        return False
+    return BUILD_FAIL_MARKER in text

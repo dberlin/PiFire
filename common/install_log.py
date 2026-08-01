@@ -35,9 +35,9 @@ MAX_BYTES = 256 * 1024
 INSTALL_FAILED_PERCENT = -1
 
 
-def _run_start(data):
+def _run_start(data, marker_text):
     """Byte offset of the current run's first line within `data`."""
-    marker = data.rfind(RUN_MARKER.encode())
+    marker = data.rfind(marker_text.encode())
     if marker < 0:
         # No marker: either a log written before this existed, or a run whose
         # marker has already rotated out. Showing the whole file beats showing
@@ -46,7 +46,7 @@ def _run_start(data):
     return data.rfind(b"\n", 0, marker) + 1
 
 
-def read_install_log(offset=0, path=None):
+def read_install_log(offset=0, path=None, marker=RUN_MARKER):
     """The current run's log from `offset` on.
 
     Returns (text, next_offset, reset). `reset` tells the client to replace its
@@ -55,6 +55,10 @@ def read_install_log(offset=0, path=None):
     session) or points past the end of the file (rotation truncated it under
     the cursor). Both cases are otherwise silent: appending would splice the
     tail of one run onto the head of another.
+
+    `path` and `marker` scope the read to a different transcript: the updater's
+    web UI rebuild writes its own run boundary into logs/update.log, which is
+    shared with the rest of the update, and reads it back through here.
     """
     try:
         with open(path or log_path(WIZARD_LOG_NAME), "rb") as handle:
@@ -64,7 +68,7 @@ def read_install_log(offset=0, path=None):
         # is the honest answer; the status line is already saying what's up.
         return "", 0, offset != 0
 
-    start = _run_start(data)
+    start = _run_start(data, marker)
     # `<=`, not `<`: a client whose offset lands exactly ON the run start has
     # consumed nothing of this run, so everything in its buffer belongs to the
     # previous one. That is the ordinary shape of a second install in one

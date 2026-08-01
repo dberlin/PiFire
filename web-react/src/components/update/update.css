@@ -15,3 +15,24 @@
   @apply bg-accent rounded;
   height: 0.5rem;
 }
+
+/* The offer to read or download a failed rebuild's output. Tinted like the
+   wizard's failed-install panel, since it reports the same kind of thing --
+   a build that did not finish, with its reasons one click away. */
+.pf-update-build-failed {
+  @apply mt-[12px] flex flex-col gap-[8px] rounded-card p-[16px] text-left;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.pf-update-build-failed p {
+  @apply m-0 text-text;
+  font: 600 14px / 1.5 "Barlow";
+}
+/* The download is an <a>, so it needs the line-height and centring a <button>
+   gets for free before it can sit beside one. */
+.pf-update-build-actions {
+  @apply flex flex-wrap items-center gap-[8px];
+}
+.pf-update-build-actions a.pf-admin-btn {
+  @apply inline-flex items-center no-underline;
+}

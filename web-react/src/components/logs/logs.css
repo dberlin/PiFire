@@ -74,3 +74,22 @@
 .pf-log-controls {
   @apply flex flex-wrap items-center gap-[16px];
 }
+
+/* ---- StreamingLogPanel ---- */
+/* .pf-log-frame above carries the viewer's dress -- tokens over the package's
+   own dark palette -- but takes its height from flex-1 against the events
+   page's column. A streaming panel sits inside a card rather than a column, and
+   LazyLog's height="auto" resolves against a definite height, so this supplies
+   one. A fixed height also means the page does not grow by a line every time
+   one arrives. */
+.pf-install-output-frame {
+  @apply mt-[12px] flex-none;
+  height: 320px;
+}
+/* Shown until the first line lands. Sized to the frame it is standing in for,
+   so the panel does not resize under the pointer the moment output starts. */
+.pf-install-output-waiting {
+  @apply m-0 mt-[12px] flex h-[320px] items-center justify-center rounded-card bg-inset text-label;
+  border: 1px solid var(--color-card-border);
+  font: 400 13px "Barlow";
+}
