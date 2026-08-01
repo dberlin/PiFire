@@ -27,8 +27,34 @@ def get_settings_dependencies_values(settings, moduleData):
             # or a module that introduces new settings keys). Fall back to None so
             # the card still renders and the user can pick a value.
             setting_value = None
-        moduleSettings[setting] = setting_value
+        moduleSettings[setting] = _constrain_to_options(setting_value, data.get("options"))
     return moduleSettings
+
+
+def _constrain_to_options(value, options):
+    """Return `value` as one of `options`' keys, or `value` untouched when the
+    dependency has no option list.
+
+    A module's option list is what that module ALLOWS, so a value outside it is
+    not a preference to preserve -- it belongs to whatever was configured
+    before. Most of a grillplatform entry is exactly this: its identity
+    (platform.current / system_type) and its soldered-in pins each offer a
+    single option, and selecting the module is what imposes them. Carrying the
+    live value through instead left the installer writing the previous
+    platform's values back, so an FT232H build came back as `custom` running the
+    prototype platform, and switching the other way wrote FT232H pin names
+    ("C2") onto a Raspberry Pi board.
+
+    Options keys are the stringified form of what settings hold (pin 23 is the
+    option "23", an unwired pin is "None", a flag is "True"), so the match is on
+    str(value) and the KEY is returned -- the same normalization
+    wizardInstallInfoExisting applies to every value, and what the installer's
+    _convert_value reverses on the way back in.
+    """
+    if not options:
+        return value
+    text = str(value)
+    return text if text in options else next(iter(options))
 
 
 def wizardInstallInfoDefaults(wizardData, settings):

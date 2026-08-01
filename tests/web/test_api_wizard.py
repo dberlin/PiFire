@@ -555,6 +555,50 @@ def test_module_values_grillplatform_returns_live_settings(ds, client):
     assert body["config"] == {}
 
 
+def test_module_values_grillplatform_imposes_the_selected_platform(ds, client):
+    # Reported: picking FT232H IO-Triggered Relay came back as "custom" on the
+    # next wizard run, and the controller loaded the prototype platform. The
+    # switch handed back platform.current/system_type as they stood for the
+    # platform being left, and both are hidden, so nothing in the wizard ever
+    # corrected them before the installer wrote them straight back.
+    settings = read_settings()
+    settings["platform"]["current"] = "custom"
+    settings["platform"]["system_type"] = "prototype"
+    write_settings_store(settings)
+
+    resp = client.post(
+        "/api/wizard/module-values",
+        data=json.dumps({"section": "grillplatform", "module": "ft232h_relay"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    deps = resp.get_json()["settings"]
+    assert deps["current"] == "ft232h_relay"
+    assert deps["system_type"] == "ft232h_relay"
+
+
+def test_module_values_grillplatform_imposes_the_boards_own_pins(ds, client):
+    # The same switch in the other direction: FT232H addresses outputs by name
+    # ("C0"), a PCB board by BCM number, so leaving the live value in place
+    # would write FT232H pin names onto a Raspberry Pi board.
+    settings = read_settings()
+    settings["platform"]["outputs"]["auger"] = "C2"
+    settings["platform"]["system_type"] = "ft232h_relay"
+    write_settings_store(settings)
+
+    resp = client.post(
+        "/api/wizard/module-values",
+        data=json.dumps({"section": "grillplatform", "module": "pcb_4.x.x"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    deps = resp.get_json()["settings"]
+    assert deps["output_auger"] == "23"
+    # system_type's options are the two this board runs on; ft232h_relay is not
+    # one of them, so the board's own first option wins.
+    assert deps["system_type"] == "raspberry_pi_all"
+
+
 def test_module_values_display_config_is_guarded(ds, client):
     # A display module that has never been persisted must not KeyError -- the
     # config bag falls back to {} (mirrors legacy _wizard_modulecard callout #2).

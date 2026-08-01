@@ -67,3 +67,63 @@ def test_settings_dependency_values_falls_back_when_the_path_hits_a_non_mapping(
     settings = {"platform": {"fan_controller": 0}}
     module_data = {"settings_dependencies": {"fan_chip": {"settings": ["platform", "fan_controller", "chip"]}}}
     assert get_settings_dependencies_values(settings, module_data) == {"fan_chip": None}
+
+
+def test_settings_dependency_values_imposes_the_only_option_a_module_offers():
+    # Selecting a module has to IMPOSE the values that module fixes -- its
+    # identity ('current'/'system_type') and its soldered-in pins. The live tree
+    # still holds the platform being switched AWAY from, so carrying that value
+    # through leaves the install writing the old platform back.
+    settings = {"platform": {"current": "custom", "system_type": "prototype"}}
+    module_data = {
+        "settings_dependencies": {
+            "current": {"settings": ["platform", "current"], "options": {"ft232h_relay": "FT232H Relay"}},
+            "system_type": {"settings": ["platform", "system_type"], "options": {"ft232h_relay": "FT232H Relay"}},
+        }
+    }
+    assert get_settings_dependencies_values(settings, module_data) == {
+        "current": "ft232h_relay",
+        "system_type": "ft232h_relay",
+    }
+
+
+def test_settings_dependency_values_keeps_a_value_the_module_does_offer():
+    settings = {"platform": {"triggerlevel": "LOW"}}
+    module_data = {
+        "settings_dependencies": {
+            "triggerlevel": {"settings": ["platform", "triggerlevel"], "options": {"LOW": "Low", "HIGH": "High"}}
+        }
+    }
+    assert get_settings_dependencies_values(settings, module_data) == {"triggerlevel": "LOW"}
+
+
+def test_settings_dependency_values_matches_an_option_across_types():
+    # Option keys are the stringified form of what lives in settings (pin 23 is
+    # the option "23", an unwired pin is the option "None", a flag is "True").
+    # Comparing raw would read every one of them as "not offered" and silently
+    # rewrite the pin map to the module's first option.
+    settings = {"platform": {"outputs": {"auger": 23}, "inputs": {"selector": None}, "standalone": True}}
+    module_data = {
+        "settings_dependencies": {
+            "output_auger": {"settings": ["platform", "outputs", "auger"], "options": {"23": "GPIO23"}},
+            "input_selector": {"settings": ["platform", "inputs", "selector"], "options": {"None": "None"}},
+            "standalone": {"settings": ["platform", "standalone"], "options": {"True": "True"}},
+        }
+    }
+    assert get_settings_dependencies_values(settings, module_data) == {
+        "output_auger": "23",
+        "input_selector": "None",
+        "standalone": "True",
+    }
+
+
+def test_settings_dependency_values_passes_through_a_dep_with_no_options():
+    # Free-text deps (i2c_bus_num, usb_serial_device) have no option list, so
+    # there is nothing to impose -- the live value is the answer.
+    settings = {"platform": {"devices": {"distance": {"i2c_bus_num": "serial:0012AB34"}}}}
+    module_data = {
+        "settings_dependencies": {
+            "device_distance_i2c_bus_num": {"settings": ["platform", "devices", "distance", "i2c_bus_num"]}
+        }
+    }
+    assert get_settings_dependencies_values(settings, module_data) == {"device_distance_i2c_bus_num": "serial:0012AB34"}
