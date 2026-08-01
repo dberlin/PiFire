@@ -174,3 +174,54 @@ def test_a_branch_checkout_still_reads_its_log_and_commit_count(checkout, in_che
     avail = updater.get_available_updates()
     assert avail["success"] is True
     assert avail["commits_behind"] == 0
+
+
+# ---------------------------------------------------------------------------
+# The version the page shows, and the log it renders.
+
+
+def test_the_log_is_plain_text_not_html(checkout, in_checkout):
+    """It is JSON served into a <pre>. The `<br>`s this used to substitute for
+    newlines were written for a Flask template that no longer calls it, and
+    reached the browser as four literal characters between every commit."""
+    in_checkout(checkout)
+    result, error = updater.get_log(2)
+
+    assert error == ""
+    assert "<br>" not in result
+    assert result.count("\n") >= 2, "one commit per line"
+
+
+def test_the_remote_version_is_read_from_history_on_a_detached_head(detached, in_checkout):
+    """A detached checkout has no origin/<branch> to ask about, but it does have
+    a history -- and reporting an error blanks the version on a checkout that
+    can perfectly well name its own."""
+    in_checkout(detached)
+    git("tag", "-a", "v1.11-test", "-m", "v1.11-test", cwd=detached)
+
+    result, error = updater.get_remote_version()
+
+    assert result == "v1.11-test"
+    assert error == ""
+
+
+def test_the_remote_version_still_follows_the_branch_when_on_one(checkout, in_checkout):
+    in_checkout(checkout)
+    git("tag", "-a", "v1.11-test", "-m", "v1.11-test", cwd=checkout)
+
+    result, error = updater.get_remote_version()
+
+    assert result == "v1.11-test"
+    assert error == ""
+
+
+def test_a_tag_only_on_a_later_commit_is_not_claimed_by_a_detached_head(detached, in_checkout):
+    """--merged is doing real work: HEAD is one commit back, so a tag on the tip
+    is not reachable from it and must not be reported as this checkout's."""
+    in_checkout(detached)
+    tip = git("rev-parse", "origin/main", cwd=detached).stdout.strip()
+    git("tag", "-a", "v9.9-tip", "-m", "v9.9-tip", tip, cwd=detached)
+
+    result, _ = updater.get_remote_version()
+
+    assert result != "v9.9-tip"

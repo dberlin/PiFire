@@ -246,15 +246,22 @@ def do_update():
 
 
 def get_log(num_commits=10):
+    """The last `num_commits` on origin/<branch>, one per line.
+
+    PLAIN TEXT. Its only consumer is /api/update/log, which is JSON served into
+    a <pre>: the `<br>`s this used to substitute for newlines were written for
+    a Flask template that no longer calls it, and they reached the browser as
+    four literal characters between every commit instead of a line break.
+    """
     branch, error_msg = get_branch()
     if error_msg == "":
         command = ["git", "log", f"origin/{branch}", f"-{num_commits}", '--pretty="%h - %cr : %s"']
         log = subprocess.run(command, capture_output=True, text=True)
         if log.returncode == 0:
-            result = log.stdout.replace("\n", "<br>").replace('"', "")
+            result = log.stdout.replace('"', "")
         else:
             result = "ERROR Getting Log."
-            error_msg = log.stderr.replace("\n", "<br>")
+            error_msg = log.stderr
     else:
         result = "ERROR Getting Branch Name."
     return (result, error_msg)
@@ -264,7 +271,12 @@ def get_remote_version():
     remote_url, error_msg = get_remote_url()
     current_branch, branch_error = get_branch()
 
-    if error_msg == "" and branch_error == "":
+    # A detached checkout has no origin/<branch> to ask about, but it does have
+    # a history -- so the question becomes "the newest release tag reachable
+    # from where HEAD actually is". Reporting an error instead would blank the
+    # version on a checkout that is perfectly capable of naming its own.
+    reachable_from = f"origin/{current_branch}" if branch_error == "" else "HEAD"
+    if error_msg == "":
         # Instead of getting all tags, we'll get tags that are on the current branch
         # First fetch the latest tags
         fetch_command = ["git", "fetch", "--tags"]
@@ -275,7 +287,7 @@ def get_remote_version():
 
         # Now get tags that contain commits from the current branch
         # This command finds tags that are reachable from the branch
-        command = ["git", "tag", "--sort=v:refname", "--merged", f"origin/{current_branch}"]
+        command = ["git", "tag", "--sort=v:refname", "--merged", reachable_from]
         versions = subprocess.run(command, capture_output=True, text=True)
 
         if versions.returncode == 0:
@@ -292,10 +304,7 @@ def get_remote_version():
             result = "ERROR Getting Remote Version."
             error_msg = versions.stderr.replace("\n", " | ")
     else:
-        result = "ERROR Getting Remote URL or Branch."
-        if error_msg:
-            error_msg += " | "
-        error_msg += branch_error
+        result = "ERROR Getting Remote URL."
     return (result, error_msg)
 
 

@@ -105,12 +105,77 @@ pifire_cleanup_bun() {
 # installed system-wide. An existing bun on PATH is used as-is (and never
 # removed); otherwise one is unpacked into a temp directory that
 # pifire_cleanup_bun deletes.
-pifire_get_bun() {
+# Where bun ends up when something other than PATH put it there.
+#
+# A rebuild triggered from the web UI runs in a process descended from the
+# service manager, whose PATH is the system default -- not the one an
+# interactive shell builds from ~/.profile, ~/.bashrc or a version manager's
+# activation hook. So a machine with a perfectly good bun a shell can see took
+# the download path anyway, and then failed on a network the shell also had.
+#
+# Real binaries, not shims: a mise or asdf shim re-execs its manager, which is
+# itself only on the interactive PATH.
+pifire_bun_candidates() {
+	local home="${HOME:-}"
+	# `:+` rather than `:-`: an unset BUN_INSTALL leaves an empty line the
+	# callers skip, instead of duplicating the ~/.bun default below it.
+	printf '%s\n' \
+		"${BUN_INSTALL:+$BUN_INSTALL/bin/bun}" \
+		"$home/.bun/bin/bun" \
+		"${MISE_DATA_DIR:-$home/.local/share/mise}/installs/bun/latest/bin/bun" \
+		"$home/.asdf/installs/bun/latest/bin/bun" \
+		/usr/local/bin/bun \
+		/opt/bun/bin/bun \
+		/usr/bin/bun
+}
+
+# Why the build has no toolchain, and what to do about it.
+#
+# The download is a fallback, so its failure is only half the story: the other
+# half is that nothing was found locally, and an operator who can run `bun`
+# themselves needs to know WHERE this looked before concluding the machine has
+# no bun. Both halves, and the two ways out, in one place.
+pifire_report_no_bun() {
+	local reason="$1"
+	log " !! $reason"
+	log " !! No existing bun was found either. Looked on PATH and at:"
+	local candidate
+	while read -r candidate; do
+		[[ -n "$candidate" ]] && log " !!   $candidate"
+	done < <(pifire_bun_candidates)
+	log " !! Either give this machine network access to bun.sh, or install bun"
+	log " !! somewhere above -- \`curl -fsSL https://bun.sh/install | bash\` puts"
+	log " !! it in ~/.bun/bin. A version manager's shim will not do: this runs"
+	log " !! without the PATH your login shell builds."
+}
+
+# Set $PIFIRE_BUN from a bun already on this machine, or return 1. Touches no
+# network -- kept separate from pifire_get_bun so it can be exercised without
+# one, and so the download stays visibly a fallback rather than a step.
+pifire_locate_bun() {
 	if command -v bun >/dev/null 2>&1; then
 		PIFIRE_BUN="$(command -v bun)"
 		log " + Using the bun already on PATH: $PIFIRE_BUN ($("$PIFIRE_BUN" --version 2>/dev/null))"
 		return 0
 	fi
+
+	local candidate
+	while read -r candidate; do
+		[[ -n "$candidate" && -x "$candidate" ]] || continue
+		PIFIRE_BUN="$candidate"
+		# Its own directory goes on PATH for the same reason the downloaded
+		# one's does: package.json's "build" script re-invokes `bun`, resolved
+		# through PATH by the shell bun spawns.
+		export PATH="$(dirname "$candidate"):$PATH"
+		log " + Using the bun installed at $PIFIRE_BUN ($("$PIFIRE_BUN" --version 2>/dev/null))"
+		return 0
+	done < <(pifire_bun_candidates)
+
+	return 1
+}
+
+pifire_get_bun() {
+	pifire_locate_bun && return 0
 
 	# bun ships as a zip and its installer shells out to unzip. The installers
 	# put it in the package list, but an install predating that -- upgrading
@@ -135,11 +200,11 @@ pifire_get_bun() {
 	# the build run without root.
 	if ! curl -fsSL https://bun.sh/install |
 		env BUN_INSTALL="$PIFIRE_BUN_TMPDIR" BUN_INSTALL_CACHE_DIR="$PIFIRE_BUN_TMPDIR/cache" bash >>"$LOG" 2>&1; then
-		log " !! Failed to download bun. See $LOG."
+		pifire_report_no_bun "Could not download bun from https://bun.sh/install."
 		return 1
 	fi
 	if [[ ! -x "$PIFIRE_BUN_TMPDIR/bin/bun" ]]; then
-		log " !! bun did not land at $PIFIRE_BUN_TMPDIR/bin/bun."
+		pifire_report_no_bun "The bun installer ran but left nothing at $PIFIRE_BUN_TMPDIR/bin/bun."
 		return 1
 	fi
 	PIFIRE_BUN="$PIFIRE_BUN_TMPDIR/bin/bun"
