@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { adminErrorText, systemAction } from "../../helpers/admin/adminApi";
+import type { SystemAction } from "../../helpers/admin/adminTypes";
 import { behindText } from "../../helpers/update/behindText";
 import {
   buildLogDownloadUrl,
@@ -51,6 +53,7 @@ export function UpdatePage() {
   const [progress, setProgress] = useState<UpdateStatus | null>(null);
   const [done, setDone] = useState<null | "ok" | "reboot" | "failed">(null);
   const [showBuildLog, setShowBuildLog] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const apply = useCallback((s: UpdateResult<UpdateState>, c: UpdateResult<UpdateCheck>) => {
     if (s.ok && s.data) {
@@ -120,6 +123,15 @@ export function UpdatePage() {
     // A new run writes a new transcript. Leaving the panel open would show the
     // previous build's failure until the first line of this one lands.
     setShowBuildLog(false);
+  };
+
+  // POSTs to the admin API rather than linking, for the reason InstallProgress
+  // documents: /admin/restart and /admin/reboot were Flask page routes and went
+  // with the rest of them, and the API is POST-only on purpose.
+  const runSystemAction = async (action: SystemAction) => {
+    setActionError(null);
+    const result = await systemAction(action);
+    if (!result.ok) setActionError(adminErrorText(result));
   };
 
   const showLog = async () => {
@@ -271,9 +283,51 @@ export function UpdatePage() {
           />
           <p>{progress.status}</p>
           <pre className="pf-update-log">{progress.output}</pre>
-          {done === "ok" && <p>Update complete.</p>}
-          {done === "reboot" && <p>Update complete — reboot required.</p>}
+          {/* The run says "Finished! Restarting Server..." and then nothing
+              restarts anything -- the updater is a detached process that cannot
+              restart the service it was launched from, and the page was only
+              announcing the finish. So the page offers it, the way the wizard's
+              InstallProgress does at the end of an install. Until the service
+              restarts, what is running is still the pre-update code. */}
+          {done === "ok" && (
+            <div className="pf-update-done">
+              <p>Update complete. Restart the service to run the new code.</p>
+              <button
+                type="button"
+                className="pf-admin-btn"
+                onClick={() => void runSystemAction("restart")}
+              >
+                Restart Now
+              </button>
+            </div>
+          )}
+          {done === "reboot" && (
+            <div className="pf-update-done">
+              <p>Update complete — a reboot is required to load the new configuration.</p>
+              <div className="pf-update-done-actions">
+                <button
+                  type="button"
+                  className="pf-admin-btn"
+                  onClick={() => void runSystemAction("reboot")}
+                >
+                  Reboot Now
+                </button>
+                <button
+                  type="button"
+                  className="pf-admin-btn"
+                  onClick={() => void runSystemAction("restart")}
+                >
+                  Restart Service Only
+                </button>
+              </div>
+            </div>
+          )}
           {done === "failed" && <p role="alert">{progress.status}</p>}
+          {actionError && (
+            <p className="pf-update-note" role="alert">
+              {actionError}
+            </p>
+          )}
         </section>
       )}
 

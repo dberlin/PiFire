@@ -36,3 +36,17 @@
 .pf-update-build-actions a.pf-admin-btn {
   @apply inline-flex items-center no-underline;
 }
+
+/* The end of a run. The status line says "Restarting Server..." and nothing
+   restarts by itself -- the updater is detached and cannot restart the service
+   it was launched from -- so the finish carries the control that does it. */
+.pf-update-done {
+  @apply mt-[12px] flex flex-col gap-[8px];
+}
+.pf-update-done p {
+  @apply m-0 text-text;
+  font: 600 14px / 1.5 "Barlow";
+}
+.pf-update-done-actions {
+  @apply flex flex-wrap items-center gap-[8px];
+}

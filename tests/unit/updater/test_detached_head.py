@@ -225,3 +225,52 @@ def test_a_tag_only_on_a_later_commit_is_not_claimed_by_a_detached_head(detached
     result, _ = updater.get_remote_version()
 
     assert result != "v9.9-tip"
+
+
+# ---------------------------------------------------------------------------
+# Tags that MOVED upstream. `git fetch --tags` refuses to overwrite a tag it
+# already has -- "would clobber existing tag" -- and fails the WHOLE fetch, so
+# one re-cut release left every existing clone reporting "ERROR Fetching Tags."
+# forever.
+
+
+@pytest.fixture
+def moved_tag(checkout):
+    """A clone holding v1.0, whose origin has since re-cut v1.0 elsewhere."""
+    origin = checkout.parent / "origin"
+    git("tag", "-a", "v1.0", "-m", "v1.0", cwd=origin)
+    git("fetch", "--tags", cwd=checkout)
+    git("tag", "-d", "v1.0", cwd=origin)
+    git("tag", "-a", "v1.0", "-m", "v1.0", "HEAD~1", cwd=origin)
+    return checkout
+
+
+def test_a_plain_tag_fetch_really_does_fail_on_a_moved_tag(moved_tag):
+    """The premise, checked rather than assumed -- otherwise the fix below is
+    guarding against nothing."""
+    plain = git("fetch", "--tags", cwd=moved_tag)
+
+    assert plain.returncode != 0
+    assert "clobber" in (plain.stderr + plain.stdout).lower()
+
+
+def test_the_remote_version_survives_a_moved_tag(moved_tag, in_checkout):
+    in_checkout(moved_tag)
+
+    result, error = updater.get_remote_version()
+
+    assert "ERROR" not in result, result
+    assert error == ""
+
+
+def test_the_remote_version_survives_an_unreachable_remote(checkout, in_checkout):
+    """A network blip must not blank the version line: the tags already on disk
+    still answer "what version is this checkout"."""
+    in_checkout(checkout)
+    git("tag", "-a", "v1.2-local", "-m", "v1.2-local", cwd=checkout)
+    git("remote", "set-url", "origin", "https://127.0.0.1:1/nope.git", cwd=checkout)
+
+    result, error = updater.get_remote_version()
+
+    assert result == "v1.2-local"
+    assert error == ""

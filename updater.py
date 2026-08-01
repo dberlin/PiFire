@@ -277,13 +277,18 @@ def get_remote_version():
     # version on a checkout that is perfectly capable of naming its own.
     reachable_from = f"origin/{current_branch}" if branch_error == "" else "HEAD"
     if error_msg == "":
-        # Instead of getting all tags, we'll get tags that are on the current branch
-        # First fetch the latest tags
-        fetch_command = ["git", "fetch", "--tags"]
+        # --force, because a tag that MOVED upstream otherwise fails the whole
+        # fetch with "would clobber existing tag" -- permanently, for every
+        # clone that already had the old one. Tags are read-only input here:
+        # this only ever displays the newest one, so taking the remote's answer
+        # is the whole point.
+        fetch_command = ["git", "fetch", "--tags", "--force"]
         fetch = subprocess.run(fetch_command, capture_output=True, text=True)
-
+        # A failed fetch is not fatal. The tags already on disk still answer
+        # "what version is this checkout", just possibly not the very newest --
+        # and a network blip should not blank the version line.
         if fetch.returncode != 0:
-            return "ERROR Fetching Tags.", fetch.stderr.replace("\n", " | ")
+            logger.warning(f"Could not fetch tags: {fetch.stderr.strip()}")
 
         # Now get tags that contain commits from the current branch
         # This command finds tags that are reachable from the branch

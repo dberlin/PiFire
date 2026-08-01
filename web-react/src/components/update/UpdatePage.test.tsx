@@ -25,6 +25,12 @@ rs.mock("../logs/StreamingLogPanel", () => ({
   StreamingLogPanel: () => <div data-testid="build-log-panel" />,
 }));
 
+const systemActionMock = rs.fn();
+rs.mock("../../helpers/admin/adminApi", () => ({
+  systemAction: (...a: unknown[]) => systemActionMock(...a),
+  adminErrorText: (r: { message?: string }) => r.message ?? "failed",
+}));
+
 const state = {
   ok: true,
   status: 200,
@@ -165,7 +171,9 @@ describe("UpdatePage", () => {
     renderPage();
     await screen.findByText(/v1\.8\.0/);
     fireEvent.click(screen.getByRole("button", { name: /upgrade dependencies/i }));
-    expect(await screen.findByText(/reboot/i)).toBeInTheDocument();
+    // Specific: the finish now also carries a "Reboot Now" button, so a bare
+    // /reboot/i matches two elements.
+    expect(await screen.findByText(/a reboot is required/i)).toBeInTheDocument();
   });
 });
 
@@ -362,5 +370,77 @@ describe("UpdatePage on a detached checkout", () => {
 
     expect(await screen.findByText(/3 commits behind/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update to latest" })).toBeEnabled();
+  });
+});
+
+describe("UpdatePage finishing a run", () => {
+  function seedFinish(percent: number) {
+    seed({
+      upgradeDeps: { ok: true, status: 200, message: "", data: { started: true } },
+      fetchUpdateStatus: {
+        ok: true,
+        status: 200,
+        message: "",
+        data: { percent, status: "Finished!", output: " - Finished!  Restarting Server..." },
+      },
+    });
+    systemActionMock.mockReset();
+    systemActionMock.mockResolvedValue({ ok: true, status: 200, message: "", data: null });
+  }
+
+  const finish = async () => {
+    renderPage();
+    await screen.findByText("Actions");
+    fireEvent.click(screen.getByRole("button", { name: /upgrade dependencies/i }));
+  };
+
+  it("offers the restart the status line promises", async () => {
+    /* The run publishes "Finished! Restarting Server..." and then nothing
+       restarts anything -- the updater is detached and cannot restart the
+       service it was launched from. The page only announced the finish, so an
+       operator was left on the pre-update code with no way forward. */
+    seedFinish(101);
+    await finish();
+
+    const button = await screen.findByRole("button", { name: "Restart Now" });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(systemActionMock).toHaveBeenLastCalledWith("restart"));
+  });
+
+  it("offers both a reboot and a service restart when a reboot is required", async () => {
+    seedFinish(142);
+    await finish();
+
+    expect(await screen.findByRole("button", { name: "Reboot Now" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restart Service Only" }));
+    await waitFor(() => expect(systemActionMock).toHaveBeenLastCalledWith("restart"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Reboot Now" }));
+    await waitFor(() => expect(systemActionMock).toHaveBeenLastCalledWith("reboot"));
+  });
+
+  it("surfaces a refused restart instead of appearing to do nothing", async () => {
+    seedFinish(101);
+    systemActionMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      message: "system_active",
+      data: null,
+    });
+    await finish();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restart Now" }));
+
+    expect(await screen.findByText("system_active")).toBeInTheDocument();
+  });
+
+  it("offers no restart when the run failed", async () => {
+    seedFinish(-1);
+    await finish();
+
+    await waitFor(() => expect(screen.getAllByRole("alert").length).toBeGreaterThan(0));
+    expect(screen.queryByRole("button", { name: "Restart Now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reboot Now" })).toBeNull();
   });
 });
