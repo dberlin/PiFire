@@ -831,3 +831,39 @@ def test_live_install_shape_validates_end_to_end(_captured_write_log):
     assert "emc2301" not in out["platform"]  # stripped
     assert out["platform"]["devices"]["distance"]["address"] == "0x29"  # kept
     assert out["platform"]["fan_controller"]["address"] == "0x2f"  # kept
+
+
+def test_i2c_bus_accepts_every_variant():
+    from common.settings_schema import validate_settings_tree
+
+    for bus in (
+        {"kind": "basic"},
+        {"kind": "kernel", "bus_num": 3},
+        {"kind": "kernel", "adapter": "CP2112"},
+        {"kind": "kernel", "serial": "0012AB34"},
+        {"kind": "ft232h", "url": "ftdi://ftdi:232h:FT9ABC/1"},
+        {"kind": "mcp2221", "serial": "01234567"},
+    ):
+        settings = copy.deepcopy(default_settings())
+        settings["platform"]["devices"]["distance"]["i2c_bus"] = bus
+        settings["platform"]["fan_controller"]["i2c_bus"] = bus
+        validate_settings_tree(settings)
+
+
+def test_i2c_bus_rejects_a_field_from_another_kind():
+    """The schema mirrors the dataclass hierarchy: extra="forbid" on each
+    variant is what makes only one member of the union match."""
+    from common.settings_schema import SettingsValidationError, validate_settings_tree
+
+    settings = copy.deepcopy(default_settings())
+    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "ft232h", "adapter": "CP2112"}
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(settings)
+
+
+def test_i2c_bus_defaults_to_basic():
+    settings = default_settings()
+    assert settings["platform"]["devices"]["distance"]["i2c_bus"] == {"kind": "basic"}
+    assert settings["platform"]["fan_controller"]["i2c_bus"] == {"kind": "basic"}
+    assert "i2c_bus_kind" not in settings["platform"]["fan_controller"]
+    assert "i2c_bus_num" not in settings["platform"]["fan_controller"]

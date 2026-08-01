@@ -643,8 +643,9 @@
               "address": null,
               "device": "/dev/ttyACM0",
               "echo": 27,
-              "i2c_bus_kind": "basic",
-              "i2c_bus_num": "",
+              "i2c_bus": {
+                "kind": "basic"
+              },
               "trig": 23
             },
             "input": {
@@ -659,8 +660,9 @@
           "default": {
             "address": "0x4c",
             "chip": "emc2101",
-            "i2c_bus_kind": "basic",
-            "i2c_bus_num": "1"
+            "i2c_bus": {
+              "kind": "basic"
+            }
           }
         },
         "ft232h": {
@@ -1626,6 +1628,19 @@
       "title": "WledSuggestedConfig",
       "type": "object"
     },
+    "_BasicBus": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "basic",
+          "default": "basic",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "_BasicBus",
+      "type": "object"
+    },
     "_DevicesConfig": {
       "additionalProperties": false,
       "properties": {
@@ -1643,8 +1658,9 @@
             "address": null,
             "device": "/dev/ttyACM0",
             "echo": 27,
-            "i2c_bus_kind": "basic",
-            "i2c_bus_num": "",
+            "i2c_bus": {
+              "kind": "basic"
+            },
             "trig": 23
           }
         },
@@ -1710,15 +1726,31 @@
           "title": "Echo",
           "type": "integer"
         },
-        "i2c_bus_kind": {
-          "default": "basic",
-          "title": "I2C Bus Kind",
-          "type": "string"
-        },
-        "i2c_bus_num": {
-          "default": "",
-          "title": "I2C Bus Num",
-          "type": "string"
+        "i2c_bus": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_BasicBus"
+            },
+            {
+              "$ref": "#/$defs/_KernelBusNumber"
+            },
+            {
+              "$ref": "#/$defs/_KernelAdapterName"
+            },
+            {
+              "$ref": "#/$defs/_KernelSerialMatch"
+            },
+            {
+              "$ref": "#/$defs/_FT232hBus"
+            },
+            {
+              "$ref": "#/$defs/_MCP2221Bus"
+            }
+          ],
+          "default": {
+            "kind": "basic"
+          },
+          "title": "I2C Bus"
         },
         "trig": {
           "default": 23,
@@ -1727,6 +1759,24 @@
         }
       },
       "title": "_DistanceDeviceConfig",
+      "type": "object"
+    },
+    "_FT232hBus": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "ft232h",
+          "default": "ft232h",
+          "title": "Kind",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "title": "_FT232hBus",
       "type": "object"
     },
     "_FT232hConfig": {
@@ -1754,15 +1804,31 @@
           "title": "Chip",
           "type": "string"
         },
-        "i2c_bus_kind": {
-          "default": "basic",
-          "title": "I2C Bus Kind",
-          "type": "string"
-        },
-        "i2c_bus_num": {
-          "default": "1",
-          "title": "I2C Bus Num",
-          "type": "string"
+        "i2c_bus": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_BasicBus"
+            },
+            {
+              "$ref": "#/$defs/_KernelBusNumber"
+            },
+            {
+              "$ref": "#/$defs/_KernelAdapterName"
+            },
+            {
+              "$ref": "#/$defs/_KernelSerialMatch"
+            },
+            {
+              "$ref": "#/$defs/_FT232hBus"
+            },
+            {
+              "$ref": "#/$defs/_MCP2221Bus"
+            }
+          ],
+          "default": {
+            "kind": "basic"
+          },
+          "title": "I2C Bus"
         }
       },
       "title": "_FanControllerConfig",
@@ -1819,6 +1885,84 @@
         }
       },
       "title": "_InputsConfig",
+      "type": "object"
+    },
+    "_KernelAdapterName": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {
+          "title": "Adapter",
+          "type": "string"
+        },
+        "kind": {
+          "const": "kernel",
+          "default": "kernel",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "adapter"
+      ],
+      "title": "_KernelAdapterName",
+      "type": "object"
+    },
+    "_KernelBusNumber": {
+      "additionalProperties": false,
+      "properties": {
+        "bus_num": {
+          "title": "Bus Num",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "kernel",
+          "default": "kernel",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bus_num"
+      ],
+      "title": "_KernelBusNumber",
+      "type": "object"
+    },
+    "_KernelSerialMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "kernel",
+          "default": "kernel",
+          "title": "Kind",
+          "type": "string"
+        },
+        "serial": {
+          "title": "Serial",
+          "type": "string"
+        }
+      },
+      "required": [
+        "serial"
+      ],
+      "title": "_KernelSerialMatch",
+      "type": "object"
+    },
+    "_MCP2221Bus": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "mcp2221",
+          "default": "mcp2221",
+          "title": "Kind",
+          "type": "string"
+        },
+        "serial": {
+          "default": "",
+          "title": "Serial",
+          "type": "string"
+        }
+      },
+      "title": "_MCP2221Bus",
       "type": "object"
     },
     "_NumatoConfig": {
@@ -2182,8 +2326,9 @@
             "address": null,
             "device": "/dev/ttyACM0",
             "echo": 27,
-            "i2c_bus_kind": "basic",
-            "i2c_bus_num": "",
+            "i2c_bus": {
+              "kind": "basic"
+            },
             "trig": 23
           },
           "input": {
@@ -2195,8 +2340,9 @@
         "fan_controller": {
           "address": "0x4c",
           "chip": "emc2101",
-          "i2c_bus_kind": "basic",
-          "i2c_bus_num": "1"
+          "i2c_bus": {
+            "kind": "basic"
+          }
         },
         "ft232h": {
           "url": "1"

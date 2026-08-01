@@ -74,8 +74,7 @@ def default_settings():
             "distance": {
                 "echo": 27,  # HCSR04 Distance Sensor
                 "trig": 23,  # HCSR04 Distance Sensor
-                "i2c_bus_kind": "basic",  # VL53L0X/VL53L4CD/VL53L1X: "basic" | "extended"
-                "i2c_bus_num": "",  # VL53L0X/VL53L4CD/VL53L1X: extended/ft232h/mcp2221 selector, blank until chosen
+                "i2c_bus": {"kind": "basic"},  # VL53L0X/VL53L4CD/VL53L1X only; see common/i2c_bus_config.py
                 "address": None,  # VL53L0X/VL53L4CD/VL53L1X: optional I2C address override (hex string or int)
                 "device": "/dev/ttyACM0",  # SEN0628: USB-serial device path
             },
@@ -103,8 +102,7 @@ def default_settings():
         },
         "fan_controller": {  # x86_numato platform: selectable EMC2101/EMC2301 fan PWM controller
             "chip": "emc2101",  # 'emc2101' or 'emc2301'
-            "i2c_bus_kind": "basic",  # 'basic' = integrated I2C bus (board.SCL/SDA); 'extended' = numbered/bridge bus
-            "i2c_bus_num": "1",  # extended only: /dev/i2c-N number or adapter-name match (e.g. 'CP2112')
+            "i2c_bus": {"kind": "basic"},  # fan controller bus; see common/i2c_bus_config.py
             "address": "0x4c",  # fan controller I2C address (EMC2101 0x4C / EMC2301 0x2F)
         },
         "ft232h": {  # ft232h_relay platform: FT232H USB GPIO expander selection

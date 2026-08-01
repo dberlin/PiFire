@@ -30,7 +30,7 @@ NEW constraint must trace the same way.
 import copy
 import json
 from types import UnionType
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_serializer, model_validator
 from pydantic_core import ErrorDetails
@@ -113,11 +113,51 @@ class _DisplayDeviceConfig(_Section):
     rst: int = 25
 
 
+# The four I2C bus kinds, mirroring common/i2c_bus_config.py's dataclass
+# hierarchy. `kind` alone cannot discriminate -- three kernel variants share it
+# -- so this is a left-to-right union whose members each forbid the other
+# variants' fields. That is what makes {"kind":"kernel","adapter":"X"} match
+# exactly one member, and what makes a stale field from a previous kind a
+# validation error rather than a silently carried value.
+class _BasicBus(_Section):
+    kind: Literal["basic"] = "basic"
+
+
+class _KernelBusNumber(_Section):
+    kind: Literal["kernel"] = "kernel"
+    bus_num: int
+
+
+class _KernelAdapterName(_Section):
+    kind: Literal["kernel"] = "kernel"
+    adapter: str
+
+
+class _KernelSerialMatch(_Section):
+    kind: Literal["kernel"] = "kernel"
+    serial: str
+
+
+class _FT232hBus(_Section):
+    kind: Literal["ft232h"] = "ft232h"
+    url: str = ""
+
+
+class _MCP2221Bus(_Section):
+    kind: Literal["mcp2221"] = "mcp2221"
+    serial: str = ""
+
+
+I2CBusConfig = Annotated[
+    Union[_BasicBus, _KernelBusNumber, _KernelAdapterName, _KernelSerialMatch, _FT232hBus, _MCP2221Bus],
+    Field(union_mode="left_to_right"),
+]
+
+
 class _DistanceDeviceConfig(_Section):
     echo: int = 27
     trig: int = 23
-    i2c_bus_kind: str = "basic"
-    i2c_bus_num: str = ""
+    i2c_bus: I2CBusConfig = _BasicBus()
     # Optional I2C address override. distance/_tof_base.py accepts a hex
     # string ("0x29"), a plain int, or None (fall back to the driver's
     # default_address), and the wizard writes the hex-string form -- so an
@@ -191,8 +231,7 @@ class _NumatoConfig(_Section):
 
 class _FanControllerConfig(_Section):
     chip: str = "emc2101"
-    i2c_bus_kind: str = "basic"
-    i2c_bus_num: str = "1"
+    i2c_bus: I2CBusConfig = _BasicBus()
     address: str = "0x4c"
 
 

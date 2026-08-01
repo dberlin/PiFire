@@ -125,17 +125,26 @@ export type Rst = number;
 export type Address = string | number | null;
 export type Device = string;
 export type Echo = number;
-export type I2CBusKind = string;
-export type I2CBusNum = string;
+export type I2CBus = _BasicBus | _KernelBusNumber | _KernelAdapterName | _KernelSerialMatch | _FT232HBus | _MCP2221Bus;
+export type Kind = "basic";
+export type BusNum = number;
+export type Kind1 = "kernel";
+export type Adapter = string;
+export type Kind2 = "kernel";
+export type Kind3 = "kernel";
+export type Serial = string;
+export type Kind4 = "ft232h";
+export type Url1 = string;
+export type Kind5 = "mcp2221";
+export type Serial1 = string;
 export type Trig = number;
 export type DownDt = number;
 export type EnterSw = number;
 export type UpClk = number;
 export type Address1 = string;
 export type Chip = string;
-export type I2CBusKind1 = string;
-export type I2CBusNum1 = string;
-export type Url1 = string;
+export type I2CBus1 = _BasicBus | _KernelBusNumber | _KernelAdapterName | _KernelSerialMatch | _FT232HBus | _MCP2221Bus;
+export type Url2 = string;
 export type Selector = number | null;
 export type Shutdown1 = number | null;
 export type Baudrate = number;
@@ -459,9 +468,31 @@ export interface _DistanceDeviceConfig {
   address?: Address;
   device?: Device;
   echo?: Echo;
-  i2c_bus_kind?: I2CBusKind;
-  i2c_bus_num?: I2CBusNum;
+  i2c_bus?: I2CBus;
   trig?: Trig;
+}
+export interface _BasicBus {
+  kind?: Kind;
+}
+export interface _KernelBusNumber {
+  bus_num: BusNum;
+  kind?: Kind1;
+}
+export interface _KernelAdapterName {
+  adapter: Adapter;
+  kind?: Kind2;
+}
+export interface _KernelSerialMatch {
+  kind?: Kind3;
+  serial: Serial;
+}
+export interface _FT232HBus {
+  kind?: Kind4;
+  url?: Url1;
+}
+export interface _MCP2221Bus {
+  kind?: Kind5;
+  serial?: Serial1;
 }
 export interface _InputDeviceConfig {
   down_dt?: DownDt;
@@ -471,11 +502,10 @@ export interface _InputDeviceConfig {
 export interface _FanControllerConfig {
   address?: Address1;
   chip?: Chip;
-  i2c_bus_kind?: I2CBusKind1;
-  i2c_bus_num?: I2CBusNum1;
+  i2c_bus?: I2CBus1;
 }
 export interface _FT232HConfig {
-  url?: Url1;
+  url?: Url2;
 }
 export interface _InputsConfig {
   selector?: Selector;
