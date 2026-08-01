@@ -1,0 +1,343 @@
+{
+  "mpc": {
+    "small_up": {
+      "0": {
+        "rebuild": {
+          "peak_excursion": 10.972771176240883,
+          "settling_min": NaN,
+          "steady_band": 4.688735271477304,
+          "iae": 22639.703600813937,
+          "first_post_step_u": {
+            "cycle_ratio": 0.393145326814036,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "set_target": {
+          "peak_excursion": 7.699069667166896,
+          "settling_min": NaN,
+          "steady_band": 4.692664935504926,
+          "iae": 21996.91660169814,
+          "first_post_step_u": {
+            "cycle_ratio": 0.22161171618292633,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "baseline": {
+          "peak_excursion": 8.109704193974096,
+          "settling_min": NaN,
+          "steady_band": 4.75156662165729,
+          "iae": 22714.106337699002,
+          "first_post_step_u": null
+        },
+        "_self_check": {
+          "pre_step_identical": true,
+          "post_step_identical": false
+        }
+      },
+      "1": {
+        "rebuild": {
+          "peak_excursion": 10.515190098116733,
+          "settling_min": NaN,
+          "steady_band": 4.740844166809024,
+          "iae": 21967.312400741284,
+          "first_post_step_u": {
+            "cycle_ratio": 0.38319329075251796,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "set_target": {
+          "peak_excursion": 7.705531656646741,
+          "settling_min": NaN,
+          "steady_band": 4.621376817685441,
+          "iae": 21843.742118890776,
+          "first_post_step_u": {
+            "cycle_ratio": 0.21843361437645178,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "baseline": {
+          "peak_excursion": 8.01677316772512,
+          "settling_min": NaN,
+          "steady_band": 4.914940839331394,
+          "iae": 22291.56006443854,
+          "first_post_step_u": null
+        },
+        "_self_check": {
+          "pre_step_identical": true,
+          "post_step_identical": false
+        }
+      },
+      "2": {
+        "rebuild": {
+          "peak_excursion": 10.579287333241837,
+          "settling_min": NaN,
+          "steady_band": 4.878560653487739,
+          "iae": 22867.395807009292,
+          "first_post_step_u": {
+            "cycle_ratio": 0.4128677615848946,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "set_target": {
+          "peak_excursion": 8.75076691965495,
+          "settling_min": NaN,
+          "steady_band": 4.634575143535987,
+          "iae": 22250.282154659217,
+          "first_post_step_u": {
+            "cycle_ratio": 0.23212574187108206,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "baseline": {
+          "peak_excursion": 7.9761846638342035,
+          "settling_min": NaN,
+          "steady_band": 4.818831893955302,
+          "iae": 22147.784864117584,
+          "first_post_step_u": null
+        },
+        "_self_check": {
+          "pre_step_identical": true,
+          "post_step_identical": false
+        }
+      }
+    },
+    "large_up": {
+      "0": {
+        "rebuild": {
+          "peak_excursion": 8.409945637554983,
+          "settling_min": NaN,
+          "steady_band": 4.728807583389869,
+          "iae": 25458.90856643883,
+          "first_post_step_u": {
+            "cycle_ratio": 0.9,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "set_target": {
+          "peak_excursion": 7.7716182947226,
+          "settling_min": NaN,
+          "steady_band": 4.527642952375687,
+          "iae": 26333.037452452427,
+          "first_post_step_u": {
+            "cycle_ratio": 0.7719124541838566,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "baseline": {
+          "peak_excursion": 8.109704193974096,
+          "settling_min": NaN,
+          "steady_band": 4.75156662165729,
+          "iae": 22714.106337699002,
+          "first_post_step_u": null
+        },
+        "_self_check": {
+          "pre_step_identical": true,
+          "post_step_identical": false
+        }
+      },
+      "1": {
+        "rebuild": {
+          "peak_excursion": 7.994478932191157,
+          "settling_min": NaN,
+          "steady_band": 4.523726492943869,
+          "iae": 26451.49470245069,
+          "first_post_step_u": {
+            "cycle_ratio": 0.9,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "set_target": {
+          "peak_excursion": 7.918514362989072,
+          "settling_min": NaN,
+          "steady_band": 4.092396518180052,
+          "iae": 25400.905042085647,
+          "first_post_step_u": {
+            "cycle_ratio": 0.7687367931134613,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "baseline": {
+          "peak_excursion": 8.01677316772512,
+          "settling_min": NaN,
+          "steady_band": 4.914940839331394,
+          "iae": 22291.56006443854,
+          "first_post_step_u": null
+        },
+        "_self_check": {
+          "pre_step_identical": true,
+          "post_step_identical": false
+        }
+      },
+      "2": {
+        "rebuild": {
+          "peak_excursion": 8.34096522057564,
+          "settling_min": NaN,
+          "steady_band": 4.519796587997485,
+          "iae": 25819.351190040026,
+          "first_post_step_u": {
+            "cycle_ratio": 0.9,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "set_target": {
+          "peak_excursion": 8.17420905294074,
+          "settling_min": NaN,
+          "steady_band": 4.247945279829484,
+          "iae": 26469.652231972326,
+          "first_post_step_u": {
+            "cycle_ratio": 0.782432551595642,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "baseline": {
+          "peak_excursion": 7.9761846638342035,
+          "settling_min": NaN,
+          "steady_band": 4.818831893955302,
+          "iae": 22147.784864117584,
+          "first_post_step_u": null
+        },
+        "_self_check": {
+          "pre_step_identical": true,
+          "post_step_identical": false
+        }
+      }
+    },
+    "step_down": {
+      "0": {
+        "rebuild": {
+          "peak_excursion": 8.81465260156483,
+          "settling_min": NaN,
+          "steady_band": 4.716536062095114,
+          "iae": 27443.988540707014,
+          "first_post_step_u": {
+            "cycle_ratio": 0.1,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "set_target": {
+          "peak_excursion": 8.463861197549562,
+          "settling_min": NaN,
+          "steady_band": 4.570064950963702,
+          "iae": 27405.49003944934,
+          "first_post_step_u": {
+            "cycle_ratio": 0.1,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "baseline": {
+          "peak_excursion": 8.175461776933957,
+          "settling_min": NaN,
+          "steady_band": 4.343330157369412,
+          "iae": 21975.965495470744,
+          "first_post_step_u": null
+        },
+        "_self_check": {
+          "pre_step_identical": true,
+          "post_step_identical": false
+        }
+      },
+      "1": {
+        "rebuild": {
+          "peak_excursion": 8.296291403845089,
+          "settling_min": NaN,
+          "steady_band": 4.4287303484964795,
+          "iae": 26783.004582667054,
+          "first_post_step_u": {
+            "cycle_ratio": 0.1,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "set_target": {
+          "peak_excursion": 9.491465151733081,
+          "settling_min": NaN,
+          "steady_band": 4.751992721626712,
+          "iae": 28229.200386231925,
+          "first_post_step_u": {
+            "cycle_ratio": 0.1,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "baseline": {
+          "peak_excursion": 7.515913640979022,
+          "settling_min": NaN,
+          "steady_band": 4.658223261764615,
+          "iae": 21518.125367334113,
+          "first_post_step_u": null
+        },
+        "_self_check": {
+          "pre_step_identical": true,
+          "post_step_identical": false
+        }
+      },
+      "2": {
+        "rebuild": {
+          "peak_excursion": 8.411712000495413,
+          "settling_min": NaN,
+          "steady_band": 4.603778260610228,
+          "iae": 26942.046139472586,
+          "first_post_step_u": {
+            "cycle_ratio": 0.1,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "set_target": {
+          "peak_excursion": 8.78132928785422,
+          "settling_min": NaN,
+          "steady_band": 4.739952543495549,
+          "iae": 27631.897366247314,
+          "first_post_step_u": {
+            "cycle_ratio": 0.1,
+            "fan": {
+              "duty": null
+            }
+          }
+        },
+        "baseline": {
+          "peak_excursion": 7.504593321793209,
+          "settling_min": NaN,
+          "steady_band": 5.078172134673577,
+          "iae": 22024.146836585016,
+          "first_post_step_u": null
+        },
+        "_self_check": {
+          "pre_step_identical": true,
+          "post_step_identical": false
+        }
+      }
+    }
+  }
+}
