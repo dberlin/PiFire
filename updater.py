@@ -30,11 +30,16 @@ from common.datastore_accessors import (
     set_wizard_install_status,
     write_settings,
 )
+from common.web_ui_build import rebuild_web_ui, web_ui_needs_rebuild
 from importlib.metadata import version, PackageNotFoundError
 
+import os
 import subprocess
 import argparse
 import logging
+
+#: This file sits at the repo root, beside web-react/ and updater/.
+REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 """
 ==============================================================================
@@ -339,6 +344,54 @@ def read_output(command):
     print(f"Return Code: {return_code}")
 
 
+def rebuild_web_ui_if_stale(repo_root=None, runner=None, force=False):
+    """Rebuild the React bundle when the checked-out sources are newer than it.
+
+    Runs after every update and branch change: web-react/dist is git-ignored,
+    so pulling new React sources leaves the built bundle untouched and the SPA
+    blueprint keeps serving it.
+
+    Skipped when the bundle is already newer than every source, so a
+    backend-only update does not pay for a build that takes minutes on a Pi and
+    an update whose migration step already built it does not build twice.
+    Returns True when the bundle is up to date afterwards.
+
+    `force` builds regardless, for the updater page's Rebuild button: a bundle
+    can be newer than its sources and still be wrong -- a build that failed
+    half-way, or one whose output was disturbed -- and the mtime check cannot
+    see that. An explicit request is taken at face value.
+    """
+    repo_root = repo_root or REPO_ROOT
+    if not force and not web_ui_needs_rebuild(repo_root):
+        output = " - Web UI is already up to date with its sources"
+        logger.info(output)
+        set_updater_install_status(95, "Checking Web UI...", output)
+        return True
+
+    status = "Rebuilding Web UI..."
+    logger.info(status)
+    set_updater_install_status(95, status, " - Rebuilding the web UI from the updated sources")
+
+    code = rebuild_web_ui(repo_root, lambda line: _publish(95, status, line), runner=runner)
+    if code == 0:
+        logger.info("Web UI rebuilt")
+        return True
+
+    # Not fatal to the update -- the backend is already on the new code and a
+    # failed build must not look like a failed update -- but it cannot pass
+    # silently either: what is being served is now a bundle built from
+    # different sources.
+    output = f" - Web UI rebuild FAILED (exit {code}). The previous bundle is still being served."
+    logger.error(output)
+    set_updater_install_status(95, "Web UI rebuild failed", output)
+    return False
+
+
+def _publish(percent, status, line):
+    set_updater_install_status(percent, status, line)
+    logger.info(line)
+
+
 def install_dependencies(current_version_string="0.0.0", current_build=None):
     result = 0
     percent = 30
@@ -567,6 +620,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "-v", "--uv", action="store_true", required=False, help="Set uv flag and clear venv flag in settings"
     )
+    parser.add_argument(
+        "-w",
+        "--rebuildwebui",
+        action="store_true",
+        required=False,
+        help="Rebuild the React web UI from the current sources",
+    )
     parser.add_argument("-l", "--legacyvenv", action="store_true", required=False, help="Set venv flag in settings")
     parser.add_argument("-d", "--debug", action="store_true", required=False, help="Enable Debug Mode")
     parser.add_argument(
@@ -616,6 +676,10 @@ if __name__ == "__main__":
         time.sleep(4)
 
         install_dependencies(current_version, current_build)
+        # After the dependencies, so a rebuild sees any new node/bun the
+        # migration step installed -- and so an upgrade.sh that already built
+        # the bundle leaves nothing for this to do.
+        rebuild_web_ui_if_stale()
 
     elif args.branch:
         num_args += 1
@@ -636,6 +700,16 @@ if __name__ == "__main__":
         time.sleep(4)
 
         install_dependencies(current_version, current_build)
+        # A branch change swaps the React sources wholesale; the bundle from
+        # the branch just left is exactly what must not keep being served.
+        rebuild_web_ui_if_stale()
+
+    elif args.rebuildwebui:
+        num_args += 1
+        # Forced: the caller asked for this build explicitly, so it runs even
+        # when the mtime check would call the bundle current.
+        rebuild_web_ui_if_stale(force=True)
+        set_updater_install_status(101, "Finished!", " - Web UI rebuild finished")
 
     elif args.remote:
         num_args += 1

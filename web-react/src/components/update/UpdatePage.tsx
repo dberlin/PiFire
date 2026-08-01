@@ -7,6 +7,7 @@ import {
   fetchUpdateState,
   fetchUpdateStatus,
   pullUpdate,
+  rebuildWebUi,
   refreshBranches,
   upgradeDeps,
 } from "../../helpers/update/updateApi";
@@ -168,6 +169,23 @@ export function UpdatePage() {
         >
           Upgrade dependencies
         </button>
+        {/* web-react/dist is a build artifact, so pulling new sources does not
+            produce a new bundle on its own. An update rebuilds it, but this is
+            the way back when that build did not run or failed -- otherwise the
+            only route is a shell on the grill. */}
+        <button
+          type="button"
+          className="pf-admin-btn"
+          disabled={busy}
+          onClick={() => void run(() => rebuildWebUi())}
+        >
+          Rebuild web UI
+        </button>
+        {state.web_ui_stale && (
+          <p className="pf-update-note" role="status">
+            The web interface is older than the code on disk. Rebuild it to pick up the update.
+          </p>
+        )}
         {note && <p className="pf-update-note">{note}</p>}
       </section>
 

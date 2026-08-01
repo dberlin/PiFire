@@ -22,7 +22,8 @@ from common.datastore_accessors import (
 )
 from common.modes import Mode
 from common.system import is_real_hardware
-from updater import get_available_updates, get_branch, get_log, get_update_data
+from common.web_ui_build import web_ui_needs_rebuild
+from updater import REPO_ROOT, get_available_updates, get_branch, get_log, get_update_data
 
 from . import api_update_bp
 
@@ -59,6 +60,10 @@ def update_state():
             "branches": d["branches"],
             "remote_url": d["remote_url"],
             "remote_version": d["remote_version"],
+            # Whether the served React bundle is older than the sources on
+            # disk. Drives the updater page's Rebuild Web UI control, which is
+            # the way back from a pull whose rebuild did not run or failed.
+            "web_ui_stale": web_ui_needs_rebuild(REPO_ROOT),
         }
     )
 
@@ -118,6 +123,21 @@ def update_pull():
         return _error(error_msg, 502)
     set_updater_install_status(0, "Starting Update...", "")
     return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -u {branch} -p &")})
+
+
+@api_update_bp.route("/rebuild-web-ui", methods=["POST"])
+def update_rebuild_web_ui():
+    """Rebuild the React bundle from the sources currently on disk.
+
+    Unguarded by mode, unlike /pull and /upgrade: this touches nothing but
+    web-react/dist, changes no Python the control process is running, and is
+    the recovery path when a pull left the served bundle behind. Forced rather
+    than conditional -- an explicit request builds even when the bundle looks
+    current, because a half-finished build can look current and be broken.
+    """
+    settings = read_settings()
+    set_updater_install_status(0, "Starting Web UI Rebuild...", "")
+    return _ok({"started": _fire(settings, f"{_python_exec(settings)} updater.py -w &")})
 
 
 @api_update_bp.route("/upgrade", methods=["POST"])

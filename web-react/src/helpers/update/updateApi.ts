@@ -76,3 +76,4 @@ export const changeBranch = (target: string, baseUrl = BASE_URL) =>
   post<UpdateStarted>(baseUrl, "branch", { target });
 export const pullUpdate = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "pull");
 export const upgradeDeps = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "upgrade");
+export const rebuildWebUi = (baseUrl = BASE_URL) => post<UpdateStarted>(baseUrl, "rebuild-web-ui");

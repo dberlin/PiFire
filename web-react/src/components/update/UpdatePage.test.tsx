@@ -13,6 +13,7 @@ rs.mock("../../helpers/update/updateApi", () => ({
   changeBranch: rs.fn(),
   pullUpdate: rs.fn(),
   upgradeDeps: rs.fn(),
+  rebuildWebUi: rs.fn(),
 }));
 
 const state = {
@@ -25,6 +26,7 @@ const state = {
     branches: ["main", "dev"],
     remote_url: "u",
     remote_version: "v1.8.1",
+    web_ui_stale: false,
   },
 };
 
@@ -142,5 +144,45 @@ describe("UpdatePage", () => {
     await screen.findByText(/v1\.8\.0/);
     fireEvent.click(screen.getByRole("button", { name: /upgrade dependencies/i }));
     expect(await screen.findByText(/reboot/i)).toBeInTheDocument();
+  });
+});
+
+describe("UpdatePage web UI rebuild", () => {
+  it("fires a rebuild when asked", async () => {
+    /* web-react/dist is a build artifact, so a pull whose rebuild did not run
+       leaves the served interface behind with no way back from the browser. */
+    seed({ rebuildWebUi: { ok: true, status: 200, message: "", data: { started: true } } });
+    renderPage();
+    await screen.findByText("Actions");
+
+    fireEvent.click(screen.getByRole("button", { name: "Rebuild web UI" }));
+
+    await waitFor(() => expect(api.rebuildWebUi).toHaveBeenCalledTimes(1));
+  });
+
+  it("says so when the served bundle is older than the code", async () => {
+    (api.fetchUpdateState as ReturnType<typeof rs.fn>).mockResolvedValue({
+      ...state,
+      data: { ...state.data, web_ui_stale: true },
+    });
+    (api.fetchUpdateCheck as ReturnType<typeof rs.fn>).mockResolvedValue({
+      ok: true,
+      status: 200,
+      message: "",
+      data: { current: "v1.8.0", behind: 0 },
+    });
+    renderPage();
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "The web interface is older than the code on disk",
+    );
+  });
+
+  it("stays quiet when the bundle is current", async () => {
+    seed();
+    renderPage();
+    await screen.findByText("Actions");
+
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

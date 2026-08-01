@@ -32,7 +32,10 @@ def _stub_reads(monkeypatch):
 
 
 def test_state_returns_the_update_data_shape(ds, client, monkeypatch):
+    import blueprints.api_update.routes as ur
+
     _stub_reads(monkeypatch)
+    monkeypatch.setattr(ur, "web_ui_needs_rebuild", lambda root: False)
     body = client.get("/api/update/state").get_json()
     assert body["result"] == "OK"
     assert body["data"] == {
@@ -41,7 +44,18 @@ def test_state_returns_the_update_data_shape(ds, client, monkeypatch):
         "branches": ["main", "dev", "prototype"],
         "remote_url": "https://github.com/nebhead/PiFire",
         "remote_version": "v1.8.1",
+        "web_ui_stale": False,
     }
+
+
+def test_state_reports_a_bundle_older_than_its_sources(ds, client, monkeypatch):
+    """Drives the updater page's Rebuild Web UI prompt: web-react/dist is a
+    build artifact, so a pull can leave the served interface behind."""
+    import blueprints.api_update.routes as ur
+
+    _stub_reads(monkeypatch)
+    monkeypatch.setattr(ur, "web_ui_needs_rebuild", lambda root: True)
+    assert client.get("/api/update/state").get_json()["data"]["web_ui_stale"] is True
 
 
 def test_check_reports_commits_behind(ds, client, monkeypatch):
@@ -169,3 +183,39 @@ def test_upgrade_is_blocked_unless_stopped(ds, client, monkeypatch):
     _set_mode(Mode.STOP)
     assert client.post("/api/update/upgrade").status_code == 200
     assert len(fired) == 1 and fired[0].endswith("updater.py -i &")
+
+
+def test_rebuild_web_ui_fires_the_w_flag_on_real_hardware(ds, client, monkeypatch):
+    _, fired = _neutralize(monkeypatch)
+    _set_real_hw(True)
+
+    resp = client.post("/api/update/rebuild-web-ui")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"started": True}
+    assert len(fired) == 1 and fired[0].endswith("updater.py -w &")
+
+
+def test_rebuild_web_ui_does_not_shell_out_off_real_hardware(ds, client, monkeypatch):
+    _, fired = _neutralize(monkeypatch)
+    _set_real_hw(False)
+
+    resp = client.post("/api/update/rebuild-web-ui")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"started": False}
+    assert fired == []
+
+
+def test_rebuild_web_ui_is_allowed_while_the_grill_runs(ds, client, monkeypatch):
+    """Unlike /pull and /upgrade: this writes only web-react/dist and changes
+    no code the control process is running, and refusing it would strand a
+    grill mid-cook on a stale interface."""
+    _, fired = _neutralize(monkeypatch)
+    _set_real_hw(True)
+    _set_mode(Mode.HOLD)
+
+    resp = client.post("/api/update/rebuild-web-ui")
+
+    assert resp.status_code == 200
+    assert len(fired) == 1

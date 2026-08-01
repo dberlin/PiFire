@@ -4,6 +4,9 @@ export interface UpdateState {
   branches: string[];
   remote_url: string;
   remote_version: string;
+  /** The served React bundle is older than the sources on disk -- a pull whose
+   *  rebuild did not run, or failed. */
+  web_ui_stale: boolean;
 }
 
 export interface UpdateCheck {

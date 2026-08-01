@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { probeModulesLoader } from "../helpers/probes/probeMapRoutes";
 import { settingsLoader } from "../helpers/settings/settingsRoutes";
+import { useWebUiBuild } from "../helpers/useWebUiBuild";
 import { wizardLoader } from "../helpers/wizard/wizardRoutes";
 import { AppPrefsProvider } from "./AppPrefs";
 import { AdminPage } from "./admin/AdminPage";
@@ -150,6 +151,10 @@ export const routes = [
 const router = createBrowserRouter(routes);
 
 export default function App() {
+  // Above the router, not inside a route: an update can land while the user is
+  // anywhere, including the wizard, which is the one route mounted outside
+  // AppShell.
+  useWebUiBuild();
   return (
     <AppPrefsProvider>
       <RouterProvider router={router} />
