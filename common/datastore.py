@@ -314,6 +314,7 @@ class transaction:
 def init():
     connection()
     _first_boot_import()
+    _upgrade_settings_in_store()
 
 
 def _first_boot_import():
@@ -343,6 +344,46 @@ def _first_boot_import():
         if conn.execute("SELECT 1 FROM kv WHERE key='pellets:general'").fetchone() is None:
             pelletdb = backups.read_pellet_db_file()  # the FILE reader, not SQLite
             conn.execute(upsert, ("pellets:general", json.dumps(pelletdb)))
+
+
+def _upgrade_settings_in_store():
+    """Bring the SQLite-stored settings tree up to the running code's version.
+
+    The settings migration cascade reaches settings imported from a JSON file,
+    which happens on first boot and on an explicit restore. A tree that has
+    lived in SQLite ever since would otherwise never be migrated again -- so a
+    shape change leaves an existing install holding keys the schema no longer
+    models, and the write-time repair strips them on the next save.
+    """
+    import json
+
+    from common import settings_migration  # deferred to avoid import cycle
+    from common.common import semantic_ver_is_lower, semantic_ver_to_list
+    from common.defaults import default_settings
+
+    settings_default = default_settings()
+    current = settings_default["versions"]
+
+    raw = get_blob("settings:general")
+    if raw is None:
+        return
+    settings = json.loads(raw)
+    stored = settings.get("versions") or {}
+    if not stored.get("server"):
+        return
+    if not semantic_ver_is_lower(stored["server"], current["server"]) and stored.get("build", 0) >= current.get(
+        "build", 0
+    ):
+        return
+
+    prev_ver = semantic_ver_to_list(stored["server"])
+    settings = settings_migration.upgrade_settings(prev_ver, settings, settings_default)
+    settings["versions"] = current
+    with transaction() as conn:
+        conn.execute(
+            "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("settings:general", json.dumps(settings)),
+        )
 
 
 def _reset_for_tests(path):
