@@ -245,7 +245,9 @@ def wizard_scan():
     Discovery-function return shapes (reconciled against the real
     implementations, not guessed):
       - discover_extended_i2c_buses() -> [{'bus_num': int, 'name': str,
-        'serial': str | None}, ...]                    (common/i2c_bus.py)
+        'serial': str | None}, ...]. The 'kernel' kind returns three groups
+        from this, one per way a KernelBus can be addressed: bus number,
+        adapter name, and serial.                      (common/i2c_bus.py)
       - discover_mcp2221_devices() -> [{'serial': str, 'path': ...}, ...]
         ('serial' is only ever a truthy string -- the function filters out
         entries with no serial_number)                 (grillplat/mcp2221.py)
@@ -261,7 +263,7 @@ def wizard_scan():
     groups = []
     error = None
     try:
-        if kind == "extended":
+        if kind == "kernel":
             adapters = discover_extended_i2c_buses()
             groups = [
                 {
@@ -269,6 +271,10 @@ def wizard_scan():
                     "items": [
                         {"value": str(a["bus_num"]), "label": f"{a['name']} (bus {a['bus_num']})"} for a in adapters
                     ],
+                },
+                {
+                    "title": "By Adapter Name",
+                    "items": [{"value": a["name"], "label": f"{a['name']} (bus {a['bus_num']})"} for a in adapters],
                 },
                 {
                     "title": "By Serial",

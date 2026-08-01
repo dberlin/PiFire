@@ -236,7 +236,7 @@ def test_scan_extended_i2c_returns_groups(ds, client, monkeypatch):
     )
     resp = client.post(
         "/api/wizard/scan",
-        data=json.dumps({"kind": "extended"}),
+        data=json.dumps({"kind": "kernel"}),
         content_type="application/json",
     )
     assert resp.status_code == 200
@@ -252,7 +252,7 @@ def test_scan_no_results_returns_friendly_error(ds, client, monkeypatch):
     monkeypatch.setattr(wr, "discover_extended_i2c_buses", lambda *a, **k: [])
     resp = client.post(
         "/api/wizard/scan",
-        data=json.dumps({"kind": "extended"}),
+        data=json.dumps({"kind": "kernel"}),
         content_type="application/json",
     )
     body = resp.get_json()
@@ -778,3 +778,22 @@ def test_installlog_before_any_install_is_empty_rather_than_an_error(ds, client)
 
     assert body["text"] == ""
     assert body["offset"] == 0
+
+
+def test_scan_kernel_offers_all_three_ways_to_address_an_adapter(client, monkeypatch):
+    monkeypatch.setattr(
+        "blueprints.api_wizard.routes.discover_extended_i2c_buses",
+        lambda: [{"bus_num": 7, "name": "CP2112 SMBus Bridge", "serial": "AB12"}],
+    )
+    body = client.post("/api/wizard/scan", json={"kind": "kernel"}).get_json()
+    titles = [group["title"] for group in body["groups"]]
+    assert titles == ["By Bus Number", "By Adapter Name", "By Serial"]
+    by_title = {group["title"]: group["items"] for group in body["groups"]}
+    assert by_title["By Bus Number"][0]["value"] == "7"
+    assert by_title["By Adapter Name"][0]["value"] == "CP2112 SMBus Bridge"
+    assert by_title["By Serial"][0]["value"] == "AB12"
+
+
+def test_scan_no_longer_answers_to_the_old_kind_name(client):
+    body = client.post("/api/wizard/scan", json={"kind": "extended"}).get_json()
+    assert body["groups"] == []
