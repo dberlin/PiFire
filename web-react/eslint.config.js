@@ -21,6 +21,7 @@ export default [
       "*.config.ts",
       "src/helpers/settings/settingsTypes.gen.ts",
       "src/helpers/settings/controllerTypes.gen.ts",
+      "src/helpers/settings/settingsDefaults.gen.ts",
     ],
   },
   {

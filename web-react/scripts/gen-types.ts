@@ -9,6 +9,7 @@
 import { compileFromFile } from "json-schema-to-typescript";
 import { readFile, writeFile } from "node:fs/promises";
 import { emitControllerTypes } from "./emitControllerTypes";
+import { emitSettingsDefaults } from "./emitSettingsDefaults";
 
 const SCHEMA_PATH = "schema/settings.schema.json";
 const CONTROLLERS_PATH = "../controller/controllers.json";
@@ -30,6 +31,11 @@ const ARTIFACTS: Artifact[] = [
     out: "src/helpers/settings/controllerTypes.gen.ts",
     generate: async () =>
       emitControllerTypes(JSON.parse(await readFile(CONTROLLERS_PATH, "utf8"))),
+  },
+  {
+    out: "src/helpers/settings/settingsDefaults.gen.ts",
+    generate: async () =>
+      emitSettingsDefaults(JSON.parse(await readFile(SCHEMA_PATH, "utf8"))),
   },
 ];
 
