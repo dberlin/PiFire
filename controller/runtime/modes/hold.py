@@ -1,4 +1,5 @@
 from common.common import WriteKind
+from common.controller_model_state import ControllerModelStore
 from common.modes import Mode
 from controller.applied_output import AppliedOutput, OutputSource, classify_output_source, seed_output
 from controller.runtime.logic.cycle import hold_initial_cycle
@@ -50,6 +51,7 @@ class HoldMode(ControlMode):
     Startup/Reignite afterstarttemp-write teardown gate)."""
 
     name = Mode.HOLD
+    _model_store = None
 
     def setup(self):
         import control as _control
@@ -72,10 +74,16 @@ class HoldMode(ControlMode):
         self.state.lid.expires = 0
         self.state.target_temp_achieved = False
 
+        self._model_store = self._model_store or ControllerModelStore()
+        self._controller_name = self.settings["controller"]["selected"]
+
         # Load Controller Module (i.e. PID)
         self._runner, self._controller_status = _runner_mod.build_runner(
             self.settings, self.control, logger=self.ctx.control_log
         )
+
+        if self._runner is not None:
+            self._restore_model()
 
         # Fan ownership is a setup-time capability of the controller (e.g. MPC
         # with enable_fan_input), not a runtime latch -- this closes a startup
@@ -135,6 +143,18 @@ class HoldMode(ControlMode):
             self._controller_status = self._runner.reconfigure(settings, control, logger=ctx.control_log)
             if self._controller_status == "Active":
                 _control.eventLogger.info("Controller reinitialized with updated settings")
+                self._controller_name = settings["controller"]["selected"]
+                self._restore_model()
+                self._runner.set_output(
+                    seed_output(
+                        self.state.cycle.ratio,
+                        now,
+                        lid_open=self.state.lid.open_detected,
+                        manual_override_active=self.state.manual_override["auger"] > now,
+                        fan_assist_active=self.state.fan.assist,
+                        auger_output=current_output_status["auger"],
+                    )
+                )
 
         # Feed the runner every tick so a threaded core always has a fresh temp
         # to solve; for the synchronous runner this just stores the latest temp,
@@ -193,6 +213,10 @@ class HoldMode(ControlMode):
                         requested=self.state.controller.output,
                     )
                 )
+
+            snapshot = self._runner.get_model_snapshot()
+            if snapshot is not None:
+                self._model_store.save(self._controller_name, snapshot)
 
         self._auger_cycle_tick(now, current_output_status)
 
@@ -364,6 +388,17 @@ class HoldMode(ControlMode):
                 timestamp=self._last_now,
             )
         )
+
+    def _restore_model(self):
+        snapshot = self._model_store.load(self._controller_name)
+        if snapshot is None:
+            return
+        import control as _control
+
+        if self._runner.restore_model(snapshot):
+            _control.eventLogger.info(f"Restored the stored {self._controller_name} model")
+        else:
+            _control.eventLogger.warning(f"Stored {self._controller_name} model was rejected; starting fresh")
 
     # check_safety is now a declarative pre_act guard (GUARDS["Hold"]); the base
     # ControlMode default (return False) applies here.

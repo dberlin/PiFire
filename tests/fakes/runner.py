@@ -22,7 +22,7 @@ class FakeControllerRunner:
     def submit(self, temp):
         self.submitted_temps.append(temp)
 
-    def reconfigure(self, settings, control):
+    def reconfigure(self, settings, control, logger=None):
         return "Active"
 
     def control_period(self):
