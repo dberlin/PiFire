@@ -61,6 +61,42 @@ class ControllerBase:
         (expensive solve) rather than inline in the control loop."""
         return False
 
+    def set_output(self, applied):
+        """Report the duty that actually reached the auger.
+
+        `applied` is a controller.applied_output.AppliedOutput. Controllers that
+        model the plant use it so their model follows the grill rather than the
+        request. A report whose `controller_commanded` is False is NOT a report
+        to discard -- the grill really did run at that duty, so it belongs in
+        the command history. What it suppresses is *identification* across the
+        interval, so no estimator computes a temperature slope over time the
+        controller did not drive.
+        """
+
+    def get_status(self):
+        """JSON-safe diagnostics for the MQTT payload.
+
+        Return None to publish the controller's __dict__, which is the legacy
+        behavior and correct for controllers whose attributes are all scalars.
+        """
+        return None
+
+    def get_model_snapshot(self):
+        """A JSON-encodable record of learned plant parameters, or None.
+
+        Must carry an integer `revision` that increases whenever the model
+        changes; the store uses it to skip writes that would learn nothing.
+        """
+        return None
+
+    def restore_model(self, snapshot):
+        """Adopt a persisted snapshot. True when it was adopted.
+
+        The store validates that a snapshot is a bounded, JSON-safe record; the
+        controller validates that its numbers describe a possible grill.
+        """
+        return False
+
 
 def normalize_controller_output(output):
     """
