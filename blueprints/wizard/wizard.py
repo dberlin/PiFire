@@ -137,16 +137,18 @@ def wizardInstallInfoExisting(wizardData, settings):
             wizardInstallInfo["modules"][module]["profile_selected"] = []
 
         for setting in wizardData["modules"][module][selected]["settings_dependencies"]:
-            settingsLocation = wizardData["modules"][module][selected]["settings_dependencies"][setting]["settings"]
+            dependency = wizardData["modules"][module][selected]["settings_dependencies"][setting]
+            settingsLocation = dependency["settings"]
             settingsValue = settings.copy()
             for index in range(0, len(settingsLocation)):
                 settingsValue = settingsValue[settingsLocation[index]]
             # A composite dependency (i2c_bus) is an object, not a scalar --
             # str()ing it would produce a Python repr the installer can never
-            # parse back. Every other setting still normalizes to its string
-            # form for the option-matching in _constrain_to_options.
+            # parse back, so the manifest's declared type decides, not the
+            # value's runtime shape. Every other setting still normalizes to
+            # its string form for the option-matching in _constrain_to_options.
             wizardInstallInfo["modules"][module]["settings"][setting] = (
-                settingsValue if isinstance(settingsValue, dict) else str(settingsValue)
+                settingsValue if dependency.get("type") == "i2c_bus" else str(settingsValue)
             )
         if module == "display":
             wizardInstallInfo["modules"][module]["config"] = settings["display"]["config"][
