@@ -85,7 +85,7 @@ class GrillSim:
         eff_fan = fan if self.fan_is_lever else 0.65
 
         # deadtime: pellets fed now release heat `deadtime` seconds later
-        fed = self.feed_rate if auger_on else 0.0
+        fed = self.feed_rate * float(auger_on)
         released = self.transit.popleft()
         self.transit.append(fed)
         self.fuel += released

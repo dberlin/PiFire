@@ -80,20 +80,36 @@ def _report(core, ratio, source_name, t, requested=None):
 
 
 def _auger_toggle_tick(auger_on, auger_toggle, t, ratio, cycle_time):
-    """Port of controller.runtime.modes.base.ControlMode._auger_cycle_tick.
+    """Port of controller.runtime.modes.base.ControlMode._auger_cycle_tick,
+    returning the auger's exact fractional on-time over the window [t, t+1)
+    instead of a single boolean sample of it.
 
-    Production runs a free-running toggle keyed on elapsed time since the last
-    toggle, decoupled from the controller's re-solve cadence -- the auger keeps
-    toggling on its own timer regardless of how often `ratio` gets rewritten
-    between toggles. Both branches test the same pre-tick snapshot of
-    `auger_on`, so at most one of them can fire in a given tick.
+    Production evaluates this strict-`>` toggle at its work-loop resolution
+    (~20 Hz) and drives a physical auger that integrates fuel delivery
+    continuously between samples. GrillSim can only be stepped once per
+    simulated second, so sampling the toggle as a boolean once per second
+    would quantize fuel delivery to whichever side of a transition the sample
+    landed on. Instead, the transition instant within the window is located
+    exactly (continuous time, so `>` vs `>=` at that single instant does not
+    affect the fraction) and returned as the portion of the window it covers.
+    This is arithmetic rather than sub-stepping because `cycle_time * u_min`
+    and `cycle_time * (1 - u_max)` are both >= 1 s for every ratio this
+    harness runs, so at most one transition ever falls inside a given window.
+
+    `auger_toggle` is carried as the exact (possibly fractional) transition
+    time rather than snapped to a tick, so later windows see the true elapsed
+    time since the last transition.
     """
     was_on = auger_on
-    if not was_on and (t - auger_toggle) > cycle_time * (1 - ratio):
-        auger_on, auger_toggle = True, t
-    if was_on and (t - auger_toggle) > cycle_time * ratio:
-        auger_on, auger_toggle = False, t
-    return auger_on, auger_toggle
+    if not was_on:
+        transition = auger_toggle + cycle_time * (1 - ratio)
+        if transition >= t + 1:
+            return False, auger_toggle, 0.0
+        return True, transition, (t + 1 - transition)
+    transition = auger_toggle + cycle_time * ratio
+    if transition >= t + 1:
+        return True, auger_toggle, 1.0
+    return False, transition, (transition - t)
 
 
 def run_scenario(controller, scenario, seed):
@@ -137,12 +153,14 @@ def run_scenario(controller, scenario, seed):
                 _report(core, ratio, "controller", t, requested=requested)
 
         if lid_open:
-            auger_on, auger_toggle = False, t
+            auger_on, auger_toggle, auger_frac = False, t, 0.0
             _report(core, 0.0, "lid_open", t)
         else:
-            auger_on, auger_toggle = _auger_toggle_tick(auger_on, auger_toggle, t, ratio, CYCLE_DATA["HoldCycleTime"])
+            auger_on, auger_toggle, auger_frac = _auger_toggle_tick(
+                auger_on, auger_toggle, t, ratio, CYCLE_DATA["HoldCycleTime"]
+            )
 
-        plant.step(auger_on=auger_on, fan_frac=0.0 if lid_open else fan_frac)
+        plant.step(auger_on=auger_frac, fan_frac=0.0 if lid_open else fan_frac)
 
         temps.append(temp_f)
         duties.append(0.0 if lid_open else ratio)

@@ -1,19 +1,31 @@
-"""Pins the fix-round-1 correction to controller_matrix.py's auger PWM model.
+"""Pins controller_matrix.py's auger PWM model against two regressions.
 
-The harness used to re-anchor its duty-cycle window every controller re-solve
-(`cycle_anchor = t`), which only reproduces production for controllers whose
-re-solve period equals HoldCycleTime. MPC re-solves every 5s against a 20s
-cycle_time, so the realized auger on-fraction came out far higher than the
-requested ratio -- `_auger_toggle_tick` ports the free-running toggle in
-`ControlMode._auger_cycle_tick` (controller/runtime/modes/base.py) instead,
-which is independent of the caller's re-solve cadence.
+1. The harness used to re-anchor its duty-cycle window every controller
+   re-solve (`cycle_anchor = t`), which only reproduces production for
+   controllers whose re-solve period equals HoldCycleTime. MPC re-solves every
+   5s against a 20s cycle_time, so the realized auger on-fraction came out far
+   higher than the requested ratio.
+2. Sampling the toggle as a boolean once per simulated second (GrillSim's
+   integration step) quantizes fuel delivery to whichever side of a
+   transition the sample lands on, biasing the realized duty above the
+   requested ratio -- worst at small ratios, e.g. ~21% high at `u_min`, which
+   both controllers sit at for the entire 225 F scenarios.
+
+`_auger_toggle_tick` ports the free-running toggle in
+`ControlMode._auger_cycle_tick` (controller/runtime/modes/base.py), which is
+independent of the caller's re-solve cadence, and returns the toggle's exact
+fractional on-time over the caller's 1 s window rather than a boolean sample
+of it (paired with `GrillSim.step`'s `float(auger_on)`, which accepts that
+fraction directly).
 
 The integration test below drives the real `run_scenario` loop (not just the
 extracted helper) with a stub controller whose `get_control_period()` varies,
 so a regression that reintroduces re-anchoring inside the loop itself would
 still be caught -- exercising `_auger_toggle_tick` in isolation would not
-catch that class of regression. The legacy-model test is a negative control
-proving the fix is not vacuous: the pre-fix model passes when the control
+catch that class of regression. Tolerances are tight enough to fail under
+boolean-per-tick sampling (tested at `ratio=0.35` and at `ratio=u_min`, the
+worst case). The legacy-model test is a negative control proving the
+period-mismatch fix is not vacuous: the pre-fix model passes when the control
 period matches HoldCycleTime and fails when it does not.
 """
 
@@ -29,6 +41,7 @@ import docs.superpowers.experiments.controller_matrix as controller_matrix
 
 CYCLE_TIME = controller_matrix.CYCLE_DATA["HoldCycleTime"]
 RATIO = 0.35
+U_MIN = controller_matrix.CYCLE_DATA["u_min"]
 DURATION = 20 * CYCLE_TIME  # enough full cycles to average out the startup transient
 
 
@@ -70,14 +83,15 @@ class _StubController:
 
 
 class _FakePlant:
-    """Records every `auger_on` the real run_scenario loop drives, ignoring
-    thermal physics entirely -- only the toggle sequence is under test here."""
+    """Records the exact auger on-fraction the real run_scenario loop drives
+    each window, ignoring thermal physics entirely -- only the toggle's timing
+    is under test here."""
 
     instances = []
 
     def __init__(self, seed=0):
         del seed
-        self.on_ticks = []
+        self.on_fracs = []
         _FakePlant.instances.append(self)
 
     def measured(self):
@@ -85,19 +99,31 @@ class _FakePlant:
 
     def step(self, auger_on, fan_frac):
         del fan_frac
-        self.on_ticks.append(bool(auger_on))
+        self.on_fracs.append(float(auger_on))
 
 
-@pytest.mark.parametrize("control_period", [20, 5])
-def test_run_scenario_realized_duty_matches_ratio_regardless_of_control_period(control_period, monkeypatch):
+@pytest.mark.parametrize(
+    "control_period,ratio",
+    [
+        (20, RATIO),
+        (5, RATIO),
+        # u_min is where boolean-per-tick sampling costs the most relative
+        # error (~21% high, both controllers sit here for the whole 225 F
+        # scenarios), so it is the case most likely to catch a regression
+        # back to boolean sampling.
+        (20, U_MIN),
+        (5, U_MIN),
+    ],
+)
+def test_run_scenario_realized_duty_matches_ratio_regardless_of_control_period(control_period, ratio, monkeypatch):
     """Drives the real run_scenario loop -- not just _auger_toggle_tick in
-    isolation -- so a regression that reintroduces re-anchoring inside the loop
-    itself would still be caught."""
+    isolation -- so a regression that reintroduces re-anchoring, or reintroduces
+    boolean-per-tick sampling, inside the loop itself would still be caught."""
     name = "_stub_toggle_probe"
     fake_mod = types.ModuleType(f"controller.{name}")
     fake_mod.Controller = _StubController
     monkeypatch.setitem(sys.modules, f"controller.{name}", fake_mod)
-    monkeypatch.setitem(controller_matrix.CONTROLLER_CONFIGS, name, {"_period": control_period, "_ratio": RATIO})
+    monkeypatch.setitem(controller_matrix.CONTROLLER_CONFIGS, name, {"_period": control_period, "_ratio": ratio})
     monkeypatch.setattr(controller_matrix, "GrillSim", _FakePlant)
     _FakePlant.instances.clear()
 
@@ -105,8 +131,11 @@ def test_run_scenario_realized_duty_matches_ratio_regardless_of_control_period(c
     controller_matrix.run_scenario(name, scenario, seed=0)
 
     plant = _FakePlant.instances[-1]
-    realized = sum(plant.on_ticks) / len(plant.on_ticks)
-    assert realized == pytest.approx(RATIO, abs=0.02)
+    realized = sum(plant.on_fracs) / len(plant.on_fracs)
+    # Tight enough to fail boolean-per-tick sampling (~0.0136 off at ratio=0.35,
+    # ~0.0318 off at ratio=u_min); the fractional model should be exact modulo
+    # floating point.
+    assert realized == pytest.approx(ratio, abs=0.005)
 
 
 def test_legacy_model_actually_fails_the_mismatched_period_case():
