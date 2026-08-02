@@ -144,6 +144,7 @@ class Controller(ControllerBase):
 
         self._set_point_c = 0.0
         self._last_Q = cfg["Q_min"]
+        self._applied_Q = float(cfg["Q_min"])
         self._x_hat = None
         self._policy_u_prev = float(cfg["Q_min"])
         self._last_Q_raw = float(cfg["Q_min"])
@@ -288,6 +289,18 @@ class Controller(ControllerBase):
 
     def wants_async(self):
         return True
+
+    def get_status(self):
+        return {
+            "set_point": self.set_point,
+            "set_point_c": float(self._set_point_c),
+            "last_Q": float(self._last_Q),
+            "applied_Q": float(self._applied_Q),
+            "policy": "net" if self._net is not None else "nlp",
+            "u_min": float(self.u_min),
+            "u_max": float(self.u_max),
+            "x_hat": None if self._x_hat is None else [float(v) for v in np.asarray(self._x_hat).reshape(-1)],
+        }
 
     def update(self, current):
         y = _to_c(current, self.units)

@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import time
@@ -91,3 +92,24 @@ def test_fan_on_derives_fan_suffixed_path_and_falls_back(tmp_path, capsys):
     assert "_fan.npz" in out  # tried the fan-on path, not the base
     c.set_target(150.0)
     assert c.update(150.0)["fan"]["duty"] is not None
+
+
+def test_get_status_is_json_safe():
+    c = _make()
+    c.set_target(225.0)
+    c.update(200.0)
+    status = c.get_status()
+    # the real bar: it survives the MQTT encoder
+    encoded = json.dumps(status, allow_nan=False)
+    assert "do_mpc" not in encoded
+    assert set(status) >= {"set_point", "set_point_c", "last_Q", "applied_Q", "policy", "x_hat"}
+    assert isinstance(status["x_hat"], list)
+    assert all(isinstance(v, float) for v in status["x_hat"])
+
+
+def test_dunder_dict_is_not_json_safe():
+    """The reason get_status exists; if this ever passes, revisit the fallback."""
+    c = _make()
+    c.update(200.0)
+    with pytest.raises(TypeError):
+        json.dumps(dict(c.__dict__))
