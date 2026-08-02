@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useOutletContext } from "react-router";
+import type { ControllerConfigs } from "../../../helpers/settings/controllerTypes.gen";
 import { setPath } from "../../../helpers/settings/delta";
 import type { ControllerMetadata, Settings } from "../../../helpers/settings/settingsApi";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
@@ -11,7 +12,9 @@ import { TextField } from "../fields/TextField";
 import { Toggle } from "../fields/Toggle";
 import { SaveBar } from "../SaveBar";
 
-type ControllerValues = Record<string, number | boolean | string>;
+/** The selected controller's option values. Keyed by controller name because
+ *  the tab edits one at a time and writes back under that key. */
+type SelectedConfig = ControllerConfigs[keyof ControllerConfigs];
 
 function firstControllerKey(meta: ControllerMetadata | null): string {
   if (!meta) return "";
@@ -28,10 +31,10 @@ function deriveValues(
   selected: string,
   settings: Settings,
   meta: ControllerMetadata | null,
-): ControllerValues {
-  if (!meta || !selected || !meta.metadata[selected]) return {};
+): SelectedConfig {
+  const out: Record<string, number | boolean | string> = {};
+  if (!meta || !selected || !meta.metadata[selected]) return out as SelectedConfig;
   const saved = settings.controller?.config?.[selected] ?? {};
-  const out: ControllerValues = {};
   for (const opt of meta.metadata[selected].config) {
     if (opt.option_type === "bool") {
       out[opt.option_name] =
@@ -51,7 +54,9 @@ function deriveValues(
     }
     // unknown option_type values are skipped — not rendered, not included in the save delta
   }
-  return out;
+  // The saved config arrives from the server as an untyped dict; this return is
+  // the boundary where it takes on the shape the selected controller declares.
+  return out as SelectedConfig;
 }
 
 export function ControllerTab() {
@@ -89,14 +94,27 @@ export function ControllerTab() {
 
   const entry = controllerMeta.metadata[selected];
   const set = (name: string, val: number | boolean | string) =>
-    setV((d) => ({ ...d, values: { ...d.values, [name]: val } }));
+    setV((d) => ({
+      ...d,
+      // The option NAME is a runtime fact from /api/controller_metadata; the
+      // generated types describe the value bag. Writing a runtime-named key into
+      // a statically typed bag is the one place those two views meet.
+      values: {
+        ...(d.values as Record<string, number | boolean | string>),
+        [name]: val,
+      } as SelectedConfig,
+    }));
 
   const onSave = async () => {
     let d: object = {};
     d = setPath(d, "controller.selected", selected);
-    const rebuilt: ControllerValues = {};
+    const rebuilt: Record<string, number | boolean | string> = {};
+    // The option LIST is a runtime fact from /api/controller_metadata; the generated
+    // types describe the value bag. Reading a runtime-named key out of a statically
+    // typed bag is the one place those two views meet.
+    const raw = values as Record<string, number | boolean | string>;
     for (const opt of entry?.config ?? []) {
-      const v = values[opt.option_name];
+      const v = raw[opt.option_name];
       if (opt.option_type === "bool") rebuilt[opt.option_name] = !!v;
       else if (opt.option_type === "int") rebuilt[opt.option_name] = Math.round(Number(v));
       else if (opt.option_type === "float") rebuilt[opt.option_name] = Number(v);
@@ -130,12 +148,16 @@ export function ControllerTab() {
         <p className="pf-field-hint">This controller has no configuration options.</p>
       )}
       {entry?.config.map((opt) => {
+        // The option LIST is a runtime fact from /api/controller_metadata; the generated
+        // types describe the value bag. Reading a runtime-named key out of a statically
+        // typed bag is the one place those two views meet.
+        const raw = (values as Record<string, number | boolean | string>)[opt.option_name];
         if (opt.option_type === "bool") {
           return (
             <Toggle
               key={opt.option_name}
               label={opt.option_friendly_name}
-              checked={!!values[opt.option_name]}
+              checked={!!raw}
               onChange={(b) => set(opt.option_name, b)}
             />
           );
@@ -145,7 +167,7 @@ export function ControllerTab() {
             <NumberField
               key={opt.option_name}
               label={opt.option_friendly_name}
-              value={Number(values[opt.option_name] ?? 0)}
+              value={Number(raw ?? 0)}
               onChange={(n) => set(opt.option_name, n)}
               min={opt.option_min ?? undefined}
               max={opt.option_max ?? undefined}
@@ -160,7 +182,7 @@ export function ControllerTab() {
             <Select
               key={opt.option_name}
               label={opt.option_friendly_name}
-              value={String(values[opt.option_name] ?? "")}
+              value={String(raw ?? "")}
               options={listValues.map((lv, i) => ({
                 value: String(lv),
                 label: listLabels[i] ?? String(lv),
@@ -174,7 +196,7 @@ export function ControllerTab() {
             <TextField
               key={opt.option_name}
               label={opt.option_friendly_name}
-              value={String(values[opt.option_name] ?? "")}
+              value={String(raw ?? "")}
               onChange={(v) => set(opt.option_name, v)}
             />
           );

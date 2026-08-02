@@ -340,3 +340,28 @@ describe("ControllerTab", () => {
     expect(inputFor("Integral Time (Ti)")).not.toHaveAttribute("step");
   });
 });
+
+// Type-level only: the generated map must name every controller and give each
+// its own option set, so indexing one with another's option is a compile error.
+// Runtime behaviour is unchanged and is covered by the cases above.
+import type { ControllerConfigs } from "../../../../../src/helpers/settings/controllerTypes.gen";
+
+describe("generated controller config types", () => {
+  it("gives each controller its own option set", () => {
+    const pid: ControllerConfigs["pid"] = { PB: 60, Td: 45, Ti: 180, center: 0.5 };
+    expect(pid.PB).toBe(60);
+
+    // @ts-expect-error -- Kp belongs to pid_parallel, not pid
+    const wrong: ControllerConfigs["pid"] = { PB: 60, Td: 45, Ti: 180, center: 0.5, Kp: 1 };
+    expect(wrong).toBeTruthy();
+  });
+
+  it("constrains a list option to its declared values", () => {
+    const ok: ControllerConfigs["mpc"]["estimator"] = "ekf";
+    expect(ok).toBe("ekf");
+
+    // @ts-expect-error -- "ekfx" is not one of ekf | mhe | kf
+    const typo: ControllerConfigs["mpc"]["estimator"] = "ekfx";
+    expect(typo).toBeTruthy();
+  });
+});
