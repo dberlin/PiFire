@@ -2,6 +2,10 @@
 
 Durable backlog for the `web-react/` replacement of the Flask/Jinja UI.
 
+Two sibling backlogs cover everything this one does not: `backend-backlog.md`
+(the Python server — blueprints, control loop, datastore and schema layer,
+updater) and `display-backlog.md` (the display process and its drivers).
+
 ## How to read this file
 
 Earlier revisions accumulated three different kinds of date on the same entry —

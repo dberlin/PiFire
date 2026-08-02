@@ -2,7 +2,8 @@
 
 Durable backlog for the display process (`display_process.py`,
 `display_launch.py`) and the drivers under `display/`. Separate from
-`react-migration-backlog.md`, which tracks the web UI.
+`react-migration-backlog.md`, which tracks the web UI, and from
+`backend-backlog.md`, which tracks the rest of the Python server.
 
 **Opened 2026-08-02.**
 
