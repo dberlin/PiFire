@@ -189,6 +189,19 @@ def _episode_span(arg):
     c.set_target(float(seg_sp[0]))
     seg = 0
     Xh, Up, Ts, Q = [], [], [], []
+    # Lid-open pauses: hold.py fires one AppliedOutput(0.0) at detection,
+    # then pins cycle.ratio to u_min (auger still cycling, fan off) for the
+    # rest of the pause. The estimator's transport-lag states carry that
+    # one below-Q_min tick on every real lid event; without it here the net
+    # never learns the regime and extrapolates exactly where the NLP does
+    # not (see net_vs_nlp_replay.py's faithful lid model, which this mirrors).
+    pauses = []
+    if rng.random() < 0.35:
+        n_pause = int(rng.integers(1, 3))
+        for _ in range(n_pause):
+            start = int(rng.integers(8, max(9, nsteps - 8)))
+            length = int(rng.integers(2, 7))  # 25 s steps -> 50-150 s
+            pauses.append((start, start + length))
     for k in range(nsteps):
         if seg + 1 < nseg and k >= seg_bounds[seg + 1]:
             seg += 1
@@ -205,20 +218,31 @@ def _episode_span(arg):
             Up.append(lastQ)
             Ts.append(float(c._set_point_c))
             Q.append(q_exp)
+        pause = next(((lo, hi) for lo, hi in pauses if lo <= k < hi), None)
         q_app = q_exp + (rng.normal(0, dither) if rng.random() < 0.5 else 0.0)
         q_app = float(np.clip(q_app, qmin, qmax))
-        auger, fan_duty = allocate(
-            q_app,
-            Q_min=qmin,
-            Q_max=qmax,
-            u_min=c.u_min,
-            u_max=c.u_max,
-            fan_min_pct=cfg["fan_min_pct"],
-            fan_max_pct=cfg["fan_max_pct"],
-            enable_fan=bool(cfg["enable_fan_input"]),
-        )
-        ratio = float(np.clip(auger, c.u_min, c.u_max))
-        fan = fan_duty if fan_duty is not None else 100.0
+        if pause is not None:
+            lo, _hi = pause
+            # detection tick: auger forced fully off (ratio 0.0, below u_min);
+            # remaining ticks: ratio pinned at u_min while the auger keeps
+            # cycling. Fan is off for the whole pause either way.
+            ratio = 0.0 if k == lo else c.u_min
+            fan = 0.0
+            frac = (ratio - c.u_min) / (c.u_max - c.u_min)
+            q_app = qmin + frac * (qmax - qmin)
+        else:
+            auger, fan_duty = allocate(
+                q_app,
+                Q_min=qmin,
+                Q_max=qmax,
+                u_min=c.u_min,
+                u_max=c.u_max,
+                fan_min_pct=cfg["fan_min_pct"],
+                fan_max_pct=cfg["fan_max_pct"],
+                enable_fan=bool(cfg["enable_fan_input"]),
+            )
+            ratio = float(np.clip(auger, c.u_min, c.u_max))
+            fan = fan_duty if fan_duty is not None else 100.0
         on = int(round(ratio * 25))
         for s in range(25):
             plant.step(auger_on=(s < on), fan_frac=fan / 100.0)
