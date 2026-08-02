@@ -110,12 +110,13 @@ import importlib
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from multiprocessing import Pool
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from controller.grill_sim import GrillSim  # noqa: E402
 
@@ -176,88 +177,163 @@ def _report(core, ratio, source_name, t, requested=None):
     setter(AppliedOutput(ratio=ratio, source=OutputSource(source_name), timestamp=float(t), requested=requested))
 
 
+def _auger_toggle_tick(auger_on, auger_toggle, t, ratio, cycle_time):
+    """Port of controller.runtime.modes.base.ControlMode._auger_cycle_tick,
+    returning the auger's exact fractional on-time over the window [t, t+1)
+    instead of a single boolean sample of it.
+
+    Production evaluates this strict-`>` toggle at its work-loop resolution
+    (~20 Hz) and drives a physical auger that integrates fuel delivery
+    continuously between samples. GrillSim can only be stepped once per
+    simulated second, so sampling the toggle as a boolean once per second
+    would quantize fuel delivery to whichever side of a transition the sample
+    landed on. Instead, the transition instant within the window is located
+    exactly (continuous time, so `>` vs `>=` at that single instant does not
+    affect the fraction) and returned as the portion of the window it covers.
+    This is arithmetic rather than sub-stepping, and it depends on at most one
+    transition ever falling inside a 1 s window -- the assertion below makes
+    that requirement explicit instead of leaving it to fail silently.
+
+    `auger_toggle` is carried as the exact (possibly fractional) transition
+    time rather than snapped to a tick, so later windows see the true elapsed
+    time since the last transition. A re-solve to a smaller ratio can put the
+    threshold computed from the old `auger_toggle` in the past relative to the
+    current window; `transition` is clamped to `t` so that case reads as "flip
+    right now" instead of a negative or >1 fraction, and the return value is
+    clamped to [0, 1] as a backstop.
+    """
+    assert cycle_time * ratio >= 1 and cycle_time * (1 - ratio) >= 1, (
+        f"ratio={ratio} at cycle_time={cycle_time} gives an on- or off-phase "
+        "shorter than one window -- more than one transition could fall "
+        "inside a single tick, which this closed-form arithmetic can't represent"
+    )
+    was_on = auger_on
+    if not was_on:
+        transition = max(auger_toggle + cycle_time * (1 - ratio), t)
+        if transition >= t + 1:
+            return False, auger_toggle, 0.0
+        return True, transition, min(max(t + 1 - transition, 0.0), 1.0)
+    transition = max(auger_toggle + cycle_time * ratio, t)
+    if transition >= t + 1:
+        return True, auger_toggle, 1.0
+    return False, transition, min(max(transition - t, 0.0), 1.0)
+
+
+class _SimClock:
+    """Callable replacement for `time.time`, advanced once per simulated
+    second so a controller reading the wall clock for its own `dt` observes
+    the step size this harness actually models, not the wall-clock time
+    between tight-loop calls."""
+
+    def __init__(self, t0):
+        self.t = t0
+
+    def __call__(self):
+        return self.t
+
+
 def run_scenario(controller, scenario, seed):
-    mod = importlib.import_module(f"controller.{controller}")
-    core = mod.Controller(dict(CONTROLLER_CONFIGS[controller]), "F", dict(CYCLE_DATA))
-    plant = GrillSim(seed=seed)
-    u_min, u_max = CYCLE_DATA["u_min"], CYCLE_DATA["u_max"]
+    # Some controllers (pid_sp, pid_ac) read time.time() for their own dt;
+    # replacing it with a clock this loop drives makes their dt match the
+    # simulated second the loop models, instead of the wall-clock nanoseconds
+    # between calls in a tight loop. Controllers that don't read the wall
+    # clock (mpc) are unaffected. Started one HoldCycleTime before t=0 so the
+    # very first solve -- which happens immediately, since next_solve starts
+    # at 0.0 -- sees a full period of elapsed time rather than dt=0.
+    clock = _SimClock(-float(CYCLE_DATA["HoldCycleTime"]))
+    real_time_time = time.time
+    time.time = clock
+    try:
+        mod = importlib.import_module(f"controller.{controller}")
+        core = mod.Controller(dict(CONTROLLER_CONFIGS[controller]), "F", dict(CYCLE_DATA))
+        plant = GrillSim(seed=seed)
+        u_min, u_max = CYCLE_DATA["u_min"], CYCLE_DATA["u_max"]
 
-    setpoint = _setpoint_at(scenario, 0)
-    core.set_target(setpoint)
-    _report(core, u_min, "seed", 0)
+        setpoint = _setpoint_at(scenario, 0)
+        core.set_target(setpoint)
+        _report(core, u_min, "seed", 0)
 
-    period = core.get_control_period() or CYCLE_DATA["HoldCycleTime"]
-    cycle_time = CYCLE_DATA["HoldCycleTime"]
-    ratio, fan_frac = u_min, 1.0
-    next_solve = 0.0
-    auger_on, auger_toggle = False, 0.0
+        period = core.get_control_period() or CYCLE_DATA["HoldCycleTime"]
+        ratio, fan_frac = u_min, 1.0
+        next_solve = 0.0
+        auger_on, auger_toggle = False, 0.0
 
-    temps, duties, settle_from = [], [], None
-    for t in range(scenario.duration_s):
-        new_sp = _setpoint_at(scenario, t)
-        if new_sp != setpoint:
-            setpoint = new_sp
-            core.set_target(setpoint)
-            settle_from = None
+        temps, duties, settle_from = [], [], None
+        for t in range(scenario.duration_s):
+            clock.t = float(t)
+            new_sp = _setpoint_at(scenario, t)
+            if new_sp != setpoint:
+                setpoint = new_sp
+                core.set_target(setpoint)
+                # set_target() just reset the controller's own last-update
+                # clock to t; if a scheduled solve also lands on t (e.g.
+                # step_225_275's setpoint change falls on a solve boundary),
+                # calling update() again this same tick would hand it dt=0.
+                # Push the next solve a full period out from here instead.
+                next_solve = t + period
+                settle_from = None
 
-        lid_open = _lid_open_at(scenario, t)
-        temp_f = _c_to_f(plant.measured())
+            lid_open = _lid_open_at(scenario, t)
+            temp_f = _c_to_f(plant.measured())
 
-        if t >= next_solve:
-            next_solve = t + period
-            raw = core.update(temp_f)
-            if isinstance(raw, dict):
-                requested = float(raw.get("cycle_ratio", 0.0))
-                fan = raw.get("fan") or {}
-                if fan.get("duty") is not None:
-                    fan_frac = float(fan["duty"]) / 100.0
+            if t >= next_solve:
+                next_solve = t + period
+                raw = core.update(temp_f)
+                if isinstance(raw, dict):
+                    requested = float(raw.get("cycle_ratio", 0.0))
+                    fan = raw.get("fan") or {}
+                    if fan.get("duty") is not None:
+                        fan_frac = float(fan["duty"]) / 100.0
+                else:
+                    requested = float(raw)
+                ratio = min(max(requested, u_min), u_max)
+                if not lid_open:
+                    _report(core, ratio, "controller", t, requested=requested)
+
+            if lid_open:
+                auger_on, auger_toggle, auger_frac = False, t, 0.0
+                _report(core, 0.0, "lid_open", t)
             else:
-                requested = float(raw)
-            ratio = min(max(requested, u_min), u_max)
-            if not lid_open:
-                _report(core, ratio, "controller", t, requested=requested)
+                auger_on, auger_toggle, auger_frac = _auger_toggle_tick(
+                    auger_on, auger_toggle, t, ratio, CYCLE_DATA["HoldCycleTime"]
+                )
 
-        if lid_open:
-            auger_on, auger_toggle = False, t
-            _report(core, 0.0, "lid_open", t)
-        else:
-            was_on = auger_on
-            if not was_on and (t - auger_toggle) > cycle_time * (1 - ratio):
-                auger_on, auger_toggle = True, t
-            if was_on and (t - auger_toggle) > cycle_time * ratio:
-                auger_on, auger_toggle = False, t
+            plant.step(auger_on=auger_frac, fan_frac=0.0 if lid_open else fan_frac)
 
-        plant.step(auger_on=auger_on, fan_frac=0.0 if lid_open else fan_frac)
+            temps.append(temp_f)
+            # The requested ratio, not the realized on-fraction plant.step()
+            # received (see _auger_toggle_tick) -- 0.0 during lid-open, when
+            # the controller's request is overridden rather than applied.
+            duties.append(0.0 if lid_open else ratio)
+            if abs(temp_f - setpoint) <= 5.0:
+                if settle_from is None:
+                    settle_from = t
+            else:
+                settle_from = None
 
-        temps.append(temp_f)
-        duties.append(0.0 if lid_open else ratio)
-        if abs(temp_f - setpoint) <= 5.0:
-            if settle_from is None:
-                settle_from = t
-        else:
-            settle_from = None
-
-    temps = np.asarray(temps)
-    duties = np.asarray(duties)
-    sp_series = np.asarray([_setpoint_at(scenario, t) for t in range(scenario.duration_s)])
-    err = temps - sp_series
-    result = {
-        "controller": controller,
-        "scenario": scenario.name,
-        "seed": seed,
-        "iae": float(np.abs(err).sum()),
-        "pct_within_5f": float((np.abs(err) <= 5.0).mean() * 100.0),
-        "overshoot_f": float(err.max()),
-        "undershoot_f": float(err.min()),
-        "settle_s": (None if settle_from is None else int(settle_from)),
-        "mean_duty": float(duties.mean()),
-        "std_duty": float(duties.std()),
-        "final_temp_f": float(temps[-1]),
-    }
-    status = getattr(core, "get_status", lambda: None)()
-    if status is not None:
-        result["status"] = json.loads(json.dumps(status, allow_nan=False, default=str))
-    return result
+        temps = np.asarray(temps)
+        duties = np.asarray(duties)
+        sp_series = np.asarray([_setpoint_at(scenario, t) for t in range(scenario.duration_s)])
+        err = temps - sp_series
+        result = {
+            "controller": controller,
+            "scenario": scenario.name,
+            "seed": seed,
+            "iae": float(np.abs(err).sum()),
+            "pct_within_5f": float((np.abs(err) <= 5.0).mean() * 100.0),
+            "overshoot_f": float(err.max()),
+            "undershoot_f": float(err.min()),
+            "settle_s": (None if settle_from is None else int(settle_from)),
+            "mean_duty": float(duties.mean()),
+            "std_duty": float(duties.std()),
+            "final_temp_f": float(temps[-1]),
+        }
+        status = getattr(core, "get_status", lambda: None)()
+        if status is not None:
+            result["status"] = json.loads(json.dumps(status, allow_nan=False, default=str))
+        return result
+    finally:
+        time.time = real_time_time
 
 
 def _job(arg):
@@ -296,11 +372,72 @@ print(run_scenario('pid_ac', Scenario('smoke', 600, [(0, 225.0)]), 0))
 ```
 Expected: a dict with a finite `iae` and a `mean_duty` between `u_min` and `u_max`. If `iae` is `nan` or `mean_duty` is exactly `u_min` for the whole run, stop and fix the harness — a broken harness makes every later number meaningless.
 
-The auger loop above is a port of `ControlMode._auger_cycle_tick` (`controller/runtime/modes/base.py:105-134`), and the port has to stay faithful in one specific way: the toggle is free-running on `auger_toggle` and nothing about it resets when the controller re-solves. Production keeps these on separate clocks — `HoldMode.on_tick` gates the controller update on `controller.cycle_start`/`controller_interval` and only writes `state.cycle.ratio`, while the auger keeps cycling on its own timers. Re-anchoring the window to each solve instead makes the realized duty `min(1, ratio * HoldCycleTime / period)`, so any controller whose control period is shorter than `HoldCycleTime` saturates: MPC solves at 5 s against a 20 s cycle, and every steady scenario lands on the same terminal temperature no matter the set point. Controllers whose period equals `HoldCycleTime` — every PID variant — are unaffected, which is what makes this easy to miss.
+`_auger_toggle_tick` is a port of `ControlMode._auger_cycle_tick`
+(`controller/runtime/modes/base.py:105-134`): a toggle free-running on
+`auger_toggle`, keyed on elapsed time since its own last flip and never reset
+when the controller re-solves. `HoldMode.on_tick` gates the controller update
+on `controller.cycle_start`/`controller_interval` and only writes
+`state.cycle.ratio`; the auger cycles on its own timers regardless. Two
+distinct ways to get this wrong, both found the hard way against this exact
+harness:
 
-- [ ] **Step 3b: Pin the cycle model with a discriminating test**
+1. **Re-anchoring the window to each solve** (an earlier version of this
+   harness did) makes the realized duty `min(1, ratio * HoldCycleTime /
+   period)`, so any controller whose control period is shorter than
+   `HoldCycleTime` saturates -- MPC solves at 5 s against a 20 s cycle, and
+   every steady scenario landed on the same ~520 F terminal temperature no
+   matter the set point.
+2. **Sampling the toggle as a single boolean once per simulated second**
+   (GrillSim's integration step) quantizes fuel delivery to whichever side of
+   a transition the sample landed on, biasing realized duty above the
+   requested ratio -- worst at small ratios (u_min realized ~21% high). Fixed
+   by locating the transition instant exactly within the window and returning
+   the fraction of the window it covers (closed-form, valid because
+   `cycle_time * ratio` and `cycle_time * (1 - ratio)` are both required to be
+   >= 1 s, asserted explicitly) instead of a boolean sample -- paired with
+   `GrillSim.step` accepting that fraction directly
+   (`fed = self.feed_rate * float(auger_on)`, unchanged for every existing
+   boolean caller).
 
-Assert that at a fixed `ratio`, the realized auger on-fraction over a long window matches `ratio` for a 20 s control period **and** for a 5 s one — realized duty must not depend on the re-solve cadence. Before accepting it, run the same test against the re-anchored model and confirm the 5 s case fails. A test that passes under both models proves nothing; record both results.
+Controllers whose period equals `HoldCycleTime` are unaffected by defect 1,
+but *not* by defect 2 or by the wall-clock defect below -- "period matches
+HoldCycleTime" is not a general excuse to skip checking a PID variant's
+numbers against a fix in this harness.
+
+**A third, unrelated defect hit only PID variants:** `pid_sp.py`/`pid_ac.py`
+compute `dt = time.time() - self.last_update` and divide by it twice. Calling
+`core.update()` in this loop's tight `for t in range(...)` gives `dt` on the
+order of 1e-5 s instead of the intended 20 s control period, saturating PID
+output regardless of temperature error -- a saturated relay, not a PID
+controller. Fixed with `_SimClock`, which replaces `time.time` for the
+duration of `run_scenario` (patched and restored in a `try`/`finally`, safe
+under multiprocessing workers since each runs scenarios serially) and is
+advanced once per simulated second to match the loop's own step size. That
+exposed a fourth, narrower defect: `core.set_target()` resets a controller's
+own last-update clock, and `step_225_275`'s setpoint change at t=7200 lands
+exactly on a solve boundary (7200 is a multiple of the 20 s period) -- the
+scheduled solve landing on the same tick handed `pid_sp` `dt=0` and crashed.
+Fixed by pushing `next_solve` a full period past a setpoint change, which
+does not disturb the `dt == period` invariant on any other solve.
+
+- [ ] **Step 3b: Pin all four defects with discriminating tests**
+
+- Auger toggle: assert that at a fixed `ratio`, the realized auger on-fraction
+  over a long window matches `ratio` for both a 20 s and a 5 s control
+  period, at a ratio whose cycle duration is an exact number of ticks (e.g.
+  `u_min`) *and* one that is not (e.g. 0.4237, so the fractional-remainder
+  arithmetic itself is exercised, not just the toggle timing). Before
+  accepting either test, run it against the defect it targets (the
+  re-anchored model; boolean-per-tick sampling) and confirm it fails; a test
+  that passes under both the broken and fixed model proves nothing.
+- Simulated clock: assert the `dt` a real `pid_sp`/`pid_ac` instance observes
+  equals `HoldCycleTime` on every solve, across a scenario with no setpoint
+  change (`steady_225`) and one with a setpoint change that lands on a solve
+  boundary (`step_225_275`), plus a sanity range on the raw output. Confirm
+  it fails (dt ~1e-5 s) without the clock.
+- `GrillSim.step`'s `float(auger_on)`: assert the same seed and the same
+  True/False sequence, once passed as bools and once as the equivalent
+  1.0/0.0 floats, produce identical temperature trajectories.
 
 - [ ] **Step 4: Run the baseline matrix**
 
