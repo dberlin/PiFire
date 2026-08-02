@@ -9,6 +9,8 @@ This complements (does not replace) the characterization oracle in
 tests/characterization/, which is the real behavior-preservation gate.
 """
 
+import pytest
+
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
@@ -139,13 +141,16 @@ def _make_mode():
     return mode
 
 
-def test_on_manual_output_is_called_with_the_change_and_output():
-    """The hook fires while control['manual'] still names the actuator."""
+@pytest.mark.parametrize("actuator", ["auger", "fan", "igniter", "power"])
+def test_on_manual_output_is_called_with_the_change_and_output(actuator):
+    """The hook fires while control['manual'] still names the actuator, for
+    each of the four boolean actuators -- each has its own branch and its own
+    call site, so this must be parametrized rather than covering "auger" alone."""
     mode = _make_mode()
     seen = []
     mode._on_manual_output = lambda name, output: seen.append((name, output))
     control = mode.control
-    control["manual"]["change"] = "auger"
+    control["manual"]["change"] = actuator
     control["manual"]["output"] = True
     mode.settings["safety"]["allow_manual_changes"] = True
 
@@ -155,7 +160,7 @@ def test_on_manual_output_is_called_with_the_change_and_output():
         current_output_status={"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100},
     )
 
-    assert seen == [("auger", True)]
+    assert seen == [(actuator, True)]
     # and the reset still happened afterwards
     assert control["manual"]["change"] is False
 
@@ -219,6 +224,32 @@ def test_on_manual_output_is_not_called_when_a_pwm_request_is_rejected():
     )
 
     assert seen == []
+
+
+def test_on_manual_output_reports_the_resolved_speed_for_an_accepted_pwm_change():
+    """An accepted pwm change (dc_fan enabled, fan on, speed differing from
+    current) is the fifth call site, and its `output` argument is the
+    resolved duty-cycle speed -- not control['manual']['output'], which pwm
+    requests never populate. Reverting the argument to control['manual']['output']
+    (False here) must fail this."""
+    mode = _make_mode()
+    seen = []
+    mode._on_manual_output = lambda name, output: seen.append((name, output))
+    control = mode.control
+    control["manual"]["change"] = "pwm"
+    control["manual"]["pwm"] = 50
+    control["manual"]["output"] = False
+    mode.settings["safety"]["allow_manual_changes"] = True
+    mode.settings["platform"]["dc_fan"] = True
+
+    mode._apply_manual_overrides(
+        control,
+        now=100.0,
+        current_output_status={"auger": False, "fan": True, "igniter": False, "power": False, "pwm": 100},
+    )
+
+    assert seen == [("pwm", 50)]
+    assert control["manual"]["pwm"] == 100  # reset after being applied
 
 
 def test_on_manual_output_default_is_a_no_op():

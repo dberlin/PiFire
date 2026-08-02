@@ -103,7 +103,11 @@ class ControlMode:
         pass
 
     def _on_manual_output(self, name, output):
-        """A human just drove an actuator directly. `name` is the actuator."""
+        """A human just drove an actuator directly. `name` is the actuator;
+        fires once per consumed change, not per tick of the override window
+        (derive that window from state.manual_override[name] instead). For the
+        four boolean actuators `output` is True/False; for "pwm" it is the
+        applied duty-cycle percentage."""
 
     # ---- shared helpers ----
     def _auger_cycle_tick(self, now, current_output_status):
@@ -470,10 +474,8 @@ class ControlMode:
                     _control.eventLogger.debug("PWM Speed: " + str(speed) + "%")
                     grill_platform.set_duty_cycle(speed)
                     manual_override["pwm"] = override_time
-                    # Fires here, before the reset below wipes the requested speed --
-                    # this branch's own gate (dc_fan, fan on, speed actually changing)
-                    # IS the "applied" condition; the outer "change in [...]" check
-                    # alone would fire even when this gate rejects the request.
+                    # Fires only when this branch's own gate accepts the request --
+                    # before the reset below wipes the applied speed.
                     self._on_manual_output("pwm", speed)
                     control["manual"]["pwm"] = 100  # Reset PWM
 
