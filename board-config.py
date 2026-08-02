@@ -21,7 +21,6 @@ import os
 import json
 import subprocess
 
-from common import datastore
 from common.datastore_accessors import read_settings
 from common.system import probe_os_info, refresh_os_info
 
@@ -571,13 +570,6 @@ def _print_results_and_reboot_flag(results, reboot_flags, logger):
 ==============================================================================
 """
 if __name__ == "__main__":
-    # board-config.py runs as its own standalone process (the wizard's
-    # installer commands and the CLI invoke it directly), so it gets no
-    # benefit from app.py's or control.py's init() call. Must run before the
-    # first read_settings() call below -- see app.py:39 and control.py:70,
-    # which do the same.
-    datastore.init()
-
     logger = create_logger("board_config", filename="./logs/board_config.log", level=log_level)
 
     print("PiFire Board Configuration Tool v1.0.1")

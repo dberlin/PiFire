@@ -28,9 +28,19 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 #: Entry points found by the scan below that legitimately don't have to
 #: initialise the datastore before their first settings access, and why.
-#: Empty today -- every entry point the scan finds touches the datastore and
-#: is expected to initialise it first.
-EXCLUDED_ENTRY_POINTS = set()
+EXCLUDED_ENTRY_POINTS = {
+    # Runs as `sudo python board-config.py ...` from the wizard's command_list
+    # and from upgrade.sh -- always as root. init() would run _first_boot_import()
+    # and the settings-tree migration, both writes; under sudo's default umask
+    # those land as root-owned datastore files without the group-write bit that
+    # supervisor's umask=002 programs depend on for control/display to share
+    # them. board-config.py only ever reads settings (read_settings() self-heals
+    # to defaults via connection() -> _ensure_schema() with no init() needed),
+    # and every command_list invocation runs after the parent wizard.py process
+    # has already called datastore.init() itself, so the tree it reads is
+    # already migrated.
+    "board-config.py",
+}
 
 #: Settings read/write entry points; a call to any of these is what
 #: datastore.init() must precede.
