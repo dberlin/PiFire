@@ -98,6 +98,14 @@ Concurrency requires isolated `jj` workspaces — disjoint file lists alone are 
 
 `_calculate_gains` guards `if ti == 0`, which lets a negative `Ti` through and yields a sign-flipped `ki` — an integral term that drives the output the wrong way. This fixes every PID variant at once and has no effect on any valid configuration.
 
+Add a second unguarded division in the same pass: a floor on the elapsed time PID-SP and PID-AC divide by.
+
+`update()` computes `dt = time.time() - self.last_update` and then divides by it three times. Two of those cancel — `roc = (current - self.last) / dt` is multiplied by `1 - exp(-dt / tau)`, and the `dt` dependencies annihilate as `dt` shrinks — but `derv = (predicted_temp - self.last) / dt` has no such cancellation and diverges as `1 / dt`. At `dt == 0` it raises.
+
+`dt == 0` is not exotic. `set_target` assigns `self.last_update = time.time()`, and float64's ULP at the current epoch is 238 ns, so back-to-back `time.time()` calls return the *identical* float about 82% of the time. Any caller that retargets and then solves without an intervening sleep divides by zero. Today the only such call site — `ThreadedControllerRunner._loop` — is unreachable (its `set_target` has no callers, and the threaded runner is selected only for MPC, which never reads the wall clock), so this is hardening, not a live-bug fix. It is worth doing anyway: Plan A Task 6 rewrites that very loop, and the scenario harness hit the crash on first contact.
+
+Floor `dt` at a small positive value rather than returning early — a controller that silently skips an update is harder to diagnose than one that clamps. Put the floor in `pid_base.py` so both variants inherit it, and pin it with a test that calls `update()` twice at the same clock value and asserts a finite in-range output rather than an exception.
+
 **Files:**
 - Modify: `controller/pid_base.py`
 - Test: `tests/unit/controller/test_pid_base.py` (create)
@@ -1968,6 +1976,18 @@ EOF
 **Interfaces:**
 - Consumes: `FOPDTIdentifier` (Task 5), `SmithPredictor` (Tasks 6-7).
 - Produces: a `Controller` whose `update()` is `pid_ac`'s with the selected temperature substituted, plus the startup reduction actually applied.
+
+#### Three dead stores the rewrite must not carry over
+
+A rewrite that transcribes the current `update()` faithfully will reproduce all three of these, because each one *looks* like a working feature. Each needs a test that fails against the current code.
+
+**The startup reduction is discarded.** `self.u = self.u * 0.65` at `pid_sp.py:142` is overwritten by `self.u = self.p + self.i + self.d` three lines later, so the overshoot suppression has never once taken effect. Applying it to the newly computed `self.u` is already this task's `STARTUP_REDUCTION` change — noted here so it is understood as fixing a dead store, not adding a new behavior.
+
+**The derivative suppression is discarded.** `self.derv = 0.0` at `pid_sp.py:126`, guarded by `(self.new_target and self.set_point < current) or (abs(error) > self.pb / 2)`, is unconditionally overwritten by `self.derv = (predicted_temp - self.last) / dt` at `:137`. The comment above it — "Minimize derivative to maximize descent rate when setting new lower Set Point" — describes a feature that has never executed. Decide deliberately whether the rewrite keeps it: with the Smith predictor supplying the selected temperature, suppressing D on a downward set-point change may no longer be wanted. Whichever way it goes, it must be a choice with a test behind it, not an accident that survives the port. `pid_ac.py` carries the same two dead stores; do not fix them there in this task, but say so in the commit message.
+
+**`self.last` starts at a fictitious 150.** `pid_sp.py:80` initializes `self.last = 150`, and `update()`'s repair — `if self.last == 0.0 and self.new_target: self.last = current` — tests against `0.0`, so it never fires. Every construction therefore makes the first solve compute `roc` and `derv` against a previous temperature of 150 °F that was never measured; from a 68 °F cold start that is a phantom −4.1 °F/s. This matters more than it looks, because production rebuilds the controller on a set-point change, so it recurs on every change rather than only at startup.
+
+Initialize `self.last` to `None` and seed it from the first observed temperature, making the first update's rate exactly zero. Pin it with a test asserting the first `update()` after construction produces the same output for a cold start and a hot one when both are at steady state — under the current code they differ, because one is 82 °F below the phantom and the other is above it.
 
 - [ ] **Step 1: `jj new`, then write the failing test**
 
