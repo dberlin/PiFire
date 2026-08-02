@@ -19,8 +19,6 @@ corrected fallback behavior.
 import importlib
 import json
 
-import pytest
-
 from common import datastore
 from common.datastore_accessors import read_control, read_pellet_db
 
@@ -174,7 +172,11 @@ def test_build_devices_grillplat_import_failure_falls_back_to_prototype(ds, monk
     assert type(devices.grill_platform).__module__ == "grillplat.prototype"
 
 
-def test_build_devices_grillplat_import_failure_debug_mode_reraises(ds, monkeypatch):
+def test_build_devices_grillplat_import_failure_falls_back_to_prototype_in_debug_mode(ds, monkeypatch):
+    """Unlike the distance path, grillplat import failure sets
+    critical_error -- but even in debug_mode it must not re-raise: a
+    developer who leaves debug_mode on and loses the configured platform
+    device still gets a controller that boots, on the prototype fallback."""
     from controller.runtime.devices import build_devices
 
     settings = _settings()
@@ -185,10 +187,11 @@ def test_build_devices_grillplat_import_failure_debug_mode_reraises(ds, monkeypa
         _selective_import({"grillplat.nonexistent_grillplat_xyz": ModuleNotFoundError}),
     )
 
-    with pytest.raises(ModuleNotFoundError):
-        build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+    devices, errors = build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
 
-    # The critical_error flag was still set before the re-raise.
+    assert len(errors) == 1
+    assert "nonexistent_grillplat_xyz" in errors[0]
+    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
     assert read_control()["critical_error"] is True
 
 
@@ -209,7 +212,10 @@ def test_build_devices_grillplat_configure_failure_falls_back_to_prototype(ds, m
     assert type(devices.grill_platform).__module__ == "grillplat.prototype"
 
 
-def test_build_devices_grillplat_configure_failure_debug_mode_reraises(ds, monkeypatch):
+def test_build_devices_grillplat_configure_failure_falls_back_to_prototype_in_debug_mode(ds, monkeypatch):
+    """Same as the import-failure case above, but for the construction
+    (rather than import) step: debug_mode must not turn a recovered-from
+    configure failure into a crash."""
     from controller.runtime.devices import build_devices
 
     settings = _settings()
@@ -220,8 +226,11 @@ def test_build_devices_grillplat_configure_failure_debug_mode_reraises(ds, monke
         _selective_import({"grillplat.broken_grillplat": _FakeModule(GrillPlatform=_RaisingGrillPlatform)}),
     )
 
-    with pytest.raises(RuntimeError, match="boom: bad grillplat config"):
-        build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+    devices, errors = build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+
+    assert len(errors) == 1
+    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    assert read_control()["critical_error"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -261,15 +270,22 @@ def test_build_devices_probes_setup_failure_falls_back_to_disabled(ds, monkeypat
     assert devices.probe_complex.disable is True
 
 
-def test_build_devices_probes_setup_failure_debug_mode_reraises(ds, monkeypatch):
+def test_build_devices_probes_setup_failure_falls_back_to_disabled_in_debug_mode(ds, monkeypatch):
+    """Same guarantee as the grillplat cases: a probes-setup failure must
+    still fall back to the disabled probe complex even in debug_mode,
+    rather than re-raising and killing the controller."""
     from controller.runtime.devices import build_devices
 
     monkeypatch.setattr("probes.main.ProbesMain", _FakeProbesMain)
     settings = _settings()
     settings["globals"]["debug_mode"] = True
+    control_log = _RecordingLogger()
 
-    with pytest.raises(RuntimeError, match="boom: probe setup failed"):
-        build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+    devices, errors = build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=control_log)
+
+    assert len(errors) == 1
+    assert control_log.exceptions
+    assert devices.probe_complex.disable is True
 
 
 def test_build_devices_probe_errors_forwarded_to_frontend(ds):
@@ -398,7 +414,11 @@ def test_build_display_configure_failure_falls_back_to_none(ds, monkeypatch):
     assert type(display).__module__ == "display.none"
 
 
-def test_build_display_configure_failure_debug_mode_reraises(ds, monkeypatch):
+def test_build_display_configure_failure_falls_back_to_none_in_debug_mode(ds, monkeypatch):
+    """Mirrors the build_devices() debug_mode guarantees above: a display
+    construction failure must still fall back to the "none" display even
+    with debug_mode on, so a developer chasing a display bug doesn't lose
+    the whole display process to a re-raise."""
     from controller.runtime.devices import build_display
 
     settings = _settings()
@@ -409,9 +429,13 @@ def test_build_display_configure_failure_debug_mode_reraises(ds, monkeypatch):
         "controller.runtime.devices.importlib.import_module",
         _selective_import({"display.broken_display": _FakeModule(Display=_RaisingDisplay)}),
     )
+    control_log = _RecordingLogger()
 
-    with pytest.raises(RuntimeError, match="boom: bad display config"):
-        build_display(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+    display, errors = build_display(settings, errors=[], event_log=_RecordingLogger(), control_log=control_log)
+
+    assert len(errors) == 1
+    assert control_log.exceptions
+    assert type(display).__module__ == "display.none"
 
 
 # ---------------------------------------------------------------------------
@@ -453,36 +477,25 @@ def test_build_display_import_failure_falls_back_to_none_module(ds):
     assert type(display).__module__ == "display.none"
 
 
-def test_build_display_import_failure_debug_mode_reraises_original_error(ds, monkeypatch):
-    """Covers the debug_mode branch (line 65-66) in isolation: with
-    "display_none" mocked to resolve (so bug #1 above doesn't mask it), a
-    bare `raise` inside the except block re-raises the *original*
-    exception -- the primary display module's import failure -- not
-    whatever "display_none" did. Since the re-raise happens before control
-    ever reaches the second try block, this path escapes before latent bug
-    #2 (disp_rotation) would otherwise fire, and the caller sees the true
-    root cause (the configured display module doesn't exist).
-    """
+def test_build_display_import_failure_falls_back_to_none_module_in_debug_mode(ds, monkeypatch):
+    """Covers the debug_mode path through the import-failure except block:
+    even with debug_mode on, the primary display module's import failure
+    must fall back to "display.none" and let build_display() return
+    normally, rather than re-raising the original ModuleNotFoundError and
+    killing the display process."""
     from controller.runtime.devices import build_display
 
-    monkeypatch.setattr(
-        "controller.runtime.devices.importlib.import_module",
-        _selective_import(
-            {
-                "display.nonexistent_display_xyz": ModuleNotFoundError,
-                "display_none": _FakeModule(Display=_RaisingDisplay),
-            }
-        ),
-    )
     settings = _settings()
     settings["modules"]["display"] = "nonexistent_display_xyz"
     settings["globals"]["debug_mode"] = True
-    errors = []
+    control_log = _RecordingLogger()
 
-    with pytest.raises(ModuleNotFoundError, match="nonexistent_display_xyz"):
-        build_display(settings, errors=errors, event_log=_RecordingLogger(), control_log=_RecordingLogger())
+    display, errors = build_display(settings, errors=[], event_log=_RecordingLogger(), control_log=control_log)
 
     assert len(errors) == 1
+    assert "nonexistent_display_xyz" in errors[0]
+    assert control_log.exceptions
+    assert type(display).__module__ == "display.none"
 
 
 def test_build_display_import_failure_uses_default_display_config_and_rotation(ds, monkeypatch):

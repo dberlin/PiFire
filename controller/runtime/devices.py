@@ -64,8 +64,6 @@ def build_display(settings, *, errors, event_log, control_log):
         write_errors(errors)
         event_log.error(error_event)
         control_log.error(error_event)
-        if settings["globals"]["debug_mode"]:
-            raise
 
     try:
         display_device = DisplayModule.Display(
@@ -98,8 +96,6 @@ def build_display(settings, *, errors, event_log, control_log):
         write_errors(errors)
         event_log.error(error_event)
         control_log.error(error_event)
-        if settings["globals"]["debug_mode"]:
-            raise
 
     return display_device, errors
 
@@ -155,8 +151,6 @@ def build_devices(settings, *, errors, event_log, control_log):
         write_errors(errors)
         event_log.error(error_event)
         control_log.error(error_event)
-        if settings["globals"]["debug_mode"]:
-            raise
 
     try:
         grill_platform = GrillPlatModule.GrillPlatform(platform_config)
@@ -186,8 +180,6 @@ def build_devices(settings, *, errors, event_log, control_log):
         write_errors(errors)
         event_log.error(error_event)
         control_log.error(error_event)
-        if settings["globals"]["debug_mode"]:
-            raise
 
     """
 	Set up Probes Input Module
@@ -210,8 +202,6 @@ def build_devices(settings, *, errors, event_log, control_log):
         write_errors(errors)
         event_log.error(error_event)
         control_log.error(error_event)
-        if settings["globals"]["debug_mode"]:
-            raise
 
     # Get probe initialization errors and pass along to the frontend
     probe_errors = probe_complex.get_errors()
