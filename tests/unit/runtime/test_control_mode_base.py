@@ -125,3 +125,101 @@ def test_status_publishes_duty_fields():
     # Default state: no auger ratio set, DC fan disabled, fan output off.
     assert status["cycle_ratio"] == 0.0
     assert status["fan_duty"] == 0
+
+
+def _make_mode():
+    """Build a ControlMode the way run() does before entering the loop, so
+    _apply_manual_overrides can be exercised directly without running the
+    full work-cycle loop."""
+    ctx = _make_ctx()
+    mode = _RecordingMode(ctx, WorkCycleState())
+    mode.settings = ctx.store.read_settings()
+    mode.control = ctx.store.read_control()
+    mode.state.manual_override = {"igniter": 0, "auger": 0, "fan": 0, "power": 0, "pwm": 0}
+    return mode
+
+
+def test_on_manual_output_is_called_with_the_change_and_output():
+    """The hook fires while control['manual'] still names the actuator."""
+    mode = _make_mode()
+    seen = []
+    mode._on_manual_output = lambda name, output: seen.append((name, output))
+    control = mode.control
+    control["manual"]["change"] = "auger"
+    control["manual"]["output"] = True
+    mode.settings["safety"]["allow_manual_changes"] = True
+
+    mode._apply_manual_overrides(
+        control,
+        now=100.0,
+        current_output_status={"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100},
+    )
+
+    assert seen == [("auger", True)]
+    # and the reset still happened afterwards
+    assert control["manual"]["change"] is False
+
+
+def test_on_manual_output_is_not_called_when_no_change_is_pending():
+    mode = _make_mode()
+    seen = []
+    mode._on_manual_output = lambda name, output: seen.append((name, output))
+    control = mode.control
+    control["manual"]["change"] = False
+
+    mode._apply_manual_overrides(
+        control,
+        now=100.0,
+        current_output_status={"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100},
+    )
+
+    assert seen == []
+
+
+def test_on_manual_output_fires_even_when_no_physical_toggle_is_needed():
+    """The hook marks override application, not a change in actuator state:
+    it must still fire when the requested output already matches the current
+    one (no fan_on()/fan_off() call happens)."""
+    mode = _make_mode()
+    seen = []
+    mode._on_manual_output = lambda name, output: seen.append((name, output))
+    control = mode.control
+    control["manual"]["change"] = "auger"
+    control["manual"]["output"] = True
+    mode.settings["safety"]["allow_manual_changes"] = True
+
+    mode._apply_manual_overrides(
+        control,
+        now=100.0,
+        # auger already on and matches the requested output: no actuation call
+        current_output_status={"auger": True, "fan": False, "igniter": False, "power": False, "pwm": 100},
+    )
+
+    assert seen == [("auger", True)]
+
+
+def test_on_manual_output_is_not_called_when_a_pwm_request_is_rejected():
+    """A pwm change is only "present" in control['manual'] until its own gate
+    (dc_fan enabled, fan currently on, speed actually differing) decides
+    whether it is applied. With dc_fan disabled the request is never applied,
+    so the hook must not fire even though control['manual']['change'] == 'pwm'."""
+    mode = _make_mode()
+    seen = []
+    mode._on_manual_output = lambda name, output: seen.append((name, output))
+    control = mode.control
+    control["manual"]["change"] = "pwm"
+    control["manual"]["pwm"] = 50
+    mode.settings["safety"]["allow_manual_changes"] = True
+    mode.settings["platform"]["dc_fan"] = False
+
+    mode._apply_manual_overrides(
+        control,
+        now=100.0,
+        current_output_status={"auger": False, "fan": True, "igniter": False, "power": False, "pwm": 100},
+    )
+
+    assert seen == []
+
+
+def test_on_manual_output_default_is_a_no_op():
+    assert _make_mode()._on_manual_output("auger", True) is None

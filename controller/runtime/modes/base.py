@@ -102,6 +102,9 @@ class ControlMode:
     def _on_auger_on(self, now):
         pass
 
+    def _on_manual_output(self, name, output):
+        """A human just drove an actuator directly. `name` is the actuator."""
+
     # ---- shared helpers ----
     def _auger_cycle_tick(self, now, current_output_status):
         """Shared (non-Hold) auger toggle: turn the auger on/off based on
@@ -425,6 +428,7 @@ class ControlMode:
                         grill_platform.fan_off()
                         _control.eventLogger.debug("Fan OFF")
                     manual_override["fan"] = override_time
+                    self._on_manual_output("fan", control["manual"]["output"])
 
                 if control["manual"]["change"] == "auger":
                     if control["manual"]["output"] and not current_output_status["auger"]:
@@ -434,6 +438,7 @@ class ControlMode:
                         grill_platform.auger_off()
                         _control.eventLogger.debug("Auger OFF")
                     manual_override["auger"] = override_time
+                    self._on_manual_output("auger", control["manual"]["output"])
 
                 if control["manual"]["change"] == "igniter":
                     if control["manual"]["output"] and not current_output_status["igniter"]:
@@ -443,6 +448,7 @@ class ControlMode:
                         grill_platform.igniter_off()
                         _control.eventLogger.debug("Igniter OFF")
                     manual_override["igniter"] = override_time
+                    self._on_manual_output("igniter", control["manual"]["output"])
 
                 if control["manual"]["change"] == "power":
                     if control["manual"]["output"] and not current_output_status["power"]:
@@ -452,6 +458,7 @@ class ControlMode:
                         grill_platform.power_off()
                         _control.eventLogger.debug("Power OFF")
                     manual_override["power"] = override_time
+                    self._on_manual_output("power", control["manual"]["output"])
 
                 if (
                     self.settings["platform"]["dc_fan"]
@@ -463,6 +470,11 @@ class ControlMode:
                     _control.eventLogger.debug("PWM Speed: " + str(speed) + "%")
                     grill_platform.set_duty_cycle(speed)
                     manual_override["pwm"] = override_time
+                    # Fires here, before the reset below wipes the requested speed --
+                    # this branch's own gate (dc_fan, fan on, speed actually changing)
+                    # IS the "applied" condition; the outer "change in [...]" check
+                    # alone would fire even when this gate rejects the request.
+                    self._on_manual_output("pwm", speed)
                     control["manual"]["pwm"] = 100  # Reset PWM
 
                 # Reset to False (not None) to match default_control()'s seed and
