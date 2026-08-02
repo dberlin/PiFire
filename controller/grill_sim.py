@@ -15,14 +15,17 @@
      release (default ~20 s);
    - the FAN as a real lever (it accelerates burn, boosts firepot->chamber
      convection, and increases chamber->ambient loss);
+   - an OPEN LID as a chamber-to-ambient heat leak large enough to produce the
+     excursion Hold's lid detector fires on;
    - combustion noise (pellet quality), sensor LAG (probe time constant ~4.5 s),
      and a light, occasional WIND breeze nudging chamber heat loss a few percent.
 
  So a passing closed-loop result is honest about realistic performance (a few
  degrees C band), not the artificially tight band an idealized plant gives.
 
- Interface: step(auger_on, fan_frac) advances one DT=1 s; measured() returns the
- lagged + noisy probe reading; true_Tc is the (noise-free) chamber temperature.
+ Interface: step(auger_on, fan_frac, lid_open=False) advances one DT=1 s;
+ measured() returns the lagged + noisy probe reading; true_Tc is the
+ (noise-free) chamber temperature.
 
 *****************************************
 """
@@ -33,7 +36,7 @@ DT = 1.0
 
 
 class GrillSim:
-    def __init__(self, *, seed=0, deadtime=20, fan_is_lever=True, fixed_fan=None, probe_tau=4.5, H=420.0):
+    def __init__(self, *, seed=0, deadtime=20, fan_is_lever=True, fixed_fan=None, probe_tau=4.5, H=420.0, h_lid=1.5):
         self.rng = np.random.default_rng(seed)
         self.fan_is_lever = fan_is_lever
         self.fixed_fan = fixed_fan  # if set, fan held at this frac
@@ -41,6 +44,10 @@ class GrillSim:
         # truth params (offset from the controller's nominal grey-box)
         self.C_f, self.C_c = 9.0, 300.0
         self.h_fc0, self.h_amb0 = 1.3, 0.42
+        # extra chamber->ambient conductance while the lid is open; ~4x the
+        # closed-lid, fan-off loss, which drops a 225 F chamber well past the
+        # 15% fall that arms Hold's lid detector within a two-minute pause
+        self.h_lid = h_lid
         self.sigma = 1.4e-9
         self.feed_rate = 1.0  # fuel units/s while auger ON
         self.H = H  # heat per fuel unit (~140 -> 334F max; ~300 -> ~450F max)
@@ -78,7 +85,7 @@ class GrillSim:
     def measured(self):
         return self.T_meas + float(self.rng.normal(0, 0.15))
 
-    def step(self, auger_on, fan_frac):
+    def step(self, auger_on, fan_frac, lid_open=False):
         if self.fixed_fan is not None:
             fan_frac = self.fixed_fan
         fan = float(np.clip(fan_frac, 0.0, 1.0))
@@ -103,6 +110,8 @@ class GrillSim:
         # fan-dependent transfer + loss; wind gusts on loss
         h_fc = self.h_fc0 * (0.6 + 0.7 * eff_fan)
         h_amb = self.h_amb0 * (0.8 + 0.5 * eff_fan) * self._wind()
+        if lid_open:
+            h_amb += self.h_lid
         rad = self.sigma * ((self.T_c + 273.15) ** 4 - (self.T_amb + 273.15) ** 4)
 
         dT_f = (heat - h_fc * (self.T_f - self.T_c)) / self.C_f

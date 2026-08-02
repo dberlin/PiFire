@@ -3,9 +3,17 @@
 
 Drives a controller core directly -- no Hold mode, no datastore -- so a run is
 reproducible from (controller, scenario, seed) alone. The lid-open scenario
-reproduces what Hold does to the auger during a pause and reports it through
-`set_output` when the controller has that capability, so the same harness
-measures code from before and after applied-output feedback exists.
+opens the lid on the plant as well as reproducing what Hold does to the auger
+during a pause, and reports the applied duty through `set_output` when the
+controller has that capability, so the same harness measures code from before
+and after applied-output feedback exists.
+
+A `lid_open` window is a physically open lid: the chamber leaks heat to ambient
+(`GrillSim.step(lid_open=True)`), the fan stops, and the auger is pinned as Hold
+pins it. That is the shape of Hold's manual `lid_open_toggle` path, which can
+begin at setpoint; the automatic detector instead arms only once the chamber has
+already fallen `LidOpenThreshold` percent below it, and the excursion this
+scenario produces is deep enough to cross that trigger.
 """
 
 import argparse
@@ -221,7 +229,7 @@ def run_scenario(controller, scenario, seed):
                     auger_on, auger_toggle, t, ratio, CYCLE_DATA["HoldCycleTime"]
                 )
 
-            plant.step(auger_on=auger_frac, fan_frac=0.0 if lid_open else fan_frac)
+            plant.step(auger_on=auger_frac, fan_frac=0.0 if lid_open else fan_frac, lid_open=lid_open)
 
             temps.append(temp_f)
             # The reported ratio: 0.0 at the detection instant, u_min (pinned
@@ -250,6 +258,12 @@ def run_scenario(controller, scenario, seed):
             "mean_duty": float(duties.mean()),
             "std_duty": float(duties.std()),
             "final_temp_f": float(temps[-1]),
+            # Depth of the lid excursion: the coldest reading from the first
+            # lid opening to the end of the run, so the trough is captured
+            # wherever transport lag puts it relative to the lid closing.
+            "lid_min_temp_f": (
+                None if not scenario.lid_open else float(temps[min(start for start, _ in scenario.lid_open) :].min())
+            ),
         }
         status = getattr(core, "get_status", lambda: None)()
         if status is not None:

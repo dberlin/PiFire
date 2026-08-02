@@ -90,8 +90,8 @@ class _FakePlant:
     def measured(self):
         return 0.0
 
-    def step(self, auger_on, fan_frac):
-        del fan_frac
+    def step(self, auger_on, fan_frac, lid_open=False):
+        del fan_frac, lid_open
         self.on_fracs.append(float(auger_on))
 
 

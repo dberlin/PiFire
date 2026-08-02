@@ -76,14 +76,16 @@ class _FakePlant:
     def __init__(self, seed=0):
         del seed
         self.on_fracs = []
+        self.lid_opens = []
         _FakePlant.instances.append(self)
 
     def measured(self):
         return 0.0
 
-    def step(self, auger_on, fan_frac):
+    def step(self, auger_on, fan_frac, lid_open=False):
         del fan_frac
         self.on_fracs.append(float(auger_on))
+        self.lid_opens.append(bool(lid_open))
 
 
 def _run_stub(monkeypatch, lid_open):
@@ -137,6 +139,11 @@ def test_lid_open_reports_zero_once_then_u_min_while_cycling(monkeypatch):
     assert any(frac > 0.0 for frac in rest_of_pause), (
         f"auger was held off for the whole pause instead of cycling at the pinned u_min ratio: {rest_of_pause}"
     )
+    # The lid is open on the plant for exactly the window, so the chamber
+    # leaks heat for the whole pause rather than only at the detection instant.
+    assert plant.lid_opens[LID_START : LID_START + LID_DURATION] == [True] * LID_DURATION
+    assert not any(plant.lid_opens[:LID_START])
+    assert not any(plant.lid_opens[LID_START + LID_DURATION :])
     # Realized duty over the pause (excluding the forced-off first tick)
     # should track u_min, not 0.0. The window does not land on a whole number
     # of 20 s cycles measured from the forced-off tick, so this is close to

@@ -449,6 +449,8 @@ Expected: `60 runs -> ...` (2 controllers × 6 scenarios × 5 seeds). This takes
 
 **Regeneration hazard:** once `mpc.Controller.set_output` exists, re-running this exact command captures the 30 `mpc` rows with applied-duty feedback live; regenerating `_matrix_baseline.json` as a genuine before-arm requires disabling `set_output` first, or it silently becomes a second after-arm.
 
+Disabling it in the parent process is not enough. `main()` runs the jobs through a `multiprocessing.Pool`, and Python 3.14 defaults to the `forkserver` start method on Linux, so the workers are fresh interpreters that never see a parent-process monkeypatch — the run would look patched and produce after-arm numbers. Patch every interpreter instead, via a `sitecustomize.py` on `PYTHONPATH` that replaces `controller.mpc.Controller.set_output` with a no-op. Verify the arm rather than trusting it: a non-lid `mpc` row (`steady_225` seed 0) must come back **bit-identical** to the committed baseline and must **differ** from the committed after-arm at ~1e-10. Matching the after-arm exactly means the patch did not reach the workers.
+
 - [ ] **Step 5: Format and commit**
 
 ```bash
@@ -2691,30 +2693,34 @@ EOF
 - Create: `docs/superpowers/experiments/_matrix_after_mpc.json` (generated)
 - Create: `docs/superpowers/experiments/_net_vs_nlp_after.json` (generated)
 
-> **CORRECTION (Task 16) — this task's GrillSim matrix conclusion is withdrawn. Its replay/agreement conclusion stands.**
+> **CORRECTION (Task 17, superseding Task 16) — this task's GrillSim matrix conclusion is replaced. Its replay/agreement conclusion stands, unchanged.**
 >
-> Task 14's matrix figures (`IAE -6.2% mean, pct_within_5f +2.09, overshoot 9.9 -> 7.5 F, settle ~300 s sooner` on `lid_open_225`) were measured under a `controller_matrix.py` lid model that Task 16 found to be wrong. That model held the auger off and reported applied duty `0.0` for all 120 s of the pause. `controller/runtime/modes/hold.py` does something much milder: one `AppliedOutput(ratio=0.0)` at the detection instant (`hold.py:238-266`, one-shot via the `target_temp_achieved` interlock), then `cycle.ratio` pinned to `cycle_data["u_min"]` (`hold.py:171-173`) with the auger still cycling at that duty (`hold.py:228` -> `base.py:118-147`, no lid gate).
+> Task 14's matrix figures (`IAE -6.2% mean, pct_within_5f +2.09, overshoot 9.9 -> 7.5 F, settle ~300 s sooner` on `lid_open_225`) were measured under a `controller_matrix.py` lid model that held the auger off and reported applied duty `0.0` for all 120 s of the pause. Task 16 corrected that *actuator* model to `hold.py`'s: one `AppliedOutput(ratio=0.0)` at the detection instant (`hold.py:238-266`, one-shot via the `target_temp_achieved` interlock), then `cycle.ratio` pinned to `cycle_data["u_min"]` (`hold.py:171-173`) with the auger still cycling at that duty (`hold.py:228` -> `base.py:118-147`, no lid gate). Measured under that correction, the effect of applied-duty feedback was `+0.86%` IAE.
 >
-> Re-measured under the corrected model — MPC, `lid_open_225`, 5 seeds, the two arms differing only in whether `mpc.Controller.set_output` is live:
+> **That `+0.86%` is retired too.** Task 16 left the scenario with no lid on the *plant* side. `GrillSim` scales both `h_fc` and `h_amb` with the fan, so cutting the fan trapped heat and the chamber *warmed* 224.9 -> 227.3 F across a "lid open" event — an excursion of 2.9 F at its deepest, against the >=33.75 F fall that arms `hold.py:241`'s detector at a 225 F setpoint. There was no disturbance for applied-duty feedback to reject, so `+0.86%` was measured on an event production cannot reach. Task 17 gave `GrillSim.step` a `lid_open` chamber-to-ambient leak and wired the scenario to it; the chamber now falls to 162-165 F, well past the 191.25 F trigger, on every controller and seed.
 >
-> | metric | Task 14 (old lid model) | corrected |
-> |---|---|---|
-> | IAE | -6.17% (better) | **+0.86% (worse)** |
-> | `pct_within_5f` | +2.09 | **-0.074** |
-> | overshoot | 9.9 -> 7.5 F | **7.54 -> 7.59 F** |
-> | settle | ~300 s sooner | **5.4 s later** |
+> Re-measured with a lid that actually opens — MPC, `lid_open_225`, 5 seeds, the two arms differing only in whether `mpc.Controller.set_output` is live:
 >
-> **The mechanism, measured on `mpc/lid_open_225/0`:** `hold.py:171-173` pins `state.cycle.ratio` to `u_min` — not the controller's command — and `hold.py:206` reports `requested=state.controller.output`, the command itself. Production behaves the same way. MPC's `control_period` is 5.0 s, so 25 of its reports land inside the 120 s pause, and 24 of those 25 diverge: applied duty holds at `0.15` while the requested duty ranges `0.1566`-`0.2041`. `set_output` pulls `_applied_Q` from a `5.84`-`11.86` range (mean ~9.5) down to `Q_min = 5.0` on every one of those 24 ticks — a sustained, roughly 2x divergence in assumed heat, not a single tick. What shrank between the old model and the corrected one is not the divergence itself: the old model reported `0.0` on all 120 ticks with the per-solve report suppressed, while the corrected model reports `5.0` at 24 solve ticks. The divergence shrank; it did not disappear.
+> | metric | Task 14 (no plant lid, whole-pause auger off) | Task 16 (no plant lid, `hold.py` actuators) | Task 17 (open lid) |
+> |---|---|---|---|
+> | IAE | -6.17% (better) | +0.86% (worse) | **-14.20% (better)** |
+> | `pct_within_5f` | +2.09 | -0.074 | **+2.32** |
+> | overshoot | 9.9 -> 7.5 F | 7.54 -> 7.59 F | **23.89 -> 9.59 F** |
+> | settle | ~300 s sooner | 5.4 s later | **182 s sooner** |
 >
-> **Do not overstate this.** `+0.86%` over 5 seeds (sign consistent on all 5, range `+0.57%`..`+1.14%`) retires Task 14's number; it does **not** establish that applied-duty feedback is harmful, or that the direction is real. The effect is negligible in either direction. What it does establish is that **`lid_open_225` is not a scenario that fails to separate the arms** — it separates them across the sustained ~2x divergence in assumed heat described above, and applied-duty feedback still does not help on it. That is a more informative, and more damaging, result than "no longer evidence": the one scenario in this matrix that does exercise a large, sustained command-vs-applied divergence shows no measured benefit from correcting it. The paths this matrix does not cover (manual override, `u_max` clamping, the sub-`u_min` reports Task 15's retraining addressed) remain uncovered, so the plan still carries no measured closed-loop benefit for applied-duty feedback. Task 14's Step 4 decision — *"Task 15 runs, the net is not shipped unchanged"* — rested on the **replay** excursion/RMS gate, not on the matrix, and is unaffected.
+> **The mechanism, measured on `mpc/lid_open_225/0`:** `hold.py:171-173` pins `state.cycle.ratio` to `u_min` — not the controller's command — and `hold.py:206` reports `requested=state.controller.output`, the command itself. Production behaves the same way. MPC's `control_period` is 5.0 s, so 25 of its reports land inside the 120 s pause; 24 are per-solve reports and **all 24 diverge**. With the chamber falling, the requested duty ranges `0.1663`-`0.9000` (mean `0.609`, saturating at `u_max` for most of the pause) while the applied duty holds at `u_min = 0.15`. Without `set_output` the estimator integrates the command, so it believes roughly four times the fuel actually delivered went into the firepot, and the recovery overshoots by 23.9 F on average. With `set_output` live the estimator integrates the pinned `u_min`, and overshoot is 9.6 F. This is the divergence the plumbing was built to correct, at the amplitude an open lid produces; under Task 16's fanless-but-sealed chamber the same 24 ticks diverged only `0.1566`-`0.2041` against `0.15`, which is why the effect was invisible.
 >
-> **Artifact state.** Both matrix artifacts were re-captured by Task 16 under the corrected lid model, and they are once again a genuine before/after pair on their 30 `mpc` rows:
+> **What this does and does not establish.** `-14.20%` over 5 seeds, sign consistent on all 5, range `-13.96%`..`-14.59%`: on this scenario the effect is large and unambiguous, and it replaces both earlier numbers. It is one scenario at one setpoint on one plant, so it establishes that applied-duty feedback pays off when commanded and applied duty diverge by several times over a sustained window — not a figure to quote for closed-loop performance generally. The paths this matrix still does not cover (manual override, `u_max` clamping outside a pause, the sub-`u_min` reports Task 15's retraining addressed) remain uncovered. Task 14's Step 4 decision — *"Task 15 runs, the net is not shipped unchanged"* — rested on the **replay** excursion/RMS gate, not on the matrix, and is unaffected by any of this.
 >
-> - `_matrix_baseline.json` — **before**: `mpc.Controller.set_output` replaced by a no-op, so nothing writes `_applied_Q` from outside and `update()`'s own `self._applied_Q = Q` (`controller/mpc.py:401`) feeds the estimator the *commanded* duty. That is exactly pre-Task-13 MPC, which inherited `ControllerBase.set_output`'s no-op. The arm is verified: all 25 non-lid `mpc` rows land **bit-identically** on the pre-Task-13 baseline captured at `e5f06ad32abf`.
+> **Artifact state.** Both matrix artifacts were re-captured by Task 17 under the open-lid plant, and they remain a genuine before/after pair on their 30 `mpc` rows:
+>
+> - `_matrix_baseline.json` — **before**: `mpc.Controller.set_output` replaced by a no-op, so nothing writes `_applied_Q` from outside and `update()`'s own `self._applied_Q = Q` (`controller/mpc.py:401`) feeds the estimator the *commanded* duty. That is exactly pre-Task-13 MPC, which inherited `ControllerBase.set_output`'s no-op.
 > - `_matrix_after_mpc.json` — **after**: `set_output` live, applied-duty feedback in the loop.
-> - The 30 `pid_sp` rows in `_matrix_baseline.json` are untouched and belong to neither arm: `pid_sp` does not override `set_output`, so it is bit-identical under both (measured, not assumed).
+> - The 30 `pid_sp` rows in `_matrix_baseline.json` belong to neither arm: `pid_sp` does not override `set_output`, so it is bit-identical under both (measured, not assumed). Their `lid_open_225` rows moved with the plant change; the rest did not.
+> - The arms are verified against the pre-Task-17 capture: all 50 non-lid rows across both controllers are **bit-identical** to it, so the plant change is confined to the scenario that opens the lid.
+> - Rows now carry `lid_min_temp_f`, the coldest reading from the first lid opening to the end of the run. It is `null` on the five scenarios with no lid window, and 161.9-164.6 F on `lid_open_225` — the excursion depth is recorded in the artifact rather than inferred from it.
 >
-> **What the Step 4 diff actually shows.** On the 25 non-lid rows, ~1e-10 relative drift (worst `3.06e-10`, `mpc/steady_450/2` `overshoot_f`) — `set_output` inverts `allocate()` in floating point, and 3.5 h of closed-loop integration amplifies the round-trip's few-ULP error to that. It is ULP noise, not an effect. On the 5 `lid_open_225` rows, the `+0.86%` mean IAE above. **The matrix therefore measures no closed-loop benefit for applied-duty feedback anywhere**, and Task 14's Step 4 decision stands only on the replay excursion/RMS gate.
+> **What the Step 4 diff actually shows.** On the 25 non-lid rows, ~1e-10 relative drift (worst `3.06e-10`, `mpc/steady_450/2` `overshoot_f`) — `set_output` inverts `allocate()` in floating point, and 3.5 h of closed-loop integration amplifies the round-trip's few-ULP error to that. It is ULP noise, not an effect. On the 5 `lid_open_225` rows, the `-14.20%` mean IAE above.
 
 - [ ] **Step 1: `jj new`**
 
@@ -2763,7 +2769,7 @@ EOF
 
 Those key names are the ones the script actually emits — check them against a baseline record before trusting this snippet, since a `KeyError` here is the good outcome and a silently-renamed key is not.
 
-The matrix half of this snippet compares two real arms again after Task 16's re-capture, but it separates them on one scenario only. Expect ~1e-10 relative drift on the 25 non-lid rows — floating-point noise from `set_output`'s inverse of `allocate()`, amplified by 3.5 h of integration, not an effect — and `+0.86%` mean IAE on the 5 `lid_open_225` rows. See the Task 16 correction at the top of this task before reading any matrix number below. The replay half is unaffected.
+The matrix half of this snippet compares two real arms after Task 17's re-capture, but it separates them on one scenario only. Expect ~1e-10 relative drift on the 25 non-lid rows — floating-point noise from `set_output`'s inverse of `allocate()`, amplified by 3.5 h of integration, not an effect — and `-14.20%` mean IAE on the 5 `lid_open_225` rows. See the Task 17 correction at the top of this task before reading any matrix number below. The replay half is unaffected.
 
 The gate is **relative**, and the agreement gate binds. Read the quantities in this order:
 
@@ -2780,7 +2786,7 @@ Do not substitute the clamped difference for the raw one anywhere in this compar
 
 If the matrix regresses while the replay holds, that is a different finding — the applied-duty change itself hurt closed-loop performance — and it goes back to the user rather than being tuned around.
 
-This matrix gate is void as written: under the corrected lid model the arms differ by `+0.86%` IAE on the only scenario that separates them, which is neither a regression nor an improvement worth gating on. See the Task 16 correction at the top of this task.
+This matrix gate never bound the decision, and still does not: under the open-lid plant the arms differ by `-14.20%` IAE on the only scenario that separates them, which is an improvement rather than the regression the gate was written to catch. See the Task 17 correction at the top of this task.
 
 - [ ] **Step 5: Commit the numbers**
 
