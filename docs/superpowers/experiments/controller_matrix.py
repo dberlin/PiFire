@@ -79,6 +79,23 @@ def _report(core, ratio, source_name, t, requested=None):
     setter(AppliedOutput(ratio=ratio, source=OutputSource(source_name), timestamp=float(t), requested=requested))
 
 
+def _auger_toggle_tick(auger_on, auger_toggle, t, ratio, cycle_time):
+    """Port of controller.runtime.modes.base.ControlMode._auger_cycle_tick.
+
+    Production runs a free-running toggle keyed on elapsed time since the last
+    toggle, decoupled from the controller's re-solve cadence -- the auger keeps
+    toggling on its own timer regardless of how often `ratio` gets rewritten
+    between toggles. Both branches test the same pre-tick snapshot of
+    `auger_on`, so at most one of them can fire in a given tick.
+    """
+    was_on = auger_on
+    if not was_on and (t - auger_toggle) > cycle_time * (1 - ratio):
+        auger_on, auger_toggle = True, t
+    if was_on and (t - auger_toggle) > cycle_time * ratio:
+        auger_on, auger_toggle = False, t
+    return auger_on, auger_toggle
+
+
 def run_scenario(controller, scenario, seed):
     mod = importlib.import_module(f"controller.{controller}")
     core = mod.Controller(dict(CONTROLLER_CONFIGS[controller]), "F", dict(CYCLE_DATA))
@@ -92,7 +109,7 @@ def run_scenario(controller, scenario, seed):
     period = core.get_control_period() or CYCLE_DATA["HoldCycleTime"]
     ratio, fan_frac = u_min, 1.0
     next_solve = 0.0
-    cycle_anchor = 0.0
+    auger_on, auger_toggle = False, 0.0
 
     temps, duties, settle_from = [], [], None
     for t in range(scenario.duration_s):
@@ -116,16 +133,14 @@ def run_scenario(controller, scenario, seed):
             else:
                 requested = float(raw)
             ratio = min(max(requested, u_min), u_max)
-            cycle_anchor = t
             if not lid_open:
                 _report(core, ratio, "controller", t, requested=requested)
 
         if lid_open:
-            auger_on = False
+            auger_on, auger_toggle = False, t
             _report(core, 0.0, "lid_open", t)
         else:
-            phase = (t - cycle_anchor) % CYCLE_DATA["HoldCycleTime"]
-            auger_on = phase < CYCLE_DATA["HoldCycleTime"] * ratio
+            auger_on, auger_toggle = _auger_toggle_tick(auger_on, auger_toggle, t, ratio, CYCLE_DATA["HoldCycleTime"])
 
         plant.step(auger_on=auger_on, fan_frac=0.0 if lid_open else fan_frac)
 

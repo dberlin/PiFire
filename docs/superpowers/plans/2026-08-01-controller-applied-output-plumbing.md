@@ -187,9 +187,10 @@ def run_scenario(controller, scenario, seed):
     _report(core, u_min, "seed", 0)
 
     period = core.get_control_period() or CYCLE_DATA["HoldCycleTime"]
+    cycle_time = CYCLE_DATA["HoldCycleTime"]
     ratio, fan_frac = u_min, 1.0
     next_solve = 0.0
-    cycle_anchor = 0.0
+    auger_on, auger_toggle = False, 0.0
 
     temps, duties, settle_from = [], [], None
     for t in range(scenario.duration_s):
@@ -213,16 +214,18 @@ def run_scenario(controller, scenario, seed):
             else:
                 requested = float(raw)
             ratio = min(max(requested, u_min), u_max)
-            cycle_anchor = t
             if not lid_open:
                 _report(core, ratio, "controller", t, requested=requested)
 
         if lid_open:
-            auger_on = False
+            auger_on, auger_toggle = False, t
             _report(core, 0.0, "lid_open", t)
         else:
-            phase = (t - cycle_anchor) % CYCLE_DATA["HoldCycleTime"]
-            auger_on = phase < CYCLE_DATA["HoldCycleTime"] * ratio
+            was_on = auger_on
+            if not was_on and (t - auger_toggle) > cycle_time * (1 - ratio):
+                auger_on, auger_toggle = True, t
+            if was_on and (t - auger_toggle) > cycle_time * ratio:
+                auger_on, auger_toggle = False, t
 
         plant.step(auger_on=auger_on, fan_frac=0.0 if lid_open else fan_frac)
 
@@ -292,6 +295,12 @@ print(run_scenario('pid_ac', Scenario('smoke', 600, [(0, 225.0)]), 0))
 "
 ```
 Expected: a dict with a finite `iae` and a `mean_duty` between `u_min` and `u_max`. If `iae` is `nan` or `mean_duty` is exactly `u_min` for the whole run, stop and fix the harness — a broken harness makes every later number meaningless.
+
+The auger loop above is a port of `ControlMode._auger_cycle_tick` (`controller/runtime/modes/base.py:105-134`), and the port has to stay faithful in one specific way: the toggle is free-running on `auger_toggle` and nothing about it resets when the controller re-solves. Production keeps these on separate clocks — `HoldMode.on_tick` gates the controller update on `controller.cycle_start`/`controller_interval` and only writes `state.cycle.ratio`, while the auger keeps cycling on its own timers. Re-anchoring the window to each solve instead makes the realized duty `min(1, ratio * HoldCycleTime / period)`, so any controller whose control period is shorter than `HoldCycleTime` saturates: MPC solves at 5 s against a 20 s cycle, and every steady scenario lands on the same terminal temperature no matter the set point. Controllers whose period equals `HoldCycleTime` — every PID variant — are unaffected, which is what makes this easy to miss.
+
+- [ ] **Step 3b: Pin the cycle model with a discriminating test**
+
+Assert that at a fixed `ratio`, the realized auger on-fraction over a long window matches `ratio` for a 20 s control period **and** for a 5 s one — realized duty must not depend on the re-solve cadence. Before accepting it, run the same test against the re-anchored model and confirm the 5 s case fails. A test that passes under both models proves nothing; record both results.
 
 - [ ] **Step 4: Run the baseline matrix**
 
@@ -2501,6 +2510,8 @@ QT_QPA_PLATFORM=offscreen uv run python docs/superpowers/experiments/net_vs_nlp_
 QT_QPA_PLATFORM=offscreen uv run python docs/superpowers/experiments/controller_matrix.py \
   --controllers mpc --out docs/superpowers/experiments/_matrix_after_mpc.json -w 8
 ```
+
+The baseline was captured with do-mpc installed, so every MPC row solved the real NLP rather than the net approximation. Confirm the same is true here before comparing — a run that fell back to the net is measuring a different controller, and the difference would read as an effect of this plan's changes.
 
 - [ ] **Step 4: Compare and decide**
 
