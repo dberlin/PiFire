@@ -234,6 +234,24 @@ def _migrate_i2c_buses(settings):
     return changed
 
 
+#: Where the MPC calibration log was written before it moved under ./logs.
+_LEGACY_MPC_LOG_PATH = "./controller/mpc_calibration_log.csv"
+_MPC_LOG_PATH = "./logs/mpc_calibration_log.csv"
+
+
+def _migrate_mpc_log_path(settings):
+    """Move the MPC calibration log out of the source tree and into ./logs.
+
+    Only the superseded default is rewritten. A path the operator chose is
+    theirs, and silently relocating their file would lose track of it.
+    """
+    config = settings.get("controller", {}).get("config", {}).get("mpc")
+    if not isinstance(config, dict) or config.get("log_path") != _LEGACY_MPC_LOG_PATH:
+        return False
+    config["log_path"] = _MPC_LOG_PATH
+    return True
+
+
 #: The shape migrations, in ascending order, as (target_version, migration).
 #: A step's number is the version the tree is AT once that step has run, and
 #: each callable mutates the tree in place and returns True if it changed
@@ -241,6 +259,7 @@ def _migrate_i2c_buses(settings):
 #: cascade in upgrade_settings() below is closed to new entries.
 _SHAPE_MIGRATIONS = [
     (1, _migrate_i2c_buses),
+    (2, _migrate_mpc_log_path),
 ]
 
 

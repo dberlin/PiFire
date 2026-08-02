@@ -72,7 +72,7 @@ _DEFAULTS = dict(
     est_r_meas=0.04,
     # Optional logging of (time_s, temp_c, Q) for the offline calibration utility.
     log_data=False,
-    log_path="./controller/mpc_calibration_log.csv",
+    log_path="./logs/mpc_calibration_log.csv",
 )
 
 

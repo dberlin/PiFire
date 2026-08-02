@@ -734,7 +734,7 @@
           "option_friendly_name": "Calibration Log Path",
           "option_description": "CSV file path for the calibration data log (when logging is enabled).",
           "option_type": "string",
-          "option_default": "./controller/mpc_calibration_log.csv",
+          "option_default": "./logs/mpc_calibration_log.csv",
           "hidden": false
         }
       ]
