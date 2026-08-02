@@ -129,6 +129,33 @@ def _load_net_policy(cfg):
     return net
 
 
+_PHYSICAL_PARAMS = ("C_f", "C_c", "h_fc", "h_amb", "theta", "n_delay", "K_Q", "sigma")
+
+
+def _warn_about_model(cfg):
+    """Report a model that cannot govern this grill well.
+
+    Both conditions are advisory: the shipped parameters are a legitimate
+    starting point for a first cook, and a controller that refuses to run is
+    worse than one that says what is wrong.
+    """
+    if all(cfg.get(k) == _DEFAULTS[k] for k in _PHYSICAL_PARAMS):
+        print(
+            "[mpc] model is uncalibrated (every thermal parameter is still the shipped default). "
+            "Expect large overshoot until you fit this grill with controller/update_mpc.py."
+        )
+    h_amb = float(cfg.get("h_amb") or 0.0)
+    if h_amb > 0.0:
+        tau = float(cfg["C_c"]) / h_amb
+        horizon = float(cfg["n_horizon"]) * float(cfg["t_step"])
+        if horizon < tau:
+            print(
+                f"[mpc] prediction horizon is {horizon:.0f} s but the model's chamber time "
+                f"constant is {tau:.0f} s; the controller cannot see far enough ahead to stop "
+                "in time. Raise n_horizon or t_step."
+            )
+
+
 def requires_modules(config):
     """Import names `Controller(config, ...)` will need but a base install lacks.
 
@@ -163,6 +190,7 @@ class Controller(ControllerBase):
         cfg = dict(_DEFAULTS)
         cfg.update(config or {})
         self.cfg = cfg
+        _warn_about_model(cfg)
         self.u_min = cycle_data.get("u_min", 0.1)
         self.u_max = cycle_data.get("u_max", 0.9)
 

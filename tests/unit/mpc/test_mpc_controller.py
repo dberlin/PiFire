@@ -9,7 +9,7 @@ import pytest
 
 import notify.mqtt_handler as mh
 from common.modes import Mode
-from controller.mpc import Controller, _DEFAULTS
+from controller.mpc import Controller, _DEFAULTS, _warn_about_model
 from controller.runtime.runner import ThreadedControllerRunner
 from controller.applied_output import AppliedOutput, OutputSource
 
@@ -462,3 +462,34 @@ def test_a_solve_failure_during_a_pause_holds_the_command_not_the_applied_value(
     mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
     mpc_controller.update(200.0)
     assert mpc_controller._last_Q == pytest.approx(commanded)
+
+
+def test_shipped_defaults_are_reported_as_uncalibrated(capsys):
+    _warn_about_model(dict(_DEFAULTS))
+    out = capsys.readouterr().out
+    assert "uncalibrated" in out.lower()
+    assert "update_mpc" in out
+
+
+def test_calibrated_params_are_not_reported_as_uncalibrated(capsys):
+    cfg = dict(_DEFAULTS)
+    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, n_horizon=200)
+    _warn_about_model(cfg)
+    assert "uncalibrated" not in capsys.readouterr().out.lower()
+
+
+def test_a_horizon_shorter_than_the_chamber_time_constant_is_reported(capsys):
+    cfg = dict(_DEFAULTS)
+    # 11000/2.7 = 4074 s time constant against a 24*25 = 600 s horizon.
+    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0)
+    _warn_about_model(cfg)
+    out = capsys.readouterr().out
+    assert "horizon" in out.lower()
+    assert "600" in out
+
+
+def test_an_adequate_horizon_is_not_reported(capsys):
+    cfg = dict(_DEFAULTS)
+    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, n_horizon=200, t_step=25.0)
+    _warn_about_model(cfg)
+    assert "horizon" not in capsys.readouterr().out.lower()
