@@ -236,7 +236,7 @@ export function ProfileEditor({
         }
         // The cascade is why ConfirmAction has a `message` prop at all:
         // delete_profile rewrites every log entry pointing at this profile to
-        // the literal "deleted" (routes.py:157-159).
+        // a tombstone (common/pellets_actions.py).
         message="Every entry in the pellet log that refers to this profile will be marked “User Deleted Profile”. This cannot be undone."
         onConfirm={() => {
           const id = pending;

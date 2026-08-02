@@ -5,7 +5,7 @@ import type { LiveState } from "../../../src/helpers/types";
 import { useLiveState } from "../../../src/helpers/useLiveState";
 
 const PELLET_DB: PelletDb = {
-  schema_version: 1,
+  schema_version: 2,
   current: {
     pelletid: "p1",
     hopper_level: 62,
@@ -15,9 +15,9 @@ const PELLET_DB: PelletDb = {
   brands: ["Generic", "Custom"],
   woods: ["Alder", "Oak"],
   archive: {
-    p1: { id: "p1", brand: "Generic", wood: "Alder", rating: 4, comments: "placeholder" },
+    p1: { brand: "Generic", wood: "Alder", rating: 4, comments: "placeholder" },
   },
-  log: { "2026-07-25 09:00:00": "p1" },
+  log: { "1785013200000": { pelletid: "p1", deleted: false } },
   lastupdated: { time: 1785000000 },
 };
 

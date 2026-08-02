@@ -4,8 +4,8 @@ import { ProfileEditor } from "../../../../src/components/pellets/ProfileEditor"
 import type { PelletProfile } from "../../../../src/helpers/pellets/pelletTypes";
 
 const ARCHIVE: Record<string, PelletProfile> = {
-  p2: { id: "p2", brand: "Custom", wood: "Oak", rating: 3, comments: "second" },
-  p1: { id: "p1", brand: "Generic", wood: "Alder", rating: 4, comments: "first" },
+  p2: { brand: "Custom", wood: "Oak", rating: 3, comments: "second" },
+  p1: { brand: "Generic", wood: "Alder", rating: 4, comments: "first" },
 };
 
 function renderEditor(over: Partial<Parameters<typeof ProfileEditor>[0]> = {}) {

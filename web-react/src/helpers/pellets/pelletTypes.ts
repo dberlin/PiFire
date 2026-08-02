@@ -1,5 +1,5 @@
-// Mirrors common/defaults.py default_pellets() (:616-672) and the payload
-// blueprints/mobile/socket_io.py:174 emits as `socket_pellet_data`.
+// Mirrors common/pellets_schema.py PelletDbSchema and the payload
+// blueprints/mobile/socket_io.py emits as `socket_pellet_data`.
 //
 // SHAPE PIN: tests/web/test_api_pellets.py::test_get_pellets_returns_full_database
 // asserts these exact key sets against a live GET /api/pellets. If you add a
@@ -9,13 +9,21 @@
 // Hand-written because `gen:types` compiles schema/settings.schema.json only
 // (scripts/gen-types.ts:15-16) and the pellet DB has no JSON schema.
 
-/** One archive entry. `id` repeats the archive key (defaults.py:657-665). */
+/** One archive entry. The archive key is the profile id; the entry does not
+    repeat it. */
 export interface PelletProfile {
-  id: string;
   brand: string;
   wood: string;
-  rating: number; // 1-5, rendered as stars
+  rating: number; // 1-5, enforced by common/pellets_schema.py, rendered as stars
   comments: string;
+}
+
+/** One load. `pelletid` is null exactly when the profile it named was deleted
+    -- common/pellets_actions.py pellets_delete_profile writes the tombstone
+    rather than removing the entry. */
+export interface PelletLogEntry {
+  pelletid: string | null;
+  deleted: boolean;
 }
 
 export interface PelletCurrent {
@@ -23,11 +31,11 @@ export interface PelletCurrent {
   pelletid: string;
   /** Percent remaining, 0-100. Also arrives on socket_dash_data as `hopperLevel`. */
   hopper_level: number;
-  /** "YYYY-MM-DD HH:MM:SS" -- str(datetime.now())[0:19], defaults.py:619-620. */
+  /** "YYYY-MM-DD HH:MM:SS" -- str(datetime.now())[0:19]. */
   date_loaded: string;
-  /** GRAMS since the last load. The control process increments this
-        (controller/runtime/modes/base.py:761-763); nothing in the UI writes it
-        except indirectly, by loading a profile (which zeroes it). */
+  /** GRAMS since the last load, a float. The control process increments this
+        (controller/runtime/modes/base.py); nothing in the UI writes it except
+        indirectly, by loading a profile (which zeroes it). */
   est_usage: number;
 }
 
@@ -39,8 +47,8 @@ export interface PelletDb {
   brands: string[];
   woods: string[];
   archive: Record<string, PelletProfile>;
-  /** timestamp key -> profile id, or the literal "deleted" when the profile
-        it pointed at was removed (common/pellets_actions.py, delete_profile). */
-  log: Record<string, string>;
+  /** Load time in epoch MILLISECONDS, as a decimal string -- JSON object keys
+        are strings. Sort numerically; text order is wrong across digit counts. */
+  log: Record<string, PelletLogEntry>;
   lastupdated: { time: number };
 }

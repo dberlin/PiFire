@@ -42,8 +42,11 @@ rs.mock("../../../../src/helpers/pellets/pelletsApi", () => ({
 
 const { PelletsPage } = await import("../../../../src/components/pellets/PelletsPage");
 
+const LOG_KEY = "1785013200000";
+const LOG_LABEL = `Delete log entry ${new Date(Number(LOG_KEY)).toLocaleString()}`;
+
 const DB: PelletDb = {
-  schema_version: 1,
+  schema_version: 2,
   current: {
     pelletid: "p1",
     hopper_level: 62,
@@ -53,10 +56,10 @@ const DB: PelletDb = {
   brands: ["Generic"],
   woods: ["Alder"],
   archive: {
-    p1: { id: "p1", brand: "Generic", wood: "Alder", rating: 4, comments: "c" },
-    p2: { id: "p2", brand: "Custom", wood: "Oak", rating: 5, comments: "second" },
+    p1: { brand: "Generic", wood: "Alder", rating: 4, comments: "c" },
+    p2: { brand: "Custom", wood: "Oak", rating: 5, comments: "second" },
   },
-  log: { "2026-07-25 09:00:00": "p1" },
+  log: { [LOG_KEY]: { pelletid: "p1", deleted: false } },
   lastupdated: { time: 1785000000 },
 };
 
@@ -146,7 +149,7 @@ describe("PelletsPage", () => {
       "Add wood type",
       "Delete Generic",
       "Delete Alder",
-      "Delete log entry 2026-07-25 09:00:00",
+      LOG_LABEL,
     ];
     for (const name of gated) {
       await waitFor(() =>
@@ -304,11 +307,11 @@ describe("PelletsPage action wiring", () => {
 
   it("deletes a log entry by its timestamp key", async () => {
     mountDb();
-    fireEvent.click(screen.getByRole("button", { name: "Delete log entry 2026-07-25 09:00:00" }));
+    fireEvent.click(screen.getByRole("button", { name: LOG_LABEL }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    // The log is keyed by timestamp, and the archive by profile id; passing the
-    // row's profile id instead would match nothing and no-op (:163).
-    await waitFor(() => expect(deleteLogMock).toHaveBeenCalledWith("", "2026-07-25 09:00:00"));
+    // The log is keyed by load time, and the archive by profile id; passing the
+    // row's profile id instead would match nothing and no-op.
+    await waitFor(() => expect(deleteLogMock).toHaveBeenCalledWith("", LOG_KEY));
   });
 });

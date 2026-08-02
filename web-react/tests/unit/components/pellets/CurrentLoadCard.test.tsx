@@ -4,7 +4,7 @@ import { CurrentLoadCard } from "../../../../src/components/pellets/CurrentLoadC
 import type { PelletDb } from "../../../../src/helpers/pellets/pelletTypes";
 
 const DB: PelletDb = {
-  schema_version: 1,
+  schema_version: 2,
   current: {
     pelletid: "p1",
     hopper_level: 62,
@@ -14,10 +14,10 @@ const DB: PelletDb = {
   brands: ["Generic", "Custom"],
   woods: ["Alder", "Oak"],
   archive: {
-    p2: { id: "p2", brand: "Custom", wood: "Oak", rating: 5, comments: "second" },
-    p1: { id: "p1", brand: "Generic", wood: "Alder", rating: 4, comments: "placeholder" },
+    p2: { brand: "Custom", wood: "Oak", rating: 5, comments: "second" },
+    p1: { brand: "Generic", wood: "Alder", rating: 4, comments: "placeholder" },
   },
-  log: { "2026-07-25 09:00:00": "p1" },
+  log: { "1785013200000": { pelletid: "p1", deleted: false } },
   lastupdated: { time: 1785000000 },
 };
 

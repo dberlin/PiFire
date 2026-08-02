@@ -1,18 +1,23 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { PelletLog } from "../../../../src/components/pellets/PelletLog";
-import type { PelletProfile } from "../../../../src/helpers/pellets/pelletTypes";
+import type { PelletLogEntry, PelletProfile } from "../../../../src/helpers/pellets/pelletTypes";
 
 const ARCHIVE: Record<string, PelletProfile> = {
-  p1: { id: "p1", brand: "Generic", wood: "Alder", rating: 5, comments: "c" },
+  p1: { brand: "Generic", wood: "Alder", rating: 5, comments: "c" },
 };
 
-const LOG = {
-  "2026-07-25 12:00:00": "p1",
-  "2026-07-23 08:00:00": "deleted",
-  "2026-07-24 10:00:00": "p1",
-  "2026-07-22 06:00:00": "vanished",
+// Epoch milliseconds, as decimal strings. "999999999999" sorts after
+// "1784851200000" as text and before it as a number, which is why the
+// component sorts numerically.
+const LOG: Record<string, PelletLogEntry> = {
+  "1785024000000": { pelletid: "p1", deleted: false },
+  "999999999999": { pelletid: "p1", deleted: false },
+  "1784851200000": { pelletid: null, deleted: true },
+  "1784937600000": { pelletid: "vanished", deleted: false },
 };
+
+const WHEN = (key: string) => new Date(Number(key)).toLocaleString();
 
 function renderLog(over: Partial<Parameters<typeof PelletLog>[0]> = {}) {
   const props = {
@@ -27,17 +32,17 @@ function renderLog(over: Partial<Parameters<typeof PelletLog>[0]> = {}) {
 }
 
 function timestampCells() {
-  return screen.getAllByRole("cell", { name: /^2026-/ }).map((c) => c.textContent);
+  return screen.getAllByRole("row").map((r) => r.firstElementChild?.textContent ?? "");
 }
 
 describe("PelletLog", () => {
-  it("sorts rows by timestamp key ascending (index.html:439 items()|sort)", () => {
+  it("sorts rows oldest first, numerically rather than as text", () => {
     renderLog();
     expect(timestampCells()).toEqual([
-      "2026-07-22 06:00:00",
-      "2026-07-23 08:00:00",
-      "2026-07-24 10:00:00",
-      "2026-07-25 12:00:00",
+      WHEN("999999999999"),
+      WHEN("1784851200000"),
+      WHEN("1784937600000"),
+      WHEN("1785024000000"),
     ]);
   });
 
@@ -47,33 +52,32 @@ describe("PelletLog", () => {
     expect(screen.getAllByLabelText("Rating: 5 of 5").length).toBe(2);
   });
 
-  it("renders the literal 'deleted' value as User Deleted Profile with no delete button", () => {
+  it("renders a tombstone as User Deleted Profile with no delete button", () => {
     renderLog();
-    // index.html:442-445: "-" for rating and no action.
     expect(screen.getAllByText("User Deleted Profile").length).toBe(2);
     expect(
-      screen.queryByRole("button", { name: "Delete log entry 2026-07-23 08:00:00" }),
+      screen.queryByRole("button", { name: `Delete log entry ${WHEN("1784851200000")}` }),
     ).toBeNull();
   });
 
   it("gives an id missing from the archive the same deleted treatment, not a crash", () => {
-    // The Jinja at index.html:447 would 500 on this.
     renderLog();
     expect(
-      screen.queryByRole("button", { name: "Delete log entry 2026-07-22 06:00:00" }),
+      screen.queryByRole("button", { name: `Delete log entry ${WHEN("1784937600000")}` }),
     ).toBeNull();
   });
 
-  it("only a confirmed delete calls onDelete, with the timestamp key", () => {
+  it("only a confirmed delete calls onDelete, with the millisecond key", () => {
     const props = renderLog();
-    fireEvent.click(screen.getByRole("button", { name: "Delete log entry 2026-07-25 12:00:00" }));
+    const label = `Delete log entry ${WHEN("1785024000000")}`;
+    fireEvent.click(screen.getByRole("button", { name: label }));
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(props.onDelete).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete log entry 2026-07-25 12:00:00" }));
+    fireEvent.click(screen.getByRole("button", { name: label }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
-    expect(props.onDelete).toHaveBeenCalledWith("2026-07-25 12:00:00");
+    expect(props.onDelete).toHaveBeenCalledWith("1785024000000");
   });
 
   it("disables every delete button while busy", () => {
