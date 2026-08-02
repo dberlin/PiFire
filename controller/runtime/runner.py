@@ -104,6 +104,12 @@ class SyncControllerRunner(ControllerRunner):
         return self._core.restore_model(snapshot)
 
     def controller_state(self):
+        """A mapping the caller owns outright and may mutate freely -- Hold adds
+        "cycle_ratio" to it before publishing to MQTT -- without touching the
+        controller's own state. `status is None` (not merely falsy) is what
+        selects the fallback, so a controller whose get_status() legitimately
+        returns {} is trusted rather than second-guessed.
+        """
         status = self._core.get_status()
         if status is None:
             return dict(self._core.__dict__)

@@ -157,9 +157,28 @@ def test_sync_runner_forwards_snapshot_and_restore():
     assert core.restored == {"revision": 9}
 
 
+def test_sync_runner_restore_model_propagates_rejection():
+    class _RejectingCore(_RecordingCore):
+        def restore_model(self, snapshot):
+            self.restored = snapshot
+            return False
+
+    core = _RejectingCore()
+    assert SyncControllerRunner(core).restore_model({"revision": 1}) is False
+    assert core.restored == {"revision": 1}
+
+
 def test_controller_state_prefers_get_status():
     runner = SyncControllerRunner(_RecordingCore(status={"K": 700.0}))
     assert runner.controller_state() == {"K": 700.0}
+
+
+def test_controller_state_treats_empty_status_dict_as_present():
+    # {} is falsy but not None: get_status() answered, so it wins over the
+    # dunder-dict fallback rather than being mistaken for "no answer".
+    core = _RecordingCore(status={})
+    core.p = 0.25
+    assert SyncControllerRunner(core).controller_state() == {}
 
 
 def test_controller_state_falls_back_to_dunder_dict():
