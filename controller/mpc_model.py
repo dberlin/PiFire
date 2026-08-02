@@ -101,6 +101,71 @@ def _rad_loss(T_c, T_amb, sigma):
     return sigma * ((T_c + _KELVIN) ** 4 - (T_amb + _KELVIN) ** 4)
 
 
+def simulate_grey_box(
+    t,
+    Q,
+    *,
+    C_f,
+    C_c,
+    h_fc,
+    h_amb,
+    T_amb,
+    T0,
+    K_Q=1.0,
+    sigma=0.0,
+    theta=0.0,
+    n_delay=0,
+    max_dt=1.0,
+):
+    """Forward-simulate chamber temperature for the plant the MPC plans against.
+
+    The single executable statement of the dynamics documented at the top of
+    this module, including the radiative loss and the Erlang transport-delay
+    chain. The offline calibration utility fits through this function so the
+    parameters it produces describe the model that consumes them.
+
+    `out[i]` is the chamber temperature AT `t[i]`, so `out[0] == T0`; each step
+    advances the state from `t[i]` to `t[i+1]` under the input `Q[i]`. The
+    disturbance state `d` is absent: it exists to absorb model error at run
+    time, and fitting against it would let it absorb the very mismatch a
+    calibration exists to remove.
+    """
+    t = np.asarray(t, dtype=float)
+    Q = np.asarray(Q, dtype=float)
+    n = max(int(n_delay), 0)
+    lag_tau = (float(theta) / n) if (n > 0 and theta > 0.0) else 0.0
+    lags = np.zeros(n)
+    T_f = float(T0)
+    T_c = float(T0)
+    out = np.empty_like(t)
+    for i in range(len(t)):
+        out[i] = T_c
+        if i == len(t) - 1:
+            break
+        span = float(t[i + 1] - t[i])
+        if span <= 0.0:
+            continue
+        # Sub-step: C_f/h_fc is a handful of seconds, well under a typical log
+        # cadence, so integrating at the sample spacing alone diverges.
+        steps = max(1, int(np.ceil(span / max_dt)))
+        dt = span / steps
+        u = float(Q[i])
+        for _ in range(steps):
+            if lag_tau > 0.0:
+                prev = u
+                for j in range(n):
+                    lags[j] += dt * (prev - lags[j]) / lag_tau
+                    prev = lags[j]
+                heat_in = lags[-1]
+            else:
+                heat_in = u
+            dT_f = (K_Q * heat_in - h_fc * (T_f - T_c)) / C_f
+            dT_c = (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c
+            T_f += dt * dT_f
+            T_c += dt * dT_c
+    return out
+
+
 def build_do_mpc_model(*, C_f, C_c, h_fc, h_amb, T_amb, theta=0.0, n_delay=0, K_Q=1.0, sigma=0.0):
     """Build the do-mpc continuous model of the augmented grey-box plant.
 
