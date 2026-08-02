@@ -70,6 +70,13 @@ def _lid_open_at(scenario, t):
     return any(start <= t < start + dur for start, dur in scenario.lid_open)
 
 
+def _lid_open_start_at(scenario, t):
+    """True on the single tick a lid-open window begins -- the instant
+    hold.py:247-264 forces the auger off and reports one AppliedOutput(0.0),
+    as distinct from the rest of the pause, which keeps cycling at u_min."""
+    return any(start == t for start, _ in scenario.lid_open)
+
+
 def _report(core, ratio, source_name, t, requested=None):
     """Report applied duty when the controller can hear it; no-op otherwise."""
     setter = getattr(core, "set_output", None)
@@ -177,6 +184,7 @@ def run_scenario(controller, scenario, seed):
                 settle_from = None
 
             lid_open = _lid_open_at(scenario, t)
+            lid_open_start = lid_open and _lid_open_start_at(scenario, t)
             temp_f = _c_to_f(plant.measured())
 
             if t >= next_solve:
@@ -190,13 +198,25 @@ def run_scenario(controller, scenario, seed):
                 else:
                     requested = float(raw)
                 ratio = min(max(requested, u_min), u_max)
-                if not lid_open:
-                    _report(core, ratio, "controller", t, requested=requested)
+                # hold.py:171-173 replaces the controller's answer with u_min
+                # for the whole pause, ahead of the floor/ceiling just above.
+                if lid_open:
+                    ratio = u_min
+                _report(core, ratio, "lid_open" if lid_open else "controller", t, requested=requested)
 
-            if lid_open:
+            if lid_open_start:
+                # hold.py's detection instant: auger off, cycle timer reset,
+                # one AppliedOutput(0.0) report (hold.py:247-264). That block
+                # clears target_temp_achieved (hold.py:266), and the pause's
+                # own heat loss keeps it clear -- hold.py:234 only re-arms it
+                # once the plant is back at setpoint -- so this fires exactly
+                # once per pause, not every tick.
                 auger_on, auger_toggle, auger_frac = False, t, 0.0
                 _report(core, 0.0, "lid_open", t)
             else:
+                # hold.py:228 calls _auger_cycle_tick unconditionally and
+                # base.py:118-147 has no lid gate, so for the rest of the
+                # pause the auger keeps cycling at the ratio pinned above.
                 auger_on, auger_toggle, auger_frac = _auger_toggle_tick(
                     auger_on, auger_toggle, t, ratio, CYCLE_DATA["HoldCycleTime"]
                 )
@@ -204,10 +224,10 @@ def run_scenario(controller, scenario, seed):
             plant.step(auger_on=auger_frac, fan_frac=0.0 if lid_open else fan_frac)
 
             temps.append(temp_f)
-            # The requested ratio, not the realized on-fraction plant.step()
-            # received (see _auger_toggle_tick) -- 0.0 during lid-open, when
-            # the controller's request is overridden rather than applied.
-            duties.append(0.0 if lid_open else ratio)
+            # The reported ratio: 0.0 at the detection instant, u_min (pinned
+            # above) for the rest of the pause, the controller's own answer
+            # otherwise.
+            duties.append(0.0 if lid_open_start else ratio)
             if abs(temp_f - setpoint) <= 5.0:
                 if settle_from is None:
                     settle_from = t
