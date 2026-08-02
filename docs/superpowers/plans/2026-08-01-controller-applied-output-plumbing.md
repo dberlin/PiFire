@@ -1143,10 +1143,52 @@ Expected: FAIL — `TypeError: Can't instantiate abstract class ThreadedControll
 In `ThreadedControllerRunner.__init__`, beside `self._pending_core = None`, add:
 
 ```python
-        self._pending_outputs = []
+        self._pending_outputs = collections.deque(maxlen=_MAX_PENDING_OUTPUTS)
+        self._pending_dropped = 0
         self._pending_restore = None
         self._model_snapshot = core.get_model_snapshot()
 ```
+
+and at module level:
+
+```python
+# Hold reports once per work-loop tick, and that loop runs at roughly 20 Hz
+# (`ControlMode.run` sleeps 0.05 s), while the worker drains only once per
+# controller solve. This ceiling spans a stalled solve without letting the
+# backlog grow without bound; the oldest reports are the ones to lose, since
+# a consumer identifying a process model cares about recent duty.
+_MAX_PENDING_OUTPUTS = 2048
+```
+
+A bounded deque is required, not a convenience. The producer is Hold's tick loop at ~20 Hz; the consumer runs once per control period. In steady state that is about 100 entries for MPC's 5 s period, but a slow or hung NLP solve makes the producer unbounded against a stopped consumer, and the replay loop below would then feed the entire backlog into the controller in a single burst.
+
+`maxlen` alone would drop silently, so count the drops:
+
+```python
+        if len(self._pending_outputs) == self._pending_outputs.maxlen:
+            self._pending_dropped += 1
+```
+
+immediately before the `append` in Step 6, and surface `_pending_dropped` in `controller_state()`. A nonzero value means the worker could not keep up, which is a fact worth seeing rather than inferring.
+
+Pin both halves with a test in `tests/unit/runtime/test_threaded_runner.py`:
+
+```python
+def test_a_stalled_worker_bounds_the_backlog_and_counts_the_drops():
+    runner, core = _threaded_runner_with_blocked_worker()
+    for i in range(_MAX_PENDING_OUTPUTS + 50):
+        runner.set_output(_output(ratio=0.3, timestamp=float(i)))
+
+    assert len(runner._pending_outputs) == _MAX_PENDING_OUTPUTS
+    assert runner._pending_dropped == 50
+    assert runner.controller_state()["pending_dropped"] == 50
+
+    # the survivors are the newest, and the oldest are what went
+    oldest = min(a.timestamp for a in runner._pending_outputs)
+    assert oldest == 50.0
+```
+
+The `oldest == 50.0` assertion is the load-bearing one: it proves the deque discards from the correct end. A `maxlen` deque that dropped the newest would keep the backlog bounded and still starve the controller of current duty, and every other assertion here would pass.
 
 - [ ] **Step 4: Drain and replay in `_loop`**
 
