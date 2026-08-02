@@ -20,7 +20,7 @@ import importlib
 import json
 
 from common import datastore
-from common.datastore_accessors import read_control, read_pellet_db
+from common.datastore_accessors import read_control, read_display_errors, read_errors, read_pellet_db, write_errors
 
 
 def _settings(**overrides):
@@ -496,6 +496,77 @@ def test_build_display_import_failure_falls_back_to_none_module_in_debug_mode(ds
     assert "nonexistent_display_xyz" in errors[0]
     assert control_log.exceptions
     assert type(display).__module__ == "display.none"
+
+
+# ---------------------------------------------------------------------------
+# build_display(): the banner reaches the dashboard without erasing the
+# control process's own banners
+# ---------------------------------------------------------------------------
+
+_CONTROL_BANNER = "Grill Platform Error: Could not load the grill platform module."
+
+
+def test_build_display_import_failure_banner_lands_in_the_display_blob(ds):
+    """The display process and the control process are independent supervisor
+    programs, and each error blob is written whole. A display failure must
+    record into the display's own list, leaving the control process's banners
+    -- which nothing restarted -- exactly where the dashboard expects them."""
+    from controller.runtime.devices import build_display
+
+    write_errors([_CONTROL_BANNER])
+    settings = _settings()
+    settings["modules"]["display"] = "nonexistent_display_xyz"
+
+    build_display(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+
+    assert read_errors() == [_CONTROL_BANNER], "build_display() overwrote the control process's banners"
+    display_errors = read_display_errors()
+    assert len(display_errors) == 1
+    assert "nonexistent_display_xyz" in display_errors[0]
+
+
+def test_build_display_configure_failure_banner_lands_in_the_display_blob(ds, monkeypatch):
+    from controller.runtime.devices import build_display
+
+    write_errors([_CONTROL_BANNER])
+    settings = _settings()
+    settings["modules"]["display"] = "broken_display"
+    settings["display"] = {"config": {"broken_display": {}}}
+    monkeypatch.setattr(
+        "controller.runtime.devices.importlib.import_module",
+        _selective_import({"display.broken_display": _FakeModule(Display=_RaisingDisplay)}),
+    )
+
+    build_display(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+
+    assert read_errors() == [_CONTROL_BANNER], "build_display() overwrote the control process's banners"
+    display_errors = read_display_errors()
+    assert len(display_errors) == 1
+    assert "broken_display" in display_errors[0]
+
+
+def test_build_display_failures_do_not_set_critical_error(ds, monkeypatch):
+    """critical_error makes the control loop ignore every mode change (see
+    controller.py's `updated and not critical_error` guard) -- it means the
+    grill can no longer be driven safely. A blank screen must not make the
+    grill uncontrollable, so neither display path may set it. Mirrors
+    test_build_devices_distance_failures_do_not_set_critical_error_or_reraise_in_debug_mode."""
+    from controller.runtime.devices import build_display
+
+    settings = _settings()
+    settings["modules"]["display"] = "nonexistent_display_xyz"
+    build_display(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+    assert not read_control().get("critical_error")
+
+    settings = _settings()
+    settings["modules"]["display"] = "broken_display"
+    settings["display"] = {"config": {"broken_display": {}}}
+    monkeypatch.setattr(
+        "controller.runtime.devices.importlib.import_module",
+        _selective_import({"display.broken_display": _FakeModule(Display=_RaisingDisplay)}),
+    )
+    build_display(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+    assert not read_control().get("critical_error")
 
 
 def test_build_display_import_failure_uses_default_display_config_and_rotation(ds, monkeypatch):

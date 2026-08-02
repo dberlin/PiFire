@@ -115,6 +115,43 @@ def test_errors_and_current_status_roundtrip(ds):
     assert c.read_status() == {"mode": "Hold"}
 
 
+def test_display_errors_roundtrip(ds):
+    c.write_display_errors(["d1"])
+    assert c.read_display_errors() == ["d1"]
+
+
+def test_read_display_errors_defaults_to_empty_before_anything_is_written(ds):
+    assert c.read_display_errors() == []
+
+
+def test_flush_display_errors_returns_empty_and_clears_the_stored_list(ds):
+    c.write_display_errors(["d1"])
+    assert c.flush_display_errors() == []
+    assert c.read_display_errors() == []
+
+
+def test_flush_display_errors_leaves_the_control_process_list_alone(ds):
+    """The display process boots and clears its own banners; the control
+    process's banners are durable and are NOT the display's to discard."""
+    c.write_errors(["control banner"])
+    c.write_display_errors(["display banner"])
+
+    c.flush_display_errors()
+
+    assert c.read_errors() == ["control banner"]
+
+
+def test_flush_errors_leaves_the_display_process_list_alone(ds):
+    """The other direction: the controller restarts far more often than the
+    display, and its boot flush must not erase the display's banner."""
+    c.write_errors(["control banner"])
+    c.write_display_errors(["display banner"])
+
+    c.flush_errors()
+
+    assert c.read_display_errors() == ["display banner"]
+
+
 def test_autotune_uses_queue(ds):
     c.flush_autotune()
     c.write_autotune({"tr": 1})

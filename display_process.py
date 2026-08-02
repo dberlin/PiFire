@@ -14,7 +14,7 @@ import logging
 
 from common import datastore
 from common.common import create_logger
-from common.datastore_accessors import read_settings
+from common.datastore_accessors import flush_display_errors, read_settings
 from controller.runtime.devices import build_display
 from controller.runtime.store import SqliteStore
 from controller.runtime.clock import RealClock
@@ -64,7 +64,12 @@ if __name__ == "__main__":
         "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s", level=log_level
     )
 
-    display_device, _errors = build_display(settings, errors=[], event_log=eventLogger, control_log=controlLogger)
+    # Clear this process's own banner list at its own start, mirroring
+    # control.py's boot path: a repaired display drops its stale banner, a
+    # still-broken one re-reports. The control process's list is untouched.
+    display_device, _errors = build_display(
+        settings, errors=flush_display_errors(), event_log=eventLogger, control_log=controlLogger
+    )
 
     eventLogger.info("PiFire Display Process started.")
 

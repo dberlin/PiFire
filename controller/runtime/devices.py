@@ -1,10 +1,12 @@
 """Hardware device construction, with prototype-fallback try/except logic:
 each device module is imported dynamically from settings, and if it fails to
 load or configure, a simulated "none" fallback is substituted and the failure
-is recorded to the errors list/logs. build_devices() builds the grill
-platform, probe complex, and distance sensor for the controller process;
-build_display() builds only the display for the separate display process --
-kept apart so the two processes never touch each other's hardware."""
+is recorded to that process's errors list/logs. build_devices() builds the
+grill platform, probe complex, and distance sensor for the controller process
+and records to the ``errors`` list; build_display() builds only the display for
+the separate display process and records to the ``display_errors`` list -- kept
+apart so the two processes never touch each other's hardware, and so neither
+one's whole-list write erases the other's banners."""
 
 import importlib
 
@@ -14,6 +16,7 @@ from common.datastore_accessors import (
     read_pellet_db,
     write_pellet_db,
     write_control,
+    write_display_errors,
     write_errors,
     write_generic_key,
 )
@@ -32,7 +35,9 @@ def build_display(settings, *, errors, event_log, control_log):
     distance hardware, and the controller must never touch the display.
 
     :param settings: Settings dictionary
-    :param errors: Errors list to append to (and persist via write_errors)
+    :param errors: Display errors list to append to (and persist via
+        write_display_errors -- the display process owns this list, so a
+        controller restart cannot erase what is recorded here)
     :param event_log: Event logger
     :param control_log: Control logger
     :return: (display_or_None, errors)
@@ -61,7 +66,7 @@ def build_display(settings, *, errors, event_log, control_log):
             f"again from the admin panel to fix this issue."
         )
         errors.append(error_event)
-        write_errors(errors)
+        write_display_errors(errors)
         event_log.error(error_event)
         control_log.error(error_event)
 
@@ -93,7 +98,7 @@ def build_display(settings, *, errors, event_log, control_log):
             f"again from the admin panel to fix this issue."
         )
         errors.append(error_event)
-        write_errors(errors)
+        write_display_errors(errors)
         event_log.error(error_event)
         control_log.error(error_event)
 

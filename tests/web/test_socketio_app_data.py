@@ -57,6 +57,7 @@ from common.datastore_accessors import (
     read_control,
     read_current,
     flush_current,
+    read_display_errors,
     read_errors,
     read_pellets_store,
     read_settings,
@@ -64,6 +65,7 @@ from common.datastore_accessors import (
     read_status,
     write_connected_user,
     write_control,
+    write_display_errors,
     write_errors,
     write_generic_key,
     write_pellet_db,
@@ -1380,6 +1382,66 @@ def test_check_control_status_leaves_a_control_process_error_alone(sio):
     _stamp_heartbeat(0)
     sio.mod._check_control_status()
     assert read_errors() == ["Grill Platform Error: Could not load the grill platform module."]
+
+
+# =====================================================================
+# The dash payload carries banners from both producer processes
+# =====================================================================
+
+_CONTROL_BANNER = "Grill Platform Error: Could not load the grill platform module."
+_DISPLAY_BANNER = (
+    'An error occurred loading the [ili9341f] display module.  The "display.none" module has been loaded instead.'
+)
+
+
+def test_dash_errors_carry_both_the_control_and_the_display_banner(sio):
+    """The control process and the display process each own a blob, so a
+    display that fell back to display.none is reported alongside -- not
+    instead of -- whatever the controller recorded."""
+    write_errors([_CONTROL_BANNER])
+    write_display_errors([_DISPLAY_BANNER])
+    flush_current()
+
+    dash = sio.mod._get_dash_data(read_settings(), read_pellets_store())
+
+    assert dash["errors"] == [_CONTROL_BANNER, _DISPLAY_BANNER]
+
+
+def test_dash_errors_carry_a_display_banner_with_no_control_banner(sio):
+    """The common case in the field: the controller is healthy and only the
+    display failed, so the display blob is the payload's sole source."""
+    write_display_errors([_DISPLAY_BANNER])
+    flush_current()
+
+    dash = sio.mod._get_dash_data(read_settings(), read_pellets_store())
+
+    assert dash["errors"] == [_DISPLAY_BANNER]
+
+
+def test_dash_errors_append_the_control_down_entry_after_both_blobs(sio):
+    """The liveness entry stays last: it is recomputed per frame, while both
+    blobs are durable."""
+    from common.app import CONTROL_DOWN_ERROR
+
+    write_errors([_CONTROL_BANNER])
+    write_display_errors([_DISPLAY_BANNER])
+    flush_current()
+    _stamp_heartbeat(CONTROL_HEARTBEAT_STALE_AFTER + 5)
+    sio.mod._check_control_status()
+
+    dash = sio.mod._get_dash_data(read_settings(), read_pellets_store())
+
+    assert dash["errors"] == [_CONTROL_BANNER, _DISPLAY_BANNER, CONTROL_DOWN_ERROR]
+
+
+def test_dash_data_reads_the_display_blob_without_consuming_it(sio):
+    """The display process owns that list; the web tier only ever reads it."""
+    write_display_errors([_DISPLAY_BANNER])
+    flush_current()
+
+    sio.mod._get_dash_data(read_settings(), read_pellets_store())
+
+    assert read_display_errors() == [_DISPLAY_BANNER]
 
 
 # =====================================================================

@@ -175,7 +175,7 @@ def execute_control_writes():
 
 def read_errors():
     """
-    Read Errors from SQLite DB
+    Read the control process's error list from SQLite DB.
 
     :return: errors
     """
@@ -184,7 +184,7 @@ def read_errors():
 
 def flush_errors():
     """
-    Clear the stored error list.
+    Clear the control process's stored error list.
 
     Returns ``[]`` -- the *new* state, not the discarded contents. This is
     deliberately not a read-and-clear: the sole caller (``control.py``'s boot
@@ -203,11 +203,52 @@ def flush_errors():
 
 def write_errors(errors):
     """
-    Write Errors to SQLite DB
+    Write the control process's error list to SQLite DB.
 
     :param errors: Errors
     """
     _write_json_blob("errors", errors)
+
+
+def read_display_errors():
+    """
+    Read the display process's error list from SQLite DB.
+
+    Separate from :func:`read_errors` because each writer replaces the whole
+    blob. The control process and the display process are independent
+    supervisor programs that fail and restart on their own schedules, so a
+    single shared list means whichever wrote last erases the other's banners.
+    One list per process keeps both sets of banners on the dashboard.
+
+    :return: display errors
+    """
+    return _read_json_blob("display_errors", list)
+
+
+def flush_display_errors():
+    """
+    Clear the display process's stored error list.
+
+    Returns ``[]`` -- the *new* state, not the discarded contents, matching
+    :func:`flush_errors`. The sole caller (``display_process.py``'s boot path)
+    wants a cleared store plus a fresh accumulator to hand to
+    ``build_display()``, so a repaired display drops its stale banner on
+    restart while a still-broken one re-reports. Returning the pre-flush
+    errors would resurrect the previous run's banners instead.
+
+    :return: An empty error list.
+    """
+    write_display_errors([])
+    return []
+
+
+def write_display_errors(errors):
+    """
+    Write the display process's error list to SQLite DB.
+
+    :param errors: Errors
+    """
+    _write_json_blob("display_errors", errors)
 
 
 def read_warnings_snapshot():
