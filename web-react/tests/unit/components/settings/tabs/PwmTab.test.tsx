@@ -404,3 +404,77 @@ describe("PwmTab", () => {
     });
   });
 });
+
+const mpcFanSettings = (pwmControl: boolean, enableFanInput: boolean) => ({
+  platform: { dc_fan: true },
+  pwm: {
+    pwm_control: pwmControl,
+    update_time: 10,
+    min_duty_cycle: 20,
+    max_duty_cycle: 100,
+    frequency: 25000,
+  },
+  controller: { selected: "mpc", config: { mpc: { enable_fan_input: enableFanInput } } },
+});
+
+describe("PwmTab MPC fan interaction", () => {
+  // Display values collide across this tab -- update_time 10 is also the third
+  // default boundary, and the duty bounds are also profile values -- so reach
+  // each input through its own label rather than by value.
+  const fieldInput = (label: string) => {
+    const input = screen.getByText(label).closest("label")?.querySelector("input");
+    if (!input) throw new Error(`no input for field "${label}"`);
+    return input;
+  };
+
+  it("notes that MPC fan commands are inert while PWM control is off", () => {
+    renderRoute(<PwmTab />, { settings: mpcFanSettings(false, true), mode: "Stop" });
+    expect(screen.getByText(/fan commands will not be applied/i)).toBeInTheDocument();
+  });
+
+  it("drops the note as soon as PWM control is toggled on, without saving", () => {
+    renderRoute(<PwmTab />, { settings: mpcFanSettings(false, true), mode: "Stop" });
+    fireEvent.click(screen.getByRole("button", { name: "PWM Control" }));
+    expect(screen.queryByText(/fan commands will not be applied/i)).toBeNull();
+    expect(saveMock).not.toHaveBeenCalled();
+  });
+
+  it("disables the update time and the profile table when MPC owns the fan", () => {
+    renderRoute(<PwmTab />, { settings: mpcFanSettings(true, true), mode: "Stop" });
+    expect(fieldInput("Update Time")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "+ Add" })).toBeDisabled();
+    expect(screen.getByLabelText("Duty cycle row 1")).toBeDisabled();
+    expect(screen.getByLabelText("Boundary 1")).toBeDisabled();
+    expect(screen.getByText(/never used/i)).toBeInTheDocument();
+  });
+
+  it("leaves min, max and frequency editable — other paths still read them", () => {
+    renderRoute(<PwmTab />, { settings: mpcFanSettings(true, true), mode: "Stop" });
+    expect(fieldInput("Min Duty Cycle")).not.toBeDisabled();
+    expect(fieldInput("Max Duty Cycle")).not.toBeDisabled();
+    expect(fieldInput("Frequency")).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "PWM Control" })).not.toBeDisabled();
+  });
+
+  it("disables them for a pending, unsaved controller draft too", () => {
+    renderRoute(
+      <PwmTab />,
+      { settings: mpcFanSettings(true, false), mode: "Stop" },
+      {
+        drafts: {
+          controller: {
+            value: { selected: "mpc", values: { enable_fan_input: true } },
+            saved: false,
+          },
+        },
+      },
+    );
+    expect(fieldInput("Update Time")).toBeDisabled();
+  });
+
+  it("keeps them editable when MPC does not command the fan", () => {
+    renderRoute(<PwmTab />, { settings: mpcFanSettings(true, false), mode: "Stop" });
+    expect(fieldInput("Update Time")).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "+ Add" })).not.toBeDisabled();
+  });
+});

@@ -9,7 +9,7 @@ import { useSettingsDraftStore } from "../../src/helpers/settings/settingsDrafts
 // router: a parent route renders <Outlet context={context}/>, and `ui` is
 // mounted as its index child, so `useOutletContext()` resolves exactly as it
 // would inside the real SettingsShell layout route.
-export function renderRoute(ui: ReactElement, context: unknown) {
+export function renderRoute(ui: ReactElement, context: unknown, overrides?: object) {
   // Stands in for SettingsShell: it owns the draft store a settings tab writes
   // its in-progress edits into (helpers/settings/settingsDrafts.ts), so a tab
   // rendered in isolation behaves exactly as it does inside the real shell.
@@ -18,7 +18,11 @@ export function renderRoute(ui: ReactElement, context: unknown) {
   // shell. Declared inside so this module still exports only `renderRoute`.
   function RouteHost() {
     const store = useSettingsDraftStore((context as { settings?: unknown })?.settings);
-    return <Outlet context={{ ...(context as object), ...store }} />;
+    // `overrides` lands last so a test can seed the draft ANOTHER tab would
+    // have written. A seeded `drafts` is fixed for the render: the rendered
+    // tab's own writes go to the real store but stay masked, so use this for
+    // read-only assertions about a neighbouring tab's pending edit.
+    return <Outlet context={{ ...(context as object), ...store, ...overrides }} />;
   }
   const router = createMemoryRouter(
     [

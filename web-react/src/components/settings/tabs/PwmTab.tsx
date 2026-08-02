@@ -2,10 +2,18 @@ import { useState } from "react";
 import { useOutletContext } from "react-router";
 import { clampToBounds } from "../../../helpers/settings/bounds";
 import { setPath } from "../../../helpers/settings/delta";
+import {
+  MPC_FAN_DISABLED_NOTE,
+  MPC_FAN_PWM_NOTE,
+  mpcFanPending,
+} from "../../../helpers/settings/mpcFan";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
-import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import {
+  type SettingsDraftContext,
+  useSettingsDraft,
+} from "../../../helpers/settings/settingsDrafts";
 import type { PwmProfile } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
@@ -47,7 +55,7 @@ function readPwm(settings: Settings): Pwm {
 }
 
 export function PwmTab() {
-  const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
+  const { settings, drafts } = useOutletContext<SettingsDraftContext & { mode: string }>();
   const { save, saving, status } = useSaveSettings();
   // Held on SettingsShell, so an unfinished table edit survives a trip to
   // another tab; re-read from the loader whenever there is no draft.
@@ -63,6 +71,14 @@ export function PwmTab() {
   // BEFORE the hooks above — an early return there would break the Rules of
   // Hooks — and the route stays registered so a bookmarked URL still resolves.
   const dcFan = hasDcFan(settings);
+
+  // The controller's own duty replaces the temperature profile entirely
+  // (controller/runtime/modes/hold.py gates that path on the controller NOT
+  // owning the fan), so those inputs describe settings nothing will read.
+  const mpcOwnsFan = mpcFanPending(settings, drafts);
+  // Read from the draft, not from `settings`, so flipping the toggle clears
+  // the warning before the user saves.
+  const mpcFanInert = mpcOwnsFan && !pwm.pwm_control;
 
   // Column min/max come from the tab's CURRENT local values so a duty-cycle
   // edit clamps against whatever is on screen (including an un-saved
@@ -155,6 +171,7 @@ export function PwmTab() {
         checked={pwm.pwm_control}
         onChange={(v) => set("pwm_control", v)}
       />
+      {mpcFanInert && <p className="pf-settings-hint">{MPC_FAN_PWM_NOTE}</p>}
       <NumberField
         integer
         label="Update Time"
@@ -162,6 +179,7 @@ export function PwmTab() {
         onChange={(v) => set("update_time", v)}
         min={1}
         suffix="s"
+        disabled={mpcOwnsFan}
       />
       <NumberField
         integer
@@ -189,7 +207,9 @@ export function PwmTab() {
         min={1}
         suffix="Hz"
       />
+      {mpcOwnsFan && <p className="pf-settings-hint">{MPC_FAN_DISABLED_NOTE}</p>}
       <RangeProfileTable
+        disabled={mpcOwnsFan}
         boundaries={pwm.temp_range_list}
         profiles={pwm.profiles}
         columns={DUTY_COLUMNS}
