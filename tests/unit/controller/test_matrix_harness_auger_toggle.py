@@ -1,31 +1,21 @@
-"""Pins controller_matrix.py's auger PWM model against two regressions.
-
-1. The harness used to re-anchor its duty-cycle window every controller
-   re-solve (`cycle_anchor = t`), which only reproduces production for
-   controllers whose re-solve period equals HoldCycleTime. MPC re-solves every
-   5s against a 20s cycle_time, so the realized auger on-fraction came out far
-   higher than the requested ratio.
-2. Sampling the toggle as a boolean once per simulated second (GrillSim's
-   integration step) quantizes fuel delivery to whichever side of a
-   transition the sample lands on, biasing the realized duty above the
-   requested ratio -- worst at small ratios, e.g. ~21% high at `u_min`, which
-   both controllers sit at for the entire 225 F scenarios.
+"""Pins controller_matrix.py's auger PWM model.
 
 `_auger_toggle_tick` ports the free-running toggle in
-`ControlMode._auger_cycle_tick` (controller/runtime/modes/base.py), which is
-independent of the caller's re-solve cadence, and returns the toggle's exact
-fractional on-time over the caller's 1 s window rather than a boolean sample
-of it (paired with `GrillSim.step`'s `float(auger_on)`, which accepts that
-fraction directly).
+`ControlMode._auger_cycle_tick` (controller/runtime/modes/base.py): a toggle
+keyed on elapsed time since its own last flip, independent of the caller's
+re-solve cadence, returning the auger's exact fractional on-time over the
+caller's 1 s window rather than a boolean sample of it (paired with
+`GrillSim.step`'s `float(auger_on)`, which accepts that fraction directly).
 
 The integration test below drives the real `run_scenario` loop (not just the
 extracted helper) with a stub controller whose `get_control_period()` varies,
-so a regression that reintroduces re-anchoring inside the loop itself would
-still be caught -- exercising `_auger_toggle_tick` in isolation would not
-catch that class of regression. Tolerances are tight enough to fail under
-boolean-per-tick sampling (tested at `ratio=0.35` and at `ratio=u_min`, the
-worst case). The legacy-model test is a negative control proving the
-period-mismatch fix is not vacuous: the pre-fix model passes when the control
+so a regression that reintroduces re-anchoring the toggle to each re-solve, or
+reintroduces boolean-per-tick sampling, would be caught regardless of which
+line inside the loop reintroduced it. It covers a ratio whose cycle duration
+is an exact number of ticks (`u_min`) and one that is not (0.4237), so both
+the toggle's timing logic and its fractional-remainder arithmetic are
+exercised. The legacy-model test is a negative control proving the
+period-mismatch assertion is not vacuous: that model passes when the control
 period matches HoldCycleTime and fails when it does not.
 """
 
@@ -42,15 +32,18 @@ import docs.superpowers.experiments.controller_matrix as controller_matrix
 CYCLE_TIME = controller_matrix.CYCLE_DATA["HoldCycleTime"]
 RATIO = 0.35
 U_MIN = controller_matrix.CYCLE_DATA["u_min"]
+# cycle_time * NON_INTEGER_RATIO is not a whole number, so the toggle's
+# transition instants fall strictly inside a tick and the fraction returned
+# is neither 0.0 nor 1.0 -- exercises the remainder arithmetic itself, which
+# a ratio like 0.35 or u_min (both exact at cycle_time=20) cannot.
+NON_INTEGER_RATIO = 0.4237
 DURATION = 20 * CYCLE_TIME  # enough full cycles to average out the startup transient
 
 
 def _legacy_on_fraction(ratio, cycle_time, period, duration):
-    """Reproduces the pre-fix model: re-anchors the PWM window on every re-solve.
-
-    Kept local to this test, not reintroduced into the harness -- it exists only
-    to prove the negative-control test below actually discriminates.
-    """
+    """Reproduces a toggle re-anchored to each re-solve, kept local to this
+    test as a negative control -- proves the assertion above actually
+    discriminates rather than always passing."""
     cycle_anchor = 0.0
     next_solve = 0.0
     on_ticks = 0
@@ -102,23 +95,7 @@ class _FakePlant:
         self.on_fracs.append(float(auger_on))
 
 
-@pytest.mark.parametrize(
-    "control_period,ratio",
-    [
-        (20, RATIO),
-        (5, RATIO),
-        # u_min is where boolean-per-tick sampling costs the most relative
-        # error (~21% high, both controllers sit here for the whole 225 F
-        # scenarios), so it is the case most likely to catch a regression
-        # back to boolean sampling.
-        (20, U_MIN),
-        (5, U_MIN),
-    ],
-)
-def test_run_scenario_realized_duty_matches_ratio_regardless_of_control_period(control_period, ratio, monkeypatch):
-    """Drives the real run_scenario loop -- not just _auger_toggle_tick in
-    isolation -- so a regression that reintroduces re-anchoring, or reintroduces
-    boolean-per-tick sampling, inside the loop itself would still be caught."""
+def _run_stub(control_period, ratio, monkeypatch):
     name = "_stub_toggle_probe"
     fake_mod = types.ModuleType(f"controller.{name}")
     fake_mod.Controller = _StubController
@@ -129,13 +106,39 @@ def test_run_scenario_realized_duty_matches_ratio_regardless_of_control_period(c
 
     scenario = controller_matrix.Scenario(name, DURATION, [(0, 999.0)])
     controller_matrix.run_scenario(name, scenario, seed=0)
+    return _FakePlant.instances[-1]
 
-    plant = _FakePlant.instances[-1]
+
+@pytest.mark.parametrize(
+    "control_period,ratio",
+    [
+        (20, RATIO),
+        (5, RATIO),
+        # u_min is where boolean-per-tick sampling would be biased worst
+        # (both controllers sit here for the whole 225 F scenarios), so it is
+        # the case most likely to catch a regression back to boolean sampling.
+        (20, U_MIN),
+        (5, U_MIN),
+        (20, NON_INTEGER_RATIO),
+        (5, NON_INTEGER_RATIO),
+    ],
+)
+def test_run_scenario_realized_duty_matches_ratio_regardless_of_control_period(control_period, ratio, monkeypatch):
+    plant = _run_stub(control_period, ratio, monkeypatch)
     realized = sum(plant.on_fracs) / len(plant.on_fracs)
-    # Tight enough to fail boolean-per-tick sampling (~0.0136 off at ratio=0.35,
-    # ~0.0318 off at ratio=u_min); the fractional model should be exact modulo
+    # Tight enough that boolean-per-tick sampling would fail this assertion at
+    # every ratio tested; the fractional model should be exact modulo
     # floating point.
     assert realized == pytest.approx(ratio, abs=0.005)
+
+
+def test_non_integer_ratio_produces_genuine_fractional_on_time(monkeypatch):
+    """u_min and 0.35 both give an exact number of ticks per phase at
+    cycle_time=20, so a toggle that only ever returns 0.0 or 1.0 would still
+    pass the parametrized test above. This asserts the fraction formula
+    itself runs: at least one tick's on-time must be strictly between 0 and 1."""
+    plant = _run_stub(20, NON_INTEGER_RATIO, monkeypatch)
+    assert any(0.0 < frac < 1.0 for frac in plant.on_fracs)
 
 
 def test_legacy_model_actually_fails_the_mismatched_period_case():
