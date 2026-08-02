@@ -140,6 +140,27 @@ def test_threaded_runner_controller_state_snapshot():
         r.stop()
 
 
+def test_controller_state_pending_dropped_survives_hold_s_cycle_ratio_mutation():
+    # HoldMode._on_auger_on reads controller_state() and adds "cycle_ratio"
+    # before publishing to MQTT. pending_dropped is a field only the threaded
+    # runner adds to that payload; pin that it survives the mutation
+    # unchanged and defaults to 0 when nothing has been dropped -- an
+    # additive dict key is a shape a JSON-payload consumer can ignore, not
+    # one that breaks it.
+    core = FakeCore()
+    r = ThreadedControllerRunner(core)
+    try:
+        r.submit(70.0)
+        assert core.updated.wait(2.0)
+        state = r.controller_state()
+        assert state["pending_dropped"] == 0
+        state["cycle_ratio"] = 0.42
+        assert state["pending_dropped"] == 0
+        assert state["cycle_ratio"] == 0.42
+    finally:
+        r.stop()
+
+
 def test_build_runner_selects_threaded_for_wants_async_core(monkeypatch):
     import controller.runtime.runner as runner_mod
 
@@ -213,7 +234,9 @@ class _OrderRecordingCore:
         return None
 
     def get_model_snapshot(self):
-        return dict(self.snapshot)
+        # Cached, not rebuilt per call: a runner that handed this object out
+        # as-is would let a caller's mutation reach back into the core.
+        return self.snapshot
 
     def restore_model(self, snapshot):
         with self.lock:
@@ -259,6 +282,19 @@ def test_restore_model_is_applied_on_the_worker_thread():
         runner.stop()
 
 
+def test_restore_model_copies_the_snapshot_on_the_way_in():
+    core = _OrderRecordingCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        snapshot = {"revision": 7}
+        assert runner.restore_model(snapshot) is True
+        snapshot["revision"] = 999  # mutate the caller's dict after queuing it
+        runner.submit(212.0)
+        assert _wait_for(lambda: core.restored == [{"revision": 7}])
+    finally:
+        runner.stop()
+
+
 def test_restore_model_rejects_none_without_touching_the_core():
     core = _OrderRecordingCore()
     runner = ThreadedControllerRunner(core)
@@ -282,6 +318,23 @@ def test_get_model_snapshot_reads_the_worker_s_snapshot():
         runner.stop()
 
 
+def test_get_model_snapshot_returns_a_copy_not_the_core_s_object():
+    # _OrderRecordingCore.get_model_snapshot() hands back the same cached
+    # dict every call, so a runner that passed it through as-is would fail
+    # both assertions below; a fresh-dict-per-call core could not.
+    core = _OrderRecordingCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.submit(212.0)
+        assert _wait_for(lambda: ("update", 212.0) in core.calls)
+        snap = runner.get_model_snapshot()
+        assert snap is not core.snapshot
+        snap["revision"] = 999
+        assert core.snapshot == {"revision": 1}
+    finally:
+        runner.stop()
+
+
 class _BlockedWorkerCore(_OrderRecordingCore):
     """A core whose update() blocks on `gate` until the test lets it through,
     then re-arms so a subsequent update() blocks again. This holds the
@@ -292,12 +345,22 @@ class _BlockedWorkerCore(_OrderRecordingCore):
         super().__init__()
         self.entered = threading.Event()
         self.gate = threading.Event()
+        self._released = False
 
     def update(self, temp):
         self.entered.set()
-        self.gate.wait()
-        self.gate.clear()
+        if not self._released:
+            self.gate.wait()
+            self.gate.clear()
         return super().update(temp)
+
+    def release(self):
+        """Stop blocking for good, for teardown. Setting `gate` alone can
+        race: the currently-blocked call clears it on its way out, so the
+        *next* call would re-block and leave stop()'s join() to time out on a
+        thread that is never coming back."""
+        self._released = True
+        self.gate.set()
 
 
 def _threaded_runner_with_blocked_worker():
@@ -336,7 +399,7 @@ def test_a_stalled_worker_bounds_the_backlog_and_counts_the_drops():
         oldest = min(a.timestamp for a in runner._pending_outputs)
         assert oldest == 50.0
     finally:
-        core.gate.set()
+        core.release()
         runner.stop()
 
 
@@ -352,5 +415,5 @@ def test_the_backlog_stays_bounded_after_a_drain():
         assert len(runner._pending_outputs) == _MAX_PENDING_OUTPUTS
         assert isinstance(runner._pending_outputs, collections.deque)
     finally:
-        core.gate.set()
+        core.release()
         runner.stop()

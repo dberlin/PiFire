@@ -127,6 +127,13 @@ _UNSET = object()
 _MAX_PENDING_OUTPUTS = 2048
 
 
+def _owned_model_snapshot(snapshot):
+    """A copy the caller can hold and mutate without reaching into the core's
+    live model, made where the snapshot is produced rather than where it is
+    read. `get_model_snapshot()` may legitimately answer None."""
+    return None if snapshot is None else dict(snapshot)
+
+
 class ThreadedControllerRunner(ControllerRunner):
     """Runs core.update() on a background thread at the core's control period, so
     an expensive solve never blocks the caller. submit()/latest() are
@@ -142,7 +149,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._pending_outputs = collections.deque(maxlen=_MAX_PENDING_OUTPUTS)
         self._pending_dropped = 0
         self._pending_restore = None
-        self._model_snapshot = core.get_model_snapshot()
+        self._model_snapshot = _owned_model_snapshot(core.get_model_snapshot())
         self._state_snapshot = dict(core.__dict__)
         self._control_period = core.get_control_period()
         self._commands_fan = core.commands_fan()
@@ -177,7 +184,7 @@ class ThreadedControllerRunner(ControllerRunner):
                 ratio, fan = normalize_controller_output(raw)
                 snap = dict(self._core.__dict__)
                 status = self._core.get_status()
-                model = self._core.get_model_snapshot()
+                model = _owned_model_snapshot(self._core.get_model_snapshot())
                 with self._lock:
                     self._output = NormalizedOutput(cycle_ratio=ratio, fan=fan)
                     self._state_snapshot = status if status is not None else snap
@@ -232,16 +239,19 @@ class ThreadedControllerRunner(ControllerRunner):
             return self._model_snapshot
 
     def restore_model(self, snapshot):
-        """Queue a snapshot for the worker to adopt.
+        """Queue a snapshot for the worker to attempt to adopt.
 
         True means accepted for restore, not adopted: the core is mutated only
-        on the worker thread, so the adoption result is not knowable here. It
-        surfaces in get_status().
+        on the worker thread, so whether the snapshot was actually adopted is
+        not knowable from here.
         """
         if snapshot is None:
             return False
         with self._lock:
-            self._pending_restore = snapshot
+            # A snapshot queued before the worker gets to the previous one
+            # supersedes it -- only the most recent restore request matters,
+            # since an older one describes a model the caller has moved past.
+            self._pending_restore = dict(snapshot)
         return True
 
     def stop(self):
