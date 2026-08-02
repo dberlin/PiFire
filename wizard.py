@@ -24,6 +24,7 @@ from common.common import (  # Common Library for writing settings
     create_logger,
     log_path,
 )
+from common import datastore
 from common.control_delta import control_delta
 from common.datastore_accessors import (
     set_wizard_install_status,
@@ -539,6 +540,12 @@ print("PiFire Module Wizard")
 print("Copyright 2022-2025, MIT License, Ben Parmeter")
 
 if __name__ == "__main__":
+    # wizard.py runs as its own standalone process (the installer and
+    # upgrade.sh launch it directly), so it gets no benefit from app.py's or
+    # control.py's init() call. Must run before the first read_settings()
+    # call below -- see app.py:39 and control.py:70, which do the same.
+    datastore.init()
+
     parser = argparse.ArgumentParser(description="PiFire Module Wizard")
     parser.add_argument(
         "-e",

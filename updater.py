@@ -25,6 +25,7 @@ from common.common import (
     log_path,
     write_generic_json,
 )
+from common import datastore
 from common.install_log import INSTALL_FAILED_PERCENT
 from common.datastore_accessors import (
     set_updater_install_status,
@@ -805,6 +806,12 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
 ==============================================================================
 """
 if __name__ == "__main__":
+    # updater.py runs as its own standalone process (upgrade.sh launches it
+    # directly), so it gets no benefit from app.py's or control.py's init()
+    # call. Must run before the first read_settings()/write_settings() call
+    # below -- see app.py:39 and control.py:70, which do the same.
+    datastore.init()
+
     parser = argparse.ArgumentParser(description="Updater Script")
     parser.add_argument("-b", "--branch", metavar="BRANCH", type=str, required=False, help="Change Branches")
     parser.add_argument("-u", "--update", metavar="BRANCH", type=str, required=False, help="Update Current Branch")

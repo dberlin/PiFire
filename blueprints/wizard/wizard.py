@@ -52,10 +52,11 @@ def _constrain_to_options(value, options):
     wizardInstallInfoExisting applies to every value, and what the installer's
     _convert_value reverses on the way back in.
 
-    A composite dependency (i2c_bus) reads as an object rather than a scalar and
-    carries no option list; it passes through untouched.
+    A composite dependency (i2c_bus) reads as an object rather than a scalar,
+    and the manifest never gives one an option list -- so `not options` alone
+    is what lets it pass through untouched.
     """
-    if not options or isinstance(value, dict):
+    if not options:
         return value
     text = str(value)
     return text if text in options else next(iter(options))

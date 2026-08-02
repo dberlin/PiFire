@@ -84,7 +84,6 @@ def test_the_migrated_tree_survives_a_validating_write(ds):
 
 def test_init_runs_the_upgrade(monkeypatch):
     """init() is the startup hook; the migration must be wired into it."""
-    monkeypatch.setattr(datastore, "_settings_upgraded", False)
     calls = []
     monkeypatch.setattr(datastore, "_first_boot_import", lambda: calls.append("import"))
     monkeypatch.setattr(datastore, "_upgrade_settings_in_store", lambda: calls.append("upgrade"))
@@ -128,30 +127,16 @@ def test_a_missing_versions_block_is_left_alone(ds):
     assert "versions" not in read_settings_store()
 
 
-def test_reading_settings_migrates_even_without_init(ds):
-    """updater.py and wizard.py never call init(); they must still get a
-    migrated tree."""
+def test_reading_settings_does_not_migrate(ds):
+    """read_settings_store() is a pure read; migrating a legacy tree is
+    datastore.init()'s job (see
+    tests/unit/datastore/test_entry_points_initialise_the_datastore.py, which
+    pins that every entry point calls it)."""
     _legacy_stored_settings(ds)
-    # Simulate a fresh process: init() never ran in it, so the lazy guard has
-    # never tripped.
-    datastore._settings_upgraded = False
 
     from common.datastore_accessors import read_settings
 
     settings = read_settings()
 
-    assert settings["platform"]["devices"]["distance"]["i2c_bus"] == {"kind": "kernel", "adapter": "CP2112"}
-
-
-def test_the_upgrade_runs_once_per_process(ds, monkeypatch):
-    datastore._settings_upgraded = False
-    calls = []
-    monkeypatch.setattr(datastore, "_upgrade_settings_in_store", lambda: calls.append(1))
-
-    from common.datastore_accessors import read_settings_store as _read
-
-    _read()
-    _read()
-    _read()
-
-    assert calls == [1]
+    assert "i2c_bus" not in settings["platform"]["devices"]["distance"]
+    assert settings["platform"]["devices"]["distance"]["i2c_bus_kind"] == "extended"

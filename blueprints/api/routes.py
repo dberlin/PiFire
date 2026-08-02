@@ -1,5 +1,5 @@
 from flask import request, jsonify, abort
-from common.common import WriteKind, write_log, deep_update, read_generic_json, read_wizard
+from common.common import WriteKind, write_log, read_generic_json, read_wizard
 from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
 from common.datastore_accessors import (
     read_settings,
@@ -28,7 +28,7 @@ from common.i2c_bus import (
 )
 from common.modes import Mode
 from common.server_status import get_server_status
-from common.settings_schema import SettingsValidationError, validate_partial_settings
+from common.settings_schema import SettingsValidationError, apply_settings_delta, validate_partial_settings
 from common.controller_deps import guard_controller_selection
 from . import api_bp
 
@@ -173,7 +173,7 @@ _API_GET_ACTIONS = {
 
 def _api_post_settings(settings, request_json):
     try:
-        settings = deep_update(settings, request_json)
+        settings = apply_settings_delta(settings, request_json)
         write_settings(settings)
         return jsonify(
             {
@@ -244,7 +244,7 @@ def _api_post_settings_update(settings, request_json):
         return jsonify({"result": "error", "message": f"Settings update failed: {message}", "data": {}}), 200
 
     try:
-        settings = deep_update(settings, delta)
+        settings = apply_settings_delta(settings, delta)
         # Layer 3: the selected controller must be constructible on THIS install.
         # Evaluated on the MERGED tree (so it sees the selection the save would
         # actually produce) and before any write, so a refusal leaves the store

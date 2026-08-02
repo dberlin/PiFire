@@ -912,3 +912,12 @@ def test_i2c_bus_rejects_two_selectors_of_the_same_kind():
     settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "adapter": "X", "bus_num": 3}
     with pytest.raises(SettingsValidationError):
         validate_settings_tree(settings)
+
+
+def test_atomic_settings_paths_is_exactly_the_i2c_bus_fields():
+    from common.settings_schema import atomic_settings_paths
+
+    assert atomic_settings_paths() == {
+        ("platform", "devices", "distance", "i2c_bus"),
+        ("platform", "fan_controller", "i2c_bus"),
+    }

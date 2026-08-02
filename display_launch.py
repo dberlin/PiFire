@@ -19,6 +19,7 @@ import os
 import shlex
 import sys
 
+from common import datastore
 from common.datastore_accessors import read_settings
 
 # Absolute path to the shipped sway kiosk config. display_launch.py lives at the
@@ -61,6 +62,11 @@ def _ensure_runtime_dir(path):
 
 
 def main():
+    # display_launch.py runs as its own standalone process (supervisor's exec
+    # shim), so it gets no benefit from app.py's or control.py's init() call.
+    # Must run before the first read_settings() call below -- see app.py:39
+    # and control.py:70, which do the same.
+    datastore.init()
     settings = read_settings()
     argv, env_updates = build_launch_argv(settings, os.environ)
     log = logging.getLogger("display_launch")

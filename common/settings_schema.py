@@ -44,7 +44,7 @@ from pydantic import (
 from pydantic_core import ErrorDetails
 from pydantic_partial import create_partial_model
 
-from common.common import write_log
+from common.common import deep_update, write_log
 
 
 class _Section(BaseModel):
@@ -716,6 +716,72 @@ def declared_types_for_path(path) -> set[type]:
         annotation = info.annotation
         model = annotation
     return _declared_types(annotation) if annotation is not None else set()
+
+
+def atomic_settings_paths() -> set[tuple[str, ...]]:
+    """Settings paths whose value is a tagged union -- one value, not a
+    namespace to merge into.
+
+    Walks SettingsSchema's fields recursively and yields the dotted path (as
+    a tuple) of every field whose annotation is a union of `_Section` models
+    -- exactly what `I2CBusConfig` is, and what any future tagged union here
+    would be. A delta that names such a path is replacing the whole value: a
+    bus that becomes `mcp2221` has no `adapter`, and merging the delta into
+    what was there would leave the previous kind's selector behind.
+    """
+
+    def is_tagged_union(annotation: Any) -> bool:
+        origin = get_origin(annotation)
+        if origin is not Union and origin is not UnionType:
+            return False
+        members = get_args(annotation)
+        return bool(members) and all(isinstance(member, type) and issubclass(member, _Section) for member in members)
+
+    def walk(model: Any, prefix: tuple[str, ...]) -> set[tuple[str, ...]]:
+        paths: set[tuple[str, ...]] = set()
+        for key, info in model.model_fields.items():
+            path = prefix + (info.alias or key,)
+            annotation = info.annotation
+            if is_tagged_union(annotation):
+                paths.add(path)
+            elif isinstance(annotation, type) and issubclass(annotation, _Section):
+                paths |= walk(annotation, path)
+        return paths
+
+    return walk(SettingsSchema, ())
+
+
+def apply_settings_delta(settings, delta):
+    """Merge `delta` into `settings`, replacing tagged-union values wholesale.
+
+    `deep_update` stays a generic, unconditional mapping merge -- the
+    knowledge that a path like `platform.devices.distance.i2c_bus` is a
+    single value rather than a namespace belongs to the settings domain, not
+    to a dict utility. The atomic subtrees named in `delta` are lifted out
+    before the merge and assigned back directly afterward, so `deep_update`
+    never even sees them as something to merge into.
+    """
+    delta = copy.deepcopy(delta)
+    overrides: dict[tuple[str, ...], Any] = {}
+    for path in atomic_settings_paths():
+        node = delta
+        for key in path[:-1]:
+            if not isinstance(node, dict) or key not in node:
+                node = None
+                break
+            node = node[key]
+        if not isinstance(node, dict) or path[-1] not in node:
+            continue
+        overrides[path] = node.pop(path[-1])
+
+    deep_update(settings, delta)
+
+    for path, value in overrides.items():
+        node = settings
+        for key in path[:-1]:
+            node = node.setdefault(key, {})
+        node[path[-1]] = value
+    return settings
 
 
 def coerce_setting_value(path, value, fallback):

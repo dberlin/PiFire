@@ -13,12 +13,6 @@ _ORIGINAL_DB_PATH = DB_PATH
 
 _local = threading.local()
 
-#: Guards ensure_settings_upgraded() -- the migration cascade runs at most
-#: once per process. Module-level rather than per-connection: updater.py and
-#: wizard.py run as their own standalone processes and open their own
-#: connection, so this has to survive independently of _local.conn.
-_settings_upgraded = False
-
 # history table DDL (schema v4). `{name}` is templated so the pre-v4
 # migration below can rebuild it under a temporary name (history_new) with an
 # identical schema before swapping it in, preserving existing rows.
@@ -320,7 +314,7 @@ class transaction:
 def init():
     connection()
     _first_boot_import()
-    ensure_settings_upgraded()
+    _upgrade_settings_in_store()
 
 
 def _first_boot_import():
@@ -350,24 +344,6 @@ def _first_boot_import():
         if conn.execute("SELECT 1 FROM kv WHERE key='pellets:general'").fetchone() is None:
             pelletdb = backups.read_pellet_db_file()  # the FILE reader, not SQLite
             conn.execute(upsert, ("pellets:general", json.dumps(pelletdb)))
-
-
-def ensure_settings_upgraded():
-    """Migrate the stored settings tree once per process, before it is served.
-
-    Every entry point that reads settings gets a migrated tree, whether or not
-    it called init() -- the upgrade script runs updater.py and wizard.py as
-    standalone processes, and a migration only some callers reach is the
-    defect this exists to close.
-    """
-    global _settings_upgraded
-    if _settings_upgraded:
-        return
-    # Set before doing the work: _upgrade_settings_in_store() runs inside
-    # transaction()'s BEGIN IMMEDIATE, and a re-entrant call would open a
-    # nested BEGIN IMMEDIATE on the same thread-local connection.
-    _settings_upgraded = True
-    _upgrade_settings_in_store()
 
 
 def _upgrade_settings_in_store():
@@ -425,16 +401,14 @@ def _upgrade_settings_in_store():
 
 
 def _reset_for_tests(path):
-    """Test hook: repoint DB_PATH, drop the cached thread-local connection, and
-    clear the once-per-process settings-upgrade guard so the next init()/read
-    in a test runs it again against the fresh (test) database."""
-    global DB_PATH, _settings_upgraded
+    """Test hook: repoint DB_PATH and drop the cached thread-local connection so
+    the next connection()/init() in a test opens the fresh (test) database."""
+    global DB_PATH
     conn = getattr(_local, "conn", None)
     if conn is not None:
         conn.close()
         _local.conn = None
     DB_PATH = path if path is not None else _ORIGINAL_DB_PATH
-    _settings_upgraded = False
 
 
 def get_blob(key):

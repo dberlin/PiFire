@@ -12,6 +12,7 @@ Run it directly as a script, e.g. `python display_process.py`.
 
 import logging
 
+from common import datastore
 from common.common import create_logger
 from common.datastore_accessors import read_settings
 from controller.runtime.devices import build_display
@@ -43,6 +44,11 @@ class DisplayFeeder:
 
 
 if __name__ == "__main__":
+    # display_process.py runs as its own standalone process (supervisor
+    # launches it independently of app.py/control.py), so it gets no benefit
+    # from their init() calls. Must run before the first read_settings() call
+    # below -- see app.py:39 and control.py:70, which do the same.
+    datastore.init()
     settings = read_settings()
 
     log_level = logging.DEBUG if settings["globals"]["debug_mode"] else logging.ERROR

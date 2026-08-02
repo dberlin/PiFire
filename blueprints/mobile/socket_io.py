@@ -25,7 +25,6 @@ from common.common import (
     read_events_records,
     flush_events_records,
     read_generic_json,
-    deep_update,
     WriteKind,
     write_log,
     convert_settings_units,
@@ -66,7 +65,7 @@ from common.system import (
 from common.modes import Mode
 from common.pellets_actions import PELLETS_DISPATCH, clear_pellet_db
 from common.app import CONTROL_DOWN_ERROR, update_probe_config, save_settings_and_flag_update, api_response
-from common.settings_schema import SettingsValidationError
+from common.settings_schema import SettingsValidationError, apply_settings_delta
 from flask import request
 from werkzeug.utils import secure_filename
 from app import socketio
@@ -482,7 +481,7 @@ def _post_app_data_update(settings, type, request):
         control = read_control()
         for key in request.keys():
             if key in settings.keys():
-                settings = deep_update(settings, request)
+                settings = apply_settings_delta(settings, request)
                 _write_settings(settings, control)
                 return _response(result="OK", data=settings)
             else:

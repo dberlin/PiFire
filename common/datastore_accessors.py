@@ -414,12 +414,9 @@ def read_settings_store():
     # settings.json file always existing; now it must come from here until
     # the first-boot import seeds settings:general at startup.
     #
-    # ensure_settings_upgraded() runs the migration cascade here too, not only
-    # from datastore.init(): updater.py and wizard.py read settings as their
-    # own standalone processes without ever calling init() (the upgrade
-    # script starts them directly, then restarts supervisor last), so this is
-    # the only place guaranteed to run before every read.
-    datastore.ensure_settings_upgraded()
+    # A pure read: migrating a legacy tree is datastore.init()'s job, run once
+    # by every entry point at startup (see
+    # tests/unit/datastore/test_entry_points_initialise_the_datastore.py).
     return _read_json_blob("settings:general", default_settings)
 
 
