@@ -1931,11 +1931,22 @@ Persisted schema versioning is **DONE** (below). All of the following are still
 open; none has been started.
 
 S3 defaults consolidation and typed deep-path `setPath` helpers; per-controller
-schema generation from `controllers.json`; `additionalProperties` stripping in
-TS generation; `<path>: <why>` save-error display; read-path validation never
-scoped; mapping a dotted error path to the offending widget; the four 2b-1
-follow-ups (`waitFor`, `read*` fallback defaults, `aria-describedby`,
-float-vs-int audit).
+schema generation from `controllers.json`; `<path>: <why>` save-error display;
+read-path validation never scoped; mapping a dotted error path to the
+offending widget; the four 2b-1 follow-ups (`waitFor`, `read*` fallback
+defaults, `aria-describedby`, float-vs-int audit).
+
+`additionalProperties` stripping is **DONE**, and was closed by S2 rather than
+by this work. `_Section` is `extra="forbid"`, so every modelled section emits
+`"additionalProperties": false` and generates a **closed** interface — a typo'd
+field already fails `bun run typecheck`. Exactly six nodes carry
+`additionalProperties: true`, all of them deliberately dynamic maps
+(`dashboard.dashboards`, `display.config`, `onesignal.devices`, the
+`probe_devices`/`probe_info` items, `probe_profiles`); the rest are
+`dict[str, X]` value schemas, which must generate an index signature —
+`history_page.probe_config` becoming `{[k: string]: ProbeChartConfig}` is
+correct output, not leakage. Nothing was left to strip, and stripping the
+`dict[str, X]` form would have been a regression.
 
 **DONE 2026-08-02 for both durable blobs; the wizard manifest is deliberately
 out of scope (see the corrections below).** The settings tree and the pellet

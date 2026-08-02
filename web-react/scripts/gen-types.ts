@@ -3,53 +3,60 @@
 // multi-line --bannerComment string fights package.json/bun script quoting.
 //
 // Usage:
-//   bun scripts/gen-types.ts          -> writes src/helpers/settings/settingsTypes.gen.ts
-//   bun scripts/gen-types.ts --check  -> compiles to a temp file and diffs it
-//                                        against the committed file (drift check)
+//   bun scripts/gen-types.ts          -> writes each generated artifact
+//   bun scripts/gen-types.ts --check  -> compares each artifact's generated
+//                                        output against the committed file
 import { compileFromFile } from "json-schema-to-typescript";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { emitControllerTypes } from "./emitControllerTypes";
 
 const SCHEMA_PATH = "schema/settings.schema.json";
-const OUT_PATH = "src/helpers/settings/settingsTypes.gen.ts";
+const CONTROLLERS_PATH = "../controller/controllers.json";
 const BANNER_COMMENT =
   "/* eslint-disable */\n" +
   "// GENERATED from schema/settings.schema.json — do not edit. Regenerate: bun run gen:types";
 
-async function generate(): Promise<string> {
-  return compileFromFile(SCHEMA_PATH, { bannerComment: BANNER_COMMENT });
+interface Artifact {
+  out: string;
+  generate: () => Promise<string>;
 }
+
+const ARTIFACTS: Artifact[] = [
+  {
+    out: "src/helpers/settings/settingsTypes.gen.ts",
+    generate: () => compileFromFile(SCHEMA_PATH, { bannerComment: BANNER_COMMENT }),
+  },
+  {
+    out: "src/helpers/settings/controllerTypes.gen.ts",
+    generate: async () =>
+      emitControllerTypes(JSON.parse(await readFile(CONTROLLERS_PATH, "utf8"))),
+  },
+];
 
 async function main() {
   const check = process.argv.includes("--check");
-  const output = await generate();
+  let stale = false;
 
-  if (!check) {
-    await writeFile(OUT_PATH, output);
-    console.log(`Wrote ${OUT_PATH}`);
-    return;
-  }
-
-  const tmpDir = await mkdtemp(join(tmpdir(), "settingsTypes.gen.check-"));
-  const tmpFile = join(tmpDir, "settingsTypes.gen.check.ts");
-  try {
-    await writeFile(tmpFile, output);
-    const committed = await readFile(OUT_PATH, "utf8").catch(() => null);
+  for (const artifact of ARTIFACTS) {
+    const output = await artifact.generate();
+    if (!check) {
+      await writeFile(artifact.out, output);
+      console.log(`Wrote ${artifact.out}`);
+      continue;
+    }
+    const committed = await readFile(artifact.out, "utf8").catch(() => null);
     if (committed === null) {
-      console.error(`${OUT_PATH} does not exist — run 'bun run gen:types' first.`);
-      process.exit(1);
+      console.error(`${artifact.out} does not exist — run 'bun run gen:types' first.`);
+      stale = true;
+    } else if (committed !== output) {
+      console.error(`${artifact.out} is out of date. Run 'bun run gen:types' to regenerate.`);
+      stale = true;
+    } else {
+      console.log(`${artifact.out} is up to date.`);
     }
-    if (committed !== output) {
-      console.error(
-        `${OUT_PATH} is out of date with ${SCHEMA_PATH}. Run 'bun run gen:types' to regenerate.`,
-      );
-      process.exit(1);
-    }
-    console.log(`${OUT_PATH} is up to date.`);
-  } finally {
-    await rm(tmpDir, { recursive: true, force: true });
   }
+
+  if (stale) process.exit(1);
 }
 
 main().catch((err) => {

@@ -1,0 +1,92 @@
+/* eslint-disable */
+// GENERATED from controller/controllers.json — do not edit. Regenerate: bun run gen:types
+
+export interface PidConfig {
+  PB: number;
+  Td: number;
+  Ti: number;
+  center: number;
+}
+
+export interface PidClampingConfig {
+  PB: number;
+  Ti: number;
+  Td: number;
+}
+
+export interface PidClampingPercentPbConfig {
+  PB: number;
+  Ti: number;
+  Td: number;
+}
+
+export interface PidAcConfig {
+  PB: number;
+  Td: number;
+  Ti: number;
+  stable_window: number;
+  center_factor: number;
+}
+
+export interface PidSpConfig {
+  PB: number;
+  Td: number;
+  Ti: number;
+  stable_window: number;
+  center_factor: number;
+  tau: number;
+  theta: number;
+}
+
+export interface PidParallelConfig {
+  Kp: number;
+  Ki: number;
+  Kd: number;
+  Clamping: boolean;
+}
+
+export type FuzzyConfig = Record<string, never>;
+
+export type MlConfig = Record<string, never>;
+
+export interface MpcConfig {
+  n_horizon: number;
+  t_step: number;
+  control_period: number;
+  Q_w: number;
+  R_dQ: number;
+  Q_min: number;
+  Q_max: number;
+  C_f: number;
+  C_c: number;
+  h_fc: number;
+  h_amb: number;
+  T_amb: number;
+  theta: number;
+  n_delay: number;
+  K_Q: number;
+  sigma: number;
+  estimator: "ekf" | "mhe" | "kf";
+  policy: "nlp" | "net";
+  policy_net_path: string;
+  fan_min_pct: number;
+  fan_max_pct: number;
+  enable_fan_input: boolean;
+  est_q_temp: number;
+  est_q_dist: number;
+  est_r_meas: number;
+  log_data: boolean;
+  log_path: string;
+}
+
+export interface ControllerConfigs {
+  pid: PidConfig;
+  pid_clamping: PidClampingConfig;
+  pid_clamping_percent_pb: PidClampingPercentPbConfig;
+  pid_ac: PidAcConfig;
+  pid_sp: PidSpConfig;
+  pid_parallel: PidParallelConfig;
+  fuzzy: FuzzyConfig;
+  ml: MlConfig;
+  mpc: MpcConfig;
+}
