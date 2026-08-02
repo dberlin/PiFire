@@ -7,6 +7,14 @@ revisions listed several items as open that had shipped, and — more
 importantly — listed nothing that only a running browser could reveal, because
 until this date nothing had been run in one.
 
+**Partially reconciled again 2026-08-02**, covering the three items that carried
+a caveat (1, 2, 5 — all signed off) and three entries under "Shipping and
+deployment gaps" that were flatly false: Flask does serve the React app, Barlow
+is self-hosted, and there is a page title. Each had been true when written and
+was overtaken without the entry being revisited. **The rest of the OPEN section
+has NOT been re-verified against live code** — check any item here before
+scheduling it.
+
 This file previously lived in `.superpowers/sdd/`, which is gitignored scratch
 that `git clean -fdx` destroys. It is tracked now. Three audit documents cite
 it by path and line number; those citations point here.
@@ -697,7 +705,7 @@ happily; forbidding it here would be a new rule, not a port.
 Numbering is non-contiguous by design — resolved items (3, 4, 6, 6a, 7, 9)
 moved to RESOLVED above keep their numbers there. Item 10 now precedes item 11.
 
-### 1. Wizard styling — DONE (one human checkpoint outstanding)
+### 1. Wizard styling — DONE 2026-08-02
 
 **This item's original text was wrong by the time anyone read it.** It claimed
 "there is no `wizard.css`". There is: `web-react/src/components/wizard/wizard.css`,
@@ -721,10 +729,10 @@ a comment mentioned it, and deleting both `.pf-module-notes` rules left the
 guard green. Fixed, plus a test that guards the guard. Two: duplicate
 `[role="alert"]` rules in descending specificity.
 
-**Still outstanding: Task 8, the human visual checkpoint.** 8 of its 12 items
-were pre-screened from clean screenshots; items 10–12 and the type/colour
-judgement need a person. Item 7 (the no-photo fallback) is unreachable — all 62
-manifest modules have images — and cannot be performed as written.
+**Task 8, the human visual checkpoint: signed off 2026-08-02.** 8 of its 12
+items were pre-screened from clean screenshots; items 10–12 and the type/colour
+judgement were reviewed by the owner. Item 7 (the no-photo fallback) is
+unreachable — all 62 manifest modules have images — and was not performed.
 
 **How the original gap was missed:** no test in the project asserted that a class
 it uses is defined anywhere, and until 2026-07-25 nobody had opened the wizard in
@@ -738,7 +746,7 @@ list is mostly noise: CSS custom properties (`--pf-btn-h`, `--pf-col-w`,
 (`pf-badge-`, `pf-banner--`) are never whole class names. Any real number has to
 exclude `--`-prefixed tokens and resolve dynamic class construction.
 
-### 2. Dashboard reflow — DONE (unvalidated on real hardware)
+### 2. Dashboard reflow — DONE 2026-08-02
 
 Plan: `docs/superpowers/plans/2026-07-25-react-dashboard-slice.md` (14 tasks),
 all implemented. The fixed 1280×720 uniformly-scaled stage is reversed and the
@@ -760,8 +768,9 @@ button showed nine pixels of itself, the hopper level bar collapsed to 2px, and
 geometric assertion — only reading the screenshot found them. A new `panel`
 Playwright project gates all four.
 
-**Nobody has held this on a real panel or phone.** The values are measured
-floors, not design choices.
+**Signed off by the owner 2026-08-02.** The breakpoint values remain measured
+floors rather than design choices — worth knowing if one ever needs moving, but
+not an open question.
 
 Also ratified: **one dashboard forever.** No picker, no `hidden_cards`, no
 `touch_screen_mode`, no port of `Basic`. Consequence to carry: `Basic`'s
@@ -769,7 +778,7 @@ click-to-toggle manual outputs now have no home in React — that capability
 belongs to the **manual** page item below. This does not retire the Flask
 picker; it only says React will not grow one.
 
-### 5. Tailwind v4 migration — DONE 2026-07-27, one recapture outstanding
+### 5. Tailwind v4 migration — DONE 2026-07-27
 
 **Closed out 2026-07-27.** All 20 tasks are shipped and the human checkpoint has
 signed off. Accepted visual differences, the four defects the walkthrough found
@@ -1298,13 +1307,23 @@ its own slice when scheduled).
 
 #### Shipping and deployment gaps
 
-- **Flask never serves the React app.** No SPA catch-all, no
-  `send_from_directory` for a build output — so `/settings/*` deep links do not
-  resolve and there is currently no deployment path at all.
-- No page title, no favicon, no PWA manifest.
-- `index.html` loads Barlow from `fonts.googleapis.com`: an offline PiFire
-  silently falls back to a different typeface. This is also why the visual
-  fidelity gate cannot be screenshot-based.
+- ~~**Flask never serves the React app.** No SPA catch-all, no
+  `send_from_directory` for a build output.~~ — **DONE.** `blueprints/spa/`
+  serves `web-react/dist`: asset routes for `/static/js`, `/static/css` and the
+  rest, declared ahead of Flask's built-in `/static/<path:filename>` so Werkzeug
+  prefers them, plus the catch-all that makes `/settings/*` deep links resolve.
+  This is the deployment path, and it is what supervisor runs in production —
+  the rsbuild dev server is a development convenience, not a requirement.
+- ~~No page title~~ — **DONE**, `web-react/index.html` sets
+  `PiFire · React UI (POC)`. Still open: no favicon, no PWA manifest, and
+  `web-react/public/` does not exist.
+- ~~`index.html` loads Barlow from `fonts.googleapis.com`: an offline PiFire
+  silently falls back to a different typeface.~~ — **DONE.** Barlow is
+  self-hosted via `@fontsource`, imported in `src/main.tsx` and bundled at build
+  time; `index.html` carries a comment saying so. The offline Pi renders the
+  right glyphs. Note the consequence recorded in `pages-fidelity.spec.ts`: the
+  fidelity gate is landmark-based rather than screenshot-based because glyph
+  *rasterisation* still varies by host, not because the font might not load.
 - No `/manual` route — a bookmarked Flask `/manual` URL will not resolve.
 - ~~`globals.page_theme` is settable but inert.~~ — RENAMED 2026-07-27 to
   `globals.bootstrap_page_theme` and dropped from the React settings form. It
