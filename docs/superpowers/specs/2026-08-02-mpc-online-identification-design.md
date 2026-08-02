@@ -61,6 +61,11 @@ the grey-box the MPC runs; persisting and restoring a learned model; the policy,
 dependency and horizon consequences of a calibration that changes at runtime;
 the safety envelope around promotion.
 
+Two edits land outside MPC and are called out because they touch files another
+plan owns: `MAX_SNAPSHOT_BYTES` in `common/controller_model_state.py` (R3.4),
+and `requires_modules()` in `controller/mpc.py` becoming unconditional (R4.2),
+which changes what a base install may select.
+
 Out of scope: any change to the identifier's mathematics or its trust gates;
 regenerating the neural policy artifact for a learned calibration; deliberate
 excitation of any kind.
@@ -112,10 +117,14 @@ excitation of any kind.
   one process. `controller_model_state.py` documents that a per-process counter
   is silently rejected forever once it falls behind the persisted value. The
   revision is derived from persisted state, never from a fresh in-process counter.
-- **R3.4** The snapshot fits `MAX_SNAPSHOT_BYTES` (8192). The identifier's raw
-  bank — 25 candidates × a 3×3 covariance — does not fit naively; either a
-  reduced restart state is persisted or the bank is re-seeded from the trusted
-  parameters and covariance is reset. Which one is a decision, not a detail.
+- **R3.4** The **full identifier bank is persisted**, so a restart resumes with
+  its accumulated confidence rather than reconverging. The store's
+  `MAX_SNAPSHOT_BYTES` is raised from 8192 to 65536 to stop the bound being a
+  design constraint (see Measurements: the bank is 7104 bytes as plain JSON —
+  it fits today, but with 13 % headroom, so a wider dead-time grid or a fourth
+  regressor would silently push it over). Plain JSON is preferred over a packed
+  encoding at that cap: a learned model that drives a fire should stay
+  readable in the datastore.
 
 ### R4 — Policy and dependency safety
 
@@ -131,9 +140,15 @@ fail a cook rather than merely fail to help it.
   when `policy=net` and the artifact matches *at save time*. A base install
   without the `mpc` extra therefore passes the gate legitimately, learns, stops
   matching, and raises `ImportError` mid-cook on a machine that never had IPOPT.
-  **`requires_modules()` must return `("do_mpc",)` whenever identification is
-  enabled, irrespective of net match** — failing closed at save time rather than
-  open at cook time.
+  **`requires_modules()` returns `("do_mpc",)` unconditionally for MPC** —
+  irrespective of policy or net match. This is broader than this design strictly
+  needs and is a deliberate simplification: the conditional gate is a
+  correctness hazard whose only benefit is letting a base install run one
+  policy, and it fails open at exactly the wrong moment. **Product consequence
+  to accept explicitly: selecting the MPC controller at all now requires the
+  `mpc` extra, including for `policy=net` users who do not enable learning.**
+  Revisiting this belongs with the parameter-conditioned net (Deferred), not
+  here.
 - **R4.3** With identification enabled the effective policy is NLP. This is
   stated in the controller metadata rather than discovered: enabling learning
   trades the numpy fast path for IPOPT solve time every control period.
@@ -150,10 +165,21 @@ fail a cook rather than merely fail to help it.
   (`n_horizon × t_step`) must not be silently accepted. A correct model with too
   short a horizon still overshoots — it simply cannot see far enough ahead to
   brake, which is half of what happened in the incident.
-- **R5.2** The response is one of: refuse the promotion, or raise `n_horizon`
-  within a bounded budget. Raising it costs IPOPT time per control period and
-  changes `_CALIB_INTS`, which invalidates the net again — already accepted
-  under R4.
+- **R5.2** The horizon is **raised to cover the learned effective time
+  constant**, bounded by a solve-time budget rather than refused. Measurement
+  (below) settles the affordability question: a 10× horizon costs 16× the solve
+  time but still only 8.5 % of the control period. The horizon that matters is
+  set by the *effective* τ at cooking temperature, not the linear `C_c/h_amb` —
+  radiative loss makes those differ by ~3× — so the target is `n_horizon` ≈ 144
+  (3600 s span, 3.0 % of budget), not 240.
+- **R5.3** The budget is expressed as a fraction of `control_period` and checked
+  at promotion, not hard-coded to a step count. The nominal target is a Pi 5;
+  the numbers below come from the machine that actually runs this grill, and a
+  slower host must scale the horizon down rather than miss its control period.
+- **R5.4** Raising `n_horizon` changes `_CALIB_INTS` and invalidates the net —
+  already accepted under R4. `t_step` is the cheaper lever for span (it buys
+  horizon without adding decision variables, at coarser resolution) and is
+  available if the solve-time budget binds.
 
 ### R6 — Estimator contention
 
@@ -194,17 +220,56 @@ fail a cook rather than merely fail to help it.
   update is auditable offline. Path A follows behind a setting once the
   identifier lands.
 
-## Decisions required
+## Decisions
 
-Each has a recommendation; none blocks drafting the plan.
+Resolved 2026-08-02. Two were settled by measurement rather than judgement.
 
-| # | Question | Recommendation |
+| # | Question | Resolution |
 |---|---|---|
-| D1 | Path B first, or wait and do both at once? | **B first.** It needs no new mathematics and is testable against the MAK data in the tree today. |
-| D2 | Dependency policy under R4.2 | **Require `do_mpc` whenever learning is enabled.** Fails closed at settings-save. |
-| D3 | Auto-raise `n_horizon` (R5.2), or refuse and warn? | **Refuse and warn** in v1. Auto-scaling couples model quality to solve-time budget and deserves its own measurement. |
-| D4 | One operating-point-local model, or a per-band schedule? | **One model plus a recorded band** in v1; a schedule only if the 450 °F cell shows the single model failing. |
-| D5 | Persist the full RLS bank or re-seed it (R3.4)? | **Re-seed** from trusted parameters with reset covariance; it fits the 8192-byte bound trivially and loses only reconvergence time. |
+| D1 | Batch or online first? | **Batch first.** End-of-cook refit ships in v1; the live RLS identifier follows behind a setting once `fopdt_identifier.py` lands. |
+| D2 | Dependency policy under R4.2 | **`do_mpc` is required for MPC unconditionally**, net policy or not. Simplest correct thing; the conditional gate is revisited with the parameter-conditioned net, not here. |
+| D3 | Auto-raise `n_horizon`, or refuse and warn? | **Auto-raise, bounded by a measured budget.** 10× horizon costs 16× solve time but only 8.5 % of the control period; the ~3600 s span that matters costs 3.0 %. Affordable. |
+| D4 | One model, or a per-band schedule? | **One model plus a recorded band** in v1; escalate only if the 450 °F cell shows it failing. |
+| D5 | Persist the RLS bank, or re-seed it? | **Persist it, and raise the store's cap** to 65536. The 8192 bound was the thing to fix, not to design around. |
+
+## Measurements
+
+### Horizon cost (settles D3)
+
+NLP solve time per control step, MPC built on the grey-box parameters fitted
+from the 2026-08-02 MAK cook, `t_step = 25 s`, `control_period = 5 s`. Mean of
+8–15 warm solves; build time is under 0.8 s at every size and is paid once.
+
+| `n_horizon` | span | mean solve | vs. 24 | % of control period |
+|---|---|---|---|---|
+| 24 | 600 s | 26.1 ms | 1.00× | 0.5 % |
+| 48 | 1200 s | 43.3 ms | 1.66× | 0.9 % |
+| 96 | 2400 s | 87.6 ms | 3.36× | 1.8 % |
+| 144 | 3600 s | 148.1 ms | 5.68× | 3.0 % |
+| 192 | 4800 s | 259.9 ms | 9.96× | 5.2 % |
+| 240 | 6000 s | 426.0 ms | 16.32× | 8.5 % |
+
+Scaling is superlinear (~n^1.2), so a 10× horizon is a 16× solve — but the
+absolute cost is the binding question and it is small. Worst observed single
+solve at `n_horizon = 240` was 504 ms against a 5000 ms period.
+
+**These are real numbers for the deployment** — this grill runs on the machine
+that produced them — but the nominal target is a Pi 5, where the same horizon
+would be several times slower and could approach the period. Hence R5.3: the
+budget is a fraction of `control_period`, evaluated on the host, not a constant.
+
+### Snapshot size (settles D5)
+
+A 25-candidate bank (`Theta` 25×3, `P` 25×3×3, `resid_ew` 25) plus trusted
+parameters and provenance:
+
+- plain JSON float lists: **7104 bytes** — under the 8192 cap, with 13 % headroom
+- base64-packed `float32`: 1901 bytes
+
+The bank fits today by luck, not by design; one more regressor or a wider
+dead-time grid crosses the line. Raising the cap to 65536 removes the
+constraint and keeps the snapshot readable in the datastore, which matters for
+auditing a model that drives a fire.
 
 ## Verification
 
@@ -248,5 +313,4 @@ Inherited from the adaptive-smith-predictor design and binding here:
   runtime consequence here is simply NLP-only (R4.3).
 - **A parameter-conditioned net** that takes `K`/`tau`/`theta` as inputs and so
   survives adaptation. This is the principled fix for R4 and is a research task.
-- **Automatic horizon scaling** (D3).
 - **Per-band model schedules** (D4).
