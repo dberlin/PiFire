@@ -163,6 +163,19 @@ describe("ControllerTab", () => {
     expect(saveMock).not.toHaveBeenCalled();
   });
 
+  it("saves an empty config for a controller with no declared options", async () => {
+    renderRoute(<ControllerTab />, makeContext());
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuzzy" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(saveMock).toHaveBeenCalledWith(
+      { controller: { selected: "fuzzy", config: { fuzzy: {} } } },
+      ["controller_update"],
+    );
+  });
+
   it("renders a Toggle for a bool-typed option when a controller with one is selected", () => {
     renderRoute(<ControllerTab />, makeContext());
 
