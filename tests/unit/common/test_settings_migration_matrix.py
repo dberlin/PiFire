@@ -77,6 +77,8 @@ def _legacy_settings(legacy, version):
     """A settings tree carrying `legacy` at all three i2c-bus sites: the
     distance sensor, the fan controller, and one probe device's config."""
     settings = copy.deepcopy(default_settings())
+    # An install still holding the legacy i2c shape predates the shape stamp.
+    settings.pop("schema_version", None)
     settings["versions"] = dict(version)
 
     distance = settings["platform"]["devices"]["distance"]

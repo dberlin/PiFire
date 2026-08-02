@@ -16,6 +16,8 @@ from common.defaults import default_settings
 def _legacy_stored_settings(ds):
     """A settings tree as an install predating the i2c_bus composite holds it."""
     settings = copy.deepcopy(default_settings())
+    # An install still holding the legacy i2c shape predates the shape stamp.
+    settings.pop("schema_version", None)
     settings["versions"] = {"server": "1.10.10", "cookfile": "1.5.0", "recipe": "1.0.0", "build": 70}
     distance = settings["platform"]["devices"]["distance"]
     distance.pop("i2c_bus", None)

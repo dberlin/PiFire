@@ -234,6 +234,16 @@ def _migrate_i2c_buses(settings):
     return changed
 
 
+#: The shape migrations, in ascending order, as (target_version, migration).
+#: A step's number is the version the tree is AT once that step has run, and
+#: each callable mutates the tree in place and returns True if it changed
+#: anything. Gated on settings["schema_version"] alone -- the release-gated
+#: cascade in upgrade_settings() below is closed to new entries.
+_SHAPE_MIGRATIONS = [
+    (1, _migrate_i2c_buses),
+]
+
+
 def upgrade_settings(prev_ver, settings, settings_default):
     """Check if upgrading from v1.4.x or earlier"""
     if prev_ver[0] <= 1 and prev_ver[1] <= 4:

@@ -391,13 +391,9 @@ def _upgrade_settings_in_store():
     shape change leaves an existing install holding keys the schema no longer
     models, and the write-time repair strips them on the next save.
 
-    The i2c bus shape repair runs independently of the version cascade above
-    and unconditionally, whatever the stored version says: a settings shape
-    the code can no longer read is not something a version number should be
-    allowed to gate, and a version-gated migration can be skipped by a store
-    already stamped at the code's own current version. It stays cheap because
-    it is idempotent -- a tree with no legacy shape left in it reports no
-    change.
+    Shape migrations are gated on settings["schema_version"], which the release
+    version cannot close: a store already stamped at the code's own current
+    release still runs every shape step it has not been stamped for.
     """
     import copy
     import json
@@ -405,7 +401,7 @@ def _upgrade_settings_in_store():
     from common import settings_migration  # deferred to avoid import cycle
     from common.common import semantic_ver_is_lower, semantic_ver_to_list, write_log
     from common.defaults import default_settings
-    from common.settings_schema import validate_settings_tree
+    from common.settings_schema import SETTINGS_SCHEMA_VERSION, validate_settings_tree
 
     settings_default = default_settings()
     current = settings_default["versions"]
@@ -430,8 +426,28 @@ def _upgrade_settings_in_store():
             settings["versions"] = current
             changed = True
 
-        if settings_migration._migrate_i2c_buses(settings):
-            changed = True
+        # The stamp decides which steps run; the release version does not get
+        # a vote. An unstamped tree is version 0, so every step runs once.
+        # A tree from the future -- an operator downgraded PiFire -- runs
+        # nothing and keeps its own stamp: this code cannot know what its
+        # newer keys meant, and the strict-schema repair strips what it does
+        # not model.
+        stamp = settings.get("schema_version", 0)
+        if stamp > SETTINGS_SCHEMA_VERSION:
+            write_log(
+                f"Settings shape version {stamp} is newer than this build's "
+                f"{SETTINGS_SCHEMA_VERSION}; no shape migration was run."
+            )
+        else:
+            for target, migrate in settings_migration._SHAPE_MIGRATIONS:
+                if stamp < target and migrate(settings):
+                    changed = True
+            if stamp != SETTINGS_SCHEMA_VERSION:
+                # Written last, inside the same BEGIN IMMEDIATE the read took,
+                # so a crash mid-chain leaves the old stamp and the whole chain
+                # retries from scratch.
+                settings["schema_version"] = SETTINGS_SCHEMA_VERSION
+                changed = True
 
         if not changed:
             return
