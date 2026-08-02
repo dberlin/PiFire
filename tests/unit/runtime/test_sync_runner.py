@@ -1,3 +1,4 @@
+from controller.applied_output import AppliedOutput, OutputSource
 from controller.runtime.runner import SyncControllerRunner, NormalizedOutput, build_runner, _build_core
 
 
@@ -102,3 +103,70 @@ def test_sync_runner_wants_async_reflects_core_and_stop_is_noop():
     assert SyncControllerRunner(_Core(True)).wants_async() is True
     assert SyncControllerRunner(_Core(False)).wants_async() is False
     SyncControllerRunner(_Core(False)).stop()  # exists + harmless no-op for the sync runner
+
+
+class _RecordingCore:
+    def __init__(self, status=None):
+        self.applied = []
+        self._status = status
+        self.restored = None
+        self.snapshot = {"revision": 3, "K": 700.0}
+
+    def update(self, temp):
+        return 0.5
+
+    def set_target(self, sp):
+        pass
+
+    def get_control_period(self):
+        return None
+
+    def commands_fan(self):
+        return False
+
+    def wants_async(self):
+        return False
+
+    def set_output(self, applied):
+        self.applied.append(applied)
+
+    def get_status(self):
+        return self._status
+
+    def get_model_snapshot(self):
+        return self.snapshot
+
+    def restore_model(self, snapshot):
+        self.restored = snapshot
+        return True
+
+
+def test_sync_runner_forwards_set_output():
+    core = _RecordingCore()
+    runner = SyncControllerRunner(core)
+    applied = AppliedOutput(0.4, OutputSource.CONTROLLER, 12.0, requested=0.4)
+    runner.set_output(applied)
+    assert core.applied == [applied]
+
+
+def test_sync_runner_forwards_snapshot_and_restore():
+    core = _RecordingCore()
+    runner = SyncControllerRunner(core)
+    assert runner.get_model_snapshot() == {"revision": 3, "K": 700.0}
+    assert runner.restore_model({"revision": 9}) is True
+    assert core.restored == {"revision": 9}
+
+
+def test_controller_state_prefers_get_status():
+    runner = SyncControllerRunner(_RecordingCore(status={"K": 700.0}))
+    assert runner.controller_state() == {"K": 700.0}
+
+
+def test_controller_state_falls_back_to_dunder_dict():
+    core = _RecordingCore(status=None)
+    core.p = 0.25
+    state = SyncControllerRunner(core).controller_state()
+    assert state["p"] == 0.25
+    # a copy, not the live __dict__
+    state["p"] = 99
+    assert core.p == 0.25

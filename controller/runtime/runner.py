@@ -43,6 +43,14 @@ class ControllerRunner(ABC):
     @abstractmethod
     def wants_async(self): ...
     @abstractmethod
+    def set_output(self, applied): ...
+    @abstractmethod
+    def get_model_snapshot(self): ...
+    @abstractmethod
+    def restore_model(self, snapshot): ...
+    @abstractmethod
+    def controller_state(self): ...
+    @abstractmethod
     def stop(self): ...
 
 
@@ -86,8 +94,20 @@ class SyncControllerRunner(ControllerRunner):
     def stop(self):
         pass
 
+    def set_output(self, applied):
+        self._core.set_output(applied)
+
+    def get_model_snapshot(self):
+        return self._core.get_model_snapshot()
+
+    def restore_model(self, snapshot):
+        return self._core.restore_model(snapshot)
+
     def controller_state(self):
-        return dict(self._core.__dict__)
+        status = self._core.get_status()
+        if status is None:
+            return dict(self._core.__dict__)
+        return status
 
 
 _UNSET = object()
