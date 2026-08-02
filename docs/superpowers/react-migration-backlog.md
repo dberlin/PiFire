@@ -762,14 +762,22 @@ top-level item, so nobody has to read 900 lines to find that out:
 So the real open work is **9a.3 and the OPEN entries inside item 10.** The
 biggest of those, in rough order of consequence:
 
-1. `updated_message` is written on every upgrade and read by nothing (the
+1. Persisted schema versioning, **including modeling and validating
+   `pellets:general`** — the one durable blob with no schema gate, reachable
+   unvalidated from the admin restore route. **Design approved 2026-08-02**
+   (`specs/2026-08-02-persisted-schema-versioning-design.md`), no open
+   questions, nothing implemented. Ready for a plan.
+2. `updated_message` is written on every upgrade and read by nothing (the
    release-notes modal) — a live writer with no reader.
-2. No 404 route at all, so every unrouted URL hits react-router's error screen;
+3. No 404 route at all, so every unrouted URL hits react-router's error screen;
    `/manual` is one instance of it.
-3. `bootstrap_page_theme` is stored, injected, and read by nothing.
-4. No favicon, no PWA manifest.
+4. No PWA manifest.
 5. Wizard has no 800×480 coverage; no e2e for Exit Setup.
-6. Schema and toolchain follow-ups — none started.
+6. The rest of the schema and toolchain follow-ups — none started.
+
+Closed on 2026-08-02, listed here only because they were on this list an hour
+ago: `bootstrap_page_theme` (deleted, with its context processor) and the
+missing favicon (the PiFire flame, pinned end to end).
 
 **Items 1, 2, 5 and 8 are kept here rather than moved to RESOLVED** because
 their bodies carry measurement notes and ordering lessons — checkpoint before
@@ -1460,9 +1468,19 @@ enhancement goes and it is the only place that distinguishes one from a gap.
   the rsbuild dev server is a development convenience, not a requirement.
 - **DONE** — ~~No page title.~~ `web-react/index.html` sets
   `PiFire · React UI (POC)`.
-- **OPEN** — no favicon and no PWA manifest; `web-react/public/` does not
-  exist. Split out of the page-title entry, which used to carry both and read
-  as done because its first half was.
+- **DONE** — ~~no favicon.~~ Shipped 2026-08-02: the PiFire flame,
+  `<link rel="icon" href="/static/img/favicon.ico">`, which is the same asset
+  the Flask UI used. Referenced rather than copied into the bundle, because
+  `/static/img` is a kept tree Flask's default static handler serves and the
+  spa blueprint deliberately does not shadow, so one href resolves in
+  production and through the dev proxy alike. Pinned end to end by
+  `test_spa.py::test_favicon_is_declared_and_the_declared_path_is_served`,
+  which reads the href out of the shipped shell and fetches exactly that.
+- **OPEN** — no PWA manifest, and `web-react/public/` does not exist. Flask's
+  `base.html` used to link one from a `/manifest` route; both went with the
+  retirement pass, so there is no manifest anywhere now. Split out of the
+  page-title entry, which used to carry title, favicon and manifest together
+  and read as done because its first third was.
 - **DONE** — ~~`index.html` loads Barlow from `fonts.googleapis.com`, so an
   offline PiFire silently falls back to a different typeface.~~ Barlow is
   self-hosted via `@fontsource`, imported in `src/main.tsx` and bundled at build
@@ -1477,29 +1495,27 @@ enhancement goes and it is the only place that distinguishes one from a gap.
   That is true of **every** unknown path, not just this one: the app has no
   not-found surface at all. Whether `/manual` is ported is a separate question
   from whether an unrouted URL renders something deliberate.
-- **OPEN** (the rename is done, the deletion is not) — ~~`globals.page_theme`
-  is settable but inert.~~ Renamed 2026-07-27 to
-  `globals.bootstrap_page_theme` and dropped from the React settings form. It
-  only ever fed Bootstrap's light/dark theme on the legacy Flask pages, via
-  `app.py`'s `inject_theme_and_grill_name` context processor, which still reads
-  it under the new name. The React app has no light palette and never consumed
-  it. **The deletion was scheduled for "when the last Flask page is retired".
-  That happened on 2026-07-29, so it is now unblocked and overdue.** All five
-  templates that read the injected variable are gone; `templates/` holds only
-  `server_error.html`, which does not reference it. So
-  `app.py:108`'s `inject_theme_and_grill_name` now injects `page_theme` into
-  every render of exactly one template that ignores it, and
-  `bootstrap_page_theme` (`common/defaults.py:49`,
-  `common/settings_schema.py:321`) is a stored value nothing reads. Remove all
-  three, and the `"globals.page_theme"` carry-forward entry at
-  `settings_schema.py:875` with them.
-  - No migration was written for the rename. An existing install keeps its old
-    `page_theme` key, which the strict-schema repair wrapper strips on the next
-    validated write, and the new key takes its `"light"` default — so a user who
-    had chosen the dark Flask theme silently gets light back. Accepted at the
-    time because the key was cosmetic and applied only to pages that were about
-    to be retired. Those pages are gone, which makes the migration moot rather
-    than owed: there is no longer a surface the old value could have affected.
+- **DONE** — ~~`globals.page_theme` is settable but inert.~~ Renamed
+  2026-07-27 to `globals.bootstrap_page_theme`, then **deleted outright
+  2026-08-02** once the Flask pages that were its only consumer were gone.
+  Removed from `common/defaults.py` and `common/settings_schema.py`, and the
+  whole `inject_theme_and_grill_name` context processor went with it —
+  `grill_name` was equally unread, `server_error.html` being the only template
+  this app renders and taking no context. That also took a `read_settings()`
+  out of the 500 path, where a datastore failure would have made the error
+  handler raise on exactly the fault it exists to report.
+
+  The `globals.page_theme` -> `globals.bootstrap_page_theme` carry entry went
+  too, leaving `_RENAMED_SETTINGS` empty. The carry MECHANISM is kept armed and
+  its tests now install a synthetic rename, so they prove it works for the next
+  rename rather than for whichever entry happened to be listed.
+
+  **No migration is needed and none was written.** An existing install sheds
+  both keys through `validate_settings_tree()`'s repair pass on its next
+  validated write — verified against the live database rather than assumed: one
+  no-op write, key gone, nothing else lost. The value is discarded, which is
+  correct; there is no longer a surface it could affect.
+
 - **DONE, with a consequence worth knowing** — the dashboard's accent swatches
   and General's Theme field write the same key
   (`display.config.<module>.accent_theme`), which the Qt display reads once a
@@ -1930,10 +1946,66 @@ replaced by real schema versioning:
   stale draft is otherwise undetectable, and a real one silently rendered
   "Basic" for a grill running on two USB-I2C bridges.
 
-What is actually wanted: an explicit schema version on the wizard manifest and
-on every persisted blob keyed by manifest-shaped names, so staleness is a
-comparison rather than a heuristic, and so a settings-shape migration can be
-gated on the shape's own version instead of on the release build number.
+**OPEN — design APPROVED 2026-08-02, nothing implemented.** Spec:
+`specs/2026-08-02-persisted-schema-versioning-design.md`. It carries no open
+questions; the next step is an implementation plan.
+
+Two corrections the spec makes to the paragraph above, recorded here so they
+are not re-raised from this entry:
+
+- **The wizard manifest should NOT get a declared version for the draft's
+  sake.** Staleness is a boolean question, and a content hash answers it
+  better than a declared version does — a declared version is a promise a human
+  remembers to bump, and this branch's own record is that they do not (the
+  same paragraph counts four skips). `_manifest_fingerprint` cannot be
+  forgotten, so it stays. A manifest version for operator diagnostics is a real
+  but separate requirement.
+- **Only the settings tree wants an integer**, because only it has to answer
+  *which migrations must run*, which is ordered. A hash says THAT something
+  differs, never FROM WHAT.
+
+The spec also notes that the mechanism already exists one layer down —
+`PRAGMA user_version` at `common/datastore.py:215-250`, currently 4, with
+gated ordered steps and the stamp written last. The tables have it; the blobs
+stored inside them do not.
+
+The spec also covers **`pellets:general`**, which has no schema model and
+therefore no repair pass — see the entry below. It was going to be a separate
+item; the owner folded it in, on the grounds that modeling it is the
+prerequisite for versioning it.
+
+**OPEN — `pellets:general` is unmodeled and unvalidated.** Folded INTO the
+schema-versioning spec above (§5) at the owner's request rather than tracked
+separately, because modeling it is the prerequisite for versioning it and the
+two land together.
+
+Every other durable blob goes through `validate_settings_tree()`'s
+strict-plus-repair gate; `write_pellet_db()` calls `write_pellets_store()`
+directly with no validation of any kind. It holds operator-owned data (brands,
+woods, profiles, the usage log). (`PelletLevel` in `settings_schema.py:65`
+models `settings["pelletlevel"]`, the hopper level — a different thing with a
+confusingly similar name.)
+
+Sharper than "no migration net", and the reason it is worth doing now: the
+admin backup-restore route validates a settings backup and refuses a bad one
+with a 400, then in its very next branch writes an arbitrary pellet JSON file
+straight into the live store (`blueprints/api_admin/routes.py:320-337`). Same
+function, one guarded path and one unguarded one.
+
+Two live defects the spec work turned up in `common/pellets_actions.py`,
+neither fixed yet:
+
+- **The usage log silently drops entries.** It is keyed by
+  `str(datetime.now())[0:19]` — local time, second resolution — so two profile
+  loads in the same second collide on the dict key and one is lost. Both
+  writers do it.
+- **`rating` is stored unvalidated and uncoerced** from the request at both the
+  add and edit doors, so a client can store `"4"` or `99`.
+
+Also worth knowing before anyone models this from `defaults.py`: `est_usage` is
+a FLOAT on a live grill (the defaults seed int `0`), a log value can be the
+literal string `"deleted"` rather than a profile id, and `brand`/`wood` are
+deliberately NOT constrained to the `brands`/`woods` lists.
 
 ~~Tailwind prerequisites, all now owned by
 `plans/2026-07-26-tailwind-v4-migration.md`: no browserslist pinned; unverified
