@@ -354,6 +354,14 @@ def _upgrade_settings_in_store():
     lived in SQLite ever since would otherwise never be migrated again -- so a
     shape change leaves an existing install holding keys the schema no longer
     models, and the write-time repair strips them on the next save.
+
+    The i2c bus shape repair runs independently of the version cascade above
+    and unconditionally, whatever the stored version says: a settings shape
+    the code can no longer read is not something a version number should be
+    allowed to gate, and a version-gated migration can be skipped by a store
+    already stamped at the code's own current version. It stays cheap because
+    it is idempotent -- a tree with no legacy shape left in it reports no
+    change.
     """
     import copy
     import json
@@ -374,17 +382,24 @@ def _upgrade_settings_in_store():
         if row is None:
             return
         settings = json.loads(row[0])
+        changed = False
+
         stored = settings.get("versions") or {}
-        if not stored.get("server"):
-            return
-        if not semantic_ver_is_lower(stored["server"], current["server"]) and stored.get("build", 0) >= current.get(
-            "build", 0
+        if stored.get("server") and (
+            semantic_ver_is_lower(stored["server"], current["server"])
+            or stored.get("build", 0) < current.get("build", 0)
         ):
+            prev_ver = semantic_ver_to_list(stored["server"])
+            settings = settings_migration.upgrade_settings(prev_ver, settings, settings_default)
+            settings["versions"] = current
+            changed = True
+
+        if settings_migration._migrate_i2c_buses(settings):
+            changed = True
+
+        if not changed:
             return
 
-        prev_ver = semantic_ver_to_list(stored["server"])
-        settings = settings_migration.upgrade_settings(prev_ver, settings, settings_default)
-        settings["versions"] = current
         try:
             # Validated for the side effect of logging only -- write_settings()
             # is not used here (see module docstring): its repair is exactly

@@ -214,15 +214,24 @@ def _i2c_bus_sections(settings):
 
 def _migrate_i2c_buses(settings):
     """Rewrite every legacy (i2c_bus_kind, i2c_bus_num) pair as one i2c_bus
-    object. Idempotent: a section that already has i2c_bus is left alone."""
+    object. Idempotent: a section that already has i2c_bus is left alone.
+
+    Returns True if any section was converted, False if there was nothing to
+    do, so a caller running this unconditionally can skip a pointless write.
+    """
+    changed = False
     for section in _i2c_bus_sections(settings):
         if not isinstance(section, dict):
             continue
         legacy = {"i2c_bus_kind", "i2c_bus_num", "i2c_bus_match"} & set(section)
-        if "i2c_bus" not in section and legacy:
+        if not legacy:
+            continue
+        if "i2c_bus" not in section:
             section["i2c_bus"] = _legacy_bus_to_config(section)
         for key in legacy:
             section.pop(key, None)
+        changed = True
+    return changed
 
 
 def upgrade_settings(prev_ver, settings, settings_default):
