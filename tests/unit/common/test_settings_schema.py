@@ -63,6 +63,25 @@ def test_all_sections_are_modeled():
     assert modeled == set(default_settings().keys())
 
 
+def test_a_fresh_tree_is_stamped_with_the_current_shape_version():
+    """A tree the defaults just built needs no migration, so it starts at
+    CURRENT -- the same reasoning as _ensure_schema's `0 <` guards."""
+    from common.settings_schema import SETTINGS_SCHEMA_VERSION
+
+    assert default_settings()["schema_version"] == SETTINGS_SCHEMA_VERSION
+
+
+def test_the_shape_version_is_not_derived_from_the_release_version():
+    """schema_version must never move because a release number moved."""
+    from common.settings_schema import SETTINGS_SCHEMA_VERSION
+
+    settings = default_settings()
+    settings["versions"]["build"] = settings["versions"]["build"] + 1000
+    settings["versions"]["server"] = "9.9.9"
+
+    assert settings["schema_version"] == SETTINGS_SCHEMA_VERSION
+
+
 # ---------------------------------------------------------------------------
 # Migration-fixture parity (spec deliverable 2): an OLD-shaped settings.json,
 # once carried through the full read_settings_file() migration pipeline

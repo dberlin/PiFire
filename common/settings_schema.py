@@ -633,7 +633,20 @@ class Recipe(_Section):
     probe_map: RecipeProbeMap = RecipeProbeMap()
 
 
+#: The shape of the settings tree, independent of the release version. Bumped
+#: by any change to the persisted shape that an existing install cannot simply
+#: be validated into: a rename, a retype, a restructure. NOT bumped for an
+#: added or deleted field -- the write-time repair handles both losslessly
+#: (added takes its default, deleted is stripped).
+#:
+#: It lives at the top level of the tree rather than beside versions.server /
+#: versions.build, so that nothing suggests the three move together. They do
+#: not: versions is the RELEASE, read from updater/updater_manifest.json.
+SETTINGS_SCHEMA_VERSION = 1
+
+
 class SettingsSchema(_Section):
+    schema_version: int = SETTINGS_SCHEMA_VERSION
     versions: Versions
     server_info: ServerInfo
     probe_settings: ProbeSettings = ProbeSettings()

@@ -184,6 +184,7 @@ export type Maxtemp = number;
 export type Minstartuptemp = number;
 export type Reigniteretries = number;
 export type StartupCheck = boolean;
+export type SchemaVersion = number;
 export type Uuid1 = string;
 export type AutoPowerOff = boolean;
 export type ShutdownDuration = number;
@@ -230,6 +231,7 @@ export interface SettingsSchema {
   pwm?: PwmSettings;
   recipe?: Recipe;
   safety?: SafetySettings;
+  schema_version?: SchemaVersion;
   server_info: ServerInfo;
   shutdown?: ShutdownSettings;
   smoke_plus?: SmokePlus;

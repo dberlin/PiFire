@@ -19,6 +19,7 @@ import time
 
 from common.common import generate_uuid, read_generic_json, read_updater_manifest
 from common.modes import Mode, StatusState
+from common.settings_schema import SETTINGS_SCHEMA_VERSION
 
 # Set of default colors for charts.  Contains list of tuples (primary color, secondary color).
 COLOR_LIST = [
@@ -33,6 +34,8 @@ COLOR_LIST = [
 
 def default_settings():
     settings = {}
+
+    settings["schema_version"] = SETTINGS_SCHEMA_VERSION
 
     updater_info = read_updater_manifest()
     settings["versions"] = updater_info["metadata"]["versions"]

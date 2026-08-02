@@ -651,6 +651,7 @@
         "primary": "Grill"
       }
     },
+    "schema_version": 1,
     "safety": {
       "allow_manual_changes": false,
       "manual_override_time": 30,
