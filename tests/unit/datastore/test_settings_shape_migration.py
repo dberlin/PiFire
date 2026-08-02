@@ -121,3 +121,27 @@ def test_running_the_chain_twice_is_identical_to_running_it_once(ds):
     datastore._upgrade_settings_in_store()
 
     assert read_settings_store() == once
+
+
+def test_a_migrated_tree_survives_a_validating_write(ds):
+    """The stamp is a modeled field, so write_settings must preserve it rather
+    than strip it as an unmodeled key -- which is what happens to anything the
+    schema does not know about."""
+    from common.datastore_accessors import write_settings
+
+    _unstamped_legacy_tree()
+    datastore._upgrade_settings_in_store()
+
+    write_settings(read_settings_store())
+
+    assert read_settings_store()["schema_version"] == SETTINGS_SCHEMA_VERSION
+
+
+def test_init_stamps_a_pre_stamp_store(ds):
+    """init() is what every entry point calls; the stamp has to arrive there
+    and not only in the function under test."""
+    _unstamped_legacy_tree()
+
+    datastore.init()
+
+    assert read_settings_store()["schema_version"] == SETTINGS_SCHEMA_VERSION
