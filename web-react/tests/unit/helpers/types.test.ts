@@ -22,6 +22,7 @@ describe("LiveState fixture shape", () => {
       "hasDcFan",
       "hasDistanceSensor",
       "allowManualOutputs",
+      "safetyMaxTemp",
       "timer",
       "outputs",
       "recipeStatus",

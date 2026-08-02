@@ -73,6 +73,10 @@ export interface LiveState {
   startupGotoTemp: number;
   startupGotoMode: string;
   allowManualOutputs: boolean;
+  /** settings.safety.maxtemp, in tempUnits. The grill shuts down above it in
+   *  any mode, so it is the ceiling for every setpoint the dashboard offers.
+   *  Distinct from ProbeData.maxTemp, which is only the gauge's top of scale. */
+  safetyMaxTemp: number;
   manualPwm: number;
   timer: { start: number; paused: number; end: number; keepWarm: boolean; shutdown: boolean };
   outputs: { fan: boolean; auger: boolean; igniter: boolean; power: boolean };

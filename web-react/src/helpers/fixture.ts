@@ -40,6 +40,7 @@ export const FIXTURE_DASH: LiveState = {
   startupGotoTemp: 165,
   startupGotoMode: "Smoke",
   allowManualOutputs: false,
+  safetyMaxTemp: 550, // common/defaults.py settings["safety"]["maxtemp"]
   manualPwm: 100,
   timer: {
     start: 0,

@@ -332,6 +332,12 @@ def _get_dash_data(settings, pelletdb):
         "startupGotoTemp": settings["startup"]["start_to_mode"]["primary_setpoint"],
         "startupGotoMode": settings["startup"]["start_to_mode"]["after_startup_mode"],
         "allowManualOutputs": settings["safety"]["allow_manual_changes"],
+        # The temperature above which the grill shuts down in any mode
+        # (controller/runtime/logic/safety.py), carried in the units this
+        # payload's tempUnits names -- common.py converts it with them. It
+        # bounds every setpoint the dashboard offers; primaryProbe.maxTemp is
+        # the gauge's ceiling, a display choice, and cannot stand in for it.
+        "safetyMaxTemp": settings["safety"]["maxtemp"],
         "timer": {
             "start": math.trunc(control["timer"]["start"]),
             "paused": math.trunc(control["timer"]["paused"]),

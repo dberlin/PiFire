@@ -275,6 +275,29 @@
 .pf-setpoint-val span {
   @apply text-[24px] text-text-dim ml-[2px];
 }
+/* Types like a text box, reads like the headline number it replaced. The
+   native spinners are suppressed because the ± buttons beside it already do
+   that job at a touch-sized target. */
+.pf-setpoint-input {
+  width: 4ch;
+  @apply bg-transparent border-0 p-0 text-text text-center;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.pf-setpoint-input::-webkit-outer-spin-button,
+.pf-setpoint-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.pf-setpoint-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
 .pf-step {
   width: 56px;
   height: 56px;

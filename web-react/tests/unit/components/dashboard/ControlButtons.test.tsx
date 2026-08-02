@@ -383,7 +383,7 @@ describe("ControlButtons startup confirmation", () => {
     expect(command.setMode).not.toHaveBeenCalled();
   });
 
-  it("offers the hold-temperature prompt, seeded and bounded as Flask bounds it", () => {
+  it("offers the hold-temperature prompt, seeded and bounded for the grill", () => {
     render(
       <ControlButtons apiBase="" dash={holdPrompt()} command={stubCommand()} disabled={false} />,
     );
@@ -392,20 +392,38 @@ describe("ControlButtons startup confirmation", () => {
     expect(modalSubmit()).toHaveTextContent("Startup");
     // Seeded from settings.startup.start_to_mode.primary_setpoint, which is
     // startupGotoTemp on the wire.
-    expect(screen.getByText("225")).toBeInTheDocument();
+    expect((screen.getByLabelText("Change Hold Temp?") as HTMLInputElement).value).toBe("225");
     const slider = screen.getByRole("slider");
-    // 125-600 step 5 for °F (_macro_control_panel.html:236) -- WIDER than the
-    // Hold setpoint's 150-500, which is why the bounds are props.
+    // This prompt reaches lower than the Hold setpoint's 150 floor, because it
+    // is offered before the grill is up to temperature -- but it sets a Hold
+    // setpoint too, so it stops at the same shutdown limit.
     expect(slider).toHaveAttribute("min", "125");
-    expect(slider).toHaveAttribute("max", "600");
+    expect(slider).toHaveAttribute("max", "550"); // fixture safetyMaxTemp
     expect(slider).toHaveAttribute("step", "5");
   });
 
-  it("uses Flask's Celsius bounds when the grill reports Celsius", () => {
+  it("bounds the prompt by the grill's own limit, not a fixed ceiling", () => {
     render(
       <ControlButtons
         apiBase=""
-        dash={holdPrompt({ tempUnits: "C", startupGotoTemp: 110 })}
+        dash={holdPrompt({ safetyMaxTemp: 425 })}
+        command={stubCommand()}
+        disabled={false}
+      />,
+    );
+    openStartup();
+    // The ceiling this prompt shipped with was 600, so 425 can only come from
+    // the setting.
+    expect(screen.getByRole("slider")).toHaveAttribute("max", "425");
+  });
+
+  it("uses the Celsius floor when the grill reports Celsius", () => {
+    render(
+      <ControlButtons
+        apiBase=""
+        // safetyMaxTemp rides in the payload's own units, so a grill reporting
+        // Celsius reports a Celsius limit (common/common.py converts it).
+        dash={holdPrompt({ tempUnits: "C", startupGotoTemp: 110, safetyMaxTemp: 288 })}
         command={stubCommand()}
         disabled={false}
       />,
@@ -413,7 +431,7 @@ describe("ControlButtons startup confirmation", () => {
     openStartup();
     const slider = screen.getByRole("slider");
     expect(slider).toHaveAttribute("min", "50");
-    expect(slider).toHaveAttribute("max", "260");
+    expect(slider).toHaveAttribute("max", "288");
   });
 
   it("shows the hold variant, not the confirmation, when BOTH are configured", () => {

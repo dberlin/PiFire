@@ -15,12 +15,10 @@ import { SetpointEntry } from "./SetpointEntry";
 /** The two ways out of a running cook. These are never withheld. */
 const SAFETY_LABELS = new Set(["Stop", "Shutdown"]);
 
-/** Flask's startup hold-prompt slider bounds (_macro_control_panel.html:236,238).
- *  Wider than SETPOINT_RANGE, which governs the Hold setpoint. */
-const HOLD_PROMPT_RANGE: Record<"F" | "C", { min: number; max: number }> = {
-  F: { min: 125, max: 600 },
-  C: { min: 50, max: 260 },
-};
+/** The startup prompt reaches lower than the Hold setpoint does -- it is offered
+ *  before the grill is up to temperature. Its ceiling is not its own: both
+ *  modals set a Hold setpoint, so both stop at the grill's shutdown limit. */
+const HOLD_PROMPT_MIN: Record<"F" | "C", number> = { F: 125, C: 50 };
 
 /** Which variant of Flask's single #startupModal is on screen, if any. */
 type StartupPrompt = "none" | "hold" | "confirm";
@@ -204,6 +202,7 @@ export function ControlButtons({
         open={setpointOpen}
         initial={dash.primaryProbe.setTemp || dash.primaryProbe.temp}
         units={dash.tempUnits}
+        safetyMaxTemp={dash.safetyMaxTemp}
         onCancel={() => setSetpointOpen(false)}
         onSubmit={(temp) => {
           setSetpointOpen(false);
@@ -219,8 +218,8 @@ export function ControlButtons({
         units={dash.tempUnits}
         title="Change Hold Temp?"
         submitLabel="Startup"
-        min={HOLD_PROMPT_RANGE[dash.tempUnits].min}
-        max={HOLD_PROMPT_RANGE[dash.tempUnits].max}
+        safetyMaxTemp={dash.safetyMaxTemp}
+        min={HOLD_PROMPT_MIN[dash.tempUnits]}
         error={startupError}
         saving={busy}
         onCancel={() => {

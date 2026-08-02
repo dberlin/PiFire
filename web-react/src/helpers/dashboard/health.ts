@@ -10,13 +10,33 @@ export function deriveControlAlive(dash: LiveState): boolean {
   return !(dash.errors ?? []).some((e) => e.includes(CONTROL_DOWN_MARKER));
 }
 
-export const SETPOINT_RANGE: Record<"F" | "C", { min: number; max: number }> = {
-  F: { min: 150, max: 500 },
-  C: { min: 65, max: 260 },
-};
+// Floor of a Hold setpoint, per units. Only the floor is a constant: the
+// ceiling is the grill's own limit, settings.safety.maxtemp, which reaches the
+// dashboard as LiveState.safetyMaxTemp already converted into these units.
+export const SETPOINT_MIN: Record<"F" | "C", number> = { F: 150, C: 65 };
 
-export function clampSetpoint(temp: number, units: "F" | "C"): number {
-  const { min, max } = SETPOINT_RANGE[units];
+// Stands in when safetyMaxTemp is absent or nonsensical — a backend too old to
+// send it, or a hand-edited settings tree. These are the fixed ceilings this UI
+// shipped with before the real limit was on the wire.
+const SETPOINT_MAX_FALLBACK: Record<"F" | "C", number> = { F: 500, C: 260 };
+
+/** The bounds a Hold setpoint may take, given the grill's shutdown limit.
+ *  A `safetyMaxTemp` at or below the floor cannot bound anything, so the
+ *  fallback ceiling is used rather than collapsing the range to a point. */
+export function setpointRange(
+  units: "F" | "C",
+  safetyMaxTemp: number | undefined,
+): { min: number; max: number } {
+  const min = SETPOINT_MIN[units];
+  const max =
+    safetyMaxTemp !== undefined && Number.isFinite(safetyMaxTemp) && safetyMaxTemp > min
+      ? Math.round(safetyMaxTemp)
+      : SETPOINT_MAX_FALLBACK[units];
+  return { min, max };
+}
+
+export function clampSetpoint(temp: number, units: "F" | "C", safetyMaxTemp?: number): number {
+  const { min, max } = setpointRange(units, safetyMaxTemp);
   const t = Math.round(temp);
   return t < min ? min : t > max ? max : t;
 }
