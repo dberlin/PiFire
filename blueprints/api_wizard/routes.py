@@ -51,65 +51,44 @@ def _thermoworks_discover(email, password):
 
 
 def _manifest_fingerprint(wizard_data):
-    """Cheap identity for the manifest's dependency shape: a hash over every
-    section/module/dependency name it currently declares. Two manifests with
-    the same dependency names (even if descriptions, defaults or option lists
-    differ) fingerprint the same -- this is deliberately coarse, matching what
-    _draft_is_stale's key check cares about."""
+    """Cheap identity for every manifest-declared key name a draft can bind
+    to: each section/module/dependency name, plus each probes module's
+    device_specific config labels (what a drafted probe device's `config`
+    keys itself by). Entries carry a kind prefix so a dependency name can
+    never collide with a probe config label.
+
+    Two manifests declaring the same names -- even with different
+    descriptions, defaults or option lists -- fingerprint the same. Only the
+    names matter, because names are all a draft binds to."""
     modules = wizard_data.get("modules", {}) or {}
-    triples = sorted(
-        f"{section}/{module}/{dep}"
+    names = sorted(
+        f"dep:{section}/{module}/{dep}"
         for section, section_modules in modules.items()
         for module, module_data in (section_modules or {}).items()
         for dep in (module_data or {}).get("settings_dependencies", {}) or {}
     )
-    return hashlib.sha256("\n".join(triples).encode()).hexdigest()
+    names += sorted(
+        f"probecfg:{module}/{option.get('label')}"
+        for module, module_data in (modules.get("probes") or {}).items()
+        for option in ((module_data or {}).get("device_specific") or {}).get("config") or []
+    )
+    return hashlib.sha256("\n".join(names).encode()).hexdigest()
 
 
 def _draft_is_stale(draft, wizard_data):
-    """True when the draft names dependencies this manifest does not have.
+    """True when the draft was not written against this manifest.
 
-    A draft stores values keyed by manifest dependency name. When a module's
-    dependencies are renamed or replaced, those keys bind to nothing -- the
-    wizard shows a field's default while the draft still claims to hold the
-    operator's answer.
+    A draft keys its values by manifest dependency name, so one written
+    against a different manifest binds its answers to nothing -- the wizard
+    would render a field's default while the draft still claims to hold the
+    operator's answer. An absent stamp is unequal to any fingerprint, so a
+    draft written before stamping existed is stale too.
+
+    This says nothing about a draft written against the current manifest and
+    then corrupted by hand; only the manifest it was written against is
+    judged here.
     """
-    if _STAMP_KEY in draft and draft[_STAMP_KEY] != _manifest_fingerprint(wizard_data):
-        return True
-
-    modules = wizard_data.get("modules", {}) or {}
-    selections = draft.get("selections") or {}
-    for section, dep_values in (draft.get("settings_dep_values") or {}).items():
-        if not isinstance(dep_values, dict) or not dep_values:
-            continue
-        section_modules = modules.get(section)
-        if not isinstance(section_modules, dict):
-            continue
-        module_data = section_modules.get(selections.get(section))
-        if not isinstance(module_data, dict):
-            # The drafted module no longer exists in the manifest at all --
-            # a different problem, with its own handling; judging staleness
-            # here would fire for the wrong reason.
-            continue
-        allowed = module_data.get("settings_dependencies") or {}
-        if any(key not in allowed for key in dep_values):
-            return True
-
-    # A real, current, well-formed probe_map carries no config keys beyond
-    # each device's module's device_specific.config[].label set (verified
-    # against the manifest's own board defaults and a live grill's saved
-    # probe_map), so the same key check applies there.
-    probes_modules = modules.get("probes")
-    if isinstance(probes_modules, dict):
-        for device in (draft.get("probe_map") or {}).get("probe_devices") or []:
-            module_data = probes_modules.get(device.get("module"))
-            if not isinstance(module_data, dict):
-                continue
-            allowed = {option.get("label") for option in (module_data.get("device_specific") or {}).get("config") or []}
-            if any(key not in allowed for key in (device.get("config") or {})):
-                return True
-
-    return False
+    return draft.get(_STAMP_KEY) != _manifest_fingerprint(wizard_data)
 
 
 def _load_draft(wizard_data):
@@ -260,9 +239,8 @@ def wizard_draft():
     info["display_config"] = payload.get("display_config", {})
     info["probe_map"] = payload.get("probe_map", {"probe_devices": [], "probe_info": []})
     info["probes_units"] = payload.get("probes_units", "F")
-    # Stamp with the manifest's current dependency shape so a future load can
-    # tell, cheaply and totally, whether this draft still applies -- covering
-    # dependency additions the key-level check alone would miss.
+    # Stamp with the manifest's current key names so a future load can tell,
+    # cheaply and totally, whether this draft still applies.
     info[_STAMP_KEY] = _manifest_fingerprint(wizard_data)
     store_wizard_install_info(info)
     return jsonify({"result": "success"}), 200

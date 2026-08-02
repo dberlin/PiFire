@@ -170,13 +170,14 @@ def test_draft_clear_drops_probe_map_and_units(ds, client):
 
 
 # ---------------------------------------------------------------------------
-# Stale draft discard: a draft is a snapshot of manifest-shaped keys, but
-# records nothing about which manifest it was written against. When a
-# module's dependencies are renamed or replaced (e.g. the *_i2c_bus_kind +
-# *_i2c_bus_num split fields becoming one *_i2c_bus composite), a draft
-# saved before the change names keys the current manifest doesn't
-# recognize -- _load_draft() must discard it rather than serve it, or a
-# resumed wizard silently shows Basic for hardware that isn't.
+# Stale draft discard: a draft is a snapshot of manifest-shaped keys, and it
+# is served only when its stamp says it was written against the manifest in
+# force now. When a module's dependencies are renamed or replaced (e.g. the
+# *_i2c_bus_kind + *_i2c_bus_num split fields becoming one *_i2c_bus
+# composite), a draft from before the change names keys that bind to
+# nothing -- _load_draft() must discard it rather than serve it, or a
+# resumed wizard silently shows Basic for hardware that isn't. A draft
+# carrying no stamp at all cannot be shown to match, so it goes too.
 # ---------------------------------------------------------------------------
 
 
@@ -197,9 +198,9 @@ def _seed_x86_numato_live_settings():
 def test_stale_draft_with_legacy_i2c_keys_is_discarded(ds, client):
     """The real regression: a draft saved before the I2C composite-field
     change named device_distance_i2c_bus_kind/_num and i2c_bus_kind/_num.
-    The manifest now only declares the composite device_distance_i2c_bus and
-    i2c_bus deps, so none of the draft's four keys binds to anything --
-    /state must fall through to (migrated) live settings, not serve Basic."""
+    It predates stamping, so it carries no manifest fingerprint and is
+    discarded on that alone -- /state must fall through to (migrated) live
+    settings, not serve Basic."""
     _seed_x86_numato_live_settings()
     from common.datastore_accessors import store_wizard_install_info
 
@@ -233,6 +234,27 @@ def test_stale_draft_with_legacy_i2c_keys_is_discarded(ds, client):
 
 def test_draft_with_matching_keys_is_not_stale_and_is_preferred(ds, client):
     _seed_x86_numato_live_settings()
+    draft = {
+        "selections": {"grillplatform": "x86_numato", "display": None, "distance": None, "probes": None},
+        "settings_dep_values": {"grillplatform": {"i2c_bus": {"kind": "mcp2221", "serial": "DRAFT-VALUE"}}},
+        "display_config": {},
+        "probe_map": {"probe_devices": [], "probe_info": []},
+        "probes_units": "F",
+    }
+    assert client.post("/api/wizard/draft", data=json.dumps(draft), content_type="application/json").status_code == 200
+
+    body = client.get("/api/wizard/state").get_json()
+    assert body["has_draft"] is True
+    # The draft's value wins over the differently-configured live settings.
+    assert body["settings_dep_values"]["grillplatform"]["i2c_bus"] == {"kind": "mcp2221", "serial": "DRAFT-VALUE"}
+    assert ds.get_blob("wizard:install") is not None
+
+
+def test_unstamped_draft_is_discarded_even_when_every_key_is_valid(ds, client):
+    """The rule, stated directly: a draft with no manifest stamp cannot be
+    shown to have been written against this manifest, so it goes -- however
+    well its keys happen to line up."""
+    _seed_x86_numato_live_settings()
     from common.datastore_accessors import store_wizard_install_info
 
     store_wizard_install_info(
@@ -247,88 +269,64 @@ def test_draft_with_matching_keys_is_not_stale_and_is_preferred(ds, client):
     )
 
     body = client.get("/api/wizard/state").get_json()
-    assert body["has_draft"] is True
-    # The draft's value wins over the differently-configured live settings.
-    assert body["settings_dep_values"]["grillplatform"]["i2c_bus"] == {"kind": "mcp2221", "serial": "DRAFT-VALUE"}
-    assert ds.get_blob("wizard:install") is not None
-
-
-def test_draft_naming_an_unknown_module_is_not_judged_stale(ds, client):
-    """A module the manifest no longer has at all is a different problem (a
-    removed/renamed module) with its own handling -- conflating it with a
-    stale-keys draft would discard progress for the wrong reason."""
-    from common.datastore_accessors import store_wizard_install_info
-
-    store_wizard_install_info(
-        {
-            "react_draft": True,
-            "selections": {"grillplatform": "totally_bogus_module", "display": None, "distance": None, "probes": None},
-            "settings_dep_values": {"grillplatform": {"whatever_key": "whatever_value"}},
-            "display_config": {},
-            "probe_map": {"probe_devices": [], "probe_info": []},
-            "probes_units": "F",
-        }
-    )
-
-    body = client.get("/api/wizard/state").get_json()
-    assert body["has_draft"] is True
-    assert ds.get_blob("wizard:install") is not None
-
-
-def test_draft_with_unrecognized_probe_config_key_is_discarded(ds, client):
-    from common.datastore_accessors import store_wizard_install_info
-
-    store_wizard_install_info(
-        {
-            "react_draft": True,
-            "selections": {"grillplatform": None, "display": None, "distance": None, "probes": "ads1115_adafruit"},
-            "settings_dep_values": {},
-            "display_config": {},
-            "probe_map": {
-                "probe_devices": [
-                    {
-                        "device": "D1",
-                        "module": "ads1115_adafruit",
-                        "config": {"totally_bogus_probe_key": "x"},
-                    }
-                ],
-                "probe_info": [],
-            },
-            "probes_units": "F",
-        }
-    )
-
-    body = client.get("/api/wizard/state").get_json()
     assert body["has_draft"] is False
     assert ds.get_blob("wizard:install") is None
 
 
 def test_draft_with_only_recognized_probe_config_keys_survives(ds, client):
-    from common.datastore_accessors import store_wizard_install_info
-
-    store_wizard_install_info(
-        {
-            "react_draft": True,
-            "selections": {"grillplatform": None, "display": None, "distance": None, "probes": "ads1115_adafruit"},
-            "settings_dep_values": {},
-            "display_config": {},
-            "probe_map": {
-                "probe_devices": [
-                    {
-                        "device": "D1",
-                        "module": "ads1115_adafruit",
-                        "config": {"i2c_bus": {"kind": "basic"}, "i2c_bus_addr": "0x48"},
-                    }
-                ],
-                "probe_info": [],
-            },
-            "probes_units": "F",
-        }
-    )
+    draft = {
+        "selections": {"grillplatform": None, "display": None, "distance": None, "probes": "ads1115_adafruit"},
+        "settings_dep_values": {},
+        "display_config": {},
+        "probe_map": {
+            "probe_devices": [
+                {
+                    "device": "D1",
+                    "module": "ads1115_adafruit",
+                    "config": {"i2c_bus": {"kind": "basic"}, "i2c_bus_addr": "0x48"},
+                }
+            ],
+            "probe_info": [],
+        },
+        "probes_units": "F",
+    }
+    assert client.post("/api/wizard/draft", data=json.dumps(draft), content_type="application/json").status_code == 200
 
     body = client.get("/api/wizard/state").get_json()
     assert body["has_draft"] is True
     assert ds.get_blob("wizard:install") is not None
+
+
+def _wizard_data_with_probe_config(label, description="I2C Bus", default=""):
+    return {
+        "modules": {
+            "grillplatform": {"x86_numato": {"settings_dependencies": {"i2c_bus": {}}}},
+            "probes": {
+                "ads1115_adafruit": {
+                    "settings_dependencies": {},
+                    "device_specific": {"config": [{"label": label, "description": description, "default": default}]},
+                }
+            },
+        }
+    }
+
+
+def test_manifest_fingerprint_covers_probe_config_labels():
+    """A drafted probe device keys its config by these labels, and the stamp
+    is the only thing watching them -- rename one and every draft bound to
+    the old name must read as stale."""
+    from blueprints.api_wizard.routes import _manifest_fingerprint
+
+    assert _manifest_fingerprint(_wizard_data_with_probe_config("i2c_bus_addr")) != _manifest_fingerprint(
+        _wizard_data_with_probe_config("i2c_bus_address")
+    )
+    # Only the names bind a draft's values, so everything around them is
+    # deliberately outside the hash.
+    assert _manifest_fingerprint(
+        _wizard_data_with_probe_config("i2c_bus_addr", description="Address", default="0x48")
+    ) == _manifest_fingerprint(
+        _wizard_data_with_probe_config("i2c_bus_addr", description="Bus Address", default="0x49")
+    )
 
 
 def test_draft_stamp_written_by_save_draft_round_trips_and_is_not_stale(ds, client):
