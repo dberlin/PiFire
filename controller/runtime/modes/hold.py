@@ -99,6 +99,11 @@ class HoldMode(ControlMode):
         # later in the shared pre-loop) -- like StartupMode, take our own
         # ctx.clock.now() reading here rather than depending on that later value.
         self.state.controller.cycle_start = self.ctx.clock.now()
+        # `_on_manual_output` has no `now` of its own (it fires from
+        # `_apply_manual_overrides`, one call before `on_tick` in the same
+        # iteration) -- cache the loop's own notion of now here and refresh it
+        # every tick, rather than let that hook take a fresh clock reading.
+        self._last_now = self.state.controller.cycle_start
 
         if self._runner is not None:
             self._runner.set_output(
@@ -122,6 +127,7 @@ class HoldMode(ControlMode):
     def on_tick(self, now, ptemp, current_output_status):
         import control as _control
 
+        self._last_now = now
         ctx = self.ctx
         control = self.control
         settings = self.settings
@@ -211,6 +217,18 @@ class HoldMode(ControlMode):
             # If we are in a state where the auger ratio is min and we are using the fan for control, turning the fan on here would overshoot the temps.
             # This is a major issue when using piFire for a wood or charcoal pit or a hybrid wood/pellet pit.
             grill_platform.auger_off()
+            self._runner.set_output(
+                AppliedOutput(
+                    ratio=0.0,
+                    source=classify_output_source(
+                        lid_open=True,
+                        manual_override_active=self.state.manual_override["auger"] > now,
+                        fan_assist_active=self.state.fan.assist,
+                    ),
+                    timestamp=now,
+                    requested=self.state.controller.output,
+                )
+            )
             grill_platform.fan_off()
             self.state.timers.auger_toggle = now
             self.state.lid.expires = now + settings["cycle_data"]["LidOpenPauseTime"]
@@ -228,6 +246,18 @@ class HoldMode(ControlMode):
             else:
                 self.state.lid.open_detected = True
                 grill_platform.auger_off()
+                self._runner.set_output(
+                    AppliedOutput(
+                        ratio=0.0,
+                        source=classify_output_source(
+                            lid_open=True,
+                            manual_override_active=self.state.manual_override["auger"] > now,
+                            fan_assist_active=self.state.fan.assist,
+                        ),
+                        timestamp=now,
+                        requested=self.state.controller.output,
+                    )
+                )
                 grill_platform.fan_off()
                 self.state.timers.auger_toggle = now
                 self.state.lid.expires = now + settings["cycle_data"]["LidOpenPauseTime"]
@@ -314,6 +344,21 @@ class HoldMode(ControlMode):
             controller_data = self._runner.controller_state()
             controller_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
             self.ctx.notifications.check(settings, control, pid_data=controller_data)
+
+    def _on_manual_output(self, name, output):
+        if name != "auger" or self._runner is None:
+            return
+        self._runner.set_output(
+            AppliedOutput(
+                ratio=1.0 if output else 0.0,
+                source=classify_output_source(
+                    lid_open=self.state.lid.open_detected,
+                    manual_override_active=True,
+                    fan_assist_active=self.state.fan.assist,
+                ),
+                timestamp=self._last_now,
+            )
+        )
 
     # check_safety is now a declarative pre_act guard (GUARDS["Hold"]); the base
     # ControlMode default (return False) applies here.
