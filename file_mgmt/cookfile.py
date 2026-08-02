@@ -20,6 +20,7 @@ import pathlib
 
 from common.common import (
     generate_uuid,
+    log_path,
     process_metrics,
     semantic_ver_is_lower,
     semantic_ver_to_list,
@@ -445,26 +446,50 @@ def prepare_chartdata(
             chosen = select_indices(series, times, tolerance=tolerance, min_points=data_points, max_points=max_points)
             window = [window_start + i for i in chosen]
 
+        # History rows are durable and name whatever probes were configured
+        # when they were written, while probe_mapper is built from the CURRENT
+        # probe_config. Rename, delete or re-module a probe and every older row
+        # names a key the mapper no longer has -- missing data, not a server
+        # error, so the unresolvable keys are dropped and the rest still draw.
+        # The resolution happens once here rather than inside the row loop,
+        # which runs over every sampled point of a window hundreds of rows wide.
+        history_nt = history.get("NT") or {}
+        history_psp = history.get("PSP") or []
+        probe_slots = [(key, probe_mapper["probes"][key]) for key in history["P"] if key in probe_mapper["probes"]]
+        food_slots = [(key, probe_mapper["probes"][key]) for key in history["F"] if key in probe_mapper["probes"]]
+        target_slots = [(key, probe_mapper["targets"][key]) for key in history_nt if key in probe_mapper["targets"]]
+        # primarysp is iterated from the mapper itself, so its slot always
+        # resolves; what a row set can lack is the shared PSP column it reads.
+        setpoint_slots = list(probe_mapper["primarysp"].values()) if history_psp else []
+
+        dropped = sorted(
+            {key for key in history["P"] if key not in probe_mapper["probes"]}
+            | {key for key in history["F"] if key not in probe_mapper["probes"]}
+            | {key for key in history_nt if key not in probe_mapper["targets"]}
+        )
+        if dropped:
+            create_logger(
+                "events",
+                filename=log_path("events.log"),
+                messageformat="%(asctime)s [%(levelname)s] %(message)s",
+            ).warning(
+                f"Dropped {len(dropped)} history series naming probes the current configuration "
+                f"does not have: {', '.join(dropped)}."
+            )
+
         # Build all lists from file data
         for index in window:
-            for key, value in history["P"].items():
-                chart_data[probe_mapper["probes"][key]]["data"].append(
-                    {"x": history["T"][index], "y": history["P"][key][index]}
-                )
-            for key, value in history["F"].items():
-                chart_data[probe_mapper["probes"][key]]["data"].append(
-                    {"x": history["T"][index], "y": history["F"][key][index]}
-                )
-            for key, value in history["NT"].items():
-                chart_data[probe_mapper["targets"][key]]["data"].append(
-                    {"x": history["T"][index], "y": history["NT"][key][index]}
-                )
-            for key in probe_mapper["primarysp"]:
-                chart_data[probe_mapper["primarysp"][key]]["data"].append(
-                    {"x": history["T"][index], "y": history["PSP"][index]}
-                )
+            timestamp = history["T"][index]
+            for key, slot in probe_slots:
+                chart_data[slot]["data"].append({"x": timestamp, "y": history["P"][key][index]})
+            for key, slot in food_slots:
+                chart_data[slot]["data"].append({"x": timestamp, "y": history["F"][key][index]})
+            for key, slot in target_slots:
+                chart_data[slot]["data"].append({"x": timestamp, "y": history_nt[key][index]})
+            for slot in setpoint_slots:
+                chart_data[slot]["data"].append({"x": timestamp, "y": history_psp[index]})
 
-            time_labels.append(history["T"][index])
+            time_labels.append(timestamp)
     # No history: return empty series. This used to fabricate one point per
     # probe -- a literal 0 stamped at "now" -- which drew a reading that was
     # never taken, the same failure mode as the every-Nth decimation this

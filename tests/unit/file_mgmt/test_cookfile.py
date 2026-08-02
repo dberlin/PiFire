@@ -43,6 +43,7 @@ assertion; each has been flipped to assert the corrected behavior):
 """
 
 import json
+import logging
 import math
 import pathlib
 import zipfile
@@ -447,6 +448,216 @@ def test_prepare_chartdata_reduce_true_carries_null_probe_readings_through():
     grill_points = result["chart_data"][pm["probes"]["grill1"]]["data"]
     assert len(grill_points) == len(food_points) == len(result["time_labels"])
     assert all(point["y"] is not None for point in grill_points)
+
+
+def _all_y_values(result):
+    return [point["y"] for series in result["chart_data"] for point in series["data"]]
+
+
+def test_prepare_chartdata_skips_primary_history_key_absent_from_probe_config(caplog):
+    """CRITICAL regression: history rows are DURABLE and name whatever probes
+    were configured when they were written, while `probe_mapper` is built from
+    the CURRENT `probe_config`. Rename a probe, delete one, or swap a probe
+    module and every older row names a key the mapper does not have, which
+    raised `KeyError` at `chart_data[probe_mapper["probes"][key]]` -- so
+    `GET /api/history/chart` returned a 500 and the History page was dead for
+    as long as those rows stayed in the store, with nothing to recover it.
+
+    A row naming a probe the configuration no longer has is missing data, not
+    a server error: the unresolvable key is dropped and the series that do
+    resolve still render.
+    """
+    history = {
+        "T": [1000, 2000],
+        "PSP": [225, 226],
+        "P": {"grill1": [100, 110], "OldGrill": [500, 510]},
+        "F": {"probe1": [90, 95]},
+        "NT": {"grill1": [225, 225], "probe1": [165, 165]},
+    }
+
+    with caplog.at_level(logging.WARNING, logger="events"):
+        result = prepare_chartdata(_PROBE_CONFIG, num_items=0, reduce=False, data_points=0, history=history)
+
+    pm = result["probe_mapper"]
+    # The unknown key has no dataset to land in and nothing anywhere in the
+    # output carries its readings -- it is absent, not misfiled onto a
+    # neighbouring probe's series.
+    assert "OldGrill" not in pm["probes"]
+    assert 500 not in _all_y_values(result)
+    assert 510 not in _all_y_values(result)
+    # Every key that does resolve is untouched, points and all.
+    assert [pt["y"] for pt in result["chart_data"][pm["probes"]["grill1"]]["data"]] == [100, 110]
+    assert [pt["y"] for pt in result["chart_data"][pm["probes"]["probe1"]]["data"]] == [90, 95]
+    assert result["time_labels"] == [1000, 2000]
+
+
+def test_prepare_chartdata_skips_food_history_key_absent_from_probe_config():
+    """The same durable-row mismatch on the `history["F"]` loop, which reads
+    the same `probe_mapper["probes"]` map."""
+    history = {
+        "T": [1000, 2000],
+        "PSP": [225, 226],
+        "P": {"grill1": [100, 110]},
+        "F": {"probe1": [90, 95], "RetiredFood": [700, 710]},
+        "NT": {"grill1": [225, 225], "probe1": [165, 165]},
+    }
+
+    result = prepare_chartdata(_PROBE_CONFIG, num_items=0, reduce=False, data_points=0, history=history)
+
+    pm = result["probe_mapper"]
+    assert "RetiredFood" not in pm["probes"]
+    assert 700 not in _all_y_values(result)
+    assert [pt["y"] for pt in result["chart_data"][pm["probes"]["probe1"]]["data"]] == [90, 95]
+    assert [pt["y"] for pt in result["chart_data"][pm["probes"]["grill1"]]["data"]] == [100, 110]
+
+
+def test_prepare_chartdata_skips_target_history_key_absent_from_probe_config():
+    """`history["NT"]` resolves against `probe_mapper["targets"]`, a separate
+    map -- a stale notify-target key must drop the same way a probe key does."""
+    history = {
+        "T": [1000, 2000],
+        "PSP": [225, 226],
+        "P": {"grill1": [100, 110]},
+        "F": {"probe1": [90, 95]},
+        "NT": {"grill1": [225, 225], "probe1": [165, 165], "OldGrill": [400, 400]},
+    }
+
+    result = prepare_chartdata(_PROBE_CONFIG, num_items=0, reduce=False, data_points=0, history=history)
+
+    pm = result["probe_mapper"]
+    assert "OldGrill" not in pm["targets"]
+    assert 400 not in _all_y_values(result)
+    assert [pt["y"] for pt in result["chart_data"][pm["targets"]["grill1"]]["data"]] == [225, 225]
+    assert [pt["y"] for pt in result["chart_data"][pm["targets"]["probe1"]]["data"]] == [165, 165]
+
+
+def test_prepare_chartdata_all_history_keys_unknown_returns_empty_probe_series():
+    """A wholesale probe swap leaves rows where NOTHING resolves. That must
+    still return a payload -- empty per-probe series, the legend intact -- and
+    never raise. The primary-setpoint series is keyed off the mapper rather
+    than off a row key, so it is unaffected and still fills."""
+    history = {
+        "T": [1000, 2000],
+        "PSP": [225, 226],
+        "P": {"PitProbe": [100, 110]},
+        "F": {"PinkProbe": [90, 95]},
+        "NT": {"PitProbe": [225, 225], "PinkProbe": [165, 165]},
+    }
+
+    result = prepare_chartdata(_PROBE_CONFIG, num_items=0, reduce=False, data_points=0, history=history)
+
+    pm = result["probe_mapper"]
+    assert result["chart_data"][pm["probes"]["grill1"]]["data"] == []
+    assert result["chart_data"][pm["probes"]["probe1"]]["data"] == []
+    assert result["chart_data"][pm["targets"]["grill1"]]["data"] == []
+    assert result["chart_data"][pm["targets"]["probe1"]]["data"] == []
+    # The datasets still exist with their labels, so the chart keeps its
+    # legend and simply draws nothing for those probes.
+    assert result["chart_data"][pm["probes"]["grill1"]]["label"] == "Grill"
+    assert [pt["y"] for pt in result["chart_data"][pm["primarysp"]["grill1"]]["data"]] == [225, 226]
+    assert result["time_labels"] == [1000, 2000]
+
+
+def test_prepare_chartdata_logs_every_dropped_key_once_per_call(caplog):
+    """A silently-missing series looks like a bug in the chart, so the drop is
+    operator-visible: one WARNING per call naming every key dropped, not one
+    per row of a window that can be hundreds of rows wide."""
+    history = {
+        "T": [1000, 2000, 3000],
+        "PSP": [225, 226, 227],
+        "P": {"grill1": [100, 110, 120], "OldGrill": [500, 510, 520]},
+        "F": {"probe1": [90, 95, 100], "RetiredFood": [700, 710, 720]},
+        "NT": {"grill1": [225, 225, 225], "StaleTarget": [400, 400, 400]},
+    }
+
+    with caplog.at_level(logging.WARNING, logger="events"):
+        prepare_chartdata(_PROBE_CONFIG, num_items=0, reduce=False, data_points=0, history=history)
+
+    warnings = [rec for rec in caplog.records if rec.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    for key in ("OldGrill", "RetiredFood", "StaleTarget"):
+        assert key in message
+
+
+def test_prepare_chartdata_history_without_targets_or_setpoint_still_renders():
+    """`reduce=True` already read NT/PSP through `.get`, but the row loop read
+    them directly -- so a payload lacking either rendered above the fidelity
+    gate and raised below it. Both sources are optional on both paths."""
+    history = {"T": [1000, 2000], "P": {"grill1": [100, 110]}, "F": {"probe1": [90, 95]}}
+
+    result = prepare_chartdata(_PROBE_CONFIG, num_items=0, reduce=False, data_points=0, history=history)
+
+    pm = result["probe_mapper"]
+    assert [pt["y"] for pt in result["chart_data"][pm["probes"]["grill1"]]["data"]] == [100, 110]
+    assert result["chart_data"][pm["targets"]["grill1"]]["data"] == []
+    assert result["chart_data"][pm["primarysp"]["grill1"]]["data"] == []
+    assert result["time_labels"] == [1000, 2000]
+
+
+def test_prepare_chartdata_fully_resolving_payload_is_unchanged_by_the_guard():
+    """The guard must cost a payload whose keys all resolve nothing at all:
+    same datasets, same points, same order, same time_labels."""
+    history = {
+        "T": [1000, 2000, 3000],
+        "PSP": [225, 226, 227],
+        "P": {"grill1": [100, 110, 120]},
+        "F": {"probe1": [90, 95, 100]},
+        "NT": {"grill1": [225, 225, 225], "probe1": [165, 165, 165]},
+    }
+
+    result = prepare_chartdata(_PROBE_CONFIG, num_items=0, reduce=False, data_points=0, history=history)
+
+    pm = result["probe_mapper"]
+    assert pm == {
+        "probes": {"grill1": 0, "probe1": 3},
+        "targets": {"grill1": 1, "probe1": 4},
+        "primarysp": {"grill1": 2},
+    }
+    assert result["time_labels"] == [1000, 2000, 3000]
+    assert [series["data"] for series in result["chart_data"]] == [
+        [{"x": 1000, "y": 100}, {"x": 2000, "y": 110}, {"x": 3000, "y": 120}],
+        [{"x": 1000, "y": 225}, {"x": 2000, "y": 225}, {"x": 3000, "y": 225}],
+        [{"x": 1000, "y": 225}, {"x": 2000, "y": 226}, {"x": 3000, "y": 227}],
+        [{"x": 1000, "y": 90}, {"x": 2000, "y": 95}, {"x": 3000, "y": 100}],
+        [{"x": 1000, "y": 165}, {"x": 2000, "y": 165}, {"x": 3000, "y": 165}],
+    ]
+
+
+def test_prepare_chartdata_reduce_path_ignores_the_mapper_entirely():
+    """The `series` list handed to `select_indices` iterates the history's own
+    values and never consults `probe_mapper`, so an unresolvable key reaches
+    the fidelity arithmetic unchanged: the selected window is identical
+    whether or not the current config still knows that probe."""
+    n = 12000
+    grill = [200.0 + 20.0 * math.sin(2 * math.pi * i / 3000.0) for i in range(n)]
+    stale = [50.0 + 40.0 * math.sin(2 * math.pi * i / 700.0) for i in range(n)]
+    base = {
+        "T": [1700000000000 + i * 3000 for i in range(n)],
+        "PSP": [225.0] * n,
+        "F": {"probe1": [90.0] * n},
+        "NT": {"grill1": [225.0] * n, "probe1": [165.0] * n},
+    }
+
+    with_stale = prepare_chartdata(
+        _PROBE_CONFIG,
+        num_items=n,
+        reduce=True,
+        data_points=10000,
+        history={**base, "P": {"grill1": list(grill), "OldGrill": stale}},
+    )
+    stale_as_known = prepare_chartdata(
+        {**_PROBE_CONFIG, "OldGrill": _PROBE_CONFIG["probe1"]},
+        num_items=n,
+        reduce=True,
+        data_points=10000,
+        history={**base, "P": {"grill1": list(grill), "OldGrill": stale}},
+    )
+
+    assert with_stale["time_labels"] == stale_as_known["time_labels"]
+    grill_slot = with_stale["probe_mapper"]["probes"]["grill1"]
+    known_slot = stale_as_known["probe_mapper"]["probes"]["grill1"]
+    assert with_stale["chart_data"][grill_slot]["data"] == stale_as_known["chart_data"][known_slot]["data"]
 
 
 # ---------------------------------------------------------------------------
