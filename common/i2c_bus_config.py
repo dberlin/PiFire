@@ -183,9 +183,12 @@ def parse_i2c_bus(data):
         value = data[name]
         if name == "bus_num":
             try:
-                return KernelBusNumber(bus_num=int(value))
+                bus_num = int(value)
             except TypeError, ValueError:
                 raise I2CBusConfigError(f"A kernel bus_num must be a number, got {value!r}.") from None
+            if bus_num < 0:
+                raise I2CBusConfigError(f"A kernel bus_num must be zero or greater, got {bus_num!r}.")
+            return KernelBusNumber(bus_num=bus_num)
         text = str(value).strip()
         if not text:
             raise I2CBusConfigError(f"A kernel I2C bus addressed by {name} needs a value.")

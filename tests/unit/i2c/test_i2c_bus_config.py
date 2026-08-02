@@ -82,6 +82,14 @@ def test_kernel_rejects_a_non_numeric_bus_num():
         parse_i2c_bus({"kind": "kernel", "bus_num": "CP2112"})
 
 
+def test_kernel_rejects_a_negative_bus_num():
+    """No /dev/i2c-N exists for a negative N; the wizard's i2cBusError rejects
+    it too, so a settings import or restored backup must match that rule
+    rather than accepting a bus_num the wizard would never have let through."""
+    with pytest.raises(I2CBusConfigError, match="zero or greater"):
+        parse_i2c_bus({"kind": "kernel", "bus_num": -1})
+
+
 def test_a_kind_rejects_a_field_belonging_to_another_kind():
     """The whole point of the hierarchy: an ft232h bus has nowhere to keep a
     kernel adapter name, so a stale one cannot survive a change of kind."""
