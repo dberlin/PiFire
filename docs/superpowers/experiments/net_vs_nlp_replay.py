@@ -45,6 +45,45 @@ transient ends instead of whether it ends. The lid-open window is always well
 past this point (its own onset is a controller/plan-defined disturbance, not a
 symptom of startup), so lid-window figures are not split into whole/warm.
 
+Two knobs select which experiment arm a run measures, and both are recorded
+into every output row so a later comparison can tell arms apart.
+
+`lid_model` chooses how the lid-open window is modelled:
+
+  * "faithful" (default) reproduces controller/runtime/modes/hold.py. At the
+    detection instant hold.py:243-265 turns the auger off, reports a single
+    AppliedOutput(ratio=0.0), and resets the cycle timer; that block cannot
+    re-fire during the pause because it clears target_temp_achieved
+    (hold.py:266), which only re-arms once the plant is back at set point
+    (hold.py:234). For the remainder of the pause hold.py:171-173 pins the
+    commanded ratio to u_min, hold.py:206-217 reports that u_min once per
+    control period, and hold.py:228 calls _auger_cycle_tick unconditionally --
+    base.py:118-147 has no lid gate, so the auger keeps cycling at u_min. The
+    fan is off throughout (hold.py:263 at detection, hold.py:271 at clear).
+  * "stress" holds ratio at 0.0 for the entire pause and keeps the auger fully
+    off. No production path does this; it drives the sub-u_min inverse far
+    harder and far longer than a real grill can, and is kept as a deliberate
+    upper bound on the lid-window disagreement, not as the measurement.
+
+`estimator_input` chooses what the estimator's transport-lag chain is fed:
+
+  * "applied" (default) reports every applied duty through set_output, so
+    _policy_u_prev derives from what reached the auger.
+  * "command" withholds those reports entirely. update() overwrites _applied_Q
+    with each freshly computed command, so with nothing else writing it,
+    _policy_u_prev derives from the command -- reproducing the pre-Task-13
+    behavior on a post-Task-13 checkout. This exists so both arms can be run
+    under the SAME lid model; see the comparability note below.
+
+COMPARABILITY: the stored baseline was captured under lid_model="stress", so a
+lid_model="faithful" run is NOT directly comparable to it -- the lid model
+changes the plant trajectory (auger off for 120s versus cycling at u_min), not
+just the estimator's input, so the two would differ in the lid window on one
+side only. Compare arms within a single lid model. The stored baseline's role
+is to validate that estimator_input="command" + lid_model="stress" reproduces
+it; once that holds, the "command" arm is a trustworthy reference under either
+lid model.
+
 Set applied_q_split_expected=True (or --applied-q-split-expected on the CLI)
 for the after-Task-13 run. The flag is checked against actual behavior, not
 attribute presence: hasattr(core, "_applied_Q") is true on any checkout at
@@ -71,6 +110,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from controller.applied_output import AppliedOutput, OutputSource  # noqa: E402
 from controller.grill_sim import GrillSim  # noqa: E402
 from controller.mpc import Controller  # noqa: E402
 from controller.mpc_net import NetPolicy, net_path_for  # noqa: E402
@@ -120,8 +160,6 @@ def _split_is_live(cycle_data):
     that only checks presence would let a mis-targeted after-run silently
     reproduce the baseline and read as "no change" instead of failing loudly.
     """
-    from controller.applied_output import AppliedOutput, OutputSource
-
     probe = Controller({"policy": "nlp"}, "F", dict(cycle_data))
     before = getattr(probe, "_applied_Q", None)
     probe.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 0.0))
@@ -135,7 +173,13 @@ def replay(
     lid_open_for=120,
     setpoint_f=225.0,
     applied_q_split_expected=False,
+    lid_model="faithful",
+    estimator_input="applied",
 ):
+    if lid_model not in ("faithful", "stress"):
+        raise ValueError(f"lid_model must be 'faithful' or 'stress', got {lid_model!r}")
+    if estimator_input not in ("applied", "command"):
+        raise ValueError(f"estimator_input must be 'applied' or 'command', got {estimator_input!r}")
     core = Controller({"policy": "nlp"}, "F", CYCLE_DATA)
     assert core._net is None, "configure policy=nlp; the point is to log the NLP's answers"
     # which side of the Task 13 landing we're on is a caller-supplied flag
@@ -145,13 +189,23 @@ def replay(
     # set_output no-op (see _split_is_live's docstring). This does not check
     # that `_last_Q` still means what this harness thinks it means; that is
     # the provenance pin further down, in the per-solve loop.
-    assert _split_is_live(CYCLE_DATA) == applied_q_split_expected, (
+    split_live = _split_is_live(CYCLE_DATA)
+    assert split_live == applied_q_split_expected, (
         f"applied_q_split_expected={applied_q_split_expected} does not match "
         "this checkout's actual behavior. A bare hasattr(core, '_applied_Q') "
         "check would pass here even against a pre-Task-13 checkout -- Task 12 "
         "added the attribute a task before the behavior existed -- and a "
         "mis-targeted after-run would then silently reproduce the baseline "
         "instead of failing loudly. Fix the flag, not this assertion."
+    )
+    # The flag above describes the CHECKOUT; estimator_input describes the ARM.
+    # An "applied" arm on a checkout where set_output cannot move _applied_Q
+    # would silently be a "command" arm wearing the other label -- the same
+    # failure the flag exists to prevent, one level up.
+    assert estimator_input == "command" or split_live, (
+        "estimator_input='applied' on a checkout where set_output cannot move "
+        "_applied_Q -- this arm would silently reproduce the 'command' arm and "
+        "the two would read as agreeing when they were never distinguished."
     )
     core.set_target(setpoint_f)
     plant = GrillSim(seed=seed)
@@ -247,24 +301,43 @@ def replay(
                 "be trusted again."
             )
             ratio = min(max(float(raw["cycle_ratio"]), core.u_min), core.u_max)
-            if hasattr(core, "set_output"):
-                from controller.applied_output import AppliedOutput, OutputSource
-
+            # hold.py:171-173 replaces the controller's answer with u_min for
+            # the whole pause, before the u_min floor and u_max ceiling below
+            # it can apply. The stress model leaves the controller's answer in
+            # place and reports 0.0 for it instead.
+            if lid and lid_model == "faithful":
+                ratio = core.u_min
+            if estimator_input == "applied":
                 core.set_output(
                     AppliedOutput(
-                        ratio=0.0 if lid else ratio,
+                        ratio=0.0 if (lid and lid_model == "stress") else ratio,
                         source=OutputSource.LID_OPEN if lid else OutputSource.CONTROLLER,
                         timestamp=float(t),
                     )
                 )
-        if lid:
+        if lid and lid_model == "stress":
+            auger_on, auger_toggle, auger_frac = False, t, 0.0
+        elif lid and t == lid_open_at:
+            # The harness imposes the pause rather than detecting it, so its
+            # first second stands in for hold.py's detection instant: auger
+            # off, cycle timer reset, and one AppliedOutput(0.0) report
+            # (hold.py:247-264). That block clears target_temp_achieved
+            # (hold.py:266) and so cannot fire again until the plant is back at
+            # set point (hold.py:234) -- hence exactly one 0.0, not a stream.
+            if estimator_input == "applied":
+                core.set_output(AppliedOutput(ratio=0.0, source=OutputSource.LID_OPEN, timestamp=float(t)))
             auger_on, auger_toggle, auger_frac = False, t, 0.0
         else:
+            # hold.py:228 calls _auger_cycle_tick unconditionally and
+            # base.py:118-147 has no lid gate, so through the rest of the pause
+            # the auger keeps cycling at the pinned u_min.
             auger_on, auger_toggle, auger_frac = _auger_toggle_tick(auger_on, auger_toggle, t, ratio, cycle_time)
+        # The fan is off for the whole pause under either model: hold.py:263
+        # cuts it at detection and hold.py:271 only restarts it at clear.
         plant.step(auger_on=auger_frac, fan_frac=0.0 if lid else fan_frac)
         temps.append(temp_f)
-        realized_duty.append(0.0 if lid else auger_frac)
-        commanded_duty.append(0.0 if lid else ratio)
+        realized_duty.append(auger_frac)
+        commanded_duty.append(0.0 if (lid and lid_model == "stress") else ratio)
 
     n_failed = int(sum(solve_failed))
     if n_failed:
@@ -361,6 +434,10 @@ def replay(
     return {
         "seed": seed,
         "applied_q_split_expected": bool(applied_q_split_expected),
+        # Which experiment arm produced this row. Rows from different
+        # lid_models are not comparable to each other (see module docstring).
+        "lid_model": lid_model,
+        "estimator_input": estimator_input,
         "n": int(diffs_clamped.size),
         "n_lid": int(lid_mask.sum()),
         "warm_start_s": int(warm_start_s),
@@ -422,15 +499,38 @@ def main(argv=None):
         action="store_true",
         help="Set for the after-Task-13 run, once Controller exposes _applied_Q.",
     )
+    ap.add_argument(
+        "--lid-model",
+        choices=("faithful", "stress"),
+        default="faithful",
+        help="'faithful' mirrors hold.py (0.0 once, then u_min, auger cycling); "
+        "'stress' holds 0.0 with the auger off for the whole pause.",
+    )
+    ap.add_argument(
+        "--estimator-input",
+        choices=("applied", "command"),
+        default="applied",
+        help="'applied' reports duty through set_output; 'command' withholds "
+        "those reports, reproducing pre-Task-13 behavior on a post-Task-13 checkout.",
+    )
     args = ap.parse_args(argv)
-    rows = [replay(seed=s, applied_q_split_expected=args.applied_q_split_expected) for s in args.seeds]
+    rows = [
+        replay(
+            seed=s,
+            applied_q_split_expected=args.applied_q_split_expected,
+            lid_model=args.lid_model,
+            estimator_input=args.estimator_input,
+        )
+        for s in args.seeds
+    ]
     with open(args.out, "w") as f:
         json.dump(rows, f, indent=1, sort_keys=True)
     for r in rows:
         print(
             f"seed {r['seed']}: mean_temp_last_hour_f={r['mean_temp_last_hour_f']:.1f} "
             f"realized_duty={r['realized_duty_mean']:.3f} commanded_duty={r['commanded_duty_mean']:.3f} "
-            f"warm_start_s={r['warm_start_s']} applied_q_split_expected={r['applied_q_split_expected']}"
+            f"warm_start_s={r['warm_start_s']} applied_q_split_expected={r['applied_q_split_expected']} "
+            f"lid_model={r['lid_model']} estimator_input={r['estimator_input']}"
         )
         print(
             f"  excursions: warm={r['excursion_n_warm']}/{r['n']} lid={r['excursion_n_lid']}/{r['n_lid']} "

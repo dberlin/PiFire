@@ -2,6 +2,7 @@
  {
   "applied_q_split_expected": true,
   "commanded_duty_mean": 0.17038608952434692,
+  "estimator_input": "applied",
   "excursion_n_lid": 0,
   "excursion_n_warm": 57,
   "excursion_n_whole": 63,
@@ -13,6 +14,7 @@
   "excursion_worst_below_q_min_lid": 0.0,
   "excursion_worst_below_q_min_warm": 0.25385626320481514,
   "excursion_worst_below_q_min_whole": 0.25385626320481514,
+  "lid_model": "stress",
   "margin_min_to_q_max_lid": 66.70471231870653,
   "margin_min_to_q_max_whole": 5.1621558463843655,
   "margin_min_to_q_min_lid": 0.46827986828179036,
@@ -40,6 +42,7 @@
  {
   "applied_q_split_expected": true,
   "commanded_duty_mean": 0.17048299521760857,
+  "estimator_input": "applied",
   "excursion_n_lid": 0,
   "excursion_n_warm": 42,
   "excursion_n_whole": 43,
@@ -51,6 +54,7 @@
   "excursion_worst_below_q_min_lid": 0.0,
   "excursion_worst_below_q_min_warm": 0.28500519495836407,
   "excursion_worst_below_q_min_whole": 0.3826589758218395,
+  "lid_model": "stress",
   "margin_min_to_q_max_lid": 66.98335209534406,
   "margin_min_to_q_max_whole": 5.162246416226878,
   "margin_min_to_q_min_lid": 0.3641023392059344,
@@ -78,6 +82,7 @@
  {
   "applied_q_split_expected": true,
   "commanded_duty_mean": 0.17011200653431754,
+  "estimator_input": "applied",
   "excursion_n_lid": 0,
   "excursion_n_warm": 54,
   "excursion_n_whole": 54,
@@ -89,6 +94,7 @@
   "excursion_worst_below_q_min_lid": 0.0,
   "excursion_worst_below_q_min_warm": 0.3166455583552512,
   "excursion_worst_below_q_min_whole": 0.3166455583552512,
+  "lid_model": "stress",
   "margin_min_to_q_max_lid": 65.44613284144647,
   "margin_min_to_q_max_whole": 5.162581880914317,
   "margin_min_to_q_min_lid": 0.34037486436076314,
