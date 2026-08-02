@@ -432,6 +432,25 @@ describe("RangeProfileTable", () => {
       expect([...next].sort((a: number, b: number) => a - b)).toEqual(next);
     });
 
+    it("disables every input and both buttons when disabled", () => {
+      render(
+        <RangeProfileTable
+          boundaries={[3, 7]}
+          profiles={[{ duty_cycle: 20 }, { duty_cycle: 50 }, { duty_cycle: 100 }]}
+          columns={[{ key: "duty_cycle", label: "Duty cycle", suffix: "%", min: 1, max: 100 }]}
+          rangeHeader="ΔT range"
+          unit="°F"
+          onChange={() => {}}
+          disabled
+        />,
+      );
+      for (const input of screen.getAllByRole("spinbutton")) {
+        expect(input).toBeDisabled();
+      }
+      expect(screen.getByRole("button", { name: "+ Add" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Remove row 1" })).toBeDisabled();
+    });
+
     it("still refuses to remove below 2 profiles", () => {
       const onChange = rs.fn();
       render(

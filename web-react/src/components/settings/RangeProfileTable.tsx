@@ -57,6 +57,7 @@ export function RangeProfileTable({
   onChange,
   boundaryMin,
   boundaryMax,
+  disabled = false,
 }: {
   boundaries: number[];
   profiles: Record<string, number>[];
@@ -66,8 +67,11 @@ export function RangeProfileTable({
   onChange: (boundaries: number[], profiles: Record<string, number>[]) => void;
   boundaryMin?: number;
   boundaryMax?: number;
+  /** Render read-only. The rows still show their values: the settings they
+   *  describe are unreachable, not unset. */
+  disabled?: boolean;
 }) {
-  const canRemove = profiles.length > 2;
+  const canRemove = !disabled && profiles.length > 2;
   // An out-of-order keystroke is held here instead of being pushed up, so
   // `onChange` is never called with an unsorted array while multi-digit entry
   // still works ("9" on its way to "95" is momentarily out of range).
@@ -168,6 +172,7 @@ export function RangeProfileTable({
                         aria-label={`Boundary ${rowIndex + 1}`}
                         min={lower}
                         max={upper}
+                        disabled={disabled}
                         value={draft?.index === rowIndex ? draft.text : boundaries[rowIndex]}
                         onChange={(e) => handleBoundaryChange(rowIndex, e.target.value)}
                         onBlur={() => handleBoundaryBlur(rowIndex)}
@@ -183,6 +188,7 @@ export function RangeProfileTable({
                     aria-label={`${col.label} row ${rowIndex + 1}`}
                     min={col.min}
                     max={col.max}
+                    disabled={disabled}
                     value={row[col.key] ?? 0}
                     onChange={(e) => handleCellChange(rowIndex, col, e.target.value)}
                   />
@@ -209,7 +215,7 @@ export function RangeProfileTable({
           {boundaryError}
         </p>
       )}
-      <button type="button" className="pf-rpt-add" onClick={handleAdd}>
+      <button type="button" className="pf-rpt-add" disabled={disabled} onClick={handleAdd}>
         + Add
       </button>
     </div>
