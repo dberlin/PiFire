@@ -1,3 +1,4 @@
+import inspect
 import itertools
 
 import pytest
@@ -23,8 +24,9 @@ PRECEDENCE_CASES = [
 
 
 def test_precedence_cases_cover_every_boolean_combination():
-    covered = {case[:3] for case in PRECEDENCE_CASES}
-    expected = set(itertools.product([False, True], repeat=3))
+    arity = len(inspect.signature(classify_output_source).parameters)
+    covered = {case[:arity] for case in PRECEDENCE_CASES}
+    expected = set(itertools.product([False, True], repeat=arity))
     assert covered == expected
 
 
