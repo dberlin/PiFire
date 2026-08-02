@@ -248,7 +248,7 @@
       "debug_mode": false,
       "disp_rotation": 0,
       "ext_data": false,
-      "first_time_setup": true,
+      "first_time_setup": false,
       "grill_name": "",
       "prime_ignition": false,
       "python_exec": ".venv/bin/python",

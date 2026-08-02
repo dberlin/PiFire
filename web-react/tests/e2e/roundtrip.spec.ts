@@ -90,8 +90,12 @@ test("manual mode exposes the output relays and toggles one end to end", async (
 
   // The button row becomes the output control panel (legacy's control-panel
   // buttons, hidden outside Manual mode).
+  // Exact: the row also carries a "Fan %" duty button, which a substring match
+  // on "Fan" resolves to alongside the relay button.
   for (const label of ["Power", "Igniter", "Auger", "Fan"]) {
-    await expect(page.getByRole("button", { name: label })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("button", { name: label, exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
   }
 
   // Toggle the auger ON and confirm it round-trips all the way to the control

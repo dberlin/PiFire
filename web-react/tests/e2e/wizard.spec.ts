@@ -13,7 +13,7 @@ test("display step selection + config edit round-trips as a draft, then is clear
   await page.getByRole("button", { name: "Next" }).click();
   await expect(page.getByRole("heading", { name: "Probes" })).toBeVisible();
   await page.getByRole("button", { name: "Next" }).click();
-  await expect(page.getByRole("heading", { name: "Display" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Display", exact: true })).toBeVisible();
 
   // Pick a non-default display module (ili9341b is the manifest default) and
   // edit its "Screen Rotation" config field.
@@ -119,7 +119,7 @@ test("probes step: add device + probe, staged into draft", async ({ page }) => {
   expect(parsed.probe_map.probe_info[0].device).toBe("ADS1115Adafruit");
   expect(parsed.probe_map.probe_info[0].port).toBe("ADC0");
 
-  await expect(page.getByRole("heading", { name: "Display" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Display", exact: true })).toBeVisible();
 
   // Do NOT click Finish here -- it would fire the real installer.
 
@@ -166,7 +166,7 @@ test("distance step renders the sensor module card and switches modules", async 
   await page.getByRole("button", { name: "Next" }).click();
   await expect(page.getByRole("heading", { name: "Probes" })).toBeVisible();
   await page.getByRole("button", { name: "Next" }).click();
-  await expect(page.getByRole("heading", { name: "Display" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Display", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Next" }).click();
   await expect(page.getByRole("heading", { name: "Distance / Hopper" })).toBeVisible();
 
