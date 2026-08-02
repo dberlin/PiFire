@@ -175,21 +175,47 @@ def test_a_save_without_a_prior_load_still_honors_the_stored_revision():
     assert second.load("pid_sp")["K"] == 999.0
 
 
-def test_a_reset_revision_after_a_restart_is_rejected_and_logged(caplog):
-    # C1: a producer whose revision counter is per-process (resets on restart)
-    # must be rejected -- and that rejection must be visible, not a bare False
-    # that looks identical to every other reason a save can fail.
-    fake = _FakeStore()
-    first = ControllerModelStore(reader=fake.read, writer=fake.write)
-    first.save("pid_sp", {"revision": 57, "K": 700.0})
+def test_a_reset_revision_is_logged_at_error_under_the_shipped_default_log_level(caplog):
+    # C1 (fix round 2): control.py sets the "control" logger to ERROR whenever
+    # debug_mode is off -- the shipped default -- so a bare .warning() never
+    # reaches a log file in production. This test does NOT loosen that
+    # threshold with caplog.at_level(); it reproduces the exact production
+    # configuration and proves the message survives anyway, because a
+    # revision going backwards is the one outcome that must be logged at
+    # ERROR, not merely observable when a test raises the level for it.
+    control_logger = logging.getLogger("control")
+    previous_level = control_logger.level
+    control_logger.setLevel(logging.ERROR)  # matches control.py's debug_mode=False branch
+    try:
+        fake = _FakeStore()
+        first = ControllerModelStore(reader=fake.read, writer=fake.write)
+        first.save("pid_sp", {"revision": 57, "K": 700.0})
 
-    second = ControllerModelStore(reader=fake.read, writer=fake.write)
-    with caplog.at_level(logging.WARNING, logger="control"):
+        second = ControllerModelStore(reader=fake.read, writer=fake.write)
         result = second.save("pid_sp", {"revision": 1, "K": 999.0})
+    finally:
+        control_logger.setLevel(previous_level)
+
     assert result is False
     assert fake.writes == 1  # only the first, genuine save landed
+    assert any(record.levelno >= logging.ERROR for record in caplog.records)
     assert "pid_sp" in caplog.text
     assert "57" in caplog.text  # names the stored baseline it lost to
+
+
+def test_an_equal_revision_is_rejected_quietly_not_as_an_error(caplog):
+    # The other half of the same rejection path: a revision equal to the last
+    # persisted one means nothing changed -- the expected, frequent outcome on
+    # a control interval where the controller learned nothing new. This must
+    # stay below ERROR, or the shipped default log would drown in noise from
+    # every quiescent tick of every controller.
+    store, fake = _store()
+    store.save("pid_sp", {"revision": 5, "K": 700.0})
+    with caplog.at_level(logging.DEBUG, logger="control"):
+        result = store.save("pid_sp", {"revision": 5, "K": 999.0})
+    assert result is False
+    assert fake.writes == 1  # only the first, genuine save landed
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
 
 def test_a_transient_read_failure_blocks_the_write_instead_of_erasing_other_entries():
@@ -232,6 +258,32 @@ def test_save_is_fail_closed_on_a_bad_envelope(raw):
     store = ControllerModelStore(reader=fake.read, writer=fake.write)
     assert store.save("pid_sp", FOPDT) is False
     assert fake.writes == 0
+
+
+def test_load_priming_avoids_a_read_on_a_subsequent_cache_hit_save():
+    # load()'s priming of the revision cache is a pure performance optimization,
+    # not a correctness requirement: I3's cold-path fallback already re-derives
+    # the baseline from a fresh read whenever the cache is empty, so a correct
+    # reject-or-accept answer does not depend on load() having run first. What
+    # priming buys is skipping that read entirely on a cache hit -- pin it so a
+    # future change cannot silently turn the cheap, common "nothing changed"
+    # path back into one that reads storage on every call.
+    fake = _FakeStore()
+    fake.reads = 0
+    underlying_read = fake.read
+
+    def counting_read(key):
+        fake.reads += 1
+        return underlying_read(key)
+
+    first = ControllerModelStore(reader=counting_read, writer=fake.write)
+    first.save("pid_sp", {"revision": 5, "K": 700.0})
+
+    second = ControllerModelStore(reader=counting_read, writer=fake.write)
+    second.load("pid_sp")
+    reads_before = fake.reads
+    assert second.save("pid_sp", {"revision": 5, "K": 999.0}) is False
+    assert fake.reads == reads_before  # cache hit primed by load(): no read needed
 
 
 def test_round_trips_through_the_real_datastore_seam(ds):

@@ -28,9 +28,19 @@
  restart instead of surviving it) will have every save rejected as
  non-advancing once its counter falls behind the last value this store
  persisted, and it will not climb back past that value until the cook is nearly
- over, if at all. That failure mode is otherwise invisible -- the store looks
- healthy, every call returns cleanly -- so a rejected save always logs a
- warning naming the controller and the revisions involved.
+ over, if at all.
+
+ A non-advancing save is logged, but the two ways to get one are not the same
+ event and are not logged the same way. Equal to the last persisted revision
+ means nothing changed since the last save -- normal, frequent (every control
+ interval where the controller learned nothing new) and quiet by design, at
+ DEBUG. Strictly below the last persisted revision can only mean the producer's
+ own counter went backwards, i.e. the restart scenario above -- rare, always
+ wrong, and the operator has no other way to find out, so it is logged at
+ ERROR. That distinction matters because `control.py` sets this module's logger
+ to ERROR whenever `debug_mode` is off, which is the shipped default: a bare
+ `.warning()` here would never reach a log file in production, and a `.error()`
+ on every equal-revision no-op would flood it into unreadability.
 
 *****************************************
 """
@@ -91,13 +101,7 @@ class ControllerModelStore:
         # touching storage -- the common case on ticks where nothing was learned.
         cached = self._revisions.get(name)
         if cached is not None and revision <= cached:
-            _logger.warning(
-                "controller_model_state: rejecting non-advancing revision %s for %r "
-                "(this process last persisted revision %s)",
-                revision,
-                name,
-                cached,
-            )
+            self._log_non_advancing(name, revision, cached)
             return False
 
         models, safe = self._read_state()
@@ -119,14 +123,7 @@ class ControllerModelStore:
         if cached is None:
             existing = models.get(name)
             if existing is not None and revision <= existing["revision"]:
-                _logger.warning(
-                    "controller_model_state: rejecting non-advancing revision %s for %r "
-                    "(last persisted revision was %s) -- if this producer's revision counter "
-                    "reset across a restart, its model will never persist again",
-                    revision,
-                    name,
-                    existing["revision"],
-                )
+                self._log_non_advancing(name, revision, existing["revision"])
                 return False
 
         models[name] = snapshot
@@ -137,6 +134,40 @@ class ControllerModelStore:
             return False
         self._revisions[name] = revision
         return True
+
+    @staticmethod
+    def _log_non_advancing(name, revision, baseline):
+        """Log a rejected save -- at a level that matches how alarming it is.
+
+        `revision == baseline`: nothing changed since the last save. This is the
+        expected, frequent outcome on a control interval where the controller
+        learned nothing new, so it stays quiet at DEBUG.
+
+        `revision < baseline`: the incoming revision went backwards. The only way
+        that happens is a producer whose revision counter did not survive a
+        restart (see the module docstring's contract on `revision`) -- from here
+        every save for the rest of the cook is rejected the same way, and there
+        is no other signal that it happened. Logged at ERROR, matching the
+        precedent at common/control_delta.py's unsupported-version drop: it is
+        always wrong, and ERROR is the only level that survives `control.py`
+        setting this logger to ERROR whenever `debug_mode` is off.
+        """
+        if revision == baseline:
+            _logger.debug(
+                "controller_model_state: %r at revision %s matches the last persisted revision; nothing to save",
+                name,
+                revision,
+            )
+        else:
+            _logger.error(
+                "controller_model_state: revision %s for %r is BEHIND the last persisted revision %s -- its "
+                "revision counter likely reset across a restart, and its model will not persist again until "
+                "the counter climbs back past %s",
+                revision,
+                name,
+                baseline,
+                baseline,
+            )
 
     def _read_state(self):
         """Every stored snapshot, plus whether that read is trustworthy enough to write over.
