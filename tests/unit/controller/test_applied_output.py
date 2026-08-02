@@ -1,3 +1,5 @@
+import itertools
+
 import pytest
 
 from controller.applied_output import (
@@ -8,18 +10,25 @@ from controller.applied_output import (
 )
 
 
-@pytest.mark.parametrize(
-    "lid,manual,fan,expected",
-    [
-        (False, False, False, OutputSource.CONTROLLER),
-        (False, False, True, OutputSource.FAN_ASSIST),
-        (True, False, False, OutputSource.LID_OPEN),
-        (True, False, True, OutputSource.LID_OPEN),
-        (False, True, False, OutputSource.MANUAL_OVERRIDE),
-        (True, True, False, OutputSource.MANUAL_OVERRIDE),
-        (True, True, True, OutputSource.MANUAL_OVERRIDE),
-    ],
-)
+PRECEDENCE_CASES = [
+    (False, False, False, OutputSource.CONTROLLER),
+    (False, False, True, OutputSource.FAN_ASSIST),
+    (True, False, False, OutputSource.LID_OPEN),
+    (True, False, True, OutputSource.LID_OPEN),
+    (False, True, False, OutputSource.MANUAL_OVERRIDE),
+    (False, True, True, OutputSource.MANUAL_OVERRIDE),
+    (True, True, False, OutputSource.MANUAL_OVERRIDE),
+    (True, True, True, OutputSource.MANUAL_OVERRIDE),
+]
+
+
+def test_precedence_cases_cover_every_boolean_combination():
+    covered = {case[:3] for case in PRECEDENCE_CASES}
+    expected = set(itertools.product([False, True], repeat=3))
+    assert covered == expected
+
+
+@pytest.mark.parametrize("lid,manual,fan,expected", PRECEDENCE_CASES)
 def test_precedence(lid, manual, fan, expected):
     assert classify_output_source(lid, manual, fan) is expected
 
@@ -63,3 +72,17 @@ def test_seed_output_reports_zero_when_the_auger_is_off():
         0.5, 100.0, lid_open=False, manual_override_active=False, fan_assist_active=False, auger_output=False
     )
     assert applied.ratio == 0.0
+
+
+def test_seed_output_reports_manual_override_when_active():
+    applied = seed_output(
+        0.15, 100.0, lid_open=False, manual_override_active=True, fan_assist_active=False, auger_output=True
+    )
+    assert applied.source is OutputSource.MANUAL_OVERRIDE
+
+
+def test_seed_output_reports_fan_assist_when_active():
+    applied = seed_output(
+        0.15, 100.0, lid_open=False, manual_override_active=False, fan_assist_active=True, auger_output=True
+    )
+    assert applied.source is OutputSource.FAN_ASSIST
