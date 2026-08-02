@@ -78,6 +78,13 @@ class ControllerBase:
 
         Return None to publish the controller's __dict__, which is the legacy
         behavior and correct for controllers whose attributes are all scalars.
+
+        An override may assume set_target() has already been called at least
+        once: `_build_core` (controller/runtime/runner.py) constructs the core
+        and calls set_target() in the same try/except, so a core that failed to
+        take a setpoint never escapes to have get_status() (or anything else)
+        called on it. An implementation that reads a set_target()-assigned
+        attribute does not need to guard against it being unset.
         """
         return None
 

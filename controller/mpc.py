@@ -20,6 +20,7 @@
 *****************************************
 """
 
+import math
 import os
 import time
 
@@ -78,6 +79,17 @@ _DEFAULTS = dict(
 
 def _to_c(value, units):
     return (value - 32.0) * 5.0 / 9.0 if units == "F" else value
+
+
+def _finite_float(value):
+    """Cast to float, or None if the result is not finite.
+
+    A diverged solve or estimator can produce NaN/inf; json.dumps(allow_nan=False)
+    rejects NaN outright, and the MQTT handler's default allow_nan=True instead
+    emits the bare token NaN, which is not valid JSON. None survives both.
+    """
+    value = float(value)
+    return value if math.isfinite(value) else None
 
 
 def _load_net_policy(cfg):
@@ -294,13 +306,19 @@ class Controller(ControllerBase):
     def get_status(self):
         return {
             "set_point": self.set_point,
-            "set_point_c": float(self._set_point_c),
-            "last_Q": float(self._last_Q),
-            "applied_Q": float(self._applied_Q),
+            "set_point_c": _finite_float(self._set_point_c),
+            "last_Q": _finite_float(self._last_Q),
+            "applied_Q": _finite_float(self._applied_Q),
             "policy": "net" if self._net is not None else "nlp",
-            "u_min": float(self.u_min),
-            "u_max": float(self.u_max),
-            "x_hat": None if self._x_hat is None else [float(v) for v in np.asarray(self._x_hat).reshape(-1)],
+            "u_min": _finite_float(self.u_min),
+            "u_max": _finite_float(self.u_max),
+            "x_hat": None
+            if self._x_hat is None
+            else tuple(_finite_float(v) for v in np.asarray(self._x_hat).reshape(-1)),
+            # The __dict__ fallback this replaces reached the pid_cycle_data mqtt
+            # topic only through notify()'s nested-dict recursion over this same
+            # attribute; publish it explicitly so that topic keeps working.
+            "cycle_data": self.cycle_data,
         }
 
     def set_output(self, applied):

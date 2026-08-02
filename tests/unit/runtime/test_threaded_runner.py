@@ -140,6 +140,30 @@ def test_threaded_runner_controller_state_snapshot():
         r.stop()
 
 
+class _StatusBeforeSolveCore(FakeCore):
+    """get_status() answers immediately, before any update() -- exercises the
+    runner's seeding of the *initial* snapshot in __init__, not just the
+    post-solve reseed in _loop."""
+
+    def __init__(self):
+        super().__init__()
+        self.leaky = object()  # would appear in the snapshot if __init__ used __dict__
+
+    def get_status(self):
+        return {"safe": 1.0}
+
+
+def test_threaded_runner_seeds_initial_snapshot_from_get_status():
+    core = _StatusBeforeSolveCore()
+    r = ThreadedControllerRunner(core)
+    try:
+        snap = r.controller_state()
+        assert snap["safe"] == 1.0
+        assert "leaky" not in snap  # get_status() seeded it, not core.__dict__
+    finally:
+        r.stop()
+
+
 def test_controller_state_pending_dropped_survives_hold_s_cycle_ratio_mutation():
     # HoldMode._on_auger_on reads controller_state() and adds "cycle_ratio"
     # before publishing to MQTT. pending_dropped is a field only the threaded

@@ -2,8 +2,13 @@ import json
 import os
 import shutil
 import time
+from types import SimpleNamespace
+
 import pytest
+
+import notify.mqtt_handler as mh
 from controller.mpc import Controller, _DEFAULTS
+from controller.runtime.runner import ThreadedControllerRunner
 from controller.applied_output import AppliedOutput, OutputSource
 
 CONFIG = dict(
@@ -108,8 +113,11 @@ def test_get_status_is_json_safe():
     # the real bar: it survives the MQTT encoder
     encoded = json.dumps(status, allow_nan=False)
     assert "do_mpc" not in encoded
-    assert set(status) >= {"set_point", "set_point_c", "last_Q", "applied_Q", "policy", "x_hat"}
-    assert isinstance(status["x_hat"], list)
+    assert set(status) >= {"set_point", "set_point_c", "last_Q", "applied_Q", "policy", "x_hat", "cycle_data"}
+    # a tuple, not a list: controller_state() copies the returned dict but not
+    # its values, so a mutable x_hat would let one consumer's mutation reach
+    # every other consumer reading the same control-period snapshot.
+    assert isinstance(status["x_hat"], tuple)
     assert all(isinstance(v, float) for v in status["x_hat"])
 
 
@@ -119,6 +127,126 @@ def test_dunder_dict_is_not_json_safe():
     c.update(200.0)
     with pytest.raises(TypeError):
         json.dumps(dict(c.__dict__))
+
+
+def test_get_status_guards_against_non_finite_values():
+    c = _make()
+    c.set_target(225.0)
+    c.update(200.0)
+    c._x_hat = [float("nan"), float("inf"), 1.0]
+    c._last_Q = float("nan")
+    status = c.get_status()
+    # allow_nan=False raises on a bare NaN; None is the safe substitute.
+    json.dumps(status, allow_nan=False)
+    assert status["x_hat"] == (None, None, 1.0)
+    assert status["last_Q"] is None
+
+
+def test_threaded_runner_seeds_from_get_status_before_first_solve():
+    """The runner's __init__ used to snapshot core.__dict__ directly, so an MPC
+    core published its do-mpc/estimator internals for the whole first control
+    period (or forever, if the worker died inside update()). get_status() must
+    seed the very first snapshot too, not just the post-solve ones in _loop."""
+    c = _make()
+    runner = ThreadedControllerRunner(c)
+    try:
+        state = runner.controller_state()
+        json.dumps(state, allow_nan=False)  # would TypeError on a leaked estimator/mpc object
+        assert "estimator" not in state
+        assert "mpc" not in state
+        assert state["policy"] == "nlp"
+    finally:
+        runner.stop()
+
+
+class _FakeMqttClient:
+    """Minimal stand-in for paho.mqtt.client.Client -- just enough of the
+    surface notify/mqtt_handler.py drives to prove what actually reaches the
+    wire, without a real broker."""
+
+    def __init__(self, *args, **kwargs):
+        self.publish_calls = []
+        self._connected = False
+
+    def will_set(self, *args, **kwargs):
+        pass
+
+    def username_pw_set(self, *args, **kwargs):
+        pass
+
+    def connect(self, host, port, keepalive):
+        self._connected = True
+        return 0
+
+    def loop_start(self):
+        pass
+
+    def loop_stop(self):
+        pass
+
+    def disconnect(self):
+        self._connected = False
+
+    def is_connected(self):
+        return self._connected
+
+    def publish(self, topic, payload, qos=0, retain=False, properties=None):
+        self.publish_calls.append({"topic": topic, "payload": payload})
+        return SimpleNamespace(rc=0)
+
+    def subscribe(self, topic):
+        pass
+
+
+def test_mpc_status_survives_the_mqtt_publish_boundary(monkeypatch):
+    """Pins the cross-process seam: get_status()'s keys must actually clear
+    mqtt_handler's per-context whitelist to reach the wire, and the
+    pid_cycle_data topic the __dict__ fallback used to feed (via notify()'s
+    nested-dict recursion over the cycle_data attribute) must still appear."""
+    monkeypatch.setattr(mh.mqtt, "Client", _FakeMqttClient)
+    monkeypatch.setattr(mh, "getfqdn", lambda: "test.local")
+
+    settings = {
+        "globals": {"debug_mode": False, "grill_name": "", "units": "C"},
+        "modules": {"grillplat": "prototype"},
+        "probe_settings": {"probe_map": {"probe_info": []}},
+        "notify_services": {
+            "mqtt": {
+                "broker": "test.broker",
+                "enabled": True,
+                "homeassistant_autodiscovery_topic": "",  # skip HA autodiscover; not under test here
+                "id": "PiFireTest",
+                "password": "",
+                "port": "1883",
+                "update_sec": "30",
+                "username": "",
+            }
+        },
+    }
+    handler = mh.MqttNotificationHandler(settings)
+    handler.last_conn_time = 0  # defeat the post-connect publish throttle
+
+    c = _make()
+    c.set_target(225.0)
+    c.update(200.0)
+    status = c.get_status()
+    status["cycle_ratio"] = 0.5  # HoldMode adds this before publishing (hold.py)
+
+    handler.notify("pid", status)
+
+    pid_payloads = [call["payload"] for call in handler.client.publish_calls if call["topic"] == "PiFireTest/pid"]
+    assert pid_payloads
+    published = json.loads(pid_payloads[-1])
+    assert published["last_Q"] == status["last_Q"]
+    assert published["policy"] == status["policy"]
+    assert "x_hat" in published
+
+    cycle_payloads = [
+        call["payload"] for call in handler.client.publish_calls if call["topic"] == "PiFireTest/pid_cycle_data"
+    ]
+    assert cycle_payloads  # the topic __dict__ used to feed must survive get_status()
+    cycle_published = json.loads(cycle_payloads[-1])
+    assert cycle_published["HoldCycleTime"] == CYCLE["HoldCycleTime"]
 
 
 def test_set_output_inverts_the_allocation_exactly(mpc_controller):

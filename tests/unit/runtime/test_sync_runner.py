@@ -89,6 +89,40 @@ def test_build_core_logs_on_load_failure_when_logger_given():
     assert len(logger.exceptions) == 1
 
 
+def test_build_core_never_returns_active_when_set_target_raises():
+    """Pins the contract ControllerBase.get_status() (controller/base.py) relies
+    on: a core only reaches "Active" -- and only then gets wrapped in a runner
+    that might call get_status() -- if set_target() already succeeded on it,
+    because construction and set_target() share the same try/except here."""
+    import sys
+    import types
+
+    class _RaisesOnSetTarget:
+        def __init__(self, config, units, cycle_data):
+            pass
+
+        def set_target(self, sp):
+            raise RuntimeError("boom")
+
+    fake_module = types.ModuleType("controller.faketype")
+    fake_module.Controller = _RaisesOnSetTarget
+    sys.modules["controller.faketype"] = fake_module
+    try:
+        settings = {
+            "controller": {"selected": "faketype", "config": {"faketype": {}}},
+            "globals": {"units": "F"},
+            "cycle_data": {},
+        }
+        control = {"primary_setpoint": 225}
+
+        core, status = _build_core(settings, control)
+
+        assert core is None
+        assert status == "Inactive"
+    finally:
+        del sys.modules["controller.faketype"]
+
+
 def test_sync_runner_wants_async_reflects_core_and_stop_is_noop():
     from controller.runtime.runner import SyncControllerRunner
 

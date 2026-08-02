@@ -104,6 +104,19 @@ class MqttNotificationHandler:
                 "inter",
                 "inter_max",
                 "cycle_ratio",
+                # MPC's get_status() (controller/mpc.py) diagnostics. get_status()
+                # is itself the curation step -- a controller only returns a key
+                # here because it decided the key is safe and worth publishing --
+                # so any future controller's get_status() keys belong here too,
+                # not just MPC's.
+                "set_point",
+                "set_point_c",
+                "last_Q",
+                "applied_Q",
+                "policy",
+                "u_min",
+                "u_max",
+                "x_hat",
             ]
             self.HOPPER_SENSORS = ["hopper_level"]
             self.CONTROL_NOTIFY_SENSORS = ["target"]

@@ -150,7 +150,14 @@ class ThreadedControllerRunner(ControllerRunner):
         self._pending_dropped = 0
         self._pending_restore = None
         self._model_snapshot = _owned_model_snapshot(core.get_model_snapshot())
-        self._state_snapshot = dict(core.__dict__)
+        # Mirrors the post-solve seeding in _loop below: a get_status() that
+        # returns non-None is the one JSON-safe to publish, so the very first
+        # snapshot -- read before the worker's first solve completes -- must
+        # come from it too, not from a core.__dict__ that may hold do-mpc/casadi
+        # objects for the whole first control period (or forever, if the worker
+        # dies inside update()).
+        initial_status = core.get_status()
+        self._state_snapshot = dict(initial_status) if initial_status is not None else dict(core.__dict__)
         self._control_period = core.get_control_period()
         self._commands_fan = core.commands_fan()
         self._stop_event = threading.Event()
