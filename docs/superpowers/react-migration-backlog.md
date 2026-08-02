@@ -762,22 +762,20 @@ top-level item, so nobody has to read 900 lines to find that out:
 So the real open work is **9a.3 and the OPEN entries inside item 10.** The
 biggest of those, in rough order of consequence:
 
-1. Persisted schema versioning, **including modeling and validating
-   `pellets:general`** — the one durable blob with no schema gate, reachable
-   unvalidated from the admin restore route. **Design approved 2026-08-02**
-   (`specs/2026-08-02-persisted-schema-versioning-design.md`), no open
-   questions, nothing implemented. Ready for a plan.
-2. `updated_message` is written on every upgrade and read by nothing (the
+1. `updated_message` is written on every upgrade and read by nothing (the
    release-notes modal) — a live writer with no reader.
-3. No 404 route at all, so every unrouted URL hits react-router's error screen;
+2. No 404 route at all, so every unrouted URL hits react-router's error screen;
    `/manual` is one instance of it.
-4. No PWA manifest.
-5. Wizard has no 800×480 coverage; no e2e for Exit Setup.
-6. The rest of the schema and toolchain follow-ups — none started.
+3. No PWA manifest.
+4. Wizard has no 800×480 coverage; no e2e for Exit Setup.
+5. The rest of the schema and toolchain follow-ups — none started.
 
-Closed on 2026-08-02, listed here only because they were on this list an hour
-ago: `bootstrap_page_theme` (deleted, with its context processor) and the
-missing favicon (the PiFire flame, pinned end to end).
+Closed on 2026-08-02, listed here only because they were on this list the same
+day: persisted schema versioning for both durable blobs, **including modeling,
+validating and versioning `pellets:general`** — which also closed the
+unvalidated admin restore path and the pellet log's silent-drop bug;
+`bootstrap_page_theme` (deleted, with its context processor); and the missing
+favicon (the PiFire flame, pinned end to end).
 
 **Items 1, 2, 5 and 8 are kept here rather than moved to RESOLVED** because
 their bodies carry measurement notes and ordering lessons — checkpoint before
@@ -1912,9 +1910,10 @@ on change makes a bounded field untypeable (`min={20}` turns the intermediate
 `settings/fields/NumberField.tsx:41-45`, `settings/RangeProfileTable.tsx:86,102,113`,
 `settings/tabs/StartupTab.tsx:111,115`.
 
-#### Schema and toolchain follow-ups — OPEN
+#### Schema and toolchain follow-ups — MIXED
 
-All of the following are open; none has been started.
+Persisted schema versioning is **DONE** (below). All of the following are still
+open; none has been started.
 
 S3 defaults consolidation and typed deep-path `setPath` helpers; per-controller
 schema generation from `controllers.json`; `additionalProperties` stripping in
@@ -1923,7 +1922,33 @@ scoped; mapping a dotted error path to the offending widget; the four 2b-1
 follow-ups (`waitFor`, `read*` fallback defaults, `aria-describedby`,
 float-vs-int audit).
 
-**OPEN — nothing PiFire persists records the schema it was written against.**
+**DONE 2026-08-02 for both durable blobs; the wizard manifest is deliberately
+out of scope (see the corrections below).** The settings tree and the pellet
+database each carry a `schema_version`, each has an ordered migration registry
+run at `init()` inside the store's own transaction, and each has a committed
+shape digest (`common/schema_digest.py`) that fails the suite when the modeled
+shape moves without a version bump. Plan:
+`plans/2026-08-02-persisted-schema-versioning.md`.
+
+Landed alongside, because modeling the pellet database is what surfaced them:
+
+- `pellets:general` has a pydantic model for the first time
+  (`common/pellets_schema.py`), wired into `write_pellet_db()`. The admin
+  restore route validated a settings backup and 400'd a bad one, then in its
+  next branch wrote whatever JSON a pellet file held straight into the live
+  store; it now refuses a malformed one the same way.
+- **The pellet log's key-collision bug is fixed.** It was keyed by
+  `str(datetime.now())[0:19]` — local time, second resolution — so two loads
+  inside one second landed on the same dict key and one entry was silently
+  lost. Keys are epoch milliseconds now, and a millisecond already taken is
+  advanced rather than overwritten. Nothing in this backlog had recorded it.
+- The ungated i2c repair is gone: it is step 1 of `_SHAPE_MIGRATIONS`, so it
+  stops scanning on every connect forever.
+
+The original statement, kept because the reasoning below is still the record of
+why the wizard manifest is excluded:
+
+**Nothing PiFire persists records the schema it was written against.**
 `wizard/wizard_manifest.json` has no version field at all (top-level keys are
 `boards`, `modules`, `probe_config_options`), and neither does the
 `wizard:install` draft blob. The only version anywhere is
@@ -1936,19 +1961,19 @@ bumped without that migration existing yet.
 Two things were built as substitutes rather than fixes, and both should be
 replaced by real schema versioning:
 
-- The i2c settings-shape repair runs **ungated**, ignoring the version
+- ~~The i2c settings-shape repair runs **ungated**, ignoring the version
   entirely (`common/datastore.py::_upgrade_settings_in_store`), because a
   version-gated migration was skipped by an unchecked path four separate times
-  on that branch.
-- The wizard draft carries a **SHA-256 fingerprint of the manifest's
+  on that branch.~~ **Replaced:** it is step 1 of `_SHAPE_MIGRATIONS`, gated on
+  `settings["schema_version"]`.
+- **KEPT deliberately.** The wizard draft carries a **SHA-256 fingerprint of the manifest's
   `section/module/dependency` triples** (`blueprints/api_wizard/routes.py`),
   synthesized precisely because the manifest declares no identity of its own. A
   stale draft is otherwise undetectable, and a real one silently rendered
   "Basic" for a grill running on two USB-I2C bridges.
 
-**OPEN — design APPROVED 2026-08-02, nothing implemented.** Spec:
-`specs/2026-08-02-persisted-schema-versioning-design.md`. It carries no open
-questions; the next step is an implementation plan.
+**Design approved and IMPLEMENTED 2026-08-02.** Spec:
+`specs/2026-08-02-persisted-schema-versioning-design.md`.
 
 Two corrections the spec makes to the paragraph above, recorded here so they
 are not re-raised from this entry:
@@ -1969,15 +1994,14 @@ The spec also notes that the mechanism already exists one layer down —
 gated ordered steps and the stamp written last. The tables have it; the blobs
 stored inside them do not.
 
-The spec also covers **`pellets:general`**, which has no schema model and
-therefore no repair pass — see the entry below. It was going to be a separate
-item; the owner folded it in, on the grounds that modeling it is the
-prerequisite for versioning it.
+The spec also covers **`pellets:general`** — see the entry below. It was going
+to be a separate item; the owner folded it in, on the grounds that modeling it
+is the prerequisite for versioning it.
 
-**OPEN — `pellets:general` is unmodeled and unvalidated.** Folded INTO the
-schema-versioning spec above (§5) at the owner's request rather than tracked
-separately, because modeling it is the prerequisite for versioning it and the
-two land together.
+**DONE 2026-08-02 — `pellets:general` is modeled, validated and versioned.**
+Folded INTO the schema-versioning spec above (§5) at the owner's request rather
+than tracked separately, because modeling it is the prerequisite for versioning
+it and the two landed together.
 
 Every other durable blob goes through `validate_settings_tree()`'s
 strict-plus-repair gate; `write_pellet_db()` calls `write_pellets_store()`
@@ -1992,15 +2016,18 @@ with a 400, then in its very next branch writes an arbitrary pellet JSON file
 straight into the live store (`blueprints/api_admin/routes.py:320-337`). Same
 function, one guarded path and one unguarded one.
 
-Two live defects the spec work turned up in `common/pellets_actions.py`,
-neither fixed yet:
+Two live defects the spec work turned up in `common/pellets_actions.py`, both
+FIXED by the version 2 migration:
 
-- **The usage log silently drops entries.** It is keyed by
+- ~~**The usage log silently drops entries.**~~ It was keyed by
   `str(datetime.now())[0:19]` — local time, second resolution — so two profile
-  loads in the same second collide on the dict key and one is lost. Both
-  writers do it.
-- **`rating` is stored unvalidated and uncoerced** from the request at both the
-  add and edit doors, so a client can store `"4"` or `99`.
+  loads in the same second collided on the dict key and one was lost. Both
+  writers did it. Keys are epoch milliseconds now, and one already taken is
+  advanced rather than overwritten.
+- ~~**`rating` is stored unvalidated and uncoerced**~~ from the request at both
+  the add and edit doors, so a client could store `"4"` or `99`. It is bounded
+  `1..5` at the door and in the schema; existing values were coerced and
+  clamped by the migration.
 
 Also worth knowing before anyone models this from `defaults.py`: `est_usage` is
 a FLOAT on a live grill (the defaults seed int `0`), a log value can be the
