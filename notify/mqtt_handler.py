@@ -104,19 +104,23 @@ class MqttNotificationHandler:
                 "inter",
                 "inter_max",
                 "cycle_ratio",
-                # MPC's get_status() (controller/mpc.py) diagnostics. get_status()
-                # is itself the curation step -- a controller only returns a key
-                # here because it decided the key is safe and worth publishing --
-                # so any future controller's get_status() keys belong here too,
-                # not just MPC's.
+                # MPC's get_status() (controller/mpc.py) diagnostics that are
+                # actual numeric measurements -- this list is also what the
+                # "zero the PID data if not controlling" loop below zeroes on
+                # every Stop->Startup transition, and what _create_autodiscover
+                # registers (once) as a `state_class: measurement` sensor from
+                # whatever type it sees first. "policy" (a string) and "x_hat"
+                # (a list) do not belong here for that reason: zeroed to 0 they
+                # register as numeric sensors, then the real string/list value
+                # lands on a sensor HA already believes is numeric. u_min/u_max
+                # are numeric but already published faithfully via cycle_data's
+                # pid_cycle_data topic, which this zero-loop does not touch --
+                # publishing them here too just gives a second, divergent copy
+                # once this loop zeroes only the "pid" one.
                 "set_point",
                 "set_point_c",
                 "last_Q",
                 "applied_Q",
-                "policy",
-                "u_min",
-                "u_max",
-                "x_hat",
             ]
             self.HOPPER_SENSORS = ["hopper_level"]
             self.CONTROL_NOTIFY_SENSORS = ["target"]

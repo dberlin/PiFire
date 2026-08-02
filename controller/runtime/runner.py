@@ -134,6 +134,18 @@ def _owned_model_snapshot(snapshot):
     return None if snapshot is None else dict(snapshot)
 
 
+def _safe_initial_status(core):
+    """core.get_status() called here runs before the core has proven itself
+    with a successful update() -- outside the try/except _build_core uses
+    specifically so a constructor bug can never kill the control process with
+    the auger already on (see its docstring). An exception here must not
+    either."""
+    try:
+        return core.get_status()
+    except Exception:
+        return None
+
+
 class ThreadedControllerRunner(ControllerRunner):
     """Runs core.update() on a background thread at the core's control period, so
     an expensive solve never blocks the caller. submit()/latest() are
@@ -156,7 +168,7 @@ class ThreadedControllerRunner(ControllerRunner):
         # come from it too, not from a core.__dict__ that may hold do-mpc/casadi
         # objects for the whole first control period (or forever, if the worker
         # dies inside update()).
-        initial_status = core.get_status()
+        initial_status = _safe_initial_status(core)
         self._state_snapshot = dict(initial_status) if initial_status is not None else dict(core.__dict__)
         self._control_period = core.get_control_period()
         self._commands_fan = core.commands_fan()

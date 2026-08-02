@@ -92,6 +92,18 @@ def _finite_float(value):
     return value if math.isfinite(value) else None
 
 
+def _sanitized_copy(mapping):
+    """A copy of `mapping`, safe for a caller to own outright.
+
+    Every float value is passed through `_finite_float`; non-float values
+    (ints, strings) are kept as-is so e.g. an int setting is not silently
+    turned into a float. A copy rather than the live object, since this feeds
+    controller_state(), whose contract is that the caller owns the mapping --
+    `mapping` itself may be a live settings dict a consumer must not reach.
+    """
+    return {key: (_finite_float(value) if isinstance(value, float) else value) for key, value in mapping.items()}
+
+
 def _load_net_policy(cfg):
     """Load the numpy net policy, or return None to fall back to the NLP.
 
@@ -305,7 +317,7 @@ class Controller(ControllerBase):
 
     def get_status(self):
         return {
-            "set_point": self.set_point,
+            "set_point": _finite_float(self.set_point),
             "set_point_c": _finite_float(self._set_point_c),
             "last_Q": _finite_float(self._last_Q),
             "applied_Q": _finite_float(self._applied_Q),
@@ -318,7 +330,10 @@ class Controller(ControllerBase):
             # The __dict__ fallback this replaces reached the pid_cycle_data mqtt
             # topic only through notify()'s nested-dict recursion over this same
             # attribute; publish it explicitly so that topic keeps working.
-            "cycle_data": self.cycle_data,
+            # cycle_data is core.__dict__'s live reference to settings["cycle_data"]
+            # (see _build_core) -- _sanitized_copy hands back a copy, not that
+            # live settings mapping.
+            "cycle_data": _sanitized_copy(self.cycle_data),
         }
 
     def set_output(self, applied):

@@ -164,6 +164,26 @@ def test_threaded_runner_seeds_initial_snapshot_from_get_status():
         r.stop()
 
 
+class _RaisingStatusCore(FakeCore):
+    """get_status() raises -- this runs before the core has proven itself with
+    a successful update(), outside _build_core's guard, so __init__ must not
+    let it propagate and kill the control process the way an unguarded
+    constructor once did."""
+
+    def get_status(self):
+        raise RuntimeError("boom")
+
+
+def test_threaded_runner_survives_get_status_raising_during_init():
+    core = _RaisingStatusCore()
+    r = ThreadedControllerRunner(core)
+    try:
+        snap = r.controller_state()
+        assert snap["tag"] == "core-a"  # fell back to __dict__ instead of crashing __init__
+    finally:
+        r.stop()
+
+
 def test_controller_state_pending_dropped_survives_hold_s_cycle_ratio_mutation():
     # HoldMode._on_auger_on reads controller_state() and adds "cycle_ratio"
     # before publishing to MQTT. pending_dropped is a field only the threaded

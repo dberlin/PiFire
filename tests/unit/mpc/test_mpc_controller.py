@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import notify.mqtt_handler as mh
+from common.modes import Mode
 from controller.mpc import Controller, _DEFAULTS
 from controller.runtime.runner import ThreadedControllerRunner
 from controller.applied_output import AppliedOutput, OutputSource
@@ -160,11 +161,28 @@ def test_get_status_guards_against_non_finite_values():
     c.update(200.0)
     c._x_hat = [float("nan"), float("inf"), 1.0]
     c._last_Q = float("nan")
+    c.set_point = float("nan")  # e.g. a malformed setpoint, guarded like every other field
+    c.cycle_data["u_min"] = float("nan")  # e.g. a malformed setting
     status = c.get_status()
     # allow_nan=False raises on a bare NaN; None is the safe substitute.
     json.dumps(status, allow_nan=False)
     assert status["x_hat"] == (None, None, 1.0)
     assert status["last_Q"] is None
+    assert status["set_point"] is None
+    assert status["cycle_data"]["u_min"] is None
+
+
+def test_get_status_cycle_data_is_a_copy():
+    """core.cycle_data is settings["cycle_data"] itself (_build_core passes it
+    by reference); controller_state()'s contract is that the caller owns the
+    mapping outright, so a consumer mutating the returned cycle_data must not
+    reach live settings."""
+    c = _make()
+    c.set_target(225.0)
+    c.update(200.0)
+    status = c.get_status()
+    assert status["cycle_data"] == CYCLE
+    assert status["cycle_data"] is not c.cycle_data
 
 
 def test_threaded_runner_seeds_from_get_status_before_first_solve():
@@ -223,14 +241,12 @@ class _FakeMqttClient:
         pass
 
 
-def test_mpc_status_survives_the_mqtt_publish_boundary(monkeypatch):
-    """Pins the cross-process seam: get_status()'s keys must actually clear
-    mqtt_handler's per-context whitelist to reach the wire, and the
-    pid_cycle_data topic the __dict__ fallback used to feed (via notify()'s
-    nested-dict recursion over the cycle_data attribute) must still appear."""
+def _mqtt_handler(monkeypatch):
+    """A real MqttNotificationHandler wired to _FakeMqttClient -- exercises the
+    actual whitelist/recursion/zero-out logic in notify/mqtt_handler.py rather
+    than a mock of it."""
     monkeypatch.setattr(mh.mqtt, "Client", _FakeMqttClient)
     monkeypatch.setattr(mh, "getfqdn", lambda: "test.local")
-
     settings = {
         "globals": {"debug_mode": False, "grill_name": "", "units": "C"},
         "modules": {"grillplat": "prototype"},
@@ -250,6 +266,18 @@ def test_mpc_status_survives_the_mqtt_publish_boundary(monkeypatch):
     }
     handler = mh.MqttNotificationHandler(settings)
     handler.last_conn_time = 0  # defeat the post-connect publish throttle
+    return handler
+
+
+def test_mpc_status_survives_the_mqtt_publish_boundary(monkeypatch):
+    """Pins the cross-process seam: get_status()'s keys must actually clear
+    mqtt_handler's per-context whitelist to reach the wire, and the
+    pid_cycle_data topic the __dict__ fallback used to feed (via notify()'s
+    nested-dict recursion over the cycle_data attribute) must still appear.
+    Asserts the full published set, not a few named keys, so a future key
+    nobody thought to check is not silently dropped or silently let through.
+    """
+    handler = _mqtt_handler(monkeypatch)
 
     c = _make()
     c.set_target(225.0)
@@ -262,16 +290,43 @@ def test_mpc_status_survives_the_mqtt_publish_boundary(monkeypatch):
     pid_payloads = [call["payload"] for call in handler.client.publish_calls if call["topic"] == "PiFireTest/pid"]
     assert pid_payloads
     published = json.loads(pid_payloads[-1])
-    assert published["last_Q"] == status["last_Q"]
-    assert published["policy"] == status["policy"]
-    assert "x_hat" in published
+    # policy (a string) and x_hat (a list) are deliberately not in PID_SENSORS
+    # -- see the comment there -- so only the scalar numeric fields clear the
+    # whitelist gate.
+    assert published == {
+        "cycle_ratio": 0.5,
+        "set_point": status["set_point"],
+        "set_point_c": status["set_point_c"],
+        "last_Q": status["last_Q"],
+        "applied_Q": status["applied_Q"],
+    }
 
     cycle_payloads = [
         call["payload"] for call in handler.client.publish_calls if call["topic"] == "PiFireTest/pid_cycle_data"
     ]
     assert cycle_payloads  # the topic __dict__ used to feed must survive get_status()
     cycle_published = json.loads(cycle_payloads[-1])
-    assert cycle_published["HoldCycleTime"] == CYCLE["HoldCycleTime"]
+    assert cycle_published == CYCLE  # byte-identical to the legacy __dict__-fed payload
+
+
+def test_stop_to_startup_transition_zeroes_only_numeric_pid_sensors(monkeypatch):
+    """N1 regression: notify()'s "zero the PID data if not controlling" loop
+    (fires on every non-Hold mode, e.g. every Stop->Startup at the start of a
+    cook) iterates the very same PID_SENSORS list the "pid" topic publishes
+    from. A non-numeric key there gets zeroed to int 0 -- which _create_auto
+    discover then registers as a `state_class: measurement` numeric sensor --
+    and the real string/list value later lands on a sensor Home Assistant
+    already believes is numeric."""
+    handler = _mqtt_handler(monkeypatch)
+
+    handler.notify("control", {"mode": Mode.STARTUP})
+
+    pid_payloads = [call["payload"] for call in handler.client.publish_calls if call["topic"] == "PiFireTest/pid"]
+    assert pid_payloads
+    zeroed = json.loads(pid_payloads[-1])
+    assert "policy" not in zeroed
+    assert "x_hat" not in zeroed
+    assert zeroed and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in zeroed.values())
 
 
 def test_set_output_inverts_the_allocation_exactly(mpc_controller):
