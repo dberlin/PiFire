@@ -1327,6 +1327,25 @@ def test_a_stalled_worker_bounds_the_backlog_and_counts_the_drops():
 
 The `oldest == 50.0` assertion is the load-bearing one: it proves the deque discards from the correct end. A `maxlen` deque that dropped the newest would keep the backlog bounded and still starve the controller of current duty, and every other assertion here would pass.
 
+**Drain by copy-and-clear, never by rebinding.** In `_loop`, take `list(self._pending_outputs)` and then `self._pending_outputs.clear()`. Rebinding to `[]` — which is what the pre-existing code does — replaces the bounded deque with an unbounded list, so the ceiling survives exactly one drain and every guarantee above quietly evaporates. The drop-counting test would still pass, because it never drains. Add a second test that drains first and *then* overfills, so the bound is proven to outlive a drain:
+
+```python
+def test_the_backlog_stays_bounded_after_a_drain():
+    runner, core = _threaded_runner_with_blocked_worker()
+    for i in range(10):
+        runner.set_output(_output(ratio=0.3, timestamp=float(i)))
+    _drain_once(runner)
+
+    for i in range(_MAX_PENDING_OUTPUTS + 25):
+        runner.set_output(_output(ratio=0.3, timestamp=float(100 + i)))
+    assert len(runner._pending_outputs) == _MAX_PENDING_OUTPUTS
+    assert isinstance(runner._pending_outputs, collections.deque)
+```
+
+**While this file is open, fix the sync/threaded asymmetry Task 5 left behind.** `ThreadedControllerRunner.controller_state()` already returns a copy; `SyncControllerRunner.controller_state()`'s `get_status()` branch returns the controller's dict as-is. `HoldMode._on_auger_on` mutates what it receives (`controller_data["cycle_ratio"] = ...`) before publishing, so once a controller has a real `get_status()` that mutation writes into controller state. The legacy `dict(self._core.__dict__)` path was a fresh copy every time, so this would be a silent weakening of a guarantee callers already had.
+
+Make the sync branch `return dict(status)`, and say in a docstring that the returned mapping belongs to the caller. A shallow copy is enough for the known consumer. Pin it: assert that mutating the dict `controller_state()` returned leaves a subsequent call unchanged — with a core whose `get_status()` returns a cached dict, since one that builds a fresh dict each call cannot fail the test.
+
 - [ ] **Step 4: Drain and replay in `_loop`**
 
 Replace the body of `_loop` with:
@@ -1340,8 +1359,8 @@ Replace the body of `_loop` with:
                 self._pending_target = _UNSET
                 new_core = self._pending_core
                 self._pending_core = None
-                pending_outputs = self._pending_outputs
-                self._pending_outputs = []
+                pending_outputs = list(self._pending_outputs)
+                self._pending_outputs.clear()
                 restore = self._pending_restore
                 self._pending_restore = None
             if new_core is not None:
@@ -2706,12 +2725,16 @@ for key in sorted(base):
 nb = json.load(open("docs/superpowers/experiments/_net_vs_nlp_baseline.json"))
 na = json.load(open("docs/superpowers/experiments/_net_vs_nlp_after.json"))
 for b, a in zip(nb, na):
-    print(f"replay seed{b['seed']}: excursions {b['n_excursion_lid']} -> {a['n_excursion_lid']} "
-          f"(whole run {b['n_excursion']} -> {a['n_excursion']}, "
-          f"worst below Q_min {b['worst_below']:.3f} -> {a['worst_below']:.3f}) | "
-          f"rms_all_raw_warm {b['rms_all_raw_warm']:.3f} -> {a['rms_all_raw_warm']:.3f}")
+    print(f"replay seed{b['seed']}: "
+          f"lid excursions {b['excursion_n_lid']} -> {a['excursion_n_lid']} | "
+          f"lid margin to Q_min {b['margin_min_to_q_min_lid']:+.3f} -> {a['margin_min_to_q_min_lid']:+.3f} | "
+          f"warm excursions {b['excursion_n_warm']} -> {a['excursion_n_warm']} | "
+          f"rms_all_raw_warm {b['rms_all_raw_warm']:.3f} -> {a['rms_all_raw_warm']:.3f} | "
+          f"warm_start_s {b['warm_start_s']} -> {a['warm_start_s']}")
 EOF
 ```
+
+Those key names are the ones the script actually emits — check them against a baseline record before trusting this snippet, since a `KeyError` here is the good outcome and a silently-renamed key is not.
 
 The gate is **relative**, and the agreement gate binds. Read the quantities in this order:
 
