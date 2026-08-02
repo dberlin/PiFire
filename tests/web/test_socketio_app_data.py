@@ -48,7 +48,7 @@ from flask import request as flask_request
 
 from app import app as flask_app
 from common import datastore
-from common.common import WriteKind
+from common.common import ErrorKind, WriteKind
 from common.datastore_accessors import (
     CONTROL_HEARTBEAT_KEY,
     CONTROL_HEARTBEAT_STALE_AFTER,
@@ -57,7 +57,6 @@ from common.datastore_accessors import (
     read_control,
     read_current,
     flush_current,
-    read_display_errors,
     read_errors,
     read_pellets_store,
     read_settings,
@@ -65,7 +64,6 @@ from common.datastore_accessors import (
     read_status,
     write_connected_user,
     write_control,
-    write_display_errors,
     write_errors,
     write_generic_key,
     write_pellet_db,
@@ -1334,7 +1332,7 @@ def test_check_control_status_records_a_failure_without_writing_the_blob(sio):
     _stamp_heartbeat(CONTROL_HEARTBEAT_STALE_AFTER + 5)
     sio.mod._check_control_status()
     assert sio.mod._control_alive is False
-    assert read_errors() == []
+    assert read_errors(ErrorKind.ALL) == []
 
 
 def test_check_control_status_alive_records_success_and_writes_nothing(sio):
@@ -1342,7 +1340,7 @@ def test_check_control_status_alive_records_success_and_writes_nothing(sio):
     _stamp_heartbeat(0)
     sio.mod._check_control_status()
     assert sio.mod._control_alive is True
-    assert read_errors() == []
+    assert read_errors(ErrorKind.ALL) == []
 
 
 def test_check_control_status_needs_no_cooperation_from_the_control_process(sio):
@@ -1378,10 +1376,10 @@ def test_check_control_status_treats_a_stamp_just_inside_the_window_as_alive(sio
 def test_check_control_status_leaves_a_control_process_error_alone(sio):
     # Durable errors written by the control process are not this check's to
     # clear, in either direction.
-    write_errors(["Grill Platform Error: Could not load the grill platform module."])
+    write_errors(ErrorKind.CONTROL, ["Grill Platform Error: Could not load the grill platform module."])
     _stamp_heartbeat(0)
     sio.mod._check_control_status()
-    assert read_errors() == ["Grill Platform Error: Could not load the grill platform module."]
+    assert read_errors(ErrorKind.CONTROL) == ["Grill Platform Error: Could not load the grill platform module."]
 
 
 # =====================================================================
@@ -1392,14 +1390,15 @@ _CONTROL_BANNER = "Grill Platform Error: Could not load the grill platform modul
 _DISPLAY_BANNER = (
     'An error occurred loading the [ili9341f] display module.  The "display.none" module has been loaded instead.'
 )
+_WEB_BANNER = "[mpc] install failed — see dependency-install.log"
 
 
 def test_dash_errors_carry_both_the_control_and_the_display_banner(sio):
-    """The control process and the display process each own a blob, so a
+    """The control process and the display process each own a kind, so a
     display that fell back to display.none is reported alongside -- not
     instead of -- whatever the controller recorded."""
-    write_errors([_CONTROL_BANNER])
-    write_display_errors([_DISPLAY_BANNER])
+    write_errors(ErrorKind.CONTROL, [_CONTROL_BANNER])
+    write_errors(ErrorKind.DISPLAY, [_DISPLAY_BANNER])
     flush_current()
 
     dash = sio.mod._get_dash_data(read_settings(), read_pellets_store())
@@ -1409,8 +1408,8 @@ def test_dash_errors_carry_both_the_control_and_the_display_banner(sio):
 
 def test_dash_errors_carry_a_display_banner_with_no_control_banner(sio):
     """The common case in the field: the controller is healthy and only the
-    display failed, so the display blob is the payload's sole source."""
-    write_display_errors([_DISPLAY_BANNER])
+    display failed, so ErrorKind.DISPLAY is the payload's sole source."""
+    write_errors(ErrorKind.DISPLAY, [_DISPLAY_BANNER])
     flush_current()
 
     dash = sio.mod._get_dash_data(read_settings(), read_pellets_store())
@@ -1418,13 +1417,13 @@ def test_dash_errors_carry_a_display_banner_with_no_control_banner(sio):
     assert dash["errors"] == [_DISPLAY_BANNER]
 
 
-def test_dash_errors_append_the_control_down_entry_after_both_blobs(sio):
-    """The liveness entry stays last: it is recomputed per frame, while both
-    blobs are durable."""
+def test_dash_errors_append_the_control_down_entry_after_both_kinds(sio):
+    """The liveness entry stays last: it is recomputed per frame, while every
+    stored kind is durable."""
     from common.app import CONTROL_DOWN_ERROR
 
-    write_errors([_CONTROL_BANNER])
-    write_display_errors([_DISPLAY_BANNER])
+    write_errors(ErrorKind.CONTROL, [_CONTROL_BANNER])
+    write_errors(ErrorKind.DISPLAY, [_DISPLAY_BANNER])
     flush_current()
     _stamp_heartbeat(CONTROL_HEARTBEAT_STALE_AFTER + 5)
     sio.mod._check_control_status()
@@ -1434,14 +1433,27 @@ def test_dash_errors_append_the_control_down_entry_after_both_blobs(sio):
     assert dash["errors"] == [_CONTROL_BANNER, _DISPLAY_BANNER, CONTROL_DOWN_ERROR]
 
 
-def test_dash_data_reads_the_display_blob_without_consuming_it(sio):
+def test_dash_data_reads_the_display_kind_without_consuming_it(sio):
     """The display process owns that list; the web tier only ever reads it."""
-    write_display_errors([_DISPLAY_BANNER])
+    write_errors(ErrorKind.DISPLAY, [_DISPLAY_BANNER])
     flush_current()
 
     sio.mod._get_dash_data(read_settings(), read_pellets_store())
 
-    assert read_display_errors() == [_DISPLAY_BANNER]
+    assert read_errors(ErrorKind.DISPLAY) == [_DISPLAY_BANNER]
+
+
+def test_dash_errors_carry_the_web_banner_grouped_after_the_other_two(sio):
+    """The webapp's own producer (the detached extra_installer child) reaches
+    the same strip, in ErrorKind declaration order."""
+    write_errors(ErrorKind.CONTROL, [_CONTROL_BANNER])
+    write_errors(ErrorKind.DISPLAY, [_DISPLAY_BANNER])
+    write_errors(ErrorKind.WEB, [_WEB_BANNER])
+    flush_current()
+
+    dash = sio.mod._get_dash_data(read_settings(), read_pellets_store())
+
+    assert dash["errors"] == [_CONTROL_BANNER, _DISPLAY_BANNER, _WEB_BANNER]
 
 
 # =====================================================================

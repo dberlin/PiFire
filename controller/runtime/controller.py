@@ -22,7 +22,7 @@ monkeypatch them.
 import copy
 import os
 
-from common.common import WriteKind
+from common.common import ErrorKind, WriteKind
 from common.defaults import default_control
 from common.modes import COOK_MODES, Mode, StatusState
 from notify.notifications import check_notify, send_notifications
@@ -457,9 +457,9 @@ class Controller:
                             # passive Logs page. This list is what dash_data's
                             # "errors" key -- and the dashboard's error banners --
                             # read.
-                            errors = store.read_errors()
+                            errors = store.read_errors(ErrorKind.CONTROL)
                             errors.append("Cook file could not be created — see Logs")
-                            store.write_errors(errors)
+                            store.write_errors(ErrorKind.CONTROL, errors)
                     elif metrics_list[-1].get("mode") != Mode.PRIME:
                         # Nothing worth archiving, but the session's history and
                         # metrics still have to go: create_cookfile() ends with

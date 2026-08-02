@@ -37,6 +37,7 @@ import sys
 import tomllib
 
 from common.controller_deps import PROJECT_ROOT, set_install_state
+from common.common import ErrorKind
 from common.datastore_accessors import read_errors, write_errors, write_warning
 
 LOG_PATH = os.path.join(PROJECT_ROOT, "logs", "dependency-install.log")
@@ -88,9 +89,11 @@ def run_streaming(command, on_line, cwd=None):
 
 
 def _append_error(text):
-    errors = read_errors()
+    # ErrorKind.WEB: this runs as a child of the webapp's install request, so
+    # its banners belong to the web tier and survive a control-process restart.
+    errors = read_errors(ErrorKind.WEB)
     errors.append(text)
-    write_errors(errors)
+    write_errors(ErrorKind.WEB, errors)
 
 
 def install(extra, use_uv=True, python_exec=None, runner=None, project_root=None):

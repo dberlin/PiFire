@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 
 from common.common import (
+    ErrorKind,
     WriteKind,
     deep_update,
     generate_uuid,
@@ -105,11 +106,11 @@ class Store(ABC):
     @abstractmethod
     def write_pellet_db(self, db): ...
     @abstractmethod
-    def read_errors(self): ...
+    def read_errors(self, kind): ...
     @abstractmethod
-    def flush_errors(self): ...
+    def flush_errors(self, kind): ...
     @abstractmethod
-    def write_errors(self, errors): ...
+    def write_errors(self, kind, errors): ...
     @abstractmethod
     def write_generic_key(self, key, value): ...
     # --- queues ---
@@ -130,7 +131,7 @@ class InMemoryStore(Store):
         self._pellet = copy.deepcopy(pellet_db) if pellet_db is not None else {}
         self._metrics_list = [copy.deepcopy(metrics)] if metrics is not None else []
         self._history = []
-        self._errors = []
+        self._errors = {}
         self._generic = {}
         self._tr = []
         self._write_queue = deque()  # pending MERGE partials
@@ -313,18 +314,29 @@ class InMemoryStore(Store):
     def write_pellet_db(self, db):
         self._pellet = copy.deepcopy(db)
 
-    def read_errors(self):
-        return list(self._errors)
+    def read_errors(self, kind):
+        if not isinstance(kind, ErrorKind):
+            raise ValueError(f"error kind must be an ErrorKind, got {kind!r}")
+        if kind is ErrorKind.ALL:
+            # Grouped by owner in ErrorKind declaration order, matching the
+            # SQL accessor: a process rewriting its own list must not move its
+            # banners relative to the other processes'.
+            return [m for k in ErrorKind if k is not ErrorKind.ALL for m in self._errors.get(k, [])]
+        return list(self._errors.get(kind, []))
 
-    def flush_errors(self):
+    def flush_errors(self, kind):
         # Mirror common.datastore_accessors.flush_errors: returns the NEW
         # (empty) list, not the discarded contents -- callers use it as a fresh
         # accumulator.
-        self._errors = []
+        self.write_errors(kind, [])
         return []
 
-    def write_errors(self, errors):
-        self._errors = list(errors)
+    def write_errors(self, kind, errors):
+        if not isinstance(kind, ErrorKind):
+            raise ValueError(f"error kind must be an ErrorKind, got {kind!r}")
+        if kind is ErrorKind.ALL:
+            raise ValueError(f"{kind} is a read-only selector; write and flush need a single owning kind")
+        self._errors[kind] = list(errors)
 
     def write_generic_key(self, key, value):
         self._generic[key] = copy.deepcopy(value)
@@ -440,14 +452,14 @@ class SqliteStore(Store):
     def write_pellet_db(self, db):
         _c.write_pellet_db(db)
 
-    def read_errors(self):
-        return _c.read_errors()
+    def read_errors(self, kind):
+        return _c.read_errors(kind)
 
-    def flush_errors(self):
-        return _c.flush_errors()
+    def flush_errors(self, kind):
+        return _c.flush_errors(kind)
 
-    def write_errors(self, errors):
-        _c.write_errors(errors)
+    def write_errors(self, kind, errors):
+        _c.write_errors(kind, errors)
 
     def write_generic_key(self, key, value):
         _c.write_generic_key(key, value)

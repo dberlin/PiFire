@@ -45,6 +45,24 @@ class WriteKind(Enum):
     DELTA = "delta"
 
 
+class ErrorKind(Enum):
+    """Which process owns a dashboard error banner.
+
+    Each process is independently supervised and rewrites its own list
+    wholesale on restart, so the owner is what keeps one process's restart
+    from erasing another's banners.
+
+    Declaration order is the dashboard's display order for
+    :data:`ErrorKind.ALL`.
+    """
+
+    CONTROL = "control"
+    DISPLAY = "display"
+    WEB = "web"
+    # A read-only selector, not an owner: nothing writes banners "as ALL".
+    ALL = "all"
+
+
 # *****************************************
 # Constants and Globals
 # *****************************************

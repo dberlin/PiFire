@@ -198,11 +198,12 @@ def _raise_banner(text, logger=None):
     controller problem must not itself take down the control loop.
     """
     try:
+        from common.common import ErrorKind
         from common.datastore_accessors import read_errors, write_errors
 
-        errors = read_errors()
+        errors = read_errors(ErrorKind.CONTROL)
         errors.append(text)
-        write_errors(errors)
+        write_errors(ErrorKind.CONTROL, errors)
     except Exception:
         pass
     if logger is not None:

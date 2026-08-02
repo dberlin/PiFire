@@ -5,16 +5,15 @@ the control loop stamps as it works and, when that stamp has gone stale,
 reports "The control process did not respond...". That string used to be
 **appended to the errors blob**, which is the wrong store for it:
 
-* Every other writer of that blob is the control process or one of its
-  subprocesses (``controller/runtime/devices.py``, ``runner.py``,
-  ``controller.py``, ``common/extra_installer.py``), and each records a fact
-  about a *past* failure that cannot un-happen -- a display that would not
-  load, a dependency install that failed. The blob's whole lifecycle matches
-  that: ``flush_errors()`` is called exactly once, from ``control.py``'s boot
-  path, so "errors accumulated since the control process started".
+* Every other writer of the errors table (``controller/runtime/devices.py``,
+  ``runner.py``, ``controller.py``, ``common/extra_installer.py``) records a
+  fact about a *past* failure that cannot un-happen -- a display that would not
+  load, a dependency install that failed. The lifecycle matches that: each
+  producing process calls ``flush_errors()`` for its own kind at its own boot,
+  so each kind holds "errors accumulated since that process started".
 * Liveness is the opposite kind of fact. It is a statement about *right now*,
   made by the web process, and it stops being true the moment control answers
-  again. Filed in the errors blob it became permanent: ``read_errors()`` is a
+  again. Filed in the errors table it became permanent: ``read_errors()`` is a
   plain non-destructive read (unlike ``warnings`` on the very same payload,
   which drains and self-heals frame to frame), so a single missed answer rode
   every ``socket_dash_data`` frame until the control process restarted. No
@@ -22,8 +21,8 @@ reports "The control process did not respond...". That string used to be
 
 The fix is a non-sticky signal rather than a clearing endpoint: the check now
 records its verdict in memory and ``_get_dash_data`` composes it into the
-payload it is already building. The durable blob keeps its single owner (the
-control process), the web tier only ever reads it, and the observation
+payload it is already building. Each durable kind keeps its single owner, the
+web tier only ever reads the kinds it does not own, and the observation
 self-heals on the next check that succeeds.
 
 ``blueprints/dash/routes.py::dash_page`` already worked this way -- it appends
@@ -31,6 +30,7 @@ the same string to the local list it hands the template and persists nothing.
 These tests pin both consumers.
 """
 
+import os
 import time
 import types
 from unittest import mock
@@ -38,7 +38,7 @@ from unittest import mock
 import pytest
 
 from common.app import CONTROL_DOWN_ERROR
-from common.common import WriteKind
+from common.common import ErrorKind, WriteKind
 from common.datastore_accessors import (
     CONTROL_HEARTBEAT_KEY,
     CONTROL_HEARTBEAT_STALE_AFTER,
@@ -52,6 +52,7 @@ from common.datastore_accessors import (
     write_settings_store,
 )
 from common.defaults import default_pellets, default_settings
+from tests.conftest import REPO_BASE
 
 _DURABLE = "Grill Platform Error: Could not load the grill platform module."
 
@@ -105,7 +106,7 @@ def test_a_failed_liveness_check_does_not_write_the_durable_errors_blob(consumer
     process's error store, where nothing the user can reach clears it."""
     _check(consumers, alive=False)
 
-    assert read_errors() == [], "the web tier persisted a liveness observation into the errors blob"
+    assert read_errors(ErrorKind.ALL) == [], "the web tier persisted a liveness observation into the errors table"
 
 
 def test_the_payload_reports_the_control_process_as_down(consumers):
@@ -139,18 +140,65 @@ def test_repeated_ticks_keep_reporting_while_control_stays_down(consumers):
 def test_a_control_process_error_is_untouched_by_a_successful_check(consumers):
     """Guard against "fixing" this by having the check delete from the blob:
     errors the control process wrote are durable and are NOT ours to clear."""
-    write_errors([_DURABLE])
+    write_errors(ErrorKind.CONTROL, [_DURABLE])
 
     _check(consumers, alive=True)
 
-    assert read_errors() == [_DURABLE]
+    assert read_errors(ErrorKind.CONTROL) == [_DURABLE]
     assert _socket_tick(consumers)["errors"] == [_DURABLE]
 
 
 def test_a_control_process_error_survives_a_failed_check_and_is_reported_alongside(consumers):
-    write_errors([_DURABLE])
+    write_errors(ErrorKind.CONTROL, [_DURABLE])
 
     _check(consumers, alive=False)
 
-    assert read_errors() == [_DURABLE], "a failed liveness check rewrote the control process's blob"
+    assert read_errors(ErrorKind.CONTROL) == [_DURABLE], "a failed liveness check rewrote the control process's list"
     assert _socket_tick(consumers)["errors"] == [_DURABLE, CONTROL_DOWN_ERROR]
+
+
+_SEED = """
+import os
+from common import datastore
+from common.common import ErrorKind, WriteKind
+from common.datastore_accessors import (
+    init_status, write_control, write_errors, write_pellets_store, write_settings_store,
+)
+from common.defaults import default_control, default_pellets, default_settings
+
+datastore._reset_for_tests(os.environ["PIFIRE_DB_PATH"])
+datastore.init()
+write_settings_store(default_settings())
+write_pellets_store(default_pellets())
+init_status()
+write_control(default_control(), WriteKind.OVERWRITE, origin="test")
+write_errors(ErrorKind.CONTROL, ["control banner"])
+write_errors(ErrorKind.DISPLAY, ["display banner"])
+write_errors(ErrorKind.WEB, ["web banner"])
+"""
+
+
+def test_booting_the_webapp_clears_only_its_own_kind(tmp_path):
+    """app.py flushes ErrorKind.WEB at its own boot, exactly as control.py and
+    display_process.py do for theirs. The control and display processes are
+    separately supervised, so their banners are not the webapp's to discard.
+
+    Boots the real app.py in a subprocess: the flush runs at module import, so
+    an already-imported `app` in this session would not re-run it.
+    """
+    import sqlite3
+    import subprocess
+    import sys
+
+    db = str(tmp_path / "boot.db")
+    env = {**os.environ, "PIFIRE_DB_PATH": db, "QT_QPA_PLATFORM": "offscreen", "SDL_VIDEODRIVER": "dummy"}
+
+    subprocess.run([sys.executable, "-c", _SEED], cwd=REPO_BASE, env=env, check=True, timeout=120)
+    subprocess.run([sys.executable, "-c", "import app"], cwd=REPO_BASE, env=env, check=True, timeout=120)
+
+    with sqlite3.connect(db) as conn:
+        stored = conn.execute("SELECT kind, message FROM errors ORDER BY kind, id").fetchall()
+
+    assert ("web", "web banner") not in stored, "the webapp did not clear its own banners at boot"
+    assert ("control", "control banner") in stored, "the webapp cleared the control process's banners"
+    assert ("display", "display banner") in stored, "the webapp cleared the display process's banners"

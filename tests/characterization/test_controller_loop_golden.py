@@ -28,6 +28,7 @@ from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
 from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
+from common.common import ErrorKind
 from common.defaults import default_metrics
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.fakes.grill import FakeGrillPlatform
@@ -311,8 +312,8 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     only visible on the passive Logs page (self.eventLogger.error above). It
     now ALSO gets surfaced
     through the same active mechanism the dashboard error banners already
-    read -- store.read_errors()/write_errors() (the same "errors" list
-    build_devices()/build_display() append to on hardware-load failure),
+    read -- store.read_errors()/write_errors() under ErrorKind.CONTROL (the
+    same list build_devices() appends to on hardware-load failure),
     which flows to the web UI via dash_data's "errors" key."""
     settings = base_settings()
     control_data = base_control(mode="Stop")
@@ -343,8 +344,8 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     assert any("disk full" in rec.message for rec in caplog.records)  # logged loudly
 
     # ALSO surfaced actively via the errors list the dashboard banners read
-    # (store.read_errors()), not just the passive Logs page.
-    errors = store.read_errors()
+    # (store.read_errors(ErrorKind.CONTROL)), not just the passive Logs page.
+    errors = store.read_errors(ErrorKind.CONTROL)
     assert any("Cook file could not be created" in e for e in errors)
 
     # Every other Stop-cleanup step still ran despite the cookfile failure.

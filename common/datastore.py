@@ -155,6 +155,23 @@ CREATE TABLE IF NOT EXISTS logs (
 );
 CREATE INDEX IF NOT EXISTS ix_logs_name_id ON logs(name, id);
 """
+    # `kind` carries no CHECK constraint: CREATE TABLE IF NOT EXISTS leaves an
+    # existing table's constraints alone, so a CHECK would admit a newly added
+    # kind on fresh databases while silently rejecting it on every install that
+    # already has the table. common.common.ErrorKind is the one enforcement
+    # point, applied in Python where every database sees the same rule.
+    #
+    # No timestamp column: read_errors() groups by kind and orders by `id`
+    # within each group, which needs no clock -- and a clock here would have to
+    # answer whose it is, across three independently supervised processes.
+    + """
+CREATE TABLE IF NOT EXISTS errors (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind    TEXT NOT NULL,
+    message TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_errors_kind_id ON errors(kind, id);
+"""
 )
 
 # one table per queue; JSON queues carry a json_valid CHECK, raw lists do not
@@ -313,8 +330,27 @@ class transaction:
 
 def init():
     connection()
+    _drop_legacy_error_blobs()
     _first_boot_import()
     _upgrade_settings_in_store()
+
+
+def _drop_legacy_error_blobs():
+    """Remove the `kv` rows that the `errors` table replaced.
+
+    Nothing reads `errors`/`display_errors` out of `kv` any more; leaving them
+    behind would leave a stale copy of banners that outlives every process that
+    could clear them.
+
+    The SELECT guards the DELETE for the reason _ensure_logs_retention
+    documents: the steady state is a row that no longer exists, and an
+    unconditional DELETE would take a write lock on every process start to
+    delete nothing.
+    """
+    with transaction() as conn:
+        if conn.execute("SELECT 1 FROM kv WHERE key IN ('errors','display_errors')").fetchone() is None:
+            return
+        conn.execute("DELETE FROM kv WHERE key IN ('errors','display_errors')")
 
 
 def _first_boot_import():

@@ -85,13 +85,14 @@ def test_the_migrated_tree_survives_a_validating_write(ds):
 def test_init_runs_the_upgrade(monkeypatch):
     """init() is the startup hook; the migration must be wired into it."""
     calls = []
+    monkeypatch.setattr(datastore, "_drop_legacy_error_blobs", lambda: calls.append("drop-legacy-errors"))
     monkeypatch.setattr(datastore, "_first_boot_import", lambda: calls.append("import"))
     monkeypatch.setattr(datastore, "_upgrade_settings_in_store", lambda: calls.append("upgrade"))
     monkeypatch.setattr(datastore, "connection", lambda: calls.append("connect"))
 
     datastore.init()
 
-    assert calls == ["connect", "import", "upgrade"]
+    assert calls == ["connect", "drop-legacy-errors", "import", "upgrade"]
 
 
 def test_a_newer_stored_version_is_left_alone(ds):

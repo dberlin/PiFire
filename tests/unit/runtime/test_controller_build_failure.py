@@ -25,6 +25,7 @@ import sys
 import pytest
 
 import tests.characterization.harness as harness  # noqa: F401  binds control.eventLogger
+from common.common import ErrorKind
 from common.datastore_accessors import read_errors
 from controller.runtime.runner import (
     SyncControllerRunner,
@@ -115,7 +116,7 @@ def test_build_runner_falls_back_to_pid_and_keeps_controlling(no_do_mpc, ds):
 def test_build_runner_tells_the_user_what_happened(no_do_mpc, ds):
     build_runner(_mpc_settings(), _control(), logger=_Logger())
 
-    banner = "\n".join(read_errors())
+    banner = "\n".join(read_errors(ErrorKind.CONTROL))
     assert "[mpc] controller could not be started" in banner
     # Actionable: names the package, and says how to fix it.
     assert "do_mpc" in banner
@@ -185,7 +186,7 @@ def test_reconfigure_to_a_broken_controller_keeps_the_previous_core(no_do_mpc, d
     assert status == "Inactive"
     assert runner._core is previous  # still the controller that was running
     assert runner.latest_from(200.0).cycle_ratio == 0.42  # and still controlling
-    banner = "\n".join(read_errors())
+    banner = "\n".join(read_errors(ErrorKind.CONTROL))
     assert "Could not switch to the [mpc] controller" in banner
     assert "previous controller is still running your cook" in banner
 
@@ -219,4 +220,4 @@ def test_hold_cycle_survives_mpc_selected_without_do_mpc(no_do_mpc, ds):
     # Powered up and under control, not dumped into an error/stop state.
     assert "power_on" in names
     # And the user has an explanation waiting on the dashboard.
-    assert any("[mpc] controller could not be started" in error for error in read_errors())
+    assert any("[mpc] controller could not be started" in error for error in read_errors(ErrorKind.CONTROL))

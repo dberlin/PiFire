@@ -13,6 +13,8 @@ import pytest
 from common import controller_deps as cd
 from common import extra_installer as ei
 
+_CONTROL_BANNER = "Grill Platform Error: Could not load the grill platform module."
+
 
 @pytest.fixture(autouse=True)
 def _log_off_repo(tmp_path, monkeypatch):
@@ -101,18 +103,26 @@ def test_successful_install_records_done_and_tells_the_user(ds):
 
 
 def test_failed_install_records_failed_and_raises_a_dashboard_error(ds):
-    from common.datastore_accessors import read_errors
+    """The installer runs as a child of the webapp's install request, so its
+    banner belongs to ErrorKind.WEB -- a control-process restart must not
+    discard it, and it must not land in the control process's list."""
+    from common.common import ErrorKind
+    from common.datastore_accessors import read_errors, write_errors
+
+    write_errors(ErrorKind.CONTROL, [_CONTROL_BANNER])
 
     assert ei.install("mpc", use_uv=True, runner=lambda command, on_line: 1) is False
     state = cd.install_state("mpc")
     assert state["state"] == "failed"
     assert "exit code 1" in state["message"]
-    errors = read_errors()
+    errors = read_errors(ErrorKind.WEB)
     assert any("dependency-install.log" in e for e in errors)
     assert any("failed" in e for e in errors)
+    assert read_errors(ErrorKind.CONTROL) == [_CONTROL_BANNER], "the installer wrote into the control process's list"
 
 
 def test_a_runner_that_explodes_is_reported_not_propagated(ds):
+    from common.common import ErrorKind
     from common.datastore_accessors import read_errors
 
     def boom(command, on_line):
@@ -120,7 +130,7 @@ def test_a_runner_that_explodes_is_reported_not_propagated(ds):
 
     assert ei.install("mpc", use_uv=True, runner=boom) is False
     assert cd.install_state("mpc")["state"] == "failed"
-    assert any("uv: command not found" in e for e in read_errors())
+    assert any("uv: command not found" in e for e in read_errors(ErrorKind.WEB))
 
 
 def test_an_unknown_extra_fails_cleanly_without_running_anything(ds):

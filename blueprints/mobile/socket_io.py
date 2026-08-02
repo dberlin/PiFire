@@ -22,6 +22,7 @@ import os
 import time
 
 from common.common import (
+    ErrorKind,
     read_events_records,
     flush_events_records,
     read_generic_json,
@@ -40,7 +41,6 @@ from common.datastore_accessors import (
     flush_control,
     read_status,
     read_current,
-    read_display_errors,
     read_errors,
     read_warnings_snapshot,
     read_generic_key,
@@ -280,13 +280,12 @@ def _get_dash_data(settings, pelletdb):
     control = read_control()
     status = read_status()
     current = read_current()
-    # The durable half comes from the store, where the control process and the
-    # display process each own a separate blob -- either can restart and
-    # rewrite its own list without erasing the other's banners. The liveness
-    # half is recomputed per frame from the last check, so it clears itself the
-    # moment control answers again. Copy rather than append: neither blob is
-    # ours to write.
-    errors = read_errors() + read_display_errors() + ([] if _control_alive else [CONTROL_DOWN_ERROR])
+    # The durable half comes from the store, where each producing process owns
+    # its own ErrorKind -- any of them can restart and rewrite its own list
+    # without erasing the others' banners. The liveness half is recomputed per
+    # frame from the last check, so it clears itself the moment control answers
+    # again. Copy rather than append: no other kind's rows are ours to write.
+    errors = read_errors(ErrorKind.ALL) + ([] if _control_alive else [CONTROL_DOWN_ERROR])
     warnings_snapshot = read_warnings_snapshot()
     notify_data = control["notify_data"]
     probe_device_info = read_generic_key("probe_device_info")

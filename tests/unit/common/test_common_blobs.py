@@ -1,6 +1,10 @@
+import json
+
+import pytest
+
 from common import datastore_accessors as c
 from common import defaults
-from common.common import WriteKind, strip_null_members, read_events_records, flush_events_records
+from common.common import ErrorKind, WriteKind, strip_null_members, read_events_records, flush_events_records
 from common import datastore
 
 
@@ -109,47 +113,108 @@ def test_control_merge_null_free_partial_logs_nothing(ds, caplog):
 
 
 def test_errors_and_current_status_roundtrip(ds):
-    c.write_errors(["e1"])
-    assert c.read_errors() == ["e1"]
+    c.write_errors(ErrorKind.CONTROL, ["e1"])
+    assert c.read_errors(ErrorKind.CONTROL) == ["e1"]
     c.write_status({"mode": "Hold"})
     assert c.read_status() == {"mode": "Hold"}
 
 
-def test_display_errors_roundtrip(ds):
-    c.write_display_errors(["d1"])
-    assert c.read_display_errors() == ["d1"]
+def _seed_all_three():
+    c.write_errors(ErrorKind.CONTROL, ["control banner"])
+    c.write_errors(ErrorKind.DISPLAY, ["display banner"])
+    c.write_errors(ErrorKind.WEB, ["web banner"])
 
 
-def test_read_display_errors_defaults_to_empty_before_anything_is_written(ds):
-    assert c.read_display_errors() == []
+@pytest.mark.parametrize(
+    "flushed, survivors",
+    [
+        (ErrorKind.CONTROL, [(ErrorKind.DISPLAY, "display banner"), (ErrorKind.WEB, "web banner")]),
+        (ErrorKind.DISPLAY, [(ErrorKind.CONTROL, "control banner"), (ErrorKind.WEB, "web banner")]),
+        (ErrorKind.WEB, [(ErrorKind.CONTROL, "control banner"), (ErrorKind.DISPLAY, "display banner")]),
+    ],
+)
+def test_flushing_one_kind_leaves_the_other_two_intact(ds, flushed, survivors):
+    """Each producing process boots and clears its own banners. The other
+    processes' banners are durable and are NOT this one's to discard."""
+    _seed_all_three()
+
+    c.flush_errors(flushed)
+
+    for kind, banner in survivors:
+        assert c.read_errors(kind) == [banner], f"flushing {flushed} erased {kind}'s banner"
+    assert c.read_errors(flushed) == []
 
 
-def test_flush_display_errors_returns_empty_and_clears_the_stored_list(ds):
-    c.write_display_errors(["d1"])
-    assert c.flush_display_errors() == []
-    assert c.read_display_errors() == []
+def test_read_all_groups_by_kind_in_declaration_order(ds):
+    _seed_all_three()
+    assert c.read_errors(ErrorKind.ALL) == ["control banner", "display banner", "web banner"]
 
 
-def test_flush_display_errors_leaves_the_control_process_list_alone(ds):
-    """The display process boots and clears its own banners; the control
-    process's banners are durable and are NOT the display's to discard."""
-    c.write_errors(["control banner"])
-    c.write_display_errors(["display banner"])
+def test_read_all_keeps_a_kind_in_place_when_that_kind_is_rewritten(ds):
+    """write_errors replaces a kind's rows, so the replacements get fresh ids.
+    Ordering by id alone would jump a whole process's banners to the end of the
+    strip every time that process restarted."""
+    c.write_errors(ErrorKind.CONTROL, ["control first"])
+    c.write_errors(ErrorKind.DISPLAY, ["display first"])
+    assert c.read_errors(ErrorKind.ALL) == ["control first", "display first"]
 
-    c.flush_display_errors()
+    c.write_errors(ErrorKind.CONTROL, ["control rewritten"])
 
-    assert c.read_errors() == ["control banner"]
+    assert c.read_errors(ErrorKind.ALL) == ["control rewritten", "display first"]
 
 
-def test_flush_errors_leaves_the_display_process_list_alone(ds):
-    """The other direction: the controller restarts far more often than the
-    display, and its boot flush must not erase the display's banner."""
-    c.write_errors(["control banner"])
-    c.write_display_errors(["display banner"])
+def test_all_is_a_read_only_selector(ds):
+    with pytest.raises(ValueError):
+        c.write_errors(ErrorKind.ALL, ["nope"])
+    with pytest.raises(ValueError):
+        c.flush_errors(ErrorKind.ALL)
 
-    c.flush_errors()
 
-    assert c.read_display_errors() == ["display banner"]
+@pytest.mark.parametrize("bad", ["control", None])
+def test_a_bare_kind_is_rejected_by_every_accessor(ds, bad):
+    with pytest.raises(ValueError):
+        c.read_errors(bad)
+    with pytest.raises(ValueError):
+        c.write_errors(bad, ["nope"])
+    with pytest.raises(ValueError):
+        c.flush_errors(bad)
+
+
+@pytest.mark.parametrize("kind", list(ErrorKind))
+def test_reading_a_fresh_database_yields_an_empty_list_for_every_kind(ds, kind):
+    assert c.read_errors(kind) == []
+
+
+@pytest.mark.parametrize("kind", [ErrorKind.CONTROL, ErrorKind.DISPLAY, ErrorKind.WEB])
+def test_write_replaces_the_kinds_list_rather_than_appending(ds, kind):
+    c.write_errors(kind, ["a"])
+    c.write_errors(kind, ["b"])
+    assert c.read_errors(kind) == ["b"]
+
+
+def test_flush_returns_the_new_empty_state_not_the_discarded_contents(ds):
+    """Callers use the result as a fresh accumulator; handing back the
+    pre-flush list would resurrect the previous run's banners."""
+    c.write_errors(ErrorKind.CONTROL, ["stale banner"])
+    assert c.flush_errors(ErrorKind.CONTROL) == []
+    assert c.read_errors(ErrorKind.CONTROL) == []
+
+
+def test_init_drops_the_legacy_error_blobs_and_is_idempotent(ds):
+    """The kv rows the errors table replaced would otherwise outlive every
+    process that could clear them."""
+    datastore.set_blob("errors", json.dumps(["legacy control"]))
+    datastore.set_blob("display_errors", json.dumps(["legacy display"]))
+
+    datastore.init()
+
+    assert datastore.exists_blob("errors") is False
+    assert datastore.exists_blob("display_errors") is False
+
+    datastore.init()  # a second boot has nothing left to delete
+
+    assert datastore.exists_blob("errors") is False
+    assert datastore.exists_blob("display_errors") is False
 
 
 def test_autotune_uses_queue(ds):

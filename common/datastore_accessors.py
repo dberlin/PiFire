@@ -20,6 +20,7 @@ import time
 
 from common import datastore
 from common.common import (
+    ErrorKind,
     WriteKind,
     generate_uuid,
     strip_null_members,
@@ -173,82 +174,91 @@ def execute_control_writes():
     return "OK"
 
 
-def read_errors():
-    """
-    Read the control process's error list from SQLite DB.
+def _writable_error_kind(kind):
+    """Resolve ``kind`` to the stored string, rejecting the read-only selector.
 
+    ``ALL`` spans every owner, so writing or flushing it would let one process
+    discard another's banners -- the exact failure the kind column exists to
+    prevent. Bare strings are rejected too, so a typo is an error rather than a
+    silently-unreadable kind.
+    """
+    if not isinstance(kind, ErrorKind):
+        raise ValueError(f"error kind must be an ErrorKind, got {kind!r}")
+    if kind is ErrorKind.ALL:
+        raise ValueError(f"{kind} is a read-only selector; write and flush need a single owning kind")
+    return kind.value
+
+
+def read_errors(kind):
+    """
+    Read stored error banners from SQLite DB.
+
+    :param kind: An :class:`ErrorKind`. ``ALL`` returns every kind's messages
+        grouped by kind in ErrorKind declaration order, ordered by id within
+        each group. Grouping rather than a global id sort keeps the dashboard
+        order stable: :func:`write_errors` replaces a kind's rows, so a global
+        sort would jump a whole process's banners to the end of the strip every
+        time that process restarted.
     :return: errors
     """
-    return _read_json_blob("errors", list)
+    if not isinstance(kind, ErrorKind):
+        raise ValueError(f"error kind must be an ErrorKind, got {kind!r}")
+    if kind is ErrorKind.ALL:
+        owners = [k.value for k in ErrorKind if k is not ErrorKind.ALL]
+        placeholders = ",".join("?" for _ in owners)
+        rank = " ".join(f"WHEN ? THEN {i}" for i, _ in enumerate(owners))
+        rows = (
+            datastore.connection()
+            .execute(
+                f"SELECT message FROM errors WHERE kind IN ({placeholders}) ORDER BY CASE kind {rank} END, id",
+                (*owners, *owners),
+            )
+            .fetchall()
+        )
+    else:
+        rows = (
+            datastore.connection()
+            .execute("SELECT message FROM errors WHERE kind = ? ORDER BY id", (kind.value,))
+            .fetchall()
+        )
+    return [row[0] for row in rows]
 
 
-def flush_errors():
+def flush_errors(kind):
     """
-    Clear the control process's stored error list.
+    Clear one kind's stored error list.
 
     Returns ``[]`` -- the *new* state, not the discarded contents. This is
-    deliberately not a read-and-clear: the sole caller (``control.py``'s boot
-    path) wants a cleared store plus a fresh accumulator to hand to
-    ``build_devices()``. Returning the pre-flush errors would change what
-    build_devices accumulates into, resurrecting errors from the previous run.
+    deliberately not a read-and-clear: each boot-path caller wants a cleared
+    store plus a fresh accumulator to hand to its builder. Returning the
+    pre-flush errors would change what the builder accumulates into,
+    resurrecting errors from the previous run.
 
     Previously reachable only as ``read_errors(flush=True)`` -- see
     :func:`flush_history` for why that spelling was a problem.
 
+    :param kind: An :class:`ErrorKind` other than ``ALL``.
     :return: An empty error list.
     """
-    write_errors([])
+    write_errors(kind, [])
     return []
 
 
-def write_errors(errors):
+def write_errors(kind, errors):
     """
-    Write the control process's error list to SQLite DB.
+    Replace one kind's error list in SQLite DB.
 
+    The delete and the inserts share one transaction, so a concurrent reader
+    sees either the old list or the new one and never a half-written strip.
+    Rows of other kinds are untouched.
+
+    :param kind: An :class:`ErrorKind` other than ``ALL``.
     :param errors: Errors
     """
-    _write_json_blob("errors", errors)
-
-
-def read_display_errors():
-    """
-    Read the display process's error list from SQLite DB.
-
-    Separate from :func:`read_errors` because each writer replaces the whole
-    blob. The control process and the display process are independent
-    supervisor programs that fail and restart on their own schedules, so a
-    single shared list means whichever wrote last erases the other's banners.
-    One list per process keeps both sets of banners on the dashboard.
-
-    :return: display errors
-    """
-    return _read_json_blob("display_errors", list)
-
-
-def flush_display_errors():
-    """
-    Clear the display process's stored error list.
-
-    Returns ``[]`` -- the *new* state, not the discarded contents, matching
-    :func:`flush_errors`. The sole caller (``display_process.py``'s boot path)
-    wants a cleared store plus a fresh accumulator to hand to
-    ``build_display()``, so a repaired display drops its stale banner on
-    restart while a still-broken one re-reports. Returning the pre-flush
-    errors would resurrect the previous run's banners instead.
-
-    :return: An empty error list.
-    """
-    write_display_errors([])
-    return []
-
-
-def write_display_errors(errors):
-    """
-    Write the display process's error list to SQLite DB.
-
-    :param errors: Errors
-    """
-    _write_json_blob("display_errors", errors)
+    stored_kind = _writable_error_kind(kind)
+    with datastore.transaction() as conn:
+        conn.execute("DELETE FROM errors WHERE kind = ?", (stored_kind,))
+        conn.executemany("INSERT INTO errors (kind, message) VALUES (?, ?)", [(stored_kind, e) for e in errors])
 
 
 def read_warnings_snapshot():

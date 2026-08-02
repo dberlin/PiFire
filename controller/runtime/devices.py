@@ -3,20 +3,19 @@ each device module is imported dynamically from settings, and if it fails to
 load or configure, a simulated "none" fallback is substituted and the failure
 is recorded to that process's errors list/logs. build_devices() builds the
 grill platform, probe complex, and distance sensor for the controller process
-and records to the ``errors`` list; build_display() builds only the display for
-the separate display process and records to the ``display_errors`` list -- kept
+and records under ``ErrorKind.CONTROL``; build_display() builds only the display
+for the separate display process and records under ``ErrorKind.DISPLAY`` -- kept
 apart so the two processes never touch each other's hardware, and so neither
 one's whole-list write erases the other's banners."""
 
 import importlib
 
-from common.common import get_probe_info, WriteKind
+from common.common import ErrorKind, get_probe_info, WriteKind
 from common.datastore_accessors import (
     read_control,
     read_pellet_db,
     write_pellet_db,
     write_control,
-    write_display_errors,
     write_errors,
     write_generic_key,
 )
@@ -35,8 +34,8 @@ def build_display(settings, *, errors, event_log, control_log):
     distance hardware, and the controller must never touch the display.
 
     :param settings: Settings dictionary
-    :param errors: Display errors list to append to (and persist via
-        write_display_errors -- the display process owns this list, so a
+    :param errors: Display errors list to append to (and persist under
+        ErrorKind.DISPLAY -- the display process owns that kind, so a
         controller restart cannot erase what is recorded here)
     :param event_log: Event logger
     :param control_log: Control logger
@@ -66,7 +65,7 @@ def build_display(settings, *, errors, event_log, control_log):
             f"again from the admin panel to fix this issue."
         )
         errors.append(error_event)
-        write_display_errors(errors)
+        write_errors(ErrorKind.DISPLAY, errors)
         event_log.error(error_event)
         control_log.error(error_event)
 
@@ -98,7 +97,7 @@ def build_display(settings, *, errors, event_log, control_log):
             f"again from the admin panel to fix this issue."
         )
         errors.append(error_event)
-        write_display_errors(errors)
+        write_errors(ErrorKind.DISPLAY, errors)
         event_log.error(error_event)
         control_log.error(error_event)
 
@@ -118,7 +117,7 @@ def build_devices(settings, *, errors, event_log, control_log):
     hardware.
 
     :param settings: Settings dictionary
-    :param errors: Errors list to append to (and persist via write_errors)
+    :param errors: Errors list to append to (and persist under ErrorKind.CONTROL)
     :param event_log: Event logger
     :param control_log: Control logger
     :return: (Devices, errors)
@@ -153,7 +152,7 @@ def build_devices(settings, *, errors, event_log, control_log):
             f"panel to fix this issue."
         )
         errors.append(error_event)
-        write_errors(errors)
+        write_errors(ErrorKind.CONTROL, errors)
         event_log.error(error_event)
         control_log.error(error_event)
 
@@ -182,7 +181,7 @@ def build_devices(settings, *, errors, event_log, control_log):
             f"again from the admin panel to fix this issue."
         )
         errors.append(error_event)
-        write_errors(errors)
+        write_errors(ErrorKind.CONTROL, errors)
         event_log.error(error_event)
         control_log.error(error_event)
 
@@ -204,7 +203,7 @@ def build_devices(settings, *, errors, event_log, control_log):
             f"Please run the configuration wizard again from the admin panel to fix this issue. "
         )
         errors.append(error_event)
-        write_errors(errors)
+        write_errors(ErrorKind.CONTROL, errors)
         event_log.error(error_event)
         control_log.error(error_event)
 
@@ -214,7 +213,7 @@ def build_devices(settings, *, errors, event_log, control_log):
         for error in probe_errors:
             event_log.error(error)
             errors.append(error)
-            write_errors(errors)
+            write_errors(ErrorKind.CONTROL, errors)
 
     # Get probe device info for frontend
     write_generic_key("probe_device_info", probe_complex.get_device_info())
@@ -236,7 +235,7 @@ def build_devices(settings, *, errors, event_log, control_log):
             f"admin panel to fix this issue."
         )
         errors.append(error_event)
-        write_errors(errors)
+        write_errors(ErrorKind.CONTROL, errors)
         event_log.error(error_event)
         control_log.error(error_event)
 
@@ -274,7 +273,7 @@ def build_devices(settings, *, errors, event_log, control_log):
             f"from the admin panel to fix this issue."
         )
         errors.append(error_event)
-        write_errors(errors)
+        write_errors(ErrorKind.CONTROL, errors)
         event_log.error(error_event)
         control_log.error(error_event)
 

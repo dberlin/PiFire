@@ -25,8 +25,8 @@ from flask_socketio import SocketIO
 from flask_qrcode import QRcode
 from werkzeug.exceptions import InternalServerError
 from common import datastore
-from common.common import create_logger, log_path
-from common.datastore_accessors import read_settings
+from common.common import ErrorKind, create_logger, log_path
+from common.datastore_accessors import flush_errors, read_settings
 from common.system import is_real_hardware
 import logging
 
@@ -37,6 +37,12 @@ import logging
 # so running it from both independently-supervised processes, in either
 # order, is safe).
 datastore.init()
+
+# The web tier clears its own banners at its own boot, exactly as control.py and
+# display_process.py do for theirs. The sole ErrorKind.WEB producer is the
+# detached extra_installer child, so an install failure's banner now stands
+# until this process restarts. No other kind is ours to clear.
+flush_errors(ErrorKind.WEB)
 
 """
 ==============================================================================
