@@ -480,6 +480,28 @@ trained distribution just as surely, only in a different direction. Lid-open is
 already unmodeled. This change relocates the extrapolation rather than
 introducing it.
 
+One part of that reasoning has to be stated more carefully, because a
+measurement contradicts its loose form. Sub-`Q_min` entries in the lag chain are
+*not* new and never were: the KF/EKF measurement update applies its gain to all
+`n` states, the leading `n_delay` among them, so the correction alone drives lag
+entries below `Q_min` in roughly 22% of samples on an ordinary 225 F hold, with
+a minimum near zero. Any claim that `set_output` first admits sub-`Q_min` values
+to `x_hat` is simply false.
+
+The claim that survives is narrower and is the one the remedy rests on. Those
+existing excursions are *transient corrections* around a commanded rate that
+never left `[Q_min, Q_max]`, and the sampler drives the same estimator, so the
+net was trained on them -- they are in distribution. What no training episode
+contains is a *sustained* interval during which the commanded rate itself is
+zero for the length of the transport-lag chain, because `_episode_span` never
+pauses the auger. A lid-open pause fills the chain with zeros and holds it
+there; a Kalman correction jitters it. Those are different regions of the input
+space, and only the first is unreached.
+
+This sharpens rather than weakens the case for extending the sampler: the fix is
+specifically pause intervals, not wider dither, since dither already produces
+the excursions the net has seen.
+
 **Measure before spending a thousand episodes.** The first MPC step in Plan A is
 a replay experiment, cheap enough to run twice:
 

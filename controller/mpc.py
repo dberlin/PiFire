@@ -146,6 +146,8 @@ class Controller(ControllerBase):
         self._last_Q = cfg["Q_min"]
         self._x_hat = None
         self._policy_u_prev = float(cfg["Q_min"])
+        self._last_Q_raw = float(cfg["Q_min"])
+        self._last_solve_failed = False
 
         n_delay = int(cfg["n_delay"])
 
@@ -300,8 +302,11 @@ class Controller(ControllerBase):
                 Q = self._net.firing_rate(x_hat, self._policy_u_prev, self._set_point_c)
             else:
                 Q = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+            self._last_solve_failed = False
         except Exception:
             Q = self._last_Q
+            self._last_solve_failed = True
+        self._last_Q_raw = float(Q)
         Q = float(np.clip(Q, self.cfg["Q_min"], self.cfg["Q_max"]))
         self._last_Q = Q
         if self._log_path:
