@@ -145,11 +145,13 @@ def test_lid_open_reports_zero_once_then_u_min_while_cycling(monkeypatch):
 
 
 def test_whole_pause_off_model_fails_the_pinned_sequence(monkeypatch):
-    """Negative control: reintroduces the exact bug this file guards
-    against, by making every lid-open tick look like the detection instant
-    instead of just the first one. That is what the harness did before this
-    fix -- auger forced off and ratio=0.0 reported on every tick of the
-    pause, never cycling at u_min. A test that only checks "the auger is off
+    """Negative control: reintroduces the bug this file guards against, by
+    making every lid-open tick look like the detection instant instead of
+    just the first one -- auger forced off and ratio=0.0 reported on every
+    tick of the pause, never cycling at u_min. That is the behaviour the
+    harness had before this fix; the pre-fix code also suppressed the
+    per-solve report during the pause, which this reintroduces only the
+    auger-and-zero-report half of. A test that only checks "the auger is off
     at some point during the pause" would still pass this buggy model; the
     sequence pinned above does not, which is why it is the one that matters.
     """
