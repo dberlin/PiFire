@@ -280,6 +280,7 @@ class Controller(ControllerBase):
         self.set_point = set_point
         self._set_point_c = _to_c(set_point, self.units)
         self._last_Q = self.cfg["Q_min"]
+        self._applied_Q = float(self.cfg["Q_min"])
 
     def get_control_period(self):
         return float(self.cfg["control_period"])
@@ -302,12 +303,33 @@ class Controller(ControllerBase):
             "x_hat": None if self._x_hat is None else [float(v) for v in np.asarray(self._x_hat).reshape(-1)],
         }
 
+    def set_output(self, applied):
+        """Take the auger duty that actually ran and recover the firing rate.
+
+        allocate() is affine on [Q_min, Q_max], so this inverts it exactly for
+        any ratio the allocator produced. A report outside the actuator's span
+        (auger held off through a lid-open pause, a manual override) inverts to
+        a Q outside [Q_min, Q_max] just as honestly -- that is the point of
+        this method, and the estimator gets it unmodified rather than clamped.
+        """
+        span = self.u_max - self.u_min
+        if span <= 0:
+            return
+        q_span = self.cfg["Q_max"] - self.cfg["Q_min"]
+        self._applied_Q = self.cfg["Q_min"] + (float(applied.ratio) - self.u_min) / span * q_span
+
     def update(self, current):
         y = _to_c(current, self.units)
-        # 1) estimate states from the measurement
-        x_hat = self.estimator.update(self._last_Q, y)
+        # 1) estimate states from the duty that actually reached the auger --
+        #    not the command -- so a clamp, a lid-open pause, or a manual
+        #    override is visible to the estimator instead of silently assumed
+        #    away.
+        x_hat = self.estimator.update(self._applied_Q, y)
         self._x_hat = x_hat
-        self._policy_u_prev = float(self._last_Q)
+        # The net's Q_prev feature was trained on values the sampler always
+        # drove inside [Q_min, Q_max]; clamp for the net only, the estimator
+        # above already saw the unclamped value.
+        self._policy_u_prev = float(np.clip(self._applied_Q, self.cfg["Q_min"], self.cfg["Q_max"]))
         # 2) compute firing rate Q from the active policy (net or NLP). On any
         #    error we hold the previous move so the control loop never breaks.
         try:
@@ -322,6 +344,8 @@ class Controller(ControllerBase):
         self._last_Q_raw = float(Q)
         Q = float(np.clip(Q, self.cfg["Q_min"], self.cfg["Q_max"]))
         self._last_Q = Q
+        # Assume the command is applied until a report says otherwise.
+        self._applied_Q = Q
         if self._log_path:
             self._log_row(y, Q)
         # 3) allocate Q -> actuators

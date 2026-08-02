@@ -4,6 +4,7 @@ import shutil
 import time
 import pytest
 from controller.mpc import Controller, _DEFAULTS
+from controller.applied_output import AppliedOutput, OutputSource
 
 CONFIG = dict(
     n_horizon=20,
@@ -32,6 +33,11 @@ def _make():
     c = Controller(dict(CONFIG), "C", dict(CYCLE))
     c.set_target(110.0)
     return c
+
+
+@pytest.fixture
+def mpc_controller():
+    return _make()
 
 
 def test_update_returns_dict_contract():
@@ -113,3 +119,72 @@ def test_dunder_dict_is_not_json_safe():
     c.update(200.0)
     with pytest.raises(TypeError):
         json.dumps(dict(c.__dict__))
+
+
+def test_set_output_inverts_the_allocation_exactly(mpc_controller):
+    """allocate() is affine, so applied ratio -> applied Q round-trips."""
+    from controller.mpc_allocator import allocate
+
+    cfg = mpc_controller.cfg
+    for q in (cfg["Q_min"], 0.5 * (cfg["Q_min"] + cfg["Q_max"]), cfg["Q_max"]):
+        auger, _ = allocate(
+            q,
+            Q_min=cfg["Q_min"],
+            Q_max=cfg["Q_max"],
+            u_min=mpc_controller.u_min,
+            u_max=mpc_controller.u_max,
+            fan_min_pct=cfg["fan_min_pct"],
+            fan_max_pct=cfg["fan_max_pct"],
+            enable_fan=bool(cfg["enable_fan_input"]),
+        )
+        mpc_controller.set_output(AppliedOutput(auger, OutputSource.CONTROLLER, 1.0))
+        assert mpc_controller._applied_Q == pytest.approx(q)
+
+
+def test_a_lid_open_report_goes_below_q_min(mpc_controller):
+    """The estimator gets the honest input; being told Q_min for a pause it did
+    not take is the defect being fixed."""
+    mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
+    assert mpc_controller._applied_Q < mpc_controller.cfg["Q_min"]
+
+
+def test_the_estimator_is_driven_by_the_applied_input(mpc_controller, monkeypatch):
+    seen = []
+    real = mpc_controller.estimator.update
+    monkeypatch.setattr(mpc_controller.estimator, "update", lambda u, y: (seen.append(u), real(u, y))[1])
+    mpc_controller.set_target(225.0)
+    mpc_controller.update(200.0)
+    mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
+    applied = mpc_controller._applied_Q
+    mpc_controller.update(200.0)
+    assert seen[-1] == pytest.approx(applied)
+
+
+def test_with_no_report_the_command_is_assumed_applied(mpc_controller, monkeypatch):
+    """Preserves today's behavior for the sync path and controller-only tests."""
+    seen = []
+    real = mpc_controller.estimator.update
+    monkeypatch.setattr(mpc_controller.estimator, "update", lambda u, y: (seen.append(u), real(u, y))[1])
+    mpc_controller.set_target(225.0)
+    mpc_controller.update(200.0)
+    commanded = mpc_controller._last_Q
+    mpc_controller.update(200.0)
+    assert seen[-1] == pytest.approx(commanded)
+
+
+def test_the_net_sees_the_applied_input_clamped_to_its_trained_span(mpc_controller, monkeypatch):
+    if mpc_controller._net is None:
+        pytest.skip("net policy not loaded")
+    seen = []
+    monkeypatch.setattr(mpc_controller._net, "firing_rate", lambda x, u_prev, sp: (seen.append(u_prev), 50.0)[1])
+    mpc_controller.set_target(225.0)
+    mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
+    mpc_controller.update(200.0)
+    assert seen[-1] == pytest.approx(mpc_controller.cfg["Q_min"])
+
+
+def test_a_degenerate_actuator_span_is_ignored(mpc_controller):
+    before = mpc_controller._applied_Q
+    mpc_controller.u_max = mpc_controller.u_min
+    mpc_controller.set_output(AppliedOutput(0.5, OutputSource.CONTROLLER, 1.0))
+    assert mpc_controller._applied_Q == before
