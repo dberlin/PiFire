@@ -176,6 +176,31 @@ describe("ControllerTab", () => {
     );
   });
 
+  it("drops an option the selected controller does not declare and reports it, instead of saving it", async () => {
+    renderRoute(<ControllerTab />, {
+      settings: {
+        controller: { selected: "pid", config: { pid: { PB: 55, ancient_option: "leftover" } } },
+      },
+      mode: "Stop",
+      controllerMeta,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(saveMock).toHaveBeenCalledWith(
+      {
+        controller: { selected: "pid", config: { pid: { PB: 55, Td: 45, Ti: 180, center: 0.5 } } },
+      },
+      ["controller_update"],
+    );
+    const saved = saveMock.mock.calls[0]![0] as {
+      controller: { config: { pid: Record<string, unknown> } };
+    };
+    expect(Object.keys(saved.controller.config.pid)).not.toContain("ancient_option");
+    expect(screen.getByRole("alert").textContent).toContain("ancient_option");
+  });
+
   it("renders a Toggle for a bool-typed option when a controller with one is selected", () => {
     renderRoute(<ControllerTab />, makeContext());
 

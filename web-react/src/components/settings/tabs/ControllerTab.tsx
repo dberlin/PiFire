@@ -1,9 +1,9 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useOutletContext } from "react-router";
-import type { ControllerConfigs } from "../../../helpers/settings/controllerTypes.gen";
 import { setPath } from "../../../helpers/settings/delta";
 import type { ControllerMetadata, Settings } from "../../../helpers/settings/settingsApi";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import type { SaveStatus } from "../../../helpers/settings/useSaveSettings";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
@@ -11,10 +11,6 @@ import { Select } from "../fields/Select";
 import { TextField } from "../fields/TextField";
 import { Toggle } from "../fields/Toggle";
 import { SaveBar } from "../SaveBar";
-
-/** The selected controller's option values. Keyed by controller name because
- *  the tab edits one at a time and writes back under that key. */
-type SelectedConfig = ControllerConfigs[keyof ControllerConfigs];
 
 /** Working state for whichever controller is selected. The option names it is
  *  keyed by come from the runtime metadata list, not from a single static
@@ -39,7 +35,10 @@ function deriveValues(
 ): ControllerValues {
   if (!meta || !selected || !meta.metadata[selected]) return {};
   const saved = settings.controller?.config?.[selected] ?? {};
-  const out: ControllerValues = {};
+  // Start from whatever is persisted, including any key the current metadata
+  // no longer declares (a controller's option set can change between saves);
+  // the loop below overwrites every declared key with its coerced value.
+  const out: ControllerValues = { ...saved };
   for (const opt of meta.metadata[selected].config) {
     if (opt.option_type === "bool") {
       out[opt.option_name] =
@@ -84,8 +83,14 @@ export function ControllerTab() {
   );
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("controller", read);
   const { selected, values } = v;
-  const setSelected = (next: string) =>
+  // Names dropped from the last save because the selected controller does not
+  // declare them. Cleared on selection change: a new controller has its own
+  // declared set, and the names no longer describe the fields on screen.
+  const [droppedOptions, setDroppedOptions] = useState<string[]>([]);
+  const setSelected = (next: string) => {
+    setDroppedOptions([]);
     setV({ selected: next, values: deriveValues(next, settings, controllerMeta) });
+  };
 
   if (!controllerMeta) {
     return (
@@ -102,7 +107,10 @@ export function ControllerTab() {
   const onSave = async () => {
     let d: object = {};
     d = setPath(d, "controller.selected", selected);
-    const rebuilt: ControllerValues = {};
+    // Start from the full working bag so a name the selected controller does
+    // not declare (carried over from what was persisted) survives long enough
+    // to be caught below, instead of just vanishing from the declared-only loop.
+    const rebuilt: ControllerValues = { ...values };
     for (const opt of entry?.config ?? []) {
       const v = values[opt.option_name];
       if (opt.option_type === "bool") rebuilt[opt.option_name] = !!v;
@@ -118,12 +126,29 @@ export function ControllerTab() {
         rebuilt[opt.option_name] = idx >= 0 ? values_[idx] : strVal;
       } else if (opt.option_type === "string") rebuilt[opt.option_name] = String(v ?? "");
     }
-    // rebuilt now holds one entry per option the selected controller declares,
-    // coerced to that controller's own generated shape; this is the one place
-    // the runtime-keyed working bag hands off to a statically typed payload.
-    d = setPath(d, `controller.config.${selected}`, rebuilt as SelectedConfig);
-    if (await save(d, ["controller_update"])) markSaved();
+    // The declared option names are a runtime fact from /api/controller_metadata,
+    // not something a generated type can check (the selected controller is a
+    // runtime string, so it can never index the generated map statically). Drop
+    // anything the selected controller does not declare rather than persist it.
+    const declared = new Set((entry?.config ?? []).map((opt) => opt.option_name));
+    const unknownKeys = Object.keys(rebuilt).filter((key) => !declared.has(key));
+    for (const key of unknownKeys) delete rebuilt[key];
+    d = setPath(d, `controller.config.${selected}`, rebuilt);
+    const ok = await save(d, ["controller_update"]);
+    setDroppedOptions(ok ? unknownKeys : []);
+    if (ok) markSaved();
   };
+
+  // A dropped-options warning takes the same slot SaveBar already renders a
+  // save error in; a genuine save failure (nothing persisted) takes priority
+  // over it, since droppedOptions only reflects the save that just succeeded.
+  const effectiveStatus: SaveStatus =
+    status.kind !== "error" && droppedOptions.length > 0
+      ? {
+          kind: "error",
+          message: `${selected} does not have options named: ${droppedOptions.join(", ")}. These were not saved.`,
+        }
+      : status;
 
   return (
     <Section title="Controller">
@@ -192,7 +217,7 @@ export function ControllerTab() {
         }
         return null;
       })}
-      <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
+      <SaveBar onSave={onSave} saving={saving} status={effectiveStatus} dirty={dirty} />
     </Section>
   );
 }
