@@ -43,6 +43,7 @@ rs.mock("../../../../src/helpers/pellets/pelletsApi", () => ({
 const { PelletsPage } = await import("../../../../src/components/pellets/PelletsPage");
 
 const DB: PelletDb = {
+  schema_version: 1,
   current: {
     pelletid: "p1",
     hopper_level: 62,

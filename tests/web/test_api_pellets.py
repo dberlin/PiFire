@@ -42,7 +42,7 @@ def test_get_pellets_returns_full_database(live_server, page):
     assert body["result"] == "OK"
     pellets = body["data"]["pellets"]
     # SHAPE PIN: helpers/pellets/pelletTypes.ts is hand-written against this.
-    assert set(pellets) == {"current", "woods", "brands", "archive", "log", "lastupdated"}
+    assert set(pellets) == {"schema_version", "current", "woods", "brands", "archive", "log", "lastupdated"}
     assert set(pellets["current"]) == {"pelletid", "hopper_level", "date_loaded", "est_usage"}
     any_profile = next(iter(pellets["archive"].values()))
     assert set(any_profile) == {"id", "brand", "wood", "rating", "comments"}

@@ -5,6 +5,7 @@ import type { LiveState } from "../../../src/helpers/types";
 import { useLiveState } from "../../../src/helpers/useLiveState";
 
 const PELLET_DB: PelletDb = {
+  schema_version: 1,
   current: {
     pelletid: "p1",
     hopper_level: 62,

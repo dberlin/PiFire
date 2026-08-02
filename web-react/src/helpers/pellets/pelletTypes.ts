@@ -32,6 +32,9 @@ export interface PelletCurrent {
 }
 
 export interface PelletDb {
+  /** The SHAPE this database was written against, independent of the release
+        version (common/pellets_schema.py PELLETDB_SCHEMA_VERSION). */
+  schema_version: number;
   current: PelletCurrent;
   brands: string[];
   woods: string[];

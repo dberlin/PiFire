@@ -333,6 +333,7 @@ def init():
     _drop_legacy_error_blobs()
     _first_boot_import()
     _upgrade_settings_in_store()
+    _upgrade_pellets_in_store()
 
 
 def _drop_legacy_error_blobs():
@@ -464,6 +465,50 @@ def _upgrade_settings_in_store():
         conn.execute(
             "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             ("settings:general", json.dumps(settings)),
+        )
+
+
+def _upgrade_pellets_in_store():
+    """Bring the stored pellet database up to the current shape, and stamp it.
+
+    Mirrors _upgrade_settings_in_store: read and write inside one
+    BEGIN IMMEDIATE, steps gated on the blob's own stamp, and the stamp written
+    last so a crash mid-chain retries the whole chain rather than leaving a
+    version ahead of its data.
+    """
+    import json
+
+    from common.common import write_log
+    from common.pellets_schema import PELLETDB_SCHEMA_VERSION, _PELLET_MIGRATIONS
+
+    with transaction() as conn:
+        row = conn.execute("SELECT value FROM kv WHERE key='pellets:general'").fetchone()
+        if row is None:
+            return
+        pelletdb = json.loads(row[0])
+        changed = False
+
+        stamp = pelletdb.get("schema_version", 0)
+        if stamp > PELLETDB_SCHEMA_VERSION:
+            write_log(
+                f"Pellet database shape version {stamp} is newer than this build's "
+                f"{PELLETDB_SCHEMA_VERSION}; no shape migration was run."
+            )
+            return
+
+        for target, migrate in _PELLET_MIGRATIONS:
+            if stamp < target and migrate(pelletdb):
+                changed = True
+        if stamp != PELLETDB_SCHEMA_VERSION:
+            pelletdb["schema_version"] = PELLETDB_SCHEMA_VERSION
+            changed = True
+
+        if not changed:
+            return
+
+        conn.execute(
+            "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("pellets:general", json.dumps(pelletdb)),
         )
 
 

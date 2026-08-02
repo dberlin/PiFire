@@ -19,6 +19,7 @@ import time
 
 from common.common import generate_uuid, read_generic_json, read_updater_manifest
 from common.modes import Mode, StatusState
+from common.pellets_schema import PELLETDB_SCHEMA_VERSION
 from common.settings_schema import SETTINGS_SCHEMA_VERSION
 
 # Set of default colors for charts.  Contains list of tuples (primary color, secondary color).
@@ -679,6 +680,8 @@ def default_metrics():
 
 def default_pellets():
     pelletdb = {}
+
+    pelletdb["schema_version"] = PELLETDB_SCHEMA_VERSION
 
     now = str(datetime.datetime.now())
     now = now[0:19]  # Truncate the microseconds

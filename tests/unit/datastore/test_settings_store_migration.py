@@ -85,16 +85,22 @@ def test_the_migrated_tree_survives_a_validating_write(ds):
 
 
 def test_init_runs_the_upgrade(monkeypatch):
-    """init() is the startup hook; the migration must be wired into it."""
+    """init() is the startup hook; every migration must be wired into it.
+
+    Each durable blob's upgrade is named here, so adding one that init() never
+    calls fails at the enumeration rather than at whichever install first holds
+    an unmigrated shape.
+    """
     calls = []
     monkeypatch.setattr(datastore, "_drop_legacy_error_blobs", lambda: calls.append("drop-legacy-errors"))
     monkeypatch.setattr(datastore, "_first_boot_import", lambda: calls.append("import"))
     monkeypatch.setattr(datastore, "_upgrade_settings_in_store", lambda: calls.append("upgrade"))
+    monkeypatch.setattr(datastore, "_upgrade_pellets_in_store", lambda: calls.append("upgrade-pellets"))
     monkeypatch.setattr(datastore, "connection", lambda: calls.append("connect"))
 
     datastore.init()
 
-    assert calls == ["connect", "drop-legacy-errors", "import", "upgrade"]
+    assert calls == ["connect", "drop-legacy-errors", "import", "upgrade", "upgrade-pellets"]
 
 
 def test_a_newer_stored_version_is_left_alone(ds):

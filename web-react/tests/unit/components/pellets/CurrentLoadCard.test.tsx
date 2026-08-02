@@ -4,6 +4,7 @@ import { CurrentLoadCard } from "../../../../src/components/pellets/CurrentLoadC
 import type { PelletDb } from "../../../../src/helpers/pellets/pelletTypes";
 
 const DB: PelletDb = {
+  schema_version: 1,
   current: {
     pelletid: "p1",
     hopper_level: 62,

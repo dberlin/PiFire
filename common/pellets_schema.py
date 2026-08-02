@@ -50,7 +50,14 @@ class PelletLastUpdated(_PelletSection):
     time: int
 
 
+#: The shape of the pellet database, independent of both the release version
+#: and the settings tree's shape version. Different shapes, different migration
+#: histories: coupling them would mean bumping one to migrate the other.
+PELLETDB_SCHEMA_VERSION = 1
+
+
 class PelletDbSchema(_PelletSection):
+    schema_version: int = PELLETDB_SCHEMA_VERSION
     current: PelletCurrent
     archive: dict[str, PelletProfile]
     # Keyed by load time, valued by profile id or the literal "deleted" --
@@ -71,6 +78,13 @@ class PelletDbSchema(_PelletSection):
         if self.current.pelletid not in self.archive:
             raise ValueError("current.pelletid must be a key of archive")
         return self
+
+
+#: The shape migrations, in ascending order, as (target_version, migration).
+#: A step's number is the version the database is AT once it has run; each
+#: callable mutates in place and returns True if it changed anything. Empty at
+#: version 1, which is today's shape modeled exactly.
+_PELLET_MIGRATIONS: list = []
 
 
 class PelletDbValidationError(ValueError):

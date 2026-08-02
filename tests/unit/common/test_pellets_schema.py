@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from common.pellets_schema import PelletDbSchema, PelletDbValidationError, validate_pellet_db
+from common.pellets_schema import (
+    PELLETDB_SCHEMA_VERSION,
+    PelletDbSchema,
+    PelletDbValidationError,
+    validate_pellet_db,
+)
 
 LIVE_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "pelletdb_live.json"
 
@@ -24,8 +29,12 @@ def live():
 
 def test_the_live_database_validates_and_round_trips(live):
     """Captured from a running grill, not authored from the model -- a fixture
-    written from the model only proves the model agrees with itself."""
-    assert validate_pellet_db(copy.deepcopy(live)) == live
+    written from the model only proves the model agrees with itself.
+
+    The stamp is the one key the model adds rather than reads back: the capture
+    predates it, and an install in that state is exactly what
+    _upgrade_pellets_in_store brings forward."""
+    assert validate_pellet_db(copy.deepcopy(live)) == {**live, "schema_version": PELLETDB_SCHEMA_VERSION}
 
 
 def test_est_usage_is_a_float(live):
