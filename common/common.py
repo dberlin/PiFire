@@ -754,7 +754,11 @@ def get_probe_info(probe_info):
 # Attributed to Alex Martelli and Alex Telon
 def deep_update(dictionary, updates):
     for key, value in updates.items():
-        if isinstance(value, Mapping):
+        # A mapping carrying a "kind" discriminant is a tagged-union value
+        # (e.g. i2c_bus), not a namespace: it is replaced wholesale so a
+        # field from a previous kind can never survive alongside the new
+        # one.
+        if isinstance(value, Mapping) and "kind" not in value:
             dictionary[key] = deep_update(dictionary.get(key, {}), value)
         else:
             dictionary[key] = value

@@ -363,9 +363,9 @@ def ensure_settings_upgraded():
     global _settings_upgraded
     if _settings_upgraded:
         return
-    # Set before doing the work: upgrade_settings() itself reads settings (it
-    # calls into read/write helpers for warnings, profiles, etc.), and that
-    # re-entrant call must see the guard as already tripped, not recurse.
+    # Set before doing the work: _upgrade_settings_in_store() runs inside
+    # transaction()'s BEGIN IMMEDIATE, and a re-entrant call would open a
+    # nested BEGIN IMMEDIATE on the same thread-local connection.
     _settings_upgraded = True
     _upgrade_settings_in_store()
 

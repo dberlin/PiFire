@@ -200,8 +200,8 @@ def validate_bus_kinds(kinds):
     if "basic" in kinds and (kinds & USB_HID_KINDS):
         raise I2CBusConfigError(
             "'basic' I2C can't share a process with a USB-HID bus (ft232h/mcp2221): "
-            "Blinka's board backend is process-global. Use 'extended' for the onboard "
-            "bus (a Pi onboard I2C is reachable as extended bus 1)."
+            "Blinka's board backend is process-global. Use 'kernel' for the onboard "
+            "bus (a Pi onboard I2C is reachable as kernel bus 1)."
         )
 
 

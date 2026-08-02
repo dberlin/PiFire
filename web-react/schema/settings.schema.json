@@ -1891,6 +1891,7 @@
       "additionalProperties": false,
       "properties": {
         "adapter": {
+          "minLength": 1,
           "title": "Adapter",
           "type": "string"
         },
@@ -1911,6 +1912,7 @@
       "additionalProperties": false,
       "properties": {
         "bus_num": {
+          "minimum": 0,
           "title": "Bus Num",
           "type": "integer"
         },
@@ -1937,6 +1939,7 @@
           "type": "string"
         },
         "serial": {
+          "minLength": 1,
           "title": "Serial",
           "type": "string"
         }

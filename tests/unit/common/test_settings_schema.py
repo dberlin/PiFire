@@ -867,3 +867,48 @@ def test_i2c_bus_defaults_to_basic():
     assert settings["platform"]["fan_controller"]["i2c_bus"] == {"kind": "basic"}
     assert "i2c_bus_kind" not in settings["platform"]["fan_controller"]
     assert "i2c_bus_num" not in settings["platform"]["fan_controller"]
+
+
+def test_i2c_bus_rejects_negative_bus_num():
+    from common.settings_schema import SettingsValidationError, validate_settings_tree
+
+    settings = copy.deepcopy(default_settings())
+    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "bus_num": -1}
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(settings)
+
+
+def test_i2c_bus_rejects_a_blank_adapter():
+    from common.settings_schema import SettingsValidationError, validate_settings_tree
+
+    settings = copy.deepcopy(default_settings())
+    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "adapter": ""}
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(settings)
+
+
+def test_i2c_bus_rejects_a_whitespace_only_adapter():
+    from common.settings_schema import SettingsValidationError, validate_settings_tree
+
+    settings = copy.deepcopy(default_settings())
+    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "adapter": "   "}
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(settings)
+
+
+def test_i2c_bus_rejects_a_blank_serial():
+    from common.settings_schema import SettingsValidationError, validate_settings_tree
+
+    settings = copy.deepcopy(default_settings())
+    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "serial": ""}
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(settings)
+
+
+def test_i2c_bus_rejects_two_selectors_of_the_same_kind():
+    from common.settings_schema import SettingsValidationError, validate_settings_tree
+
+    settings = copy.deepcopy(default_settings())
+    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "adapter": "X", "bus_num": 3}
+    with pytest.raises(SettingsValidationError):
+        validate_settings_tree(settings)

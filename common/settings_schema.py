@@ -32,7 +32,15 @@ import json
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_serializer, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 from pydantic_core import ErrorDetails
 from pydantic_partial import create_partial_model
 
@@ -119,23 +127,29 @@ class _DisplayDeviceConfig(_Section):
 # variants' fields. That is what makes {"kind":"kernel","adapter":"X"} match
 # exactly one member, and what makes a stale field from a previous kind a
 # validation error rather than a silently carried value.
+#
+# Matches what common/i2c_bus_config.py's parse_i2c_bus accepts for a kernel
+# selector: bus_num non-negative, adapter/serial non-blank once stripped.
+_NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 class _BasicBus(_Section):
     kind: Literal["basic"] = "basic"
 
 
 class _KernelBusNumber(_Section):
     kind: Literal["kernel"] = "kernel"
-    bus_num: int
+    bus_num: int = Field(ge=0)
 
 
 class _KernelAdapterName(_Section):
     kind: Literal["kernel"] = "kernel"
-    adapter: str
+    adapter: _NonBlankStr
 
 
 class _KernelSerialMatch(_Section):
     kind: Literal["kernel"] = "kernel"
-    serial: str
+    serial: _NonBlankStr
 
 
 class _FT232hBus(_Section):
