@@ -764,7 +764,8 @@ top-level item, so nobody has to read 900 lines to find that out:
 | 11. Recipes deliberate non-dos | **WON'T DO** — boundaries, not owed work |
 | 12. Shutdown affordance and ordering | **OPEN** |
 | 13. P-MODE/SMOKE+ visibility outside Smoke | **OPEN** — needs a ruling |
-| 14. `clampSetpoint` has no caller | **OPEN** |
+| 14. `clampSetpoint` is superseded | **OPEN** — delete it |
+| 15. Probe cards intermittently read 0 | **OPEN** — live-grill report |
 
 So the real open work is **9a.3 and the OPEN entries inside item 10.** The
 biggest of those, in rough order of consequence:
@@ -779,9 +780,10 @@ biggest of those, in rough order of consequence:
 6. Shutdown does not read as destructive, and Stop/Shutdown sit in opposite
    orders here and on the attached display (item 12). Note what Shutdown
    actually does before scheduling this one — it is not a styling item.
-7. Two small ones from the same day: whether P-MODE/SMOKE+ should be Smoke-only
-   (item 13, needs a ruling) and a helper whose only caller is its test
-   (item 14).
+7. Probe cards intermittently read 0 while the attached display never does
+   (item 15) — reported from a live grill, cause not yet established.
+8. Two small ones: whether P-MODE/SMOKE+ should be Smoke-only (item 13, needs a
+   ruling) and a superseded helper to delete (item 14).
 
 Closed on 2026-08-02, listed here only because they were on this list the same
 day: persisted schema versioning for both durable blobs, **including modeling,
@@ -2206,19 +2208,64 @@ the two diverge again — and there is a live counter-argument, that P-mode is
 editable in Prime, Shutdown, Startup and Reignite (`PMODE_EDITABLE_MODES`), so
 hiding the pill in those modes removes a control, not just a readout.
 
-### 14. `clampSetpoint` has no production caller — OPEN
+### 14. `clampSetpoint` is superseded — delete it — OPEN
 
-**Status:** OPEN. Noticed 2026-08-02 while giving it the grill's real ceiling.
+**Status:** OPEN. Noticed 2026-08-02 while giving the setpoint modal the grill's
+real ceiling; history traced the same day, which settled what to do with it.
 
-`helpers/dashboard/health.ts` exports `clampSetpoint`, and the only thing that
-references it is `tests/unit/helpers/dashboard/health.test.ts`. `SetpointEntry`
-clamps with its own local closure over the resolved range. It was carried
-forward (and given the new `safetyMaxTemp` parameter) rather than deleted in
-that pass, so as not to mix a deletion into a behaviour fix — but a helper whose
-only caller is its own test is a test that proves nothing about the app.
+`helpers/dashboard/health.ts` exports `clampSetpoint` and the only thing that
+references it is `tests/unit/helpers/dashboard/health.test.ts`.
 
-Either give it the callers it was meant to have — `SetpointEntry`'s closure is
-the obvious one — or delete it with its test.
+**It did have callers.** Added in `e466e3ac` with only a test, then wired into
+the original `SetpointEntry` by `53fb83de` in three places — the open-seed, the
+`bump` stepper, and the slider's `onChange`. It went dead in `4ac5aaad`, the
+commit that added the startup hold prompt: that prompt needs a **wider** range
+than the Hold setpoint does, so the bounds became `min`/`max` props, and a
+module-level function hard-wired to `SETPOINT_RANGE` could not express
+per-caller bounds. The component grew a local `clamp` closure in that same
+change and never called the helper again.
+
+So it is not merely uncalled, it is **superseded**: `setpointRange(units,
+safetyMaxTemp)` plus the component's closure is the shape that does its job now,
+and the ceiling it hard-codes is the fixed 500 that item 12's work removed.
+Delete it with its test rather than finding it a caller. It was carried forward
+(and even given the new `safetyMaxTemp` parameter) only to keep a deletion out
+of a behaviour fix.
+
+### 15. Probe cards intermittently read 0 in the web UI — OPEN
+
+**Status:** OPEN. Reported from a live grill 2026-08-02: the web UI sometimes
+shows 0 for a probe card while the attached Qt display never falters.
+
+**What is already known.** Both UIs read the *same* blob — `control:current`,
+via `read_current()` (`common/datastore_accessors.py:699`) — so the stored value
+is not where they diverge. What differs is how each samples and seeds it:
+
+- **The web seeds from a fixture in which every temperature is 0.**
+  `useLiveState` initialises `live` to `FIXTURE_DASH` (`helpers/useLiveState.ts:33`),
+  and every probe in `helpers/fixture.ts` — food probes *and* Grill — carries
+  `temp: 0`. Any window before the first `socket_dash_data` frame therefore
+  renders zeros. Qt has no such phase: it polls the store at 20 fps from its
+  first tick.
+- **A real zeroing path exists.** `flush_current()`
+  (`common/datastore_accessors.py:668-688`) writes an all-zero structure rebuilt
+  from `probe_map`, and `controller/runtime/store.py:259` calls it. Qt sampling
+  at 20 fps would show that for ~50 ms; the web holds whatever the last socket
+  frame said, so the same transient sticks for a whole frame interval.
+- **A 0 on the wire means the blob really held 0.** `_get_probe_data`
+  (`blueprints/mobile/socket_io.py:842`) overwrites `_get_probe_structure`'s
+  `temp: 0` default (`:895`) with `current[section][probe["label"]]` — a direct
+  index, so a missing label would raise rather than silently read 0.
+
+**The question that picks between those.** Both leads above zero the primary
+probe as well as the food probes. The report says the pit value is always
+displayed. If only the food cards go to 0 while the gauge stays live, **both
+leads are wrong** and the cause is specific to the `"F"` path — which is worth
+establishing first, because it decides whether this is a seeding bug, a
+sampling-rate bug, or a producer bug.
+
+Capture a frame to settle it: the browser devtools' socket.io frames, or
+`_get_dash_data` called against the live store while a card reads 0.
 
 ---
 

@@ -98,10 +98,13 @@ That needs no Python change and does not depend on this item. See
 
 ---
 
-### 2. `v1.11.0-dev21` is a lightweight tag
+### 2. `v1.11.0-dev21` is a lightweight tag — WON'T DO
 
-**Status:** OPEN. Created 2026-08-02 by a `git tag` that ran outside
-`updater/tag-release.sh`.
+**Status:** WON'T DO. Ruled 2026-08-02: nothing is broken by it and recutting
+means deleting a pushed tag, which is not worth doing for a cosmetic
+inconsistency. Kept as a record of why the odd one out exists.
+
+Created 2026-08-02 by a `git tag` that ran outside `updater/tag-release.sh`.
 
 Every other release tag is annotated — the script uses `git tag -a` deliberately,
 because `git describe` prefers annotated tags and ignores lightweight ones unless
