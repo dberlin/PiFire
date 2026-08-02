@@ -189,3 +189,15 @@ def test_controller_state_falls_back_to_dunder_dict():
     # a copy, not the live __dict__
     state["p"] = 99
     assert core.p == 0.25
+
+
+def test_controller_state_from_get_status_is_a_copy():
+    # _RecordingCore.get_status() returns the same cached dict on every call,
+    # so a runner that handed back that dict as-is would let this mutation
+    # leak into the next read -- a fresh-dict-per-call get_status() could not
+    # fail this test.
+    core = _RecordingCore(status={"K": 700.0})
+    runner = SyncControllerRunner(core)
+    state = runner.controller_state()
+    state["K"] = 999
+    assert runner.controller_state() == {"K": 700.0}

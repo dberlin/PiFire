@@ -17,6 +17,7 @@ so a live fire never ends up unregulated. See `_build_core` and `build_runner`
 for why both of those matter.
 """
 
+import collections
 import importlib
 import threading
 from abc import ABC, abstractmethod
@@ -113,10 +114,17 @@ class SyncControllerRunner(ControllerRunner):
         status = self._core.get_status()
         if status is None:
             return dict(self._core.__dict__)
-        return status
+        return dict(status)
 
 
 _UNSET = object()
+
+# Hold reports once per work-loop tick, and that loop runs at roughly 20 Hz
+# (`ControlMode.run` sleeps 0.05 s), while the worker drains only once per
+# controller solve. This ceiling spans a stalled solve without letting the
+# backlog grow without bound; the oldest reports are the ones to lose, since
+# a consumer identifying a process model cares about recent duty.
+_MAX_PENDING_OUTPUTS = 2048
 
 
 class ThreadedControllerRunner(ControllerRunner):
@@ -131,6 +139,10 @@ class ThreadedControllerRunner(ControllerRunner):
         self._output = NormalizedOutput(cycle_ratio=0.0, fan=None)
         self._pending_target = _UNSET
         self._pending_core = None
+        self._pending_outputs = collections.deque(maxlen=_MAX_PENDING_OUTPUTS)
+        self._pending_dropped = 0
+        self._pending_restore = None
+        self._model_snapshot = core.get_model_snapshot()
         self._state_snapshot = dict(core.__dict__)
         self._control_period = core.get_control_period()
         self._commands_fan = core.commands_fan()
@@ -146,17 +158,30 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._pending_target = _UNSET
                 new_core = self._pending_core
                 self._pending_core = None
+                pending_outputs = list(self._pending_outputs)
+                self._pending_outputs.clear()
+                restore = self._pending_restore
+                self._pending_restore = None
             if new_core is not None:
                 self._core = new_core
+            if restore is not None:
+                self._core.restore_model(restore)
             if target is not _UNSET:
                 self._core.set_target(target)
+            # A command must reach the core before the temperature that command
+            # caused, and in the order the auger saw it.
+            for applied in sorted(pending_outputs, key=lambda a: a.timestamp):
+                self._core.set_output(applied)
             if temp is not None:
                 raw = self._core.update(temp)
                 ratio, fan = normalize_controller_output(raw)
                 snap = dict(self._core.__dict__)
+                status = self._core.get_status()
+                model = self._core.get_model_snapshot()
                 with self._lock:
                     self._output = NormalizedOutput(cycle_ratio=ratio, fan=fan)
-                    self._state_snapshot = snap
+                    self._state_snapshot = status if status is not None else snap
+                    self._model_snapshot = model
             # Interruptible sleep; wait(None/0) would block forever, so floor it.
             self._stop_event.wait(self._control_period or 1.0)
 
@@ -192,7 +217,32 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def controller_state(self):
         with self._lock:
-            return dict(self._state_snapshot)
+            state = dict(self._state_snapshot)
+            state["pending_dropped"] = self._pending_dropped
+            return state
+
+    def set_output(self, applied):
+        with self._lock:
+            if len(self._pending_outputs) == self._pending_outputs.maxlen:
+                self._pending_dropped += 1
+            self._pending_outputs.append(applied)
+
+    def get_model_snapshot(self):
+        with self._lock:
+            return self._model_snapshot
+
+    def restore_model(self, snapshot):
+        """Queue a snapshot for the worker to adopt.
+
+        True means accepted for restore, not adopted: the core is mutated only
+        on the worker thread, so the adoption result is not knowable here. It
+        surfaces in get_status().
+        """
+        if snapshot is None:
+            return False
+        with self._lock:
+            self._pending_restore = snapshot
+        return True
 
     def stop(self):
         self._stop_event.set()
