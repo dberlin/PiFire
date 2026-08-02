@@ -2237,35 +2237,53 @@ of a behaviour fix.
 **Status:** OPEN. Reported from a live grill 2026-08-02: the web UI sometimes
 shows 0 for a probe card while the attached Qt display never falters.
 
-**What is already known.** Both UIs read the *same* blob — `control:current`,
-via `read_current()` (`common/datastore_accessors.py:699`) — so the stored value
-is not where they diverge. What differs is how each samples and seeds it:
+**Confirmed by the reporter:** the pit card is *never* 0, only the food card is,
+and it happens throughout the cook, not at its start. That rules out the two
+obvious explanations — the fixture seed (`useLiveState.ts:33` starts from
+`FIXTURE_DASH`, in which every temp including Grill is 0) and `flush_current()`
+(`common/datastore_accessors.py:668`), which zeroes the whole structure. Both
+would take the pit down with the food probe.
 
-- **The web seeds from a fixture in which every temperature is 0.**
-  `useLiveState` initialises `live` to `FIXTURE_DASH` (`helpers/useLiveState.ts:33`),
-  and every probe in `helpers/fixture.ts` — food probes *and* Grill — carries
-  `temp: 0`. Any window before the first `socket_dash_data` frame therefore
-  renders zeros. Qt has no such phase: it polls the store at 20 fps from its
-  first tick.
-- **A real zeroing path exists.** `flush_current()`
-  (`common/datastore_accessors.py:668-688`) writes an all-zero structure rebuilt
-  from `probe_map`, and `controller/runtime/store.py:259` calls it. Qt sampling
-  at 20 fps would show that for ~50 ms; the web holds whatever the last socket
-  frame said, so the same transient sticks for a whole frame interval.
-- **A 0 on the wire means the blob really held 0.** `_get_probe_data`
-  (`blueprints/mobile/socket_io.py:842`) overwrites `_get_probe_structure`'s
-  `temp: 0` default (`:895`) with `current[section][probe["label"]]` — a direct
-  index, so a missing label would raise rather than silently read 0.
+**A `None` reading becomes a plausible-looking 0, and only on the web.** The
+asymmetry is the hardware. On the reporting grill the pit is `mcp9600_adafruit`
+— a wired thermocouple that always returns a number — while the food probe is
+`thermoworks_cloud`, a network-polled device. The chain:
 
-**The question that picks between those.** Both leads above zero the primary
-probe as well as the food probes. The report says the pit value is always
-displayed. If only the food cards go to 0 while the gauge stays live, **both
-leads are wrong** and the cause is specific to the `"F"` path — which is worth
-establishing first, because it decides whether this is a seeding bug, a
-sampling-rate bug, or a producer bug.
+1. `thermoworks_cloud` caches per-channel readings and returns **`None`** for a
+   channel whose cache is older than `poll_interval * _STALE_MULTIPLIER`
+   (`probes/thermoworks_cloud.py:88`, 30 s × 3 = 90 s by default). A missed
+   cloud poll is exactly the intermittent, mid-cook event described.
+2. The Kalman stage passes it straight through — `output_value =
+   kalman.update(raw)  # None passes through` (`probes/base.py:373`).
+3. `write_current` stores `probe_history["food"]` verbatim
+   (`common/datastore_accessors.py:660`), so `current["F"][label]` is `null`.
+4. `_get_probe_data` copies it to the wire unchanged
+   (`blueprints/mobile/socket_io.py:842`), so the frame carries `"temp": null`.
+5. `probeCard()` renders `tempInt: Math.round(fp.temp)`
+   (`helpers/dashboard/deriveView.ts`), and **`Math.round(null) === 0`**.
 
-Capture a frame to settle it: the browser devtools' socket.io frames, or
-`_get_dash_data` called against the live store while a card reads 0.
+**This is a defect on its own merits, whatever the root cause turns out to be.**
+A probe with no reading must not render as `0` — zero is a plausible
+temperature, so it reads as data rather than as absence. It should render as
+"—" (and `barPct`/`targetStr` should follow). Note also that `LiveState`'s
+`ProbeData.temp` is declared `number` while the backend can put `null` there:
+the type is lying, and nothing catches it because the fixture was hand-written
+with `temp: 0` rather than captured from a live payload.
+
+**What does not fit yet, and must be checked before calling it solved.** Qt
+reads the same `None`: `FoodProbeModel.update()` does
+`f.get(row["label"], 0)` (`display/qtbackend.py:60`), and a default only applies
+to a *missing* key, not a present `null` — so the row should take `None` too,
+and `ProbeCard.qml:62` renders `Math.round(card.temp)` into a `property real`.
+By that reading Qt should show 0 as well, and the report says it never does.
+Either the store is not actually holding `null` (and the web's 0 comes from
+somewhere else), or QML's coercion of a null into a `real` property is masking
+what JavaScript's `Math.round` exposes. Resolve that before fixing.
+
+**The decisive artifact is one captured frame** while a card reads 0: the
+socket.io frame in browser devtools (does it say `"temp": null`?), or the
+control log's Kalman DEBUG line for that port, which prints `raw=None` when this
+is what is happening.
 
 ---
 
