@@ -541,10 +541,14 @@ describe("Dashboard status readouts", () => {
 // command.setPMode sat there with no caller. Flask offers the control in five
 // modes and shows the badge in all of them (dash_default.js:248-293).
 describe("Dashboard P-Mode control", () => {
-  it("is a plain readout in Hold, where the PID owns the cycle", () => {
+  it("is not shown at all in Hold, where the controller owns the cycle", () => {
+    // It used to render as a dead "P-2" readout here: not editable, and
+    // describing a smoke cycle a hold does not run. The pills carry the
+    // actuator duties instead, as the physical display already did.
     renderDashboard({ ...FIXTURE_DASH, currentMode: "Hold", pMode: 2 });
-    expect(screen.getByText("P-2")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /P-MODE/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("P-2")).not.toBeInTheDocument();
+    expect(screen.queryByText("P-MODE")).not.toBeInTheDocument();
+    expect(screen.queryByText("SMOKE+")).not.toBeInTheDocument();
   });
 
   it("is a plain readout in Stop", () => {

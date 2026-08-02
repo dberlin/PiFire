@@ -77,6 +77,10 @@ export interface LiveState {
    *  any mode, so it is the ceiling for every setpoint the dashboard offers.
    *  Distinct from ProbeData.maxTemp, which is only the gauge's top of scale. */
   safetyMaxTemp: number;
+  /** The auger's share of its cycle, 0..1 (control:status cycle_ratio). */
+  cycleRatio: number;
+  /** The fan's commanded duty, as a percentage (control:status fan_duty). */
+  fanDuty: number;
   manualPwm: number;
   timer: { start: number; paused: number; end: number; keepWarm: boolean; shutdown: boolean };
   outputs: { fan: boolean; auger: boolean; igniter: boolean; power: boolean };

@@ -99,3 +99,50 @@ describe("deriveView.pModeEditable", () => {
     ).toBe(false);
   });
 });
+
+// The two pills under the system card. Holding, P-mode and Smoke+ describe a
+// smoke cycle that is not running -- and P-mode is already read-only there --
+// so both are replaced by what the controller is actually commanding. The
+// physical display has always made this swap (display/qml/screens/DashScreen.qml:161-174);
+// only the web UI kept showing the pair in every mode.
+describe("duty pills", () => {
+  const at = (over: Partial<LiveState>): LiveState => ({ ...FIXTURE_DASH, ...over });
+
+  it("shows the actuator duties while holding", () => {
+    const view = deriveView(at({ currentMode: "Hold", cycleRatio: 0.42, fanDuty: 65 }));
+    expect(view.pillL.label).toBe("AUGER DUTY");
+    expect(view.pillL.value).toBe("42%");
+    expect(view.pillR.label).toBe("FAN DUTY");
+    expect(view.pillR.value).toBe("65%");
+  });
+
+  it("rounds the auger's cycle share to whole percent", () => {
+    const view = deriveView(at({ currentMode: "Hold", cycleRatio: 0.335, fanDuty: 0 }));
+    expect(view.pillL.value).toBe("34%");
+    expect(view.pillR.value).toBe("0%");
+  });
+
+  it("keeps P-mode and Smoke+ in every other mode", () => {
+    for (const mode of ["Smoke", "Startup", "Stop", "Shutdown", "Prime", "Monitor", "Manual"]) {
+      const view = deriveView(at({ currentMode: mode, pMode: 3, smokePlus: true }));
+      expect(view.pillL.label, mode).toBe("P-MODE");
+      expect(view.pillL.value, mode).toBe("P-3");
+      expect(view.pillR.label, mode).toBe("SMOKE+");
+      expect(view.pillR.value, mode).toBe("ON");
+    }
+  });
+
+  it("still reports Smoke+ off outside Hold", () => {
+    const view = deriveView(at({ currentMode: "Smoke", smokePlus: false }));
+    expect(view.pillR.value).toBe("OFF");
+  });
+
+  it("survives a payload from a backend too old to send the duties", () => {
+    const { cycleRatio, fanDuty, ...older } = at({ currentMode: "Hold" });
+    void cycleRatio;
+    void fanDuty;
+    const view = deriveView(older as LiveState);
+    expect(view.pillL.value).toBe("0%");
+    expect(view.pillR.value).toBe("0%");
+  });
+});

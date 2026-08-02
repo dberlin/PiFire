@@ -23,6 +23,8 @@ describe("LiveState fixture shape", () => {
       "hasDistanceSensor",
       "allowManualOutputs",
       "safetyMaxTemp",
+      "cycleRatio",
+      "fanDuty",
       "timer",
       "outputs",
       "recipeStatus",

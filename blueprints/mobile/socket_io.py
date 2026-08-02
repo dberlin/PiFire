@@ -338,6 +338,12 @@ def _get_dash_data(settings, pelletdb):
         # bounds every setpoint the dashboard offers; primaryProbe.maxTemp is
         # the gauge's ceiling, a display choice, and cannot stand in for it.
         "safetyMaxTemp": settings["safety"]["maxtemp"],
+        # What the controller is asking of each actuator: the auger's share of
+        # its cycle (0..1) and the fan's duty as a percentage. The dashboard
+        # shows them in place of P-mode and Smoke+ while holding, where those
+        # two describe nothing the grill is doing.
+        "cycleRatio": status.get("cycle_ratio", 0) or 0,
+        "fanDuty": status.get("fan_duty", 0) or 0,
         "timer": {
             "start": math.trunc(control["timer"]["start"]),
             "paused": math.trunc(control["timer"]["paused"]),

@@ -1,4 +1,4 @@
-"""The grill's shutdown limit has to reach the dashboard.
+"""Dash-payload fields the React dashboard cannot work without.
 
 ``settings["safety"]["maxtemp"]`` is what ``controller/runtime/logic/safety.py``
 shuts the grill down above, and it is user-editable. The React dashboard bounds
@@ -20,14 +20,18 @@ from common.datastore_accessors import (
 )
 
 
-def _dash_data():
+def _dash_data(**status_over):
     from blueprints.mobile import socket_io
+    from common.datastore_accessors import read_status, write_status
 
     # Same seeding _get_dash_data needs elsewhere: status/current/device-info do
-    # not self-heal the way the settings and pellet blobs do.
+    # not self-heal the way the settings and pellet blobs do. Any status
+    # override has to be applied AFTER init_status(), which resets the blob.
     init_status()
     flush_current()
     write_generic_key("probe_device_info", {})
+    if status_over:
+        write_status({**read_status(), **status_over})
 
     return socket_io._get_dash_data(read_settings(), read_pellet_db())
 
@@ -44,6 +48,16 @@ def test_the_limit_tracks_the_setting_rather_than_a_constant(ds):
     write_settings(settings)
 
     assert _dash_data()["safetyMaxTemp"] == 412
+
+
+def test_payload_carries_the_actuator_duties(ds):
+    # The dashboard shows these in place of P-mode and Smoke+ while holding,
+    # which is what the physical display has always done -- it reads the same
+    # two keys straight off control:status (display/qtbackend.py:156-157).
+    data = _dash_data(cycle_ratio=0.42, fan_duty=65)
+
+    assert data["cycleRatio"] == 0.42
+    assert data["fanDuty"] == 65
 
 
 def test_the_limit_is_not_the_gauge_ceiling(ds):

@@ -30,10 +30,10 @@ const EDGE = "var(--card-border)";
 // is treated as not-cooking.
 const COOKING_MODES = new Set(["Startup", "Smoke", "Hold", "Prime", "Reheat"]);
 
-// Modes in which Flask shows #pmode_group, its P-Mode control
-// (dash_default.js:248-293). Notably NOT Hold: the PID owns the cycle there, so
-// the P-Mode value is displayed but not adjustable. The badge itself is shown
-// in every mode; only the control comes and goes.
+// Modes in which the P-Mode pill is a control rather than a readout. Notably
+// NOT Hold -- the controller owns the cycle there. Hold does not show the pill
+// at all now (see the duty pills below); everywhere else it is shown, and this
+// set decides whether it can be clicked.
 const PMODE_EDITABLE_MODES = new Set(["Prime", "Shutdown", "Startup", "Reignite", "Smoke"]);
 
 // A soft accent tint that still tracks the active [data-accent] theme.
@@ -171,24 +171,35 @@ export function deriveView(dash: LiveState): DashView {
   const probes = (dash.foodProbes ?? []).map((fp) => probeCard(fp, units));
 
   const smokeOn = dash.smokePlus;
-  const pillL: PillView = {
-    label: "P-MODE",
-    value: `P-${dash.pMode}`,
-    valColor: "var(--row-label)",
-    bg: SURFACE,
-    border: EDGE,
-    labelColor: DIM,
-  };
-  const pillR: PillView = smokeOn
-    ? {
-        label: "SMOKE+",
-        value: "ON",
-        valColor: OK,
-        bg: "color-mix(in srgb, var(--ok) 14%, transparent)",
-        border: OK,
-        labelColor: OK,
-      }
-    : { label: "SMOKE+", value: "OFF", valColor: DIM, bg: SURFACE, border: EDGE, labelColor: DIM };
+  // Holding, the two pills carry what the controller is asking of the auger and
+  // the fan. P-mode and Smoke+ describe the smoke cycle, which a hold does not
+  // run: P-mode is already read-only here (PMODE_EDITABLE_MODES), so the pair
+  // was two readouts of settings that changed nothing. The physical display
+  // makes the same swap (display/qml/screens/DashScreen.qml).
+  const holding = mode === "Hold";
+  const neutral = { valColor: "var(--row-label)", bg: SURFACE, border: EDGE, labelColor: DIM };
+  const pillL: PillView = holding
+    ? { label: "AUGER DUTY", value: `${Math.round((dash.cycleRatio ?? 0) * 100)}%`, ...neutral }
+    : { label: "P-MODE", value: `P-${dash.pMode}`, ...neutral };
+  const pillR: PillView = holding
+    ? { label: "FAN DUTY", value: `${Math.round(dash.fanDuty ?? 0)}%`, ...neutral }
+    : smokeOn
+      ? {
+          label: "SMOKE+",
+          value: "ON",
+          valColor: OK,
+          bg: "color-mix(in srgb, var(--ok) 14%, transparent)",
+          border: OK,
+          labelColor: OK,
+        }
+      : {
+          label: "SMOKE+",
+          value: "OFF",
+          valColor: DIM,
+          bg: SURFACE,
+          border: EDGE,
+          labelColor: DIM,
+        };
 
   const igniter = outputView(dash.outputs.igniter, "var(--igniter)", "HOT");
 
