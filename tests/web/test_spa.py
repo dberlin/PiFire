@@ -41,6 +41,23 @@ def test_static_img_still_served_by_flask_default(client):
     assert client.get("/static/img/pifire-cf-thumb.png").status_code == 200
 
 
+def test_favicon_is_declared_and_the_declared_path_is_served(client):
+    """Both ends of the favicon path, in one test.
+
+    The href lives in web-react/index.html and the file is served by Flask's
+    default static handler -- two repos' worth of distance between the two, and
+    nothing else looks at both. Asserting the tag exists would pass against a
+    dead link; asserting the file is served would pass with no tag at all. So
+    this reads the href OUT of the shipped shell and fetches exactly that.
+    """
+    index = client.get("/").get_data(as_text=True)
+    m = re.search(r'<link[^>]+rel="icon"[^>]+href="([^"]+)"', index)
+    assert m, "index.html declared no rel=icon"
+
+    href = m.group(1)
+    assert client.get(href).status_code == 200, f"favicon href {href} is not served"
+
+
 def test_unknown_api_path_is_json_404(client):
     r = client.get("/api/does-not-exist-xyz")
     assert r.status_code == 404
@@ -66,15 +83,28 @@ def test_server_error_template_renders():
 def test_retired_page_routes_are_gone():
     rules = {r.rule for r in flask_app.url_map.iter_rules()}
     for prefix in (
-        "/dash", "/admin/", "/settings/", "/tuner/", "/history/", "/metrics/",
-        "/pellets/", "/recipes/", "/cookfile/", "/probeconfig/", "/manual/",
-        "/events/", "/logs/", "/manifest/", "/wizard/", "/update/",
+        "/dash",
+        "/admin/",
+        "/settings/",
+        "/tuner/",
+        "/history/",
+        "/metrics/",
+        "/pellets/",
+        "/recipes/",
+        "/cookfile/",
+        "/probeconfig/",
+        "/manual/",
+        "/events/",
+        "/logs/",
+        "/manifest/",
+        "/wizard/",
+        "/update/",
     ):
         stale = [r for r in rules if r.startswith(prefix)]
         assert not stale, f"{prefix} still routed: {stale}"
-    assert any(r.startswith("/api/") for r in rules)   # kept
+    assert any(r.startswith("/api/") for r in rules)  # kept
     # mobile has no HTTP routes of its own (socketio-only namespace) -- the spa
     # catch-all special-cases "mobile/" paths to a JSON 404 (see
     # blueprints/spa/routes.py), so assert the blueprint itself is kept.
     assert "mobile" in flask_app.blueprints
-    assert "/<path:path>" in rules                       # SPA catch-all
+    assert "/<path:path>" in rules  # SPA catch-all

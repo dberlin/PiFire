@@ -244,7 +244,6 @@
     "globals": {
       "augerrate": 0.3,
       "boot_to_monitor": false,
-      "bootstrap_page_theme": "light",
       "debug_mode": false,
       "disp_rotation": 0,
       "ext_data": false,

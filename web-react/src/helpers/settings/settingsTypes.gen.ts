@@ -17,7 +17,6 @@ export type Selected1 = string;
 export type SleepTimeout = number;
 export type Augerrate = number;
 export type BootToMonitor = boolean;
-export type BootstrapPageTheme = string;
 export type DebugMode = boolean;
 export type DispRotation = number;
 export type ExtData = boolean;
@@ -280,7 +279,6 @@ export interface Config1 {
 export interface GlobalSettings {
   augerrate?: Augerrate;
   boot_to_monitor?: BootToMonitor;
-  bootstrap_page_theme?: BootstrapPageTheme;
   debug_mode?: DebugMode;
   disp_rotation?: DispRotation;
   ext_data?: ExtData;

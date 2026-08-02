@@ -174,11 +174,6 @@
           "title": "Boot To Monitor",
           "type": "boolean"
         },
-        "bootstrap_page_theme": {
-          "default": "light",
-          "title": "Bootstrap Page Theme",
-          "type": "string"
-        },
         "debug_mode": {
           "default": false,
           "title": "Debug Mode",
@@ -2170,7 +2165,6 @@
       "default": {
         "augerrate": 0.3,
         "boot_to_monitor": false,
-        "bootstrap_page_theme": "light",
         "debug_mode": false,
         "disp_rotation": 0,
         "ext_data": false,

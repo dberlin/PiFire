@@ -768,40 +768,60 @@ def test_distance_address_rejects_a_type_the_driver_cannot_read(_captured_write_
 # ---------------------------------------------------------------------------
 
 
-def test_repair_carries_renamed_key_preserving_the_users_value(_captured_write_log):
+@pytest.fixture
+def _synthetic_rename(monkeypatch):
+    """Install a rename nobody ships, so these tests exercise the MECHANISM.
+
+    `_RENAMED_SETTINGS` is empty whenever no rename is mid-flight, and it is
+    empty now. Binding these tests to whichever entry happened to be listed
+    meant they died with that entry -- and the carry has to keep working for
+    the next rename, which is the only time anyone will find out if it does
+    not. `grill_name` is the destination because a rename's target must be a
+    MODELED field; an unmodeled one would be stripped by the same repair pass
+    the carry runs inside, and the test would pass for the wrong reason.
+    """
+    monkeypatch.setattr(settings_schema_module, "_RENAMED_SETTINGS", {"globals.old_grill_name": "globals.grill_name"})
+
+
+def test_repair_carries_renamed_key_preserving_the_users_value(_captured_write_log, _synthetic_rename):
     s = default_settings()
-    s["globals"].pop("bootstrap_page_theme", None)
-    s["globals"]["page_theme"] = "dark"  # the pre-rename name, still holding the value
+    # A pre-rename install has no key under the NEW name at all -- the store is
+    # read raw, with no defaults merge -- so the destination is absent, not
+    # empty. That distinction is load-bearing: the carry only fills a
+    # destination that is absent or None, so seeding "" here would model a
+    # shape that never occurs and prove nothing.
+    s["globals"].pop("grill_name", None)
+    s["globals"]["old_grill_name"] = "Backyard"  # the pre-rename name, still holding the value
 
     out = validate_settings_tree(s)
 
-    assert out["globals"]["bootstrap_page_theme"] == "dark"
-    assert "page_theme" not in out["globals"]
+    assert out["globals"]["grill_name"] == "Backyard"
+    assert "old_grill_name" not in out["globals"]
     # Logged as a carry, not as a silent strip.
     assert len(_captured_write_log) == 1
     assert "carried renamed key" in _captured_write_log[0]
-    assert "globals.page_theme" in _captured_write_log[0]
-    assert "globals.bootstrap_page_theme" in _captured_write_log[0]
+    assert "globals.old_grill_name" in _captured_write_log[0]
+    assert "globals.grill_name" in _captured_write_log[0]
 
 
-def test_repair_rename_does_not_clobber_a_value_already_under_the_new_name(_captured_write_log):
+def test_repair_rename_does_not_clobber_a_value_already_under_the_new_name(_captured_write_log, _synthetic_rename):
     s = default_settings()
-    s["globals"]["bootstrap_page_theme"] = "dark"  # already migrated
-    s["globals"]["page_theme"] = "light"  # stale leftover
+    s["globals"]["grill_name"] = "Backyard"  # already migrated
+    s["globals"]["old_grill_name"] = "Stale"  # stale leftover
 
     out = validate_settings_tree(s)
 
-    assert out["globals"]["bootstrap_page_theme"] == "dark"
-    assert "page_theme" not in out["globals"]
+    assert out["globals"]["grill_name"] == "Backyard"
+    assert "old_grill_name" not in out["globals"]
     # Nothing was carried, so the stale key is reported as an ordinary strip.
     assert len(_captured_write_log) == 1
     assert "stripped unmodeled key" in _captured_write_log[0]
 
 
-def test_repair_leaves_the_callers_tree_unmutated_when_carrying(_captured_write_log):
+def test_repair_leaves_the_callers_tree_unmutated_when_carrying(_captured_write_log, _synthetic_rename):
     s = default_settings()
-    s["globals"].pop("bootstrap_page_theme", None)
-    s["globals"]["page_theme"] = "dark"
+    s["globals"].pop("grill_name", None)
+    s["globals"]["old_grill_name"] = "Backyard"
     original = copy.deepcopy(s)
 
     validate_settings_tree(s)
@@ -809,16 +829,38 @@ def test_repair_leaves_the_callers_tree_unmutated_when_carrying(_captured_write_
     assert s == original
 
 
+def test_no_rename_configured_carries_nothing(_captured_write_log):
+    """Guards the empty resting state. With `_RENAMED_SETTINGS` empty -- as it
+    is whenever no rename is mid-flight -- a stale key is an ordinary strip and
+    the carry path must stay silent rather than log an empty carry."""
+    assert settings_schema_module._RENAMED_SETTINGS == {}
+
+    s = default_settings()
+    s["globals"]["old_grill_name"] = "Backyard"
+
+    out = validate_settings_tree(s)
+
+    assert "old_grill_name" not in out["globals"]
+    assert len(_captured_write_log) == 1
+    assert "stripped unmodeled key" in _captured_write_log[0]
+    assert "carried renamed key" not in _captured_write_log[0]
+
+
 def test_live_install_shape_validates_end_to_end(_captured_write_log):
-    """The exact combination found on a real install: two settings deleted from
-    the schema, one renamed without a migration, one dead unmodeled section,
-    and a correctly-configured hex I2C address. Every settings write on that
-    install failed until the address annotation was widened -- the dead keys
-    alone were always repairable, but the address type error vetoed the repair.
+    """The exact combination found on a real install: settings deleted from the
+    schema, a dead unmodeled section, and a correctly-configured hex I2C
+    address. Every settings write on that install failed until the address
+    annotation was widened -- the dead keys alone were always repairable, but
+    the address type error vetoed the repair.
+
+    Both theme keys are here on purpose. An install predating the rename holds
+    `page_theme`, one that saw it holds `bootstrap_page_theme`, and the setting
+    is now deleted outright, so BOTH are strays and both must be stripped
+    without failing the write. There is nothing left to carry them to.
     """
     s = default_settings()
-    s["globals"].pop("bootstrap_page_theme", None)
     s["globals"]["page_theme"] = "dark"
+    s["globals"]["bootstrap_page_theme"] = "dark"
     s["globals"]["global_control_panel"] = False
     s["platform"]["emc2301"] = {"address": "0x2f", "i2c_bus_kind": "basic", "i2c_bus_num": 1}
     s["platform"]["devices"]["distance"]["address"] = "0x29"
@@ -826,7 +868,8 @@ def test_live_install_shape_validates_end_to_end(_captured_write_log):
 
     out = validate_settings_tree(s)
 
-    assert out["globals"]["bootstrap_page_theme"] == "dark"  # carried, not lost
+    assert "page_theme" not in out["globals"]  # stripped
+    assert "bootstrap_page_theme" not in out["globals"]  # stripped
     assert "global_control_panel" not in out["globals"]  # stripped
     assert "emc2301" not in out["platform"]  # stripped
     assert out["platform"]["devices"]["distance"]["address"] == "0x29"  # kept

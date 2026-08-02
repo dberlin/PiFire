@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>PiFire · React UI (POC)</title>
+    <!-- The PiFire flame, the same icon the Flask UI used. It lives under
+         /static/img, which Flask's DEFAULT static handler serves and the spa
+         blueprint deliberately does not shadow, so this one href resolves in
+         production and through the dev proxy alike -- no copy in the bundle
+         that could drift from it. -->
+    <link rel="icon" type="image/x-icon" href="/static/img/favicon.ico" />
     <!-- Barlow is self-hosted via @fontsource, imported in src/main.tsx and
          bundled at build time -- no external font CDN, so the UI renders the
          right glyphs offline on the Pi. -->

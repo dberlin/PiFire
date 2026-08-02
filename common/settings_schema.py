@@ -316,9 +316,6 @@ class GlobalSettings(_Section):
     # Mirrors defaults.py settings["globals"].
     grill_name: str = ""
     debug_mode: bool = False
-    # Bootstrap's light/dark theme for the legacy Flask pages. Nothing in the
-    # React app reads it; it is named for its one consumer so that stays plain.
-    bootstrap_page_theme: str = "light"
     disp_rotation: int = 0
     units: Literal["F", "C"] = "F"
     augerrate: float = 0.3
@@ -871,9 +868,13 @@ def validate_partial_settings(delta: dict) -> list[str]:
 #: `upgrade_settings()` cannot do this job -- it is gated on `prev_ver`, so it
 #: never fires for an install already sitting on the current version, which is
 #: exactly where an un-migrated rename strands the old key.
-_RENAMED_SETTINGS = {
-    "globals.page_theme": "globals.bootstrap_page_theme",
-}
+#: Empty is the correct resting state: it means no rename is currently
+#: mid-flight. The mechanism below is kept armed rather than deleted with its
+#: last entry, because a rename that ships without one strands the user's value
+#: silently, and that is not a failure anyone sees. Its tests install a
+#: synthetic entry, so they prove the carry works for the NEXT rename rather
+#: than for whichever one happened to be listed here.
+_RENAMED_SETTINGS: dict[str, str] = {}
 
 
 def _carry_renamed_keys(tree: dict) -> list[tuple[str, str]]:

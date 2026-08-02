@@ -99,20 +99,14 @@ app.register_blueprint(api_update_bp, url_prefix="/api/update")
 
 @app.errorhandler(InternalServerError)
 def handle_500(e):
-    """Handle 500 Server Error"""
+    """Handle 500 Server Error.
+
+    `server_error.html` is the only template this app renders, and it reads no
+    context. Keeping it that way is what makes it dependable: a handler that
+    touched the datastore would raise from inside the error path on exactly the
+    failure it exists to report.
+    """
     return render_template("server_error.html"), 500
-
-
-@app.context_processor
-def inject_theme_and_grill_name():
-    """Inject page_theme/grill_name into every template's context, replacing
-    the identical render_template kwargs that used to be passed at each of
-    the 39 call sites across the blueprints."""
-    settings = read_settings()
-    return {
-        "page_theme": settings["globals"].get("bootstrap_page_theme", "light"),
-        "grill_name": settings["globals"].get("grill_name", ""),
-    }
 
 
 """
