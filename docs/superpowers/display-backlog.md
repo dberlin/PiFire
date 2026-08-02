@@ -144,3 +144,42 @@ operator is at. Fix it in both files in one change or not at all.
 
 **Verification.** Touch targets and overlay layout need a real panel; this
 machine has none. The routing change in `Actions.js` is testable without one.
+
+---
+
+### 3. A probe with no reading shows its last value, and floods the log
+
+**Status:** OPEN. Found 2026-08-02 from a live grill's control log, while
+tracing why the web UI shows 0 for the same probe
+(`react-migration-backlog.md` item 15, which holds the full chain).
+
+**The finding.** The log carries this at frame rate:
+
+```
+display/qml/screens/DashScreen.qml:69:7: Unable to assign [undefined] to double
+```
+
+`DashScreen.qml:69` is `temp: model.temp` in the food-probe `ProbeCard`
+repeater. A probe whose reading is unavailable arrives as `None` —
+`thermoworks_cloud` returns it for a channel whose cache has gone stale, the
+Kalman stage passes it through by design (`probes/base.py:373`), and
+`FoodProbeModel.update()` stores it as-is, because `f.get(row["label"], 0)`
+(`display/qtbackend.py:60`) only defaults a *missing* key, not a present null.
+
+`ProbeCard.qml:12` declares `property real temp`, so QML refuses the
+assignment. **That refusal is why the display looks reliable**: the property
+keeps its previous value and the card goes on showing the last good reading.
+
+**Why that is still wrong.** It is right by accident, and it is not honest:
+
+- The reading shown is **stale**, with nothing saying so. A cloud probe can be
+  90 s past its last successful poll and the card still reads like live data.
+- It depends on an assignment *failing* — a refactor to `property var temp`, or
+  a `?? 0` added in the model to quiet the log, would turn a silent staleness
+  into a silent zero, which is the web's bug (item 15).
+- It writes a line to the control log every frame. That is the noise that hid
+  the real fault: the message names a QML property, not a probe.
+
+**What it should do.** Take the null deliberately rather than by rejection, and
+render absence as absence — the card showing a dash where the number goes,
+matching whatever item 15 settles on for the web, so the two agree.

@@ -2270,20 +2270,42 @@ temperature, so it reads as data rather than as absence. It should render as
 the type is lying, and nothing catches it because the fixture was hand-written
 with `temp: 0` rather than captured from a live payload.
 
-**What does not fit yet, and must be checked before calling it solved.** Qt
-reads the same `None`: `FoodProbeModel.update()` does
-`f.get(row["label"], 0)` (`display/qtbackend.py:60`), and a default only applies
-to a *missing* key, not a present `null` — so the row should take `None` too,
-and `ProbeCard.qml:62` renders `Math.round(card.temp)` into a `property real`.
-By that reading Qt should show 0 as well, and the report says it never does.
-Either the store is not actually holding `null` (and the web's 0 comes from
-somewhere else), or QML's coercion of a null into a `real` property is masking
-what JavaScript's `Math.round` exposes. Resolve that before fixing.
+**CONFIRMED from the grill's control log.** It carries this line, repeating:
 
-**The decisive artifact is one captured frame** while a card reads 0: the
-socket.io frame in browser devtools (does it say `"temp": null`?), or the
-control log's Kalman DEBUG line for that port, which prints `raw=None` when this
-is what is happening.
+```
+display/qml/screens/DashScreen.qml:69:7: Unable to assign [undefined] to double
+```
+
+`DashScreen.qml:69` is `temp: model.temp` in the food-probe `ProbeCard`
+repeater. So the store really is handing out a null for that probe, which is
+what could not be established by reading code alone — and it explains why the
+two UIs disagree.
+
+**Both UIs receive the same bad value and fail differently.** `ProbeCard.qml:12`
+declares `property real temp`, a typed double. QML *refuses* to assign
+`undefined` to it: the property keeps its previous value, so the card silently
+goes on showing the last good reading and logs the failure every frame.
+JavaScript has no such protection — `Math.round(null)` is `0` — so the web
+renders a confident zero instead.
+
+**That makes it two defects, in opposite directions:**
+
+- **Here:** a probe with no reading renders as `0`, a plausible temperature.
+- **On the display** (`display-backlog.md` item 3): a probe with no reading
+  renders as *the last good value*, with nothing to say it is stale, and floods
+  the log at frame rate. It only looks correct.
+
+**The fix is three layers, and the middle one is the real one.**
+`ProbeData.temp` is typed `number` while the producer can put `null` there;
+`thermoworks_cloud` returning `None` for a stale channel is *correct* — better
+than inventing a number — so the type has to admit it (`number | null`) and both
+UIs have to render absence as absence. Widening the type is what makes the
+compiler find every consumer: `tempInt`, `barPct`, `done` and `targetStr` all
+read `fp.temp` today.
+
+The hand-written fixture is why nothing caught this: it carries `temp: 0` for
+every probe, a value the live payload does not always produce. Capture the
+replacement from a real frame.
 
 ---
 
