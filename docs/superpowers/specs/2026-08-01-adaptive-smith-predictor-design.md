@@ -454,6 +454,23 @@ lands in the lag chain, and the net extrapolates. The NLP does not: it solves
 correctly for any state handed to it. That is precisely where the two come
 apart.
 
+The damage is bounded but not prevented. `firing_rate` clamps its *return* to
+`[Q_min, Q_max]`, so an extrapolating net yields a wrong demand rather than an
+absurd one, and no single bad state can command something outside the actuator's
+range. A wrong in-range `Q` is still wrong, and it is exactly what the
+disagreement metric is built to detect -- the clamp caps the magnitude of a
+divergence, it does not keep the two policies together.
+
+That clamp also makes the lid-open slice of the metric degenerate at the
+baseline. During the disturbance both policies sit on the `Q_min` floor -- the
+NLP through its box constraint, the net through this clamp -- so they agree
+exactly, and the measured lid-open disagreement is `0.0` rather than small.
+Zero is not evidence the net tracks the NLP through a disturbance; it is
+evidence both hit the same wall. A later comparison must therefore read
+`rms_all`/`max_all` as the reference and treat any nonzero lid-open figure as
+the net *leaving* the floor, which is the predicted symptom rather than a
+regression in its own right.
+
 The same argument says the coverage hole predates this change.
 `sample_mpc.py::_episode_span` perturbs the solver's command with dither, clips
 to `[qmin, qmax]`, and never pauses the auger -- so no training episode contains

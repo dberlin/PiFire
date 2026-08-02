@@ -144,6 +144,8 @@ class Controller(ControllerBase):
 
         self._set_point_c = 0.0
         self._last_Q = cfg["Q_min"]
+        self._x_hat = None
+        self._policy_u_prev = float(cfg["Q_min"])
 
         n_delay = int(cfg["n_delay"])
 
@@ -289,11 +291,13 @@ class Controller(ControllerBase):
         y = _to_c(current, self.units)
         # 1) estimate states from the measurement
         x_hat = self.estimator.update(self._last_Q, y)
+        self._x_hat = x_hat
+        self._policy_u_prev = float(self._last_Q)
         # 2) compute firing rate Q from the active policy (net or NLP). On any
         #    error we hold the previous move so the control loop never breaks.
         try:
             if self._net is not None:
-                Q = self._net.firing_rate(x_hat, self._last_Q, self._set_point_c)
+                Q = self._net.firing_rate(x_hat, self._policy_u_prev, self._set_point_c)
             else:
                 Q = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
         except Exception:
