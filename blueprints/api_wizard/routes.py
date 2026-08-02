@@ -81,14 +81,17 @@ def _draft_is_stale(draft, wizard_data):
     A draft keys its values by manifest dependency name, so one written
     against a different manifest binds its answers to nothing -- the wizard
     would render a field's default while the draft still claims to hold the
-    operator's answer. An absent stamp is unequal to any fingerprint, so a
-    draft written before stamping existed is stale too.
+    operator's answer. A draft written before stamping existed carries no
+    evidence of which manifest it came from, which is the same answer --
+    reached without hashing the manifest to compare against nothing.
 
     This says nothing about a draft written against the current manifest and
     then corrupted by hand; only the manifest it was written against is
     judged here.
     """
-    return draft.get(_STAMP_KEY) != _manifest_fingerprint(wizard_data)
+    if _STAMP_KEY not in draft:
+        return True
+    return draft[_STAMP_KEY] != _manifest_fingerprint(wizard_data)
 
 
 def _load_draft(wizard_data):
