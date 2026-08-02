@@ -4,10 +4,11 @@
 # PiFire Hopper Level Timing Constants
 # *****************************************
 #
-# Description: The two numbers that decide how fresh the hopper reading on
-#   the dashboard is. They are here, together, in one importable place
+# Description: The numbers that decide how fresh the hopper reading on the
+#   dashboard is, and how long the controller's boot will wait for the sensor
+#   that produces it. They are here, together, in one importable place
 #   because they only make sense relative to each other -- changing one
-#   without looking at the other is what this module exists to prevent.
+#   without looking at the others is what this module exists to prevent.
 #
 # *****************************************
 
@@ -33,3 +34,17 @@ SENSOR_SAMPLE_INTERVAL = 8
 # poll (see get_level below) while it timed the auger and igniter -- roughly a
 # third of the period, which is why the automatic refresh must never use it.
 HOPPER_LEVEL_REFRESH_INTERVAL = 10
+
+# How long a distance sensor gets to finish opening before the controller
+# gives up on it, falls back to distance.none and carries on.
+#
+# The open runs on control.py's boot path, so every second here is a second
+# with no control loop and no API. The value sits between the two numbers that
+# bracket it. Below it: a healthy open is far quicker than a healthy sample
+# cycle, and the slowest of those is the ultrasonic HC-SR04's ~1.1s
+# `raw_distance()` burst (which is why its slow_cycle_seconds is 2.0, against
+# 0.5 for the ToF sensors), so this leaves several times the room a working
+# sensor needs even on a cold USB-serial port. Above it: less than one
+# SENSOR_SAMPLE_INTERVAL, so a sensor that never opens costs the boot less
+# than the period at which a working one would have been sampled anyway.
+SENSOR_OPEN_DEADLINE = 5

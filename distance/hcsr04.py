@@ -58,7 +58,7 @@ class HopperLevel(SampledHopperLevel):
         # unit = 'metric'
         # temperature = 20 (room temp in Celsius)
 
-        self._restart_sensor()
+        self._open_with_deadline(self._restart_sensor)
         # Setup & Start Sensor Loop Thread
         self._start_sampling()
 

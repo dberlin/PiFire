@@ -36,7 +36,7 @@ class ToFHopperLevel(SampledHopperLevel):
         else:
             self.address = address
 
-        self._restart_sensor()
+        self._open_with_deadline(self._restart_sensor)
         # Setup & Start Sensor Loop Thread
         self._start_sampling()
 

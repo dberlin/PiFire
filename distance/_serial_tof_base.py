@@ -36,7 +36,7 @@ class SerialToFHopperLevel(SampledHopperLevel):
         self.device = distance_pins.get("device", self.default_device)
         self.baudrate = distance_pins.get("baudrate", self.default_baudrate)
 
-        self.__start_sensor()
+        self._open_with_deadline(self.__start_sensor)
         # Setup & Start Sensor Loop Thread
         self._start_sampling()
 
