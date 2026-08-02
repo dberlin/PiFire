@@ -158,6 +158,11 @@ def _legacy_bus_to_config(section):
     if not kind:
         kind = "extended" if selector else "basic"
 
+    if kind == "basic":
+        # basic addresses the board's own SCL/SDA pins and never had a
+        # selector, so anything stored beside it is not a discarded value.
+        return {"kind": "basic"}
+
     if kind == "extended":
         if not selector:
             # find_i2c_bus("") substring-matches every adapter and raises, so

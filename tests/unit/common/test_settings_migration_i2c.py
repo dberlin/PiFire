@@ -124,3 +124,25 @@ def test_an_unrecognized_kind_reports_the_selector_it_discards(monkeypatch):
     _migrate_i2c_buses(settings)
     assert settings["platform"]["fan_controller"]["i2c_bus"] == {"kind": "basic"}
     assert any("'3'" in msg for msg in logged)
+
+
+def test_a_basic_bus_is_not_reported_as_an_unrecognized_kind(monkeypatch):
+    """basic addresses the board's own pins and never had a selector, so a
+    leftover value beside it is not a discarded configuration."""
+    logged = []
+    monkeypatch.setattr("common.settings_migration.write_log", lambda msg: logged.append(msg))
+    settings = _legacy_settings({"i2c_bus_kind": "basic", "i2c_bus_num": "CP2112"})
+    _migrate_i2c_buses(settings)
+    assert settings["platform"]["fan_controller"]["i2c_bus"] == {"kind": "basic"}
+    assert logged == []
+
+
+def test_a_genuinely_unrecognized_kind_still_logs(monkeypatch):
+    """This fix must not silence the fallback for a kind that really is
+    unrecognized -- only 'basic' is exempt."""
+    logged = []
+    monkeypatch.setattr("common.settings_migration.write_log", lambda msg: logged.append(msg))
+    settings = _legacy_settings({"i2c_bus_kind": "banana", "i2c_bus_num": "CP2112"})
+    _migrate_i2c_buses(settings)
+    assert settings["platform"]["fan_controller"]["i2c_bus"] == {"kind": "basic"}
+    assert any("CP2112" in msg for msg in logged)
