@@ -50,6 +50,11 @@ Every task's requirements implicitly include this section.
 - **A cross-process seam needs a shape-pinning test at BOTH ends.** A payload
   field asserted only in a TypeScript fixture is not pinned; the producer needs
   its own test.
+- **Enumerate references with serena's `find_referencing_symbols`, never grep.**
+  A regex is line-oriented and literal: it misses a multi-line call and any
+  argument passed as a variable. Writing this plan, grep gave a call-site
+  breakdown for `setPath` that was wrong in three places — see Task 5. Use grep
+  only as a cross-check on a name serena has already enumerated.
 - **Baseline to beat:** Python `4707 passed, 4 skipped`; web-react
   `1752 passed`. Run the full suites before your first change if you need to
   confirm the baseline moved for a reason you caused.
@@ -847,6 +852,10 @@ jj new
 `"startup.smartstart.exit_temp"` and `"startup.smartstart.exit_tmep"`
 type-check identically, as do a `number` and a `boolean` for either.
 
+**Enumerate them with serena's `find_referencing_symbols`, not grep.** Three of
+the 39 are invisible to a line-oriented regex — one multi-line call and two that
+pass the path as a variable — and Step 5 depends on classifying all of them.
+
 **The runtime body does not change.** This is types only.
 
 - [ ] **Step 1: Write the failing type-level test**
@@ -949,24 +958,29 @@ export function setPath<P extends SettingsPath>(
 }
 ```
 
-- [ ] **Step 5: Handle the six paths that are built, not written**
+- [ ] **Step 5: Handle the eight paths that are built, not written**
 
-Of the 39 call sites, **33 pass a string literal and 6 build the path from a
-loop variable**. These will not compile against any `SettingsPath`, literal
-union or derived — `` `pwm.${k}` `` where `k` is `string` narrows to nothing:
+**Enumerate the call sites with serena, not grep.** `find_referencing_symbols`
+on `setPath` in `web-react/src/helpers/settings/delta.ts` is the only
+enumeration that is complete here — a regex misses a multi-line call and a path
+passed as a variable, and this plan's first draft missed three sites that way.
+
+The 39 sites break down as **31 literal, 5 loop-key template, 3 runtime-keyed**.
+The last eight do not compile against any `SettingsPath`, literal union or
+derived: `` `pwm.${k}` `` where `k` is `string` narrows to nothing.
+
+**The five loop keys — fix by typing the key, not by casting the path:**
 
 | Site | Shape |
 |---|---|
-| `PwmTab.tsx:110` | ``for (const [k, v] of Object.entries(clamped)) d = setPath(d, `pwm.${k}`, v);`` |
-| `SafetyTab.tsx:40` | ``Object.entries(v)`` → `` `safety.${k}` `` |
-| `WorkModeTab.tsx:103` | ``Object.entries(v.cycle_data)`` → `` `cycle_data.${k}` `` |
-| `WorkModeTab.tsx:104` | ``Object.entries(v.smoke_plus)`` → `` `smoke_plus.${k}` `` |
-| `WorkModeTab.tsx:105` | ``Object.entries(v.keep_warm)`` → `` `keep_warm.${k}` `` |
-| `ControllerTab.tsx:113` | `` `controller.config.${selected}` `` |
+| `PwmTab.tsx:109` | ``Object.entries(clamped)`` → `` `pwm.${k}` `` |
+| `SafetyTab.tsx:39` | ``Object.entries(v)`` → `` `safety.${k}` `` |
+| `WorkModeTab.tsx:102` | ``Object.entries(v.cycle_data)`` → `` `cycle_data.${k}` `` |
+| `WorkModeTab.tsx:103` | ``Object.entries(v.smoke_plus)`` → `` `smoke_plus.${k}` `` |
+| `WorkModeTab.tsx:104` | ``Object.entries(v.keep_warm)`` → `` `keep_warm.${k}` `` |
 
-Fix the first five by typing the loop key rather than by casting the path.
-`Object.entries` widens the key to `string`; `Object.keys` on a typed object and
-an explicit key type keeps it:
+`Object.entries` widens the key to `string`; `Object.keys` on a typed object
+with an explicit key type keeps it:
 
 ```tsx
 // Object.entries widens its key to string, which erases exactly the fact this
@@ -977,20 +991,36 @@ for (const k of Object.keys(clamped) as PwmKey[]) {
 }
 ```
 
-`ControllerTab.tsx:113` is different and must **not** be forced: `selected` is a
-controller name discovered at runtime, and `controller.config` is a loose dict
-server-side by design (Task 1). Leave that one site casting the path, with the
-reason on it:
+**The three runtime-keyed sites must NOT be forced.** Each indexes a dict that
+is deliberately open server-side, keyed by a name discovered at runtime.
+Narrowing them would assert a closed set that neither the backend nor the
+install actually has:
+
+| Site | Path | Keyed by |
+|---|---|---|
+| `ControllerTab.tsx:112` | `` `controller.config.${selected}` `` | the selected controller |
+| `accent.ts:42` | `accentPath(settings)` → `` `display.config.${module}.accent_theme` `` | the installed display module |
+| `GeneralTab.tsx:49` | the same `accentPath(settings)` value | the installed display module |
+
+`accentPath` (`helpers/settings/accent.ts:9-12`) returns `string | null`, so
+those two sites also carry a null check already. Leave all three casting, with
+the reason on each:
 
 ```tsx
-    // The one path that is genuinely dynamic: which controller is selected is a
-    // runtime fact, and controller.config stays an open dict server-side so an
-    // install can add one. Narrowing here would claim otherwise.
+    // Genuinely dynamic: which controller is selected is a runtime fact, and
+    // controller.config stays an open dict server-side so an install can add
+    // one. Narrowing here would claim otherwise.
     d = setPath(d, `controller.config.${selected}` as SettingsPath, rebuilt as never);
 ```
 
-Run `bun run typecheck` after this step and before Step 6 — these six are where
-it will fail first.
+```tsx
+    // display.config is keyed by the installed display module and stays an open
+    // dict for the same reason controller.config does.
+    if (path) delta = setPath(delta, path as SettingsPath, v.accent_theme as never);
+```
+
+Run `bun run typecheck` after this step and before Step 6 — these eight are
+where it will fail first.
 
 - [ ] **Step 6: Run typecheck and time it**
 
@@ -1015,9 +1045,11 @@ export type SettingsPath =
   | "shutdown.auto_power_off"
   | "startup.duration"
   | "startup.startup_exit_temp";
-  // ...one line per path; enumerate every call site with:
-  //   grep -rhoE 'setPath\([^,]+, *"[^"]+"' src | sed 's/.*"\(.*\)"/\1/' | sort -u
-  // (the first argument is `d`, `{}` or a template, so it cannot be [a-z]*)
+  // ...one line per literal path. Enumerate with serena's
+  // find_referencing_symbols on setPath, NOT with grep: PwmTab.tsx:113 is a
+  // multi-line call whose path sits on line 116, and a line-oriented regex
+  // drops it silently — leaving that one site failing to compile against a
+  // union that looks complete.
 ```
 
 `ValueAt` is unchanged either way. Record which route you took in the commit
