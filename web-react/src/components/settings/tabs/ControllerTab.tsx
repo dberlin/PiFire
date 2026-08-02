@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
+import { MPC_FAN_CONFLICT_MESSAGE, mpcFanConflict } from "../../../helpers/settings/mpcFan";
 import type { ControllerMetadata, Settings } from "../../../helpers/settings/settingsApi";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { SaveStatus } from "../../../helpers/settings/useSaveSettings";
@@ -104,7 +105,16 @@ export function ControllerTab() {
   const set = (name: string, val: number | boolean | string) =>
     setV((d) => ({ ...d, values: { ...d.values, [name]: val } }));
 
+  // Derived from the draft, so the error appears the moment the toggle is
+  // flipped rather than after a save that would have been silently useless.
+  const fanConflict = mpcFanConflict({
+    selected,
+    enableFanInput: !!values.enable_fan_input,
+    settings,
+  });
+
   const onSave = async () => {
+    if (fanConflict) return; // do NOT call save(): the fan lever would be wired to nothing
     let d: object = {};
     d = setPath(d, "controller.selected", selected);
     // Start from the full working bag so a name the selected controller does
@@ -222,6 +232,11 @@ export function ControllerTab() {
         }
         return null;
       })}
+      {fanConflict && (
+        <p className="pf-settings-error-text" role="alert">
+          {MPC_FAN_CONFLICT_MESSAGE}
+        </p>
+      )}
       <SaveBar onSave={onSave} saving={saving} status={effectiveStatus} dirty={dirty} />
     </Section>
   );

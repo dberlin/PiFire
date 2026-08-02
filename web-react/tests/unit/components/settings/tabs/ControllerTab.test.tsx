@@ -119,6 +119,15 @@ const controllerMeta: ControllerMetadata = {
           option_min: null,
           option_max: null,
         },
+        {
+          option_name: "enable_fan_input",
+          option_friendly_name: "MPC Controls Fan",
+          option_description: "If enabled, the MPC commands fan duty (PWM/DC-fan builds only).",
+          option_type: "bool",
+          option_default: false,
+          option_min: null,
+          option_max: null,
+        },
       ],
     },
   },
@@ -282,6 +291,7 @@ describe("ControllerTab", () => {
                 n_horizon: 8,
                 estimator: "kf",
                 policy_net_path: "./custom/net.npz",
+                enable_fan_input: false,
               },
             },
           },
@@ -414,5 +424,46 @@ describe("generated controller config types", () => {
     // @ts-expect-error -- "ekfx" is not one of ekf | mhe | kf
     const typo: ControllerConfigs["mpc"]["estimator"] = "ekfx";
     expect(typo).toBeTruthy();
+  });
+});
+
+const mpcContext = (pwmControl: boolean, dcFan = true) => ({
+  settings: {
+    platform: { dc_fan: dcFan },
+    pwm: { pwm_control: pwmControl },
+    controller: { selected: "mpc", config: { mpc: { enable_fan_input: true } } },
+  },
+  mode: "Stop",
+  controllerMeta,
+});
+
+describe("ControllerTab MPC fan authority", () => {
+  it("shows a blocking error when MPC owns the fan but PWM control is off", () => {
+    renderRoute(<ControllerTab />, mpcContext(false));
+    expect(screen.getByRole("alert")).toHaveTextContent(/PWM Control is off/i);
+  });
+
+  it("refuses to save while the conflict stands", () => {
+    renderRoute(<ControllerTab />, mpcContext(false));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(saveMock).not.toHaveBeenCalled();
+  });
+
+  it("has no error and saves normally when PWM control is on", () => {
+    renderRoute(<ControllerTab />, mpcContext(true));
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(saveMock).toHaveBeenCalled();
+  });
+
+  it("does not fire on an AC-fan build", () => {
+    renderRoute(<ControllerTab />, mpcContext(false, false));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("clears once MPC Controls Fan is toggled off", () => {
+    renderRoute(<ControllerTab />, mpcContext(false));
+    fireEvent.click(screen.getByRole("button", { name: "MPC Controls Fan" }));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
