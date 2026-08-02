@@ -122,3 +122,41 @@ class GrillSim:
         self.T_meas += (self.T_c - self.T_meas) * DT / self.probe_tau
         self.t += DT
         return self.true_Tc
+
+
+class MAKGrillSim(GrillSim):
+    """GrillSim carrying a real MAK grill's measured thermal parameters.
+
+    The base GrillSim is deliberately mismatched but generic. This one is
+    identified from a logged 450 F Hold cook on an actual MAK
+    (tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv), so a closed-loop result
+    on it speaks about a grill that exists: a chamber roughly ten times slower
+    than the base plant, fed through a ~100 s transport-and-ignition deadtime.
+    That combination is what makes braking distance the dominant control
+    problem rather than an afterthought.
+
+    Only the ratios C_c/h_amb0 (chamber time constant) and H/h_amb0 (steady
+    gain) are identifiable from a single heat-up ramp, so h_amb0 keeps the base
+    plant's value and the two ratios are carried in C_c and H.
+
+    The identification run had the fan pinned at 100% throughout, so the fan
+    ENTERS these numbers only at full airflow: the fan-response shape is the
+    base plant's, unfitted. Treat fan authority here as inherited structure,
+    not measurement.
+    """
+
+    #: Fitted to the logged cook: RMSE 2.3 C, peak 519 F against 520 F measured.
+    C_C = 3115.9
+    HEAT_PER_UNIT = 958.8
+    DEADTIME = 100
+    AMBIENT_C = 20.0
+
+    def __init__(self, *, T0=20.0, **kwargs):
+        kwargs.setdefault("deadtime", self.DEADTIME)
+        kwargs.setdefault("H", self.HEAT_PER_UNIT)
+        super().__init__(**kwargs)
+        self.C_c = self.C_C
+        self.T_amb = self.AMBIENT_C
+        # A cook starts from whatever the chamber is already sitting at, which
+        # for a reheat is well above ambient.
+        self.T_f = self.T_c = self.T_meas = float(T0)
