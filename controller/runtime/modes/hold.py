@@ -113,7 +113,7 @@ class HoldMode(ControlMode):
                     lid_open=False,
                     manual_override_active=False,
                     fan_assist_active=False,
-                    auger_output=True,
+                    auger_output=self.grill.get_output_status()["auger"],
                 )
             )
 
@@ -182,8 +182,11 @@ class HoldMode(ControlMode):
 
             # A live manual override already reported the duty a human commanded
             # (_on_manual_output); the cycle ratio computed here is not what the
-            # auger is doing.
-            if self.state.manual_override["auger"] <= now:
+            # auger is doing. An override expiring at exactly `now` is still live
+            # (matches the `< now` expiry check in base.py's own reset). self._runner
+            # is already guaranteed non-None here -- submit() and control_period()
+            # above would have raised otherwise.
+            if self.state.manual_override["auger"] < now:
                 self._runner.set_output(
                     AppliedOutput(
                         ratio=self.state.cycle.ratio,

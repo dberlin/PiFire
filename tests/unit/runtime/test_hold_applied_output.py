@@ -50,6 +50,48 @@ def test_per_tick_is_suppressed_while_a_manual_override_is_live(hold_cycle):
     assert runner.applied == []
 
 
+def test_per_tick_report_fires_once_per_control_interval_not_once_per_tick(hold_cycle):
+    runner = FakeControllerRunner(period=5.0).script([_output(0.5)])
+    hold = hold_cycle(runner)
+    hold.setup()
+    runner.applied.clear()
+
+    # Several ticks inside the first interval: the gate has not opened yet,
+    # so nothing is reported.
+    for t in (1.0, 2.0, 3.0, 4.0):
+        hold.on_tick(now=t, ptemp=200.0, current_output_status=_off())
+    assert runner.applied == []
+
+    # Crossing the interval boundary opens the gate once.
+    hold.on_tick(now=6.0, ptemp=200.0, current_output_status=_off())
+    assert len(runner.applied) == 1
+
+    # Several more ticks inside the new interval must not add more reports --
+    # a threaded runner replays its queue on every scheduling of the worker,
+    # not once per control interval, so a report hoisted out of the gate
+    # would flood the model with duplicates here.
+    for t in (7.0, 8.0, 9.0, 10.0):
+        hold.on_tick(now=t, ptemp=200.0, current_output_status=_off())
+    assert len(runner.applied) == 1
+
+    # Crossing the next boundary opens the gate a second time.
+    hold.on_tick(now=12.0, ptemp=200.0, current_output_status=_off())
+    assert len(runner.applied) == 2
+
+
+def test_per_tick_report_boundary_matches_the_manual_override_expiry_convention(hold_cycle):
+    runner = FakeControllerRunner(period=0.0).script([_output(0.5)])
+    hold = hold_cycle(runner)
+    hold.setup()
+    # base.py's own expiry check (`< now`) treats an override expiring at
+    # exactly `now` as still live, not yet cleared; the per-tick report must
+    # honor the same boundary and stay suppressed at equality.
+    hold.state.manual_override["auger"] = 100.0
+    runner.applied.clear()
+    hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
+    assert runner.applied == []
+
+
 def test_lid_open_detection_reports_zero(hold_cycle):
     runner = FakeControllerRunner(period=999).script([_output(0.5)])
     hold = hold_cycle(runner)
