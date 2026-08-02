@@ -46,11 +46,18 @@ past this point (its own onset is a controller/plan-defined disturbance, not a
 symptom of startup), so lid-window figures are not split into whole/warm.
 
 Set applied_q_split_expected=True (or --applied-q-split-expected on the CLI)
-for the after-Task-13 run, once Controller exposes _applied_Q; both the
-before- and after-runs use this same script, and the flag's value is
-recorded into the output JSON so a later comparison knows which mode
-produced each row. The provenance pin on core._last_Q in replay() does not
-depend on this flag and must hold in either mode.
+for the after-Task-13 run. The flag is checked against actual behavior, not
+attribute presence: hasattr(core, "_applied_Q") is true on any checkout at
+or after the task that added the field to __init__, which predates the
+behavioral split by one task and so cannot tell a live split from
+ControllerBase's set_output no-op leaving _applied_Q frozen at Q_min. See
+_split_is_live below. The flag's value is recorded into the output JSON so a
+later comparison knows which mode produced each row. Do not re-capture a
+before-run: the stored baseline (_net_vs_nlp_baseline.json) predates both
+_applied_Q and set_output entirely, so it remains a valid "estimator reads
+the command" reference point for every after-run to compare against. The
+provenance pin on core._last_Q in replay() does not depend on this flag and
+must hold in either mode.
 """
 
 import argparse
@@ -103,6 +110,24 @@ def _rms(a):
     return float(np.sqrt((a**2).mean()))
 
 
+def _split_is_live(cycle_data):
+    """Task 13's _last_Q/_applied_Q split, detected by behavior, not presence.
+
+    hasattr(core, "_applied_Q") is true on any checkout at or after Task 12,
+    which only added the attribute to __init__ -- not the behavior. The thing
+    this flag actually needs to discriminate is whether a report the
+    controller did not command can move _applied_Q off the command; a probe
+    that only checks presence would let a mis-targeted after-run silently
+    reproduce the baseline and read as "no change" instead of failing loudly.
+    """
+    from controller.applied_output import AppliedOutput, OutputSource
+
+    probe = Controller({"policy": "nlp"}, "F", dict(cycle_data))
+    before = getattr(probe, "_applied_Q", None)
+    probe.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 0.0))
+    return before is not None and getattr(probe, "_applied_Q", None) != before
+
+
 def replay(
     seed=0,
     duration_s=3 * 3600,
@@ -113,25 +138,21 @@ def replay(
 ):
     core = Controller({"policy": "nlp"}, "F", CYCLE_DATA)
     assert core._net is None, "configure policy=nlp; the point is to log the NLP's answers"
-    # `_applied_Q` is the specific attribute Task 13 of this plan is expected
-    # to add. A baseline instrument must not need editing between the before-
-    # and after-runs, so which side of that landing we're on is a caller-
-    # supplied flag (recorded below into the output row), not a hard-coded
-    # assumption -- and this only checks that the flag matches reality, not
-    # that `_last_Q` still means what this harness thinks it means. That is
+    # which side of the Task 13 landing we're on is a caller-supplied flag
+    # (recorded below into the output row), not a hard-coded assumption --
+    # checked by behavior (_split_is_live), not by attribute presence, since
+    # presence alone cannot tell a live split from ControllerBase's
+    # set_output no-op (see _split_is_live's docstring). This does not check
+    # that `_last_Q` still means what this harness thinks it means; that is
     # the provenance pin further down, in the per-solve loop.
-    if applied_q_split_expected:
-        assert hasattr(core, "_applied_Q"), (
-            "applied_q_split_expected=True but Controller does not expose "
-            "_applied_Q -- Task 13 has not landed on this checkout; rerun "
-            "without the flag."
-        )
-    else:
-        assert not hasattr(core, "_applied_Q"), (
-            "Controller now exposes _applied_Q -- Task 13's _last_Q/_applied_Q "
-            "split has landed. Rerun with applied_q_split_expected=True rather "
-            "than editing this script."
-        )
+    assert _split_is_live(CYCLE_DATA) == applied_q_split_expected, (
+        f"applied_q_split_expected={applied_q_split_expected} does not match "
+        "this checkout's actual behavior. A bare hasattr(core, '_applied_Q') "
+        "check would pass here even against a pre-Task-13 checkout -- Task 12 "
+        "added the attribute a task before the behavior existed -- and a "
+        "mis-targeted after-run would then silently reproduce the baseline "
+        "instead of failing loudly. Fix the flag, not this assertion."
+    )
     core.set_target(setpoint_f)
     plant = GrillSim(seed=seed)
     period = core.get_control_period()
@@ -199,6 +220,19 @@ def replay(
                 "-- its provenance has changed and every read of it in this "
                 "harness needs re-auditing before this baseline can be trusted "
                 "again."
+            )
+            # Sibling pin for `core._policy_u_prev`, recorded in `triples` above
+            # as "the u_prev the policy was asked about": Task 13 redefined it
+            # from `float(core._last_Q)` to `clip(core._applied_Q, Q_min,
+            # Q_max)`. mpc.py still passes exactly this value to firing_rate(),
+            # so the harness measures what it claims -- pinned here the same
+            # way `_last_Q` is, so a future redefinition fails loudly instead
+            # of sliding through unnoticed.
+            assert core._policy_u_prev == float(np.clip(core._applied_Q, core.cfg["Q_min"], core.cfg["Q_max"])), (
+                "core._policy_u_prev is no longer clip(core._applied_Q, Q_min, "
+                "Q_max) -- its provenance has changed and every read of it in "
+                "this harness needs re-auditing before this baseline can be "
+                "trusted again."
             )
             ratio = min(max(float(raw["cycle_ratio"]), core.u_min), core.u_max)
             if hasattr(core, "set_output"):

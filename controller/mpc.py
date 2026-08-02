@@ -324,17 +324,37 @@ class Controller(ControllerBase):
     def set_output(self, applied):
         """Take the auger duty that actually ran and recover the firing rate.
 
-        allocate() is affine on [Q_min, Q_max], so this inverts it exactly for
-        any ratio the allocator produced. A report outside the actuator's span
-        (auger held off through a lid-open pause, a manual override) inverts to
-        a Q outside [Q_min, Q_max] just as honestly -- that is the point of
-        this method, and the estimator gets it unmodified rather than clamped.
+        allocate() is affine on [u_min, u_max], so this inverts it exactly
+        there. Below u_min the affine inverse would extrapolate to a negative
+        Q -- but mpc_model.py's heat_in = K_Q * Q has no offset, so a negative
+        Q reads as negative heat, and a paused auger delivers none, not
+        negative heat. Below u_min the inverse instead blends linearly to the
+        origin (duty 0 -> Q 0), agreeing with the affine branch exactly at
+        u_min. The result can still land below Q_min -- that floor-crossing
+        is the signal this method exists to report, reported one call at a
+        time (a shorter or mid-interval pause is invisible between reports) --
+        it just never goes negative.
+
+        Fidelity below u_min depends on u_min > 0. At u_min == 0 the blend
+        branch is unreachable for any non-negative ratio, so the affine
+        branch alone handles duty 0 and folds it back to Q_min --
+        indistinguishable from a minimum command, the exact defect this
+        method exists to fix. u_min == 0 is a valid cycle_data configuration
+        this method does not special-case further.
         """
         span = self.u_max - self.u_min
         if span <= 0:
             return
-        q_span = self.cfg["Q_max"] - self.cfg["Q_min"]
-        self._applied_Q = self.cfg["Q_min"] + (float(applied.ratio) - self.u_min) / span * q_span
+        ratio = float(applied.ratio)
+        Q_min, Q_max = self.cfg["Q_min"], self.cfg["Q_max"]
+        # Mirrors allocate()'s own guard against a degenerate Q span, so the
+        # two maps stay consistent instead of this inverse flipping sign on a
+        # nonsense config.
+        q_span = (Q_max - Q_min) if Q_max > Q_min else 1.0
+        if self.u_min > 0 and ratio < self.u_min:
+            self._applied_Q = Q_min * ratio / self.u_min
+        else:
+            self._applied_Q = Q_min + (ratio - self.u_min) / span * q_span
 
     def update(self, current):
         y = _to_c(current, self.units)

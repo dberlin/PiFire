@@ -4,6 +4,7 @@ import shutil
 import time
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 import notify.mqtt_handler as mh
@@ -43,6 +44,30 @@ def _make():
 @pytest.fixture
 def mpc_controller():
     return _make()
+
+
+_NET_ARTIFACT = os.path.join(os.path.dirname(__file__), "..", "..", "..", "controller", "mpc_policy_net.npz")
+
+
+@pytest.fixture
+def net_mpc_controller():
+    """A Controller running the real net policy, not the NLP.
+
+    Uses _DEFAULTS rather than CONFIG: the shipped artifact's calibration was
+    fit against _DEFAULTS's physical parameters (see test_mpc_net_loop.py),
+    and CONFIG's C_f/C_c/etc. would fail matches_config() and silently fall
+    back to the NLP -- which is exactly how the net-side clamp test above
+    used to skip on every run without the skip ever meaning "artifact
+    missing".
+    """
+    if not os.path.exists(_NET_ARTIFACT):
+        pytest.skip("net artifact not exported")
+    cfg = dict(_DEFAULTS)
+    cfg["policy"] = "net"
+    c = Controller(cfg, "C", dict(CYCLE))
+    assert c._net is not None, "net artifact present but failed to load or match this config"
+    c.set_target(110.0)
+    return c
 
 
 def test_update_returns_dict_contract():
@@ -300,15 +325,13 @@ def test_with_no_report_the_command_is_assumed_applied(mpc_controller, monkeypat
     assert seen[-1] == pytest.approx(commanded)
 
 
-def test_the_net_sees_the_applied_input_clamped_to_its_trained_span(mpc_controller, monkeypatch):
-    if mpc_controller._net is None:
-        pytest.skip("net policy not loaded")
+def test_the_net_sees_the_applied_input_clamped_to_its_trained_span(net_mpc_controller, monkeypatch):
     seen = []
-    monkeypatch.setattr(mpc_controller._net, "firing_rate", lambda x, u_prev, sp: (seen.append(u_prev), 50.0)[1])
-    mpc_controller.set_target(225.0)
-    mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
-    mpc_controller.update(200.0)
-    assert seen[-1] == pytest.approx(mpc_controller.cfg["Q_min"])
+    monkeypatch.setattr(net_mpc_controller._net, "firing_rate", lambda x, u_prev, sp: (seen.append(u_prev), 50.0)[1])
+    net_mpc_controller.set_target(225.0)
+    net_mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
+    net_mpc_controller.update(200.0)
+    assert seen[-1] == pytest.approx(net_mpc_controller.cfg["Q_min"])
 
 
 def test_a_degenerate_actuator_span_is_ignored(mpc_controller):
@@ -316,3 +339,56 @@ def test_a_degenerate_actuator_span_is_ignored(mpc_controller):
     mpc_controller.u_max = mpc_controller.u_min
     mpc_controller.set_output(AppliedOutput(0.5, OutputSource.CONTROLLER, 1.0))
     assert mpc_controller._applied_Q == before
+
+
+def test_zero_duty_is_zero_firing_not_negative(mpc_controller):
+    """A paused auger delivers no fuel, not negative fuel: mpc_model.py's
+    heat_in = K_Q * Q has no offset, so the affine inverse of allocate() --
+    which does have an offset, Q_min -> u_min -- must not be extrapolated
+    past u_min down to duty 0."""
+    mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
+    assert mpc_controller._applied_Q == pytest.approx(0.0)
+
+
+def test_a_partial_floor_crossing_lands_strictly_between_zero_and_q_min(mpc_controller):
+    ratio = mpc_controller.u_min / 2.0
+    mpc_controller.set_output(AppliedOutput(ratio, OutputSource.LID_OPEN, 1.0))
+    assert 0.0 < mpc_controller._applied_Q < mpc_controller.cfg["Q_min"]
+
+
+def test_a_degenerate_q_span_matches_allocates_own_guard(mpc_controller):
+    """allocate() falls back to span=1.0 when Q_max<=Q_min; the inverse must
+    use the same fallback so the two maps agree instead of this one flipping
+    sign on a nonsense config."""
+    mpc_controller.cfg["Q_max"] = mpc_controller.cfg["Q_min"]
+    mpc_controller.set_output(AppliedOutput(mpc_controller.u_max, OutputSource.CONTROLLER, 1.0))
+    assert mpc_controller._applied_Q == pytest.approx(mpc_controller.cfg["Q_min"] + 1.0)
+
+
+def test_set_target_resets_applied_q_to_the_floor(mpc_controller):
+    mpc_controller.set_output(AppliedOutput(mpc_controller.u_max, OutputSource.CONTROLLER, 1.0))
+    assert mpc_controller._applied_Q != mpc_controller.cfg["Q_min"]
+    mpc_controller.set_target(300.0)
+    assert mpc_controller._applied_Q == pytest.approx(mpc_controller.cfg["Q_min"])
+
+
+def test_a_solve_failure_during_a_pause_holds_the_command_not_the_applied_value(mpc_controller, monkeypatch):
+    """The except-fallback holds the previous COMMAND (_last_Q), even mid-pause.
+    Conflating it with the paused _applied_Q would drop the auger to Q_min on
+    a transient solver failure instead of holding the prior command steady."""
+    calls = {"n": 0}
+
+    def fake_make_step(x):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return np.array([[40.0]])
+        raise RuntimeError("solver failure")
+
+    monkeypatch.setattr(mpc_controller.mpc, "make_step", fake_make_step)
+    mpc_controller.set_target(225.0)
+    mpc_controller.update(200.0)
+    commanded = mpc_controller._last_Q
+    assert commanded == pytest.approx(40.0)
+    mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
+    mpc_controller.update(200.0)
+    assert mpc_controller._last_Q == pytest.approx(commanded)
