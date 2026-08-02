@@ -762,6 +762,7 @@ top-level item, so nobody has to read 900 lines to find that out:
 | 9a. Live probe-map editing | 2 of 3 **DONE**; 9a.3 **OPEN** |
 | 10. Deferred-work inventory | **MIXED** — the only large open surface |
 | 11. Recipes deliberate non-dos | **WON'T DO** — boundaries, not owed work |
+| 12. Shutdown affordance and ordering | **OPEN** |
 
 So the real open work is **9a.3 and the OPEN entries inside item 10.** The
 biggest of those, in rough order of consequence:
@@ -773,6 +774,8 @@ biggest of those, in rough order of consequence:
 3. No PWA manifest.
 4. Wizard has no 800×480 coverage; no e2e for Exit Setup.
 5. The rest of the schema and toolchain follow-ups — none started.
+6. Shutdown does not read as destructive, and Stop/Shutdown sit in opposite
+   orders here and on the attached display (item 12).
 
 Closed on 2026-08-02, listed here only because they were on this list the same
 day: persisted schema versioning for both durable blobs, **including modeling,
@@ -2106,6 +2109,64 @@ happened on its own.
     `RECIPE_FOLDER + filename` concatenation that item 6 above records as the
     reason none of its routes were reused — is deleted, and its
     characterization suite with it.
+
+### 12. Shutdown does not look like what it does — OPEN
+
+**Status:** OPEN. The Qt half is `display-backlog.md` item 2; neither UI has
+both halves, and they are missing opposite ones.
+
+**Shutdown does considerably more than end the cook.** This was filed as a
+styling item and is not one:
+
+- **Every time.** `ShutdownMode.teardown()`
+  (`controller/runtime/modes/shutdown.py:25-27`) calls `grill.power_off()` once
+  `shutdown_duration` elapses, opening the platform's master power relay
+  (`grillplat/ft232h_relay.py:171-173`, and the equivalent on every other
+  platform). Everything fed through that channel loses power.
+- **Reported on a user's grill, 2026-08-02:** an FT232H-driven relay board
+  disappeared entirely at the end of a shutdown — the USB bridge sits downstream
+  of the relay it drives, so opening that relay removed the device from the bus.
+  Note what that implies: **the action removes the means of undoing itself.**
+  `power_on()` cannot re-close a relay whose controller is no longer enumerated,
+  so recovery is physical. Confirm the wiring on the affected build before
+  writing this up as general — but design for it.
+- **When `shutdown.auto_power_off` is set** — default `False`, a plain toggle on
+  the Startup settings tab — `controller/runtime/controller.py:641-643` then runs
+  `os.system("sleep 3 && sudo shutdown -h now &")`, halting the host.
+
+So a confirmation is not a nicety, and red is the least of it. The confirm text
+should say what will happen rather than ask "Shut down the grill?", and should
+say something different when `auto_power_off` is on, because that case takes the
+web UI down with it.
+
+**The affordances, as they stand.** Each UI has exactly one of the two:
+
+| | Red | Confirms | Position |
+|---|---|---|---|
+| Web | **no** | yes — "Shut down the grill?" | Shutdown, then Stop |
+| Qt | yes | **no** | Stop, then Shutdown |
+
+Here, `Shutdown` carries no `variant`, so it renders `plain` while `Stop` beside
+it is `danger` (`helpers/dashboard/buttonsForMode.ts:73-74` and `98-99` for
+Stop; `157` and `195` for Shutdown). Both of the row's ways out of a cook are
+destructive and only one of them says so. The confirm is already there on both
+Shutdown entries, so this half is a `variant: "danger"` on two lines.
+
+**The orders are inverted, and that is the sharper problem.** Every Qt row
+containing both ends `Stop, Shutdown` (`display/qml/Menus.js:101-102, 116-117,
+122-123`); every web row containing both ends `Shutdown, STOP`
+(`buttonsForMode.ts:157-158, 195-196`). The last button in the row is a
+different destructive action depending on which screen you are standing at.
+Someone who uses the grill's own display and their phone hits the wrong one.
+
+Whichever way it is unified, it must be unified in both files at once, and the
+`ControlButtons` tests that pin row contents assert order, so they will catch a
+one-sided change.
+
+**Not in scope here.** The admin page's Reboot/Shutdown/Restart
+(`components/admin/SystemCard.tsx`) power off the Pi rather than ending a cook.
+They are a different control with their own confirmation; this item is the
+dashboard's mode button.
 
 ---
 

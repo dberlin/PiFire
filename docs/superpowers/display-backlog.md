@@ -98,3 +98,49 @@ and the note in `d7432363`.
 **Verification.** This needs a real panel. This machine has no display hardware
 attached, so any change here is untested until it runs on the actual grill —
 which is a different machine.
+
+---
+
+### 2. Shutdown fires with no confirmation
+
+**Status:** OPEN. The web half is `react-migration-backlog.md` item 12; neither
+UI has both halves, and they are missing opposite ones.
+
+**Shutdown does considerably more than end the cook.** `ShutdownMode.teardown()`
+(`controller/runtime/modes/shutdown.py:25-27`) opens the platform's master power
+relay, and with `shutdown.auto_power_off` set the controller then runs
+`sudo shutdown -h now` (`controller/runtime/controller.py:641-643`) and halts
+the host — the machine this display is running on. One reported case took an
+FT232H relay board off the USB bus entirely, which `react-migration-backlog.md`
+item 12 records in full. An unconfirmed touch here is not a mis-click, it is an
+outage.
+
+**The finding.** It should read as destructive and ask before firing. Here it
+reads as destructive and does not ask:
+
+- **Red, already.** `ControlPanel.qml:26` and `:43` give `cmd_shutdown` (and
+  `cmd_stop`) `Theme.dangerColor` for the border and the press tint.
+- **No confirmation.** `Actions.activate()` (`display/qml/Actions.js:25-28`)
+  routes anything that is not `cmd_none`, `menu_*` or `input_*` straight to
+  `backend.action(a, ...)`. One touch on a 7" panel, mid-cook, and the cook is
+  over.
+
+The web UI is the mirror image: it confirms ("Shut down the grill?") and is not
+red.
+
+**Scope note.** This is not a one-liner here the way the colour is on the web
+side. `display/qml/` has no confirmation overlay to reuse — `screens/` holds
+`HoldInput`, `NotifyInput`, `QrCodeScreen` and `MenuScreen`, all of which
+collect a value rather than confirm an action. A `ConfirmOverlay.qml` has to be
+built, and `Actions.activate()` needs a way to say "this action is gated" —
+most naturally a flag on the menu item, so `Menus.js` stays the one place that
+describes what a button is.
+
+**The orders are inverted between the two UIs, and that matters more.** Every
+row here that contains both ends `Stop, Shutdown` (`Menus.js:101-102, 116-117,
+122-123`); every web row containing both ends `Shutdown, Stop`. The last button
+in the row is a different destructive action depending on which screen the
+operator is at. Fix it in both files in one change or not at all.
+
+**Verification.** Touch targets and overlay layout need a real panel; this
+machine has none. The routing change in `Actions.js` is testable without one.
