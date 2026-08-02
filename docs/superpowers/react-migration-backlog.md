@@ -763,6 +763,8 @@ top-level item, so nobody has to read 900 lines to find that out:
 | 10. Deferred-work inventory | **MIXED** — the only large open surface |
 | 11. Recipes deliberate non-dos | **WON'T DO** — boundaries, not owed work |
 | 12. Shutdown affordance and ordering | **OPEN** |
+| 13. P-MODE/SMOKE+ visibility outside Smoke | **OPEN** — needs a ruling |
+| 14. `clampSetpoint` has no caller | **OPEN** |
 
 So the real open work is **9a.3 and the OPEN entries inside item 10.** The
 biggest of those, in rough order of consequence:
@@ -775,7 +777,11 @@ biggest of those, in rough order of consequence:
 4. Wizard has no 800×480 coverage; no e2e for Exit Setup.
 5. The rest of the schema and toolchain follow-ups — none started.
 6. Shutdown does not read as destructive, and Stop/Shutdown sit in opposite
-   orders here and on the attached display (item 12).
+   orders here and on the attached display (item 12). Note what Shutdown
+   actually does before scheduling this one — it is not a styling item.
+7. Two small ones from the same day: whether P-MODE/SMOKE+ should be Smoke-only
+   (item 13, needs a ruling) and a helper whose only caller is its test
+   (item 14).
 
 Closed on 2026-08-02, listed here only because they were on this list the same
 day: persisted schema versioning for both durable blobs, **including modeling,
@@ -2163,10 +2169,56 @@ Whichever way it is unified, it must be unified in both files at once, and the
 `ControlButtons` tests that pin row contents assert order, so they will catch a
 one-sided change.
 
+**Outstanding evidence.** Which of the two mechanisms fired on the reported
+grill is not yet known, and the answer changes the confirm's wording. Its
+SQLite file settles it: `settings:general` → `shutdown.auto_power_off`,
+`modules.grillplat`, and the `platform` block (the output/pin map plus the
+`ft232h` entry, which says whether `power` is the channel the bridge hangs off).
+The `logs` table settles it independently — `eventLogger` writes "Fan OFF, Power
+OFF" at teardown on every shutdown, and "Shutdown mode ended powering off grill"
+only on the `auto_power_off` path.
+
 **Not in scope here.** The admin page's Reboot/Shutdown/Restart
 (`components/admin/SystemCard.tsx`) power off the Pi rather than ending a cook.
 They are a different control with their own confirmation; this item is the
 dashboard's mode button.
+
+### 13. Should P-MODE and SMOKE+ show outside Smoke at all? — OPEN, needs a ruling
+
+**Status:** OPEN. Raised 2026-08-02 while making the pills carry the actuator
+duties in Hold; deliberately not decided then.
+
+The duty-pill change switches on `mode === "Hold"` and nothing else, which is
+exactly what the attached display does (`DashScreen.qml:21`,
+`property bool hold: backend.mode === "Hold"`). Mirroring it was the
+conservative reading of "they do not appear in hold mode in the qt UI".
+
+But the request that prompted it was that P-mode and Smoke+ "should only appear
+in **smoke** mode" — which is stricter. Under the shipped behaviour they still
+appear in Stop, Monitor, Startup, Prime, Shutdown and Manual, describing a
+smoke cycle that is not running in any of them.
+
+The two readings differ only outside Hold, and the change is one condition in
+`helpers/dashboard/deriveView.ts` (`holding` becomes something like
+`mode !== "Smoke"`). What makes it a ruling rather than a fix: going Smoke-only
+means **the web UI leads and Qt trails**, so `DashScreen.qml` has to follow or
+the two diverge again — and there is a live counter-argument, that P-mode is
+editable in Prime, Shutdown, Startup and Reignite (`PMODE_EDITABLE_MODES`), so
+hiding the pill in those modes removes a control, not just a readout.
+
+### 14. `clampSetpoint` has no production caller — OPEN
+
+**Status:** OPEN. Noticed 2026-08-02 while giving it the grill's real ceiling.
+
+`helpers/dashboard/health.ts` exports `clampSetpoint`, and the only thing that
+references it is `tests/unit/helpers/dashboard/health.test.ts`. `SetpointEntry`
+clamps with its own local closure over the resolved range. It was carried
+forward (and given the new `safetyMaxTemp` parameter) rather than deleted in
+that pass, so as not to mix a deletion into a behaviour fix — but a helper whose
+only caller is its own test is a test that proves nothing about the app.
+
+Either give it the callers it was meant to have — `SetpointEntry`'s closure is
+the obvious one — or delete it with its test.
 
 ---
 

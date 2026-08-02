@@ -39,8 +39,9 @@ completion from a sweep:
 
 - **2026-08-02** — file opened. Item 1 was carved out of the settings-toolchain
   brainstorm on the same day; it is the half of the old S3 item that lives in
-  Python. Nothing else has been swept into this file yet, so its emptiness is
-  not evidence that the server side has one open item.
+  Python. Item 2 was added the same day. Nothing else has been swept into this
+  file yet, so its shortness is not evidence that the server side has two open
+  items.
 
 ---
 
@@ -94,3 +95,32 @@ matching nothing — is being fixed independently by generating a TypeScript
 defaults constant from the committed `web-react/schema/settings.schema.json`.
 That needs no Python change and does not depend on this item. See
 `specs/2026-08-02-settings-toolchain-followups-design.md`.
+
+---
+
+### 2. `v1.11.0-dev21` is a lightweight tag
+
+**Status:** OPEN. Created 2026-08-02 by a `git tag` that ran outside
+`updater/tag-release.sh`.
+
+Every other release tag is annotated — the script uses `git tag -a` deliberately,
+because `git describe` prefers annotated tags and ignores lightweight ones unless
+asked. `v1.11.0-dev21` is the lone lightweight one, on both this checkout and
+`origin`.
+
+**Nothing is broken by it.** `updater.py:322` runs
+`git describe --tags --always`, and `--tags` is exactly the flag that makes
+lightweight tags count; the `Remote:` line uses `git tag --sort=v:refname
+--merged`, which never cared. `tag-release.sh --check` reports the right values
+either way. This is a consistency wart, not a fault.
+
+**The fix, if it is worth doing,** is to recut it at the same commit:
+
+```
+git tag -d v1.11.0-dev21 && git push origin :refs/tags/v1.11.0-dev21
+updater/tag-release.sh v1.11.0-dev21 --tag-only
+```
+
+Deleting a pushed tag is the only reason this is filed rather than done — it
+rewrites a ref other clones already have, which is the operator's call, not an
+agent's.
