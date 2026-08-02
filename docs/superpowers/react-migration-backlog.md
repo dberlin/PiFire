@@ -2295,6 +2295,30 @@ renders a confident zero instead.
   renders as *the last good value*, with nothing to say it is stale, and floods
   the log at frame rate. It only looks correct.
 
+**Decided 2026-08-02 — what it should show.** Not a dash, and not a zero: **the
+last good value, marked stale, with how old it is** — "last data 47 s ago" or
+similar, in a line beneath the number. Both UIs, worded and placed the same.
+A reading that is 40 s old is still worth something to someone deciding whether
+to open the lid; what is unacceptable is showing it as though it were live.
+
+Two consequences follow, and they move the work:
+
+- **Nothing publishes per-probe freshness today.** The age cannot be computed in
+  either UI. `current["TS"]` timestamps the whole blob, not a probe, and it
+  keeps advancing while an individual probe is stale. The right channel already
+  exists and is already on the wire: `probe["status"]`
+  (`socket_io.py:873-885`), populated per probe from `probe_device_info` and
+  currently carrying `connected`, `error` and the battery fields. The data
+  exists at the source too — `thermoworks_cloud` caches
+  `{channel: (celsius, fetched_at_utc)}` — it is simply never surfaced. So the
+  producer publishes the last good reading and its timestamp; it is not a
+  presentation-layer fix.
+- **Do not track it client-side.** A UI that remembers "the value went null at
+  T" loses that across a page reload, and the two UIs would then disagree about
+  the same probe's age — which is the class of divergence this whole item is.
+  Keeping the last-good value in the producer also keeps `deriveView` a pure
+  function of the latest frame, which it is today and should stay.
+
 **The fix is three layers, and the middle one is the real one.**
 `ProbeData.temp` is typed `number` while the producer can put `null` there;
 `thermoworks_cloud` returning `None` for a stale channel is *correct* — better

@@ -180,6 +180,15 @@ keeps its previous value and the card goes on showing the last good reading.
 - It writes a line to the control log every frame. That is the noise that hid
   the real fault: the message names a QML property, not a probe.
 
-**What it should do.** Take the null deliberately rather than by rejection, and
-render absence as absence — the card showing a dash where the number goes,
-matching whatever item 15 settles on for the web, so the two agree.
+**What it should do — decided 2026-08-02.** Keep showing the last good value —
+which is what it accidentally does now — but **say that it is stale and how
+old it is**: "last data 47 s ago" or similar, in a line beneath the number.
+Same wording and placement as the web, so an operator moving between the panel
+and their phone reads one story.
+
+So the display's *displayed* behaviour is already half right; what is missing is
+that it does not know the reading is stale, and neither UI can work that out for
+itself. `react-migration-backlog.md` item 15 carries the decision in full,
+including where the age has to come from: the producer, via the per-probe
+`status` block that already reaches both UIs. Take the null deliberately rather
+than by rejected assignment, and stop the log line while doing it.
