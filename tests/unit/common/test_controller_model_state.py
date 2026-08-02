@@ -6,6 +6,7 @@ genuinely model-agnostic.
 """
 
 import json
+import logging
 
 import pytest
 
@@ -156,3 +157,90 @@ def test_a_write_failure_returns_false():
 
     store = ControllerModelStore(reader=lambda k: json.loads(None), writer=boom)
     assert store.save("pid_sp", FOPDT) is False
+
+
+def test_a_save_without_a_prior_load_still_honors_the_stored_revision():
+    # I3: the revision guard must not depend on the caller having called load()
+    # first. A fresh instance's first save() has an empty cache -- it must fall
+    # back to whatever is actually persisted, not treat "nothing cached yet" as
+    # "nothing to protect".
+    fake = _FakeStore()
+    first = ControllerModelStore(reader=fake.read, writer=fake.write)
+    first.save("pid_sp", {"revision": 57, "K": 700.0})
+
+    second = ControllerModelStore(reader=fake.read, writer=fake.write)
+    assert second.save("pid_sp", {"revision": 1, "K": 999.0}) is False
+    assert second.load("pid_sp")["K"] == 700.0
+    assert second.save("pid_sp", {"revision": 58, "K": 999.0}) is True
+    assert second.load("pid_sp")["K"] == 999.0
+
+
+def test_a_reset_revision_after_a_restart_is_rejected_and_logged(caplog):
+    # C1: a producer whose revision counter is per-process (resets on restart)
+    # must be rejected -- and that rejection must be visible, not a bare False
+    # that looks identical to every other reason a save can fail.
+    fake = _FakeStore()
+    first = ControllerModelStore(reader=fake.read, writer=fake.write)
+    first.save("pid_sp", {"revision": 57, "K": 700.0})
+
+    second = ControllerModelStore(reader=fake.read, writer=fake.write)
+    with caplog.at_level(logging.WARNING, logger="control"):
+        result = second.save("pid_sp", {"revision": 1, "K": 999.0})
+    assert result is False
+    assert fake.writes == 1  # only the first, genuine save landed
+    assert "pid_sp" in caplog.text
+    assert "57" in caplog.text  # names the stored baseline it lost to
+
+
+def test_a_transient_read_failure_blocks_the_write_instead_of_erasing_other_entries():
+    # I2: "I could not read it" must not collapse into "there is nothing there".
+    # A flaky reader must never cause save() to persist a fresh blob that drops
+    # every other controller's snapshot.
+    fake = _FakeStore({MODEL_STATE_KEY: json.dumps({"version": SCHEMA_VERSION, "models": {"mpc": UNRELATED}})})
+
+    def flaky_read(key):
+        raise RuntimeError("datastore is down")
+
+    store = ControllerModelStore(reader=flaky_read, writer=fake.write)
+    assert store.save("pid_sp", FOPDT) is False
+    assert fake.writes == 0
+    assert json.loads(fake.blobs[MODEL_STATE_KEY])["models"] == {"mpc": UNRELATED}
+
+
+def test_an_unrecognized_version_blocks_the_write_instead_of_downgrading_it():
+    fake = _FakeStore({MODEL_STATE_KEY: json.dumps({"version": SCHEMA_VERSION + 1, "models": {"mpc": UNRELATED}})})
+    store = ControllerModelStore(reader=fake.read, writer=fake.write)
+    assert store.save("pid_sp", FOPDT) is False
+    assert fake.writes == 0
+    stored = json.loads(fake.blobs[MODEL_STATE_KEY])
+    assert stored["version"] == SCHEMA_VERSION + 1
+    assert stored["models"] == {"mpc": UNRELATED}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "not a dict",
+        {"version": SCHEMA_VERSION + 1, "models": {"mpc": UNRELATED}},
+        {"models": {"mpc": UNRELATED}},
+        {"version": SCHEMA_VERSION, "models": "not a dict"},
+        {"version": SCHEMA_VERSION},
+    ],
+)
+def test_save_is_fail_closed_on_a_bad_envelope(raw):
+    fake = _FakeStore({MODEL_STATE_KEY: json.dumps(raw)})
+    store = ControllerModelStore(reader=fake.read, writer=fake.write)
+    assert store.save("pid_sp", FOPDT) is False
+    assert fake.writes == 0
+
+
+def test_round_trips_through_the_real_datastore_seam(ds):
+    # The fake in every other test matches read_generic_key's documented
+    # behavior on purpose, but only this test exercises the actual seam:
+    # ControllerModelStore() with no injected reader/writer, backed by a real
+    # (temp-file) SQLite datastore via common.datastore_accessors.
+    store = ControllerModelStore()
+    assert store.load("pid_sp") is None
+    assert store.save("pid_sp", FOPDT) is True
+    assert store.load("pid_sp") == FOPDT
+    assert ControllerModelStore().load("pid_sp") == FOPDT
