@@ -19,6 +19,27 @@ Presence alone isn't the invariant: a call that runs AFTER the first settings
 read is exactly the bug above, just spelled differently. What's checked here
 is order -- datastore.init() must execute before the first settings access
 reachable from the module's own run-as-a-script path.
+
+"Reachable" is deliberately generous. The scan descends into every nested
+statement block -- `if`/`elif`/`else`, `for`/`while`/`else`, `with`, and
+`try`/`except`/`finally` -- at any depth, treating a call inside any branch
+as reachable regardless of which branch a particular run would actually
+take (it does not evaluate conditions). A `read_settings()` sitting inside
+`if args.something:` is exactly as visible to this test as one at module
+top level; real entry points put most of their work behind a flag or an
+argparse branch, so a scan that only saw unconditional top-level statements
+would miss most of the surface it claims to cover.
+
+Two things it does NOT see, by design: (1) a call inside a `class` method,
+or behind a `lambda` -- neither runs just because the class/def/lambda
+statement was reached; (2) a call reached only through calling a
+module-level *function*, which is inlined at the call site so it's seen in
+its actual run order, but each module-level function is inlined at most
+once (guards against infinite recursion on mutual/self recursion), and only
+functions defined at module level are inlined this way -- a call routed
+through more indirect plumbing (a callback stored in a variable, a method
+call, `getattr`) is invisible to the scan just as it is to a human skimming
+call sites without running the code.
 """
 
 import ast
@@ -45,22 +66,6 @@ EXCLUDED_ENTRY_POINTS = {
 #: Settings read/write entry points; a call to any of these is what
 #: datastore.init() must precede.
 _SETTINGS_ACCESSORS = {"read_settings", "read_settings_store", "write_settings", "write_settings_store"}
-
-#: Statement kinds that carry no branching of their own -- the shapes
-#: `_calls_in_statement` is willing to look inside. A compound statement
-#: (`if`/`for`/`while`/`try`/`with`) is deliberately excluded: a call nested
-#: in one of those does not run merely because the enclosing statement was
-#: reached, so it must stay invisible to the ordering walk below.
-_UNCONDITIONAL_STMT_TYPES = (
-    ast.Expr,
-    ast.Assign,
-    ast.AugAssign,
-    ast.AnnAssign,
-    ast.Assert,
-    ast.Delete,
-    ast.Raise,
-    ast.Return,
-)
 
 
 def _is_top_level_main_guard(node):
@@ -107,11 +112,40 @@ def _is_settings_accessor_call(call):
     return isinstance(func, ast.Name) and func.id in _SETTINGS_ACCESSORS
 
 
-class _UnconditionalCalls(ast.NodeVisitor):
-    """Collects the Call nodes reachable from a single statement without
-    conditional or deferred execution. Does not descend into nested
-    function/class definitions -- their bodies only run when called, not when
-    the def statement itself is reached -- or into lambda bodies."""
+#: For each compound-statement type, the nested statement lists it can run,
+#: in an order consistent with execution -- e.g. a `try` body runs before its
+#: handlers, which run before `finally`. Every branch is included, not just
+#: the one that happens to run for a given input: a settings access gated by
+#: `if`/`elif`/`else`, a loop, a `with`, or a `try`/`except`/`finally` is
+#: reachable code, and the ordering invariant this test enforces has to hold
+#: for every path a real run could take, not just the one path that was
+#: exercised when the module was written.
+def _nested_stmt_lists(stmt):
+    if isinstance(stmt, ast.If):
+        return [stmt.body, stmt.orelse]
+    if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+        return [stmt.body, stmt.orelse]
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        return [stmt.body]
+    if isinstance(stmt, (ast.Try, ast.TryStar)):
+        return [stmt.body, *(handler.body for handler in stmt.handlers), stmt.orelse, stmt.finalbody]
+    return []
+
+
+class _DirectCalls(ast.NodeVisitor):
+    """Collects the Call nodes that belong to a single statement's own
+    expressions -- an assignment's value, an `if`/`while`'s test, a `for`'s
+    iterable, a `with`'s context expressions -- without descending into any
+    nested statement block. Nested blocks (`if`/`for`/`while`/`try`/`with`
+    bodies, handlers, `orelse`, `finally`) are walked separately by
+    `_entry_sequence_calls`, one statement list at a time, so each call keeps
+    its own position in source order relative to calls in sibling and
+    enclosing statements instead of being flattened together with them.
+
+    Does not descend into nested function/class definitions -- their bodies
+    only run when called, not when the def statement itself is reached -- or
+    into lambda bodies.
+    """
 
     def __init__(self):
         self.calls = []
@@ -132,18 +166,39 @@ class _UnconditionalCalls(ast.NodeVisitor):
         self.calls.append(node)
         self.generic_visit(node)
 
+    def visit_If(self, node):
+        self.visit(node.test)
+
+    def visit_For(self, node):
+        self.visit(node.iter)
+
+    def visit_AsyncFor(self, node):
+        self.visit(node.iter)
+
+    def visit_While(self, node):
+        self.visit(node.test)
+
+    def visit_With(self, node):
+        for item in node.items:
+            self.visit(item.context_expr)
+
+    def visit_AsyncWith(self, node):
+        for item in node.items:
+            self.visit(item.context_expr)
+
+    def visit_Try(self, node):
+        pass
+
+    def visit_TryStar(self, node):
+        pass
+
 
 def _calls_in_statement(stmt):
-    """Call nodes that run unconditionally when `stmt` executes.
-
-    Restricted to `_UNCONDITIONAL_STMT_TYPES`; a compound statement is opaque
-    here even though a plain `ast.walk` would happily find calls inside its
-    body -- a `datastore.init()` sitting inside `if False:` must not count as
-    reached.
+    """Call nodes that belong to `stmt` itself, per `_DirectCalls` -- not
+    counting calls inside any nested statement block, which
+    `_entry_sequence_calls` walks separately via `_nested_stmt_lists`.
     """
-    if not isinstance(stmt, _UNCONDITIONAL_STMT_TYPES):
-        return []
-    collector = _UnconditionalCalls()
+    collector = _DirectCalls()
     collector.visit(stmt)
     return collector.calls
 
@@ -152,14 +207,28 @@ def _entry_sequence_calls(tree):
     """Yield datastore.init() and settings-accessor Call nodes in the order
     they execute when the module is run as `python entrypoint.py`.
 
-    Walks the module body top to bottom. The `if __name__ == "__main__":`
-    guard is unpacked in place -- its condition is true in that scenario --
-    and a call to a function defined elsewhere at module level is inlined at
-    the point it's called, so a call routed through a `main()`-style wrapper
-    (display_launch.py) or a helper invoked from the guard (board-config.py)
-    is still seen in the order it actually runs. Each module-level function
-    is inlined at most once, which is enough to keep this from looping on
-    recursion.
+    Walks the module body top to bottom, descending into every nested
+    statement block along the way -- `if`/`elif`/`else`, `for`/`while` (and
+    their `else`), `with`, and `try`/`except`/`finally`. A call inside any of
+    these counts as reachable at that block's position: if the branch can run
+    at all, the call inside it can happen, so it is ordered relative to calls
+    in sibling and enclosing statements exactly as if the block were absent.
+    This does not evaluate conditions -- a call inside `if False:` is treated
+    the same as one inside `if True:` -- so the walk is an over-approximation
+    of what actually executes on any one run, which is the conservative
+    direction for an ordering check like this one.
+
+    The `if __name__ == "__main__":` guard is unpacked in place -- its
+    condition is true in that scenario -- and a call to a function defined
+    elsewhere at module level is inlined at the point it's called, so a call
+    routed through a `main()`-style wrapper (display_launch.py) or a helper
+    invoked from the guard (board-config.py) is still seen in the order it
+    actually runs. Each module-level function is inlined at most once, which
+    is enough to keep this from looping on recursion; a call reached only
+    through a second level of function calls (a helper calling another
+    helper) is inlined too, since the same `walk` recurses into whatever it
+    inlines, but a call inside a *class* method, or behind a lambda, is not
+    -- `_DirectCalls` treats those as never merely "reached".
     """
     module_functions = {
         node.name: node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -179,6 +248,8 @@ def _entry_sequence_calls(tree):
                 if name in module_functions and name not in inlined:
                     inlined.add(name)
                     yield from walk(module_functions[name].body)
+            for nested in _nested_stmt_lists(stmt):
+                yield from walk(nested)
 
     yield from walk(tree.body)
 
@@ -204,8 +275,8 @@ def test_every_entry_point_initialises_the_datastore_before_reading_settings():
     """datastore.init() must precede the first settings access reachable from
     each entry point's run-as-a-script path, per `_init_precedes_first_settings_access`.
     A call that exists somewhere in the file -- after the first settings read,
-    inside a branch that never runs, or in a function nobody calls -- does not
-    satisfy this.
+    in a function nobody calls, or behind indirection the scan doesn't follow
+    (a class method, a lambda, a stored callback) -- does not satisfy this.
     """
     scripts = _entry_point_scripts()
     assert scripts, "the scan found no entry points -- it is not testing anything"
