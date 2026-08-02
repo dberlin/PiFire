@@ -24,7 +24,7 @@ import os
 
 from common.common import ErrorKind, WriteKind
 from common.defaults import default_control
-from common.modes import COOK_MODES, Mode, StatusState
+from common.modes import COOK_MODES, SAFE_MODES, Mode, StatusState
 from notify.notifications import check_notify, send_notifications
 from file_mgmt.cookfile import create_cookfile
 from file_mgmt.recipes import convert_recipe_units
@@ -391,7 +391,17 @@ class Controller:
             self.probe_complex.update_probe_profiles(settings["probe_settings"]["probe_map"]["probe_info"])
             self.eventLogger.info("Active probe profiles updated in control script.")
 
-        if self.control["updated"] and not self.control["critical_error"]:
+        # A platform the controller could not build is a reason to refuse to
+        # light a fire, never a reason to refuse to put one out. `critical_error`
+        # therefore withholds the whole dispatch below -- units change, status
+        # transitions, auger off, cook-file creation, history flush -- from every
+        # mode that adds energy to the firepot, and from none of the modes that
+        # take it away. Without the SAFE_MODES arm a latched flag swallows the
+        # operator's Stop along with everything else, leaving a lit grill that
+        # can never be commanded again: `updated` is not even cleared, so the
+        # request sits in the datastore and the UI shows a transition that never
+        # happens.
+        if self.control["updated"] and (not self.control["critical_error"] or self.control["mode"] in SAFE_MODES):
             self.eventLogger.debug(
                 f"Control Settings Updated.  Mode: {self.control['mode']}, Units Change: {self.control['units_change']} "
             )
@@ -489,6 +499,15 @@ class Controller:
                 else:
                     grill_platform.power_off()
 
+                # Both cleanup branches below rebind control to a fresh
+                # default_control(), whose `critical_error` is False -- so
+                # reaching Stop or Error would otherwise ANSWER the question
+                # "can this controller drive its hardware?" by forgetting it,
+                # and the next Startup would light a fire on a platform that
+                # failed to build. The flag describes the hardware, not the
+                # cook, so it survives the reset and stays visible to the UI.
+                critical_error = self.control["critical_error"]
+
                 if self.control["mode"] == Mode.STOP:
                     self.eventLogger.info("Stop Mode Started.")
                     store.display_commands().push(("clear", None))
@@ -497,6 +516,7 @@ class Controller:
                     # assignment -- flush_control() rebinds control to a fresh
                     # default_control() (status ""), discarding it, so Stop persisted "".
                     self.control = store.flush_control()
+                    self.control["critical_error"] = critical_error
                     self.control["status"] = StatusState.INACTIVE
                     self.control["updated"] = False
                     self.control["tuning_mode"] = False  # Turn off Tuning Mode on Stop just in case it is on
@@ -511,6 +531,7 @@ class Controller:
                     self.controlLogger.error("An error has occurred, Stop Mode enabled.")
                     # Reset Control to Defaults but preserve 'Error' mode condition
                     self.control = default_control()
+                    self.control["critical_error"] = critical_error
                     self.control["mode"] = Mode.ERROR
                     self.control["status"] = StatusState.INACTIVE
                     self.control["tuning_mode"] = False  # Turn off Tuning Mode on Stop just in case it is on
