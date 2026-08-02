@@ -27,6 +27,31 @@ def test_sqlite_display_queue_roundtrip(store):
     assert store.display_commands().drain() == [["text", "ERROR"]]
 
 
+def test_generic_key_roundtrip_parity(store):
+    """ControllerModelStore is constructed with a Store's read/write_generic_key
+    as reader/writer (Task 11's fix round) instead of the module-level SQLite
+    functions, so the two paths must round-trip identically.
+    """
+    from controller.runtime.store import InMemoryStore
+
+    payload = {"version": 1, "models": {"pid_sp": {"revision": 3, "K": 700.0}}}
+    for st in (store, InMemoryStore()):
+        st.write_generic_key("controller_model_state", payload)
+        assert st.read_generic_key("controller_model_state") == payload
+
+
+def test_generic_key_absent_key_raises_type_error_on_both(store):
+    """ControllerModelStore._read_state() catches TypeError specifically to mean
+    "nothing written yet, safe to write" -- both stores must raise that, not
+    KeyError or None, for a key that was never written.
+    """
+    from controller.runtime.store import InMemoryStore
+
+    for st in (store, InMemoryStore()):
+        with pytest.raises(TypeError):
+            st.read_generic_key("never_written_key")
+
+
 def test_sqlite_append_metric_without_metrics_does_not_crash(store):
     # Regression: append_metric() with no metrics must defer to
     # common's default_metrics() (passing None crashed on metrics['starttime']).

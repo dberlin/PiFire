@@ -74,7 +74,9 @@ class HoldMode(ControlMode):
         self.state.lid.expires = 0
         self.state.target_temp_achieved = False
 
-        self._model_store = self._model_store or ControllerModelStore()
+        self._model_store = self._model_store or ControllerModelStore(
+            reader=self.ctx.store.read_generic_key, writer=self.ctx.store.write_generic_key
+        )
         self._controller_name = self.settings["controller"]["selected"]
 
         # Load Controller Module (i.e. PID)
@@ -215,8 +217,13 @@ class HoldMode(ControlMode):
                 )
 
             snapshot = self._runner.get_model_snapshot()
-            if snapshot is not None:
-                self._model_store.save(self._controller_name, snapshot)
+            if snapshot is not None and not self._model_store.save(self._controller_name, snapshot):
+                # The overwhelming majority of these are a benign non-advancing
+                # revision (nothing new learned since the last save); the store's
+                # own logger carries the specific reason (rejected vs. write
+                # failure) at warning level. This debug line only keeps the
+                # outcome from being swallowed entirely at the Hold layer.
+                _control.eventLogger.debug(f"Did not persist the {self._controller_name} model this tick")
 
         self._auger_cycle_tick(now, current_output_status)
 
@@ -395,8 +402,11 @@ class HoldMode(ControlMode):
             return
         import control as _control
 
+        # True means accepted for restore, not adopted -- a threaded runner
+        # only queues it for the worker thread, so whether it took hold is not
+        # knowable from this return value (see ThreadedControllerRunner.restore_model).
         if self._runner.restore_model(snapshot):
-            _control.eventLogger.info(f"Restored the stored {self._controller_name} model")
+            _control.eventLogger.info(f"Submitted the stored {self._controller_name} model for restore")
         else:
             _control.eventLogger.warning(f"Stored {self._controller_name} model was rejected; starting fresh")
 

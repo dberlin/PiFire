@@ -115,6 +115,8 @@ class Store(ABC):
     @abstractmethod
     def write_errors(self, kind, errors): ...
     @abstractmethod
+    def read_generic_key(self, key): ...
+    @abstractmethod
     def write_generic_key(self, key, value): ...
     # --- queues ---
     @abstractmethod
@@ -339,6 +341,15 @@ class InMemoryStore(Store):
             raise ValueError(f"{kind} is a read-only selector; write and flush need a single owning kind")
         self._errors[kind] = list(errors)
 
+    def read_generic_key(self, key):
+        # Mirrors common.datastore_accessors.read_generic_key: an absent key
+        # raises TypeError (that function calls json.loads(None)), not KeyError
+        # -- callers like ControllerModelStore._read_state() catch precisely
+        # that to distinguish "nothing written yet" from "read failed".
+        if key not in self._generic:
+            raise TypeError(f"read_generic_key: no value stored for key {key!r}")
+        return copy.deepcopy(self._generic[key])
+
     def write_generic_key(self, key, value):
         self._generic[key] = copy.deepcopy(value)
 
@@ -464,6 +475,9 @@ class SqliteStore(Store):
 
     def write_errors(self, kind, errors):
         _c.write_errors(kind, errors)
+
+    def read_generic_key(self, key):
+        return _c.read_generic_key(key)
 
     def write_generic_key(self, key, value):
         _c.write_generic_key(key, value)

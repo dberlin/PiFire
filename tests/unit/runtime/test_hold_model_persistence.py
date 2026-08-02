@@ -27,6 +27,10 @@ def test_setup_restores_a_stored_model_before_seeding(hold_cycle):
     assert runner.restored == [{"revision": 3, "K": 700.0}]
     # the seed report comes after the restore, so it lands on the restored model
     assert [a.source for a in runner.applied] == [OutputSource.SEED]
+    # `restored` and `applied` are separate lists and cannot express relative
+    # order on their own -- `calls` is the single ordered log that can.
+    kinds = [kind for kind, _ in runner.calls]
+    assert kinds.index("restore") < kinds.index("apply")
 
 
 def test_setup_with_no_stored_model_restores_nothing(hold_cycle):
@@ -68,6 +72,21 @@ def test_a_controller_with_no_snapshot_saves_nothing(hold_cycle):
     assert store.saves == []
 
 
+def test_setup_wires_the_default_store_through_ctx_store(hold_cycle):
+    """A ControllerModelStore built without an injected model_store must read and
+    write through ctx.store's generic-key methods, not the module-level SQLite
+    functions -- otherwise a save never round-trips through the same store the
+    rest of the process (and this same test's ctx) reads from.
+    """
+    runner = FakeControllerRunner(period=0.0).script([_output(0.5)])
+    hold = hold_cycle(runner, controller="pid_sp")  # no model_store injected
+    hold.setup()
+    runner.snapshot = {"revision": 1, "K": 700.0}
+    hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
+    saved = hold.ctx.store.read_generic_key("controller_model_state")
+    assert saved["models"]["pid_sp"] == {"revision": 1, "K": 700.0}
+
+
 def test_reconfigure_restores_the_model_and_reseeds(hold_cycle):
     runner = FakeControllerRunner(period=0.0).script([_output(0.5)])
     store = _FakeModelStore({"pid_sp": {"revision": 3, "K": 700.0}})
@@ -75,7 +94,10 @@ def test_reconfigure_restores_the_model_and_reseeds(hold_cycle):
     hold.setup()
     runner.restored.clear()
     runner.applied.clear()
+    runner.calls.clear()
     hold.control["controller_update"] = True
     hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     assert runner.restored == [{"revision": 3, "K": 700.0}]
     assert runner.applied[0].source is OutputSource.SEED
+    kinds = [kind for kind, _ in runner.calls]
+    assert kinds.index("restore") < kinds.index("apply")
