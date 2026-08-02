@@ -1,15 +1,20 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import * as actualLogsApi from "../../../../src/helpers/logs/logsApi" with {
   rstest: "importActual",
 };
 
 //  The viewer beneath the picker is the real LogViewer, so its fetches have to
-//  go somewhere. What this file asserts is the picker and the download link.
+//  go somewhere. What this file asserts is the picker, the download link, and
+//  that the follow toggle reaches the viewer -- LogViewer.test.tsx owns what
+//  following then does.
+const fetchLogDeltaMock = rs.fn((..._a: unknown[]) =>
+  Promise.resolve({ kind: "unchanged", nextOffset: 5, total: 5 }),
+);
 rs.mock("../../../../src/helpers/logs/logsApi", () => ({
   ...actualLogsApi,
   fetchLogWhole: () => Promise.resolve({ text: "body\n", total: 5 }),
-  fetchLogDelta: () => Promise.resolve({ kind: "unchanged", nextOffset: 5, total: 5 }),
+  fetchLogDelta: (...a: unknown[]) => fetchLogDeltaMock(...a),
 }));
 
 const { LogFilesTab } = await import("../../../../src/components/logs/LogFilesTab");
@@ -50,5 +55,51 @@ describe("LogFilesTab", () => {
   it("says so when there are no logs at all", () => {
     render(<LogFilesTab families={[]} />);
     expect(screen.getByText(/no log files/i)).toBeTruthy();
+  });
+
+  // A family's current file is live -- control.log while the control loop runs,
+  // webapp.log while gunicorn serves. Only its rotated backups are history, so
+  // this tab had a viewer that could tail and no way to ask it to.
+  it("tails the selected family by default", async () => {
+    fetchLogDeltaMock.mockClear();
+    rs.useFakeTimers();
+    try {
+      render(<LogFilesTab families={FAMILIES} />);
+      expect((screen.getByRole("checkbox", { name: /follow/i }) as HTMLInputElement).checked).toBe(
+        true,
+      );
+      //  The poll interval is only created once the initial whole-family read
+      //  has landed, so it has to settle before the clock is advanced past one
+      //  tick -- otherwise the interval does not exist yet to fire.
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(3000);
+      });
+      expect(fetchLogDeltaMock.mock.calls.length).toBeGreaterThan(0);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("stops tailing when the toggle is cleared", async () => {
+    rs.useFakeTimers();
+    try {
+      render(<LogFilesTab families={FAMILIES} />);
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(0);
+      });
+      fireEvent.click(screen.getByRole("checkbox", { name: /follow/i }));
+
+      fetchLogDeltaMock.mockClear();
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(9000); // three poll intervals
+      });
+
+      expect(fetchLogDeltaMock.mock.calls.length).toBe(0);
+    } finally {
+      rs.useRealTimers();
+    }
   });
 });

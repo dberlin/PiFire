@@ -75,8 +75,8 @@ export function EventsPage() {
           <LogViewer stem={EVENTS_STEM} follow={follow} />
         </>
       ) : (
-        //  No follow control here: these are historical files, and a follow
-        //  toggle would poll a log nothing is writing to and imply it were live.
+        //  Carries its own follow control: a family's current file is live,
+        //  and which one is selected is that tab's own state.
         <LogFilesTab families={families} />
       )}
     </section>

@@ -48,12 +48,12 @@ describe("EventsPage", () => {
     expect(await screen.findByRole("checkbox", { name: /follow/i })).toBeTruthy();
   });
 
-  it("does not offer the follow toggle on the Log Files tab", async () => {
-    //  Those files are historical. A follow control there would poll a log
-    //  nothing is writing to and imply it were live.
+  it("offers a follow toggle on the Log Files tab too", async () => {
+    //  A family's current file -- control.log, webapp.log -- is being written
+    //  right now; only its rotated backups are history.
     renderRoute(<EventsPage />, {});
     fireEvent.click(screen.getByRole("tab", { name: "Log Files" }));
-    await waitFor(() => expect(screen.queryByRole("checkbox", { name: /follow/i })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("checkbox", { name: /follow/i })).not.toBeNull());
   });
 
   it("hands the Log Files tab the families it read", async () => {

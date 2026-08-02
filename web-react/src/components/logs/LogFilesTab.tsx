@@ -9,10 +9,15 @@ function formatBytes(bytes: number): string {
   return `${bytes} B`;
 }
 
-/** Family picker plus the viewer. Tailing is off here: these are historical
- * files a user is reading, not the live feed the Events tab shows. */
+/** Family picker plus the viewer.
+ *
+ * A family is its current file plus that file's rotated backups, and the
+ * current one is being written right now -- control.log by the control loop,
+ * webapp.log by gunicorn. Only the backups are history, so tailing belongs
+ * here as much as it does on the Events tab. */
 export function LogFilesTab({ families }: { families: LogFamily[] }) {
   const [stem, setStem] = useState(families[0]?.stem ?? "");
+  const [follow, setFollow] = useState(true);
   const selected = families.find((family) => family.stem === stem) ?? families[0];
 
   if (families.length === 0) {
@@ -46,13 +51,17 @@ export function LogFilesTab({ families }: { families: LogFamily[] }) {
             downloads is what was on screen. A link to the newest member alone
             would hand over the tail of a history that mostly lives in the
             rotated backups. */}
+        <label className="pf-field">
+          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
+          <span className="pf-field-label">Follow new lines</span>
+        </label>
         {selected && (
           <a className="pf-admin-btn" href={logDownloadUrl(selected.stem)} download>
             Download
           </a>
         )}
       </div>
-      {selected && <LogViewer stem={selected.stem} follow={false} />}
+      {selected && <LogViewer stem={selected.stem} follow={follow} />}
     </>
   );
 }
