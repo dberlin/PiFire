@@ -36,6 +36,7 @@ import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from common import datastore
+from common.datastore_accessors import read_settings
 
 # 600 rows, one every 3 seconds, spans 30 minutes of history. The endpoint
 # windows by ROW COUNT (`num_items = minutes * SAMPLES_PER_MINUTE`, 20/min),
@@ -45,13 +46,30 @@ from common import datastore
 ROW_COUNT = 600
 INTERVAL_MS = 3000
 
-# Probe keys must match settings["history_page"]["probe_config"]; a key absent
-# from it would KeyError inside prepare_chartdata's probe_mapper lookup.
-PRIMARY_KEY = "Grill"
-FOOD_KEYS = ("Probe1", "Probe2", "Probe3")
+
+def probe_keys():
+    """The primary and food probe keys of the configuration this backend is
+    actually running.
+
+    History rows name probe keys, and `prepare_chartdata` renders only the
+    keys `settings["history_page"]["probe_config"]` still has -- a hardcoded
+    key seeds rows the chart drops, so the spec would measure an empty chart
+    rather than the seeded curve. Every grill in the field names its probes
+    differently, so the keys come from the configuration, not from here.
+    """
+    probe_config = read_settings()["history_page"]["probe_config"]
+    primary = [key for key, probe in probe_config.items() if probe.get("type") == "Primary"]
+    if not primary:
+        raise SystemExit(
+            "seed_history: settings['history_page']['probe_config'] has no Primary probe "
+            f"(configured: {sorted(probe_config) or 'none'}). The history chart's grill series "
+            "cannot be seeded against this configuration."
+        )
+    food = tuple(key for key, probe in probe_config.items() if probe.get("type") == "Food")
+    return primary[0], food
 
 
-def _row_values(i):
+def _row_values(i, food_count):
     """A visibly-shaped curve, not a flat line.
 
     prepare_chartdata reduces with a fidelity tolerance (default 2 degrees),
@@ -61,7 +79,7 @@ def _row_values(i):
     """
     frac = i / (ROW_COUNT - 1)
     grill = 100.0 + 300.0 * frac + 8.0 * math.sin(frac * 12.0)
-    food = [70.0 + 90.0 * frac + 4.0 * math.sin(frac * 7.0 + n) for n in range(len(FOOD_KEYS))]
+    food = [70.0 + 90.0 * frac + 4.0 * math.sin(frac * 7.0 + n) for n in range(food_count)]
     # A step, so the setpoint series is a genuine step function like the real
     # thing (and so the reduce path has an edge it must preserve).
     psp = 225.0 if frac < 0.5 else 250.0
@@ -69,6 +87,7 @@ def _row_values(i):
 
 
 def seed():
+    primary_key, food_keys = probe_keys()
     now_ms = int(time.time() * 1000)
     start_ms = now_ms - ROW_COUNT * INTERVAL_MS
 
@@ -82,17 +101,17 @@ def seed():
     # restarting at 1 after a delete.)
     with datastore.transaction() as conn:
         for i in range(ROW_COUNT):
-            grill, food, psp = _row_values(i)
+            grill, food, psp = _row_values(i, len(food_keys))
             cur = conn.execute(
                 "INSERT INTO history(ts,psp,primary_temps,food_temps,aux_temps,"
                 "notify_targets,ext_data) VALUES(?,?,?,?,?,?,?)",
                 (
                     start_ms + i * INTERVAL_MS,
                     psp,
-                    json.dumps({PRIMARY_KEY: round(grill, 1)}),
-                    json.dumps({k: round(v, 1) for k, v in zip(FOOD_KEYS, food, strict=True)}),
+                    json.dumps({primary_key: round(grill, 1)}),
+                    json.dumps({k: round(v, 1) for k, v in zip(food_keys, food, strict=True)}),
                     json.dumps({}),
-                    json.dumps({PRIMARY_KEY: 0, **{k: 0 for k in FOOD_KEYS}}),
+                    json.dumps({primary_key: 0, **{k: 0 for k in food_keys}}),
                     None,
                 ),
             )

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { APIRequestContext } from "@playwright/test";
 import { expect, test } from "@playwright/test";
-import { API, ensureStopped, refreshLiveProbeReadings } from "./helpers";
+import { API, ensureStopped, monitorProbeReadings } from "./helpers";
 
 // Requires the prototype backend running: `uv run python control.py` + `uv run
 // python app.py`.
@@ -256,7 +256,18 @@ test("a high limit the probe has already passed is saved pre-armed", async ({ pa
   const { label, name } = await firstFoodProbe(request);
 
   try {
-    const current = await refreshLiveProbeReadings(request);
+    const { current, silent } = await monitorProbeReadings(request);
+    // The pre-arm can only be the thing under test on a backend whose probes
+    // actually read. Without probe hardware the configured modules cannot load
+    // and every probe sits at 0, which is a fact about this machine -- say so
+    // and name the probes, rather than letting it look like a product failure.
+    test.skip(
+      current === null,
+      `Backend has no live probe readings: after a Monitor pass ${silent.join(", ")} still read 0. ` +
+        "The configured probe modules cannot read on a machine with no probe hardware.",
+    );
+    if (current === null) return;
+
     expect(
       current.F[label],
       "the probe must already be above the 1° limit for the pre-arm to be the thing under test",

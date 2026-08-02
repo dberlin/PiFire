@@ -146,28 +146,56 @@ export async function expectCurrentMatchesProbeMap(request: APIRequestContext): 
 }
 
 /**
- * Put the grill in Monitor and wait until every probe reports a real reading.
+ * Put the grill in Monitor and report what its probes read.
  *
  * A spec that needs a probe to have READ something has to run the grill: this
  * backend reads its probes only in a running mode, and every reading reads back
  * 0 in Stop. Monitor is the mode for it -- it reads probes and drives no
  * outputs, so it is safe even against real hardware.
  *
- * Leaves the grill IN Monitor: a caller that needs a live reading needs it to
- * still be live. Pair it with `ensureStopped` in a finally.
+ * A backend that never produces a reading is a RESULT here, not a timeout: a
+ * machine with no probe hardware runs control.py perfectly well, but its
+ * configured probe modules cannot read on it (mcp9600_adafruit needs a real
+ * I2C bus, thermoworks_cloud needs the network and credentials), so every
+ * probe stays at 0. That is a property of the machine rather than a failure,
+ * and it is the caller's business what to do about it -- so `silent` names the
+ * probes that produced nothing and `current` is null, instead of a timeout
+ * asking whether control.py is running.
+ *
+ * Leaves the grill IN Monitor either way: a caller that needs a live reading
+ * needs it to still be live. Pair it with `ensureStopped` in a finally.
  */
-export async function refreshLiveProbeReadings(request: APIRequestContext): Promise<CurrentBlob> {
+export async function monitorProbeReadings(
+  request: APIRequestContext,
+  maxWaitMs = 20000,
+): Promise<{ current: CurrentBlob | null; silent: string[] }> {
   const want = await liveProbeLabels(request);
   const modeRes = await request.post(`${API}/api/set/mode/monitor`);
   if (!modeRes.ok()) throw new Error(`Failed to set mode to monitor: HTTP ${modeRes.status}`);
 
-  const reading = (labels: string[], group: Record<string, number> | undefined) =>
-    labels.length === Object.keys(group ?? {}).length && labels.every((l) => (group?.[l] ?? 0) > 0);
-  return pollCurrent(
-    request,
-    (c) => reading(want.P, c.P) && reading(want.F, c.F),
-    20000,
-    `Timed out waiting for Monitor mode to produce a reading on every probe ` +
-      `(wanted ${JSON.stringify(want)}). Is control.py running?`,
-  );
+  const silentIn = (labels: string[], group: Record<string, number> | undefined) =>
+    labels.filter((label) => !((group?.[label] ?? 0) > 0));
+
+  const startTime = Date.now();
+  let last: CurrentBlob | null = null;
+  for (;;) {
+    const res = await request.get(`${API}/api/current`);
+    if (res.ok()) {
+      const current = ((await res.json()) as { current?: CurrentBlob }).current;
+      if (current !== undefined) {
+        last = current;
+        const silent = [...silentIn(want.P, current.P), ...silentIn(want.F, current.F)];
+        if (silent.length === 0) return { current, silent };
+      }
+    }
+    if (Date.now() - startTime >= maxWaitMs) {
+      return {
+        current: null,
+        silent: last
+          ? [...silentIn(want.P, last.P), ...silentIn(want.F, last.F)]
+          : [...want.P, ...want.F],
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 }

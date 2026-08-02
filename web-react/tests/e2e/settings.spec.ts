@@ -307,7 +307,7 @@ test("a min >= max duty cycle is refused client-side without issuing any request
   expect(JSON.stringify(afterBody.settings)).toBe(beforeSnapshot);
 });
 
-test("controller tab shows the live controller and PB round-trips, cross-checked via /api/settings", async ({
+test("controller tab shows the live controller, and PB round-trips where the controller has one", async ({
   page,
 }) => {
   const settingsRes = await page.request.get("/api/settings");
@@ -334,6 +334,17 @@ test("controller tab shows the live controller and PB round-trips, cross-checked
   await expect(select).toHaveValue(selectedKey);
   const selectedOptionText = await select.locator("option:checked").textContent();
   expect(selectedOptionText).toBe(expectedLabel);
+
+  // Proportional Band is a PID-family field, and the selected controller is
+  // whatever this grill actually runs -- mpc, fuzzy and ml have no PB at all.
+  // The controller's own config block is the authority on which fields it has,
+  // and naming the controller in the skip keeps "not applicable here" from
+  // reading as "passed".
+  const selectedConfig = settingsBody.settings?.controller?.config?.[selectedKey] ?? {};
+  test.skip(
+    !("PB" in selectedConfig),
+    `Selected controller "${selectedKey}" (${expectedLabel}) has no Proportional Band(PB) field`,
+  );
 
   const pbField = page.getByLabel("Proportional Band(PB)");
   await expect(pbField).toBeVisible();

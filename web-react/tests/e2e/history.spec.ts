@@ -74,6 +74,12 @@ interface SeedResult {
 
 let seeded: SeedResult | null = null;
 
+// The primary probe's DISPLAY name, which is what the chart labels its series
+// with -- read from the backend rather than assumed, for the same reason
+// seed_history.py reads the probe KEYS from it: every grill names its probes
+// differently, and this spec has to find the seeded grill curve on all of them.
+let primaryProbeLabel = "";
+
 function runSeedScript(args: string[]): string {
   // `test.info().file` is this spec's own absolute path, so both the script
   // beside it and the repo root three levels up (where `uv run` finds the
@@ -107,6 +113,20 @@ test.beforeAll(async ({ request }) => {
       "server are using different pifire.db files -- set PIFIRE_DB_PATH to the " +
       "database the backend serves, or run this spec from that checkout.",
   ).toBeGreaterThan(0);
+
+  const settingsRes = await request.get(`${API}/api/settings`);
+  const settingsBody = (await settingsRes.json()) as {
+    settings?: {
+      history_page?: { probe_config?: Record<string, { name?: string; type?: string }> };
+    };
+  };
+  const probeConfig = settingsBody.settings?.history_page?.probe_config ?? {};
+  const primary = Object.values(probeConfig).find((probe) => probe.type === "Primary");
+  expect(
+    primary?.name,
+    `no Primary probe in history_page.probe_config (configured: ${Object.keys(probeConfig).join(", ") || "none"})`,
+  ).toBeTruthy();
+  primaryProbeLabel = primary?.name ?? "";
 });
 
 test.afterAll(async () => {
@@ -131,8 +151,17 @@ async function overlayBox(page: Page) {
 }
 
 /**
- * Hovers the plot at `fraction` of its width and returns the first series'
- * (Grill's) value as the tooltip renders it.
+ * Hovers the plot at `fraction` of its width and returns the PRIMARY probe's
+ * value as the tooltip renders it.
+ *
+ * Selected by label, not by position: tooltip rows follow chart series order,
+ * which follows `probe_config` iteration order, so a grill whose food probe is
+ * configured first puts a food series in row 0. The thresholds below are all
+ * derived from the seeded grill sweep, so reading the wrong row compares a
+ * 70-160 curve against 100-400 bounds and fails as though the chart were wrong.
+ *
+ * Matched against the label text with the value element removed, so
+ * "Pit Probe" cannot also match "Pit Probe Set Point".
  *
  * Always moves to a corner first: uPlot updates its cursor from `mousemove`,
  * so moving straight to a coordinate the mouse is already at would fire no
@@ -145,7 +174,18 @@ async function grillValueAt(page: Page, fraction: number): Promise<number> {
 
   const tip = page.locator(".pf-history-tip");
   await expect(tip).toBeVisible();
-  const text = await tip.locator(".r").first().locator("b").innerText();
+  const text = await tip.evaluate((el, label) => {
+    for (const row of Array.from(el.querySelectorAll(".r"))) {
+      const value = row.querySelector("b");
+      const whole = row.textContent ?? "";
+      const shown = value?.textContent ?? "";
+      if (whole.slice(0, whole.length - shown.length).trim() === label) return shown;
+    }
+    const seen = Array.from(el.querySelectorAll(".r"))
+      .map((row) => row.textContent)
+      .join(" | ");
+    throw new Error(`no tooltip row labelled "${label}"; rows were: ${seen}`);
+  }, primaryProbeLabel);
   const value = Number.parseFloat(text);
   expect(Number.isNaN(value), `tooltip value "${text}" did not parse as a number`).toBe(false);
   return value;
@@ -301,12 +341,15 @@ test("the cursor tooltip renders a row per visible series with real values", asy
   const firstRow = tip.locator(".r").first();
   await expect(firstRow).toContainText(visible[0].label);
 
-  // A real formatted reading, and -- because the seeded Grill curve sweeps
-  // 100 -> 400 across the window -- one that actually corresponds to the
-  // middle of the plot. A placeholder or a stale zero would fail this.
+  // A real formatted reading, not a placeholder or a stale zero.
   const valueText = await firstRow.locator("b").innerText();
   expect(valueText).toMatch(/^-?\d+\.\d°$/);
-  const value = Number.parseFloat(valueText);
+
+  // ...and one that tracks the plot: the seeded grill curve sweeps 100 -> 400
+  // across the window, so mid-plot lands mid-sweep. Read from the PRIMARY
+  // probe's row rather than row 0, whose series depends on this grill's
+  // probe_config ordering.
+  const value = await grillValueAt(page, 0.5);
   expect(value).toBeGreaterThan(SEEDED_GRILL_MIN + 0.3 * SEEDED_GRILL_SPAN);
   expect(value).toBeLessThan(SEEDED_GRILL_MIN + 0.7 * SEEDED_GRILL_SPAN);
 
