@@ -1,5 +1,6 @@
 from common.common import WriteKind
 from common.modes import Mode
+from controller.applied_output import AppliedOutput, OutputSource, classify_output_source, seed_output
 from controller.runtime.logic.cycle import hold_initial_cycle
 from controller.runtime.logic.fan import start_fan, smoke_plus_max_ratio, fan_assist_times
 from controller.runtime.logic.pwm import hold_duty_cycle
@@ -99,6 +100,18 @@ class HoldMode(ControlMode):
         # ctx.clock.now() reading here rather than depending on that later value.
         self.state.controller.cycle_start = self.ctx.clock.now()
 
+        if self._runner is not None:
+            self._runner.set_output(
+                seed_output(
+                    self.state.cycle.ratio,
+                    self.state.controller.cycle_start,
+                    lid_open=False,
+                    manual_override_active=False,
+                    fan_assist_active=False,
+                    auger_output=True,
+                )
+            )
+
     def setup_safety(self, ptemp) -> str:
         # Flameout is now a declarative pre_loop guard (GUARDS["Hold"], fired by
         # evaluate_phase in base.run before the loop). This override survives only
@@ -160,6 +173,23 @@ class HoldMode(ControlMode):
                 self.state.fan.assist = False
             # Don't set ratio over maximum.
             self.state.cycle.ratio = min(self.state.cycle.ratio, settings["cycle_data"]["u_max"])
+
+            # A live manual override already reported the duty a human commanded
+            # (_on_manual_output); the cycle ratio computed here is not what the
+            # auger is doing.
+            if self.state.manual_override["auger"] <= now:
+                self._runner.set_output(
+                    AppliedOutput(
+                        ratio=self.state.cycle.ratio,
+                        source=classify_output_source(
+                            lid_open=self.state.lid.open_detected,
+                            manual_override_active=False,
+                            fan_assist_active=self.state.fan.assist,
+                        ),
+                        timestamp=now,
+                        requested=self.state.controller.output,
+                    )
+                )
 
         self._auger_cycle_tick(now, current_output_status)
 

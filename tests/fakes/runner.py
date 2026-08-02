@@ -7,6 +7,9 @@ class FakeControllerRunner:
         self.submitted_temps = []
         self._commands_fan = commands_fan
         self._wants_async = wants_async
+        self.applied = []
+        self.restored = []
+        self.snapshot = None
 
     def script(self, outputs):
         self._script = list(outputs)
@@ -33,6 +36,19 @@ class FakeControllerRunner:
 
     def stop(self):
         pass
+
+    def set_output(self, applied):
+        self.applied.append(applied)
+
+    def get_model_snapshot(self):
+        return self.snapshot
+
+    def restore_model(self, snapshot):
+        self.restored.append(snapshot)
+        return snapshot is not None
+
+    def controller_state(self):
+        return {"fake": True}
 
     def latest(self):
         if not self._script:
