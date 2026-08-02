@@ -144,6 +144,45 @@ def test_restoring_the_pellet_database_does_not_restart(env):
     assert env["calls"] == []
 
 
+def test_a_malformed_pellet_backup_is_refused_and_the_store_is_untouched(env):
+    """The settings branch of this route validates and refuses a bad backup
+    with a 400. The pellet branch wrote whatever JSON the file held straight
+    into the live store, and the same UI is what let the operator upload it."""
+    from common.datastore_accessors import read_pellets_store
+
+    before = read_pellets_store()
+    with open(os.path.join(env["dir"], "PelletDB_01-01-26_130000.json"), "w", encoding="utf-8") as h:
+        json.dump({"current": {"hopper_level": "not a number"}}, h)
+
+    resp = env["client"].post(
+        "/api/admin/backups/restore",
+        json={"kind": "pelletdb", "file": "PelletDB_01-01-26_130000.json"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["message"] == "invalid_backup"
+    assert read_pellets_store() == before
+    assert env["calls"] == []
+
+
+def test_a_well_formed_pellet_backup_still_restores(env):
+    from common.datastore_accessors import read_pellets_store
+    from common.defaults import default_pellets
+
+    payload = default_pellets()
+    payload["brands"] = ["Generic", "Custom", "Restored Brand"]
+    with open(os.path.join(env["dir"], "PelletDB_01-01-26_140000.json"), "w", encoding="utf-8") as h:
+        json.dump(payload, h)
+
+    resp = env["client"].post(
+        "/api/admin/backups/restore",
+        json={"kind": "pelletdb", "file": "PelletDB_01-01-26_140000.json"},
+    )
+
+    assert resp.status_code == 200
+    assert "Restored Brand" in read_pellets_store()["brands"]
+
+
 @pytest.mark.parametrize("hostile", HOSTILE)
 @pytest.mark.parametrize("kind", ["settings", "pelletdb"])
 def test_restore_refuses_a_traversal(env, kind, hostile):

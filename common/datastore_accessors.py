@@ -33,6 +33,7 @@ from common.defaults import (
     default_pellets,
     default_settings,
 )
+from common.pellets_schema import validate_pellet_db
 from common.settings_schema import validate_settings_tree
 from common.sqlite_queue import SqliteMembershipList, SqliteQueue
 
@@ -538,9 +539,13 @@ def write_pellet_db(pelletdb):
     """
     Write Pellet DataBase to SQLite DB (source of truth at runtime).
 
+    Strict-validates first, exactly as write_settings() does: a rejected write
+    leaves the store untouched, and the normalized dump the gate returns -- not
+    the caller's raw dict -- is what gets persisted. No bypass parameter.
+
     :param pelletdb: Pellet Database
     """
-    write_pellets_store(pelletdb)
+    write_pellets_store(validate_pellet_db(pelletdb))
 
 
 def seed_pellets_store():

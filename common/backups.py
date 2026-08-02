@@ -100,7 +100,8 @@ def read_pellet_db_file(filename="pelletdb.json", retry_count=0):
     #  This ensures that any NEW fields are captured.
     for key in pelletdb.keys():
         if key in pelletdb_struct.keys():
-            pelletdb[key] = pelletdb_struct[key].copy()
+            value = pelletdb_struct[key]
+            pelletdb[key] = value.copy() if hasattr(value, "copy") else value
 
     return pelletdb
 

@@ -100,6 +100,22 @@ def test_a_real_error_still_raises_even_beside_an_unmodeled_key(live):
         validate_pellet_db(live)
 
 
+def test_the_control_process_write_path_accepts_a_live_database(ds, live):
+    """controller/runtime/store.py calls write_pellet_db every 60s and at each
+    mode end, updating exactly these two fields. The gate raises, so a shape it
+    rejected would take down the control loop rather than a request."""
+    from common.datastore_accessors import read_pellets_store, write_pellet_db
+
+    write_pellet_db(live)
+
+    stored = read_pellets_store()
+    stored["current"]["est_usage"] = stored["current"]["est_usage"] + 12.5
+    stored["current"]["hopper_level"] = 87
+    write_pellet_db(stored)
+
+    assert read_pellets_store()["current"]["hopper_level"] == 87
+
+
 def test_raw_model_validate_rejects_an_unmodeled_key(live):
     """Self-healing lives ONLY in validate_pellet_db, exactly as it lives only
     in validate_settings_tree."""

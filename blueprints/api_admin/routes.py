@@ -24,6 +24,7 @@ from common.common import WriteKind, write_log
 from common.control_delta import control_delta
 from common.file_browser import resolve_managed_file
 from common.settings_migration import read_settings_file
+from common.pellets_schema import PelletDbValidationError
 from common.settings_schema import SettingsValidationError
 from common.datastore_accessors import (
     flush_control,
@@ -303,13 +304,13 @@ def admin_backup_restore():
     Flask exactly -- settings are read once at boot by processes this request
     cannot reach, whereas the pellet database is re-read on demand.
 
-    A settings backup that fails strict validation (hand-edited, or from a
-    build old enough that migration can't fully repair it) is rejected with
-    the same error envelope every other write endpoint uses -- matching
-    legacy admin_page()'s dispatch-level try/except, which caught exactly
-    this and re-rendered with ctx.errors instead of 500ing. write_settings()
-    validates before persisting, so a rejection here leaves the store
-    untouched and never restarts.
+    A backup that fails strict validation -- hand-edited, or from a build old
+    enough that migration can't fully repair it -- is rejected with the same
+    error envelope every other write endpoint uses, matching legacy
+    admin_page()'s dispatch-level try/except, which caught exactly this and
+    re-rendered with ctx.errors instead of 500ing. Both write_settings() and
+    write_pellet_db() validate before persisting, so a rejection leaves the
+    store untouched and, for settings, never restarts.
     """
     body = json_body()
     kind = body.get("kind")
@@ -333,7 +334,10 @@ def admin_backup_restore():
         set_server_status("restarting")
         restart_scripts()
     else:
-        write_pellet_db(read_pellet_db_file(filename=path))
+        try:
+            write_pellet_db(read_pellet_db_file(filename=path))
+        except PelletDbValidationError as exc:
+            return error("invalid_backup", 400, detail="; ".join(exc.errors))
         write_log(f"Admin: restored pellet database from {os.path.basename(path)}")
     return jsonify(api_response("OK", None, {"kind": kind, "file": os.path.basename(path)})), 200
 
