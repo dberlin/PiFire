@@ -1927,14 +1927,15 @@ on change makes a bounded field untypeable (`min={20}` turns the intermediate
 
 #### Schema and toolchain follow-ups — MIXED
 
-Persisted schema versioning is **DONE** (below). All of the following are still
-open; none has been started.
+Persisted schema versioning is **DONE** (below) and `additionalProperties`
+stripping is **DONE** (below). Per-controller schema generation is
+**IN PROGRESS** (below). The rest are still open; none has been started.
 
-S3 defaults consolidation and typed deep-path `setPath` helpers; per-controller
-schema generation from `controllers.json`; `<path>: <why>` save-error display;
-read-path validation never scoped; mapping a dotted error path to the
-offending widget; the four 2b-1 follow-ups (`waitFor`, `read*` fallback
-defaults, `aria-describedby`, float-vs-int audit).
+S3 defaults consolidation and typed deep-path `setPath` helpers;
+`<path>: <why>` save-error display; read-path validation never scoped;
+mapping a dotted error path to the offending widget; the four 2b-1
+follow-ups (`waitFor`, `read*` fallback defaults, `aria-describedby`,
+float-vs-int audit).
 
 `additionalProperties` stripping is **DONE**, and was closed by S2 rather than
 by this work. `_Section` is `extra="forbid"`, so every modelled section emits
@@ -1947,6 +1948,13 @@ field already fails `bun run typecheck`. Exactly six nodes carry
 `history_page.probe_config` becoming `{[k: string]: ProbeChartConfig}` is
 correct output, not leakage. Nothing was left to strip, and stripping the
 `dict[str, X]` form would have been a regression.
+
+Per-controller schema generation from `controllers.json` is **IN PROGRESS**.
+The generator (`web-react/scripts/emitControllerTypes.ts`) and the generated
+`ControllerConfigs` / `PidConfig` / `MpcConfig` / … types
+(`src/helpers/settings/controllerTypes.gen.ts`) have landed; `ControllerTab`
+does not consume them yet. Both halves are tracked in
+`docs/superpowers/plans/2026-08-02-settings-toolchain-followups.md`.
 
 **DONE 2026-08-02 for both durable blobs; the wizard manifest is deliberately
 out of scope (see the corrections below).** The settings tree and the pellet
