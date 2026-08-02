@@ -13,15 +13,33 @@
 #
 # *****************************************
 
+import time
+
 from common.i2c_bus import open_i2c_bus
 from common.i2c_bus_config import parse_i2c_bus
 from distance._sampled_base import SampledHopperLevel
+from distance.intervals import TOF_DATA_READY_POLL, TOF_READ_DEADLINE
+
+
+class ToFReadTimeout(RuntimeError):
+    """A ToF sensor did not report data ready inside its deadline.
+
+    A RuntimeError, which is also what the Adafruit VL53L0X driver raises from
+    its own bounded poll, so all three ToF sensors signal a read that gave up
+    the same way and the sampling loop needs one rule for them.
+    """
 
 
 class ToFHopperLevel(SampledHopperLevel):
     default_address = 0x29
 
     sensor_label = "TOF sensor"
+
+    # How long one reading may wait for the sensor, and how often that wait
+    # asks. Both are transactions on the shared I2C bus; the values and the
+    # reasoning behind them live in distance/intervals.py.
+    read_deadline_seconds = TOF_READ_DEADLINE
+    data_ready_poll_seconds = TOF_DATA_READY_POLL
 
     def __init__(self, dev_pins, empty=22, full=4, debug=False):
         super().__init__(empty=empty, full=full, debug=debug)
@@ -52,6 +70,26 @@ class ToFHopperLevel(SampledHopperLevel):
         ranging if the chip requires it, and set self.tof. Subclasses must
         implement this."""
         raise NotImplementedError
+
+    def _await_data_ready(self):
+        """Wait for `self.tof.data_ready`, and give up on it rather than wait
+        forever.
+
+        `data_ready` is a register read, so each check takes and releases the
+        lock on a bus the probes and the grill platform share. A sensor that
+        stops asserting it therefore keeps that bus busy for as long as the
+        controller runs, which starves every other device on it. Reaching the
+        deadline ends the reading; the sampling loop counts the cycle as failed
+        and holds the sensor off the bus for a while.
+        """
+        deadline = time.monotonic() + self.read_deadline_seconds
+        while not self.tof.data_ready:
+            if time.monotonic() >= deadline:
+                raise ToFReadTimeout(
+                    f"The {self.sensor_label} did not report a reading within "
+                    f"{self.read_deadline_seconds}s of being asked."
+                )
+            time.sleep(self.data_ready_poll_seconds)
 
     def _read_distance_mm(self):
         """Return a single distance reading in millimeters. Subclasses must

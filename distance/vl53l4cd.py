@@ -9,8 +9,6 @@
 #
 # *****************************************
 
-import time
-
 from adafruit_vl53l4cd import VL53L4CD
 
 from distance._tof_base import ToFHopperLevel
@@ -24,8 +22,7 @@ class HopperLevel(ToFHopperLevel):
         self.tof.start_ranging()
 
     def _read_distance_mm(self):
-        while not self.tof.data_ready:
-            time.sleep(0.001)
+        self._await_data_ready()
         distance_cm = self.tof.distance
         self.tof.clear_interrupt()
         return distance_cm * 10

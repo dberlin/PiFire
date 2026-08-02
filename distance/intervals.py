@@ -48,3 +48,43 @@ HOPPER_LEVEL_REFRESH_INTERVAL = 10
 # SENSOR_SAMPLE_INTERVAL, so a sensor that never opens costs the boot less
 # than the period at which a working one would have been sampled anyway.
 SENSOR_OPEN_DEADLINE = 5
+
+# How long one ToF reading may wait for the sensor to report data ready before
+# the read fails instead of waiting longer.
+#
+# The wait is a poll of an I2C register, on a bus every device sharing that
+# hardware also uses (common/i2c_bus.py hands them all the same cached bus and
+# its one lock), so a sensor that never answers costs the probes and the grill
+# platform their bus, not just the hopper reading. Ten times the 50ms timing
+# budget both Adafruit ToF drivers configure, which is the interval a healthy
+# part actually needs to produce a reading. It equals the ToF sensors'
+# slow_cycle_seconds, so a read that runs this long has already made its cycle
+# a slow one, and it is far below stuck_cycle_seconds (30), which keeps the
+# watchdog the outer net rather than the first thing to notice.
+TOF_READ_DEADLINE = 0.5
+
+# How often that wait re-reads the data-ready register.
+#
+# Each check is one transaction on the shared bus. The parts need ~50ms to
+# produce a reading, so asking faster only repeats a question that cannot have
+# a new answer yet: at 10ms a healthy reading costs about five transactions and
+# arrives at most 10ms late, where 1ms cost about fifty for the same reading,
+# and a failing sensor spent the whole deadline at ~1000 bus acquisitions a
+# second.
+TOF_DATA_READY_POLL = 0.01
+
+# The wait a sampler takes before retrying after one failed cycle, and the
+# longest wait a run of them can reach. Delays double from the base -- 1, 2, 4,
+# 8, then the cap -- and the first cycle that succeeds returns to the base.
+#
+# The base is the sampling loop's own 1s pacing tick: anything smaller would be
+# rounded up to it anyway. The cap is the owner's number. It reads oddly beside
+# SENSOR_SAMPLE_INTERVAL, which is already 8, and that is because widening the
+# gap between timed cycles is not what the backoff is mainly for:
+# `request_sample()` can pull the next cycle forward to the next tick, and both
+# controller/runtime/controller.py and controller/runtime/modes/base.py call
+# it, so a failing sensor can be asked ~once a second without one. The backoff
+# is a floor under the interval, not a replacement for it -- the interval still
+# governs the healthy path, where there are no consecutive failures to count.
+SENSOR_BACKOFF_BASE = 1
+SENSOR_BACKOFF_CAP = 10

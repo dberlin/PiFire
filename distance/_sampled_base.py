@@ -34,7 +34,12 @@ import time
 # keep its own pacing whatever the sampling loop's clock is doing.
 from time import monotonic as _monotonic, sleep as _sleep
 
-from distance.intervals import SENSOR_OPEN_DEADLINE, SENSOR_SAMPLE_INTERVAL
+from distance.intervals import (
+    SENSOR_BACKOFF_BASE,
+    SENSOR_BACKOFF_CAP,
+    SENSOR_OPEN_DEADLINE,
+    SENSOR_SAMPLE_INTERVAL,
+)
 
 
 class SensorOpenTimeout(RuntimeError):
@@ -43,6 +48,15 @@ class SensorOpenTimeout(RuntimeError):
     Raised on the constructing thread, so `build_devices()` substitutes
     distance.none and records an operator banner -- the same fallback it
     already takes for a sensor that fails to open outright.
+    """
+
+
+class SampleCycleFailed(RuntimeError):
+    """A reading in a sample cycle did not come back, so the cycle ended there.
+
+    Raised in place of the transport's own exception, which it carries as
+    __cause__, and caught by the sampling loop. Its purpose is to leave the
+    burst: the remaining reads of the cycle are never issued.
     """
 
 
@@ -90,6 +104,13 @@ class SampledHopperLevel:
     # live in distance/intervals.py.
     open_deadline_seconds = SENSOR_OPEN_DEADLINE
 
+    # How long the sampler stays off the bus after one failed cycle, and the
+    # longest that wait can grow to as failures keep following one another.
+    # Overridable per transport; the shared values and the reasoning behind
+    # them live in distance/intervals.py.
+    backoff_base_seconds = SENSOR_BACKOFF_BASE
+    backoff_cap_seconds = SENSOR_BACKOFF_CAP
+
     # Names the sensor in the stuck-sensor warning.
     sensor_label = "sensor"
 
@@ -116,6 +137,15 @@ class SampledHopperLevel:
         # Keeps the operator banner to one per stuck episode rather than one
         # per watchdog check.
         self._stuck_reported = False
+        # Failed cycles since the last one that succeeded. Sets the length of
+        # the wait before the next attempt.
+        self._consecutive_failures = 0
+        # Sampling-clock stamp before which no reading and no re-open may be
+        # issued, or None when the sampler is free to go to the device.
+        self._backoff_until = None
+        # Keeps the failure banner to one per run of failures rather than one
+        # per cycle, the way _stuck_reported does for the watchdog's.
+        self._failure_reported = False
 
         if self.empty <= self.full:
             event = "ERROR: Invalid Hopper Level Configuration Empty Level <= Full Level (forcing defaults)"
@@ -221,16 +251,58 @@ class SampledHopperLevel:
 
         Until it does, the loop keeps cycling without publishing: a reading
         that arrives minutes late describes a moment nobody can place, so it
-        has no claim on the cached level."""
+        has no claim on the cached level.
+
+        Returns True once the re-open succeeds, which is what puts the attempt
+        on the backoff schedule: a device that will not re-open is left alone
+        for longer each time rather than re-opened once a cycle forever."""
         try:
             self._restart_sensor()
         except Exception:
-            self.logger.exception(f"Re-initializing the {self.sensor_label} after a stuck reading failed.")
-            return
+            if not self._failure_reported:
+                self.logger.exception(f"Re-initializing the {self.sensor_label} after a stuck reading failed.")
+            return False
 
         self.sensor_healthy = True
         self._stuck_reported = False
         self.logger.info(f"The {self.sensor_label} is answering again; hopper readings have resumed.")
+        return True
+
+    # ---- failure backoff ----
+
+    def _backoff_delay(self, failures):
+        """How long to stay off the bus after `failures` cycles in a row have
+        failed."""
+        return min(self.backoff_cap_seconds, self.backoff_base_seconds * 2 ** (failures - 1))
+
+    def _note_cycle_failed(self, reason):
+        """Record a failed cycle and hold the sampler off the device.
+
+        A sensor that has just failed is not helped by being asked again
+        immediately, and every attempt costs the bus its lock for a whole read
+        deadline, so the wait doubles while the failures keep coming."""
+        self._consecutive_failures += 1
+        delay = self._backoff_delay(self._consecutive_failures)
+        self._backoff_until = time.time() + delay
+
+        if self._failure_reported:
+            return
+        self._failure_reported = True
+        self.logger.error(
+            f"The {self.sensor_label} failed to produce a reading ({reason}). The hopper level on the "
+            f"dashboard is the last one it reported. Retrying in {delay}s, then at longer intervals up "
+            f"to {self.backoff_cap_seconds}s, until it answers again."
+        )
+
+    def _note_cycle_succeeded(self):
+        """Clear the backoff and close off a run of failures."""
+        self._consecutive_failures = 0
+        self._backoff_until = None
+
+        if not self._failure_reported:
+            return
+        self._failure_reported = False
+        self.logger.info(f"The {self.sensor_label} produced a reading again; hopper readings have resumed.")
 
     # ---- transport hooks ----
 
@@ -263,6 +335,17 @@ class SampledHopperLevel:
         sample_time = time.time()
         while self.sensor_thread_active:
             now = time.time()
+
+            if self._backoff_until is not None:
+                if now < self._backoff_until:
+                    # Nothing at all goes to the device during the wait: no
+                    # reading, no re-open. Any request that arrived is left
+                    # standing rather than cleared, so it is honoured when the
+                    # wait ends instead of being spent inside it.
+                    time.sleep(1)
+                    continue
+                self._backoff_until = None
+
             if self.sample_requested or (now > sample_time + self.sensor_thread_read_interval):
                 # Clear the request BEFORE reading, not after. A request that
                 # arrives while this cycle is in flight then survives into the
@@ -270,13 +353,27 @@ class SampledHopperLevel:
                 # being silently swallowed by the cycle it just missed.
                 self.sample_requested = False
 
-                if self.sensor_healthy:
-                    self._take_sample()
+                failure = None
+                try:
+                    if self.sensor_healthy:
+                        self._take_sample()
+                    elif not self._recover_from_stuck_read():
+                        # A sensor the watchdog has given up on gets re-opened,
+                        # not re-read: another read would only be aimed at the
+                        # device that is already not answering.
+                        failure = "re-initializing it did not succeed"
+                except Exception as error:
+                    # Nothing a transport raises may end this thread. The loop
+                    # is the only thing that ever brings a sensor back, and a
+                    # thread that died leaves get_level() serving one number
+                    # for the rest of the run with nothing in the log to say
+                    # why the hopper reading stopped moving.
+                    failure = str(error) or error.__class__.__name__
+
+                if failure is None:
+                    self._note_cycle_succeeded()
                 else:
-                    # A sensor the watchdog has given up on gets re-opened, not
-                    # re-read: another read would only be aimed at the device
-                    # that is already not answering.
-                    self._recover_from_stuck_read()
+                    self._note_cycle_failed(failure)
 
                 # Counted LAST, so an observer that waits for the count to rise
                 # sees a fully finished cycle -- reading published and any
@@ -287,7 +384,10 @@ class SampledHopperLevel:
 
     def _take_sample(self):
         """Average `samples_per_cycle` readings, publish the level, and
-        re-initialize a sensor that answered slowly."""
+        re-initialize a sensor that answered slowly.
+
+        Raises SampleCycleFailed when the cycle produced no reading to
+        publish; the sampling loop turns that into a backoff."""
         # Read the sensor multiple times and average the result
         avg_dist = 0
         start_time = time.time()
@@ -298,7 +398,16 @@ class SampledHopperLevel:
         self._cycle_started_at = _monotonic()
         try:
             for reading in range(self.samples_per_cycle):
-                distance = self._read_distance_mm()
+                try:
+                    distance = self._read_distance_mm()
+                except Exception as error:
+                    # Abandon the burst. The reads still to come would be aimed
+                    # at a device that has just stopped answering, and each one
+                    # costs another read deadline's worth of traffic on a bus
+                    # the probes and the grill platform share.
+                    raise SampleCycleFailed(
+                        f"reading {reading + 1} of {self.samples_per_cycle} failed: {error}"
+                    ) from error
                 if not self.sensor_healthy:
                     # The watchdog gave up on this cycle while the read was
                     # outstanding. What came back describes an unplaceable
@@ -309,7 +418,8 @@ class SampledHopperLevel:
                     # cannot be read by the watchdog as a cycle already
                     # long overdue and set off a second banner.
                     self._cycle_started_at = None
-                    self._recover_from_stuck_read()
+                    if not self._recover_from_stuck_read():
+                        raise SampleCycleFailed("re-initializing it after a stuck reading did not succeed")
                     return
                 if distance > 0:
                     if avg_dist > 0:
@@ -356,9 +466,16 @@ class SampledHopperLevel:
     def request_sample(self):
         """Ask the sampling thread to take a fresh reading, and return NOW.
 
-        The reading lands in the cache within a second or so, and reaches the
-        datastore on the control loop's next timed refresh. Nothing waits: this
-        sets a flag the sampling thread is already watching."""
+        From a sensor that is answering, the reading lands in the cache within
+        a second or so and reaches the datastore on the control loop's next
+        timed refresh. From one that is failing, it lands when the backoff the
+        failures earned expires -- up to `backoff_cap_seconds` later. The
+        request is held rather than dropped either way, and it never shortens
+        a backoff: a device that has stopped answering is not asked again just
+        because something asked for it.
+
+        Nothing waits: this sets a flag the sampling thread is already
+        watching."""
         self.sample_requested = True
 
     def get_level(self):
