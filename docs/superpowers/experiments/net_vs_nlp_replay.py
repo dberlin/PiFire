@@ -191,6 +191,12 @@ def replay(
         temp_f = _c_to_f(plant.measured())
         if t >= next_solve:
             next_solve = t + period
+            # Captured before update() runs: update() derives _policy_u_prev
+            # from _applied_Q at entry and then overwrites _applied_Q with the
+            # freshly computed command, so reading _applied_Q back out after
+            # the call is one control step stale relative to what
+            # _policy_u_prev was actually computed from.
+            applied_before_update = float(core._applied_Q)
             raw = core.update(temp_f)
             # these are recorded ON the controller during the update() call
             # just made, not read back out of state it mutates afterward
@@ -227,12 +233,18 @@ def replay(
             # Q_max)`. mpc.py still passes exactly this value to firing_rate(),
             # so the harness measures what it claims -- pinned here the same
             # way `_last_Q` is, so a future redefinition fails loudly instead
-            # of sliding through unnoticed.
-            assert core._policy_u_prev == float(np.clip(core._applied_Q, core.cfg["Q_min"], core.cfg["Q_max"])), (
-                "core._policy_u_prev is no longer clip(core._applied_Q, Q_min, "
-                "Q_max) -- its provenance has changed and every read of it in "
-                "this harness needs re-auditing before this baseline can be "
-                "trusted again."
+            # of sliding through unnoticed. Compared against the value
+            # `_applied_Q` held BEFORE this update() call (see
+            # applied_before_update above): update() derives _policy_u_prev
+            # from _applied_Q at entry, then overwrites _applied_Q with the
+            # new command before this line runs, so comparing against the
+            # post-call value is one control step off by construction (fails
+            # every solve, not just when the split actually breaks).
+            assert core._policy_u_prev == float(np.clip(applied_before_update, core.cfg["Q_min"], core.cfg["Q_max"])), (
+                "core._policy_u_prev is no longer clip(_applied_Q-at-entry, "
+                "Q_min, Q_max) -- its provenance has changed and every read of "
+                "it in this harness needs re-auditing before this baseline can "
+                "be trusted again."
             )
             ratio = min(max(float(raw["cycle_ratio"]), core.u_min), core.u_max)
             if hasattr(core, "set_output"):

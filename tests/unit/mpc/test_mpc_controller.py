@@ -411,6 +411,21 @@ def test_a_partial_floor_crossing_lands_strictly_between_zero_and_q_min(mpc_cont
     assert 0.0 < mpc_controller._applied_Q < mpc_controller.cfg["Q_min"]
 
 
+def test_the_floor_blend_is_continuous_at_u_min(mpc_controller):
+    """The boundary-value tests alone (duty 0 -> Q 0, duty u_min -> Q_min) are
+    satisfied by any k*Q_min*ratio/u_min blend, not just k=1 -- a k<1 slope
+    leaves a jump exactly at u_min, which duty crosses routinely, not rarely.
+    Continuity across the seam is the assertion that actually pins the slope."""
+    u_min = mpc_controller.u_min
+    mpc_controller.set_output(AppliedOutput(u_min - 1e-9, OutputSource.LID_OPEN, 1.0))
+    just_below = mpc_controller._applied_Q
+    mpc_controller.set_output(AppliedOutput(u_min, OutputSource.CONTROLLER, 1.0))
+    at_floor = mpc_controller._applied_Q
+    assert just_below == pytest.approx(mpc_controller.cfg["Q_min"])
+    assert at_floor == pytest.approx(mpc_controller.cfg["Q_min"])
+    assert just_below == pytest.approx(at_floor)
+
+
 def test_a_degenerate_q_span_matches_allocates_own_guard(mpc_controller):
     """allocate() falls back to span=1.0 when Q_max<=Q_min; the inverse must
     use the same fallback so the two maps agree instead of this one flipping
