@@ -425,8 +425,27 @@ jj new
 **Context.** Read `ControllerTab.tsx` in full before editing. It renders options
 from the runtime `/api/controller_metadata` response (`ControllerOption` in
 `helpers/settings/settingsApi.ts:21-34`) — that stays, because the option
-*list* is a runtime fact. What changes is the type of the value bag it reads
-from and writes back to `settings.controller.config[selected]`.
+*list* is a runtime fact. What changes is how the value bag it writes back to
+`settings.controller.config[selected]` is checked.
+
+**Corrected during execution, 2026-08-02 — the check is a runtime one, not a
+compile-time one.** This task was first written expecting the generated types to
+check the tab's value bag. They cannot: `selected` is a runtime string, so
+`ControllerConfigs[selected]` never resolves statically, and an `as
+SelectedConfig` assertion catches nothing — probed against the real generated
+types with `tsc --strict`, both `{} as SelectedConfig` and
+`{totallyBogusField: "nope"} as SelectedConfig` compile clean, while the
+equivalent *assignment* fails with TS2322. This is the same fact that keeps
+`controller.config` an open dict server-side: a controller can be added by
+dropping a file into `controller/`.
+
+So the boundary is validated at run time instead, against the option names the
+tab already holds from `/api/controller_metadata`: a key the selected controller
+does not declare is **filtered out of the payload** — writing it would put junk
+into `settings.controller.config[selected]` that nothing cleans up — and
+**surfaced to the user** through the tab's existing error path, never silently
+dropped. The generated types keep their value where a controller is statically
+known, and in the type-level tests below, which pin the generator's output.
 
 - [ ] **Step 1: Write the failing type-level test**
 
