@@ -2,18 +2,60 @@
 
 Durable backlog for the `web-react/` replacement of the Flask/Jinja UI.
 
-**Reconciled 2026-07-25** against live code and a real browser. Previous
-revisions listed several items as open that had shipped, and — more
-importantly — listed nothing that only a running browser could reveal, because
-until this date nothing had been run in one.
+## How to read this file
 
-**Partially reconciled again 2026-08-02**, covering the three items that carried
-a caveat (1, 2, 5 — all signed off) and three entries under "Shipping and
-deployment gaps" that were flatly false: Flask does serve the React app, Barlow
-is self-hosted, and there is a page title. Each had been true when written and
-was overtaken without the entry being revisited. **The rest of the OPEN section
-has NOT been re-verified against live code** — check any item here before
-scheduling it.
+Earlier revisions accumulated three different kinds of date on the same entry —
+when it was opened, when somebody swept it, and when it was fixed — none of them
+labelled. An entry could read `SHIPPED 2026-07-28 … still open … 2026-07-29` and
+mean any of them. **One convention now, applied throughout:**
+
+| | |
+|---|---|
+| **DONE** | The work landed. Any date on the line is **when it landed**, never when someone noticed. |
+| **OPEN** | Not done. **Carries no date** — a date beside unfinished work is exactly what used to read as a completion. |
+| **WON'T DO** | Decided against. The ruling that decided it is named. |
+
+Rules that follow from that, and that the next editor has to keep:
+
+- **The status word comes first**, before the prose, on every entry.
+- **Never add a date to an OPEN entry.** If you want to record when you checked
+  it, say so in the reconciliation log below — that is what it is for.
+- **Never date a heading with the day you swept it.** Item 8's heading briefly
+  read `DONE 2026-08-02` when nothing was migrated that day; every page under it
+  had shipped a week earlier.
+- Struck-through (`~~text~~`) means the claim was wrong or has been overtaken.
+  The correction follows it. Nothing is deleted outright, so a reader who
+  remembers the old claim can see what happened to it.
+
+## Reconciliation log
+
+Dates here are when someone *checked*, which is why they are quarantined in this
+one section instead of being sprinkled through the entries.
+
+- **2026-07-25** — first pass against live code and a real browser. Previous
+  revisions listed several items as open that had shipped and, more
+  importantly, listed nothing that only a running browser could reveal, because
+  until then nothing had been run in one.
+- **2026-07-26, 2026-07-28, 2026-07-29** — three partial sweeps of item 10's
+  deferred-work inventory. Each is written up inside that item.
+- **2026-08-02** — full pass over the OPEN section. Three items carrying a
+  caveat (1, 2, 5) were signed off, and **roughly two dozen entries were
+  stale** — each true when written and overtaken without the entry being
+  revisited. The date convention above was introduced by this pass.
+
+  The single largest cause of staleness was the **Flask-retirement pass, which
+  landed 2026-07-29**. Six groups of deferrals were phrased as "waits for the
+  general pass (ruling 5)"; that pass then shipped and none of them were
+  struck. `blueprints/{admin, cookfile, dash, events, history, logs, manifest,
+  manual, metrics, pellets, probeconfig, recipes, settings, update}/` hold no
+  source file today — only a stale `__pycache__` — and `templates/` is down to
+  `server_error.html`. Anything describing a Flask page, template, macro or
+  characterization test as live was describing something that no longer exists.
+
+  **Lesson for the next slice that defers on a future pass:** a deferral written
+  as "until X happens" is a promise that someone re-reads this file when X
+  happens. Nobody did. Name the item the pass has to close, so the pass's own
+  checklist carries it.
 
 This file previously lived in `.superpowers/sdd/`, which is gitignored scratch
 that `git clean -fdx` destroys. It is tracked now. Three audit documents cite
@@ -337,8 +379,8 @@ it by path and line number; those citations point here.
   "Deferred by the updater slice" below.
 - **Wizard** (`/wizard`) — all steps functional: welcome, grill platform,
   probes (devices + ports), display, distance, finish, install-progress
-  polling, and an Exit control. Functionally complete; styling is being
-  finished — see open item 1.
+  polling, and an Exit control. Functionally complete and styled — item 1 was
+  signed off 2026-08-02.
 
 ### Behaviour and correctness
 
@@ -702,10 +744,42 @@ happily; forbidding it here would be a new rule, not a port.
 
 ## OPEN
 
-Numbering is non-contiguous by design — resolved items (3, 4, 6, 6a, 7, 9)
-moved to RESOLVED above keep their numbers there. Item 10 now precedes item 11.
+### What is actually open — read this before scheduling anything
 
-### 1. Wizard styling — DONE 2026-08-02
+This heading says OPEN; most of what is under it is not. The status of each
+top-level item, so nobody has to read 900 lines to find that out:
+
+| Item | Status |
+|---|---|
+| 1. Wizard styling | **DONE** |
+| 2. Dashboard reflow | **DONE** |
+| 5. Tailwind v4 migration | **DONE** |
+| 8. Un-migrated Flask pages | **DONE** — nothing is un-migrated |
+| 9a. Live probe-map editing | 2 of 3 **DONE**; 9a.3 **OPEN** |
+| 10. Deferred-work inventory | **MIXED** — the only large open surface |
+| 11. Recipes deliberate non-dos | **WON'T DO** — boundaries, not owed work |
+
+So the real open work is **9a.3 and the OPEN entries inside item 10.** The
+biggest of those, in rough order of consequence:
+
+1. `updated_message` is written on every upgrade and read by nothing (the
+   release-notes modal) — a live writer with no reader.
+2. No 404 route at all, so every unrouted URL hits react-router's error screen;
+   `/manual` is one instance of it.
+3. `bootstrap_page_theme` is stored, injected, and read by nothing.
+4. No favicon, no PWA manifest.
+5. Wizard has no 800×480 coverage; no e2e for Exit Setup.
+6. Schema and toolchain follow-ups — none started.
+
+**Items 1, 2, 5 and 8 are kept here rather than moved to RESOLVED** because
+their bodies carry measurement notes and ordering lessons — checkpoint before
+recapture, how a reflow gate goes vacuous, how to count "undefined classes"
+honestly — that are most useful next to the work they came from.
+
+Numbering is non-contiguous by design: resolved items (3, 4, 6, 6a, 7, 9) moved
+to RESOLVED above keep their numbers there. Item 10 precedes item 11.
+
+### 1. Wizard styling — DONE
 
 **This item's original text was wrong by the time anyone read it.** It claimed
 "there is no `wizard.css`". There is: `web-react/src/components/wizard/wizard.css`,
@@ -746,7 +820,7 @@ list is mostly noise: CSS custom properties (`--pf-btn-h`, `--pf-col-w`,
 (`pf-badge-`, `pf-banner--`) are never whole class names. Any real number has to
 exclude `--`-prefixed tokens and resolve dynamic class construction.
 
-### 2. Dashboard reflow — DONE 2026-08-02
+### 2. Dashboard reflow — DONE
 
 Plan: `docs/superpowers/plans/2026-07-25-react-dashboard-slice.md` (14 tasks),
 all implemented. The fixed 1280×720 uniformly-scaled stage is reversed and the
@@ -778,7 +852,7 @@ click-to-toggle manual outputs now have no home in React — that capability
 belongs to the **manual** page item below. This does not retire the Flask
 picker; it only says React will not grow one.
 
-### 5. Tailwind v4 migration — DONE 2026-07-27
+### 5. Tailwind v4 migration — DONE
 
 **Closed out 2026-07-27.** All 20 tasks are shipped and the human checkpoint has
 signed off. Accepted visual differences, the four defects the walkthrough found
@@ -793,19 +867,23 @@ status.
 
 The fidelity reference was re-established after the sign-off — that order
 matters, since recapturing first would have baked in the four defects the
-walkthrough found. `bun run test:e2e:fidelity` is **105 passed, 0 failed**.
-
-Nothing is outstanding on this item. `/settings/probes` — the one surface the
-migration left ungated, because ProbesTab shipped after the reference was first
-captured — got its own spec and baselines on 2026-07-27, so all twelve settings
-tabs are now covered at both viewports. `test:e2e:fidelity` is **109 passed, 0
+walkthrough found. That left `bun run test:e2e:fidelity` at **105 passed, 0
 failed**.
+
+`/settings/probes` was the one surface the migration left ungated, because
+ProbesTab shipped after the reference was first captured. It got its own spec
+and baselines, so all twelve settings tabs are now covered at both viewports and
+`test:e2e:fidelity` finished at **109 passed, 0 failed**. (105 then 109 is one
+number before that addition and one after, not a disagreement.)
 
 Spec: `docs/superpowers/specs/2026-07-25-tailwind-v4-migration-design.md`.
 Ratified: token bridge (`@theme` + `@apply`, `pf-*` names and JSX survive), gate
 extended to every page at 1280×720 and 390×844, implementation gated on the
 wizard-styling and dashboard-reflow slices merging first.
 
+<details>
+<summary><b>The original item statement, kept as history — it is written as
+instructions, and they have all been carried out.</b></summary>
 
 Move `web-react/`'s six hand-written stylesheets (2,603 lines: `theme.css`,
 `dashboard.css` 1149, `wizard.css` 624, `settings.css` 344, `shell.css` 315,
@@ -817,17 +895,22 @@ Hard requirement: **visually identical before and after**, except where the
 generalised rather than reinvented — `tests/e2e/layoutBaseline.ts` +
 `dashboard-layout-1280x720.json` capture a per-landmark box plus
 `fontSize`/`fontWeight`, compared with `BOX_TOL = 2`px and an `EXACT` override
-table. It is deliberately **not** a `toHaveScreenshot()` gate: `index.html`
-loads Barlow from `fonts.googleapis.com`, so pixels depend on the network and
+table. It is deliberately **not** a `toHaveScreenshot()` gate: pixels depend on
 the host font stack, and masking the volatile regions would mask exactly the
-typography the gate exists to protect.
+typography the gate exists to protect. (This paragraph originally justified that
+with "`index.html` loads Barlow from `fonts.googleapis.com`". Barlow has been
+self-hosted since 2026-07-29 — the *network* half of the reason is gone, the
+host-rasterisation half is not, and the conclusion is unchanged. Same correction
+under *Shipping and deployment gaps*.)
 
 **Unblocked 2026-07-26.** The wizard-styling and dashboard-reflow slices — which
 were rewriting the two largest stylesheets and would have collided with this —
 are both merged. Re-measure the line counts above before starting; they were
 taken before those two landed.
 
-#### DONE 2026-07-27 — Tasks 1-14 shipped, Task 15 (human) outstanding
+</details>
+
+#### DONE — tasks 1-14, landed 2026-07-27
 
 Plan: `plans/2026-07-26-tailwind-v4-migration.md`. All fourteen implementation
 tasks landed; the visual guarantee held. **The 38 pre-Tailwind baselines are
@@ -837,7 +920,7 @@ independently in the main checkout, not just reported), and the fidelity gate is
 baseline files that had never existed, for 43 total. Suite 1258 → 1262; CSS
 bundle 41,207 → 53,871 bytes raw / 10,555 gzip, with no duplicated theme layer.
 
-#### Tasks 16-20, 2026-07-27 — the plan's gaps closed, and preflight adopted
+#### DONE — tasks 16-20, landed 2026-07-27: the plan's gaps closed, preflight adopted
 
 Five follow-on tasks, none of them in the plan.
 
@@ -864,30 +947,36 @@ Five follow-on tasks, none of them in the plan.
   and `cookfiles.css` authored with `@apply`. No stylesheet in the app is
   hand-written now.
 
-**Outstanding:**
+**Both DONE.** Kept because the ORDER is the reusable part, not because
+anything is owed:
 
-1. **The baselines now encode the pre-preflight rendering**, so
-   `bun run test:e2e:fidelity` is 47 failed / 58 passed by design. The "never
-   recapture" rule was premised on preflight changing nothing; that premise is
-   gone. The reference has to be re-established deliberately, **after** the human
-   visual checkpoint — recapturing first would bake in whatever they would have
-   objected to.
-2. **Task 15 human visual checkpoint.** Evidence pack is in the SDD ledger, and
-   the preflight before/after screenshots are the substantive input to it.
-   Carries the known 390×844 General-tab hint wart (52px column forcing a 187px
-   row against 36-38px neighbours) — pre-existing and deliberately not fixed
-   during a conversion.
+1. ~~**The baselines encode the pre-preflight rendering**, so
+   `test:e2e:fidelity` is 47 failed / 58 passed by design.~~ Re-established
+   after the sign-off, as required — **109 passed, 0 failed**. The "never
+   recapture" rule was premised on preflight changing nothing; once that premise
+   went, the reference had to be re-cut deliberately.
+2. ~~**Task 15 human visual checkpoint.**~~ Signed off; accepted differences and
+   the four defects the walkthrough found are in
+   `audits/2026-07-27-tailwind-migration-diffs.md`. It carried the known 390×844
+   General-tab hint wart (52px column forcing a 187px row against 36-38px
+   neighbours) — pre-existing and deliberately not fixed during a conversion.
+
+**The order is the point:** the checkpoint ran first, then the recapture.
+Recapturing first would have baked in whatever the reviewer was about to object
+to, and a green gate would have been the evidence that it was fine.
 3. **Two things found and left alone**, both pre-existing: `.pf-settings-back`
    ("Back to history") is dim text with no affordance, and the class is shared
    with a `<button>` that should not be underlined, so it needs a decision rather
    than a patch. The cook-file table runs its Download button off the right edge
    at 390px.
-4. **`history-*.json` is machine-dependent.** `/history` embeds the cook-file
-   list, and the older `history` spec measures the developer's real cook files
-   through the demo server's `/api` proxy. It is the one baseline of the 43 that
-   would not reproduce on another machine.
+4. ~~**`history-*.json` is machine-dependent.**~~ **FIXED 2026-07-28.** The
+   `history` fidelity spec stubs `/api/files/cookfiles` (`stubs:
+   stubCookFiles`), so the embedded saved-cooks list renders fixture rows
+   instead of the developer's real cook files. Both history baselines are
+   byte-deterministic across captures — verified by capturing twice. The tuner
+   slice's deferral list records the same fix; this copy was left standing.
 
-### 8. Un-migrated Flask pages
+### 8. Un-migrated Flask pages — DONE, nothing left un-migrated
 
 Roughly ordered by daily-use value:
 
@@ -955,23 +1044,43 @@ Roughly ordered by daily-use value:
       It reports one record per MODE TRANSITION — no aggregate, no trend, no
       cross-cook total — which is also why it does not poll. See the SHIPPED
       section.
-- [ ] **mobile** — may be obsolete once the dashboard reflows. Responsiveness is
-      necessary, not sufficient; confirm before building, and do not delete the
-      blueprint yet.
+- [x] ~~**mobile**~~ — **NOT A PAGE; the entry was a category error.**
+      `blueprints/mobile/` registers no HTTP route at all: it is
+      `socket_io.py`, and it is the live Socket.IO feed the React app itself
+      consumes. There was never a mobile page to migrate. The Flask-retirement
+      pass settled its fate on 2026-07-29 — **kept, registered, untouched** —
+      which also supersedes ruling 2's "`/mobile` will die". See the correction
+      on that ruling.
 
-### 9a. Live probe-map editing — three gaps disclosed by the probeconfig slice
+      What the responsiveness half of this line meant is real and lives
+      elsewhere: the dashboard reflow (item 2) and the 800×480 `panel` project
+      are what cover a phone and the grill's own screen.
 
-`/settings/probes` shipped 2026-07-26. Three things it deliberately does NOT do,
-recorded here rather than left in the plan document, per the standing rule below.
+### 9a. Live probe-map editing — 2 of 3 DONE, 1 OPEN
 
-1. **Derived blobs other than `history_page.probe_config` are not regenerated.**
-   `apply_probe_map` regenerates the history chart config, matching
-   `wizard.py:230`, but leaves `control["notify_data"]` and
-   `settings["recipe"]["probe_map"]` alone — because `run_wizard` leaves them
-   alone too (`wizard.py:227-231` regenerates only the one). Matching the
-   installer exactly was the conservative choice; diverging from it is a
-   deliberate decision that deserves its own change. **Consequence: renaming a
-   probe here leaves a stale notify entry pointing at the old label.**
+`/settings/probes` shipped 2026-07-26 with three deliberate gaps, recorded here
+rather than left in the plan document, per the standing rule below. **Two are
+closed** (2 in 2026-07-26, 1 by ruling 6); only 3 survives, and in a narrower
+form than it was written. The numbering is kept so the original three stay
+traceable.
+
+1. ~~**Derived blobs other than `history_page.probe_config` are not
+   regenerated.**~~ **DONE** — ruling 6 was implemented, and this entry
+   outlived it. `common/defaults.py::set_probe_map()` is now the single
+   installer of a probe map and rebuilds *everything* keyed by a probe LABEL:
+   `history_page.probe_config`, `settings["recipe"]["probe_map"]`,
+   `settings["dashboard"][*]["custom"]["hidden_cards"]` and
+   `control["notify_data"]`. **Both** writers go through it — the live path
+   (`blueprints/api/routes.py:432`) and the installer (`wizard.py:314`) — so
+   the hole ruling 6 found in `run_wizard` is closed too, not just the one in
+   the React tab.
+
+   Two mechanics worth carrying: `notify_data` is rebuilt in place but
+   PERSISTED BY THE CALLER as a `notify.replace` op, because
+   `common/control_delta.py:34` forbids `notify_data` under `set` (it is an
+   array whose elements need addressing). And only ids the OLD map carried as
+   labels are pruned from `hidden_cards`, so non-probe card ids ("hopper",
+   "status") survive.
 
 2. ~~**Rebuilding probe devices does not close the old ones.**~~ **FIXED
    2026-07-26.** `ProbeInterface.close()` is now an explicit teardown hook and
@@ -1005,25 +1114,41 @@ recorded here rather than left in the plan document, per the standing rule below
    partially built `probe_device_list`. The earlier text of this item claimed
    the fallback covered construct failures too; it never has.
 
-3. **Last write wins between the two probe editors.** The Flask settings page
-   still edits individual `probe_info` entries in place via
-   `update_probe_config` (`common/app.py:346-390`). Two humans editing probes
-   simultaneously there and in the React tab, both in Stop mode, within one
-   page lifetime, is unmitigated. Not papered over with a `lastupdated.time`
-   compare-and-swap: that race is datastore-wide and pre-existing, and a
-   point fix here would imply a guarantee the rest of the store does not make.
+3. **Last write wins between the two probe editors** — still true, but the
+   other editor is no longer the one this entry named. The Flask settings page
+   was deleted by the retirement pass; `update_probe_config`
+   (`common/app.py:358`) survives with exactly ONE caller,
+   `blueprints/mobile/socket_io.py::_update_probe_config` — the mobile app's
+   door, which edits individual `probe_info` entries in place while
+   `POST /api/probe_map` applies a whole map. A human in the React tab and a
+   phone doing the same thing, both in Stop mode, is unmitigated.
 
-### 10. Deferred-work inventory — 103 open items pulled out of plan documents
+   Narrower than it was (a phone rather than a second browser tab), and not
+   papered over with a `lastupdated.time` compare-and-swap: that race is
+   datastore-wide and pre-existing, and a point fix here would imply a
+   guarantee the rest of the store does not make.
+
+### 10. Deferred-work inventory — MIXED, see each subsection
+
+> **The "103 open" in this item's original title was a 2026-07-26 measurement
+> and is now badly wrong.** Three reconciliation sweeps and the Flask-retirement
+> pass have closed a large fraction of it, and the 2026-08-02 pass struck
+> roughly two dozen more entries below. **Do not quote a count from this item.**
+> Every subsection below carries its own verified disposition; those are the
+> answer. The number is left in the prose beneath only as the historical
+> snapshot it was.
 
 **Swept 2026-07-26**, after Slice 2 (item 9) proved that deferred work was
 landing in plan documents and nowhere else. Two agents read all 17 React slice
 plans, the 7 wizard plans, 14 React/UI specs and both audits, and checked every
 finding against live code rather than trusting the document.
 
-**225 findings. 103 still open, 115 already shipped, 7 need a ruling.** The
-"already shipped" number is the important one: a great deal of this had been
-done and the documents never said so. All 9 CRITICALs and 12 of 18 IMPORTANTs
-from the divergence audit are closed.
+**As measured on 2026-07-26: 225 findings, 103 open, 115 already shipped, 7
+needing a ruling.** Those numbers are a snapshot of that day and nothing has
+recomputed them since; the per-finding dispositions below are current, the
+counts are not. The "already shipped" number is the one worth carrying: a
+great deal of this had been done and the documents never said so. All 9
+CRITICALs and 12 of 18 IMPORTANTs from the divergence audit are closed.
 
 Per-item detail — source document, exactly what was deferred, and the
 `file:line` that decided each status — is in
@@ -1119,7 +1244,7 @@ their audit number:
     disposition of every finding (incl. accepted divergences and
     UNCLEAR/browser-only items) is in the audit's *sweep 2* block.
 
-#### Flask-retirement pass — SHIPPED 2026-07-29 (ruling 5: #5 + #71)
+#### DONE — Flask-retirement pass, landed 2026-07-29 (ruling 5: #5 + #71)
 
 Spec/plan: `specs/2026-07-29-flask-retirement-design.md`,
 `plans/2026-07-29-flask-retirement.md`. Executed subagent-driven; final gate green
@@ -1163,9 +1288,11 @@ tests).
   (`dead-function-audit.md`) found exactly ONE behavioral gap (below); everything
   else was replicated on a kept surface or pure-dead.
 
-**Deferred by the Flask-retirement pass (recorded, not built):**
-- **Warnings never auto-clear in React — SHIPPED (2026-07-29 warnings-clear
-  slice).** React now has a dismiss control: `POST /api/dismiss_warnings
+**Deferred by the Flask-retirement pass (recorded, not built) — both since
+closed:**
+
+- **DONE** — ~~Warnings never auto-clear in React.~~ Shipped 2026-07-29 by the
+  warnings-clear slice. React now has a dismiss control: `POST /api/dismiss_warnings
   {through_id}` clears `SqliteQueue` rows `WHERE id <= through_id` — a
   high-water-mark clear, keyed to the `warningsMaxId` the socket payload
   publishes alongside `warnings`, so a warning raised after the client's
@@ -1173,7 +1300,8 @@ tests).
   `drain_warnings()` (the read-and-burn accessors this gap was originally
   filed against) are retired, along with the Valkey-era `scenario_warnings`
   oracle fixture and its now-meaningless drain/clear-parity test.
-- ~~**Pre-existing e2e baseline drift.**~~ **RESOLVED 2026-07-29.** `fidelity-pages`
+- **DONE** — ~~Pre-existing e2e baseline drift.~~ Resolved 2026-07-29.
+  `fidelity-pages`
   was 106 passed / 6 failed; it is now **112 passed**. Each failure was diagnosed
   to an *intended* change that landed after its baseline was captured — no
   regression was hiding in the set, which is why the baselines were recaptured
@@ -1226,7 +1354,7 @@ tests).
   or wizard baseline goes red with no plausible source change, check whether a
   backend is running before you touch the baseline.**
 
-- **#1 / #2 — RESOLVED by ruling (2026-07-28), not a web-react target.** The QML
+- **WON'T DO** — #1 / #2, resolved by ruling 8: not a web-react target. The QML
   kiosk is the on-device touchscreen UI (a fullscreen Wayland kiosk on the Pi's
   attached screen) and it STAYS; the React app was never going to reimplement
   its screens. The kiosk was only a *visual* target — the React UI borrows its
@@ -1234,13 +1362,15 @@ tests).
   `themeTokens.test.ts`). So the "kiosk screens never built in React" framing is
   a category error the spike plan introduced; closed as won't-do. See ruling 8.
 
-#### Enhancements accepted beyond Flask parity — 2026-07-28
+#### Enhancements accepted beyond Flask parity — DONE, list currently empty
 
-Net-new UX the user has accepted even though Flask never had it (so these are
-NOT parity ports — they will not be caught by any fidelity gate, and each needs
-its own slice when scheduled).
+Net-new UX the user has accepted even though Flask never had it. These are NOT
+parity ports: no fidelity gate will catch them, and each needs its own slice
+when scheduled. The one entry ever added here has shipped, so nothing is
+pending — but keep the section, because this is where the next accepted
+enhancement goes and it is the only place that distinguishes one from a gap.
 
-- ~~**Credential masking (#19).**~~ SHIPPED 2026-07-29. `SecretField.tsx` masks
+- **DONE** — ~~Credential masking (#19).~~ Shipped 2026-07-29. `SecretField.tsx` masks
   the value and reveals it only while the user holds it open with a Show/Hide
   toggle. Field-level only: storage and transport still send these in clear,
   because hiding the value on screen is the only thing a field component can
@@ -1260,9 +1390,9 @@ its own slice when scheduled).
   distinguishable to a screen reader), Playwright's `getByLabel` matches it too:
   locators for a masked field need `{ exact: true }`.
 
-#### Whole surfaces never built
+#### Whole surfaces never built — MIXED
 
-- ~~**Probe config as a React surface**~~ — SHIPPED 2026-07-26 as the
+- **DONE** — ~~Probe config as a React surface.~~ Shipped 2026-07-26 as the
   `/settings/probes` tab (`ProbesTab.tsx`,
   `plans/2026-07-26-react-probeconfig-page.md`, 9 tasks); see the SHIPPED entry
   at item 8. It had been the single most-deferred item in the project, named
@@ -1270,12 +1400,16 @@ its own slice when scheduled).
   Corrected 2026-07-29: this line still read "was never started" three days
   after the tab shipped, and reading it cold was enough to reopen a finished
   slice.
-- ~~Recipes~~ — SHIPPED 2026-07-27; the navbar entry is a real link now.
+- **DONE** — ~~Recipes~~ shipped 2026-07-27; the navbar entry is a real link now.
   ~~Admin~~ — SHIPPED 2026-07-27, same. ~~Events~~ — SHIPPED 2026-07-28, and it
   was the last one: **no navbar entry renders disabled any more**, and no whole
   Flask page in the navbar is unported.
-- Cook-file list / upload / delete (D4) — History shipped the chart only.
-- ~~Recipe unpause payload not ported~~ — SHIPPED 2026-07-29 (#58).
+- **DONE** — ~~Cook-file list / upload / delete (D4); History shipped the chart only.~~
+  **SHIPPED 2026-07-26** (finding #25): `components/cookfiles/*` +
+  `helpers/files/cookfileApi.ts`, rendered on `/history` exactly as Flask does.
+  The SHIPPED section and the sweep-2 reconciliation both recorded this; this
+  line was the third copy and the only one still claiming it was open.
+- **DONE** — ~~Recipe unpause payload not ported.~~ Shipped 2026-07-29 (#58).
   `helpers/command.ts:210`'s `recipeUnpause` posts the minimal
   `{recipe:{step_data:{pause:false}}}`, and `buttonsForMode.ts:107-108` branches
   the single Next Step button on `recipeStatus.paused` — unpause when paused,
@@ -1283,7 +1417,7 @@ its own slice when scheduled).
   `command.test.ts` and `buttonsForMode.test.ts`. Corrected 2026-07-29: this
   line still claimed the gap was open while the sweep-2 reconciliation above
   recorded the fix on the same day, so the file contradicted itself.
-- ~~`global_control_panel` neither read nor offered~~ — the SETTING IS GONE,
+- **DONE** — ~~`global_control_panel` neither read nor offered.~~ The SETTING IS GONE,
   deleted 2026-07-29 rather than implemented. "Show Control Panel on Most Pages"
   was a Flask-era layout switch for Jinja templates that no longer exist; no
   Python, React or QML read it and no UI in either stack ever offered a way to
@@ -1293,199 +1427,304 @@ its own slice when scheduled).
   `validate_settings_tree()`'s repair pass on its next validated write.
   (Stopping the grill from any page remains possible only from the dashboard —
   that was never what this flag delivered.)
-- ~~WLED preset/profile grids (backend and schema are already ready).~~ SHIPPED
-  2026-07-28 (#17) — see the reconciliation above.
-- OneSignal: no "add device"; `uuid`/`app_id` not editable.
-- "Send Test Notification" (Apprise/OneSignal test). ~~All three WLED action
-  buttons~~ SHIPPED 2026-07-28 (#17): Discover, Push Profiles, Test Profile.
-- PlatformTab is read-only — no React editor for `platform.*`.
-- ~~QML kiosk screens (Splash, Menu, Keypad, Hold/Notify overlays, QR, Sleep).~~
-  **RULED 2026-07-28 (ruling 8): NOT a web-react target.** The QML kiosk is the
+- **DONE** — ~~WLED preset/profile grids (backend and schema are already
+  ready).~~ Shipped 2026-07-28 (#17); see the reconciliation above.
+- **WON'T DO** — ~~OneSignal: no "add device"; `uuid`/`app_id` not editable.~~
+  **By decision, not a gap** (#18, confirmed against live code above). Devices self-register
+  from the mobile app, so an "add device" control would have nothing to add;
+  only `friendly_name` is editable, and `uuid`/`app_id` are deliberately not
+  rendered. `NotificationsTab.tsx:35-38` states this at the code. Listing it
+  under "never built" reads as owed work; it is not.
+- **OPEN** — "Send Test Notification" (Apprise/OneSignal test) is genuinely
+  still missing. (~~All three WLED action buttons~~ **DONE**, shipped
+  2026-07-28 (#17): Discover, Push Profiles, Test Profile.)
+- **WON'T DO** — ~~PlatformTab is read-only, no React editor for
+  `platform.*`.~~ **By decision** (#21, confirmed above): platform edits are
+  owned by the wizard, which is where the hardware is chosen. Same objection
+  as the OneSignal line — a settled ruling filed under "never built".
+- **WON'T DO** — ~~QML kiosk screens (Splash, Menu, Keypad, Hold/Notify
+  overlays, QR, Sleep).~~ **Ruling 8: NOT a web-react target.** The QML kiosk
+  is the
   on-device touchscreen UI and stays; React never intended to reimplement its
   screens. The kiosk was only a visual target, and that borrowing already
   shipped (`Theme.qml` → `theme.css`). Findings #1/#2 closed as won't-do.
 
-#### Shipping and deployment gaps
+#### Shipping and deployment gaps — MIXED
 
-- ~~**Flask never serves the React app.** No SPA catch-all, no
-  `send_from_directory` for a build output.~~ — **DONE.** `blueprints/spa/`
+- **DONE** — ~~Flask never serves the React app; no SPA catch-all, no
+  `send_from_directory` for a build output.~~ `blueprints/spa/`
   serves `web-react/dist`: asset routes for `/static/js`, `/static/css` and the
   rest, declared ahead of Flask's built-in `/static/<path:filename>` so Werkzeug
   prefers them, plus the catch-all that makes `/settings/*` deep links resolve.
   This is the deployment path, and it is what supervisor runs in production —
   the rsbuild dev server is a development convenience, not a requirement.
-- ~~No page title~~ — **DONE**, `web-react/index.html` sets
-  `PiFire · React UI (POC)`. Still open: no favicon, no PWA manifest, and
-  `web-react/public/` does not exist.
-- ~~`index.html` loads Barlow from `fonts.googleapis.com`: an offline PiFire
-  silently falls back to a different typeface.~~ — **DONE.** Barlow is
+- **DONE** — ~~No page title.~~ `web-react/index.html` sets
+  `PiFire · React UI (POC)`.
+- **OPEN** — no favicon and no PWA manifest; `web-react/public/` does not
+  exist. Split out of the page-title entry, which used to carry both and read
+  as done because its first half was.
+- **DONE** — ~~`index.html` loads Barlow from `fonts.googleapis.com`, so an
+  offline PiFire silently falls back to a different typeface.~~ Barlow is
   self-hosted via `@fontsource`, imported in `src/main.tsx` and bundled at build
   time; `index.html` carries a comment saying so. The offline Pi renders the
   right glyphs. Note the consequence recorded in `pages-fidelity.spec.ts`: the
   fidelity gate is landmark-based rather than screenshot-based because glyph
   *rasterisation* still varies by host, not because the font might not load.
-- No `/manual` route — a bookmarked Flask `/manual` URL will not resolve.
-- ~~`globals.page_theme` is settable but inert.~~ — RENAMED 2026-07-27 to
+- **OPEN** — no `/manual` route, and now no 404 route either. `blueprints/manual/` was
+  deleted by the retirement pass, so a bookmarked `/manual` reaches the SPA
+  catch-all, which serves `index.html` — and `components/App.tsx` declares no
+  `path: "*"`, so react-router falls through to its default error screen.
+  That is true of **every** unknown path, not just this one: the app has no
+  not-found surface at all. Whether `/manual` is ported is a separate question
+  from whether an unrouted URL renders something deliberate.
+- **OPEN** (the rename is done, the deletion is not) — ~~`globals.page_theme`
+  is settable but inert.~~ Renamed 2026-07-27 to
   `globals.bootstrap_page_theme` and dropped from the React settings form. It
   only ever fed Bootstrap's light/dark theme on the legacy Flask pages, via
   `app.py`'s `inject_theme_and_grill_name` context processor, which still reads
   it under the new name. The React app has no light palette and never consumed
-  it. **Delete the key outright when the last Flask page is retired** (item 8):
-  remove it from `common/defaults.py` and `common/settings_schema.py`, drop the
-  context processor's entry, and drop `page_theme` from the five templates that
-  reference the injected variable.
+  it. **The deletion was scheduled for "when the last Flask page is retired".
+  That happened on 2026-07-29, so it is now unblocked and overdue.** All five
+  templates that read the injected variable are gone; `templates/` holds only
+  `server_error.html`, which does not reference it. So
+  `app.py:108`'s `inject_theme_and_grill_name` now injects `page_theme` into
+  every render of exactly one template that ignores it, and
+  `bootstrap_page_theme` (`common/defaults.py:49`,
+  `common/settings_schema.py:321`) is a stored value nothing reads. Remove all
+  three, and the `"globals.page_theme"` carry-forward entry at
+  `settings_schema.py:875` with them.
   - No migration was written for the rename. An existing install keeps its old
     `page_theme` key, which the strict-schema repair wrapper strips on the next
     validated write, and the new key takes its `"light"` default — so a user who
-    had chosen the dark Flask theme silently gets light back. Accepted because
-    the key is cosmetic, applies only to pages being retired, and is scheduled
-    for deletion; call it out if the Flask UI outlives this.
-- The dashboard's accent swatches and General's Theme field now write the same
-  key (`display.config.<module>.accent_theme`), which the Qt display reads once
-  a second — so changing the accent in a browser repaints the attached screen.
-  Intended, per the 2026-07-27 ruling, but it is the first setting the dashboard
-  writes without a Save, so a stray click is immediately live on the appliance.
+    had chosen the dark Flask theme silently gets light back. Accepted at the
+    time because the key was cosmetic and applied only to pages that were about
+    to be retired. Those pages are gone, which makes the migration moot rather
+    than owed: there is no longer a surface the old value could have affected.
+- **DONE, with a consequence worth knowing** — the dashboard's accent swatches
+  and General's Theme field write the same key
+  (`display.config.<module>.accent_theme`), which the Qt display reads once a
+  second, so changing the accent in a browser repaints the attached screen.
+  Intended, per ruling 7's sibling decision. Flagged because it is the first
+  setting the dashboard writes **without a Save**, so a stray click is
+  immediately live on the appliance. Not an open item; a property to remember
+  before adding a second such control.
 
-#### Backend behaviour that is broken or lying
+#### Backend behaviour that is broken or lying — MIXED
 
-- ~~The errors blob is write-only from the web tier, and `_check_control_status`
-  can false-positive on a healthy system~~ — FIXED 2026-07-26 (item 4). The blob
+- **DONE** — ~~The errors blob is write-only from the web tier, and
+  `_check_control_status` can false-positive on a healthy system.~~ Fixed
+  2026-07-26 (item 4). The blob
   is now read-only from the web tier; liveness is a non-sticky in-memory signal
   composed into each payload. The false-positive vector (the `queue_systemo`
   race) was fixed earlier still.
-- ~~`get_os_info(persist=True)` — a destructive flag still defaults to true.~~
-  — FIXED 2026-07-26 (item 7): split into `probe_os_info()` + `refresh_os_info()`.
-- `backup_pellet_db` is not performed on a React "Load New Pellets".
-- Residual clobber window on the pellet blob — no optimistic concurrency.
-- Notify targets are never converted on a temperature-units change.
+- **DONE** — ~~`get_os_info(persist=True)`, a destructive flag defaulting to
+  true.~~ Fixed 2026-07-26 (item 7): split into `probe_os_info()` + `refresh_os_info()`.
+- **DONE** — ~~`backup_pellet_db` is not performed on a React "Load New
+  Pellets".~~ Fixed 2026-07-29 (#67). `common/pellets_actions.py::pellets_load_profile`
+  snapshots before writing, and since that module is the shared implementation
+  both transports call, the REST and Socket.IO doors get it together.
+- **DONE** — ~~Notify targets are never converted on a temperature-units
+  change.~~ Fixed 2026-07-29 (#35). `_cmd_set_units` converts every armed
+  `control["notify_data"]` target through addressed `notify.set` ops
+  (`common/common.py::notify_target_conversion_ops`), gated on a real unit
+  change and skipping the `target: 0` off-sentinel.
 
-#### Deferred by the events + logs slice — 2026-07-28
+  Both of these were recorded as fixed in the sweep-2 reconciliation above on
+  the day they landed, and both were left standing here — the same entry
+  claimed open and closed in one file.
+- **OPEN** — residual clobber window on the pellet blob; no optimistic
+  concurrency. every pellet write is a read-modify-write of the whole blob with
+  nothing to detect a concurrent one.
+
+#### Deferred by the events + logs slice — MIXED
 
 Per the standing rule below. `plans/2026-07-28-react-events-logs.md` is the
 detailed reference for each.
 
-- **`blueprints/events/` and `blueprints/logs/` are still live, and still carry
-  their two traversal doors** — `send_file` and `read_log_file` in
-  `logs/routes.py` both join a request field onto the logs folder. The React
-  surface does not inherit them (it takes a family stem, never a path), but
-  nothing has closed them where they are. They go with the general Flask
-  retirement pass (ruling 5), and until then they are reachable.
-- **`datastore.read_log()` still has no caller.** Confirmed by symbol search,
-  not grep. The events tab reads files rather than the table — deliberately, per
-  the user's ruling, since only supervisord logs to files without a database
-  row. So this remains a written-but-unused reader. Delete it or use it; do not
-  leave a third opinion about where logs live.
-- **`board-config.py` carries its own duplicate `create_logger`** writing to
+- **DONE** — ~~`blueprints/events/` and `blueprints/logs/` are still live, and
+  still carry their two traversal doors.~~ Closed 2026-07-29 by the retirement
+  pass — both blueprints were deleted, so `send_file` and `read_log_file`, and
+  the request-field-joined-onto-the-logs-folder pattern they shared, are
+  unreachable because the code is gone. This entry's own escape clause ("they
+  go with the general Flask retirement pass") is what came true.
+- **OPEN** — `datastore.read_log()` still has no PRODUCTION caller. Wording
+  updated: it does have callers now and they are all tests
+  (`tests/unit/datastore/test_log_retention.py`,
+  `tests/web/test_api_admin_clear_events.py`). Those tests use it as an oracle
+  for the retention trigger and for clear-events, which is genuinely useful, so
+  "delete it or use it" is no longer the whole choice: it is a test-only reader
+  of a table the product does not read. The events tab still reads FILES rather
+  than the table, deliberately, per the user's ruling — only supervisord logs
+  to a file without a database row. Decide whether the table is a product
+  surface or a test fixture, and say so where the reader lives.
+- **OPEN** — `board-config.py` carries its own duplicate `create_logger`,
+  writing to
   `./logs/` directly. It is out of the web tier and was left untouched, so it is
   the one remaining writer that ignores `PIFIRE_LOG_DIR`.
-- **The wizard's hard links to Flask's `/admin/reboot` and `/admin/restart`**
-  are still open — unchanged from the admin slice's deferral, restated here
-  because this slice touched the same blueprint and did not close them.
+- **DONE** — ~~The wizard's hard links to Flask's `/admin/reboot` and
+  `/admin/restart`.~~ The wizard POSTs to the admin API instead
+  of linking — `InstallProgress.tsx:74` and `WizardShell.tsx:144` both say so
+  in comments that name the retired routes. It had to close: those Flask page
+  routes went with the retirement pass, so a link would now be dead rather than
+  merely misdirected.
 
-#### Deferred by the metrics slice — 2026-07-28
+#### Deferred by the metrics slice — MIXED
 
 Per the standing rule below. `plans/2026-07-28-react-metrics-page.md` is the
 detailed reference for each.
 
-- **Four collected columns are shown nowhere but the raw disclosure.**
+- **OPEN** — four collected columns are shown nowhere but the raw disclosure.
   `fanontime`/`fanontime_c` and `pellet_level_start`/`pellet_level_end`/
   `pellet_brand_type` are written by `control.py` and named by **no macro** in
   `_macro_metrics.html`, so the port kept parity and left them to the `Raw
   Data` panel. Two are worth promoting: `fanontime` is the only reading of fan
   duty the system has, and the pellet-level delta over a mode is a **measured**
   consumption figure sitting beside an estimate the page does display.
-- **`blueprints/metrics/` is still live** and still renders the Jinja page. It
-  keeps its `/metrics/<action>` rule for both POST and GET, and
-  `test_page_smallpages.py` remains its characterization net. Retirement waits
-  for the general pass (ruling 5), as `blueprints/admin/` does.
-- **`_macro_metrics.html`'s Hold card still reads the non-existent
-  `grill_settemp`.** Fixed on the React surface only — see the SHIPPED entry.
-  Fixing the template would change what its characterization test pins, which
-  is a separate decision from porting the page.
-- **The legacy export still doubles its filename.** Same reasoning: the new
-  route passes a bare stamp, `blueprints/metrics` was not touched.
-- **Metrics are shown flat, not grouped by cook.** Records chain
+- **MOOT** — ~~`blueprints/metrics/` is still live~~, ~~`_macro_metrics.html`'s
+  Hold card still reads the non-existent `grill_settemp`~~, ~~the legacy export
+  still doubles its filename~~. All three ceased to exist on 2026-07-29. The
+  blueprint, the macro and `test_page_smallpages.py` were all deleted by the
+  retirement pass. Each of these deferrals existed only because touching the
+  Jinja page would have moved what its characterization test pinned; there is
+  no page, no macro and no test left to move. The React surface's fixes stand
+  as the only implementations.
+- **WON'T DO (for now)** — metrics are shown flat, not grouped by cook.
+  Records chain
   Startup → Smoke/Hold → Shutdown → Stop, so a session grouping is derivable;
   it was considered and cut as scope. Order is the server's insertion order,
   oldest first, matching the CSV — a page and its own export disagreeing about
   order would make the two impossible to line up.
-- **No live refresh.** The page reads once on mount. A row is written when a
+- **WON'T DO** — no live refresh; the page reads once on mount. A row is written when a
   mode ENDS and a mode lasts minutes to hours, so a poll would spend requests
   to show the same thing; a running mode's card does show `Active` and an em
   dash rather than a stale end time.
 
-#### Deferred by the tuner slices — 2026-07-28
+#### Deferred by the tuner slices — MIXED
 
 Per the standing rule below. Both flows have shipped;
 `plans/2026-07-28-react-tuner-manual.md` and `-auto.md` are the detailed
 references. What remains open:
 
-- **`blueprints/tuner/` is still live**, still renders its Jinja page, and
-  still owns `tuner.py`'s maths. Retirement waits for the general pass
-  (ruling 5), as `blueprints/metrics/` and `blueprints/admin/` do.
-- **`calc_shh_coefficients` and `temp_to_tr` still swallow every exception into
-  a bare `except:`.** The new endpoint interprets their output rather than
-  changing them: `test_page_tuner.py` pins the current return shape, and
-  `tuner.py` has other callers. `temp_to_tr` remains the documented-unreliable
-  inverse — `chart_ok` reports when it fails; nothing yet makes it fail less
-  often.
-- **`_settings_addprofile` still reports success for a profile it never
-  applied** when `apply_profile` matches no probe, and leaves the orphan behind.
-  The new `POST /api/tuner/profile` 404s before storing anything; the legacy
-  handler is untouched (it reads `request.form` off the global, so it is not
-  callable without a request context anyway).
-- **The tuner fidelity baseline captures only the pre-Start MANUAL screen** —
+- **MOOT** — ~~`blueprints/tuner/` is still live, still renders its Jinja
+  page.~~ The page ceased to exist on 2026-07-29. What survives at that path is
+  `blueprints/tuner/tuner.py`, the maths module, kept deliberately because
+  `blueprints/api_tuner/routes.py:34` imports `calc_auto_tune_status`,
+  `calc_shh_chart` and `calc_shh_coefficients` from it. It is a library now,
+  not a blueprint — `__init__.py` is three lines and registers no route.
+- **OPEN** — `calc_shh_coefficients` and `temp_to_tr` still swallow every
+  exception into a bare `except:`. Still true, and **this entry's reason for
+  not fixing them has expired.** It said `test_page_tuner.py` pins the return shape and
+  `tuner.py` has other callers; that test was deleted with the page, and the
+  only callers now are `api_tuner/routes.py` and
+  `tests/unit/tuner/test_calc_auto_tune_status.py`. The endpoint interpreting
+  their output is the whole contract, so tightening the maths is a change to
+  one caller, not to a characterized legacy page. `temp_to_tr` remains the
+  documented-unreliable inverse — `chart_ok` reports when it fails; nothing yet
+  makes it fail less often.
+- **MOOT** — ~~`_settings_addprofile` still reports success for a profile it
+  never applied.~~ Ceased to exist 2026-07-29: it lived in `blueprints/settings/`, which
+  the retirement pass deleted. `POST /api/tuner/profile`, which 404s before
+  storing anything, is now the only way to add a profile.
+- **OPEN** — the tuner fidelity baseline captures only the pre-Start MANUAL
+  screen:
   the three empty segment cards plus the Manual/Auto toggle. The Auto screen
   (reference selector + accumulation card), the curve and the save form are all
   reached only by interaction or a live session, so they are covered by unit
   tests, not the fidelity gate.
-- **The auto flow's e2e cannot reach `ready`.** A real ≥50 °F spread will not
+- **OPEN** — the auto flow's e2e cannot reach `ready`. A real ≥50 °F spread will not
   occur on a Stopped/Monitor grill during a test, so the live spec proves
   accumulation and the session lifecycle only; the `ready` selection path is
   covered by `test_api_tuner_auto.py`'s seeded twelve-sample test. Nothing
   drives the full converge-and-solve loop end to end against a real grill.
-- ~~**`history-390x844.json` keeps re-capturing with the tuner baselines.**~~
-  FIXED 2026-07-28: the `history` fidelity spec now stubs `/api/files/cookfiles`
-  (`stubs: stubCookFiles`), so the saved-cooks section renders fixture rows
+- **DONE** — ~~`history-390x844.json` keeps re-capturing with the tuner
+  baselines.~~ Fixed 2026-07-28: the `history` fidelity spec now stubs
+  `/api/files/cookfiles` (`stubs: stubCookFiles`), so the saved-cooks section
+  renders fixture rows
   instead of the demo backend's live cook files. Both history baselines are now
   byte-deterministic across captures — verified by capturing twice. This closes
   the drift the metrics and both tuner slices had been absorbing.
 
-#### Deferred by the updater slice (SHIPPED 2026-07-29)
+#### Deferred by the updater slice — OPEN
 
 The `/update` page (`specs/2026-07-29-react-updater-*`, `plans/2026-07-29-react-updater.md`)
 is scoped to the updater page itself. One piece of the Flask updater experience
 is **global chrome, not the page**, and is deliberately excluded:
 
-- **The post-update "what's new" release-notes modal is not ported.** After an
-  update, Flask sets `settings["globals"]["updated_message"]` and every page
-  shows a one-time modal on next load, rendered by `templates/base.html:165-230`
-  (`updater_message_modal` + `updater_message.js`), whose body comes from
-  `GET /update/post-message` (`_update_get_post_message`, which reads
-  `./updater/post-update-message.html` and `render_template_string`s it — a
-  template-injection surface the React port would drop, not reproduce). It is
-  **app-shell chrome triggered by a settings flag on ANY route**, not a control
-  on the updater page, so it belongs with the shell, not this slice. This is the
-  same class as the other `base.html` cross-cutting items the standing rule says
-  to surface before calling the migration done (see the base.html sweep at the
-  end of this file). The one-line "updater release-notes modal dropped" note
-  under *UI parity, minor-graded* below is the same item; this is its full
-  disposition and the reason it is shell-owned.
+- **OPEN** — the post-update "what's new" release-notes modal is not ported,
+  and since 2026-07-29 it is **not rendered anywhere at all.** Flask used to set
+  `settings["globals"]["updated_message"]` on upgrade and show a one-time modal
+  on the next load of any page, from `templates/base.html:165-230`
+  (`updater_message_modal` + `updater_message.js`), with a body from
+  `GET /update/post-message` (`_update_get_post_message`, which read
+  `./updater/post-update-message.html` and `render_template_string`d it — a
+  template-injection surface the React port would drop, not reproduce). The
+  retirement pass deleted `base.html`, the JS and the route.
 
-#### UI parity, minor-graded
+  So the state today, verified 2026-08-02: `updated_message` is still SET —
+  `_upgrade_settings` sets it on every upgrade regardless of how far the tree
+  jumps, pinned by four tests in `test_settings_migration.py` — and
+  `updater/post-update-message.html` still ships. Nothing reads either. **A
+  writer, a payload and no reader**, which is a worse resting state than the
+  deferral described: the flag now silently accumulates instead of being
+  consumed. Either build the shell modal or retire the flag and the file
+  together; leaving one end live is the option to rule out.
 
-History Stream toggle and 5 s poll vs Flask's ~1 s; chart annotations fetched
-but never drawn and disabled probes silently dropped; per-probe fill colours
-configurable but ignored; History duration is a bare number input, not a 1–480
-slider; ~~History→Metrics link dropped~~ (restored 2026-07-28 by the metrics
-slice); `display.sleep_timeout` has no control at
-all; Controller "use recommended value" buttons and metadata card dropped;
-updater release-notes modal dropped; per-setting Description dropped by
-`SelectField` and `ConfigOptionField`; secret masking not ported (API keys and
-tokens render as plain text); Flask's three dashboard error modals flattened and
-the `ui_hash` reload prompt has no counterpart; discovery results lost their
-Refresh/Close controls; `pf-section-note` and `pf-kv` have no CSS rule anywhere;
-PlatformTab's markup uses classes that do not exist.
+  Still **app-shell chrome triggered by a settings flag on ANY route**, not a
+  control on the updater page, so it belongs with the shell. Same item as the
+  one-line "updater release-notes modal dropped" under *UI parity,
+  minor-graded*; this is its full disposition.
+
+#### UI parity, minor-graded — MIXED
+
+Re-verified 2026-08-02; five of these had closed and two were half-right.
+
+**Still open, confirmed against live code:** History Stream toggle and 5 s poll
+(`HistoryPage.tsx:27`) vs Flask's ~1 s; disabled probes silently dropped;
+per-probe fill colours configurable but ignored — `line_color*` is written by
+`HistoryTab` and read by nothing in `helpers/history/`; History duration is a
+bare `NumberField` (`HistoryPage.tsx:156`), not a 1–480 slider; Controller "use
+recommended value" buttons; updater release-notes modal dropped (full
+disposition under the updater slice — it is shell chrome, not a page control);
+per-setting Description dropped by `Select` and `ConfigOptionField`, neither of
+which takes a description prop; the `ui_hash` reload prompt has no counterpart,
+though `create_ui_hash()` is still published on `/api/status`; discovery results
+lost their Refresh/Close controls.
+
+**Half-right, corrected:**
+
+- *Chart annotations fetched but never drawn* — an `annotationPlugin` exists and
+  `CookFileChart.tsx:61,98` draws mode-change markers. What remains is narrower:
+  `/history` still passes no `annotations`, which `HistoryChart.tsx:22` says in
+  its own prop comment. One page, not the feature.
+- *Controller metadata card dropped* — the description renders
+  (`ControllerTab.tsx:127`). Only the recommended-value buttons are missing.
+- *Flask's three dashboard error modals flattened* — the Flask dashboards were
+  deleted 2026-07-29, so there is nothing left to be a parity gap against. If
+  the flattening is wrong it is now a design question about React's own banners,
+  not a port.
+
+**Closed:**
+
+- ~~`display.sleep_timeout` has no control at all~~ — it is in the General tab
+  (`GeneralTab.tsx:78`), per ruling 4. Finding #45 recorded this on 2026-07-28
+  and this line was never struck. Ruling 4's *other* half — that it must
+  actually drive the DPMS behaviour — is unverified here and tracked on the
+  ruling.
+- ~~Secret masking not ported~~ — `SecretField.tsx` shipped 2026-07-29 across
+  all six credential fields, and is written up under *Enhancements accepted
+  beyond Flask parity*. Recorded there as shipped and here as open, in the same
+  file.
+- ~~`pf-section-note` and `pf-kv` have no CSS rule anywhere~~ — `.pf-kv` and
+  `.pf-kv-row` have rules (`settings.css:383-395`); `.pf-section-note` is
+  *deliberately* unstyled and allowlisted. This is finding #22's ruling, already
+  written out above.
+- ~~PlatformTab's markup uses classes that do not exist~~ — it uses five
+  (`pf-btn`, `pf-kv`, `pf-kv-row`, `pf-section-note`, `pf-settings-tab`) and
+  `tests/unit/styleCoverage.test.ts` now fails the build if any class on a
+  covered surface has no rule. Its `UNSTYLED` allowlist is asserted for EXACT
+  equality, and a second test fails if an entry on it is unused or has gained a
+  rule — so the allowlist cannot rot into the thing this line was complaining
+  about.
 
 Wizard specifically: no confirmation summary at Finish; install output never
 rendered, so a failed install leaves the user blind; Finish error detail (422
@@ -1494,64 +1733,116 @@ the last step rather than on entry; per-step explanatory copy dropped; strictly
 Back/Next with inert step indicators; tables have no column headers and device
 "Type" shows `friendly_name` rather than the module id.
 
-#### Verification gaps
+#### Verification gaps — MIXED
 
-- The `Basic` dashboard (795 lines) has never been compared by anyone.
-- `probeconfig.js` plumbing and `probeReducer.ts` validation semantics never
-  verified against each other.
-- No 800×480 or phone-viewport coverage for the wizard.
-- Three wizard surfaces unreachable by e2e — they rest on the human eye alone.
-- Never checked: WCAG contrast, accent swaps, Barlow-unavailable rendering.
-- No unconsumed-field regression check exists.
-- `/scan`'s `vid`/`pid` are unwired — Flask hex-parses them, the React endpoint
-  does not.
-- `/admin/restart` and `/admin/reboot` are same-origin and hit the dev server
-  rather than Flask. **Still open after the 2026-07-27 admin slice**, which
-  deliberately did not repoint them: `POST /api/admin/system` now exists and is
-  what these should call, but the wizard's own links were out of that slice's
-  scope.
-- No e2e coverage of Exit Setup / `POST /api/wizard/cancel`.
+Re-verified 2026-08-02. Four of these described code that no longer exists.
+
+**Still open:**
+
+- No unconsumed-field regression check exists — nothing in the tree asserts that
+  a setting the schema defines is read by some surface.
+- No e2e coverage of Exit Setup / `POST /api/wizard/cancel`. Unit coverage
+  exists (`WizardExitRoundTrip.test.tsx`, `WizardShell.test.tsx`,
+  `wizardApi.test.ts`); no spec drives it in a browser.
+- No **800×480** coverage for the wizard. The `panel` project matches
+  `dashboard-panel.spec.ts` only, so the grill's own screen is gated for the
+  dashboard and nothing else.
+- Accent swaps and Barlow-unavailable rendering: never checked. (WCAG contrast
+  is no longer in this list — see below.)
 - The reboot-modal flow has never run on real Pi hardware, and the assumption
   that `raspi-config nonint do_onewire 0` writes `dtoverlay=w1-gpio` is
   unverified.
 
-#### Rulings — 2026-07-26
+**Corrected:**
+
+- *No phone-viewport coverage for the wizard* — there is: `pages-fidelity`
+  captures the wizard at 390×844 as well as 1280×720, and
+  `wizard-probes-390x844` is one of the baselines the 2026-07-29 recapture
+  diagnosed. Only the 800×480 half of this line survives, above.
+- *Three wizard surfaces unreachable by e2e — they rest on the human eye alone*
+  — they no longer rest on the eye alone. `CHROME_PROBES` in `pageSpecs.ts`
+  renders each `role="dialog"` surface synthetically against a committed
+  baseline, which proves the rules resolve and to WHAT. It still proves nothing
+  about how they look in situ; that remains the human checkpoint's job.
+- *Never checked: WCAG contrast* — ruling 7 measured it when it collapsed the
+  two bespoke ramps onto the Qt tokens: the change costs ~2 points of text
+  contrast, leaves everything at clear AA, and removed the app's only sub-AA
+  value. Not a systematic audit, but no longer "never checked".
+
+**Closed — the code these describe is gone:**
+
+- ~~The `Basic` dashboard (795 lines) has never been compared by anyone.~~
+  Deleted 2026-07-29, and ruling 1 had already said in terms not to open this as
+  a gap again. It was re-opened here anyway, three lines above the ruling
+  forbidding it.
+- ~~`probeconfig.js` plumbing vs `probeReducer.ts` validation semantics.~~
+  `probeconfig.js` went with `static/js/` in the retirement pass; there is no
+  second implementation left to reconcile against.
+- ~~`/scan`'s `vid`/`pid` are unwired.~~ Wired: `wizardApi.ts::scan` passes them
+  through from the manifest as written (`"0x2a19"`), and
+  `common/usb_serial.py::discover_usb_serial_devices` coerces via `_as_usb_id`,
+  which accepts an int or a hex string and raises on a malformed one. The
+  comment on the client explains that typing them as `number` is precisely what
+  made them get dropped before.
+- ~~`/admin/restart` and `/admin/reboot` are same-origin and hit the dev server
+  rather than Flask.~~ The wizard POSTs `/api/admin/system` now — see the
+  events+logs deferral above, where the same item is also struck.
+
+#### Rulings
 
 These were open questions. They are now answered; the entries they resolve are
 struck from the list below rather than left to be re-asked.
 
-1. **React ships ONE dashboard, permanently.** `hidden_cards`,
+**A ruling is a DECISION, not a status.** Deciding what to build is not
+building it, and three of these were quietly read as "handled" for that reason.
+Each therefore carries its own implementation status: rulings 1, 2, 5, 6 and 8
+need nothing further, ruling 3 is implemented, ruling 7 is implemented, and
+**ruling 4 is only half satisfied**.
+
+1. **DECIDED, nothing to build. React ships ONE dashboard, permanently.** `hidden_cards`,
    `touch_screen_mode`, the dashboard picker and the whole `Basic` dashboard
    (795 lines) are dropped deliberately, not pending. Do not port them, and do
    not open "the Basic dashboard has never been compared" as a gap again — there
    is nothing to compare it to.
-2. **`/mobile` will die.** Stop treating it as a migration target. It is not
-   "may be obsolete"; it is going away. The blueprint stays only until the
-   general retirement in ruling 5.
-3. **Settings edits must survive a tab switch.** Today SmartStart/PWM table
-   edits are lost on navigation, where Flask persisted immediately. Either
-   answer is acceptable — preserve across the switch, or save immediately.
-   **Preserving is the better fit**: saving immediately contradicts the per-tab
-   `SaveBar` that already shipped and would make every keystroke a control
-   write. Losing the edit silently is the only outcome ruled out.
-4. **`display.sleep_timeout` belongs in the General tab**, and it must actually
-   drive the DPMS behaviour — see [[project_qt_display_dpms_sway]]: cage's
-   `wlr-randr --off` broke touch-wake on DSI+HDMI, blanking is disabled in the
-   interim, and the next step there is imperative DPMS under sway/labwc. The
-   React control and that work are the same feature; a control that renders but
-   does nothing is worse than no control.
-5. **No Flask page is retired until everything else is finished.** `pellets`,
-   `probeconfig` and `cookfile` all now have shipped React replacements and all
-   three Flask surfaces stay live. Retirement is one deliberate pass at the end,
-   not a trailing step of each slice.
-6. **Renaming a probe must not leave stale references.** This overrules item
-   9a.1's conservative "match `wizard.py` exactly" choice. `apply_probe_map`
-   regenerates only `history_page.probe_config`; a rename therefore leaves
-   `control["notify_data"]` and `settings["recipe"]["probe_map"]` pointing at
-   the old label. Fix it in `apply_probe_map`, and fix `run_wizard` too — the
-   installer has the same hole, which is why matching it looked safe.
-7. **Qt wins for `ok`/`warn`/`danger` everywhere — both bespoke ramps are
-   gone.** Two React-only colour sets had no counterpart in `Theme.qml` and so
+2. **REVERSED — ~~`/mobile` will die~~.** Overtaken 2026-07-29. The premise
+   was that `/mobile` was a page awaiting retirement. It is not a page at all:
+   `blueprints/mobile/` registers no HTTP route, only Socket.IO, and it is the
+   live feed the React dashboard itself consumes. The retirement pass therefore
+   kept it, registered and untouched, and killing it would take React's own data
+   channel with it. The half of this ruling that stands: **stop treating
+   `/mobile` as a migration target** — it never was one.
+3. **DECIDED and IMPLEMENTED. Settings edits must survive a tab switch**
+   (finding #46): drafts are held on `SettingsShell` and survive tab navigation. The
+   ruling chose preserving over saving-immediately, because saving immediately
+   contradicts the per-tab `SaveBar` and would make every keystroke a control
+   write. Losing the edit silently was the only outcome ruled out, and it no
+   longer happens.
+4. **DECIDED, HALF IMPLEMENTED. `display.sleep_timeout` belongs in the General
+   tab.** The
+   control shipped (`GeneralTab.tsx:78`, writing `display.sleep_timeout`). The
+   ruling's other requirement, that it **actually drive the DPMS behaviour**, is
+   not verified: see [[project_qt_display_dpms_sway]] — cage's `wlr-randr --off`
+   broke touch-wake on DSI+HDMI, blanking is disabled in the interim, and the
+   next step is imperative DPMS under sway/labwc. **A control that renders but
+   does nothing is worse than no control**, so this ruling is not satisfied by
+   the field existing. This is the open half of the item struck from *UI parity,
+   minor-graded* above.
+5. **CARRIED OUT. ~~No Flask page is retired until everything else is
+   finished~~** — the pass landed 2026-07-29. The one deliberate pass this ruling called for
+   happened: 14 page blueprints deregistered and deleted, the shared templates
+   and legacy `static/{css,font,js}` with them. Six deferrals elsewhere in this
+   file were written as "waits for the general pass (ruling 5)"; all are now
+   struck. Cite this ruling only as history — nothing is waiting on it.
+6. **DECIDED and IMPLEMENTED. Renaming a probe must not leave stale
+   references** — more completely than the ruling asked.
+   `common/defaults.py::set_probe_map()` rebuilds
+   `history_page.probe_config`, `settings["recipe"]["probe_map"]`,
+   `control["notify_data"]` **and** `dashboard[*].custom.hidden_cards` (a probe
+   card's id IS its label), and BOTH writers go through it — the live path and
+   `run_wizard`, so the installer's identical hole is closed too. See item 9a.1.
+7. **DECIDED and IMPLEMENTED. Qt wins for `ok`/`warn`/`danger` everywhere —
+   both bespoke ramps are gone.** Two React-only colour sets had no counterpart
+   in `Theme.qml` and so
    were never covered by the `themeTokens` guard: a LIGHT ramp for text on
    tinted badges (`#8fe09a`/`#ffce6a`/`#ff8b82`, 24 sites in 7 stylesheets) and
    a MUTED set for the pellet meter (`#6cc070`/`#e0a44a`/`#d05a4e`, 4 sites) —
@@ -1566,8 +1857,9 @@ struck from the list below rather than left to be re-asked.
    *Leftover, deliberately not swept:* `tools/qt_dashboard_preview.qml:409,572,573`
    still hold the light ramp. It is a standalone dev preview with its own
    self-contained palette that never imports `Theme.qml`, so it was out of scope.
-8. **The QML kiosk is NOT a web-react target** (2026-07-28). The Qt Quick (QML)
-   UI is a separate on-device front-end — a fullscreen Wayland kiosk on the Pi's
+8. **DECIDED, nothing to build. The QML kiosk is NOT a web-react target.**
+   The Qt Quick (QML) UI is a separate on-device front-end — a fullscreen
+   Wayland kiosk on the Pi's
    attached touchscreen (`display/qml/`), sharing only the SQLite datastore and
    command channel with the web tier. The React app was never going to
    reimplement its screens (Splash, Menu, Keypad, Hold/Notify overlays, QR,
@@ -1578,10 +1870,17 @@ struck from the list below rather than left to be re-asked.
    they were a category error the react spike plan introduced, not real gaps.
    The `tests/ui/test_qtquick_*.py` specs remain the kiosk's own net.
 
-#### Still needing a human
+#### Still needing a human — NONE OUTSTANDING
 
-Nothing. Every question in this group was answered on 2026-07-26; see the
-rulings above.
+No open questions. The design questions in this group were answered by the
+rulings above, and the two visual checkpoints that outlived them — item 1's
+Task 8 and item 2's responsive layout — were signed off by the owner on
+2026-08-02.
+
+Item 1's Task 8 item 7 (the no-photo fallback) was **not performed**, because
+it is unreachable: all 62 manifest modules have images. That is a skipped check,
+not an outstanding one — it needs a manifest without a photo before anyone can
+look at it.
 
 ~~Whether React's client-side clamps are deleted now that the schema enforces
 bounds.~~ **Ruled: the clamps stay.** The schema is authoritative and remains
@@ -1597,7 +1896,9 @@ on change makes a bounded field untypeable (`min={20}` turns the intermediate
 `settings/fields/NumberField.tsx:41-45`, `settings/RangeProfileTable.tsx:86,102,113`,
 `settings/tabs/StartupTab.tsx:111,115`.
 
-#### Schema and toolchain follow-ups
+#### Schema and toolchain follow-ups — OPEN
+
+All of the following are open; none has been started.
 
 S3 defaults consolidation and typed deep-path `setPath` helpers; per-controller
 schema generation from `controllers.json`; `additionalProperties` stripping in
@@ -1606,7 +1907,7 @@ scoped; mapping a dotted error path to the offending widget; the four 2b-1
 follow-ups (`waitFor`, `read*` fallback defaults, `aria-describedby`,
 float-vs-int audit).
 
-**Nothing PiFire persists records the schema it was written against — 2026-08-01.**
+**OPEN — nothing PiFire persists records the schema it was written against.**
 `wizard/wizard_manifest.json` has no version field at all (top-level keys are
 `boards`, `modules`, `probe_config_options`), and neither does the
 `wizard:install` draft blob. The only version anywhere is
@@ -1634,16 +1935,30 @@ on every persisted blob keyed by manifest-shaped names, so staleness is a
 comparison rather than a heuristic, and so a settings-shape migration can be
 gated on the shape's own version instead of on the release build number.
 
-Tailwind prerequisites, all now owned by `plans/2026-07-26-tailwind-v4-migration.md`:
-no browserslist pinned; unverified whether Biome's CSS parser accepts
-`@theme`/`@apply`/`@import "tailwindcss"`; **no visual baselines exist for any
-page at either viewport**; dynamic class names are invisible to Tailwind's
-scanner and the required safelist note does not exist.
+~~Tailwind prerequisites, all now owned by
+`plans/2026-07-26-tailwind-v4-migration.md`: no browserslist pinned; unverified
+whether Biome's CSS parser accepts `@theme`/`@apply`/`@import "tailwindcss"`;
+**no visual baselines exist for any page at either viewport**; dynamic class
+names are invisible to Tailwind's scanner and the required safelist note does
+not exist.~~ — **all four resolved by the migration shipping** (item 5,
+2026-07-27), which is what "owned by the plan" was always going to mean. A
+browserslist is pinned in `package.json:7`, with `rsbuild.config.ts:12` stating
+outright that targets are pinned there rather than left to a default; Biome
+parses the at-rules (the whole app is authored with them and `bun run lint` is a
+gate); there are **61** baseline files across both viewports; and the dynamic
+names are handled — `CHROME_PROBES` in `pageSpecs.ts` carries the
+runtime-constructed `pf-badge-${tone}` pair with a committed baseline and a
+comment explaining that Tailwind's scanner cannot see them.
 
-### 11. Recipes slice — what it deliberately does NOT do
+### 11. Recipes slice — what it deliberately does NOT do — WON'T DO unless asked
 
 Recorded here per the standing rule, rather than left in
 `plans/2026-07-27-react-recipes.md`.
+
+**None of these is owed work.** Each is a boundary the slice chose and can
+defend; several are places where the React surface is deliberately STRICTER
+than Flask. Item 10 is the exception — it describes something that has since
+happened on its own.
 
 1. **No recipe comments panel.** Human ruling, 2026-07-27, taken before a line
    was written. `comments.json` is in every `.pfrecipe` and Flask's
@@ -1682,9 +1997,12 @@ Recorded here per the standing rule, rather than left in
    `file_mgmt.recipes.RECIPE_FOLDER`**, not `current_app.config`, so a fixture
    must patch both. Nothing in the new surface depends on it; it is a trap for
    the next person.
-10. **The Flask `/recipes` page stays live**, along with its
-    characterization suite. Retirement is one deliberate pass at the end
-    (ruling 5).
+10. ~~**The Flask `/recipes` page stays live**, along with its
+    characterization suite.~~ **RETIRED 2026-07-29** with the other 13 page
+    blueprints. `blueprints/recipes/` — including the unvalidated
+    `RECIPE_FOLDER + filename` concatenation that item 6 above records as the
+    reason none of its routes were reused — is deleted, and its
+    characterization suite with it.
 
 ---
 
@@ -1753,9 +2071,17 @@ Recorded here per the standing rule, rather than left in
   demo-server projects stub every fetch and are meant to run without PiFire.
 - **Playwright needs the main checkout or an explicit DB path**, and the suite
   runs `workers: 1` because every spec drives one shared, stateful PiFire.
-- The Playwright characterization suite covers all 17 Flask blueprint pages
+- ~~The Playwright characterization suite covers all 17 Flask blueprint pages
   (`docs/web-test-findings-2026-07-17.md`) — it is the safety net for each
-  page's migration.
+  page's migration.~~ **The net came down with the pages, 2026-07-29.** It had
+  done its job: every page it characterized has a shipped React replacement, and
+  the retirement pass deleted or surgically trimmed each spec only after
+  confirming coverage on the kept surface — including the admin-restore
+  path-traversal containment guarantee, which moved to
+  `test_api_admin_backups.py` rather than being dropped. `tests/web/` retains
+  exactly one `test_page_*`: `test_page_api.py`. Read
+  `docs/web-test-findings-2026-07-17.md` as a historical record of what the
+  Flask UI did, not as a description of a running suite.
 - `api` / `api_wizard` are the JSON backends the React app consumes, not pages
   to migrate.
 
@@ -1801,8 +2127,15 @@ the point is that it exists here at all.
    Global navigation was missing from this file entirely for months: every plan
    was scoped to one surface and ended at "register the route in App.tsx", and
    nobody wrote the task for how a user gets from one page to another. Before
-   calling the migration done, ask what lives in `templates/base.html` and in the
-   app's chrome that no page-shaped item would ever cover.
+   calling the migration done, ask what lives in the app's chrome that no
+   page-shaped item would ever cover.
+
+   `templates/base.html` used to be the place to read for that answer, and it
+   was deleted on 2026-07-29 — so the question now has to be asked from the
+   React side (`components/shell/`) and from git history. The post-update
+   release-notes modal is the one known survivor of that sweep: base.html was
+   its only implementation, and deleting the file did not close the item. Assume
+   there are others.
 2. **Tests that assert text and roles do not assert that a page looks like
    anything.** The wizard shipped with no CSS and a full green suite.
 3. **Verifying a feature by calling its API is not verifying the feature.** The
