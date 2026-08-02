@@ -254,3 +254,27 @@ def test_on_manual_output_reports_the_resolved_speed_for_an_accepted_pwm_change(
 
 def test_on_manual_output_default_is_a_no_op():
     assert _make_mode()._on_manual_output("auger", True) is None
+
+
+def test_last_now_defaults_to_zero_before_any_tick():
+    assert _make_mode()._last_now == 0.0
+
+
+def test_apply_manual_overrides_refreshes_last_now_unconditionally():
+    """`_last_now` is the loop-consistent `now` a mode's `_on_manual_output`
+    override reads (the hook has no `now` parameter of its own -- see its
+    docstring). It must be refreshed even when no manual change is pending:
+    `run()` samples `now` once per iteration and passes that same value to
+    `_apply_manual_overrides` and `on_tick`, so gating the refresh behind a
+    pending change would let it go stale on every no-op tick."""
+    mode = _make_mode()
+    control = mode.control
+    control["manual"]["change"] = False
+
+    mode._apply_manual_overrides(
+        control,
+        now=123.0,
+        current_output_status={"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100},
+    )
+
+    assert mode._last_now == 123.0

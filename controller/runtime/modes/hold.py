@@ -99,11 +99,6 @@ class HoldMode(ControlMode):
         # later in the shared pre-loop) -- like StartupMode, take our own
         # ctx.clock.now() reading here rather than depending on that later value.
         self.state.controller.cycle_start = self.ctx.clock.now()
-        # `_on_manual_output` has no `now` of its own (it fires from
-        # `_apply_manual_overrides`, one call before `on_tick` in the same
-        # iteration) -- cache the loop's own notion of now here and refresh it
-        # every tick, rather than let that hook take a fresh clock reading.
-        self._last_now = self.state.controller.cycle_start
 
         if self._runner is not None:
             self._runner.set_output(
@@ -127,7 +122,6 @@ class HoldMode(ControlMode):
     def on_tick(self, now, ptemp, current_output_status):
         import control as _control
 
-        self._last_now = now
         ctx = self.ctx
         control = self.control
         settings = self.settings
@@ -225,7 +219,10 @@ class HoldMode(ControlMode):
                     ratio=0.0,
                     source=classify_output_source(
                         lid_open=True,
-                        manual_override_active=self.state.manual_override["auger"] > now,
+                        # An override expiring at exactly `now` is still live, matching
+                        # the `< now` reset convention in base.py's `_auger_cycle_tick`
+                        # and the `< now` gate on Hold's own per-tick report above.
+                        manual_override_active=self.state.manual_override["auger"] >= now,
                         fan_assist_active=self.state.fan.assist,
                     ),
                     timestamp=now,
@@ -254,7 +251,9 @@ class HoldMode(ControlMode):
                         ratio=0.0,
                         source=classify_output_source(
                             lid_open=True,
-                            manual_override_active=self.state.manual_override["auger"] > now,
+                            # See the detection branch above: `>= now` matches the
+                            # `< now` expiry convention used elsewhere in this file.
+                            manual_override_active=self.state.manual_override["auger"] >= now,
                             fan_assist_active=self.state.fan.assist,
                         ),
                         timestamp=now,
@@ -354,10 +353,13 @@ class HoldMode(ControlMode):
         self._runner.set_output(
             AppliedOutput(
                 ratio=1.0 if output else 0.0,
+                # lid_open/fan_assist_active are inert here: manual_override_active=True
+                # already outranks both in classify_output_source's precedence, so the
+                # actual lid/fan state can never change the result.
                 source=classify_output_source(
-                    lid_open=self.state.lid.open_detected,
+                    lid_open=False,
                     manual_override_active=True,
-                    fan_assist_active=self.state.fan.assist,
+                    fan_assist_active=False,
                 ),
                 timestamp=self._last_now,
             )

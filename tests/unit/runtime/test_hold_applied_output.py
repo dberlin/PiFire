@@ -190,12 +190,71 @@ def test_manual_changes_to_other_actuators_report_nothing(hold_cycle):
     assert runner.applied == []
 
 
-def test_manual_override_timestamp_uses_the_ticks_now_not_a_fresh_clock_read(hold_cycle):
-    runner = FakeControllerRunner(period=999).script([_output(0.5)])
+def test_manual_override_timestamp_uses_last_now_not_a_fresh_clock_read(hold_cycle):
+    """`_last_now` is refreshed by `ControlMode._apply_manual_overrides` (tested
+    at that level in test_control_mode_base.py); here we only pin that the hook
+    itself reads `self._last_now` rather than taking its own clock reading --
+    ctx.clock (a ManualClock) stays at its default 0.0 for the whole test, so a
+    fresh read would report 0.0, not the tick this override actually belongs to."""
+    runner = FakeControllerRunner(period=999)
     hold = hold_cycle(runner)
     hold.setup()
-    hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
+    hold._last_now = 100.0  # what _apply_manual_overrides would have set this tick
     runner.applied.clear()
     hold._on_manual_output("auger", True)
     (applied,) = runner.applied
     assert applied.timestamp == 100.0
+
+
+def test_per_tick_during_an_active_pause_is_lid_open(hold_cycle):
+    runner = FakeControllerRunner(period=0.0).script([_output(0.5), _output(0.5)])
+    hold = hold_cycle(runner)
+    hold.setup()
+    hold.control["lid_open_toggle"] = True
+    hold.on_tick(now=100.0, ptemp=225.0, current_output_status=_off())
+    assert hold.state.lid.open_detected is True
+    runner.applied.clear()
+    hold.on_tick(now=150.0, ptemp=225.0, current_output_status=_off())  # past the control interval
+    (applied,) = runner.applied
+    assert applied.source is OutputSource.LID_OPEN
+    assert applied.ratio == hold.settings["cycle_data"]["u_min"]
+
+
+def test_lid_open_toggle_reports_the_controllers_request(hold_cycle):
+    runner = FakeControllerRunner(period=999)
+    hold = hold_cycle(runner)
+    hold.setup()
+    hold.control["lid_open_toggle"] = True
+    hold.state.controller.output = 0.5
+    runner.applied.clear()
+    hold.on_tick(now=100.0, ptemp=225.0, current_output_status=_off())
+    (lid_report,) = [a for a in runner.applied if a.source is OutputSource.LID_OPEN]
+    assert lid_report.requested == 0.5
+
+
+def test_lid_open_detection_treats_an_override_expiring_at_exactly_now_as_still_live(hold_cycle):
+    runner = FakeControllerRunner(period=999)
+    hold = hold_cycle(runner)
+    hold.setup()
+    hold.state.target_temp_achieved = True
+    hold.settings["cycle_data"]["LidOpenDetectEnabled"] = True
+    hold.control["primary_setpoint"] = 225.0
+    # Matches base.py's own `< now` expiry convention (an override expiring at
+    # exactly `now` is still live) and the per-tick report's same boundary.
+    hold.state.manual_override["auger"] = 100.0
+    runner.applied.clear()
+    hold.on_tick(now=100.0, ptemp=100.0, current_output_status=_off())
+    (report,) = [a for a in runner.applied if a.source in (OutputSource.LID_OPEN, OutputSource.MANUAL_OVERRIDE)]
+    assert report.source is OutputSource.MANUAL_OVERRIDE
+
+
+def test_lid_open_toggle_treats_an_override_expiring_at_exactly_now_as_still_live(hold_cycle):
+    runner = FakeControllerRunner(period=999)
+    hold = hold_cycle(runner)
+    hold.setup()
+    hold.control["lid_open_toggle"] = True
+    hold.state.manual_override["auger"] = 100.0
+    runner.applied.clear()
+    hold.on_tick(now=100.0, ptemp=225.0, current_output_status=_off())
+    (report,) = [a for a in runner.applied if a.source in (OutputSource.LID_OPEN, OutputSource.MANUAL_OVERRIDE)]
+    assert report.source is OutputSource.MANUAL_OVERRIDE

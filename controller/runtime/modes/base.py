@@ -61,6 +61,12 @@ class ControlMode:
     """
 
     name: Mode | str = ""
+    # Loop-consistent `now`, refreshed at the top of `_apply_manual_overrides`
+    # (the same value `run()` will go on to pass to `on_tick` this iteration).
+    # `_on_manual_output` has no `now` of its own; it reads this instead of
+    # taking a fresh clock reading, so a manual report never sorts after the
+    # tick reports it actually preceded (Task 6's runner replays by timestamp).
+    _last_now: float = 0.0
 
     def __init__(self, ctx, state):
         self.ctx = ctx
@@ -412,6 +418,7 @@ class ControlMode:
         and self.state.manual_override in place."""
         import control as _control  # module global: eventLogger
 
+        self._last_now = now
         ctx = self.ctx
         mode = self.name
         grill_platform = self.grill
