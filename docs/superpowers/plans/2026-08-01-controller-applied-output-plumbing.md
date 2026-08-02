@@ -2706,15 +2706,25 @@ for key in sorted(base):
 nb = json.load(open("docs/superpowers/experiments/_net_vs_nlp_baseline.json"))
 na = json.load(open("docs/superpowers/experiments/_net_vs_nlp_after.json"))
 for b, a in zip(nb, na):
-    print(f"replay seed{b['seed']}: rms_all {b['rms_all']:.3f} -> {a['rms_all']:.3f} | "
-          f"rms_lid {b['rms_lid']} -> {a['rms_lid']} | max_lid {b['max_lid']} -> {a['max_lid']}")
+    print(f"replay seed{b['seed']}: excursions {b['n_excursion_lid']} -> {a['n_excursion_lid']} "
+          f"(whole run {b['n_excursion']} -> {a['n_excursion']}, "
+          f"worst below Q_min {b['worst_below']:.3f} -> {a['worst_below']:.3f}) | "
+          f"rms_all_raw_warm {b['rms_all_raw_warm']:.3f} -> {a['rms_all_raw_warm']:.3f}")
 EOF
 ```
 
-The gate is **relative**, and the agreement gate binds:
+The gate is **relative**, and the agreement gate binds. Read the quantities in this order:
 
-- **Replay disagreement did not grow** (`rms_all`, `max_all`, `rms_lid`, `max_lid` all at or below baseline) → the net ships unchanged. Record the numbers that justified not retraining and **skip Task 15**.
-- **Replay disagreement grew** → go to Task 15. Do not reason about whether the matrix "looks fine anyway"; the net is only worth having while it approximates the NLP.
+- **Primary: excursion count in the lid window.** The number of net *raw* outputs falling outside `[Q_min, Q_max]` while the auger is paused. Baseline is exactly `0` on every seed, so any nonzero after-value is the predicted failure appearing, not noise. This is the decision.
+- **Secondary: `rms_all_raw_warm`.** Raw difference, warm window only. Use it to size a change the excursion count already flagged, not to overrule a clean excursion count.
+- **Context only: the whole-run and clamped figures.** `max_all` over the whole run is dominated by the ignition transient — its `argmax` sits about 45 s in, four times anything the controller does afterwards — so it compares startups, not policies. Do not gate on it.
+
+Then:
+
+- **Excursion count still zero in the lid window and `rms_all_raw_warm` at or below baseline** → the net ships unchanged. Record the numbers that justified not retraining and **skip Task 15**.
+- **Either grew** → go to Task 15. Do not reason about whether the matrix "looks fine anyway"; the net is only worth having while it approximates the NLP.
+
+Do not substitute the clamped difference for the raw one anywhere in this comparison. Both policies are bounded by the same box, so clamping first makes a net demanding `-63` against an NLP asking `5.0` read as perfect agreement — which is precisely the condition this gate exists to catch.
 
 If the matrix regresses while the replay holds, that is a different finding — the applied-duty change itself hurt closed-loop performance — and it goes back to the user rather than being tuned around.
 

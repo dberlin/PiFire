@@ -508,18 +508,47 @@ a replay experiment, cheap enough to run twice:
 1. Run the GrillSim lid-open scenario with `policy: nlp`, logging every
    `(x_hat, u_prev, set_point_c)` triple the policy was asked about along with
    the `Q` the NLP returned.
-2. Replay those triples through `NetPolicy.firing_rate` and report
-   `|Q_net - Q_nlp|` -- RMS and max, over the whole run and over the lid-open
-   segment separately, so a localized blowup is not averaged into nothing.
+2. Replay those triples through the net and report `|Q_net - Q_nlp|` -- RMS and
+   max, over the whole run and over the lid-open segment separately, so a
+   localized blowup is not averaged into nothing.
 3. Do this on unmodified code first, then again after `set_output` lands.
+
+Two refinements are not optional, because measurement showed the naive form of
+each reports the wrong thing.
+
+**Compare before the clamp.** `firing_rate` forces its answer into
+`[Q_min, Q_max]`, and the NLP is bounded by the same box, so comparing the two
+returned values hides exactly the failure being looked for -- a net demanding
+`-63` against an NLP asking `5.0` reads as perfect agreement. The comparison
+runs against the net's unclamped output. The clamped difference is worth
+reporting too, as what the plant would actually experience, but it is not the
+acceptance quantity.
+
+**Exclude the ignition transient.** The largest pointwise disagreement in a cold
+run lands about 45 seconds in, and it is four times anything the controller does
+afterwards; including it means comparing startups rather than policies. Metrics
+that feed the decision come from a warm window, with the cutoff derived from
+when the run settles rather than hard-coded.
+
+**The primary quantity is an excursion count, not an RMS.** Count the net's raw
+outputs that fall outside `[Q_min, Q_max]`, whole-run and lid-window, with the
+worst magnitude on each side. This is a far better instrument than the RMS it
+replaces: it reads exactly zero in the lid window on unmodified code across
+every seed, and the same measurement on a run where the net had genuinely gone
+out of distribution showed demands of `-63` to `-38`. A hard-zero null with an
+enormous signal beats a noisy average -- the lid-window RMS carries a 6%
+seed-to-seed spread on 24 samples, and its max carries 14%, so a small real
+change is indistinguishable from seed noise, and because the comparison is not
+paired a null or negative delta cannot be interpreted at all. Warm-window
+`rms_all` on the raw difference stays as the secondary quantity.
 
 The gate is relative, for the same reason the GrillSim bar is no-regression: an
 absolute threshold invented here would be a number to tune the test against. The
-pre-change disagreement is the baseline, and the post-change disagreement must
-not exceed it. Reporting both is the deliverable either way -- the pre-change
-number is the first honest measurement of how far the shipped net drifts from
-the NLP during a disturbance, and it is worth having on the record regardless of
-what it says about this change.
+pre-change measurement is the baseline, and the post-change measurement must not
+exceed it. Reporting both is the deliverable either way -- the pre-change number
+is the first honest measurement of how far the shipped net drifts from the NLP
+during a disturbance, and it is worth having on the record regardless of what it
+says about this change.
 
 **If the disagreement grows, retraining alone will not fix it.** Regenerating
 from the current sampler produces another net that has never seen a pause. The
