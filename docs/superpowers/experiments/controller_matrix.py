@@ -8,12 +8,22 @@ during a pause, and reports the applied duty through `set_output` when the
 controller has that capability, so the same harness measures code from before
 and after applied-output feedback exists.
 
-A `lid_open` window is a physically open lid: the chamber leaks heat to ambient
-(`GrillSim.step(lid_open=True)`), the fan stops, and the auger is pinned as Hold
-pins it. That is the shape of Hold's manual `lid_open_toggle` path, which can
-begin at setpoint; the automatic detector instead arms only once the chamber has
-already fallen `LidOpenThreshold` percent below it, and the excursion this
-scenario produces is deep enough to cross that trigger.
+A `lid_open` window drives two independent things, as production does:
+
+* the physical lid, open for the whole window, leaking chamber heat to ambient
+  (`GrillSim.step(lid_open=True)`); and
+* Hold's actuator pause, which starts when the lid opens and runs
+  `LidOpenPauseTime` seconds (`hold.py:265`, `hold.py:296`) -- the fan stops and
+  the auger is pinned to `u_min` (`hold.py:171-173`). Hold releases the pause on
+  the timer (`hold.py:269-271`) whether or not the lid is still open, so a window
+  longer than the pause ends with the controller back at full authority while the
+  chamber is still losing heat.
+
+The pause begins at the instant the lid opens, which is the shape of Hold's
+manual `lid_open_toggle` path and can happen at setpoint; the automatic detector
+instead arms only once the chamber has already fallen `LidOpenThreshold` percent
+below it, and the excursion this scenario produces is deep enough to cross that
+trigger.
 """
 
 import argparse
@@ -29,11 +39,16 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
+from common.defaults import default_settings  # noqa: E402
 from controller.grill_sim import GrillSim  # noqa: E402
 
 OUT = "./docs/superpowers/experiments/_matrix_baseline.json"
 
 CYCLE_DATA = {"HoldCycleTime": 20, "u_min": 0.15, "u_max": 0.9, "PMode": 2}
+
+# How long Hold holds the actuators after a lid event, from the same setting
+# production reads, so the harness tracks a user's configured pause.
+LID_PAUSE_S = default_settings()["cycle_data"]["LidOpenPauseTime"]
 
 CONTROLLER_CONFIGS = {
     "pid_sp": {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010},
@@ -52,7 +67,9 @@ class Scenario:
     duration_s: int
     # (start_second, setpoint_F); the first entry must start at 0
     setpoints: list = field(default_factory=list)
-    # (start_second, duration_s) windows where Hold would pin the auger off
+    # (start_second, duration_s) windows where the lid is physically open. The
+    # actuator pause each one triggers is derived, and is LID_PAUSE_S long
+    # regardless of how long the lid stays open.
     lid_open: list = field(default_factory=list)
 
 
@@ -75,14 +92,35 @@ def _setpoint_at(scenario, t):
 
 
 def _lid_open_at(scenario, t):
+    """The lid is physically open, so the chamber is leaking heat to ambient.
+    Hold has no notion of this; it only ever sees the temperature."""
     return any(start <= t < start + dur for start, dur in scenario.lid_open)
 
 
-def _lid_open_start_at(scenario, t):
-    """True on the single tick a lid-open window begins -- the instant
-    hold.py:247-264 forces the auger off and reports one AppliedOutput(0.0),
-    as distinct from the rest of the pause, which keeps cycling at u_min."""
+def _lid_paused_at(scenario, t):
+    """Hold is holding the actuators. The pause is a timer armed when the lid
+    opens (`hold.py:296`) and cleared LID_PAUSE_S later (`hold.py:269-271`),
+    independent of whether the lid is still open."""
+    return any(start <= t < start + LID_PAUSE_S for start, _ in scenario.lid_open)
+
+
+def _lid_pause_start_at(scenario, t):
+    """True on the single tick a pause begins -- the instant hold.py:247-264
+    forces the auger off and reports one AppliedOutput(0.0), as distinct from
+    the rest of the pause, which keeps cycling at u_min."""
     return any(start == t for start, _ in scenario.lid_open)
+
+
+def _recovery_s(err_from_lid):
+    """Seconds from the lid opening until the chamber, having left the 5 F
+    band around setpoint, is back inside it. 0 if it never left, None if the
+    run ends before it returns."""
+    outside = np.flatnonzero(np.abs(err_from_lid) > 5.0)
+    if outside.size == 0:
+        return 0
+    left = int(outside[0])
+    back = np.flatnonzero(np.abs(err_from_lid[left:]) <= 5.0)
+    return None if back.size == 0 else left + int(back[0])
 
 
 def _report(core, ratio, source_name, t, requested=None):
@@ -192,7 +230,8 @@ def run_scenario(controller, scenario, seed):
                 settle_from = None
 
             lid_open = _lid_open_at(scenario, t)
-            lid_open_start = lid_open and _lid_open_start_at(scenario, t)
+            lid_paused = _lid_paused_at(scenario, t)
+            lid_pause_start = _lid_pause_start_at(scenario, t)
             temp_f = _c_to_f(plant.measured())
 
             if t >= next_solve:
@@ -207,12 +246,14 @@ def run_scenario(controller, scenario, seed):
                     requested = float(raw)
                 ratio = min(max(requested, u_min), u_max)
                 # hold.py:171-173 replaces the controller's answer with u_min
-                # for the whole pause, ahead of the floor/ceiling just above.
-                if lid_open:
+                # while the pause is live, ahead of the floor/ceiling just
+                # above. Once the timer clears the controller is back at full
+                # authority even if the lid is still open.
+                if lid_paused:
                     ratio = u_min
-                _report(core, ratio, "lid_open" if lid_open else "controller", t, requested=requested)
+                _report(core, ratio, "lid_open" if lid_paused else "controller", t, requested=requested)
 
-            if lid_open_start:
+            if lid_pause_start:
                 # hold.py's detection instant: auger off, cycle timer reset,
                 # one AppliedOutput(0.0) report (hold.py:247-264). That block
                 # clears target_temp_achieved (hold.py:266), and the pause's
@@ -229,13 +270,16 @@ def run_scenario(controller, scenario, seed):
                     auger_on, auger_toggle, t, ratio, CYCLE_DATA["HoldCycleTime"]
                 )
 
-            plant.step(auger_on=auger_frac, fan_frac=0.0 if lid_open else fan_frac, lid_open=lid_open)
+            # The fan is cut for the pause only; hold.py:271 restarts it on
+            # expiry, so it is running again for any part of the lid window
+            # that outlasts the timer.
+            plant.step(auger_on=auger_frac, fan_frac=0.0 if lid_paused else fan_frac, lid_open=lid_open)
 
             temps.append(temp_f)
             # The reported ratio: 0.0 at the detection instant, u_min (pinned
             # above) for the rest of the pause, the controller's own answer
             # otherwise.
-            duties.append(0.0 if lid_open_start else ratio)
+            duties.append(0.0 if lid_pause_start else ratio)
             if abs(temp_f - setpoint) <= 5.0:
                 if settle_from is None:
                     settle_from = t
@@ -246,6 +290,7 @@ def run_scenario(controller, scenario, seed):
         duties = np.asarray(duties)
         sp_series = np.asarray([_setpoint_at(scenario, t) for t in range(scenario.duration_s)])
         err = temps - sp_series
+        lid_start = min((start for start, _ in scenario.lid_open), default=None)
         result = {
             "controller": controller,
             "scenario": scenario.name,
@@ -261,9 +306,12 @@ def run_scenario(controller, scenario, seed):
             # Depth of the lid excursion: the coldest reading from the first
             # lid opening to the end of the run, so the trough is captured
             # wherever transport lag puts it relative to the lid closing.
-            "lid_min_temp_f": (
-                None if not scenario.lid_open else float(temps[min(start for start, _ in scenario.lid_open) :].min())
-            ),
+            "lid_min_temp_f": (None if lid_start is None else float(temps[lid_start:].min())),
+            # Width of the same excursion: seconds from the lid opening until
+            # the chamber is first back within 5 F of setpoint. Depth alone
+            # cannot distinguish the modelled pause length, since a longer
+            # pause only digs the trough deeper.
+            "lid_recovery_s": (None if lid_start is None else _recovery_s(err[lid_start:])),
         }
         status = getattr(core, "get_status", lambda: None)()
         if status is not None:

@@ -13,9 +13,12 @@ net-policy training sampler -- passes a Python bool.
 record for 20+ experiments and two committed matrix artifacts, so the default
 `lid_open=False` must reproduce the pre-existing trajectory exactly, not merely
 closely: a drift of a few ULP compounds over the 3.5 h runs those artifacts
-measure. The positive control below drives the same plant with `lid_open=True`
-and shows the parameter does reach the dynamics, so the no-op assertion is not
-passing on an argument the plant ignores.
+measure. Comparing `step(a, f)` against `step(a, f, lid_open=False)` cannot show
+that -- in Python those are one call taking one branch, so any perturbation of
+the closed-lid dynamics moves both sides equally. `CLOSED_LID_FINAL_C` is
+therefore an absolute pin, the value the plant produced before `lid_open`
+existed. The positive control below drives the same plant with `lid_open=True`
+and shows the parameter does reach the dynamics.
 
 Each test drives the real (current) `GrillSim.step` twice from the same seed
 with the same on/off pattern and compares the temperature trajectories.
@@ -28,6 +31,9 @@ FAN_FRAC = 0.6
 # the deadtime transit line, fuel accumulation, and the wind-gust RNG draws.
 _BLOCK = [True, True, True] + [False] * 14 + [True, True]
 BOOL_SEQUENCE = (_BLOCK * 20)[:300]
+# Final chamber reading of BOOL_SEQUENCE at seed 7, measured on the plant as it
+# stood before the lid model was added.
+CLOSED_LID_FINAL_C = 90.48906753109672
 
 
 def test_float_auger_on_matches_boolean_auger_on():
@@ -43,7 +49,7 @@ def test_float_auger_on_matches_boolean_auger_on():
     assert bool_trace == float_trace
 
 
-def test_lid_open_false_matches_omitting_lid_open():
+def test_closed_lid_trajectory_matches_the_plant_before_the_lid_model():
     seed = 7
 
     omitted_plant = GrillSim(seed=seed)
@@ -52,6 +58,9 @@ def test_lid_open_false_matches_omitting_lid_open():
     omitted_trace = [omitted_plant.step(auger_on=on, fan_frac=FAN_FRAC) for on in BOOL_SEQUENCE]
     explicit_trace = [explicit_plant.step(auger_on=on, fan_frac=FAN_FRAC, lid_open=False) for on in BOOL_SEQUENCE]
 
+    assert omitted_trace[-1] == CLOSED_LID_FINAL_C, (
+        f"the closed-lid trajectory has moved off the pre-lid-model plant: {omitted_trace[-1]!r}"
+    )
     assert omitted_trace == explicit_trace
 
 
