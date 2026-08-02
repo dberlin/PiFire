@@ -135,7 +135,7 @@ def test_clear_pelletdb_log_empties_it(client):
     from common.datastore_accessors import read_pellet_db, write_pellet_db
 
     pelletdb = read_pellet_db()
-    pelletdb["log"]["1767225600"] = "sentinel-profile-id"
+    pelletdb["log"]["1767225600000"] = {"pelletid": "sentinel-profile-id", "deleted": False}
     write_pellet_db(pelletdb)
     assert read_pellet_db()["log"] != {}
 

@@ -19,6 +19,7 @@ discard the controller's est_usage/hopper_level updates. Never add a handler
 that accepts a whole pellet database.
 """
 
+import time
 from datetime import datetime
 
 from common.app import api_response
@@ -27,6 +28,29 @@ from common.common import WriteKind
 from common.control_delta import control_delta
 from common.datastore_accessors import write_control, write_pellet_db
 from common.defaults import default_pellets
+
+
+def _log_key(log):
+    """A millisecond key for `log` that no existing entry already holds.
+
+    Second resolution let two loads inside one second land on the same dict key
+    and lose an entry; a millisecond that is already taken is advanced rather
+    than overwritten, so the count is the number of loads whatever the clock
+    does.
+    """
+    stamp = int(time.time() * 1000)
+    while str(stamp) in log:
+        stamp += 1
+    return str(stamp)
+
+
+def _validated_rating(action_data):
+    """The rating as an int in 1..5, or None if the request did not carry one."""
+    try:
+        rating = int(action_data["rating"])
+    except KeyError, TypeError, ValueError:
+        return None
+    return rating if 1 <= rating <= 5 else None
 
 
 def clear_pellet_db():
@@ -49,11 +73,9 @@ def clear_pellet_db():
 def pellets_load_profile(pelletdb, action_data):
     if "profile" in action_data:
         pelletdb["current"]["pelletid"] = action_data["profile"]
-        now = str(datetime.now())
-        now = now[0:19]
-        pelletdb["current"]["date_loaded"] = now
-        pelletdb["current"]["est_usage"] = 0
-        pelletdb["log"][now] = action_data["profile"]
+        pelletdb["current"]["date_loaded"] = str(datetime.now())[0:19]
+        pelletdb["current"]["est_usage"] = 0.0
+        pelletdb["log"][_log_key(pelletdb["log"])] = {"pelletid": action_data["profile"], "deleted": False}
         # This handler changes one boolean, so one boolean is what it states.
         # Queuing the whole control dict would carry a stale snapshot of every
         # other member through the queue, and a delta says only what it means.
@@ -109,41 +131,58 @@ def pellets_edit_woods(pelletdb, action_data):
 
 
 def pellets_add_profile(pelletdb, action_data):
+    rating = _validated_rating(action_data)
+    if rating is None:
+        return api_response(result="Error", message="Error: rating must be a whole number from 1 to 5")
+
     profile_id = "".join(filter(str.isalnum, str(datetime.now())))
+    brand = action_data["brand_name"]
+    wood = action_data["wood_type"]
     pelletdb["archive"][profile_id] = {
-        "id": profile_id,
-        "brand": action_data["brand_name"],
-        "wood": action_data["wood_type"],
-        "rating": action_data["rating"],
+        "brand": brand,
+        "wood": wood,
+        "rating": rating,
         "comments": action_data["comments"],
     }
+    # The vocabularies are autocomplete suggestions, and a bag they have not
+    # heard of is the normal case -- so naming one adds it.
+    if brand not in pelletdb["brands"]:
+        pelletdb["brands"].append(brand)
+    if wood not in pelletdb["woods"]:
+        pelletdb["woods"].append(wood)
+
     if action_data["add_and_load"]:
         pelletdb["current"]["pelletid"] = profile_id
         # MINIMAL patch -- see pellets_load_profile for the full rationale.
         write_control(control_delta(set_values={"hopper_check": True}), WriteKind.DELTA, origin="app")
-        now = str(datetime.now())
-        now = now[0:19]
-        pelletdb["current"]["date_loaded"] = now
-        pelletdb["current"]["est_usage"] = 0
-        pelletdb["log"][now] = profile_id
-        write_pellet_db(pelletdb)
-        return api_response(result="OK")
-    else:
-        write_pellet_db(pelletdb)
-        return api_response(result="OK")
+        pelletdb["current"]["date_loaded"] = str(datetime.now())[0:19]
+        pelletdb["current"]["est_usage"] = 0.0
+        pelletdb["log"][_log_key(pelletdb["log"])] = {"pelletid": profile_id, "deleted": False}
+
+    write_pellet_db(pelletdb)
+    return api_response(result="OK")
 
 
 def pellets_edit_profile(pelletdb, action_data):
-    if "profile" in action_data:
-        profile_id = action_data["profile"]
-        pelletdb["archive"][profile_id]["brand"] = action_data["brand_name"]
-        pelletdb["archive"][profile_id]["wood"] = action_data["wood_type"]
-        pelletdb["archive"][profile_id]["rating"] = action_data["rating"]
-        pelletdb["archive"][profile_id]["comments"] = action_data["comments"]
-        write_pellet_db(pelletdb)
-        return api_response(result="OK")
-    else:
+    if "profile" not in action_data:
         return api_response(result="Error", message="Error: Profile not included in request")
+    rating = _validated_rating(action_data)
+    if rating is None:
+        return api_response(result="Error", message="Error: rating must be a whole number from 1 to 5")
+
+    profile_id = action_data["profile"]
+    brand = action_data["brand_name"]
+    wood = action_data["wood_type"]
+    pelletdb["archive"][profile_id]["brand"] = brand
+    pelletdb["archive"][profile_id]["wood"] = wood
+    pelletdb["archive"][profile_id]["rating"] = rating
+    pelletdb["archive"][profile_id]["comments"] = action_data["comments"]
+    if brand not in pelletdb["brands"]:
+        pelletdb["brands"].append(brand)
+    if wood not in pelletdb["woods"]:
+        pelletdb["woods"].append(wood)
+    write_pellet_db(pelletdb)
+    return api_response(result="OK")
 
 
 def pellets_delete_profile(pelletdb, action_data):
@@ -154,8 +193,8 @@ def pellets_delete_profile(pelletdb, action_data):
         else:
             pelletdb["archive"].pop(profile_id)
             for index in pelletdb["log"]:
-                if pelletdb["log"][index] == profile_id:
-                    pelletdb["log"][index] = "deleted"
+                if pelletdb["log"][index]["pelletid"] == profile_id:
+                    pelletdb["log"][index] = {"pelletid": None, "deleted": True}
         write_pellet_db(pelletdb)
         return api_response(result="OK")
     else:

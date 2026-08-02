@@ -692,7 +692,7 @@ def default_pellets():
         "pelletid": ID,  # Pellet ID for the profile currently loaded
         "hopper_level": 100,  # Percentage of pellets remaining
         "date_loaded": now,  # Date that current pellets loaded
-        "est_usage": 0,  # Estimated usage since loading (use auger load rate, and auger on time)
+        "est_usage": 0.0,  # Estimated usage since loading (use auger load rate, and auger on time)
     }
 
     pelletdb["woods"] = [
@@ -722,7 +722,6 @@ def default_pellets():
 
     pelletdb["archive"] = {
         ID: {
-            "id": ID,
             "brand": "Generic",
             "wood": "Alder",
             "rating": 4,
@@ -732,7 +731,7 @@ def default_pellets():
         }
     }
 
-    pelletdb["log"] = {now: ID}
+    pelletdb["log"] = {str(math.trunc(time.time() * 1000)): {"pelletid": ID, "deleted": False}}
 
     pelletdb["lastupdated"] = {"time": math.trunc(time.time())}
 

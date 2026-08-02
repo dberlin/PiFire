@@ -45,10 +45,13 @@ def test_get_pellets_returns_full_database(live_server, page):
     assert set(pellets) == {"schema_version", "current", "woods", "brands", "archive", "log", "lastupdated"}
     assert set(pellets["current"]) == {"pelletid", "hopper_level", "date_loaded", "est_usage"}
     any_profile = next(iter(pellets["archive"].values()))
-    assert set(any_profile) == {"id", "brand", "wood", "rating", "comments"}
+    assert set(any_profile) == {"brand", "wood", "rating", "comments"}
     assert isinstance(pellets["brands"], list)
     assert isinstance(pellets["woods"], list)
     assert isinstance(pellets["log"], dict)
+    any_entry = next(iter(pellets["log"].values()))
+    assert set(any_entry) == {"pelletid", "deleted"}
+    assert all(key.isdigit() for key in pellets["log"])
 
 
 def test_post_pellets_edit_brands_round_trip(live_server, page):

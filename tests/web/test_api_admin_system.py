@@ -169,13 +169,13 @@ def test_factory_reset_clears_the_pellet_database(hazard):
     from common.datastore_accessors import read_pellet_db, write_pellet_db
 
     pelletdb = read_pellet_db()
-    pelletdb["log"]["1767225600"] = "sentinel-profile-id"
+    pelletdb["log"]["1767225600000"] = {"pelletid": "sentinel-profile-id", "deleted": False}
     write_pellet_db(pelletdb)
-    assert "1767225600" in read_pellet_db()["log"]
+    assert "1767225600000" in read_pellet_db()["log"]
 
     hazard["client"].post("/api/admin/factory-reset", json={})
     log_after = read_pellet_db()["log"]
-    assert "1767225600" not in log_after
+    assert "1767225600000" not in log_after
     assert "sentinel-profile-id" not in log_after.values()
 
 

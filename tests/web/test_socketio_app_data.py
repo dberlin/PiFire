@@ -369,7 +369,7 @@ def test_post_admin_clear_pelletdb(sio):
 def test_post_admin_clear_pelletdb_log(sio):
     # Seed a log entry, confirm it is cleared.
     pelletdb = read_pellets_store()
-    pelletdb["log"]["2020-01-01 00:00:00"] = "x"
+    pelletdb["log"]["1577836800000"] = {"pelletid": "x", "deleted": False}
     write_pellet_db(pelletdb)
     resp = sio.mod._post_app_data("admin_action", "clear_pelletdb_log")
     assert resp["result"] == "OK"
@@ -383,7 +383,7 @@ def test_post_admin_factory_defaults(sio):
     write_settings_store(settings)
     pelletdb = read_pellets_store()
     pelletdb["brands"].append("SHOULD_BE_WIPED_BRAND")
-    pelletdb["log"]["2020-01-01 00:00:00"] = "x"
+    pelletdb["log"]["1577836800000"] = {"pelletid": "x", "deleted": False}
     write_pellet_db(pelletdb)
 
     resp = sio.mod._post_app_data("admin_action", "factory_defaults")
@@ -401,7 +401,7 @@ def test_post_admin_factory_defaults(sio):
     assert cleared["brands"] == default_pellets()["brands"]
     # A fresh default database carries one placeholder profile and the single
     # log entry recording its load -- the seeded 2020 entry must be gone.
-    assert list(cleared["log"].values()) == [cleared["current"]["pelletid"]]
+    assert list(cleared["log"].values()) == [{"pelletid": cleared["current"]["pelletid"], "deleted": False}]
 
 
 def test_post_admin_reboot(sio):
@@ -1032,17 +1032,17 @@ def test_post_pellets_delete_profile_rewrites_matching_log_entries(sio):
     # inner `for index in pelletdb["log"]` rewrite loop body (line 592)
     # actually executes.
     pelletdb = read_pellets_store()
-    pelletdb["archive"]["deadbeef"] = {"id": "deadbeef", "brand": "B", "wood": "W", "rating": 1, "comments": ""}
-    pelletdb["log"]["2020-01-01 00:00:00"] = "deadbeef"
+    pelletdb["archive"]["deadbeef"] = {"brand": "B", "wood": "W", "rating": 1, "comments": ""}
+    pelletdb["log"]["1577836800000"] = {"pelletid": "deadbeef", "deleted": False}
     write_pellet_db(pelletdb)
     payload = json.dumps({"pellets_action": {"profile": "deadbeef"}})
     resp = sio.mod._post_app_data("pellets_action", "delete_profile", payload)
     assert resp["result"] == "OK"
-    assert read_pellets_store()["log"]["2020-01-01 00:00:00"] == "deleted"
+    assert read_pellets_store()["log"]["1577836800000"] == {"pelletid": None, "deleted": True}
 
 
 def test_post_pellets_delete_log_not_present_still_ok(sio):
-    payload = json.dumps({"pellets_action": {"log_item": "2099-01-01 00:00:00"}})
+    payload = json.dumps({"pellets_action": {"log_item": "4102444800000"}})
     before = dict(read_pellets_store()["log"])
     resp = sio.mod._post_app_data("pellets_action", "delete_log", payload)
     assert resp["result"] == "OK"
