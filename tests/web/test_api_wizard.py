@@ -169,6 +169,240 @@ def test_draft_clear_drops_probe_map_and_units(ds, client):
     assert body["probe_map"]["probe_devices"][0]["device"] != "D1" or body["probe_map"]["probe_devices"] == []
 
 
+# ---------------------------------------------------------------------------
+# Stale draft discard: a draft is a snapshot of manifest-shaped keys, but
+# records nothing about which manifest it was written against. When a
+# module's dependencies are renamed or replaced (e.g. the *_i2c_bus_kind +
+# *_i2c_bus_num split fields becoming one *_i2c_bus composite), a draft
+# saved before the change names keys the current manifest doesn't
+# recognize -- _load_draft() must discard it rather than serve it, or a
+# resumed wizard silently shows Basic for hardware that isn't.
+# ---------------------------------------------------------------------------
+
+
+def _seed_x86_numato_live_settings():
+    """Live settings for a grill actually running x86_numato with two
+    USB-I2C bridges (an emc2101 fan controller on one, a distance sensor's
+    VL53L on the other) -- the migrated composite-field shape the manifest
+    now expects."""
+    settings = read_settings()
+    settings["globals"]["first_time_setup"] = False
+    settings["platform"]["current"] = "x86_numato"
+    settings["platform"]["fan_controller"]["i2c_bus"] = {"kind": "kernel", "serial": "0003171140"}
+    settings["platform"]["devices"]["distance"]["i2c_bus"] = {"kind": "kernel", "serial": "0006634723"}
+    write_settings_store(settings)
+    return settings
+
+
+def test_stale_draft_with_legacy_i2c_keys_is_discarded(ds, client):
+    """The real regression: a draft saved before the I2C composite-field
+    change named device_distance_i2c_bus_kind/_num and i2c_bus_kind/_num.
+    The manifest now only declares the composite device_distance_i2c_bus and
+    i2c_bus deps, so none of the draft's four keys binds to anything --
+    /state must fall through to (migrated) live settings, not serve Basic."""
+    _seed_x86_numato_live_settings()
+    from common.datastore_accessors import store_wizard_install_info
+
+    store_wizard_install_info(
+        {
+            "react_draft": True,
+            "selections": {"grillplatform": "x86_numato", "display": None, "distance": None, "probes": None},
+            "settings_dep_values": {
+                "grillplatform": {
+                    "device_distance_i2c_bus_kind": "extended",
+                    "device_distance_i2c_bus_num": "serial:0006634723",
+                    "i2c_bus_kind": "extended",
+                    "i2c_bus_num": "serial:0003171140",
+                }
+            },
+            "display_config": {},
+            "probe_map": {"probe_devices": [], "probe_info": []},
+            "probes_units": "F",
+        }
+    )
+
+    resp = client.get("/api/wizard/state")
+    body = resp.get_json()
+    assert body["has_draft"] is False
+    assert body["settings_dep_values"]["grillplatform"]["device_distance_i2c_bus"] == {
+        "kind": "kernel",
+        "serial": "0006634723",
+    }
+    assert ds.get_blob("wizard:install") is None
+
+
+def test_draft_with_matching_keys_is_not_stale_and_is_preferred(ds, client):
+    _seed_x86_numato_live_settings()
+    from common.datastore_accessors import store_wizard_install_info
+
+    store_wizard_install_info(
+        {
+            "react_draft": True,
+            "selections": {"grillplatform": "x86_numato", "display": None, "distance": None, "probes": None},
+            "settings_dep_values": {"grillplatform": {"i2c_bus": {"kind": "mcp2221", "serial": "DRAFT-VALUE"}}},
+            "display_config": {},
+            "probe_map": {"probe_devices": [], "probe_info": []},
+            "probes_units": "F",
+        }
+    )
+
+    body = client.get("/api/wizard/state").get_json()
+    assert body["has_draft"] is True
+    # The draft's value wins over the differently-configured live settings.
+    assert body["settings_dep_values"]["grillplatform"]["i2c_bus"] == {"kind": "mcp2221", "serial": "DRAFT-VALUE"}
+    assert ds.get_blob("wizard:install") is not None
+
+
+def test_draft_naming_an_unknown_module_is_not_judged_stale(ds, client):
+    """A module the manifest no longer has at all is a different problem (a
+    removed/renamed module) with its own handling -- conflating it with a
+    stale-keys draft would discard progress for the wrong reason."""
+    from common.datastore_accessors import store_wizard_install_info
+
+    store_wizard_install_info(
+        {
+            "react_draft": True,
+            "selections": {"grillplatform": "totally_bogus_module", "display": None, "distance": None, "probes": None},
+            "settings_dep_values": {"grillplatform": {"whatever_key": "whatever_value"}},
+            "display_config": {},
+            "probe_map": {"probe_devices": [], "probe_info": []},
+            "probes_units": "F",
+        }
+    )
+
+    body = client.get("/api/wizard/state").get_json()
+    assert body["has_draft"] is True
+    assert ds.get_blob("wizard:install") is not None
+
+
+def test_draft_with_unrecognized_probe_config_key_is_discarded(ds, client):
+    from common.datastore_accessors import store_wizard_install_info
+
+    store_wizard_install_info(
+        {
+            "react_draft": True,
+            "selections": {"grillplatform": None, "display": None, "distance": None, "probes": "ads1115_adafruit"},
+            "settings_dep_values": {},
+            "display_config": {},
+            "probe_map": {
+                "probe_devices": [
+                    {
+                        "device": "D1",
+                        "module": "ads1115_adafruit",
+                        "config": {"totally_bogus_probe_key": "x"},
+                    }
+                ],
+                "probe_info": [],
+            },
+            "probes_units": "F",
+        }
+    )
+
+    body = client.get("/api/wizard/state").get_json()
+    assert body["has_draft"] is False
+    assert ds.get_blob("wizard:install") is None
+
+
+def test_draft_with_only_recognized_probe_config_keys_survives(ds, client):
+    from common.datastore_accessors import store_wizard_install_info
+
+    store_wizard_install_info(
+        {
+            "react_draft": True,
+            "selections": {"grillplatform": None, "display": None, "distance": None, "probes": "ads1115_adafruit"},
+            "settings_dep_values": {},
+            "display_config": {},
+            "probe_map": {
+                "probe_devices": [
+                    {
+                        "device": "D1",
+                        "module": "ads1115_adafruit",
+                        "config": {"i2c_bus": {"kind": "basic"}, "i2c_bus_addr": "0x48"},
+                    }
+                ],
+                "probe_info": [],
+            },
+            "probes_units": "F",
+        }
+    )
+
+    body = client.get("/api/wizard/state").get_json()
+    assert body["has_draft"] is True
+    assert ds.get_blob("wizard:install") is not None
+
+
+def test_draft_stamp_written_by_save_draft_round_trips_and_is_not_stale(ds, client):
+    _seed_x86_numato_live_settings()
+    draft = {
+        "selections": {"grillplatform": "x86_numato", "display": None, "distance": None, "probes": None},
+        "settings_dep_values": {"grillplatform": {"i2c_bus": {"kind": "basic"}}},
+        "display_config": {},
+        "probe_map": {"probe_devices": [], "probe_info": []},
+        "probes_units": "F",
+    }
+    r = client.post("/api/wizard/draft", data=json.dumps(draft), content_type="application/json")
+    assert r.status_code == 200
+
+    body = client.get("/api/wizard/state").get_json()
+    assert body["has_draft"] is True
+
+
+def test_draft_with_wrong_stamp_is_stale(ds, client):
+    from common.datastore_accessors import load_wizard_install_info, store_wizard_install_info
+
+    draft = {
+        "selections": {"grillplatform": "x86_numato", "display": None, "distance": None, "probes": None},
+        "settings_dep_values": {"grillplatform": {"i2c_bus": {"kind": "basic"}}},
+        "display_config": {},
+        "probe_map": {"probe_devices": [], "probe_info": []},
+        "probes_units": "F",
+    }
+    r = client.post("/api/wizard/draft", data=json.dumps(draft), content_type="application/json")
+    assert r.status_code == 200
+
+    info = load_wizard_install_info()
+    info["manifest_fingerprint"] = "not-a-real-fingerprint"
+    store_wizard_install_info(info)
+
+    body = client.get("/api/wizard/state").get_json()
+    assert body["has_draft"] is False
+    assert ds.get_blob("wizard:install") is None
+
+
+def test_stale_draft_discard_logs_an_operator_facing_line(ds, client, monkeypatch):
+    import blueprints.api_wizard.routes as wr
+
+    logged = []
+    monkeypatch.setattr(wr, "write_log", lambda event, *a, **k: logged.append(event))
+
+    _seed_x86_numato_live_settings()
+    from common.datastore_accessors import store_wizard_install_info
+
+    store_wizard_install_info(
+        {
+            "react_draft": True,
+            "selections": {"grillplatform": "x86_numato", "display": None, "distance": None, "probes": None},
+            "settings_dep_values": {
+                "grillplatform": {
+                    "device_distance_i2c_bus_kind": "extended",
+                    "device_distance_i2c_bus_num": "serial:0006634723",
+                    "i2c_bus_kind": "extended",
+                    "i2c_bus_num": "serial:0003171140",
+                }
+            },
+            "display_config": {},
+            "probe_map": {"probe_devices": [], "probe_info": []},
+            "probes_units": "F",
+        }
+    )
+
+    resp = client.get("/api/wizard/state")
+    assert resp.get_json()["has_draft"] is False
+    assert len(logged) == 1
+    assert "draft" in logged[0].lower()
+    assert "current configuration" in logged[0].lower()
+
+
 def test_cancel_clears_first_time_setup(ds, client):
     settings = read_settings()
     settings["globals"]["first_time_setup"] = True

@@ -1587,6 +1587,34 @@ scoped; mapping a dotted error path to the offending widget; the four 2b-1
 follow-ups (`waitFor`, `read*` fallback defaults, `aria-describedby`,
 float-vs-int audit).
 
+**Nothing PiFire persists records the schema it was written against — 2026-08-01.**
+`wizard/wizard_manifest.json` has no version field at all (top-level keys are
+`boards`, `modules`, `probe_config_options`), and neither does the
+`wizard:install` draft blob. The only version anywhere is
+`updater_manifest.json`'s `metadata.versions`, which is the RELEASE version, and
+it is demonstrably not a proxy for shape: a real grill database sat at
+`1.11.0 build 71` — the code's own current version — while still holding the
+pre-71 `i2c_bus_kind`/`i2c_bus_num` settings shape, because the version was
+bumped without that migration existing yet.
+
+Two things were built as substitutes rather than fixes, and both should be
+replaced by real schema versioning:
+
+- The i2c settings-shape repair runs **ungated**, ignoring the version
+  entirely (`common/datastore.py::_upgrade_settings_in_store`), because a
+  version-gated migration was skipped by an unchecked path four separate times
+  on that branch.
+- The wizard draft carries a **SHA-256 fingerprint of the manifest's
+  `section/module/dependency` triples** (`blueprints/api_wizard/routes.py`),
+  synthesized precisely because the manifest declares no identity of its own. A
+  stale draft is otherwise undetectable, and a real one silently rendered
+  "Basic" for a grill running on two USB-I2C bridges.
+
+What is actually wanted: an explicit schema version on the wizard manifest and
+on every persisted blob keyed by manifest-shaped names, so staleness is a
+comparison rather than a heuristic, and so a settings-shape migration can be
+gated on the shape's own version instead of on the release build number.
+
 Tailwind prerequisites, all now owned by `plans/2026-07-26-tailwind-v4-migration.md`:
 no browserslist pinned; unverified whether Biome's CSS parser accepts
 `@theme`/`@apply`/`@import "tailwindcss"`; **no visual baselines exist for any

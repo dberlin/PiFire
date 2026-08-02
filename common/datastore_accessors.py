@@ -770,6 +770,15 @@ def store_wizard_install_info(wizard_install_info):
     datastore.set_blob("wizard:install", json.dumps(wizard_install_info))
 
 
+def delete_wizard_install_info():
+    """
+    Remove Wizard Install Info from SQLite DB
+
+    :return:
+    """
+    datastore.delete_blob("wizard:install")
+
+
 def get_wizard_install_status():
     """
     Read Wizard Install Status from SQLite DB

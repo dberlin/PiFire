@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 
 from flask import jsonify, request
@@ -11,8 +12,9 @@ from blueprints.wizard.wizard import (
     wizardInstallInfoExisting,
 )
 from common.app import get_supported_cmds, get_system_command_output, process_command
-from common.common import read_wizard
+from common.common import read_wizard, write_log
 from common.datastore_accessors import (
+    delete_wizard_install_info,
     get_wizard_install_status,
     load_wizard_install_info,
     read_control,
@@ -39,6 +41,7 @@ from . import api_wizard_bp
 
 _SECTIONS = ["grillplatform", "display", "distance", "probes"]
 _DRAFT_KEY = "react_draft"  # marker key inside the wizard blob
+_STAMP_KEY = "manifest_fingerprint"  # which manifest shape a draft was written against
 
 
 def _thermoworks_discover(email, password):
@@ -47,17 +50,93 @@ def _thermoworks_discover(email, password):
     return asyncio.run(_thermoworks_discover_impl(email, password))
 
 
-def _load_draft():
+def _manifest_fingerprint(wizard_data):
+    """Cheap identity for the manifest's dependency shape: a hash over every
+    section/module/dependency name it currently declares. Two manifests with
+    the same dependency names (even if descriptions, defaults or option lists
+    differ) fingerprint the same -- this is deliberately coarse, matching what
+    _draft_is_stale's key check cares about."""
+    modules = wizard_data.get("modules", {}) or {}
+    triples = sorted(
+        f"{section}/{module}/{dep}"
+        for section, section_modules in modules.items()
+        for module, module_data in (section_modules or {}).items()
+        for dep in (module_data or {}).get("settings_dependencies", {}) or {}
+    )
+    return hashlib.sha256("\n".join(triples).encode()).hexdigest()
+
+
+def _draft_is_stale(draft, wizard_data):
+    """True when the draft names dependencies this manifest does not have.
+
+    A draft stores values keyed by manifest dependency name. When a module's
+    dependencies are renamed or replaced, those keys bind to nothing -- the
+    wizard shows a field's default while the draft still claims to hold the
+    operator's answer.
+    """
+    if _STAMP_KEY in draft and draft[_STAMP_KEY] != _manifest_fingerprint(wizard_data):
+        return True
+
+    modules = wizard_data.get("modules", {}) or {}
+    selections = draft.get("selections") or {}
+    for section, dep_values in (draft.get("settings_dep_values") or {}).items():
+        if not isinstance(dep_values, dict) or not dep_values:
+            continue
+        section_modules = modules.get(section)
+        if not isinstance(section_modules, dict):
+            continue
+        module_data = section_modules.get(selections.get(section))
+        if not isinstance(module_data, dict):
+            # The drafted module no longer exists in the manifest at all --
+            # a different problem, with its own handling; judging staleness
+            # here would fire for the wrong reason.
+            continue
+        allowed = module_data.get("settings_dependencies") or {}
+        if any(key not in allowed for key in dep_values):
+            return True
+
+    # A real, current, well-formed probe_map carries no config keys beyond
+    # each device's module's device_specific.config[].label set (verified
+    # against the manifest's own board defaults and a live grill's saved
+    # probe_map), so the same key check applies there.
+    probes_modules = modules.get("probes")
+    if isinstance(probes_modules, dict):
+        for device in (draft.get("probe_map") or {}).get("probe_devices") or []:
+            module_data = probes_modules.get(device.get("module"))
+            if not isinstance(module_data, dict):
+                continue
+            allowed = {option.get("label") for option in (module_data.get("device_specific") or {}).get("config") or []}
+            if any(key not in allowed for key in (device.get("config") or {})):
+                return True
+
+    return False
+
+
+def _load_draft(wizard_data):
     """`load_wizard_install_info()` does `json.loads(datastore.get_blob(...))`
     with no guard for a missing key -- on a fresh install (no `/wizard` GET,
     no `/api/wizard/draft` POST yet) the blob doesn't exist and this raises
     TypeError. There is no seeded default for this key (see
     tests/web/test_page_probeconfig.py's module docstring), so a fresh state
-    request must tolerate that."""
+    request must tolerate that.
+
+    Also the single consumption point for a draft: a draft written against a
+    manifest this version no longer matches (see _draft_is_stale) is
+    discarded here rather than served, so a resumed setup can't silently
+    overwrite working hardware with whatever a mismatched key's default
+    renders as."""
     try:
-        return load_wizard_install_info()
+        draft = load_wizard_install_info()
     except TypeError, ValueError:
         return None
+    if isinstance(draft, dict) and _draft_is_stale(draft, wizard_data):
+        delete_wizard_install_info()
+        write_log(
+            "Wizard: discarded a saved setup draft because it referenced settings this "
+            "version no longer has -- showing your current configuration instead."
+        )
+        return None
+    return draft
 
 
 def _build_state(settings, control):
@@ -73,7 +152,7 @@ def _build_state(settings, control):
         if isinstance(board, dict) and isinstance(board.get("probe_map"), dict)
     }
 
-    draft = _load_draft()
+    draft = _load_draft(wizard_data)
     has_draft = isinstance(draft, dict) and draft.get(_DRAFT_KEY) is True
 
     if has_draft:
@@ -155,7 +234,8 @@ def wizard_state():
 @api_wizard_bp.route("/draft", methods=["POST"])
 def wizard_draft():
     payload = request.get_json(silent=True) or {}
-    info = _load_draft()
+    wizard_data = read_wizard()
+    info = _load_draft(wizard_data)
     if not isinstance(info, dict):
         info = {}
 
@@ -170,6 +250,7 @@ def wizard_draft():
         info.pop("display_config", None)
         info.pop("probe_map", None)
         info.pop("probes_units", None)
+        info.pop(_STAMP_KEY, None)
         store_wizard_install_info(info)
         return jsonify({"result": "success"}), 200
 
@@ -179,6 +260,10 @@ def wizard_draft():
     info["display_config"] = payload.get("display_config", {})
     info["probe_map"] = payload.get("probe_map", {"probe_devices": [], "probe_info": []})
     info["probes_units"] = payload.get("probes_units", "F")
+    # Stamp with the manifest's current dependency shape so a future load can
+    # tell, cheaply and totally, whether this draft still applies -- covering
+    # dependency additions the key-level check alone would miss.
+    info[_STAMP_KEY] = _manifest_fingerprint(wizard_data)
     store_wizard_install_info(info)
     return jsonify({"result": "success"}), 200
 
@@ -444,7 +529,8 @@ def wizard_finish():
         return jsonify({"result": "error", "message": "system_active"}), 409
 
     payload = request.get_json(silent=True) or {}
-    existing = _load_draft()
+    wizard_data = read_wizard()
+    existing = _load_draft(wizard_data)
     if not isinstance(existing, dict):
         existing = {}
     wizard_install_info = _wizard_install_info_from_payload(payload, existing)
@@ -465,7 +551,6 @@ def wizard_finish():
     if missing_sections:
         return jsonify({"result": "error", "message": "missing_selection", "sections": missing_sections}), 400
 
-    wizard_data = read_wizard()
     try:
         validate_bus_kinds(wizard_bus_kinds(wizard_install_info, wizard_data))
     except I2CBusConfigError as exc:
