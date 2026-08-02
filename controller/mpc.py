@@ -331,8 +331,6 @@ class Controller(ControllerBase):
     def set_target(self, set_point):
         self.set_point = set_point
         self._set_point_c = _to_c(set_point, self.units)
-        self._last_Q = self.cfg["Q_min"]
-        self._applied_Q = float(self.cfg["Q_min"])
 
     def get_control_period(self):
         return float(self.cfg["control_period"])

@@ -435,13 +435,6 @@ def test_a_degenerate_q_span_matches_allocates_own_guard(mpc_controller):
     assert mpc_controller._applied_Q == pytest.approx(mpc_controller.cfg["Q_min"] + 1.0)
 
 
-def test_set_target_resets_applied_q_to_the_floor(mpc_controller):
-    mpc_controller.set_output(AppliedOutput(mpc_controller.u_max, OutputSource.CONTROLLER, 1.0))
-    assert mpc_controller._applied_Q != mpc_controller.cfg["Q_min"]
-    mpc_controller.set_target(300.0)
-    assert mpc_controller._applied_Q == pytest.approx(mpc_controller.cfg["Q_min"])
-
-
 def test_a_solve_failure_during_a_pause_holds_the_command_not_the_applied_value(mpc_controller, monkeypatch):
     """The except-fallback holds the previous COMMAND (_last_Q), even mid-pause.
     Conflating it with the paused _applied_Q would drop the auger to Q_min on
@@ -493,3 +486,23 @@ def test_an_adequate_horizon_is_not_reported(capsys):
     cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, n_horizon=200, t_step=25.0)
     _warn_about_model(cfg)
     assert "horizon" not in capsys.readouterr().out.lower()
+
+
+def test_set_target_keeps_the_applied_firing_rate_history():
+    """_applied_Q is the rate the grill actually ran at (recovered by
+    set_output) and is what the estimator is given as its known input;
+    _last_Q is the last command, held over on a solve failure. Both describe
+    the grill, not the target, so a new setpoint must not rewrite either."""
+    c = Controller(dict(CONFIG), "C", dict(CYCLE))
+    c._last_Q = 87.5
+    c._applied_Q = 84.0
+    c.set_target(300)
+    assert c._last_Q == 87.5
+    assert c._applied_Q == 84.0
+
+
+def test_set_target_still_updates_the_target():
+    c = Controller(dict(CONFIG), "C", dict(CYCLE))
+    c.set_target(300)
+    assert c.set_point == 300
+    assert c._set_point_c == 300  # units are "C" here, so no conversion
