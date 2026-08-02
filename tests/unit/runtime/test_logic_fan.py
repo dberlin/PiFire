@@ -1,4 +1,10 @@
-from controller.runtime.logic.fan import FanTimes, clamp_duty, fan_assist_times, smoke_plus_max_ratio
+from controller.runtime.logic.fan import (
+    FanTimes,
+    clamp_duty,
+    controller_fan_authority,
+    fan_assist_times,
+    smoke_plus_max_ratio,
+)
 
 
 def test_clamp_duty_below_min_raises_to_min():
@@ -61,3 +67,19 @@ def test_fan_assist_times_output_equals_u_min_with_full_ratio_is_100_percent_fan
 def test_fan_times_is_a_dataclass_instance():
     result = fan_assist_times(controller_output=10, total_fan_cycle=45, max_fan_ratio=1, u_min=10)
     assert isinstance(result, FanTimes)
+
+
+def _s(dc_fan):
+    return {"platform": {"dc_fan": dc_fan}}
+
+
+def test_authority_requires_both_a_dc_fan_and_pwm_control():
+    assert controller_fan_authority(_s(True), {"pwm_control": True}) is True
+
+
+def test_authority_is_denied_when_pwm_control_is_off():
+    assert controller_fan_authority(_s(True), {"pwm_control": False}) is False
+
+
+def test_authority_is_denied_on_an_ac_fan_build():
+    assert controller_fan_authority(_s(False), {"pwm_control": True}) is False

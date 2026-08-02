@@ -3,7 +3,12 @@ from common.controller_model_state import ControllerModelStore
 from common.modes import Mode
 from controller.applied_output import AppliedOutput, OutputSource, classify_output_source, seed_output
 from controller.runtime.logic.cycle import hold_initial_cycle
-from controller.runtime.logic.fan import start_fan, smoke_plus_max_ratio, fan_assist_times
+from controller.runtime.logic.fan import (
+    controller_fan_authority,
+    fan_assist_times,
+    smoke_plus_max_ratio,
+    start_fan,
+)
 from controller.runtime.logic.pwm import hold_duty_cycle
 from controller.runtime.modes.base import ControlMode
 import controller.runtime.runner as _runner_mod
@@ -91,7 +96,22 @@ class HoldMode(ControlMode):
         # with enable_fan_input), not a runtime latch -- this closes a startup
         # window where the temp-profile fan path could run before the
         # controller's first fan command.
-        self.state.controller.controls_fan = self._runner.commands_fan() if self._runner is not None else False
+        #
+        # Ownership additionally requires that the controller's duty can reach
+        # the fan. Granting it otherwise is strictly worse than withholding it:
+        # the grant suppresses the temperature-profile and fan-assist paths
+        # below, and the apply path then discards the duty, so nothing moves the
+        # fan at all.
+        wants_fan = self._runner.commands_fan() if self._runner is not None else False
+        has_authority = controller_fan_authority(self.settings, self.control)
+        if wants_fan and not has_authority:
+            _control.eventLogger.error(
+                f"Controller '{self.settings['controller']['selected']}' is configured to command "
+                "the fan, but its duty cannot reach the hardware (PWM Control is off, or this is "
+                "not a DC-fan build). Enable Settings > PWM Fan > PWM Control. Fan commands from "
+                "the controller will be ignored; the non-controller fan paths stay active."
+            )
+        self.state.controller.controls_fan = wants_fan and has_authority
 
         _control.eventLogger.debug(
             "On Time = "
@@ -177,7 +197,7 @@ class HoldMode(ControlMode):
             # controller's commands_fan() capability) suppresses the
             # temperature-profile fan logic below so it cannot overwrite the
             # MPC-issued fan command.
-            if fan_cmd is not None and settings["platform"]["dc_fan"] and control["pwm_control"]:
+            if fan_cmd is not None and controller_fan_authority(settings, control):
                 self.state.controller.fan_duty = fan_cmd["duty"]
                 control["duty_cycle"] = self.state.controller.fan_duty
                 ctx.store.write_control(control, WriteKind.OVERWRITE, origin="control")

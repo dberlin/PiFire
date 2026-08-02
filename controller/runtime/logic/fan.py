@@ -12,6 +12,18 @@ def clamp_duty(duty, pwm_settings):
     return adjusted
 
 
+def controller_fan_authority(settings, control):
+    """Whether a controller-issued fan duty can actually reach the hardware.
+
+    A duty only ever lands on a DC-fan build with PWM control switched on. The
+    setup-time ownership decision and the per-tick apply path both ask this one
+    question so they cannot disagree: an ownership claim that the apply path
+    then refuses leaves the fan driven by nobody, because the claim also
+    suppresses the temperature-profile and fan-assist paths.
+    """
+    return bool(settings["platform"]["dc_fan"]) and bool(control["pwm_control"])
+
+
 def smoke_plus_max_ratio(smoke_plus_settings, s_plus):
     if s_plus:
         total = smoke_plus_settings["on_time"] + smoke_plus_settings["off_time"]
