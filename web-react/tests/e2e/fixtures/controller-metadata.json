@@ -119,17 +119,6 @@
         },
         {
           "hidden": false,
-          "option_default": 9.0,
-          "option_description": "Firepot lumped thermal mass (nominal; calibrate per grill). [Default=9.0]",
-          "option_friendly_name": "Firepot Heat Capacity",
-          "option_max": null,
-          "option_min": 1.0,
-          "option_name": "C_f",
-          "option_step": 1.0,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
           "option_default": 320.0,
           "option_description": "Chamber lumped thermal mass (nominal; calibrate per grill). [Default=320.0]",
           "option_friendly_name": "Chamber Heat Capacity",
@@ -137,17 +126,6 @@
           "option_min": 1.0,
           "option_name": "C_c",
           "option_step": 1.0,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 1.3,
-          "option_description": "Heat-transfer coefficient firepot->chamber (nominal; calibrate). [Default=1.3]",
-          "option_friendly_name": "Firepot-Chamber Coupling",
-          "option_max": null,
-          "option_min": 0.0,
-          "option_name": "h_fc",
-          "option_step": 0.1,
           "option_type": "float"
         },
         {
