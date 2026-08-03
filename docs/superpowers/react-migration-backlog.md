@@ -766,6 +766,8 @@ top-level item, so nobody has to read 900 lines to find that out:
 | 13. P-MODE/SMOKE+ visibility outside Smoke | **OPEN** — needs a ruling |
 | 14. `clampSetpoint` is superseded | **OPEN** — delete it |
 | 15. Probe cards intermittently read 0 | **OPEN** — live-grill report |
+| 16. Save-error placement wired for one tab | **OPEN** |
+| 17. No guard on `integer` field marking | **OPEN** |
 
 So the real open work is **9a.3 and the OPEN entries inside item 10.** The
 biggest of those, in rough order of consequence:
@@ -2349,6 +2351,47 @@ read `fp.temp` today.
 The hand-written fixture is why nothing caught this: it carries `temp: 0` for
 every probe, a value the live payload does not always produce. Capture the
 replacement from a real frame.
+
+### 16. Settings save-error placement is wired for one tab, one widget — OPEN
+
+**Status:** OPEN. Left deliberately by
+`plans/2026-08-02-settings-toolchain-followups.md` Task 8, whose scope was one
+tab plus the shared plumbing; recorded here so the boundary is not mistaken for
+completeness.
+
+The backend now reports which settings field it refused and why, and that
+reaches the browser as `SaveFieldError[]`. Two gaps remain:
+
+- **Only `NumberField` has an inline error slot.** `Toggle`, `Select` and
+  `RangeProfileTable` do not, so on the Startup tab 7 of 13 paths show their
+  reason beside the control and the other 6 surface only in the collected list
+  under the save bar. Nothing is dropped — `CLAIMED_PATHS` lists exactly the
+  error-capable paths and a guard test fails if that drifts — but the split is
+  visible to a user.
+- **Only `StartupTab` is wired.** The other eleven tabs still show the summary
+  line alone.
+
+`errorFor` / `unmatchedErrors` (`helpers/settings/fieldErrors.ts`) are the whole
+mechanism; extending a tab is passing `error={errorFor(errors, path)}` and
+listing that path as claimed.
+
+### 17. Nothing guards which fields are marked `integer` — OPEN
+
+**Status:** OPEN. Raised by the same plan's whole-branch review and deliberately
+deferred; the reviewer's own words were "not a defect today".
+
+`NumberField` takes an `integer` prop that rounds on blur, and 35 call sites
+carry it. Every one was checked against the schema by hand when it landed and
+all 35 are genuinely `type: integer`. Nothing stops the next edit marking a
+field the schema calls `number` — and rounding a fraction to a whole number is
+silent corruption, not a visible failure. `cycle_data.u_max` is the sharp case:
+it is `0.9`, and the control loop does `ratio = min(ratio, u_max)`.
+
+It was not fixed because the obvious guard is brittle: the `integer` prop and
+the field's settings path are not adjacent in the JSX, so a source-scanning test
+would have to correlate them by proximity. Something structural — a wrapper that
+takes the path and derives `integer` from the generated schema — would be worth
+more than a fragile scanner.
 
 ---
 
