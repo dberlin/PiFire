@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { deriveView } from "../../../../src/helpers/dashboard/deriveView";
+import { deriveView, staleLabel } from "../../../../src/helpers/dashboard/deriveView";
 import { FIXTURE_DASH } from "../../../../src/helpers/fixture";
 import type { LiveState, ProbeData } from "../../../../src/helpers/types";
 
@@ -20,6 +20,64 @@ describe("probeCard identity", () => {
     const v = card({ title: "Brisket", label: "Probe1" });
     expect(v.label).toBe("Probe1");
     expect(v.name).toBe("Brisket");
+  });
+});
+
+// A probe device may have no reading to give: a network-polled one returns
+// None for a channel whose cache went stale, and it reaches the wire as null.
+// Math.round(null) is 0, so the card used to render a confident zero -- a
+// plausible temperature, which reads as data rather than as absence.
+describe("probeCard with no current reading", () => {
+  const withLast = (over: Partial<ProbeData["status"]>) =>
+    card({ temp: null, status: { ...FIXTURE_DASH.foodProbes[0].status, ...over } });
+
+  it("shows the last real reading rather than a zero", () => {
+    const v = withLast({ lastTemp: 147, lastReadingAge: 47 });
+    expect(v.tempInt).toBe(147);
+    expect(v.stale).toBe("last data 47s ago");
+  });
+
+  it("shows nothing at all for a probe that has never reported", () => {
+    const v = card({ temp: null, status: FIXTURE_DASH.foodProbes[0].status });
+    expect(v.tempInt).toBeNull();
+    expect(v.stale).toBeNull();
+  });
+
+  it("is not marked stale while the probe is reporting", () => {
+    // lastTemp disagrees with temp on purpose: a live reading must win, so a
+    // stale marker here would mean the branch was chosen on the wrong field.
+    const v = card({ temp: 210, status: { lastTemp: 147, lastReadingAge: 47 } });
+    expect(v.tempInt).toBe(210);
+    expect(v.stale).toBeNull();
+  });
+
+  it("measures progress against the carried reading, not against zero", () => {
+    const v = card({
+      temp: null,
+      target: 203,
+      targetReq: true,
+      status: { lastTemp: 202, lastReadingAge: 12 },
+    });
+    expect(v.barPct).toBeGreaterThan(90);
+  });
+
+  it("draws no progress for a probe with nothing to show", () => {
+    const v = card({ temp: null, target: 203, targetReq: true, status: {} });
+    expect(v.barPct).toBe(0);
+  });
+});
+
+describe("staleLabel", () => {
+  // Worded and bucketed identically in display/staleness.py; the two are
+  // pinned separately against this same table.
+  it("counts seconds, then minutes, then hours", () => {
+    expect(staleLabel(0)).toBe("last data 0s ago");
+    expect(staleLabel(47)).toBe("last data 47s ago");
+    expect(staleLabel(59)).toBe("last data 59s ago");
+    expect(staleLabel(60)).toBe("last data 1m ago");
+    expect(staleLabel(3599)).toBe("last data 59m ago");
+    expect(staleLabel(3600)).toBe("last data 1h ago");
+    expect(staleLabel(7260)).toBe("last data 2h ago");
   });
 });
 

@@ -1,7 +1,11 @@
 import { arcLength, describeArc, polarToCartesian, valueAngle } from "../../helpers/gaugeMath";
 
 interface GrillGaugeProps {
-  temp: number;
+  /** Already rounded by deriveView, and already the last real reading when the
+   *  probe has no current one. Null only when it has produced nothing at all. */
+  temp: number | null;
+  /** Set when `temp` is a carried-over reading, e.g. "last data 47s ago". */
+  stale: string | null;
   setpoint: number;
   maxTemp: number;
   frac: number;
@@ -17,6 +21,7 @@ interface GrillGaugeProps {
 // overlay — the heart of the design's dashboard.
 export function GrillGauge({
   temp,
+  stale,
   setpoint,
   maxTemp,
   frac,
@@ -77,9 +82,10 @@ export function GrillGauge({
       <div className="pf-dash-gauge-overlay">
         <div className="pf-dash-gauge-caption">Grill</div>
         <div className="pf-dash-gauge-num">
-          <span className="pf-dash-gauge-temp">{Math.round(temp)}</span>
+          <span className="pf-dash-gauge-temp">{temp === null ? "—" : temp}</span>
           <span className="pf-dash-gauge-unit">°{units}</span>
         </div>
+        {stale && <div className="pf-dash-gauge-stale">{stale}</div>}
         {hasSetpoint && <div className="pf-dash-gauge-set">SET {Math.round(setpoint)}°</div>}
         <div className="pf-dash-gauge-mode">{modeLabel}</div>
       </div>

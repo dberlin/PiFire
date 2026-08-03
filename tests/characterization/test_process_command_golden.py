@@ -26,6 +26,18 @@ hand-updated to include the now-correct `pwm.temp_range_list` diff. This is
 a sanctioned exception to "never regenerate the fixture": a proven bug
 fix, not refactor drift.
 
+DELIBERATE RE-BASELINE (per-probe freshness): `control:current` gained a
+`LAST` map -- each probe's last real reading and when it was taken -- so that a
+probe reporting no reading can be shown as its last value MARKED STALE rather
+than as a plausible 0. WHAT CHANGED: exactly one key, in exactly one entry --
+`get_current`'s `return.data` gained `"LAST": {}`. It is empty because the
+harness seeds through `flush_current()` and patches the blob directly (see the
+note at the seeding site), which is also why this stays deterministic: the map
+is only populated by `write_current()`, whose wall-clock stamp the harness
+avoids on purpose. WHY it is a contract change and not drift: `get_current`
+returns the blob, so a new key in the blob is a new key in the response. It is
+additive -- every pre-existing key is byte-identical, and no other case moved.
+
 DELIBERATE RE-BASELINE (control-write deltas): the timer commands stopped
 queueing a whole control snapshot and now queue an intent ENVELOPE -- a named
 op the drain evaluates against live state (common/control_delta.py). WHAT
@@ -173,7 +185,7 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_g
 #   5a3702a7... -> 8d110035...  the six set_timer_ start/pause/stop entries
 #   8d110035... -> 2665570f...  the 18 notify / flag / hopper entries
 #   2665570f... -> 88c081a4...  the 44 scalar / mode / manual entries
-GOLDEN_SHA256 = "88c081a4e5d583aae69187beefc5d8a42afeaf1936ca36e891a305c2fe65cbde"
+GOLDEN_SHA256 = "487c91602da2215fbc45541c4563b304bb4b55e4fc98241eced8479a80d17548"
 
 # Frozen wall clock. The set/timer branches stamp time.time() into control.
 FIXED_NOW = 1700000000.0

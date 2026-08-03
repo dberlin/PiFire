@@ -600,6 +600,10 @@ class ProbeCard(FlexObject):
         data = self.objectData.get("data", {})
         name = data.get("name", "")
         temp = data.get("temp", 0)
+        # Defaults describe a probe that is reporting, so a layout or a caller
+        # that knows nothing of staleness draws exactly what it drew before.
+        has_temp = data.get("hasTemp", True)
+        stale = data.get("stale", "")
         target = data.get("target", 0)
         units = self.objectData.get("units", "F")
 
@@ -608,8 +612,9 @@ class ProbeCard(FlexObject):
         cooking_color = (255, 210, 63, 255)
         done_color = (94, 201, 111, 255)
         ambient_color = (125, 114, 100, 255)
+        warn_color = (255, 176, 32, 255)
 
-        done = target > 0 and temp >= target - 1
+        done = has_temp and target > 0 and temp >= target - 1
 
         card = Image.new("RGBA", size)
         draw = ImageDraw.Draw(card)
@@ -648,7 +653,8 @@ class ProbeCard(FlexObject):
             draw.polygon(triangle_points, fill=target_color)
 
         # Big temperature
-        temp_label = self._draw_text(round(temp), "./static/font/BarlowSemiCondensed-Bold.ttf", 90, light_color)
+        temp_text = round(temp) if has_temp else "—"
+        temp_label = self._draw_text(temp_text, "./static/font/BarlowSemiCondensed-Bold.ttf", 90, light_color)
         card.paste(temp_label, (35, 75), temp_label)
 
         # Units, smaller/dim, following the big temp
@@ -657,11 +663,17 @@ class ProbeCard(FlexObject):
         units_y = 75 + temp_label.size[1] - units_label.size[1]
         card.paste(units_label, (units_x, units_y), units_label)
 
+        # Says the number above is not current. Sits between the temperature
+        # and the bar, where the card has spare height at every output size.
+        if stale:
+            stale_label_img = self._draw_text(stale, "./static/font/Barlow-SemiBold.ttf", 22, warn_color)
+            card.paste(stale_label_img, (35, 152), stale_label_img)
+
         # Progress bar near the bottom
         bar_track = (35, 178, size[0] - 35, 188)
         draw.rounded_rectangle(bar_track, radius=5, fill=(60, 54, 46, 255))
 
-        if target > 0:
+        if has_temp and target > 0:
             fraction = max(0.0, min(1.0, temp / target))
         else:
             fraction = 0.0
@@ -717,6 +729,10 @@ class GaugeEmber(FlexObject):
 
         temps = self.objectData["temps"]
         current_temp = temps[0]
+        # Defaults describe a probe that is reporting, so a layout or a caller
+        # that knows nothing of staleness draws exactly what it drew before.
+        has_temp = self.objectData.get("hasTemp", True)
+        stale = self.objectData.get("stale", "")
         setpoint = temps[2] if len(temps) > 2 else 0
         max_temp = self.objectData["max_temp"] or 1
         units = self.objectData["units"]
@@ -801,7 +817,10 @@ class GaugeEmber(FlexObject):
         pieces.append(label_canvas)
 
         temp_canvas = self._draw_text(
-            round(current_temp), "./static/font/BarlowSemiCondensed-Bold.ttf", round(size[0] * 0.22), light_color
+            round(current_temp) if has_temp else "—",
+            "./static/font/BarlowSemiCondensed-Bold.ttf",
+            round(size[0] * 0.22),
+            light_color,
         )
         units_canvas = self._draw_text(
             f"°{units}", "./static/font/Barlow-SemiBold.ttf", round(size[0] * 0.072), dim_color
@@ -820,6 +839,13 @@ class GaugeEmber(FlexObject):
             units_canvas,
         )
         pieces.append(temp_row)
+
+        # Says the number above is not current. Stacked with the rest, so the
+        # centred column reflows around it rather than overlapping.
+        if stale:
+            pieces.append(
+                self._draw_text(stale, "./static/font/Barlow-SemiBold.ttf", round(size[0] * 0.05), (255, 176, 32, 255))
+            )
 
         if setpoint > 0:
             set_canvas = self._draw_text(

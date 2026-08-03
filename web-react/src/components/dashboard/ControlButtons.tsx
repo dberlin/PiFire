@@ -200,7 +200,10 @@ export function ControlButtons({
 
       <SetpointEntry
         open={setpointOpen}
-        initial={dash.primaryProbe.setTemp || dash.primaryProbe.temp}
+        // `||` already falls past a null reading; the trailing 0 is for a pit
+        // probe that has produced nothing at all, where there is no number to
+        // prefill with.
+        initial={dash.primaryProbe.setTemp || dash.primaryProbe.temp || 0}
         units={dash.tempUnits}
         safetyMaxTemp={dash.safetyMaxTemp}
         onCancel={() => setSetpointOpen(false)}

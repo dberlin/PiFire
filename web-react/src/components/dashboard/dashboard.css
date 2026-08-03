@@ -776,6 +776,16 @@
   color: var(--text-dim);
   margin-left: 2px;
 }
+/* Says the reading above it is not current. Deliberately quiet: it qualifies a
+   number the operator can still use, rather than warning about a fault. */
+.pf-dash-probestale {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--warn);
+  margin-top: 2px;
+  white-space: nowrap;
+}
 .pf-dash-bar {
   height: 6px;
   @apply rounded-[6px] mt-[8px] overflow-hidden;
@@ -840,6 +850,12 @@
   font-weight: 600;
   color: var(--text-dim);
   margin-left: 4px;
+}
+/* Same role as .pf-dash-probestale, sized for the gauge overlay. */
+.pf-dash-gauge-stale {
+  font: 600 14px "Barlow";
+  letter-spacing: 0.4px;
+  @apply text-warn mt-[2px] whitespace-nowrap;
 }
 .pf-dash-gauge-set {
   font: 600 20px "Barlow";

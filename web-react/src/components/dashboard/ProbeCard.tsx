@@ -54,9 +54,13 @@ export function ProbeCard({
         </span>
       </div>
       <div className="pf-dash-probetemp">
-        <span className="pf-dash-probetemp-int">{p.tempInt}</span>
+        <span className="pf-dash-probetemp-int">{p.tempInt === null ? "—" : p.tempInt}</span>
         <span className="pf-dash-probetemp-unit">°{p.unit}</span>
       </div>
+      {/* The number above is the probe's last real reading, not a current one.
+          Without this line it reads as live, which is the whole defect: a
+          temperature is plausible at any value, so absence has to be said. */}
+      {p.stale && <div className="pf-dash-probestale">{p.stale}</div>}
       <div className="pf-dash-bar">
         <div className="pf-dash-bar-fill" />
       </div>

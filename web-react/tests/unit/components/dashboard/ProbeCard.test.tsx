@@ -194,3 +194,36 @@ describe("ProbeCard status badges", () => {
     expect(container.querySelectorAll(".pf-badge")).toHaveLength(2);
   });
 });
+
+// A reading the card cannot refresh must not read as live. The number stays --
+// 40 s of age is still worth something to someone deciding whether to open the
+// lid -- but it has to say so, because a temperature is plausible at any value.
+describe("ProbeCard staleness", () => {
+  const BASE: ProbeCardView = deriveView(FIXTURE_DASH).probes[0];
+  const withStale = (over: Partial<ProbeCardView>): ProbeCardView => ({ ...BASE, ...over });
+
+  it("renders no stale line while the probe is reporting", () => {
+    const { container } = render(
+      <ProbeCard p={withStale({ tempInt: 147, stale: null })} onOpenNotify={rs.fn()} />,
+    );
+    expect(screen.getByText("147")).toBeInTheDocument();
+    expect(container.querySelector(".pf-dash-probestale")).toBeNull();
+  });
+
+  it("keeps the number and adds the age when the reading is stale", () => {
+    const { container } = render(
+      <ProbeCard
+        p={withStale({ tempInt: 147, stale: "last data 47s ago" })}
+        onOpenNotify={rs.fn()}
+      />,
+    );
+    expect(screen.getByText("147")).toBeInTheDocument();
+    expect(container.querySelector(".pf-dash-probestale")).toHaveTextContent("last data 47s ago");
+  });
+
+  it("shows a dash, not a zero, for a probe that has never reported", () => {
+    render(<ProbeCard p={withStale({ tempInt: null, stale: null })} onOpenNotify={rs.fn()} />);
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
+  });
+});

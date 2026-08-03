@@ -773,7 +773,7 @@ top-level item, so nobody has to read 900 lines to find that out:
 | 12. Shutdown affordance and ordering | **OPEN** |
 | 13. P-MODE/SMOKE+ visibility outside Smoke | **DONE** 2026-08-03 — Smoke-only, in all three dashboards |
 | 14. `clampSetpoint` is superseded | **OPEN** — delete it |
-| 15. Probe cards intermittently read 0 | **OPEN** — live-grill report |
+| 15. Probe cards intermittently read 0 | **DONE** 2026-08-03 — last value + age, all three dashboards |
 | 16. Save-error placement wired for one tab | **OPEN** |
 | 17. No guard on `integer` field marking | **OPEN** |
 
@@ -792,10 +792,8 @@ biggest of those, in rough order of consequence:
 6. Shutdown does not read as destructive, and Stop/Shutdown sit in opposite
    orders here and on the attached display (item 12). Note what Shutdown
    actually does before scheduling this one — it is not a styling item.
-7. Probe cards intermittently read 0 while the attached display never does
-   (item 15) — reported from a live grill; **cause established**, fix not
-   written. A stale reading arrives as `null` and `Math.round(null)` is `0`;
-   QML refuses the same assignment, which is why only the web UI shows it.
+7. ~~Probe cards intermittently read 0 while the attached display never
+   does (item 15)~~ — **fixed 2026-08-03** in all three dashboards.
 8. ~~Whether P-MODE/SMOKE+ should be Smoke-only (item 13)~~ — **ruled and
    shipped 2026-08-03**; a superseded helper still waits to be deleted
    (item 14).
@@ -2304,9 +2302,37 @@ Delete it with its test rather than finding it a caller. It was carried forward
 (and even given the new `safetyMaxTemp` parameter) only to keep a deletion out
 of a behaviour fix.
 
-### 15. Probe cards intermittently read 0 in the web UI — OPEN
+### 15. Probe cards intermittently read 0 in the web UI — DONE 2026-08-03
 
-**Status:** OPEN. Reported from a live grill 2026-08-02: the web UI sometimes
+**Fixed in all three dashboards.** A probe with no current reading now shows
+its last real one with the age beneath it ("last data 47s ago"), and a probe
+that has produced nothing at all shows "—" rather than a number. The age comes
+from the producer: `write_current()` keeps a `LAST` map of each probe's last
+real reading and when it was taken (`common/datastore_accessors.py`), the wire
+carries it as `status.lastTemp` / `status.lastReadingAge`
+(`socket_io.py::_get_probe_data`), and the on-device pair read the blob
+directly. Wording is shared, one table pinned on each side
+(`display/staleness.py`, `staleLabel` in `deriveView.ts`).
+
+Three things the fix turned up that the analysis below did not have:
+
+- **A third dashboard.** `display/_base_flex.py` drives the pygame/DSI
+  displays and had the bug in its own form: `_update_probe_cards` coerced the
+  None to `0`, and `_update_primary_gauge_values` did the same for the pit.
+  That is the web's exact defect in a third place. Anything below that says
+  "both UIs" means three.
+- **The staleness line needed the change gates rewritten.** Both flex updaters
+  compared against the *previous frame's readings*, and a probe that is down
+  reports the same thing every frame while its age climbs — so the age would
+  have frozen at whatever it was when the probe went quiet. They compare
+  against what the widget is currently showing instead.
+- **The `get_current` API contract moved.** It returns the blob verbatim, so
+  `LAST` is a new key in the public response; re-baselined through the
+  characterization suite's documented procedure, rationale included there.
+
+**Original analysis, kept because it is the trace that found it:**
+
+**Status:** reported from a live grill 2026-08-02: the web UI sometimes
 shows 0 for a probe card while the attached Qt display never falters.
 
 **Confirmed by the reporter:** the pit card is *never* 0, only the food card is,
@@ -2339,8 +2365,11 @@ A probe with no reading must not render as `0` — zero is a plausible
 temperature, so it reads as data rather than as absence. It should render as
 "—" (and `barPct`/`targetStr` should follow). Note also that `LiveState`'s
 `ProbeData.temp` is declared `number` while the backend can put `null` there:
-the type is lying, and nothing catches it because the fixture was hand-written
-with `temp: 0` rather than captured from a live payload.
+the type is lying, and nothing catches it because `FIXTURE_DASH` carries
+`temp: 0` for every probe. That fixture is a genuine capture (2026-07-21) and
+its zeros are real — the grill was idle when it was taken — so the gap is not
+that it was hand-authored, it is that no capture has ever caught a probe with
+no reading.
 
 **CONFIRMED from the grill's control log.** It carries this line, repeating:
 
@@ -2399,9 +2428,10 @@ UIs have to render absence as absence. Widening the type is what makes the
 compiler find every consumer: `tempInt`, `barPct`, `done` and `targetStr` all
 read `fp.temp` today.
 
-The hand-written fixture is why nothing caught this: it carries `temp: 0` for
-every probe, a value the live payload does not always produce. Capture the
-replacement from a real frame.
+No fixture covers the null: `FIXTURE_DASH` is a real capture, but of an idle
+grill, so every probe in it reports. Add explicit null cases rather than
+recapturing — a capture only catches a stale probe if one happens to be stale
+while it is taken.
 
 ### 16. Settings save-error placement is wired for one tab, one widget — OPEN
 

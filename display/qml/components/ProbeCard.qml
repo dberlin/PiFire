@@ -10,12 +10,19 @@ Rectangle {
 	property bool compact: false
 	property string name: ""
 	property real temp: 0
+	// False when the probe has produced no reading at all, so there is no
+	// number to show. `temp` is the last real reading whenever there is one,
+	// which is why it stays a plain real: the model resolves the absence
+	// rather than passing a null down and letting the assignment fail.
+	property bool hasTemp: true
+	// Set when `temp` is a carried-over reading, e.g. "last data 47s ago".
+	property string stale: ""
 	property real target: 0
 	property real maxTemp: 300
 	property string units: "F"
 	signal tapped()
 
-	readonly property bool done: target > 0 && temp >= target - 1
+	readonly property bool done: hasTemp && target > 0 && temp >= target - 1
 
 	color: Theme.card
 	radius: Theme.cardRadius
@@ -59,7 +66,7 @@ Rectangle {
 		Row {
 			spacing: 2
 			Text {
-				text: Math.round(card.temp)
+				text: card.hasTemp ? Math.round(card.temp) : "—"
 				font.family: Theme.condensed
 				font.pixelSize: card.compact ? 52 : 66
 				font.bold: true
@@ -75,6 +82,18 @@ Rectangle {
 			}
 		}
 
+		// Says the number above is not current. Without it the card reads as
+		// live, which is the whole defect: a temperature is plausible at any
+		// value, so absence has to be said rather than implied.
+		Text {
+			visible: card.stale !== ""
+			text: card.stale
+			font.family: Theme.sans
+			font.pixelSize: card.compact ? 11 : 13
+			font.bold: true
+			color: Theme.warn
+		}
+
 		Rectangle {
 			width: parent.width
 			height: 6
@@ -83,7 +102,7 @@ Rectangle {
 			Rectangle {
 				height: parent.height
 				radius: 3
-				width: parent.width * (card.target > 0 ? Math.max(0.02, Math.min(1, card.temp / card.target)) : 0)
+				width: parent.width * (card.hasTemp && card.target > 0 ? Math.max(0.02, Math.min(1, card.temp / card.target)) : 0)
 				color: card.done ? Theme.okColor : Theme.accentColor
 				Behavior on width { NumberAnimation { duration: 900; easing.type: Easing.OutCubic } }
 			}

@@ -16,7 +16,8 @@ describe("GrillGauge", () => {
     const v = deriveView(dash);
     render(
       <GrillGauge
-        temp={dash.primaryProbe.temp}
+        temp={v.tempInt}
+        stale={v.stale}
         setpoint={dash.primaryProbe.setTemp}
         maxTemp={v.maxTemp}
         frac={v.gaugeFrac}
@@ -41,7 +42,8 @@ describe("GrillGauge", () => {
     const v = deriveView(dash);
     render(
       <GrillGauge
-        temp={dash.primaryProbe.temp}
+        temp={v.tempInt}
+        stale={v.stale}
         setpoint={dash.primaryProbe.setTemp}
         maxTemp={v.maxTemp}
         frac={v.gaugeFrac}

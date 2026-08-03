@@ -66,6 +66,7 @@ from common.datastore_accessors import (
     read_current,
 )
 from common.system import is_real_hardware
+from display.staleness import resolve_reading
 
 """
 ==================================================================================
@@ -763,23 +764,35 @@ class DisplayBase:
         self._update_probe_cards()
 
     def _update_primary_gauge_values(self):
-        """Update Primary Gauge Values"""
+        """Update Primary Gauge Values
+
+        Compared against what the gauge is showing rather than against the
+        previous frame, for the same reason as the probe cards: a pit probe
+        that stays unavailable reports the same thing every frame while its
+        age keeps climbing.
+        """
         primary_key = list(self.in_data["P"].keys())[0]  # Get the key for the primary gauge
+        now_ms = int(time.time() * 1000)
+        temp, has_temp, stale = resolve_reading(
+            self.in_data["P"][primary_key], self.in_data.get("LAST", {}).get(primary_key), now_ms
+        )
+        object_data = self.display_object_list[self.dash_map["primary_gauge"]].get_object_data()
+        temps = [temp, self.in_data["NT"][primary_key], self.in_data["PSP"]]
         if (
-            (self.in_data["P"] != self.last_in_data["P"])
-            or (self.in_data["PSP"] != self.last_in_data["PSP"])
-            or (self.in_data["NT"][primary_key] != self.last_in_data["NT"].get(primary_key))
+            object_data["temps"] == temps
+            and object_data.get("hasTemp") == has_temp
+            and object_data.get("stale") == stale
         ):
-            """ Update the Primary Gauge """
-            object_data = self.display_object_list[self.dash_map["primary_gauge"]].get_object_data()
-            object_data["temps"][0] = (
-                self.in_data["P"][primary_key] if self.in_data["P"][primary_key] is not None else 0
-            )
-            object_data["temps"][1] = self.in_data["NT"][primary_key]
-            object_data["temps"][2] = self.in_data["PSP"]
-            object_data["units"] = self.units
-            # object_data['label'] = primary_key
-            self.display_object_list[self.dash_map["primary_gauge"]].update_object_data(object_data)
+            return
+        """ Update the Primary Gauge """
+        object_data["temps"][0] = temp
+        object_data["temps"][1] = self.in_data["NT"][primary_key]
+        object_data["temps"][2] = self.in_data["PSP"]
+        object_data["hasTemp"] = has_temp
+        object_data["stale"] = stale
+        object_data["units"] = self.units
+        # object_data['label'] = primary_key
+        self.display_object_list[self.dash_map["primary_gauge"]].update_object_data(object_data)
 
     def _update_food_gauges(self):
         """Update Food Probe Gauges and Values"""
@@ -803,24 +816,39 @@ class DisplayBase:
                 self.display_object_list[self.dash_map[gauge]].update_object_data(object_data)
 
     def _update_probe_cards(self):
-        """Update Probe Cards (ember dash)"""
-        probe_card_keys = list(self.probe_card_label_map.keys())
-        for card in probe_card_keys:
+        """Update Probe Cards (ember dash)
+
+        Compared against what the card is already showing rather than against
+        the previous frame's readings: a probe that stays unavailable produces
+        the same reading every frame while its age keeps climbing, so a gate on
+        the readings alone would freeze the staleness line at the age it had
+        when the probe went quiet.
+        """
+        now_ms = int(time.time() * 1000)
+        last_readings = self.in_data.get("LAST", {})
+        for card in list(self.probe_card_label_map.keys()):
             if card not in self.dash_map.keys():
                 continue
             key = self.probe_card_label_map[card]
-            if (
-                self.last_in_data["F"][key] != self.in_data["F"][key]
-                or self.last_in_data["NT"][key] != self.in_data["NT"][key]
+            temp, has_temp, stale = resolve_reading(self.in_data["F"][key], last_readings.get(key), now_ms)
+            target = self.in_data["NT"][key] if self.in_data["NT"][key] is not None else 0
+            object_data = self.display_object_list[self.dash_map[card]].get_object_data()
+            object_data.setdefault("data", {})
+            shown = object_data["data"]
+            if (shown.get("temp"), shown.get("hasTemp"), shown.get("stale"), shown.get("target")) == (
+                temp,
+                has_temp,
+                stale,
+                target,
             ):
-                """ Update this probe card """
-                object_data = self.display_object_list[self.dash_map[card]].get_object_data()
-                object_data.setdefault("data", {})
-                object_data["data"]["name"] = self.probe_card_name_map[card]
-                object_data["data"]["temp"] = self.in_data["F"][key] if self.in_data["F"][key] is not None else 0
-                object_data["data"]["target"] = self.in_data["NT"][key] if self.in_data["NT"][key] is not None else 0
-                object_data["units"] = self.units
-                self.display_object_list[self.dash_map[card]].update_object_data(object_data)
+                continue
+            shown["name"] = self.probe_card_name_map[card]
+            shown["temp"] = temp
+            shown["hasTemp"] = has_temp
+            shown["stale"] = stale
+            shown["target"] = target
+            object_data["units"] = self.units
+            self.display_object_list[self.dash_map[card]].update_object_data(object_data)
 
     def _update_output_icons(self):
         """Update Output Status Icons"""

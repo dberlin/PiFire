@@ -127,3 +127,52 @@ updater/tag-release.sh v1.11.0-dev21 --tag-only
 Deleting a pushed tag is the only reason this is filed rather than done — it
 rewrites a ref other clones already have, which is the operator's call, not an
 agent's.
+
+### 3. `control:current` is a bare dict with no model — OPEN
+
+**Status:** OPEN. Raised 2026-08-03 while adding per-probe freshness to it.
+
+**The finding.** `control:current` is the highest-traffic durable blob PiFire
+has — written once per control pass, read by the web tier, the Qt Quick
+display, the pygame/flex displays and the `get_current` API — and it is a bare
+dict with no model, no validation and no declared shape. Its keys are
+single letters (`P`, `F`, `AUX`, `NT`, `PSP`, `TS`, and now `LAST`), so every
+consumer carries its own idea of what they mean and what may be missing.
+
+**What that costs, concretely, from this week's work.** The item-15 fix had to
+add one key, and doing it meant touching five places that each re-derive the
+structure by hand:
+
+- `write_current()` builds it literally; `flush_current()` builds a *second*
+  literal that has to be kept in step (it gained `"LAST": {}` by hand).
+- `socket_io.py::_get_probe_data` reaches in with `current[section][label]`,
+  which raises `KeyError` on a probe the blob has never seen.
+- `_base_flex` and `qtbackend` each index it directly, and each had its own
+  None-handling: one coerced to `0`, the other let the null reach QML.
+- The `get_current` golden had to be re-baselined, because the API returns the
+  blob verbatim — a new key in the blob is a new key in the public response,
+  and nothing said so at the time it was added.
+
+Every one of those is a shape decision made five times independently. The
+`temp` type is the sharpest instance: the producer can put `None` in `P`/`F`,
+and until 2026-08-03 the TypeScript declared `number`, which is why
+`Math.round(null)` reached a card as `0`.
+
+**What to build.** The same two-layer treatment `settings` and `pellets`
+already have (`common/settings_schema.py`, `common/pellets_schema.py`):
+
+- a pydantic model of the blob, including `schema_version` and an entry in an
+  ordered `_SHAPE_MIGRATIONS` registry, so `LAST` and anything after it
+  arrives as a version bump rather than a key that silently appears;
+- a dataclass (or the model itself) that consumers hold instead of a dict, so
+  `current.food["Probe1"]` replaces `current["F"]["Probe1"]` and the optional
+  reading is `float | None` in one declared place rather than five undeclared
+  ones;
+- a committed shape digest, as both other blobs have, so the modeled shape
+  cannot move without the suite noticing.
+
+**Two things to settle first.** Whether the single-letter wire keys are kept
+as pydantic aliases (they are on the socket payload and in the `get_current`
+response, so renaming them is a client-visible change), and whether the model
+is validated on every control pass or only at `init()` — this blob is written
+about once a second, which is a different budget from `settings`.

@@ -11,6 +11,13 @@ export interface ProbeStatus {
   batteryVoltage?: number;
   connected?: boolean;
   error?: boolean | null; // real capture emits `null` when no error is present
+  /** The last reading this probe actually produced, and how many seconds ago
+   *  it was taken. Both are published on every frame, so while the probe is
+   *  reporting `lastTemp` agrees with `temp` and the age is 0; they matter
+   *  when `temp` is null, which is the only time a card has a stale value to
+   *  show. Absent for a probe that has never reported since the last flush. */
+  lastTemp?: number;
+  lastReadingAge?: number;
   [k: string]: unknown;
 }
 
@@ -18,7 +25,11 @@ export interface ProbeData {
   title: string;
   label: string;
   eta: number | string | null; // real capture emits `null` when no ETA applies
-  temp: number;
+  /** null when the device had no reading to give -- a network-polled probe
+   *  whose cache went stale returns None rather than inventing a number, and
+   *  it reaches the wire unchanged (common/datastore_accessors.py). Rendering
+   *  it as a number would turn absence into a plausible temperature. */
+  temp: number | null;
   setTemp: number;
   maxTemp: number;
   target: number;

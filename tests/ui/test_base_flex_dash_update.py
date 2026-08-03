@@ -14,6 +14,7 @@ plumbing.
 
 import json
 import os
+import time
 
 import pytest
 
@@ -445,3 +446,100 @@ def test_cook_time_data_zero_when_no_timestamp():
         "label": "COOK TIME",
         "value": "00:00",
     }
+
+
+def _probe_card_data(display, card="probe_card_0"):
+    return _obj_data(display, card)["data"]
+
+
+def test_probe_card_shows_the_last_reading_marked_stale(tmp_path):
+    display = _make_display(tmp_path)
+    display.in_data = _in_data()
+    display._update_dash_objects()
+
+    now_ms = int(time.time() * 1000)
+    display.in_data = _in_data(F={"Probe1": None, "Probe2": 80})
+    display.in_data["LAST"] = {"Probe1": {"temp": 147, "ts": now_ms - 47_000}}
+    display._update_dash_objects()
+
+    data = _probe_card_data(display)
+    assert data["temp"] == 147.0
+    assert data["hasTemp"] is True
+    assert data["stale"] == "last data 47s ago"
+
+
+def test_probe_card_shows_no_number_for_a_probe_that_never_reported(tmp_path):
+    display = _make_display(tmp_path)
+    display.in_data = _in_data()
+    display._update_dash_objects()
+
+    display.in_data = _in_data(F={"Probe1": None, "Probe2": 80})
+    display.in_data["LAST"] = {}
+    display._update_dash_objects()
+
+    data = _probe_card_data(display)
+    assert data["hasTemp"] is False
+    assert data["stale"] == ""
+
+
+def test_probe_card_ages_the_marker_while_the_probe_stays_quiet(tmp_path):
+    # The reading is identical frame to frame while a probe is down, so a gate
+    # on the readings alone would freeze the age where it started.
+    display = _make_display(tmp_path)
+    display.in_data = _in_data()
+    display._update_dash_objects()
+
+    now_ms = int(time.time() * 1000)
+    display.in_data = _in_data(F={"Probe1": None, "Probe2": 80})
+    display.in_data["LAST"] = {"Probe1": {"temp": 147, "ts": now_ms - 10_000}}
+    display._update_dash_objects()
+    assert _probe_card_data(display)["stale"] == "last data 10s ago"
+
+    display.in_data["LAST"] = {"Probe1": {"temp": 147, "ts": now_ms - 130_000}}
+    display._update_dash_objects()
+    assert _probe_card_data(display)["stale"] == "last data 2m ago"
+
+
+def test_probe_card_is_unmarked_while_the_probe_reports(tmp_path):
+    # Two passes: _update_gauges_and_cards returns early until last_in_data has
+    # been seeded, so the first one never draws a card.
+    display = _make_display(tmp_path)
+    display.in_data = _in_data()
+    display._update_dash_objects()
+    display.in_data = _in_data(F={"Probe1": 121, "Probe2": 80})
+    display._update_dash_objects()
+
+    data = _probe_card_data(display)
+    assert data["temp"] == 121.0
+    assert data["hasTemp"] is True
+    assert data["stale"] == ""
+
+
+def test_primary_gauge_shows_the_last_reading_marked_stale(tmp_path):
+    display = _make_display(tmp_path)
+    display.in_data = _in_data()
+    display._update_dash_objects()
+
+    now_ms = int(time.time() * 1000)
+    display.in_data = _in_data(P={"Grill": None})
+    display.in_data["LAST"] = {"Grill": {"temp": 231, "ts": now_ms - 90_000}}
+    display._update_dash_objects()
+
+    gauge = _obj_data(display, "primary_gauge")
+    assert gauge["temps"][0] == 231.0
+    assert gauge["hasTemp"] is True
+    assert gauge["stale"] == "last data 1m ago"
+
+
+def test_primary_gauge_shows_no_number_for_a_pit_probe_that_never_reported(tmp_path):
+    display = _make_display(tmp_path)
+    display.in_data = _in_data()
+    display._update_dash_objects()
+
+    display.in_data = _in_data(P={"Grill": None})
+    display.in_data["LAST"] = {}
+    display._update_dash_objects()
+
+    gauge = _obj_data(display, "primary_gauge")
+    assert gauge["hasTemp"] is False
+    assert gauge["stale"] == ""

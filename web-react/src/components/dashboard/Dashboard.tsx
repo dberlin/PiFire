@@ -4,7 +4,7 @@ import type { CommandClient } from "../../helpers/command";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
 import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";
-import { deriveView, type PillView } from "../../helpers/dashboard/deriveView";
+import { deriveView, type PillView, reading } from "../../helpers/dashboard/deriveView";
 import { useClock, useFitScale } from "../../helpers/dashboard/hooks";
 import { type NotifyEdit, readNotifyEdit, saveNotifyEdit } from "../../helpers/notify/notifyState";
 import { saveAccent } from "../../helpers/settings/accent";
@@ -136,10 +136,17 @@ export function Dashboard({
     setNotifySaving(true);
     setNotifyError(null);
     try {
-      // The probe's CURRENT reading goes with the write: it is what pre-arms
-      // each limit's `triggered` latch, so an alert saved while the temperature
-      // is already out of range stays quiet until it leaves and comes back.
-      await saveNotifyEdit(apiBase, notifyLabel, edit, notifyProbe.temp);
+      // The probe's reading goes with the write: it is what pre-arms each
+      // limit's `triggered` latch, so an alert saved while the temperature is
+      // already out of range stays quiet until it leaves and comes back. When
+      // the probe has no current reading this is the same carried-over value
+      // its card is showing, which is what the operator set the limit against.
+      await saveNotifyEdit(
+        apiBase,
+        notifyLabel,
+        edit,
+        reading(notifyProbe.temp, notifyProbe.status).shown ?? 0,
+      );
       setNotifyLabel(null);
     } catch (e) {
       // Stay open on failure. This write is not echoed back until the control
@@ -259,7 +266,8 @@ export function Dashboard({
           {/* Center: gauge + cook time + controls */}
           <div data-pf="centerCol" className="pf-dash-centercol">
             <GrillGauge
-              temp={dash.primaryProbe.temp}
+              temp={view.tempInt}
+              stale={view.stale}
               setpoint={dash.primaryProbe.setTemp}
               maxTemp={view.maxTemp}
               frac={view.gaugeFrac}

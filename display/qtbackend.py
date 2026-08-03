@@ -16,6 +16,7 @@ import time
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Property, Qt, Signal, Slot
 
 from common.modes import Mode
+from display.staleness import resolve_reading
 
 
 class FoodProbeModel(QAbstractListModel):
@@ -23,6 +24,8 @@ class FoodProbeModel(QAbstractListModel):
     TempRole = Qt.UserRole + 2
     TargetRole = Qt.UserRole + 3
     MaxRole = Qt.UserRole + 4
+    HasTempRole = Qt.UserRole + 5
+    StaleRole = Qt.UserRole + 6
 
     def __init__(self, food_info, parent=None):
         super().__init__(parent)
@@ -33,6 +36,8 @@ class FoodProbeModel(QAbstractListModel):
                 "name": f.get("name", f"Probe {i + 1}"),
                 "label": f.get("label", f.get("name", f"Probe {i + 1}")),
                 "temp": 0,
+                "hasTemp": True,
+                "stale": "",
                 "target": 0,
                 "maxTemp": f.get("max_temp", 300),
             }
@@ -43,7 +48,14 @@ class FoodProbeModel(QAbstractListModel):
         return 0 if parent.isValid() else len(self._rows)
 
     def roleNames(self):
-        return {self.NameRole: b"name", self.TempRole: b"temp", self.TargetRole: b"target", self.MaxRole: b"maxTemp"}
+        return {
+            self.NameRole: b"name",
+            self.TempRole: b"temp",
+            self.TargetRole: b"target",
+            self.MaxRole: b"maxTemp",
+            self.HasTempRole: b"hasTemp",
+            self.StaleRole: b"stale",
+        }
 
     def data(self, index, role):
         if not index.isValid():
@@ -54,21 +66,31 @@ class FoodProbeModel(QAbstractListModel):
             self.TempRole: row["temp"],
             self.TargetRole: row["target"],
             self.MaxRole: row["maxTemp"],
+            self.HasTempRole: row["hasTemp"],
+            self.StaleRole: row["stale"],
         }.get(role)
 
-    def update(self, in_data):
+    def update(self, in_data, now_ms=None):
         f = in_data.get("F", {})
         nt = in_data.get("NT", {})
+        last = in_data.get("LAST", {})
+        if now_ms is None:
+            now_ms = int(time.time() * 1000)
         changed = False
         for row in self._rows:
-            temp = f.get(row["label"], 0)
+            # .get with no default on purpose: a probe reporting None and a
+            # probe whose key is missing are the same thing to the card, and
+            # `f.get(label, 0)` only defaulted the second.
+            temp, has_temp, stale = resolve_reading(f.get(row["label"]), last.get(row["label"]), now_ms)
             target = nt.get(row["label"], 0)
-            if row["temp"] != temp or row["target"] != target:
-                row["temp"], row["target"] = temp, target
+            if (row["temp"], row["hasTemp"], row["stale"], row["target"]) != (temp, has_temp, stale, target):
+                row["temp"], row["hasTemp"], row["stale"], row["target"] = temp, has_temp, stale, target
                 changed = True
         if changed and self._rows:
             self.dataChanged.emit(
-                self.index(0, 0), self.index(len(self._rows) - 1, 0), [self.TempRole, self.TargetRole]
+                self.index(0, 0),
+                self.index(len(self._rows) - 1, 0),
+                [self.TempRole, self.TargetRole, self.HasTempRole, self.StaleRole],
             )
 
 
@@ -104,6 +126,8 @@ class PiFireBackend(QObject):
         self._mode = "Stop"
         self._units = "F"
         self._primary_temp = 0
+        self._primary_has_temp = True
+        self._primary_stale = ""
         self._primary_sp = 0
         self._hopper_level = 0
         self._hopper_enabled = False
@@ -142,8 +166,15 @@ class PiFireBackend(QObject):
         self._set("_units", status.get("units", "F"), self.unitsChanged)
         p = in_data.get("P", {})
         primary_key = next(iter(p), None)
-        primary_temp = p.get(primary_key, 0) if primary_key is not None else 0
+        now_ms = int(self._now() * 1000)
+        primary_temp, primary_has_temp, primary_stale = resolve_reading(
+            p.get(primary_key) if primary_key is not None else 0,
+            in_data.get("LAST", {}).get(primary_key),
+            now_ms,
+        )
         self._set("_primary_temp", primary_temp, self.primaryChanged)
+        self._set("_primary_has_temp", primary_has_temp, self.primaryChanged)
+        self._set("_primary_stale", primary_stale, self.primaryChanged)
         self._set("_primary_sp", in_data.get("PSP", 0) or 0, self.primaryChanged)
         nt = in_data.get("NT", {})
         self._set("_primary_notify", nt.get(primary_key, 0) or 0, self.primaryChanged)
@@ -160,7 +191,7 @@ class PiFireBackend(QObject):
         self._set("_recipe_paused", bool(status.get("recipe_paused", False)), self.statusChanged)
         self._set("_hopper_enabled", bool(status.get("hopper_level_enabled", False)), self.hopperChanged)
         self._set("_hopper_level", max(status.get("hopper_level", 0) or 0, 0), self.hopperChanged)
-        self._food_model.update(in_data)
+        self._food_model.update(in_data, now_ms)
         now = self._now()
         self._update_timer_text(status, now)
         self._update_cook_elapsed(status, now)
@@ -347,6 +378,14 @@ class PiFireBackend(QObject):
     @Property(float, notify=primaryChanged)
     def primaryTemp(self):
         return float(self._primary_temp)
+
+    @Property(bool, notify=primaryChanged)
+    def primaryHasTemp(self):
+        return self._primary_has_temp
+
+    @Property(str, notify=primaryChanged)
+    def primaryStale(self):
+        return self._primary_stale
 
     @Property(float, notify=primaryChanged)
     def primarySetpoint(self):

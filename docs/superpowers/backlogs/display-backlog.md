@@ -147,9 +147,21 @@ machine has none. The routing change in `Actions.js` is testable without one.
 
 ---
 
-### 3. A probe with no reading shows its last value, and floods the log
+### 3. A probe with no reading shows its last value, and floods the log — DONE 2026-08-03
 
-**Status:** OPEN. Found 2026-08-02 from a live grill's control log, while
+**Fixed.** The absence is taken deliberately now: `FoodProbeModel` resolves it
+into `temp` + `hasTemp` + `stale` before it reaches QML, so `property real
+temp` is never handed an undefined and the log line is gone. The card keeps
+showing the last real reading -- which is what it accidentally did -- and says
+how old it is underneath, worded identically to the web
+(`display/staleness.py`). A probe that has produced nothing at all draws "—".
+The same treatment went to the primary gauge, and to the pygame/flex displays,
+which had the web's silent-zero form of the bug rather than this one.
+`backlogs/react-migration-backlog.md` item 15 holds the full disposition.
+
+**Original finding, kept as the trace:**
+
+**Status:** found 2026-08-02 from a live grill's control log, while
 tracing why the web UI shows 0 for the same probe
 (`react-migration-backlog.md` item 15, which holds the full chain).
 

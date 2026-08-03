@@ -72,6 +72,8 @@ Item {
 						compact: dash.compact
 						name: model.name
 						temp: model.temp
+						hasTemp: model.hasTemp
+						stale: model.stale
 						target: model.target
 						maxTemp: model.maxTemp
 						units: backend.units
@@ -103,6 +105,8 @@ Item {
 						height: dash.compact ? 300 : 392
 						compact: dash.compact
 						value: backend.primaryTemp
+						hasValue: backend.primaryHasTemp
+						stale: backend.primaryStale
 						setpoint: backend.primarySetpoint
 						target: backend.primaryNotifyTarget
 						maxValue: backend.primaryMax

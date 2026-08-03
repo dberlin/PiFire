@@ -1,4 +1,4 @@
-import type { LiveState } from "../types";
+import type { LiveState, ProbeStatus } from "../types";
 import {
   type BatteryBadge,
   batteryBadge,
@@ -33,13 +33,46 @@ const COOKING_MODES = new Set(["Startup", "Smoke", "Hold", "Prime", "Reheat"]);
 // A soft accent tint that still tracks the active [data-accent] theme.
 const accentMix = (pct: number) => `color-mix(in srgb, var(--accent) ${pct}%, transparent)`;
 
+/** How a stale reading says so. Worded and bucketed exactly as the attached
+ *  display words it (display/staleness.py), so an operator moving between the
+ *  panel and their phone reads one story about the same probe. */
+export function staleLabel(seconds: number): string {
+  if (seconds < 60) return `last data ${seconds}s ago`;
+  if (seconds < 3600) return `last data ${Math.floor(seconds / 60)}m ago`;
+  return `last data ${Math.floor(seconds / 3600)}h ago`;
+}
+
+/** What a card shows for a probe, and whether that number is live.
+ *
+ *  A probe with no current reading keeps showing its last real one -- 40 s of
+ *  age is still worth something to someone deciding whether to open the lid --
+ *  but it must not read as live, so it carries the age with it. `shown` is
+ *  null only for a probe that has produced nothing at all. */
+export function reading(
+  temp: number | null,
+  status: ProbeStatus,
+): { shown: number | null; stale: string | null } {
+  if (temp !== null) return { shown: temp, stale: null };
+  const last = status.lastTemp;
+  if (typeof last !== "number") return { shown: null, stale: null };
+  return {
+    shown: last,
+    stale: staleLabel(typeof status.lastReadingAge === "number" ? status.lastReadingAge : 0),
+  };
+}
+
 export interface ProbeCardView {
   name: string;
   /** The probe's `label`, not its display title: every notify write is
    *  addressed by label (common/api_commands.py:441-449), and the title is a
    *  free-text name the user can change. */
   label: string;
-  tempInt: number;
+  /** The temperature to display, which is the last real reading when the probe
+   *  has no current one. Null only when it has produced nothing at all. */
+  tempInt: number | null;
+  /** Set when `tempInt` is a carried-over reading rather than a live one, e.g.
+   *  "last data 47s ago". Null while the probe is reporting. */
+  stale: string | null;
   unit: "F" | "C";
   targetStr: string;
   tgtColor: string;
@@ -87,7 +120,11 @@ export interface DashView {
   modeLabel: string;
   liveColor: string;
   units: "F" | "C";
-  tempInt: number;
+  /** The pit temperature to display -- the last real reading when there is no
+   *  current one, null when the probe has produced nothing at all. */
+  tempInt: number | null;
+  /** Set when `tempInt` is a carried-over reading rather than a live one. */
+  stale: string | null;
   maxTemp: number;
   gaugeFrac: number;
   hasSetpoint: boolean;
@@ -117,15 +154,20 @@ function outputView(on: boolean, onColor: string, onStatus: string): OutputView 
 
 function probeCard(fp: LiveState["foodProbes"][number], units: "F" | "C"): ProbeCardView {
   const hasTarget = fp.target > 0 && fp.targetReq;
-  const done = hasTarget && fp.temp >= fp.target - 1;
+  const { shown, stale } = reading(fp.temp, fp.status);
+  // Progress is measured against whatever the card is showing: a stale reading
+  // still places the probe on its way to target, and a probe with no reading
+  // at all has no progress to draw.
+  const done = hasTarget && shown !== null && shown >= fp.target - 1;
   return {
     name: fp.title,
     label: fp.label,
-    tempInt: Math.round(fp.temp),
+    tempInt: shown === null ? null : Math.round(shown),
+    stale,
     unit: units,
     targetStr: hasTarget ? `→ ${Math.round(fp.target)}°` : "AMBIENT",
     tgtColor: hasTarget ? (done ? OK : YELLOW) : DIM,
-    barPct: hasTarget ? Math.max(2, Math.min(100, (fp.temp / fp.target) * 100)) : 0,
+    barPct: hasTarget && shown !== null ? Math.max(2, Math.min(100, (shown / fp.target) * 100)) : 0,
     barColor: done ? OK : "var(--accent)",
     // hasNotifications, NOT targetReq: the backend sets it when ANY of the
     // probe's three notify entries is armed (blueprints/mobile/socket_io.py:
@@ -198,14 +240,20 @@ export function deriveView(dash: LiveState): DashView {
 
   const igniter = outputView(dash.outputs.igniter, "var(--igniter)", "HOT");
 
+  // The pit probe is usually a wired thermocouple that always has a number,
+  // but nothing guarantees it: the same carry-over applies here so a gauge
+  // never reads 0° for a probe that simply did not report.
+  const primary = reading(p.temp, p.status);
+
   return {
     cooking,
     modeLabel: mode.toUpperCase(),
     liveColor: cooking ? OK : DIM,
     units,
-    tempInt: Math.round(p.temp),
+    tempInt: primary.shown === null ? null : Math.round(primary.shown),
+    stale: primary.stale,
     maxTemp,
-    gaugeFrac: Math.max(0, Math.min(1, p.temp / maxTemp)),
+    gaugeFrac: primary.shown === null ? 0 : Math.max(0, Math.min(1, primary.shown / maxTemp)),
     hasSetpoint: p.setTemp > 0,
     setpointInt: Math.round(p.setTemp),
     hasProbes: probes.length > 0,

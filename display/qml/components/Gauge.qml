@@ -15,6 +15,11 @@ Item {
 	id: g
 	property bool compact: false
 	property real value: 0
+	// False when the pit probe has produced no reading at all. `value` is the
+	// last real one whenever there is one.
+	property bool hasValue: true
+	// Set when `value` is a carried-over reading, e.g. "last data 47s ago".
+	property string stale: ""
 	property real setpoint: 0
 	property real target: 0
 	property real maxValue: 600
@@ -143,7 +148,7 @@ Item {
 			anchors.horizontalCenter: parent.horizontalCenter
 			spacing: 4
 			Text {
-				text: Math.round(g.value)
+				text: g.hasValue ? Math.round(g.value) : "—"
 				font.family: Theme.condensed
 				font.pixelSize: g.compact ? 66 : 84
 				font.bold: true
@@ -157,6 +162,16 @@ Item {
 				anchors.bottom: parent.bottom
 				anchors.bottomMargin: 10
 			}
+		}
+		// Same role as the probe cards' stale line, sized for the gauge.
+		Text {
+			anchors.horizontalCenter: parent.horizontalCenter
+			visible: g.stale !== ""
+			text: g.stale
+			font.family: Theme.sans
+			font.pixelSize: g.compact ? 13 : 15
+			font.bold: true
+			color: Theme.warn
 		}
 		Text {
 			anchors.horizontalCenter: parent.horizontalCenter

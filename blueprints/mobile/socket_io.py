@@ -825,6 +825,10 @@ def _post_app_data(action=None, type=None, json_data=None):
 
 def _get_probe_data(probe_type, settings, current, probe_device_info, notify_data):
     probe_list = []
+    # Read against the wall clock rather than current["TS"]: if the control
+    # process stops writing, TS freezes and every age would freeze with it,
+    # reporting a stale reading as fresh for as long as the outage lasts.
+    now_ms = int(time.time() * 1000)
 
     # Determine section based on probe type
     if probe_type == "Primary":
@@ -841,6 +845,13 @@ def _get_probe_data(probe_type, settings, current, probe_device_info, notify_dat
             probe_data["label"] = probe["label"]
             probe_data["temp"] = current[section][probe["label"]]
             probe_data["device"] = probe["device"]
+            # Both are published whether or not `temp` is None, so a client
+            # never has to remember a previous frame to know how old a reading
+            # is; while the probe is reporting they simply agree with `temp`.
+            last = current.get("LAST", {}).get(probe["label"])
+            if last is not None:
+                probe_data["status"]["lastTemp"] = last["temp"]
+                probe_data["status"]["lastReadingAge"] = max(0, int((now_ms - last["ts"]) / 1000))
             if probe_type == "Primary":
                 probe_data["setTemp"] = current["PSP"]
             probe_list.append(probe_data)
