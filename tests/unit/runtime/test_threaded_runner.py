@@ -240,6 +240,9 @@ def test_hold_teardown_stops_threaded_runner():
     thread = runner._thread
     hold = HoldMode.__new__(HoldMode)
     hold._runner = runner
+    # Enough of a mode for teardown to read its identification setting; this
+    # test is about the worker thread being joined, not about learning.
+    hold.settings = {"controller": {}}
     hold.teardown(70.0)
     assert not thread.is_alive()
 

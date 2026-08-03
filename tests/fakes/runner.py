@@ -14,6 +14,13 @@ class FakeControllerRunner:
         # `restored` and `applied` are separate lists and so cannot express
         # relative ordering between a restore and the report that follows it.
         self.calls = []
+        self.refits = 0
+        self.refit_raises = None
+        self.stops = 0
+        # How many stop() calls had happened at each refit_from_cook() call, so
+        # a test can hold the refit to after the worker was asked to stop
+        # without reading the two counters as if they were ordered.
+        self.stops_before_each_refit = []
 
     def script(self, outputs):
         self._script = list(outputs)
@@ -39,7 +46,7 @@ class FakeControllerRunner:
         return self._wants_async
 
     def stop(self):
-        pass
+        self.stops += 1
 
     def set_output(self, applied):
         self.applied.append(applied)
@@ -52,6 +59,12 @@ class FakeControllerRunner:
         self.restored.append(snapshot)
         self.calls.append(("restore", snapshot))
         return snapshot is not None
+
+    def refit_from_cook(self):
+        self.refits += 1
+        self.stops_before_each_refit.append(self.stops)
+        if self.refit_raises:
+            raise self.refit_raises
 
     def controller_state(self):
         return {"fake": True}

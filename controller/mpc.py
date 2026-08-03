@@ -30,6 +30,7 @@ import numpy as np
 # net policy + EKF path is pure numpy/scipy and never imports it.
 
 from controller.base import ControllerBase
+from controller.model_promotion import Verdict as _Verdict
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE
 from controller.mpc_allocator import allocate
 
@@ -82,6 +83,36 @@ _DEFAULTS = dict(
 # its end, and the end is what describes the grill's current state.
 _HISTORY_MAX = 8640
 
+# A refit re-simulates the whole series once per least-squares evaluation, so
+# cost is linear in samples while the answer is not: a cook's SHAPE identifies
+# the grill, not the density it was sampled at. Decimate to this many rows.
+_REFIT_MAX_SAMPLES = 1200
+
+# Below this a record is an interrupted cook rather than a description of a
+# grill, and fitting it would produce a confident answer from nothing.
+_REFIT_MIN_SAMPLES = 120
+
+# Parameters the least-squares solve starts from, and the magnitudes it scales
+# by. Held at a fixed reference so that every cook's fit is a statement about
+# the grill alone, independent of every cook before it.
+#
+# Seeding the solve from the running model instead would close a feedback loop
+# through the fit: the identifiable content of a log is the RATIOS among
+# (C_f, C_c, h_fc, h_amb, K_Q, sigma) -- see update_mpc._FREE -- so the solve is
+# free to slide along the common-scaling direction that C_f and sigma only
+# partly pin down. Restarting each fit from the previous answer lets that slide
+# compound: the magnitudes grow cook after cook at unchanged RMSE, with the
+# solver reporting convergence throughout, until they leave
+# model_promotion.PROMOTION_BOUNDS and every later candidate is refused for a
+# drift no measurement of the grill can see. The same compounding shifts
+# C_c/h_amb, the chamber time constant the promotion policy guards.
+#
+# Only the fitted parameters and the held scale anchor C_f appear here. T_amb,
+# sigma and n_delay are passed through the fit unchanged, so they cannot
+# compound, and are taken from the running config where an operator's own
+# calibration of them lives.
+_REFIT_INIT = {key: float(_DEFAULTS[key]) for key in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta")}
+
 
 def _to_c(value, units):
     return (value - 32.0) * 5.0 / 9.0 if units == "F" else value
@@ -96,6 +127,18 @@ def _finite_float(value):
     """
     value = float(value)
     return value if math.isfinite(value) else None
+
+
+def _optional_int(value):
+    """Cast to int, or None when there is no number to report.
+
+    Distinguishes "not recorded" from a recorded zero, which for a count of
+    solver work are opposite claims.
+    """
+    try:
+        return int(value)
+    except TypeError, ValueError:
+        return None
 
 
 def _sanitized_copy(mapping):
@@ -386,8 +429,12 @@ class Controller(ControllerBase):
     _MODEL_SCHEMA = 1
     _MODEL_PARAM_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
 
-    def _adopt_model(self, params, *, rmse, samples, band_c):
+    def _adopt_model(self, params, *, rmse, samples, band_c, nfev=None):
         """Take `params` into the running config and bump the revision.
+
+        Only `_MODEL_PARAM_KEYS` cross into the config, so a fitter's own
+        bookkeeping -- `converged`, `nfev` -- travels alongside a fit without
+        ever becoming part of the model.
 
         Rebuilding the NLP is the CALLER's business: adoption between cooks
         needs no rebuild because the next Hold builds fresh, and adoption
@@ -404,6 +451,12 @@ class Controller(ControllerBase):
             "rmse": float(rmse),
             "samples": int(samples),
             "band_c": [float(band_c[0]), float(band_c[1])],
+            # How hard the solve worked for these numbers. A converged solve
+            # that took one evaluation moved nowhere, and reads identically to
+            # a hard-won one in every other field. None -- never 0 -- stands in
+            # for "not recorded", so an unknown effort cannot be misread as a
+            # measured absence of effort.
+            "nfev": None if nfev is None else int(nfev),
         }
 
     def get_model_snapshot(self):
@@ -455,12 +508,95 @@ class Controller(ControllerBase):
             "rmse": float(snapshot.get("rmse", float("inf"))),
             "samples": int(snapshot.get("samples", 0)),
             "band_c": [float(v) for v in snapshot.get("band_c", (0.0, 0.0))],
+            # Carried back across the store so the field means the same thing
+            # on both sides of it. A snapshot written before this field existed
+            # has no effort to report, which is None, not zero.
+            "nfev": _optional_int(snapshot.get("nfev")),
         }
         return True
 
     def cook_history(self):
         """The cook's (time_s, temp_c, Q_applied) rows, oldest first."""
         return list(self._history)
+
+    def refit_from_cook(self, history=None):
+        """Refit the thermal model from a finished cook and judge the result.
+
+        Between cooks only: a refit re-simulates the whole history once per
+        least-squares evaluation, so it belongs nowhere near the control path.
+        An accepted model changes `cfg` but rebuilds nothing -- it reaches the
+        grill through the next cook's restore.
+        """
+        from controller.model_promotion import evaluate
+        from controller.update_mpc import fit_params, fit_quality
+
+        rows = list(history if history is not None else self._history)
+        if len(rows) < _REFIT_MIN_SAMPLES:
+            return _Verdict(False, f"only {len(rows)} samples; need {_REFIT_MIN_SAMPLES}")
+
+        step = max(1, math.ceil(len(rows) / _REFIT_MAX_SAMPLES))
+        rows = rows[::step]
+        t = np.array([r[0] for r in rows], dtype=float)
+        temp = np.array([r[1] for r in rows], dtype=float)
+        Q = np.array([r[2] for r in rows], dtype=float)
+        t = t - t[0]
+
+        T_amb = float(self.cfg["T_amb"])
+        try:
+            fitted = fit_params(
+                t,
+                temp,
+                Q,
+                T_amb=T_amb,
+                init=dict(_REFIT_INIT),
+                sigma=float(self.cfg["sigma"]),
+                n_delay=int(self.cfg["n_delay"]),
+            )
+            # The candidate starts from a fixed reference, but it is judged
+            # against the model actually driving the grill: the question this
+            # answers is whether to replace THAT, on this cook's own data.
+            incumbent = {k: float(self.cfg[k]) for k in self._MODEL_PARAM_KEYS}
+            cand_rmse, _ = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
+            inc_rmse, _ = fit_quality(t, temp, Q, incumbent, T_amb=T_amb)
+        except (ValueError, FloatingPointError) as e:
+            return _Verdict(False, f"fit failed: {e}")
+
+        # A solve that ran out of evaluations reports its best point so far, and
+        # that point has not been shown to be a minimum -- so it is refused.
+        # The converse is not available: scipy calls a stalled step and a
+        # stalled cost "converged" too, and a one-evaluation solve that moved
+        # nowhere reports the same flag as a hard-won fit. Convergence can only
+        # veto here; what earns a promotion is the error comparison and the
+        # bounds below.
+        if not fitted["converged"]:
+            return _Verdict(False, f"the solve did not converge within {fitted['nfev']} evaluations")
+
+        verdict = evaluate(
+            fitted,
+            incumbent,
+            candidate_rmse=cand_rmse,
+            incumbent_rmse=inc_rmse,
+            n_horizon=int(self.cfg["n_horizon"]),
+            t_step=float(self.cfg["t_step"]),
+        )
+        print(
+            f"[mpc] refit: {verdict.reason} (candidate RMSE {cand_rmse:.2f} C, "
+            f"incumbent {inc_rmse:.2f} C, {fitted['nfev']} evaluations)"
+        )
+        if verdict.horizon_needed:
+            print(
+                f"[mpc] refit: this model wants n_horizon >= {verdict.horizon_needed} "
+                f"at t_step {self.cfg['t_step']:.0f} s"
+            )
+        if verdict.accepted:
+            self._adopt_model(
+                fitted,
+                rmse=cand_rmse,
+                samples=len(rows),
+                band_c=(float(temp.min()), float(temp.max())),
+                nfev=fitted["nfev"],
+            )
+        return verdict
 
     def set_output(self, applied):
         """Take the auger duty that actually ran and recover the firing rate.

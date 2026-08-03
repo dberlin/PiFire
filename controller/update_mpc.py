@@ -88,10 +88,12 @@ def _solve_scale(init):
     columns comparably sized.
 
     Taken from `init` rather than a fixed table so it tracks whatever the
-    caller actually starts from: a refit begins at an already-fitted model, not
-    at the shipped defaults, and a table would be scaling against the wrong
-    reference exactly there. A non-positive or non-finite starting value
-    carries no magnitude to scale by, so it falls back to 1.
+    caller actually starts from -- a calibration run seeded from a previous
+    fit, a grill whose parameters are decades away from the shipped ones -- and
+    so that the scaling is fully determined by the starting point the caller
+    chose, with nothing else feeding into how the solve is conditioned. A
+    non-positive or non-finite starting value carries no magnitude to scale by,
+    so it falls back to 1.
     """
     scale = []
     for key in _FREE:

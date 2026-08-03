@@ -50,6 +50,8 @@ class ControllerRunner(ABC):
     @abstractmethod
     def restore_model(self, snapshot): ...
     @abstractmethod
+    def refit_from_cook(self): ...
+    @abstractmethod
     def controller_state(self): ...
     @abstractmethod
     def stop(self): ...
@@ -103,6 +105,15 @@ class SyncControllerRunner(ControllerRunner):
 
     def restore_model(self, snapshot):
         return self._core.restore_model(snapshot)
+
+    def refit_from_cook(self):
+        """Ask the core to learn from the cook that just ended, if it can.
+
+        A controller with no identification of its own simply has nothing to
+        refit, which is None rather than an error.
+        """
+        fn = getattr(self._core, "refit_from_cook", None)
+        return fn() if fn is not None else None
 
     def controller_state(self):
         """A mapping the caller owns outright and may mutate freely -- Hold adds
@@ -272,6 +283,27 @@ class ThreadedControllerRunner(ControllerRunner):
             # since an older one describes a model the caller has moved past.
             self._pending_restore = dict(snapshot)
         return True
+
+    def refit_from_cook(self):
+        """Refit the core's model from the cook that just ended.
+
+        Runs on the CALLER's thread, which is why teardown asks for it only
+        after `stop()` has joined the worker: a refit takes seconds to minutes
+        and mutates the core's config, so it must never overlap a solve.
+
+        The worker is the thing that normally republishes the model snapshot,
+        and it is gone by now, so this republishes it directly -- otherwise an
+        adopted model would exist in the core and be invisible to the
+        `get_model_snapshot()` the caller persists it through.
+        """
+        fn = getattr(self._core, "refit_from_cook", None)
+        if fn is None:
+            return None
+        verdict = fn()
+        model = _owned_model_snapshot(self._core.get_model_snapshot())
+        with self._lock:
+            self._model_snapshot = model
+        return verdict
 
     def stop(self):
         self._stop_event.set()

@@ -436,8 +436,36 @@ class HoldMode(ControlMode):
     def status_fragment(self) -> dict:
         return {"lid_open_detected": self.state.lid.open_detected, "lid_open_endtime": self.state.lid.expires}
 
+    def _refit_model(self):
+        """Learn from the cook that just ended.
+
+        A refit re-simulates the whole cook once per solver evaluation, so it
+        is a between-cooks activity and runs here rather than on any tick --
+        and only after `stop()`, since it mutates the very core a background
+        solve would be reading. Nothing is rebuilt now: an accepted model
+        reaches the grill through the NEXT cook's restore, which is why the
+        result has to be persisted before this mode exits.
+        """
+        cfg = self.settings["controller"].get("config", {}).get("mpc", {})
+        if not cfg.get("enable_identification"):
+            return
+        import control as _control
+
+        try:
+            self._runner.refit_from_cook()
+            snapshot = self._runner.get_model_snapshot()
+            if snapshot is not None:
+                if not self._model_store.save(self._controller_name, snapshot):
+                    # Nothing learned this cook is the ordinary outcome here
+                    # (the revision does not advance when the candidate was
+                    # refused); the store logs the specific reason itself.
+                    _control.eventLogger.debug(f"Did not persist a refit {self._controller_name} model")
+        except Exception as e:  # a refit must never cost an orderly shutdown
+            _control.eventLogger.error(f"Model refit failed at cook end: {e}")
+
     def teardown(self, ptemp):
         # Stop the controller runner's background thread (no-op for the
         # synchronous runner). Guard against a failed build leaving no runner.
         if self._runner is not None:
             self._runner.stop()
+            self._refit_model()
