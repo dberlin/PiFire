@@ -6,11 +6,16 @@ import pytest
 
 from controller.mpc import _DEFAULTS, Controller
 
+#: The schema this controller writes and is the only one it will read back.
+#: A literal, not `Controller._MODEL_SCHEMA`: importing it would move every
+#: expectation below along with any change to it, so a bump could never be
+#: caught here. Raising it is a deliberate edit, and the tests that pin what
+#: happens to an OLDER record keep their own literals.
+CURRENT_SCHEMA = 2
+
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 PARAMS = dict(
-    C_f=9.0,
     C_c=2520.0,
-    h_fc=0.39,
     h_amb=0.224,
     T_amb=20.0,
     theta=93.0,
@@ -58,7 +63,7 @@ def test_a_restored_revision_is_carried_forward_not_restarted():
     assert (
         c.restore_model(
             {
-                "version": 1,
+                "version": CURRENT_SCHEMA,
                 "revision": 41,
                 "params": dict(PARAMS),
                 "rmse": 2.0,
@@ -76,7 +81,7 @@ def test_restore_applies_the_parameters_to_the_running_model():
     c = _c()
     c.restore_model(
         {
-            "version": 1,
+            "version": CURRENT_SCHEMA,
             "revision": 1,
             "params": dict(PARAMS),
             "rmse": 2.0,
@@ -92,7 +97,14 @@ def test_an_unphysical_snapshot_is_refused():
     bad = dict(PARAMS, C_c=-1.0)
     assert (
         c.restore_model(
-            {"version": 1, "revision": 1, "params": bad, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+            {
+                "version": CURRENT_SCHEMA,
+                "revision": 1,
+                "params": bad,
+                "rmse": 2.0,
+                "samples": 100,
+                "band_c": [40.0, 232.0],
+            }
         )
         is False
     )
@@ -111,8 +123,44 @@ def test_a_snapshot_from_a_future_schema_is_refused():
 
 def test_a_malformed_snapshot_is_refused_rather_than_raising():
     c = _c()
-    for junk in (None, {}, {"version": 1}, {"version": 1, "revision": "x", "params": {}}):
+    for junk in (None, {}, {"version": CURRENT_SCHEMA}, {"version": CURRENT_SCHEMA, "revision": "x", "params": {}}):
         assert c.restore_model(junk) is False
+
+
+def test_a_two_lump_snapshot_is_refused_and_says_why(capsys):
+    """The record a grill that has been learning all season arrives with.
+
+    Version 1 described a model with a firepot state. Its C_c, h_amb and K_Q
+    have the same names as this model's and are not the same quantities -- they
+    were fitted against a chamber fed through a firepot -- so the subset whose
+    keys still match must not be applied. A full version 1 record is used here,
+    C_f and h_fc included, because the failure this guards against is precisely
+    that those two extra keys are ignored and the other seven look valid.
+
+    It is also said out loud. The operator's model goes back to the shipped
+    defaults exactly once, at the upgrade, and finding that out from the
+    overshoot instead of the log is the outcome the message exists to prevent.
+    """
+    c = _c()
+    v1 = {
+        "version": 1,
+        "revision": 12,
+        "params": dict(PARAMS, C_f=9.0, h_fc=0.39),
+        "rmse": 2.0,
+        "samples": 1730,
+        "band_c": [40.0, 232.0],
+    }
+    assert c.restore_model(v1) is False
+    # Nothing crossed into the running model, and the revision did not advance.
+    assert c.cfg["C_c"] == pytest.approx(_DEFAULTS["C_c"])
+    assert c.get_model_snapshot() is None
+    # Both versions named, so the reader can tell which end is out of date.
+    # Asserted as the rendered phrases rather than a bare "1" in the output,
+    # which the schema number alone would satisfy.
+    out = capsys.readouterr().out
+    assert "version 1" in out
+    assert f"version {CURRENT_SCHEMA}" in out
+    assert "snapshot" in out.lower()
 
 
 def test_a_non_integer_revision_is_refused_even_with_otherwise_valid_params():
@@ -124,7 +172,7 @@ def test_a_non_integer_revision_is_refused_even_with_otherwise_valid_params():
         assert (
             c.restore_model(
                 {
-                    "version": 1,
+                    "version": CURRENT_SCHEMA,
                     "revision": bad_revision,
                     "params": dict(PARAMS),
                     "rmse": 2.0,
@@ -148,7 +196,7 @@ def test_a_non_dict_or_missing_params_is_refused_even_with_a_valid_revision():
         assert (
             c.restore_model(
                 {
-                    "version": 1,
+                    "version": CURRENT_SCHEMA,
                     "revision": 1,
                     "params": bad_params,
                     "rmse": 2.0,
@@ -159,7 +207,12 @@ def test_a_non_dict_or_missing_params_is_refused_even_with_a_valid_revision():
             is False
         )
     # params omitted from the snapshot entirely behaves the same as params=None.
-    assert c.restore_model({"version": 1, "revision": 1, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}) is False
+    assert (
+        c.restore_model(
+            {"version": CURRENT_SCHEMA, "revision": 1, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+        )
+        is False
+    )
 
 
 def test_a_non_numeric_parameter_value_is_refused_without_raising():
@@ -171,14 +224,21 @@ def test_a_non_numeric_parameter_value_is_refused_without_raising():
     bad = dict(PARAMS, h_amb="not-a-number")
     assert (
         c.restore_model(
-            {"version": 1, "revision": 1, "params": bad, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+            {
+                "version": CURRENT_SCHEMA,
+                "revision": 1,
+                "params": bad,
+                "rmse": 2.0,
+                "samples": 100,
+                "band_c": [40.0, 232.0],
+            }
         )
         is False
     )
 
 
 def test_a_params_dict_missing_a_required_key_is_refused():
-    """A params dict that IS a genuine dict but omits one of the nine
+    """A params dict that IS a genuine dict but omits one of the
     PROMOTION_BOUNDS keys reaches `params.get(key)` -> None inside the loop,
     which float() cannot convert. Same guard as the non-numeric-value test
     above, triggered by a missing key rather than an unconvertible value."""
@@ -187,7 +247,14 @@ def test_a_params_dict_missing_a_required_key_is_refused():
     del bad["theta"]
     assert (
         c.restore_model(
-            {"version": 1, "revision": 1, "params": bad, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+            {
+                "version": CURRENT_SCHEMA,
+                "revision": 1,
+                "params": bad,
+                "rmse": 2.0,
+                "samples": 100,
+                "band_c": [40.0, 232.0],
+            }
         )
         is False
     )
@@ -202,7 +269,14 @@ def test_a_non_integer_n_delay_is_refused():
     bad = dict(PARAMS, n_delay=4.5)
     assert (
         c.restore_model(
-            {"version": 1, "revision": 1, "params": bad, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+            {
+                "version": CURRENT_SCHEMA,
+                "revision": 1,
+                "params": bad,
+                "rmse": 2.0,
+                "samples": 100,
+                "band_c": [40.0, 232.0],
+            }
         )
         is False
     )
@@ -217,7 +291,14 @@ def test_a_float_valued_whole_number_n_delay_is_accepted():
     whole = dict(PARAMS, n_delay=4.0)
     assert (
         c.restore_model(
-            {"version": 1, "revision": 1, "params": whole, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+            {
+                "version": CURRENT_SCHEMA,
+                "revision": 1,
+                "params": whole,
+                "rmse": 2.0,
+                "samples": 100,
+                "band_c": [40.0, 232.0],
+            }
         )
         is True
     )

@@ -1,5 +1,6 @@
 """The fitter must recover parameters through the same dynamics the MPC uses."""
 
+import math
 import os
 
 import numpy as np
@@ -21,7 +22,7 @@ from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality
 #: whether the fitter recovers what it is given, which needs a grill it can
 #: represent. The cost of that restriction is its own question, measured
 #: against a mismatched grill in tests/unit/mpc/test_model_promotion.py.
-TRUTH = dict(C_f=9.0, C_c=11000.0, h_fc=1.3, h_amb=0.5, K_Q=32.0, theta=110.0)
+TRUTH = dict(C_c=11000.0, h_amb=0.5, K_Q=32.0, theta=110.0)
 T_AMB = 20.0
 N_DELAY = 4
 SIGMA = 1.4e-9
@@ -38,7 +39,7 @@ def _dataset():
 
 def _init():
     """The shipped starting point, exactly as controller/mpc.py's _REFIT_INIT."""
-    return dict(C_f=9.0, C_c=320.0, h_fc=1.3, h_amb=0.5, K_Q=3.5, theta=50.0)
+    return dict(C_c=320.0, h_amb=0.5, K_Q=3.5, theta=50.0)
 
 
 def test_fit_recovers_the_generating_parameters():
@@ -61,7 +62,7 @@ def test_fit_quality_is_reported_and_is_tight_on_its_own_data():
 def test_the_fitted_dict_carries_every_key_the_controller_config_needs():
     t, Q, temp = _dataset()
     fitted = fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)
-    for key in ("C_f", "C_c", "h_fc", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma"):
+    for key in ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma"):
         assert key in fitted
 
 
@@ -111,7 +112,7 @@ def test_a_held_parameter_is_returned_exactly_as_it_was_passed():
 
     t, Q, temp = _dataset()
     held = [key for key in _FIT_KEYS if key not in _FREE]
-    assert {"C_f", "h_fc", "h_amb"} <= set(held)
+    assert {"h_amb", "sigma"} <= set(held)
     for sigma in (0.0, SIGMA, 2.7182818e-9):
         for scale in (1.0, 0.5, 2.7182818):
             init = {k: v * scale for k, v in _init().items()}
@@ -210,7 +211,7 @@ def test_the_reported_sigma_is_the_one_the_fit_actually_simulated():
         Q,
         T_amb=T_AMB,
         T0=float(temp[0]),
-        **{k: fitted[k] for k in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "sigma", "theta", "n_delay")},
+        **{k: fitted[k] for k in ("C_c", "h_amb", "K_Q", "sigma", "theta", "n_delay")},
     )
     # This dataset is generated from the model, so a fit that simulated what it
     # reports reproduces it to numerical precision. A solve that used a
@@ -225,7 +226,7 @@ def test_the_reported_sigma_is_the_one_the_fit_actually_simulated():
         Q,
         T_amb=T_AMB,
         T0=float(temp[0]),
-        **{k: fitted[k] for k in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta", "n_delay")},
+        **{k: fitted[k] for k in ("C_c", "h_amb", "K_Q", "theta", "n_delay")},
         sigma=0.0,
     )
     assert np.max(np.abs(without - reported)) > 1.0
@@ -311,53 +312,55 @@ def test_a_fit_to_a_real_cook_lands_where_the_promotion_policy_can_accept_it():
         U._FREE = original
 
 
-def test_the_solve_starts_every_free_parameter_at_the_same_size():
-    """The solve's coordinates are dimensionless, whatever units it is handed.
+def test_the_solve_moves_every_free_parameter_by_ratio_not_by_amount():
+    """A step of the solve means the same thing in every direction.
 
     scipy sizes its finite-difference step and its trust region in the
-    coordinates it is given, so a solve posed directly in C_c (hundreds) and
-    K_Q (single digits) probes and moves those two on different scales. What
-    `_solve_scale` has to deliver is that the solve's own starting point is the
-    same number in every direction, regardless of how far apart the physical
-    values are.
+    coordinates it is given, so a solve posed directly in C_c (thousands) and
+    K_Q (single digits) probes and moves those two on wildly different scales.
+    Optimising the logarithms makes every coordinate dimensionless, so a step
+    is a ratio.
 
-    That is asserted here as a property of the transform rather than of one
-    parameter's magnitude: any two starting points differing only by units --
-    the same grill described in a different scale -- must produce the same
-    solve coordinates. A `_solve_scale` returning a constant would fail it, and
-    so would one keyed to anything but the caller's own starting values.
+    Asserted as the property that follows from it rather than by reaching into
+    the transform: the same grill restated in different units -- every
+    parameter and the temperatures it explains scaled together -- must be
+    recovered as the same rescaled answer, to the solve's own tolerance. A
+    solve conditioned on absolute magnitudes cannot do that, because the two
+    problems are the same shape but probed at different resolutions.
     """
-    import controller.update_mpc as U
+    t, Q, temp = _dataset()
+    base = fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)
 
-    init = _init()
-    # The spread the scaling exists to remove has to be present, or the
-    # property below is being asserted against a case it never meets.
-    magnitudes = [abs(init[key]) for key in U._FREE]
-    assert max(magnitudes) / min(magnitudes) > 10.0
+    # The same physics with heat measured in units 1000x smaller: C_c, K_Q,
+    # h_amb and sigma all scale together and the trajectory is bit-identical.
+    scaled_init = {k: (v * 1000.0 if k in ("C_c", "h_amb", "K_Q") else v) for k, v in _init().items()}
+    scaled = fit_params(t, temp, Q, T_amb=T_AMB, init=scaled_init, sigma=SIGMA * 1000.0, n_delay=N_DELAY)
 
-    started_at = [m / s for m, s in zip(magnitudes, U._solve_scale(init))]
-    assert started_at == [1.0] * len(U._FREE)
-
-    # The same grill, every parameter restated 1000x larger: the physical
-    # values all move, the coordinates the solve works in do not.
-    rescaled = {k: v * 1000.0 for k, v in init.items()}
-    assert [abs(rescaled[k]) / s for k, s in zip(U._FREE, U._solve_scale(rescaled))] == started_at
+    for key in ("C_c", "K_Q"):
+        assert scaled[key] / 1000.0 == pytest.approx(base[key], rel=1e-3), key
+    assert scaled["theta"] == pytest.approx(base["theta"], rel=1e-3)
 
 
-def test_the_solve_scale_follows_the_caller_rather_than_the_shipped_defaults():
+def test_the_solve_starts_from_the_caller_s_own_values():
     """A refit starts from an already-fitted model, not from the defaults.
 
-    Scaling against a fixed table would be scaling against the wrong reference
-    on exactly that path, so the scale is read from `init`.
+    So the solve has to begin where `init` puts it, and the log transform has
+    to carry the caller's value through rather than substituting a reference of
+    its own.
     """
-    from controller.update_mpc import _FREE, _solve_scale
+    from controller.update_mpc import _LOWER_BOUND, _log_or_floor
 
-    init = dict(_init(), C_c=8000.0, K_Q=2.5)
-    scale = _solve_scale(init)
-    assert dict(zip(_FREE, scale))["C_c"] == 8000.0
-    assert dict(zip(_FREE, scale))["K_Q"] == 2.5
-    # A starting value with no magnitude to scale by falls back to 1.
-    assert dict(zip(_FREE, _solve_scale(dict(_init(), theta=0.0))))["theta"] == 1.0
+    t, Q, temp = _dataset()
+    near = fit_params(t, temp, Q, T_amb=T_AMB, init=dict(_init(), C_c=TRUTH["C_c"]), sigma=SIGMA, n_delay=N_DELAY)
+    assert near["C_c"] == pytest.approx(TRUTH["C_c"], rel=0.35)
+
+    floor = math.log(_LOWER_BOUND)
+    # The caller's own value, not a table's.
+    assert _log_or_floor(8000.0, floor) == math.log(8000.0)
+    # Values with no logarithm to take go to the floor rather than raising or
+    # returning -inf, either of which would take the whole solve with them.
+    for degenerate in (0.0, -1.0, float("nan"), float("inf")):
+        assert _log_or_floor(degenerate, floor) == floor
 
 
 @pytest.mark.parametrize(

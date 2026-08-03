@@ -27,11 +27,17 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 PROMOTION = ROOT / "controller" / "model_promotion.py"
 UPDATE = ROOT / "controller" / "update_mpc.py"
 MPC = ROOT / "controller" / "mpc.py"
+MODEL = ROOT / "controller" / "mpc_model.py"
+NET = ROOT / "controller" / "mpc_net.py"
 
 NODES = [
     "tests/unit/mpc/test_model_promotion.py",
     "tests/unit/mpc/test_mpc_calibration.py",
     "tests/unit/mpc/test_mpc_controller.py",
+    "tests/unit/mpc/test_mpc_model.py",
+    "tests/unit/mpc/test_mpc_model_snapshot.py",
+    "tests/unit/mpc/test_mpc_net.py",
+    "tests/unit/mpc/test_mpc_ekf.py",
 ]
 
 #: (label, file, old, new). Each `old` must appear exactly once.
@@ -43,16 +49,16 @@ MUTATIONS = [
         '    brake = float(candidate["C_c"]) / float(candidate["h_amb"])',
     ),
     (
-        "M2 braking distance ignores the transport delay",
+        "M2 braking distance ignores the transport delay's length",
         PROMOTION,
-        '    transport = float(params["theta"]) / n_delay if n_delay > 0 else 0.0',
-        "    transport = 0.0",
+        '    mean = float(params["theta"]) if stages > 0 else 0.0',
+        "    mean = 1.0 if stages > 0 else 0.0",
     ),
     (
-        "M3 braking distance ignores the firepot",
+        "M3 braking distance ignores the chain outright",
         PROMOTION,
-        '    firepot = float(params["C_f"]) / h_fc',
-        "    firepot = 0.0",
+        '    mean = float(params["theta"]) if stages > 0 else 0.0',
+        "    mean = 0.0",
     ),
     (
         "M4 braking distance ignores the chamber's loss",
@@ -95,14 +101,14 @@ MUTATIONS = [
     (
         "M10 chain read as a single stage",
         PROMOTION,
-        "    stages = n_delay + 1",
+        '    stages = max(int(params["n_delay"]), 0)',
         "    stages = 1",
     ),
     (
-        "M11 chain stages read at the fastest instead of the slowest",
+        "M11 chain padded by the stage the firepot used to add",
         PROMOTION,
-        "    mean = stages * max(firepot, transport)",
-        "    mean = stages * min(firepot, transport)",
+        '    stages = max(int(params["n_delay"]), 0)',
+        '    stages = max(int(params["n_delay"]), 0) + 1',
     ),
     (
         "M12 survival drops its polynomial tail",
@@ -132,28 +138,34 @@ MUTATIONS = [
         '    target = float(params["K_Q"]) * float(q_full) * 0.1',
     ),
     (
-        "M16 h_fc back in the free set",
+        "M16 the dead time dropped from the free set",
         UPDATE,
         '_FREE = ("K_Q", "C_c", "theta")',
-        '_FREE = ("K_Q", "C_c", "h_fc", "theta")',
+        '_FREE = ("K_Q", "C_c")',
     ),
     (
         "M17 h_amb freed, restoring the scale escape",
         UPDATE,
         '_FREE = ("K_Q", "C_c", "theta")',
-        '_FREE = ("K_Q", "C_c", "h_fc", "h_amb", "theta")',
+        '_FREE = ("K_Q", "C_c", "h_amb", "theta")',
     ),
     (
         "M18 held parameters dropped instead of held",
         UPDATE,
         "    held = {k: float(init[k]) for k in _FIT_KEYS if k not in _FREE}",
-        '    held = {"C_f": float(init["C_f"])}',
+        '    held = {"h_amb": float(init["h_amb"]), "sigma": 0.0}',
     ),
     (
-        "M19 solve scale flattened to ones",
+        "M19 the solve back in raw parameters instead of their logarithms",
         UPDATE,
-        "        scale.append(magnitude if magnitude > 0.0 and np.isfinite(magnitude) else 1.0)",
-        "        scale.append(1.0)",
+        "        params.update(zip(_FREE, (math.exp(v) for v in z)))",
+        "        params.update(zip(_FREE, (float(v) for v in z)))",
+    ),
+    (
+        "M19b the log floor returns the raw value for a degenerate start",
+        UPDATE,
+        "    return math.log(value) if value > 0.0 and math.isfinite(value) else floor",
+        "    return math.log(value) if value > 0.0 and math.isfinite(value) else value",
     ),
     (
         "M20 running warning back on the time constant",
@@ -184,6 +196,109 @@ MUTATIONS = [
         PROMOTION,
         "_STEADY_STATE_CEILING_C = 100000.0",
         "_STEADY_STATE_CEILING_C = 1.0",
+    ),
+    # ---- the single-lump model and the state vector it produces ------------
+    (
+        "M25 the simulator drops the firing-rate gain",
+        MODEL,
+        "            dT_c = (K_Q * heat_in - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
+        "            dT_c = (heat_in - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
+    ),
+    (
+        "M26 the simulator drops the radiative loss",
+        MODEL,
+        "            dT_c = (K_Q * heat_in - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
+        "            dT_c = (K_Q * heat_in - h_amb * (T_c - T_amb)) / C_c",
+    ),
+    (
+        "M27 the simulator ignores the transport chain",
+        MODEL,
+        "                heat_in = lags[-1]",
+        "                heat_in = u",
+    ),
+    (
+        "M28 the simulator stops sub-stepping",
+        MODEL,
+        "        steps = max(1, int(np.ceil(span / max_dt)))",
+        "        steps = 1",
+    ),
+    (
+        "M29 the do-mpc model keeps a firepot state the estimators do not",
+        MODEL,
+        '    T_c = model.set_variable("_x", "T_c")\n    d = model.set_variable("_x", "d")\n    Q = model.set_variable("_u", "Q")',
+        '    model.set_variable("_x", "T_f")\n'
+        '    T_c = model.set_variable("_x", "T_c")\n'
+        '    d = model.set_variable("_x", "d")\n'
+        '    Q = model.set_variable("_u", "Q")',
+    ),
+    (
+        "M30 the Kalman state vector keeps the slot the firepot used to hold",
+        MODEL,
+        "        n = n_delay + 2\n        iTc, iD = n_delay, n_delay + 1\n\n        A = np.zeros((n, n))\n"
+        "        if n_delay > 0:\n            tau_d = theta / n_delay\n            for i in range(n_delay):\n"
+        "                A[i, i] = -1.0 / tau_d\n                if i > 0:\n                    A[i, i - 1] = 1.0 / tau_d\n"
+        "            A[iTc, n_delay - 1] = K_Q / C_c  # last lag feeds the chamber (scaled by K_Q)",
+        "        n = n_delay + 3\n        iTc, iD = n_delay + 1, n_delay + 2\n\n        A = np.zeros((n, n))\n"
+        "        if n_delay > 0:\n            tau_d = theta / n_delay\n            for i in range(n_delay):\n"
+        "                A[i, i] = -1.0 / tau_d\n                if i > 0:\n                    A[i, i - 1] = 1.0 / tau_d\n"
+        "            A[iTc, n_delay - 1] = K_Q / C_c  # last lag feeds the chamber (scaled by K_Q)",
+    ),
+    (
+        "M31 the Kalman default state seeds the wrong slot with ambient",
+        MODEL,
+        "            x0 = [0.0] * n_delay + [T_amb, 0.0]\n        self.x = np.array(x0, dtype=float)\n"
+        "        self.P = np.eye(n) * 5.0\n        self.n = n",
+        "            x0 = [0.0] * n_delay + [0.0, T_amb]\n        self.x = np.array(x0, dtype=float)\n"
+        "        self.P = np.eye(n) * 5.0\n        self.n = n",
+    ),
+    (
+        "M32 the EKF measures a lag state instead of the chamber",
+        MODEL,
+        "        self.A_lin, self.Baug = A, Baug\n        self.n, self.iTc = n, iTc",
+        "        self.A_lin, self.Baug = A, Baug\n        self.n, self.iTc = n, 0",
+    ),
+    # ---- the persisted snapshot -------------------------------------------
+    (
+        "M33 the snapshot schema never moved off the two-lump version",
+        MPC,
+        "    _MODEL_SCHEMA = 2",
+        "    _MODEL_SCHEMA = 1",
+    ),
+    (
+        "M34 restore_model takes a snapshot of any version",
+        MPC,
+        "        if version != self._MODEL_SCHEMA:",
+        "        if False:",
+    ),
+    (
+        "M35 restore_model refuses an old snapshot without saying so",
+        MPC,
+        '            print(\n'
+        '                f"[mpc] discarding a version {version!r} model snapshot: this controller "\n'
+        '                f"stores version {self._MODEL_SCHEMA}, the single-lump model. The next "\n'
+        '                "cook refits from scratch."\n'
+        "            )\n"
+        "            return False",
+        "            return False",
+    ),
+    # ---- the net artifact guard -------------------------------------------
+    (
+        "M36 the net width check is gone, so a stale artifact loads",
+        NET,
+        "        if self.input_dim != self.expected_input_dim(cfg):\n            return False",
+        "        if False:\n            return False",
+    ),
+    (
+        "M37 the net reads the disturbance from the two-lump slot",
+        NET,
+        "        d = x[self.n_delay + 1]",
+        "        d = x[self.n_delay + 2]",
+    ),
+    (
+        "M38 the expected width still counts a firepot slot",
+        NET,
+        '        return int(cfg.get("n_delay", self.n_delay)) + 4',
+        '        return int(cfg.get("n_delay", self.n_delay)) + 5',
     ),
 ]
 

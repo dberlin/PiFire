@@ -21,9 +21,7 @@ CONFIG = dict(
     R_dQ=0.02,
     Q_min=5.0,
     Q_max=100.0,
-    C_f=60.0,
     C_c=306.0,
-    h_fc=2.0,
     h_amb=0.55,
     T_amb=20.0,
     fan_min_pct=40.0,
@@ -505,7 +503,7 @@ def test_the_running_warning_and_the_promotion_policy_size_the_horizon_alike(cap
     cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, t_step=25.0)
     brake = longest_braking_distance(cfg)
     discredited = cfg["C_c"] / cfg["h_amb"]
-    assert brake == pytest.approx(360.0, abs=5.0)
+    assert brake == pytest.approx(315.0, abs=5.0)
     assert discredited == pytest.approx(4074.0, abs=5.0)
 
     # 24 steps of 25 s is the shipped horizon and it sits BETWEEN the two

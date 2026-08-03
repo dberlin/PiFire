@@ -13,7 +13,7 @@ from controller.model_promotion import (
     steady_state_at_full_fire,
 )
 
-GOOD = dict(C_f=9.0, C_c=2520.0, h_fc=0.39, h_amb=0.224, T_amb=20.0, theta=93.0, n_delay=4, K_Q=6.95, sigma=1.4e-9)
+GOOD = dict(C_c=2520.0, h_amb=0.224, T_amb=20.0, theta=93.0, n_delay=4, K_Q=6.95, sigma=1.4e-9)
 INCUMBENT = dict(GOOD, C_c=2000.0, h_amb=0.30)  # tau 6667 vs candidate 11250
 HORIZON = dict(n_horizon=144, t_step=25.0)
 
@@ -24,14 +24,12 @@ HORIZON = dict(n_horizon=144, t_step=25.0)
 #: that code produces. Regenerate with
 #: `python -m controller.update_mpc tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv --json`.
 REAL_MAK_FIT = dict(
-    C_f=9.0,
-    C_c=3568.69,
-    h_fc=1.3,
+    C_c=3557.93,
     h_amb=0.5,
     T_amb=20.0,
-    theta=109.09,
+    theta=116.55,
     n_delay=4,
-    K_Q=9.9118,
+    K_Q=9.8720,
     sigma=1.4e-9,
 )
 
@@ -113,7 +111,7 @@ def test_a_partial_incumbent_is_refused_not_a_crash():
 
 
 def test_a_non_numeric_parameter_is_refused_not_a_crash():
-    assert _ev(dict(GOOD, C_f="nine")).accepted is False
+    assert _ev(dict(GOOD, C_c="nine")).accepted is False
 
 
 def test_a_negative_candidate_rmse_is_refused():
@@ -515,24 +513,72 @@ def test_a_model_that_cannot_hold_the_reference_temperature_has_nothing_to_brake
     assert _ev(feeble, n_horizon=1, t_step=25.0).horizon_needed is None
 
 
-def test_a_chamber_with_no_delay_chain_still_brakes_through_the_firepot():
-    """n_delay 0 leaves one stage, and it is the firepot's own.
+def test_a_chamber_with_no_delay_chain_has_nothing_to_brake():
+    """n_delay 0 leaves no stage at all, so there is nothing left in flight.
 
-    The firepot's C_f/h_fc is normally the shorter of the two stage lengths and
-    the transport chain hides it, so a braking distance that dropped the
-    firepot entirely would read the same on any ordinary model. With the chain
-    gone it is the whole answer, and there is a closed form to check it
-    against: a single charged lag decays exponentially, so it reaches the
-    chamber's loss after C_f/h_fc * ln(flux/loss). Written out here rather than
-    imported, so it pins the implementation instead of restating it.
+    The transport chain was the second of two cascades; the firepot was the
+    other, and dropping it is what this model no longer has. So with n_delay 0
+    the fuel cut removes the entire heat input at that instant and the chamber
+    starts losing immediately. Zero is the model's own answer, not a guard
+    falling through: `braking_distance` reaches it only after clearing the
+    checks that report infinity, which the assertions below pin by showing the
+    same parameters still demand a real distance once one lag state exists.
     """
     no_chain = dict(GOOD, n_delay=0)
-    loss = no_chain["h_amb"] * (_HAZARD_C - no_chain["T_amb"]) + no_chain["sigma"] * (
-        (_HAZARD_C + 273.15) ** 4 - (no_chain["T_amb"] + 273.15) ** 4
+    assert braking_distance(no_chain, _HAZARD_C) == 0.0
+    assert _ev(no_chain, n_horizon=1, t_step=25.0).horizon_needed is None
+    # Same model, one lag state: the chain is back and so is the demand, so the
+    # zero above is the absent chain and not an unreachable code path.
+    assert braking_distance(dict(no_chain, n_delay=1), _HAZARD_C) > 0.0
+
+
+def test_one_lag_state_brakes_on_the_closed_form_a_single_lag_has():
+    """With one stage the Erlang chain is a plain exponential.
+
+    That has a closed form the implementation can be checked against rather
+    than restated: a single charged lag of mean `theta` reaches the chamber's
+    loss after theta * ln(flux/loss). Written out here so it pins the
+    implementation instead of importing it.
+    """
+    one = dict(GOOD, n_delay=1)
+    loss = one["h_amb"] * (_HAZARD_C - one["T_amb"]) + one["sigma"] * (
+        (_HAZARD_C + 273.15) ** 4 - (one["T_amb"] + 273.15) ** 4
     )
-    expected = (no_chain["C_f"] / no_chain["h_fc"]) * math.log(no_chain["K_Q"] * 100.0 / loss)
+    expected = one["theta"] * math.log(one["K_Q"] * 100.0 / loss)
     assert expected > 0.0
-    assert braking_distance(no_chain, _HAZARD_C) == pytest.approx(expected, rel=1e-9)
+    assert braking_distance(one, _HAZARD_C) == pytest.approx(expected, rel=1e-9)
+
+
+def test_the_chain_is_the_transport_delay_and_nothing_longer():
+    """Every stage is theta/n_delay, so the chain's mean is theta itself.
+
+    The estimate used to pad the cascade -- n_delay+1 stages read at the
+    slowest of two unequal lengths -- because the firepot's stage and a
+    transport stage were not the same size. With one lump they are all the same
+    size, so the padding is gone and the answer is the model's own decay. An
+    implementation that still scaled the mean by an extra stage would read
+    longer than this at every n_delay, so the check is that raising n_delay at
+    a fixed theta leaves the chain sharper, not longer.
+    """
+    at = {n: braking_distance(dict(GOOD, n_delay=n), _HAZARD_C) for n in (1, 2, 4, 8)}
+    # More stages of the same total mean is a sharper, more plug-flow delay:
+    # the flux is held up longer before it starts falling but then falls
+    # faster, and the crossing this looks for is late in that fall.
+    assert at[8] < at[4] < at[2] < at[1]
+    # A pure Erlang of mean theta can never outlast the single exponential of
+    # the same mean by more than that exponential's own crossing.
+    assert at[1] == pytest.approx(
+        GOOD["theta"]
+        * math.log(
+            GOOD["K_Q"]
+            * 100.0
+            / (
+                GOOD["h_amb"] * (_HAZARD_C - GOOD["T_amb"])
+                + GOOD["sigma"] * ((_HAZARD_C + 273.15) ** 4 - (GOOD["T_amb"] + 273.15) ** 4)
+            )
+        ),
+        rel=1e-9,
+    )
 
 
 def test_the_radiative_loss_shortens_the_braking_distance():
@@ -574,7 +620,7 @@ def test_the_implied_steady_state_is_where_full_fire_meets_the_chamber_loss():
     # 1713 F on a grill that peaked at 520 F. The sound fit says 1067 F.
     escaped = dict(REAL_MAK_FIT, C_c=1.06e5, h_amb=1.06e5 / 3552.0, K_Q=302.4)
     assert steady_state_at_full_fire(escaped) * 9.0 / 5.0 + 32.0 == pytest.approx(1713.0, abs=2.0)
-    assert steady_state_at_full_fire(REAL_MAK_FIT) * 9.0 / 5.0 + 32.0 == pytest.approx(1067.0, abs=2.0)
+    assert steady_state_at_full_fire(REAL_MAK_FIT) * 9.0 / 5.0 + 32.0 == pytest.approx(1065.0, abs=2.0)
     # 1.6x apart, and both far above the 550 F hazard limit -- which is why
     # this is reported and not turned into a refusal. A line drawn between two
     # values that close would be a guess, and `evaluate` does not see the
@@ -628,8 +674,20 @@ def test_the_estimate_matches_the_coast_the_real_cook_shows_at_the_cook_s_own_te
     step delivers the same heat as the taper did -- is 968 s, so the step-
     equivalent coast is 140 s, not the 263 s the raw timestamps give.
 
-    Against that, the estimate is 173 s: longer than the grill's, which is the
-    direction the two approximations in `braking_distance` are argued to err.
+    Against that, the estimate is 151 s: longer than the grill's, which is the
+    direction the remaining approximation in `braking_distance` -- a chamber
+    held at its starting temperature through the coast, where a warming one
+    loses more -- is argued to err.
+
+    The margin used to be wider. The two-lump model read 173 s here, and most
+    of that extra was padding rather than physics: the estimate read n_delay+1
+    stages at the slower of the firepot's stage and a transport stage, a chain
+    of longer total mean than the model actually had. With one lump every stage
+    is the same length and the Erlang is the model's own decay, so what is left
+    over the grill's 140 s is 8% rather than 24%. That is a real reduction in
+    how far this over-states, and it is deliberate -- an estimate is not made
+    safer by being wrong in a comfortable direction -- but it is why the
+    horizon is sized at the cool end, where the demand is twice this one.
     """
     # From the fixture: Q leaves 100 at t=846 s, reaches its floor of 5 at
     # t=1119 s, and the chamber peaks at 271.278 C at t=1109 s. The equal-area
@@ -639,8 +697,8 @@ def test_the_estimate_matches_the_coast_the_real_cook_shows_at_the_cook_s_own_te
     assert step_equivalent_coast_s == pytest.approx(140.0, abs=1.0)
 
     estimate = braking_distance(REAL_MAK_FIT, peak_temp_c)
-    assert estimate == pytest.approx(173.0, abs=1.0)
-    assert 1.0 < estimate / step_equivalent_coast_s < 1.5
+    assert estimate == pytest.approx(151.0, abs=1.0)
+    assert 1.0 < estimate / step_equivalent_coast_s < 1.25
 
     # Read at the wrong temperature the same model says something else
     # entirely, which is why this test fixes the temperature.
@@ -652,8 +710,8 @@ def test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows():
 
     `horizon_needed` is sized from the cool end of the operating range, not
     from the temperature the cook happened to reach, because one horizon has
-    to be adequate everywhere the grill runs. That reading is 369 s -- longer
-    than the 173 s the cook's own temperature calls for, and still the same
+    to be adequate everywhere the grill runs. That reading is 346 s -- longer
+    than the 151 s the cook's own temperature calls for, and still the same
     order as the 263 s the log spans between fuel cut and peak.
 
     Sized from C_c/h_amb the demand was 7137 s, 286 steps: a horizon the log
@@ -664,7 +722,7 @@ def test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows():
     assert raw_coast_s == pytest.approx(263.0, abs=1.0)
 
     brake = longest_braking_distance(REAL_MAK_FIT)
-    assert brake == pytest.approx(369.0, abs=2.0)
+    assert brake == pytest.approx(346.0, abs=2.0)
     assert brake < 2.0 * raw_coast_s
 
     v = _ev(REAL_MAK_FIT, n_horizon=1, t_step=25.0)
@@ -681,7 +739,7 @@ def test_a_model_that_never_stops_rising_is_refused_rather_than_passed_quietly(m
 
     `braking_distance` returns infinity for a chamber nothing pulls heat out
     of. PROMOTION_BOUNDS makes that unreachable through `evaluate` today --
-    h_amb, K_Q and h_fc all have positive floors, and the reference points at
+    h_amb and K_Q both have positive floors, and the reference points at
     or below ambient are dropped before they can produce a non-positive loss --
     so this reaches past the bounds to force the branch rather than pretending
     a candidate can express it. The branch exists because `horizon_needed`
@@ -750,9 +808,7 @@ def test_every_fitted_parameter_has_a_bound():
 #: with any mutation of it, so the test could never fail no matter what the
 #: bound became.
 _EXPECTED_BOUNDS = {
-    "C_f": (0.1, 1e4),
     "C_c": (1.0, 1e6),
-    "h_fc": (1e-3, 1e3),
     "h_amb": (1e-4, 1e3),
     "T_amb": (-40.0, 60.0),
     "theta": (0.0, 1200.0),

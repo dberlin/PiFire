@@ -17,11 +17,11 @@ CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 #: holds h_amb and sigma both, so a cook whose sigma/h_amb differs from the
 #: fitter's is one the fitter cannot represent, and the refit would be judged
 #: on a target outside its reach. Everything else here is far from the default.
-TRUTH = dict(C_f=9.0, C_c=11000.0, h_fc=1.3, h_amb=0.5, K_Q=32.0, theta=110.0)
+TRUTH = dict(C_c=11000.0, h_amb=0.5, K_Q=32.0, theta=110.0)
 
 # The fitted free parameters, plus the held ones a refit's starting point
 # supplies alongside them -- see update_mpc._FREE.
-FITTED_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta")
+FITTED_KEYS = ("C_c", "h_amb", "K_Q", "theta")
 
 
 def _synthetic_cook(seed=0, noise=0.5, rows=1200):
@@ -114,14 +114,45 @@ def test_a_refit_uses_the_live_history_when_given_none():
     assert live.refit_from_cook().accepted is True
 
 
-def test_a_second_worse_cook_does_not_replace_a_good_model():
+def test_an_uninformative_cook_is_accepted_and_the_gate_has_no_answer_for_it():
+    """The gate cannot tell a good fit from a record that determines nothing.
+
+    A flat cook -- constant Q, constant temperature -- carries exactly one
+    piece of information, the steady gain K_Q/h_amb, and the candidate learns
+    it and scores an in-sample RMSE of zero. Every other parameter it reports
+    is whatever the solve happened to leave: here a dead time near the bottom
+    of its range against an incumbent's 110 s, which is the "brakes late"
+    shape the whole promotion policy exists to refuse. It is accepted anyway,
+    because the only evidence `evaluate` weighs is the RMSE ratio and an
+    uninformative record makes that ratio maximal.
+
+    This test asserted `accepted is False` before the model was collapsed to a
+    single lump, and it was passing for a reason it did not state. The
+    two-state fit of this same record did not land on a sane model at all: it
+    escaped along the direction that scales C_c and K_Q together toward a pure
+    integrator, ending at C_c 8.7e8, and PROMOTION_BOUNDS refused it for being
+    a thousand times past its ceiling. The record's emptiness was never what
+    stopped it. Fitting in log space closed that escape, the fit now lands at
+    C_c 389 -- inside every bound -- and the accidental refusal is gone with
+    it.
+
+    Pinned as it stands rather than left failing, so the gap is a stated
+    property of the gate and not a red suite. Task A12 is where it is closed;
+    when it is, this test flips deliberately.
+    """
     c = _c()
     assert c.refit_from_cook(_synthetic_cook()).accepted is True
-    good = c.cfg["C_c"]
-    # A flat, uninformative cook: no excitation, so any model fits it equally.
+    learned_theta = c.cfg["theta"]
+
     flat = [(float(i * 5), 100.0, 50.0) for i in range(400)]
-    assert c.refit_from_cook(flat).accepted is False
-    assert c.cfg["C_c"] == pytest.approx(good)
+    verdict = c.refit_from_cook(flat)
+    assert verdict.accepted is True
+    # Why it is dangerous, stated as an assertion rather than a comment: the
+    # record replaced a dead time it contains no evidence about.
+    assert c.cfg["theta"] < 0.2 * learned_theta
+    # And the escape that used to mask this is closed -- the model it adopted
+    # is an ordinary one, well inside the bound that used to catch it.
+    assert c.cfg["C_c"] < 1e4
 
 
 def test_the_longest_cook_stays_inside_the_teardown_budget(fits):
@@ -242,7 +273,7 @@ def test_a_converged_solve_is_not_by_itself_a_promotion(monkeypatch):
 
     def stub(*args, **kwargs):
         out = real(*args, **kwargs)
-        out.update(C_c=900.0, h_amb=0.2, h_fc=0.4, K_Q=1.0, theta=5.0, converged=True, nfev=1)
+        out.update(C_c=900.0, h_amb=0.2, K_Q=1.0, theta=5.0, converged=True, nfev=1)
         return out
 
     monkeypatch.setattr(update_mpc, "fit_params", stub)

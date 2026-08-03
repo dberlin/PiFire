@@ -3,9 +3,7 @@ from controller.mpc_model import GreyBoxKF, GreyBoxEKF
 
 # Shared grey-box params (a representative calibration).
 P = dict(
-    C_f=9.0,
     C_c=320.0,
-    h_fc=1.3,
     h_amb=0.50,
     T_amb=20.0,
     t_step=25.0,
@@ -40,7 +38,7 @@ def test_ekf_radiative_changes_estimate():
     for _ in range(20):
         ekf0.update(80.0, 180.0)
         ekf1.update(80.0, 180.0)
-    iTc = P["n_delay"] + 1
+    iTc = P["n_delay"]
     # at a hot chamber the radiative loss pulls the disturbance/temperature
     # estimates apart from the linear-only case
     assert abs(ekf0.x[iTc] - ekf1.x[iTc]) > 1e-3
@@ -51,7 +49,7 @@ def test_ekf_offset_free_constant_input():
     # integrating disturbance state settles and the chamber estimate converges to
     # the measurement (offset-free).
     ekf = GreyBoxEKF(sigma=1.4e-9, **P)
-    iTc = P["n_delay"] + 1
+    iTc = P["n_delay"]
     y = 150.0
     for _ in range(400):
         ekf.update(40.0, y)
