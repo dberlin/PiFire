@@ -16,9 +16,11 @@ is absent must not be allowed to reach the control loop. Two rules:
      and the install command inherits it via `--extra`/the lockfile. A literal
      duplicated here is precisely the kind of thing that goes stale.
   2. Whether a *given config* actually needs the extra is the controller
-     module's question, not ours: `controller.mpc.requires_modules(config)` knows
-     that policy='net' + EKF is pure numpy/scipy and needs nothing. We ask it
-     rather than re-deriving its constructor's branches.
+     module's question, not ours: we ask `controller.<name>.requires_modules(config)`
+     rather than re-deriving its constructor's branches. `controller.mpc.requires_modules`
+     answers `("do_mpc",)` for every config it accepts -- no MPC configuration
+     runs on numpy/scipy alone, because a policy that starts out needing
+     nothing can still drop onto the do-mpc-backed NLP mid-cook.
 
 The install itself is DETACHED (see `install_extra_detached`) because a CasADi
 source build takes minutes: it must never block an HTTP request, and it must
@@ -84,10 +86,13 @@ def controller_dependencies(selected, metadata=None):
 def required_modules_for(selected, config, metadata=None):
     """Import names `selected` will need for THIS config.
 
-    Prefers the controller module's own `requires_modules(config)` hook, which is
-    config-aware (MPC's policy='net' path needs nothing). Falls back to the
-    manifest's static list when there is no hook, or when importing the module to
-    ask fails -- failing towards "it is needed" keeps the gate conservative.
+    Prefers the controller module's own `requires_modules(config)` hook: it is
+    the one place that can answer per-config rather than per-controller, for any
+    controller whose needs vary by settings. MPC's hook currently answers the
+    same for every config it accepts, but the mechanism stays config-aware for
+    whichever controller needs it next. Falls back to the manifest's static list
+    when there is no hook, or when importing the module to ask fails -- failing
+    towards "it is needed" keeps the gate conservative.
     """
     declared = tuple(controller_dependencies(selected, metadata).get("modules") or ())
     if not declared:
