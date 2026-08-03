@@ -32,28 +32,34 @@ proxy for reaching a hot enough temperature".
 Cost, and what is done about it
 -------------------------------
 `controller.mpc_model.simulate_grey_box` integrates with a Python loop over
-sub-steps, so one forward simulation of a 20-minute cook costs ~7.5 ms and one
-`least_squares` fit costs tens of seconds. A sweep of this size does not finish
-that way. Three things are done about it, in the order they matter:
+sub-steps, so one forward simulation of a 20-minute cook costs ~5 ms. Two
+things make a sweep of this size affordable:
 
-1. JIT. `_sim_jit` is a numba twin of `simulate_grey_box`, used for the
-   residual inside each fit. `verify_twins()` asserts it agrees with the real
-   function before any result is trusted -- the sweep is only evidence about
-   the shipped fitter if it is solving the shipped fitter's problem.
-2. VECTORIZE. `simulate_batch` evaluates B parameter sets at once with numpy,
+1. VECTORIZE. `simulate_batch` evaluates B parameter sets at once with numpy,
    which is how the truth trajectories and the sigma/h_amb trade-off surface
-   are computed. Batching only pays above B~16 (see `--bench`): one fit's
-   finite-difference Jacobian needs just len(_FREE)+1 columns, which is below
-   that crossover, so the per-fit path uses the jitted scalar twin instead.
-   Vectorization is applied where the work is actually wide, not everywhere.
-3. PARALLELIZE. Grid points are independent, so they run across a
-   `ProcessPoolExecutor`. Workers are capped at `cpu_count() - 2` and pinned to
-   one numba thread each, because a live `control.py` and gunicorn share this
-   machine.
+   are computed. `verify_twins()` asserts it reproduces `simulate_grey_box`
+   before any result is trusted -- the sweep is only evidence about the shipped
+   fitter if it is solving the shipped fitter's problem. Batching only pays
+   above B~16 (see `--bench`): one fit's finite-difference Jacobian needs just
+   len(_FREE)+1 columns, which is below that crossover, so the per-fit path
+   calls `simulate_grey_box` directly. Vectorization is applied where the work
+   is actually wide, not everywhere.
+2. PARALLELIZE. Grid points are independent, so they run across a
+   `ProcessPoolExecutor`. Workers are capped at `cpu_count() - 2` because a
+   live `control.py` and gunicorn share this machine.
 
-None of this is reachable from `controller/`. The fit that runs at cook
-teardown on a Raspberry Pi stays single-process, pure numpy/scipy, and calls
-`simulate_grey_box` directly.
+What made the fits affordable in the first place is not in this file: the
+scaled-variable solve in `fit_params` turned a fit that exhausted max_nfev
+without converging (~73 s) into one that converges in ~70 evaluations (~1.3 s).
+
+This harness deliberately depends on nothing the project does not already
+install. An earlier version jitted the integrator with numba for a further
+176x on the scalar path, which was not worth what it cost: numba pins numpy
+below the version this project uses, so a dev-only sweep tool would have
+downgraded the numeric library under the control loop, the web app and the
+whole test suite. The recorded agreement numbers for that twin are in the
+task's report. The fit that runs at cook teardown on a Raspberry Pi is
+single-process, pure numpy/scipy, and calls `simulate_grey_box` directly.
 
 Usage:
     python -m docs.superpowers.experiments.sigma_identifiability          # full sweep
@@ -108,53 +114,28 @@ _SIGMA_MAX = PROMOTION_BOUNDS["sigma"][1]
 
 
 # --------------------------------------------------------------------------
-# Forward model: a jitted scalar twin and a numpy-batched twin of
-# controller.mpc_model.simulate_grey_box. Both are verified against it.
+# Forward model: `simulate_grey_box` itself for the per-fit residual, and a
+# numpy-batched twin of it, verified against it, for the wide work.
 # --------------------------------------------------------------------------
 
-try:
-    from numba import njit
-except ImportError:  # pragma: no cover - the harness says so and stops
-    njit = None
 
-
-def _sim_py(t, Q, C_f, C_c, h_fc, h_amb, T_amb, T0, K_Q, sigma, theta, n_delay, max_dt):
-    """Statement-for-statement `simulate_grey_box`, in numba-compatible form."""
-    n = n_delay if n_delay > 0 else 0
-    lag_tau = (theta / n) if (n > 0 and theta > 0.0) else 0.0
-    lags = np.zeros(n)
-    T_f = T0
-    T_c = T0
-    out = np.empty(len(t))
-    amb4 = (T_amb + _KELVIN) ** 4
-    for i in range(len(t)):
-        out[i] = T_c
-        if i == len(t) - 1:
-            break
-        span = t[i + 1] - t[i]
-        if span <= 0.0:
-            continue
-        steps = max(1, int(np.ceil(span / max_dt)))
-        dt = span / steps
-        u = Q[i]
-        for _ in range(steps):
-            if lag_tau > 0.0:
-                prev = u
-                for j in range(n):
-                    lags[j] += dt * (prev - lags[j]) / lag_tau
-                    prev = lags[j]
-                heat_in = lags[n - 1]
-            else:
-                heat_in = u
-            dT_f = (K_Q * heat_in - h_fc * (T_f - T_c)) / C_f
-            rad = sigma * ((T_c + _KELVIN) ** 4 - amb4)
-            dT_c = (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb) - rad) / C_c
-            T_f += dt * dT_f
-            T_c += dt * dT_c
-    return out
-
-
-_sim_jit = njit(cache=True, fastmath=False)(_sim_py) if njit is not None else _sim_py
+def _sim(t, Q, C_f, C_c, h_fc, h_amb, T_amb, T0, K_Q, sigma, theta, n_delay, max_dt=1.0):
+    """`simulate_grey_box` behind a positional signature the harness can pass around."""
+    return simulate_grey_box(
+        t,
+        Q,
+        C_f=C_f,
+        C_c=C_c,
+        h_fc=h_fc,
+        h_amb=h_amb,
+        T_amb=T_amb,
+        T0=T0,
+        K_Q=K_Q,
+        sigma=sigma,
+        theta=theta,
+        n_delay=n_delay,
+        max_dt=max_dt,
+    )
 
 
 def simulate_batch(t, Q, *, T_amb, T0, C_f, C_c, h_fc, h_amb, K_Q, sigma, theta, n_delay=0, max_dt=1.0):
@@ -207,11 +188,10 @@ def simulate_batch(t, Q, *, T_amb, T0, C_f, C_c, h_fc, h_amb, K_Q, sigma, theta,
 
 
 def verify_twins(verbose=True):
-    """Both fast twins must reproduce `simulate_grey_box` before anything is trusted."""
+    """The batched twin must reproduce `simulate_grey_box` before anything is trusted."""
     rng = np.random.default_rng(0)
     t = np.arange(0.0, 1800.0, DT)
     Q = np.clip(50.0 + 50.0 * np.sin(t / 300.0), 5.0, 100.0)
-    worst_jit = 0.0
     worst_batch = 0.0
     for _ in range(8):
         p = dict(
@@ -225,27 +205,10 @@ def verify_twins(verbose=True):
             n_delay=int(rng.integers(0, 6)),
         )
         ref = simulate_grey_box(t, Q, T_amb=T_AMB, T0=25.0, max_dt=1.0, **p)
-        got_jit = _sim_jit(
-            t,
-            Q,
-            p["C_f"],
-            p["C_c"],
-            p["h_fc"],
-            p["h_amb"],
-            T_AMB,
-            25.0,
-            p["K_Q"],
-            p["sigma"],
-            p["theta"],
-            p["n_delay"],
-            1.0,
-        )
         got_batch = simulate_batch(t, Q, T_amb=T_AMB, T0=25.0, **p)[:, 0]
-        worst_jit = max(worst_jit, float(np.max(np.abs(got_jit - ref))))
         worst_batch = max(worst_batch, float(np.max(np.abs(got_batch - ref))))
     if verbose:
-        print(f"twin check: jit max|diff| = {worst_jit:.3e} C, batched max|diff| = {worst_batch:.3e} C")
-    assert worst_jit < 1e-9, f"jitted twin disagrees with simulate_grey_box by {worst_jit} C"
+        print(f"twin check: batched max|diff| = {worst_batch:.3e} C")
     assert worst_batch < 1e-9, f"batched twin disagrees with simulate_grey_box by {worst_batch} C"
 
     # Negative control on the generator: the truth parameters must reproduce
@@ -255,26 +218,12 @@ def verify_twins(verbose=True):
     worst_truth = 0.0
     for cold, hot in ((200.0, 200.0), (60.0, 260.0), (120.0, 240.0)):
         tt, temp, Q = make_cook(cold, hot, 0)
-        sim = _sim_jit(
-            tt,
-            Q,
-            TRUTH["C_f"],
-            TRUTH["C_c"],
-            TRUTH["h_fc"],
-            TRUTH["h_amb"],
-            T_AMB,
-            float(temp[0]),
-            TRUTH["K_Q"],
-            TRUTH["sigma"],
-            TRUTH["theta"],
-            int(TRUTH["n_delay"]),
-            1.0,
-        )
+        sim = simulate_grey_box(tt, Q, T_amb=T_AMB, T0=float(temp[0]), **TRUTH)
         worst_truth = max(worst_truth, float(np.sqrt(np.mean((sim - temp) ** 2))))
     if verbose:
         print(f"generator check: worst truth-parameter RMSE = {worst_truth:.3f} C (noise is {NOISE_C})")
     assert worst_truth < 1.5 * NOISE_C, f"synthetic cooks carry {worst_truth} C of error the truth model cannot explain"
-    return worst_jit, worst_batch
+    return worst_batch, worst_truth
 
 
 # --------------------------------------------------------------------------
@@ -352,7 +301,7 @@ def fit(t, temp, Q, *, free_sigma, sigma0=INIT_SIGMA, sim=None, free=None, init=
     `eps**0.5 * max(1, |x|)`, so an unscaled `sigma` near 1.4e-9 is probed with
     a step ten times its own value and the solver sees noise.
     """
-    sim = sim or _sim_jit
+    sim = sim or _sim
     init = dict(INIT if init is None else init)
     if free is None:
         free = _FREE if free_sigma else _FREE[:-1]
@@ -451,14 +400,17 @@ def _point(args):
     )
 
 
-def _init_worker():
-    os.environ.setdefault("NUMBA_NUM_THREADS", "1")
-
-
 def run_sweep(grid, seeds, workers):
+    """Fit every grid point across processes.
+
+    The integration is a Python loop, not a BLAS call, so each worker is a
+    single busy core and the only thing that needs limiting is how many of them
+    there are -- `workers` is capped by the caller at `cpu_count() - 2` to leave
+    room for the live `control.py` and gunicorn on this machine.
+    """
     points = [(c, h, s) for (c, h) in grid for s in seeds]
     t0 = time.perf_counter()
-    with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker) as pool:
+    with ProcessPoolExecutor(max_workers=workers) as pool:
         rows = list(pool.map(_point, points, chunksize=1))
     return rows, time.perf_counter() - t0
 
@@ -515,34 +467,17 @@ def bench():
     verify_twins()
     t, temp, Q = make_cook(80.0, 250.0, 0)
     p = TRUTH
-    args = (
-        t,
-        Q,
-        p["C_f"],
-        p["C_c"],
-        p["h_fc"],
-        p["h_amb"],
-        T_AMB,
-        25.0,
-        p["K_Q"],
-        p["sigma"],
-        p["theta"],
-        int(p["n_delay"]),
-        1.0,
-    )
-    _sim_jit(*args)  # compile
 
     reps = 20
     t0 = time.perf_counter()
     for _ in range(reps):
         simulate_grey_box(t, Q, T_amb=T_AMB, T0=25.0, **p)
     scalar_ms = (time.perf_counter() - t0) / reps * 1e3
-    t0 = time.perf_counter()
-    for _ in range(reps):
-        _sim_jit(*args)
-    jit_ms = (time.perf_counter() - t0) / reps * 1e3
     print(f"simulate_grey_box  {scalar_ms:8.3f} ms/sim")
-    print(f"_sim_jit           {jit_ms:8.3f} ms/sim   ({scalar_ms / jit_ms:.0f}x)")
+    # Where batching starts paying. A single fit's finite-difference Jacobian
+    # needs only len(_FREE)+1 columns, which lands below the crossover -- so
+    # the per-fit path calls simulate_grey_box directly and batching is saved
+    # for the trade-off surface, which is hundreds of sets wide.
     for B in (1, 4, 8, 16, 32, 128, 512):
         kw = {k: (np.full(B, v) if k != "n_delay" else int(v)) for k, v in p.items()}
         t0 = time.perf_counter()
@@ -563,9 +498,6 @@ def main():
     ap.add_argument("--quick", action="store_true", help="Small grid (smoke test)")
     ap.add_argument("--out", default=OUT)
     args = ap.parse_args()
-
-    if njit is None:
-        sys.exit("numba is required (dev dependency group); the interpreted sweep does not finish.")
 
     if args.bench:
         bench()
