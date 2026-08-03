@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 
 import controller.update_mpc as update_mpc
-from controller.model_promotion import PROMOTION_BOUNDS
+from common.controller_model_state import ControllerModelStore
+from controller.model_promotion import PROMOTION_BOUNDS, evaluate
 from controller.mpc import _DEFAULTS, _REFIT_INIT, _REFIT_MAX_SAMPLES, Controller
 from controller.mpc_model import simulate_grey_box
 
@@ -19,14 +20,14 @@ TRUTH = dict(C_f=9.0, C_c=11000.0, h_fc=1.3, h_amb=2.7, K_Q=32.0, theta=110.0)
 FITTED_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta")
 
 
-def _synthetic_cook(seed=0, noise=0.5):
+def _synthetic_cook(seed=0, noise=0.5, rows=1200):
     """A heat-up then a step down, from a grill that is NOT the default.
 
     Carries probe noise, without which the fit reaches an RMSE around 1e-12 and
     every error comparison in this file would be a comparison of rounding.
     """
-    t = np.arange(0.0, 6000.0, 5.0)
-    Q = np.where(t < 3000.0, 100.0, 20.0)
+    t = np.arange(0.0, 5.0 * rows, 5.0)
+    Q = np.where(t < 2.5 * rows, 100.0, 20.0)
     temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=4, **TRUTH)
     temp = temp + np.random.default_rng(seed).normal(0.0, noise, size=temp.shape)
     return list(zip(t.tolist(), temp.tolist(), Q.tolist()))
@@ -34,6 +35,20 @@ def _synthetic_cook(seed=0, noise=0.5):
 
 def _c():
     return Controller(dict(_DEFAULTS, policy="nlp"), "C", dict(CYCLE))
+
+
+@pytest.fixture
+def model_store():
+    """The real store over an in-memory key, so its validator is the one that
+    judges what a snapshot may carry."""
+    written = {}
+
+    def read(key):
+        if key not in written:
+            raise TypeError("no such key")  # what read_generic_key does for an absent key
+        return written[key]
+
+    return ControllerModelStore(reader=read, writer=written.__setitem__)
 
 
 @pytest.fixture
@@ -105,13 +120,19 @@ def test_a_second_worse_cook_does_not_replace_a_good_model():
     assert c.cfg["C_c"] == pytest.approx(good)
 
 
-def test_the_refit_is_bounded_in_time(fits):
-    """A 12-hour cook is ~8640 rows and each least-squares evaluation
-    re-simulates all of them. Decimation keeps this off the minutes scale.
+def test_the_longest_cook_stays_inside_the_teardown_budget(fits):
+    """The refit runs synchronously in HoldMode.teardown, so its cost is time
+    the shutdown fan's cool-down starts late.
 
-    The wall-clock bound alone is a weak guard on a developer machine, which
-    swallows the undecimated cook inside it; the row count is what has to hold
-    for the same bound to survive on a Raspberry Pi.
+    The budget is 30 s. The shipped `shutdown_duration` is 240 s, so a refit
+    inside this bound delays the cool-down by at most an eighth of itself,
+    with the auger and igniter already off.
+
+    A 12-hour cook is ~8640 rows and every least-squares evaluation
+    re-simulates all of them, so the row cap bounds what an iteration costs.
+    It does not bound how many iterations the solver takes, which is the
+    larger term -- hence the second assertion: the cap is the part that still
+    means something on hardware slower than the machine this runs on.
     """
     t = np.arange(0.0, 43200.0, 5.0)
     Q = np.where((t // 1800) % 2 == 0, 100.0, 20.0)
@@ -125,16 +146,27 @@ def test_the_refit_is_bounded_in_time(fits):
     assert fits[0]["rows"] <= _REFIT_MAX_SAMPLES
 
 
+def test_a_cook_just_past_the_cap_keeps_its_resolution(fits):
+    """A stride can only halve, so one row past the cap would have cost half
+    the resolution of a ~100-minute cook to save a single sample."""
+    rows = _synthetic_cook(rows=_REFIT_MAX_SAMPLES + 1)
+    assert len(rows) == _REFIT_MAX_SAMPLES + 1
+    _c().refit_from_cook(rows)
+    assert fits[0]["rows"] == _REFIT_MAX_SAMPLES
+
+
 # ---- the fit's starting point is fixed, and stays fixed across cooks ----
 
 
 def test_every_refit_starts_from_the_same_fixed_reference(fits):
     """Several cooks in a row, each accepted result left in place for the next.
 
-    A refit seeded from the running model makes each cook's answer a function
-    of every cook before it, and there is no single refit that shows it -- the
-    first one starts from the shipped model whichever way the code is written.
-    So this drives the loop and reads the starting point each time round.
+    What this pins is that the starting point is the same every time, not that
+    the finished parameters happen to agree: seeded from the running model
+    they would be a function of every cook before them, and the fit's start is
+    the only place that shows. One refit cannot show it either -- the first
+    one begins at the shipped model whichever way the code is written -- so
+    this drives the loop and reads the starting point each time round.
     """
     c = _c()
     shipped = {key: c.cfg[key] for key in FITTED_KEYS}
@@ -242,3 +274,42 @@ def test_unrecorded_solver_effort_is_none_rather_than_zero():
     restored = _c()
     assert restored.restore_model(snapshot) is True
     assert restored.get_model_snapshot()["nfev"] is None
+
+
+def test_an_unmeasured_error_is_none_and_survives_the_store(model_store):
+    """None, not 0.0 and not inf: 0.0 is an unbeatable incumbent the promotion
+    gate could never dislodge, and inf is a float the store cannot write."""
+    c = _c()
+    c.refit_from_cook(_synthetic_cook())
+    snapshot = c.get_model_snapshot()
+    snapshot.pop("rmse")
+    restored = _c()
+    assert restored.restore_model(snapshot) is True
+    out = restored.get_model_snapshot()
+    assert out["rmse"] is None
+    restored.set_target(110.0)
+    assert restored.get_status()["model"]["rmse"] is None
+    # The store's own validator, not a re-implementation of it.
+    assert model_store.save("mpc", out) is True
+    # And an error nobody measured cannot be compared against.
+    verdict = evaluate(
+        dict(TRUTH, T_amb=20.0, sigma=1.4e-9, n_delay=4),
+        {k: float(restored.cfg[k]) for k in Controller._MODEL_PARAM_KEYS},
+        candidate_rmse=1.0,
+        incumbent_rmse=out["rmse"],
+        n_horizon=24,
+        t_step=25.0,
+    )
+    assert verdict.accepted is False
+    assert "not recorded" in verdict.reason
+
+
+def test_the_snapshot_does_not_alias_the_running_model():
+    """A caller holding a snapshot must not watch it change under them when
+    the next cook adopts something."""
+    c = _c()
+    c.refit_from_cook(_synthetic_cook())
+    snapshot = c.get_model_snapshot()
+    band = list(snapshot["band_c"])
+    snapshot["band_c"][0] = -999.0
+    assert c.get_model_snapshot()["band_c"] == band

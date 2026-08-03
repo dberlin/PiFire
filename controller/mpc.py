@@ -85,7 +85,12 @@ _HISTORY_MAX = 8640
 
 # A refit re-simulates the whole series once per least-squares evaluation, so
 # cost is linear in samples while the answer is not: a cook's SHAPE identifies
-# the grill, not the density it was sampled at. Decimate to this many rows.
+# the grill, not the density it was sampled at. Fit at most this many rows,
+# selected evenly across the cook. This is where the answer stops improving:
+# a coarser sampling of a long cook starts smearing the slow chamber
+# structure the model is mostly about, and a finer one recovers nothing --
+# what a refit's wall clock actually tracks is the solver's iteration count,
+# which the row cap bounds the per-iteration cost of rather than sets.
 _REFIT_MAX_SAMPLES = 1200
 
 # Below this a record is an interrupted cook rather than a description of a
@@ -93,23 +98,16 @@ _REFIT_MAX_SAMPLES = 1200
 _REFIT_MIN_SAMPLES = 120
 
 # Parameters the least-squares solve starts from, and the magnitudes it scales
-# by. Held at a fixed reference so that every cook's fit is a statement about
-# the grill alone, independent of every cook before it.
+# by. A fixed reference, so that a cook's fit describes the grill and nothing
+# else: it cannot inherit whatever the previous fit happened to land on, and
+# two identical cooks a season apart give the same answer. Seeding it from the
+# running model instead would make each result a function of every result
+# before it, through a solver path (update_mpc._solve_scale conditions the
+# solve on `init` too) that no measurement of the finished model can unwind.
 #
-# Seeding the solve from the running model instead would close a feedback loop
-# through the fit: the identifiable content of a log is the RATIOS among
-# (C_f, C_c, h_fc, h_amb, K_Q, sigma) -- see update_mpc._FREE -- so the solve is
-# free to slide along the common-scaling direction that C_f and sigma only
-# partly pin down. Restarting each fit from the previous answer lets that slide
-# compound: the magnitudes grow cook after cook at unchanged RMSE, with the
-# solver reporting convergence throughout, until they leave
-# model_promotion.PROMOTION_BOUNDS and every later candidate is refused for a
-# drift no measurement of the grill can see. The same compounding shifts
-# C_c/h_amb, the chamber time constant the promotion policy guards.
-#
-# Only the fitted parameters and the held scale anchor C_f appear here. T_amb,
-# sigma and n_delay are passed through the fit unchanged, so they cannot
-# compound, and are taken from the running config where an operator's own
+# Only the fitted parameters and the held scale anchor C_f appear here -- see
+# update_mpc._FREE. T_amb, sigma and n_delay are passed through the fit
+# unchanged and so are taken from the running config, where an operator's own
 # calibration of them lives.
 _REFIT_INIT = {key: float(_DEFAULTS[key]) for key in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta")}
 
@@ -139,6 +137,20 @@ def _optional_int(value):
         return int(value)
     except TypeError, ValueError:
         return None
+
+
+def _optional_float(value):
+    """Cast to a finite float, or None when there is no number to report.
+
+    Same distinction as `_optional_int`, and additionally refuses inf/NaN:
+    those are not measurements either, and the model store's validator encodes
+    with allow_nan=False, so a snapshot carrying one could never be written.
+    """
+    try:
+        value = float(value)
+    except TypeError, ValueError:
+        return None
+    return value if math.isfinite(value) else None
 
 
 def _sanitized_copy(mapping):
@@ -422,7 +434,7 @@ class Controller(ControllerBase):
             if self._model_meta is None
             else {
                 "band_c": [_finite_float(v) for v in self._model_meta["band_c"]],
-                "rmse": _finite_float(self._model_meta["rmse"]),
+                "rmse": _optional_float(self._model_meta["rmse"]),
             },
         }
 
@@ -467,6 +479,10 @@ class Controller(ControllerBase):
             "revision": int(self._model_revision),
             "params": {k: float(self.cfg[k]) for k in self._MODEL_PARAM_KEYS},
             **self._model_meta,
+            # Rebuilt rather than shared: every other value here is an
+            # immutable scalar, so a shallow copy of this mapping would leave
+            # the caller holding the live list a later adoption overwrites.
+            "band_c": list(self._model_meta["band_c"]),
         }
 
     def restore_model(self, snapshot):
@@ -499,13 +515,15 @@ class Controller(ControllerBase):
         # store rejects a revision that does not advance, permanently.
         self._model_revision = revision
         self._model_meta = {
-            # Provenance only, exactly as in _adopt_model. inf -- never 0.0 --
-            # stands in for "unknown": 0.0 would read as a perfect fit, and if
-            # this field were ever wired into evaluate() as an incumbent_rmse,
-            # an unknown-error snapshot would then permanently refuse any
-            # replacement (evaluate() refuses a non-finite incumbent_rmse, so
-            # inf is safe; 0.0 would instead be an unbeatable one).
-            "rmse": float(snapshot.get("rmse", float("inf"))),
+            # Provenance only, exactly as in _adopt_model. None -- never 0.0,
+            # and never inf -- stands in for "unknown": 0.0 would read as a
+            # perfect fit and, wired into evaluate() as an incumbent_rmse,
+            # would permanently refuse any replacement, while inf is a float
+            # the store cannot persist at all (its validator encodes with
+            # allow_nan=False). evaluate() refuses a None incumbent_rmse
+            # outright, which is the honest answer for an error nobody
+            # measured.
+            "rmse": _optional_float(snapshot.get("rmse")),
             "samples": int(snapshot.get("samples", 0)),
             "band_c": [float(v) for v in snapshot.get("band_c", (0.0, 0.0))],
             # Carried back across the store so the field means the same thing
@@ -524,8 +542,10 @@ class Controller(ControllerBase):
 
         Between cooks only: a refit re-simulates the whole history once per
         least-squares evaluation, so it belongs nowhere near the control path.
-        An accepted model changes `cfg` but rebuilds nothing -- it reaches the
-        grill through the next cook's restore.
+        It runs synchronously on its caller's thread and takes seconds -- see
+        `_REFIT_MAX_SAMPLES` for the budget and HoldMode._refit_model for why
+        spending it at teardown is safe. An accepted model changes `cfg` but
+        rebuilds nothing: it reaches the grill through the next cook's restore.
         """
         from controller.model_promotion import evaluate
         from controller.update_mpc import fit_params, fit_quality
@@ -534,8 +554,13 @@ class Controller(ControllerBase):
         if len(rows) < _REFIT_MIN_SAMPLES:
             return _Verdict(False, f"only {len(rows)} samples; need {_REFIT_MIN_SAMPLES}")
 
-        step = max(1, math.ceil(len(rows) / _REFIT_MAX_SAMPLES))
-        rows = rows[::step]
+        if len(rows) > _REFIT_MAX_SAMPLES:
+            # Evenly spaced indices rather than a stride: a stride can only
+            # halve, so one row past the cap would cost half the resolution of
+            # the whole cook. This lands on the cap itself at any length.
+            keep = np.unique(np.linspace(0, len(rows) - 1, _REFIT_MAX_SAMPLES).round().astype(int))
+            rows = [rows[i] for i in keep]
+        started = time.perf_counter()
         t = np.array([r[0] for r in rows], dtype=float)
         temp = np.array([r[1] for r in rows], dtype=float)
         Q = np.array([r[2] for r in rows], dtype=float)
@@ -569,6 +594,10 @@ class Controller(ControllerBase):
         # veto here; what earns a promotion is the error comparison and the
         # bounds below.
         if not fitted["converged"]:
+            print(
+                f"[mpc] refit: abandoned after {fitted['nfev']} evaluations over "
+                f"{len(rows)} samples in {time.perf_counter() - started:.1f} s"
+            )
             return _Verdict(False, f"the solve did not converge within {fitted['nfev']} evaluations")
 
         verdict = evaluate(
@@ -581,7 +610,8 @@ class Controller(ControllerBase):
         )
         print(
             f"[mpc] refit: {verdict.reason} (candidate RMSE {cand_rmse:.2f} C, "
-            f"incumbent {inc_rmse:.2f} C, {fitted['nfev']} evaluations)"
+            f"incumbent {inc_rmse:.2f} C, {fitted['nfev']} evaluations over "
+            f"{len(rows)} samples in {time.perf_counter() - started:.1f} s)"
         )
         if verdict.horizon_needed:
             print(

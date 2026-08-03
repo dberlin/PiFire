@@ -442,16 +442,30 @@ class HoldMode(ControlMode):
         A refit re-simulates the whole cook once per solver evaluation, so it
         is a between-cooks activity and runs here rather than on any tick --
         and only after `stop()`, since it mutates the very core a background
-        solve would be reading. Nothing is rebuilt now: an accepted model
-        reaches the grill through the NEXT cook's restore, which is why the
-        result has to be persisted before this mode exits.
+        solve would be reading.
+
+        It runs SYNCHRONOUSLY and holds up teardown for seconds. That is the
+        deliberate choice: by this point base.run() has already turned the
+        auger and igniter off, so there is nothing to be late for except the
+        shutdown fan's cool-down, which is `shutdown_duration` (240 s shipped)
+        and dwarfs the delay. A background thread would return teardown
+        instantly and then be killed at process exit with the cook's evidence
+        still in it -- silently losing the one thing this feature exists to
+        produce, on the last cook before every restart.
+
+        Nothing is rebuilt now: an accepted model reaches the grill through
+        the NEXT cook's restore, which is why the result has to be persisted
+        before this mode exits.
         """
-        cfg = self.settings["controller"].get("config", {}).get("mpc", {})
-        if not cfg.get("enable_identification"):
-            return
         import control as _control
 
         try:
+            # Inside the try with everything else: teardown's contract is an
+            # orderly shutdown, and a settings dict that has lost its shape is
+            # no more entitled to break that than a solver is.
+            config = self.settings["controller"].get("config", {})
+            if not config.get(self._controller_name, {}).get("enable_identification"):
+                return
             self._runner.refit_from_cook()
             snapshot = self._runner.get_model_snapshot()
             if snapshot is not None:
@@ -465,7 +479,9 @@ class HoldMode(ControlMode):
 
     def teardown(self, ptemp):
         # Stop the controller runner's background thread (no-op for the
-        # synchronous runner). Guard against a failed build leaving no runner.
+        # synchronous runner), then spend the seconds a refit costs while the
+        # actuators are already off. Guard against a failed build leaving no
+        # runner.
         if self._runner is not None:
             self._runner.stop()
             self._refit_model()

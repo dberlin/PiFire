@@ -287,15 +287,23 @@ class ThreadedControllerRunner(ControllerRunner):
     def refit_from_cook(self):
         """Refit the core's model from the cook that just ended.
 
-        Runs on the CALLER's thread, which is why teardown asks for it only
-        after `stop()` has joined the worker: a refit takes seconds to minutes
-        and mutates the core's config, so it must never overlap a solve.
+        Runs synchronously on the CALLER's thread, which is why teardown asks
+        for it only after `stop()`: a refit takes seconds and mutates the
+        core's config, so it must never overlap a solve.
 
-        The worker is the thing that normally republishes the model snapshot,
-        and it is gone by now, so this republishes it directly -- otherwise an
-        adopted model would exist in the core and be invisible to the
+        `stop()` joins with a timeout and so cannot promise the worker is
+        gone. A worker still running would overwrite the republish below on
+        its next pass and the cook's learning would vanish without a trace, so
+        that case raises instead -- losing a refit is acceptable, losing it
+        silently is not.
+
+        The worker is what normally republishes the model snapshot, and it has
+        stopped by now, so this republishes it directly: otherwise an adopted
+        model would exist in the core and be invisible to the
         `get_model_snapshot()` the caller persists it through.
         """
+        if self._thread.is_alive():
+            raise RuntimeError("the controller worker did not stop; refusing to refit behind it")
         fn = getattr(self._core, "refit_from_cook", None)
         if fn is None:
             return None

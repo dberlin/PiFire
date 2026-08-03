@@ -28,9 +28,9 @@ class _RecordingStore:
         return True
 
 
-def _hold(hold_cycle, runner, *, identification, store=None):
-    hold = hold_cycle(runner, controller="mpc", model_store=store)
-    hold.settings["controller"]["config"]["mpc"] = {"enable_identification": identification}
+def _hold(hold_cycle, runner, *, identification, store=None, controller="mpc", configure="mpc"):
+    hold = hold_cycle(runner, controller=controller, model_store=store)
+    hold.settings["controller"]["config"][configure] = {"enable_identification": identification}
     hold.setup()
     return hold
 
@@ -68,6 +68,24 @@ def test_the_refit_waits_for_the_runner_to_stop(hold_cycle):
     hold = _hold(hold_cycle, runner, identification=True)
     hold.teardown(225)
     assert runner.stops_before_each_refit == [1]
+
+
+def test_the_gate_follows_the_selected_controller(hold_cycle):
+    """Identification is enabled under `mpc`, but a PID grill is running: the
+    setting belongs to the controller it names, not to whatever is loaded."""
+    runner = FakeControllerRunner(period=0.01)
+    hold = _hold(hold_cycle, runner, identification=True, controller="pid_sp", configure="mpc")
+    hold.teardown(225)
+    assert runner.refits == 0
+
+
+def test_settings_that_lost_their_shape_do_not_break_teardown(hold_cycle):
+    runner = FakeControllerRunner(period=0.01)
+    hold = _hold(hold_cycle, runner, identification=True)
+    hold.settings = {}
+    hold.teardown(225)  # must not raise
+    assert runner.stops == 1
+    assert runner.refits == 0
 
 
 def test_a_refit_failure_does_not_break_teardown(hold_cycle):
@@ -149,6 +167,37 @@ def test_the_threaded_runner_republishes_the_snapshot_a_refit_produced():
     assert runner.get_model_snapshot() is None
     runner.refit_from_cook()
     assert runner.get_model_snapshot() == {"version": 1, "revision": 3, "params": {}}
+
+
+def test_a_worker_that_would_not_stop_refuses_the_refit_out_loud():
+    """`stop()` joins with a timeout, so it cannot promise the worker is gone.
+    A worker still running would overwrite the republished snapshot on its
+    next pass and the cook's learning would disappear without a trace."""
+    core = _CoreWithRefit()
+    runner = ThreadedControllerRunner(core)
+    try:
+        with pytest.raises(RuntimeError, match="did not stop"):
+            runner.refit_from_cook()  # the worker is still running
+        assert core.refits == 0
+    finally:
+        runner.stop()
+
+
+def test_a_refit_that_refuses_still_reaches_the_operator(hold_cycle):
+    """Hold logs what escapes the runner, so the refusal above is not silent."""
+    runner = FakeControllerRunner(period=0.01)
+    runner.refit_raises = RuntimeError("the controller worker did not stop")
+    hold = _hold(hold_cycle, runner, identification=True)
+    import control as _control
+
+    logged = []
+    original = _control.eventLogger.error
+    _control.eventLogger.error = logged.append
+    try:
+        hold.teardown(225)
+    finally:
+        _control.eventLogger.error = original
+    assert any("did not stop" in line for line in logged)
 
 
 def test_a_runner_that_forgets_to_refit_cannot_be_built():
