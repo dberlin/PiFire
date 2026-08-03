@@ -21,11 +21,17 @@ from common.common import write_log
 
 
 class _CurrentSection(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
 
 class LastReading(_CurrentSection):
     """A probe's last real reading, and when it was taken."""
+
+    # frozen must be restated (assigning model_config here replaces, rather
+    # than merges with, _CurrentSection's) -- extra="forbid" carries over
+    # explicitly rather than by inheritance, matching _SystemConfig in
+    # common/settings_schema.py.
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     temp: int | float
     ts: int
@@ -125,6 +131,22 @@ def to_snapshot(schema):
         timestamp=schema.timestamp,
         last_readings=dict(schema.last_readings),
     )
+
+
+def snapshot_from(raw, probe_info):
+    """Validate a stored blob into a snapshot, the load/fallback/to_snapshot
+    sequence every store's ``read_current_snapshot`` needs.
+
+    :param raw: the dict as stored
+    :param probe_info: zero-argument callable returning the probe_info list
+        (settings["probe_settings"]["probe_map"]["probe_info"]), invoked only
+        when ``raw`` will not parse
+    :return: CurrentSnapshot
+    """
+    schema = load_current(raw)
+    if schema is None:
+        schema = zeroed_current(probe_info())
+    return to_snapshot(schema)
 
 
 def build_current(in_data, previous, now_ms):

@@ -26,7 +26,13 @@ from common.common import (
     strip_null_members,
 )
 from common.control_delta import apply_control_delta, is_control_delta, validate_control_delta
-from common.current_schema import build_current, dump_legacy, load_current, to_snapshot, zeroed_current
+from common.current_schema import (
+    build_current,
+    dump_legacy,
+    load_current,
+    snapshot_from,
+    zeroed_current,
+)
 from common.defaults import (
     METRIC_COLUMNS,
     default_control,
@@ -697,16 +703,18 @@ def read_current_snapshot():
     """
     Read the current probe temps as a validated snapshot.
 
-    An unparseable blob is discarded rather than repaired: it is a cache of the
-    last control pass, and the next pass refills it.
+    An unparseable blob is discarded rather than repaired -- it is a cache of
+    the last control pass, and the next pass refills it -- and rebuilt from the
+    configured probe map, same as :func:`flush_current`. An absent/empty blob
+    (a fresh install) validates cleanly instead, and yields a snapshot with
+    every section empty rather than zeroed from the probe map.
 
     :return: CurrentSnapshot
     """
-    schema = load_current(_read_json_blob("control:current", dict))
-    if schema is None:
-        settings = read_settings()
-        schema = zeroed_current(settings["probe_settings"]["probe_map"]["probe_info"])
-    return to_snapshot(schema)
+    return snapshot_from(
+        _read_json_blob("control:current", dict),
+        lambda: read_settings()["probe_settings"]["probe_map"]["probe_info"],
+    )
 
 
 def write_tr(tr_data):

@@ -14,7 +14,7 @@ from common.common import (
     strip_null_members,
 )
 from common.control_delta import apply_control_delta, is_control_delta, validate_control_delta
-from common.current_schema import build_current, dump_legacy, load_current, to_snapshot, zeroed_current
+from common.current_schema import build_current, dump_legacy, load_current, snapshot_from, zeroed_current
 from common.defaults import METRIC_COLUMNS, default_control, default_metrics
 
 
@@ -228,10 +228,7 @@ class InMemoryStore(Store):
         return copy.deepcopy(self._current)
 
     def read_current_snapshot(self):
-        schema = load_current(self._current)
-        if schema is None:
-            schema = zeroed_current(self._probe_info())
-        return to_snapshot(schema)
+        return snapshot_from(self._current, self._probe_info)
 
     def _probe_info(self):
         return self._settings.get("probe_settings", {}).get("probe_map", {}).get("probe_info", [])

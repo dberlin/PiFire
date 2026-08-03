@@ -175,3 +175,10 @@ def test_snapshot_does_not_alias_the_model():
     snap = to_snapshot(schema)
     schema.primary["PitProbe"] = 999
     assert snap.primary["PitProbe"] == 210
+
+
+def test_snapshot_last_readings_cannot_be_mutated():
+    schema = build_current(IN_DATA, None, 1000)
+    snap = to_snapshot(schema)
+    with pytest.raises(ValidationError):
+        snap.last_readings["PitProbe"].temp = 999
