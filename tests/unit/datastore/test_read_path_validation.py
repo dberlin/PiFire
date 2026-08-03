@@ -17,7 +17,7 @@ def test_a_valid_tree_reports_nothing(ds, caplog):
     # write_log() (common/common.py) always logs at INFO -- it takes no level
     # argument -- so the capture level here has to be INFO, not WARNING, or
     # the line below would pass regardless of whether anything was reported.
-    with caplog.at_level("INFO"):
+    with caplog.at_level("INFO", logger="events"):
         datastore._validate_settings_in_store()
 
     assert "settings" not in caplog.text.lower()
@@ -28,7 +28,7 @@ def test_a_broken_tree_is_reported_with_its_paths(ds, caplog):
     settings["startup"]["duration"] = "not a number"
     write_settings_store(settings)  # bypasses the write gate on purpose
 
-    with caplog.at_level("INFO"):
+    with caplog.at_level("INFO", logger="events"):
         datastore._validate_settings_in_store()
 
     assert "startup.duration" in caplog.text

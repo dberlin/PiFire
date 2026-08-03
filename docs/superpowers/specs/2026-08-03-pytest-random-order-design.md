@@ -24,8 +24,12 @@ Do not add disabled markers or other exceptions. An order-dependent failure is a
 
 - `pyproject.toml`: add the dev dependency and pytest option.
 - `uv.lock`: record the resolved package and dependency-group membership.
+- `tests/web/conftest.py`: confine sync Playwright's event loop to each web test module.
+- `tests/web/test_socketio_app_data.py`: isolate handler tests from the process-wide events log.
+- `tests/web/test_webapp_sqlite.py`: restore the seeded datastore baseline before every test.
+- `tests/unit/datastore/test_read_path_validation.py`: make the captured logger level explicit.
 
-No application or test source files change.
+No application source files change. Test-harness changes are limited to order dependencies exposed by the randomized suite.
 
 ## Verification
 

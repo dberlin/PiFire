@@ -27,11 +27,12 @@ wizard e2e test's precedent. Rationale:
   a fresh value) to make each test's starting state explicit rather than
   relying on ordering.
 
-`browser`/`page`: reuse pytest-playwright's built-in fixtures. No custom
-wrapper is needed -- `page` (function-scoped) composes cleanly with a
-module-scoped `live_server`, as already proven by
-test_wizard_nested_modal_scroll.py running multiple tests against one
-live_server with the plain `page` fixture.
+`playwright`/`browser_context_args`/`browser`: override pytest-playwright's
+session-scoped fixture chain at module scope. The sync Playwright API keeps an
+asyncio loop active in the test thread until `playwright.stop()`; session scope
+therefore breaks any later test that calls `asyncio.run()` when modules are
+randomized. Module scope tears that loop down with each web test file while
+still sharing one browser across the file's function-scoped `page` fixtures.
 
 Thread-shared datastore (the load-bearing trick)
 -------------------------------------------------
@@ -55,6 +56,7 @@ make that change without also switching the read-back helpers to read the
 DB file directly.)
 """
 
+import json
 import os
 import shutil
 import tempfile
@@ -86,6 +88,48 @@ except Exception as exc:  # pragma: no cover - only exercised if playwright itse
 requires_chromium = pytest.mark.skipif(
     _PLAYWRIGHT_UNAVAILABLE_REASON is not None, reason=_PLAYWRIGHT_UNAVAILABLE_REASON or ""
 )
+
+
+@pytest.fixture(scope="module")
+def playwright():
+    """Keep the sync API's event loop confined to each web test module."""
+    with sync_playwright() as instance:
+        yield instance
+
+
+@pytest.fixture(scope="module")
+def browser_context_args(pytestconfig, playwright, device, base_url, _pw_artifacts_folder):
+    """Mirror pytest-playwright's context options at module scope."""
+    context_args = {}
+    if device:
+        context_args.update(playwright.devices[device])
+    if base_url:
+        context_args["base_url"] = base_url
+    if pytestconfig.getoption("--video") in {"on", "retain-on-failure"}:
+        context_args["record_video_dir"] = _pw_artifacts_folder.name
+    return context_args
+
+
+@pytest.fixture(scope="module")
+def browser(playwright, browser_name, browser_type_launch_args, connect_options):
+    """Share one browser per module without a session-long event loop."""
+    browser_type = getattr(playwright, browser_name)
+    if connect_options:
+        browser = browser_type.connect(
+            **{
+                **connect_options,
+                "headers": {
+                    "x-playwright-launch-options": json.dumps(browser_type_launch_args),
+                    **(connect_options.get("headers") or {}),
+                },
+            }
+        )
+    else:
+        browser = browser_type.launch(**browser_type_launch_args)
+    try:
+        yield browser
+    finally:
+        browser.close()
 
 
 @pytest.fixture(autouse=True)

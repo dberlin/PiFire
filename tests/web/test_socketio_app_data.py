@@ -129,6 +129,7 @@ def sio(ds):
         mock.patch.object(socket_io, "restart_control", side_effect=_rec("restart_control")),
         mock.patch.object(socket_io, "restart_webapp", side_effect=_rec("restart_webapp")),
         mock.patch.object(socket_io, "restart_scripts", side_effect=_rec("restart_scripts")),
+        mock.patch.object(socket_io, "read_events_records", return_value=[]),
     ):
         yield types.SimpleNamespace(mod=socket_io, calls=calls)
 

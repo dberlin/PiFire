@@ -39,26 +39,30 @@ from common.datastore_accessors import (  # noqa: E402
 )
 from common.defaults import default_control, default_pellets, default_settings  # noqa: E402
 
-datastore._reset_for_tests(_DB_PATH)
-datastore.init()
+
+def _seed_database():
+    datastore._reset_for_tests(_DB_PATH)
+    datastore.init()
+    settings = default_settings()
+    settings["globals"]["grill_name"] = _SEEDED_GRILL_NAME
+    write_settings_store(settings)
+    write_pellets_store(default_pellets())
+    init_status()
+    write_control(default_control(), WriteKind.OVERWRITE, origin="test")
+    # read_probe_status() (used by the /api/current route) reads this generic
+    # key; in production it's populated by the control loop's probe discovery.
+    write_generic_key("probe_device_info", {})
+    write_current(
+        {
+            "probe_history": {"primary": {"Probe1": 225}, "food": {}, "aux": {}},
+            "primary_setpoint": 225,
+            "notify_targets": {},
+        }
+    )
+
 
 _SEEDED_GRILL_NAME = "T18 Seeded Grill"
-_seed_settings = default_settings()
-_seed_settings["globals"]["grill_name"] = _SEEDED_GRILL_NAME
-write_settings_store(_seed_settings)
-write_pellets_store(default_pellets())
-init_status()
-write_control(default_control(), WriteKind.OVERWRITE, origin="test")
-# read_probe_status() (used by the /api/current route) reads this generic
-# key; in production it's populated by the control loop's probe discovery.
-write_generic_key("probe_device_info", {})
-write_current(
-    {
-        "probe_history": {"primary": {"Probe1": 225}, "food": {}, "aux": {}},
-        "primary_setpoint": 225,
-        "notify_targets": {},
-    }
-)
+_seed_database()
 
 from app import app as flask_app  # noqa: E402
 
@@ -74,7 +78,7 @@ def setup_function(function):
     # seeded DB before every test in this module so both the free-function
     # assertions and the `flask_app` test-client requests are guaranteed
     # to hit our seeded data regardless of full-suite run order.
-    datastore._reset_for_tests(_DB_PATH)
+    _seed_database()
 
 
 def teardown_module(module):
