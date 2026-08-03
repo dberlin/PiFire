@@ -683,8 +683,9 @@ class SettingsSchema(_Section):
 class SettingsValidationError(ValueError):
     """A settings tree (or delta) failed strict schema validation."""
 
-    def __init__(self, errors: list[str]):
+    def __init__(self, errors: list[str], pairs: list[dict] | None = None):
         self.errors = errors
+        self.pairs = pairs or []
         super().__init__("; ".join(errors))
 
 
@@ -692,9 +693,22 @@ def _format_errors(errs: list[ErrorDetails]) -> list[str]:
     return [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in errs]
 
 
+def _error_pairs(errs: list[ErrorDetails]) -> list[dict]:
+    return [{"path": ".".join(str(p) for p in err["loc"]), "message": err["msg"]} for err in errs]
+
+
 def format_validation_errors(exc: ValidationError) -> list[str]:
     """Dotted-path `"section.field: reason"` strings for a pydantic ValidationError."""
     return _format_errors(exc.errors())
+
+
+def format_validation_pairs(exc: ValidationError) -> list[dict]:
+    """`{"path": "section.field", "message": reason}` for a pydantic ValidationError.
+
+    The structured twin of format_validation_errors: same paths, same order, not
+    yet joined, so a caller can route each one to the field that produced it.
+    """
+    return _error_pairs(exc.errors())
 
 
 def _declared_types(annotation: Any) -> set[type]:
@@ -874,6 +888,22 @@ def validate_partial_settings(delta: dict) -> list[str]:
     return []
 
 
+def validate_partial_settings_pairs(delta: dict) -> list[dict]:
+    """`{"path": ..., "message": ...}` for a sparse delta; empty if it type-checks.
+
+    The structured twin of validate_partial_settings, over the same
+    PartialSettingsSchema and therefore the same Layer-1 rules: field types
+    only, no cross-field validators, which on a sparse delta would run against
+    static defaults rather than the store's real values.
+    """
+    try:
+        PartialSettingsSchema.model_validate(delta, strict=True)
+    except ValidationError as exc:
+        field_errors = [err for err in exc.errors() if err["type"] != "value_error"]
+        return _error_pairs(field_errors)
+    return []
+
+
 #: Settings that were RENAMED rather than removed, as
 #: {old dotted path: new dotted path}. The repair gate below strips every
 #: unmodeled key, which for a rename would silently discard the user's
@@ -979,7 +1009,7 @@ def validate_settings_tree(settings: dict) -> dict:
     except ValidationError as exc:
         errors = exc.errors()
         if not errors or any(err["type"] != "extra_forbidden" for err in errors):
-            raise SettingsValidationError(format_validation_errors(exc)) from exc
+            raise SettingsValidationError(format_validation_errors(exc), format_validation_pairs(exc)) from exc
 
         repaired = copy.deepcopy(settings)
         carried = _carry_renamed_keys(repaired)
@@ -988,7 +1018,9 @@ def validate_settings_tree(settings: dict) -> dict:
         try:
             model = SettingsSchema.model_validate(repaired, strict=True)
         except ValidationError as retry_exc:
-            raise SettingsValidationError(format_validation_errors(retry_exc)) from retry_exc
+            raise SettingsValidationError(
+                format_validation_errors(retry_exc), format_validation_pairs(retry_exc)
+            ) from retry_exc
 
         carried_olds = {old for old, _ in carried}
         for old_path, new_path in carried:

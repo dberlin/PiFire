@@ -28,7 +28,7 @@ from common.i2c_bus import (
 )
 from common.modes import Mode
 from common.server_status import get_server_status
-from common.settings_schema import SettingsValidationError, apply_settings_delta, validate_partial_settings
+from common.settings_schema import SettingsValidationError, apply_settings_delta, validate_partial_settings_pairs
 from common.controller_deps import guard_controller_selection
 from . import api_bp
 
@@ -231,17 +231,30 @@ def _api_post_settings_update(settings, request_json):
          values everywhere. Caught here and turned into the same error
          envelope; the store is left untouched (write_settings() validates
          before persisting). This layer is authoritative.
+
+    The envelope's `errors` key carries `{"path", "message"}` pairs alongside
+    the joined `message` string, so a client can route each failure to the
+    field that caused it. A rejection that is not about any field (unknown
+    flag, blocked controller selection, an unexpected exception) sends an
+    empty list rather than an invented path.
     """
     delta = request_json.get("settings", {})
     flags = request_json.get("flags", []) or []
     for flag in flags:
         if flag not in _SETTINGS_UPDATE_ALLOWED_FLAGS:
-            return jsonify({"result": "error", "message": f"Unknown flag: {flag}", "data": {}}), 200
+            return jsonify({"result": "error", "message": f"Unknown flag: {flag}", "errors": [], "data": {}}), 200
 
-    layer1_errors = validate_partial_settings(delta)
-    if layer1_errors:
-        message = "; ".join(layer1_errors)
-        return jsonify({"result": "error", "message": f"Settings update failed: {message}", "data": {}}), 200
+    layer1_pairs = validate_partial_settings_pairs(delta)
+    if layer1_pairs:
+        message = "; ".join(f"{p['path']}: {p['message']}" for p in layer1_pairs)
+        return jsonify(
+            {
+                "result": "error",
+                "message": f"Settings update failed: {message}",
+                "errors": layer1_pairs,
+                "data": {},
+            }
+        ), 200
 
     try:
         settings = apply_settings_delta(settings, delta)
@@ -253,15 +266,22 @@ def _api_post_settings_update(settings, request_json):
         # background install; see common/controller_deps.py.
         blocked = guard_controller_selection(settings)
         if blocked:
-            return jsonify({"result": "error", "message": blocked, "data": {}}), 200
+            return jsonify({"result": "error", "message": blocked, "errors": [], "data": {}}), 200
         control = read_control()
         save_settings_and_flag_update(settings, control, *flags, origin="api")
-        return jsonify({"result": "success", "message": "Settings updated.", "data": settings}), 200
+        return jsonify({"result": "success", "message": "Settings updated.", "errors": [], "data": settings}), 200
     except SettingsValidationError as exc:
         message = "; ".join(exc.errors)
-        return jsonify({"result": "error", "message": f"Settings update failed: {message}", "data": {}}), 200
+        return jsonify(
+            {
+                "result": "error",
+                "message": f"Settings update failed: {message}",
+                "errors": exc.pairs,
+                "data": {},
+            }
+        ), 200
     except Exception as e:
-        return jsonify({"result": "error", "message": f"Settings update failed: {e}", "data": {}}), 200
+        return jsonify({"result": "error", "message": f"Settings update failed: {e}", "errors": [], "data": {}}), 200
 
 
 def _api_post_control(settings, request_json):
