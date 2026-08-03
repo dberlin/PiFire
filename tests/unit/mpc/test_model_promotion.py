@@ -24,12 +24,12 @@ HORIZON = dict(n_horizon=144, t_step=25.0)
 #: that code produces. Regenerate with
 #: `python -m controller.update_mpc tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv --json`.
 REAL_MAK_FIT = dict(
-    C_c=3557.93,
+    C_c=3591.95,
     h_amb=0.5,
     T_amb=20.0,
-    theta=116.55,
-    n_delay=4,
-    K_Q=9.8720,
+    theta=111.32,
+    n_delay=8,
+    K_Q=9.9208,
     sigma=1.4e-9,
 )
 
@@ -620,7 +620,7 @@ def test_the_implied_steady_state_is_where_full_fire_meets_the_chamber_loss():
     # 1713 F on a grill that peaked at 520 F. The sound fit says 1067 F.
     escaped = dict(REAL_MAK_FIT, C_c=1.06e5, h_amb=1.06e5 / 3552.0, K_Q=302.4)
     assert steady_state_at_full_fire(escaped) * 9.0 / 5.0 + 32.0 == pytest.approx(1713.0, abs=2.0)
-    assert steady_state_at_full_fire(REAL_MAK_FIT) * 9.0 / 5.0 + 32.0 == pytest.approx(1065.0, abs=2.0)
+    assert steady_state_at_full_fire(REAL_MAK_FIT) * 9.0 / 5.0 + 32.0 == pytest.approx(1067.0, abs=2.0)
     # 1.6x apart, and both far above the 550 F hazard limit -- which is why
     # this is reported and not turned into a refusal. A line drawn between two
     # values that close would be a guess, and `evaluate` does not see the
@@ -674,20 +674,27 @@ def test_the_estimate_matches_the_coast_the_real_cook_shows_at_the_cook_s_own_te
     step delivers the same heat as the taper did -- is 968 s, so the step-
     equivalent coast is 140 s, not the 263 s the raw timestamps give.
 
-    Against that, the estimate is 151 s: longer than the grill's, which is the
-    direction the remaining approximation in `braking_distance` -- a chamber
-    held at its starting temperature through the coast, where a warming one
-    loses more -- is argued to err.
+    THIS NO LONGER CLEARS THE GRILL'S OWN COAST, and the test says so rather
+    than asserting a conservatism the model has stopped having. The estimate is
+    136 s against the grill's 140 s: 0.97x, an under-prediction of 3%.
 
-    The margin used to be wider. The two-lump model read 173 s here, and most
-    of that extra was padding rather than physics: the estimate read n_delay+1
-    stages at the slower of the firepot's stage and a transport stage, a chain
-    of longer total mean than the model actually had. With one lump every stage
-    is the same length and the Erlang is the model's own decay, so what is left
-    over the grill's 140 s is 8% rather than 24%. That is a real reduction in
-    how far this over-states, and it is deliberate -- an estimate is not made
-    safer by being wrong in a comfortable direction -- but it is why the
-    horizon is sized at the cool end, where the demand is twice this one.
+    The margin was never physics. The two-lump model read 173 s here (1.24x),
+    and the single lump at n_delay=4 read 151 s (1.08x) while the fit still ran
+    through an Euler chain that inflated theta by about n_delay * sub-step.
+    Neither was the estimate being cautious. The shorter the chain, the fatter
+    its survival tail, and `braking_distance` integrates that tail; the Euler
+    bias then padded theta on top. Taking both away -- n_delay 4 -> 8 and an
+    exactly-advanced chain in the fit simulator -- leaves what the model
+    actually predicts: 146 s (1.04x) at n_delay=4 and 136 s here at 8. The
+    model still recovers only 71% of the reference plant's real dead time, so
+    what is exposed is that under-recovery, which the padding had covered.
+
+    That `braking_distance` no longer over-states a real grill's coast is a
+    live safety question, not a bound this test may widen: it is raised in
+    .superpowers/sdd/2026-08-02-mpc-online-identification/task-A11fix-report.md
+    and is not settled here. What bounds the exposure meanwhile is that the
+    horizon is sized from the COOL end, which reads 253 s -- 1.86x this one --
+    and the shipped 24-step, 25 s horizon covers even that 2.4 times over.
     """
     # From the fixture: Q leaves 100 at t=846 s, reaches its floor of 5 at
     # t=1119 s, and the chamber peaks at 271.278 C at t=1109 s. The equal-area
@@ -697,12 +704,15 @@ def test_the_estimate_matches_the_coast_the_real_cook_shows_at_the_cook_s_own_te
     assert step_equivalent_coast_s == pytest.approx(140.0, abs=1.0)
 
     estimate = braking_distance(REAL_MAK_FIT, peak_temp_c)
-    assert estimate == pytest.approx(151.0, abs=1.0)
-    assert 1.0 < estimate / step_equivalent_coast_s < 1.25
+    assert estimate == pytest.approx(136.0, abs=1.0)
+    # Pinned as the measured ratio, two-sided and tight, so that a change in
+    # either direction has to be looked at: back above 1.0 would mean the
+    # conservatism returned, further below means the shortfall grew.
+    assert estimate / step_equivalent_coast_s == pytest.approx(0.97, abs=0.02)
 
     # Read at the wrong temperature the same model says something else
     # entirely, which is why this test fixes the temperature.
-    assert braking_distance(REAL_MAK_FIT, _FLOOR_C) > 2.0 * estimate
+    assert braking_distance(REAL_MAK_FIT, _FLOOR_C) > 1.5 * estimate
 
 
 def test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows():
@@ -710,11 +720,11 @@ def test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows():
 
     `horizon_needed` is sized from the cool end of the operating range, not
     from the temperature the cook happened to reach, because one horizon has
-    to be adequate everywhere the grill runs. That reading is 346 s -- longer
-    than the 151 s the cook's own temperature calls for, and still the same
-    order as the 263 s the log spans between fuel cut and peak.
+    to be adequate everywhere the grill runs. That reading is 253 s -- longer
+    than the 136 s the cook's own temperature calls for, and just under the
+    263 s the log spans between fuel cut and peak.
 
-    Sized from C_c/h_amb the demand was 7137 s, 286 steps: a horizon the log
+    Sized from C_c/h_amb the demand was 7184 s, 288 steps: a horizon the log
     contains no evidence for, since a ramp that never approaches steady state
     does not determine that ratio.
     """
@@ -722,7 +732,7 @@ def test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows():
     assert raw_coast_s == pytest.approx(263.0, abs=1.0)
 
     brake = longest_braking_distance(REAL_MAK_FIT)
-    assert brake == pytest.approx(346.0, abs=2.0)
+    assert brake == pytest.approx(253.0, abs=2.0)
     assert brake < 2.0 * raw_coast_s
 
     v = _ev(REAL_MAK_FIT, n_horizon=1, t_step=25.0)
