@@ -114,6 +114,11 @@ debug_*.html
 # ...but never track compiled bytecode, even under tests/
 tests/**/__pycache__/
 
+# numba's on-disk JIT cache, written next to whichever experiment jitted a
+# function (docs/superpowers/experiments/sigma_identifiability.py). Machine
+# and version specific, and regenerated on first run.
+**/__pycache__/*.nb[ci]
+
 # approxMPC experiment artifacts
 docs/superpowers/experiments/_ampc_data/
 docs/superpowers/experiments/training/
