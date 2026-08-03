@@ -7,6 +7,8 @@ pinned byte-identical here because other clients read it.
 
 import pytest
 
+from common.settings_schema import validate_partial_settings, validate_partial_settings_pairs
+
 
 @pytest.fixture
 def client(ds):
@@ -31,12 +33,31 @@ def test_a_bad_field_reports_its_own_path(client, ds):
 
 
 def test_the_message_is_unchanged_by_the_new_field(client, ds):
-    # Other consumers read `message`; adding `errors` must not reword it.
-    res = _post(client, {"settings": {"startup": {"duration": "not a number"}}, "flags": []})
+    # Other consumers read `message`; adding `errors` must not reword it. The
+    # oracle is validate_partial_settings itself, not the response's own
+    # `errors` array reconstructed at itself -- the Layer-1 path no longer
+    # calls validate_partial_settings at all, so nothing else would notice
+    # validate_partial_settings_pairs drifting from it.
+    #
+    # startup.pwm_duty_cycle=15 with no pwm section present would normally
+    # trip the cross-field startup/pwm duty-cycle rule -- a value_error both
+    # validators must filter out alike -- paired here with two independent
+    # field errors so both the filter and the ordering across multiple
+    # entries are pinned.
+    delta = {
+        "safety": {"maxtemp": "nope"},
+        "pwm": {"frequency": "y"},
+        "startup": {"pwm_duty_cycle": 15},
+    }
+    expected = "; ".join(validate_partial_settings(delta))
+    pairs_joined = "; ".join(f"{p['path']}: {p['message']}" for p in validate_partial_settings_pairs(delta))
+    assert pairs_joined == expected
+    assert len(validate_partial_settings_pairs(delta)) > 1
+
+    res = _post(client, {"settings": delta, "flags": []})
     body = res.get_json()
 
-    joined = "; ".join(f"{e['path']}: {e['message']}" for e in body["errors"])
-    assert body["message"] == f"Settings update failed: {joined}"
+    assert body["message"] == f"Settings update failed: {expected}"
 
 
 def test_two_bad_fields_report_two_entries(client, ds):
