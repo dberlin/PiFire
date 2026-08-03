@@ -162,24 +162,14 @@ def requires_modules(config):
     do-mpc's CasADi/IPOPT stack publishes no Linux-ARM wheel and so builds from
     source, which is why it is a PiFire *optional* dependency -- the `mpc` extra
     in pyproject.toml -- installed only when someone selects this controller.
-    Whether a given MPC config actually needs it depends on the config, so the
-    settings-save gate (common/controller_deps.py) asks THIS function rather
-    than re-deriving __init__'s branch structure, which would silently drift the
-    moment the policy/estimator wiring changes.
 
-    Returns an empty tuple when the base install is sufficient.
+    Every MPC config needs it. The gate used to exempt `policy=net` when the
+    artifact's calibration matched, but that answer is only true until the
+    calibration changes: a learned model, or any hand-edited thermal parameter,
+    makes the artifact stale and drops the controller onto the NLP mid-cook,
+    where the import would fail on a machine this gate had already cleared.
+    An answer that expires is worse than a conservative one.
     """
-    cfg = dict(_DEFAULTS)
-    cfg.update(config or {})
-    # GreyBoxMHE solves an NLP, so it imports do_mpc (controller/mpc_model.py)
-    # regardless of which firing-rate policy is selected.
-    if str(cfg.get("estimator", "ekf")).lower() == "mhe":
-        return ("do_mpc",)
-    # policy='net' is pure numpy/scipy -- but only if its artifact actually loads
-    # AND matches this config; otherwise __init__ falls back to the NLP, which
-    # does need do_mpc.
-    if str(cfg.get("policy", "nlp")).lower() == "net" and _load_net_policy(cfg) is not None:
-        return ()
     return ("do_mpc",)
 
 

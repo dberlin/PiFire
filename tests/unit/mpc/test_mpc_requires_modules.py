@@ -51,11 +51,15 @@ def test_mhe_estimator_needs_do_mpc_even_with_net_policy():
 
 
 @needs_art
-def test_net_policy_with_loadable_artifact_needs_nothing():
-    # policy='net' + EKF is pure numpy/scipy: this configuration works on a base
-    # install, and the gate must NOT block it or trigger a pointless CasADi build.
+def test_net_policy_with_loadable_artifact_still_needs_do_mpc():
+    # policy='net' + EKF is pure numpy/scipy and this configuration works on a
+    # base install today -- but a loadable artifact only describes the
+    # calibration at settings-save time. A learned model or a hand-edited
+    # thermal parameter can invalidate it before the next cook, dropping the
+    # controller onto the NLP on a machine this gate had already cleared. The
+    # gate no longer answers from the artifact at all.
     cfg = dict(_DEFAULTS, policy="net")
-    assert requires_modules(cfg) == ()
+    assert requires_modules(cfg) == ("do_mpc",)
 
 
 def test_net_policy_with_missing_artifact_needs_do_mpc():
@@ -108,3 +112,24 @@ def test_dev_group_takes_do_mpc_with_the_training_extras():
     # extra installs and tests/unit/mpc/ can use do-mpc for real.
     dev = _pyproject()["dependency-groups"]["dev"]
     assert "do-mpc[full]>=5.1.1" in dev
+
+
+def test_do_mpc_is_required_even_for_a_matching_net_policy():
+    """The gate used to answer from the artifact's calibration, which a learned
+    model invalidates mid-cook -- after the save it was consulted for. It now
+    answers the same way for every MPC config."""
+    cfg = dict(_DEFAULTS)
+    cfg.update(policy="net")
+    assert requires_modules(cfg) == ("do_mpc",)
+
+
+def test_do_mpc_is_required_for_the_nlp_policy():
+    assert requires_modules(dict(_DEFAULTS, policy="nlp")) == ("do_mpc",)
+
+
+def test_do_mpc_is_required_for_the_mhe_estimator():
+    assert requires_modules(dict(_DEFAULTS, estimator="mhe")) == ("do_mpc",)
+
+
+def test_an_empty_config_still_requires_do_mpc():
+    assert requires_modules({}) == ("do_mpc",)

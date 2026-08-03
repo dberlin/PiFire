@@ -70,13 +70,17 @@ def test_mpc_reports_missing_do_mpc(no_do_mpc):
     assert missing.modules == ("do_mpc",)
 
 
-def test_net_policy_is_not_blocked_by_missing_do_mpc(no_do_mpc):
-    # policy='net' + EKF is pure numpy/scipy. Blocking it -- or kicking off a
-    # multi-minute CasADi build for it -- would break a working configuration.
+def test_net_policy_is_blocked_by_missing_do_mpc_like_every_mpc_config(no_do_mpc):
+    # policy='net' + EKF is pure numpy/scipy, but that only describes the
+    # calibration at settings-save time: a learned model or a hand-edited
+    # thermal parameter can invalidate the artifact before the next cook,
+    # dropping the controller onto the NLP on a machine this gate had already
+    # cleared. requires_modules() no longer exempts this config, so the gate
+    # must not either.
     cfg = dict(_DEFAULTS, policy="net")
-    if cd.required_modules_for("mpc", cfg):
-        pytest.skip("net artifact not exported in this checkout")
-    assert cd.check_controller_dependencies("mpc", cfg) is None
+    missing = cd.check_controller_dependencies("mpc", cfg)
+    assert missing is not None
+    assert missing.modules == ("do_mpc",)
 
 
 def test_detection_falls_back_to_the_manifest_list_when_the_hook_is_unavailable(monkeypatch, no_do_mpc):

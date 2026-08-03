@@ -82,6 +82,20 @@ def test_a_second_save_does_not_start_a_second_build(no_do_mpc, spy_popen, ds):
     assert "already in progress" in second
 
 
+def test_an_mpc_config_with_policy_net_is_still_refused_without_do_mpc(no_do_mpc, spy_popen, ds):
+    # policy='net' + EKF only describes the calibration at save time: a
+    # learned model or a hand-edited thermal parameter can invalidate it
+    # before the next cook and drop the controller onto the NLP, which needs
+    # do_mpc. requires_modules() no longer exempts this config, so the gate
+    # must not either.
+    config = dict(_DEFAULTS, policy="net")
+    message = cd.guard_controller_selection(_settings("mpc", config))
+
+    assert message is not None
+    assert "do_mpc" in message
+    assert len(spy_popen.calls) == 1
+
+
 # --- the cases that must NOT install --------------------------------------
 
 
@@ -94,16 +108,6 @@ def test_nothing_is_installed_when_do_mpc_is_already_present(spy_popen, ds):
 def test_nothing_is_installed_when_mpc_is_not_selected(no_do_mpc, spy_popen, ds):
     # do_mpc missing, but the user picked PID: no refusal, no build.
     assert cd.guard_controller_selection(_settings("pid", {"PB": 60.0})) is None
-    assert spy_popen.calls == []
-
-
-def test_nothing_is_installed_for_an_mpc_config_that_does_not_need_do_mpc(no_do_mpc, spy_popen, ds):
-    # policy='net' + EKF is pure numpy/scipy. Refusing this -- or kicking off a
-    # multi-minute CasADi build for it -- would break a working configuration.
-    config = dict(_DEFAULTS, policy="net")
-    if cd.required_modules_for("mpc", config):
-        pytest.skip("net artifact not exported in this checkout")
-    assert cd.guard_controller_selection(_settings("mpc", config)) is None
     assert spy_popen.calls == []
 
 
