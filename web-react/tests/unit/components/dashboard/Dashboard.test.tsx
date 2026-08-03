@@ -616,3 +616,43 @@ describe("Dashboard hopper card", () => {
     expect(screen.queryByRole("button", { name: "Refresh Status" })).not.toBeInTheDocument();
   });
 });
+
+// Smoke+ is a toggle rather than a picker, so the pill writes straight through.
+// Gated the same way the P-MODE pill is: outside Smoke the same pill reads FAN
+// DUTY, which toggles nothing.
+describe("Dashboard Smoke+ control", () => {
+  it("toggles Smoke+ on from the pill in Smoke", async () => {
+    const user = userEvent.setup();
+    const command = makeCommand();
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", smokePlus: false }, { command });
+    await user.click(screen.getByRole("button", { name: /SMOKE\+/ }));
+    await waitFor(() => expect(command.setSmokePlus).toHaveBeenCalledWith(true));
+  });
+
+  it("toggles Smoke+ off again from the same pill", async () => {
+    const user = userEvent.setup();
+    const command = makeCommand();
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", smokePlus: true }, { command });
+    await user.click(screen.getByRole("button", { name: /SMOKE\+/ }));
+    await waitFor(() => expect(command.setSmokePlus).toHaveBeenCalledWith(false));
+  });
+
+  it("is not a button where the pill reads the fan duty", () => {
+    for (const mode of ["Hold", "Stop", "Startup", "Shutdown"]) {
+      const { unmount } = renderDashboard({ ...FIXTURE_DASH, currentMode: mode });
+      expect(screen.queryByRole("button", { name: /SMOKE\+/ }), mode).not.toBeInTheDocument();
+      expect(screen.getByText("FAN DUTY"), mode).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("stays a readout during a recipe, as the P-MODE pill does", () => {
+    renderDashboard({
+      ...FIXTURE_DASH,
+      currentMode: "Smoke",
+      recipeStatus: { ...FIXTURE_DASH.recipeStatus, recipeMode: true },
+    });
+    expect(screen.queryByRole("button", { name: /SMOKE\+/ })).not.toBeInTheDocument();
+    expect(screen.getByText("SMOKE+")).toBeInTheDocument();
+  });
+});

@@ -341,7 +341,17 @@ export function Dashboard({
                 p={view.pillL}
                 onClick={view.pModeEditable ? () => setPModeOpen(true) : undefined}
               />
-              <Pill p={view.pillR} />
+              {/* Smoke+ is a toggle, not a picker, so the pill writes
+                  straight through rather than opening a menu. The value comes
+                  back on the next frame; no local mirror. */}
+              <Pill
+                p={view.pillR}
+                onClick={
+                  view.smokePlusEditable
+                    ? () => void command.setSmokePlus(!dash.smokePlus)
+                    : undefined
+                }
+              />
             </div>
             {/* Flask hides the whole hopper card when settings.modules.dist is
                 "none" (_macro_dash_default.html:416-420), which is exactly what

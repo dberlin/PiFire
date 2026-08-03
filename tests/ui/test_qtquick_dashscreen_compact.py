@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtCore import QObject, QUrl, Property
+from PySide6.QtCore import QObject, QUrl, Property, Slot
 from PySide6.QtQml import QQmlComponent
 
 from tests.conftest import QML_DIR
@@ -10,6 +10,11 @@ class _StubBackend(QObject):
     def __init__(self, mode="Stop"):
         super().__init__()
         self._mode = mode
+        self.smoke_plus_toggles = 0
+
+    @Slot()
+    def toggleSmokePlus(self):
+        self.smoke_plus_toggles += 1
 
     mode = Property(str, lambda self: self._mode, constant=True)
     foodProbeCount = Property(int, lambda self: 0, constant=True)
@@ -113,3 +118,23 @@ def test_the_pill_is_inert_where_it_reads_the_auger_duty(qml_engine):
         left = _pills(_dash(qml_engine, 1280, mode))[0]
         assert left.property("label") == "AUGER DUTY", mode
         assert left.property("clickable") is False, mode
+
+
+def test_the_smoke_plus_pill_toggles_smoke_plus(qml_engine):
+    dash = _dash(qml_engine, 1280, "Smoke")
+    right = _pills(dash)[1]
+    assert right.property("label") == "SMOKE+"
+    assert right.property("clickable") is True
+
+    right.tapped.emit()
+
+    # Reaches the backend, rather than merely being marked clickable: the
+    # command is what makes it a control.
+    assert dash._backend.smoke_plus_toggles == 1
+
+
+def test_the_right_pill_is_inert_where_it_reads_the_fan_duty(qml_engine):
+    for mode in ["Hold", "Stop", "Startup", "Shutdown"]:
+        right = _pills(_dash(qml_engine, 1280, mode))[1]
+        assert right.property("label") == "FAN DUTY", mode
+        assert right.property("clickable") is False, mode

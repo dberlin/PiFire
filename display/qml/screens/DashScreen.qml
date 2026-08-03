@@ -187,6 +187,11 @@ Item {
 						label: dash.smoking ? "SMOKE+" : "FAN DUTY"
 						value: dash.smoking ? (backend.smokePlus ? "ON" : "OFF") : backend.fanDuty + "%"
 						highlighted: dash.smoking ? backend.smokePlus : backend.fanOn
+						// Smoke+ is a toggle, so the pill writes straight
+						// through instead of opening a menu. Outside Smoke the
+						// same pill reads FAN DUTY, which toggles nothing.
+						clickable: dash.smoking
+						onTapped: backend.toggleSmokePlus()
 					}
 				}
 

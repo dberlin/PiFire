@@ -39,6 +39,17 @@ describe("createCommand issues the right URLs", () => {
     await createCommand("").setSmokePlus(true);
     expect(url()).toBe("/api/set/splus/true");
   });
+  it("setPMode → the bare number", async () => {
+    // common/api_commands.py::_cmd_set_pmode reads arglist[1] and gates on
+    // .isdigit() before the 0-9 range check, so anything but a bare integer
+    // segment is refused server-side with no client-visible error.
+    await createCommand("").setPMode(7);
+    expect(url()).toBe("/api/set/pmode/7");
+  });
+  it("setPMode → 0 is a real value, not an omitted one", async () => {
+    await createCommand("").setPMode(0);
+    expect(url()).toBe("/api/set/pmode/0");
+  });
   it("timerStart → seconds", async () => {
     await createCommand("").timerStart(600);
     expect(url()).toBe("/api/set/timer/start/600");

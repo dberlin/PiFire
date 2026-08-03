@@ -140,6 +140,9 @@ export interface DashView {
   lidOpen: boolean;
   /** Whether the P-MODE pill is a control right now, or a read-only readout. */
   pModeEditable: boolean;
+  /** Whether the SMOKE+ pill toggles Smoke+ right now. Same gate as the P-MODE
+   *  pill: outside Smoke that pill reads FAN DUTY, which toggles nothing. */
+  smokePlusEditable: boolean;
 }
 
 function outputView(on: boolean, onColor: string, onStatus: string): OutputView {
@@ -272,6 +275,9 @@ export function deriveView(dash: LiveState): DashView {
     // hides the whole control panel during one -- so the pill stays read-only
     // however the sub-mode reads.
     pModeEditable: !dash.recipeStatus?.recipeMode && smoking,
+    // A recipe drives Smoke+ itself, the same reason P-mode stays read-only
+    // during one.
+    smokePlusEditable: !dash.recipeStatus?.recipeMode && smoking,
   };
 }
 

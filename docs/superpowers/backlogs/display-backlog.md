@@ -212,15 +212,19 @@ than by rejected assignment, and stop the log line while doing it.
 Both are consistency questions, not faults. Recorded because each is a place
 where "the two UIs agree" is currently false.
 
-**The SMOKE+ pill is a readout on every dashboard.** The P-MODE pill now opens
-the P-Mode menu when tapped on the Qt display, matching the web, where the
-left pill is a button and the right one is not. So Smoke+ is toggled from the
-menu (`cmd_splus`) on the display and from the control panel on the web, but
-never from the pill that shows it. On a touchscreen that is the obvious thing
-to press. Making it a toggle is a one-line change on the Qt side
-(`clickable: dash.smoking`, `onTapped: backend.toggleSmokePlus()`), but the web
-would have to follow or the two diverge again -- which is the trap
-`backlogs/react-migration-backlog.md` item 13 was filed for.
+~~**The SMOKE+ pill is a readout on every dashboard.**~~ **DONE 2026-08-03** --
+it toggles Smoke+ on both the Qt display and the web, gated on Smoke exactly
+as the P-MODE pill is. The pygame pill stays a readout: those layouts have no
+tap routing for a duty_pill, and the seven non-ember ones are being retired.
+
+**Ruled 2026-08-03: Smoke only.** Both pills are visible and clickable in
+Smoke and nowhere else. Outside it they read AUGER DUTY / FAN DUTY, which are
+readouts with nothing to set, so a tap there does nothing by design. The
+alternative considered and declined was the `pModeActive` set
+(Startup/Reignite/Smoke), where P-mode does govern the running cycle. Consequence
+to know: on the Qt display in Stop there is now no P-mode path at all, because
+the Stop menu variant (`main`) carries no PMode entry -- Settings > Work Mode
+on the web is the only route.
 
 **The legacy pygame `p_mode` widget still shows in Startup and Reignite.**
 `_base_flex.py::_update_p_mode` gates on
