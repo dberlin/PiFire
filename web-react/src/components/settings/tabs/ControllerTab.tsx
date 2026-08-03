@@ -241,8 +241,8 @@ export function ControllerTab() {
       })}
       {learning && netPolicy && (
         <p className="pf-settings-hint">
-          A learned calibration no longer matches the pre-trained neural policy, so while this grill
-          is learning, the controller falls back to solving the full optimisation every step.
+          A learned calibration no longer matches the pre-trained neural policy, so the controller
+          falls back to the full optimisation until it is retrained.
         </p>
       )}
       {fanConflict && (

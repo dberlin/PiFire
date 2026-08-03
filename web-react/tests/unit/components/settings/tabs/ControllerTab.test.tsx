@@ -1,8 +1,16 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { ControllerTab } from "../../../../../src/components/settings/tabs/ControllerTab";
 import type { ControllerMetadata } from "../../../../../src/helpers/settings/settingsApi";
 import { renderRoute } from "../../../test-utils";
+
+// Shared with controllers.json's enable_identification option_description
+// (checked below) so the two descriptions of the same setting cannot drift
+// without a test noticing on at least one side.
+const LEARNING_FALLBACK_CLAIM = "falls back to the full optimisation until it is retrained";
+const LEARNING_FALLBACK_REGEX = new RegExp(LEARNING_FALLBACK_CLAIM, "i");
 
 const saveMock = rs.fn().mockResolvedValue(true);
 
@@ -147,6 +155,8 @@ const controllerMeta: ControllerMetadata = {
             "describes the grill better. On the Neural Net firing-rate policy, a learned " +
             "calibration no longer matches the trained artifact, so the controller falls " +
             "back to the full optimisation until it is retrained.",
+          // (kept in sync with controller/controllers.json's enable_identification entry;
+          // see the "matches controllers.json" test below)
           option_type: "bool",
           option_default: false,
           option_min: null,
@@ -510,22 +520,34 @@ describe("ControllerTab identification note", () => {
 
   it("explains the fallback when learning is on and the fast path is in use", () => {
     renderRoute(<ControllerTab />, ctx(true));
-    expect(screen.getByText(/falls back to solving the full optimisation/i)).toBeInTheDocument();
+    expect(screen.getByText(LEARNING_FALLBACK_REGEX)).toBeInTheDocument();
   });
 
   it("says nothing when learning is off", () => {
     renderRoute(<ControllerTab />, ctx(false));
-    expect(screen.queryByText(/falls back to solving the full optimisation/i)).toBeNull();
+    expect(screen.queryByText(LEARNING_FALLBACK_REGEX)).toBeNull();
   });
 
   it("appears as soon as the toggle is flipped, before saving", () => {
     renderRoute(<ControllerTab />, ctx(false));
     fireEvent.click(screen.getByRole("button", { name: "Learn This Grill" }));
-    expect(screen.getByText(/falls back to solving the full optimisation/i)).toBeInTheDocument();
+    expect(screen.getByText(LEARNING_FALLBACK_REGEX)).toBeInTheDocument();
   });
 
   it("says nothing when learning is on but the firing-rate policy is NLP (already solves in full)", () => {
     renderRoute(<ControllerTab />, ctx(true, "nlp"));
-    expect(screen.queryByText(/falls back to solving the full optimisation/i)).toBeNull();
+    expect(screen.queryByText(LEARNING_FALLBACK_REGEX)).toBeNull();
+  });
+
+  it("keeps controllers.json's option_description making the same claim as the rendered note", () => {
+    // Nothing type-checks this pairing: the JSON is read by the Flask/legacy
+    // settings surface and by no code the React bundle imports, so a wording
+    // change on one side has no compiler or runtime signal on the other.
+    const raw = readFileSync(resolve("../controller/controllers.json"), "utf-8");
+    const meta = JSON.parse(raw) as {
+      metadata: { mpc: { config: Array<{ option_name: string; option_description: string }> } };
+    };
+    const opt = meta.metadata.mpc.config.find((o) => o.option_name === "enable_identification");
+    expect(opt?.option_description).toMatch(LEARNING_FALLBACK_REGEX);
   });
 });
