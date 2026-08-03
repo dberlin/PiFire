@@ -216,11 +216,6 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* The composite field stacks its kind select above the kind-specific
- * controls, unlike the module-deps row layout .pf-field otherwise gets. */
-.pf-i2c-bus-field {
-  @apply flex-col items-stretch;
-}
 .pf-i2c-bus-kernel {
   border: none;
   display: flex;

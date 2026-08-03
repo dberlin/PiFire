@@ -66,7 +66,7 @@ export function I2cBusField({ dep, value, onChange, onScan }: I2cBusFieldProps) 
       : result;
 
   return (
-    <div className="pf-field pf-i2c-bus-field">
+    <div className="pf-field pf-field-column">
       <label className="pf-field-label" htmlFor={kindId}>
         {dep.friendly_name}
       </label>

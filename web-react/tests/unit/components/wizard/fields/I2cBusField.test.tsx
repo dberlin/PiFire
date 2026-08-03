@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { I2cBusField } from "../../../../../src/components/wizard/fields/I2cBusField";
+import { allStylesheets, classesStylingButtons } from "../../../../../src/helpers/cssCoverage";
 import type { I2cBusValue } from "../../../../../src/helpers/wizard/i2cBusTypes";
 
 const dep = { friendly_name: "I2C Bus", settings: [], type: "i2c_bus" as const };
@@ -176,6 +177,23 @@ describe("I2cBusField", () => {
     fireEvent.click(screen.getByText("Discover"));
     fireEvent.click(await screen.findByText("XY99"));
     expect(onChange).toHaveBeenCalledWith({ kind: "mcp2221", serial: "XY99" });
+  });
+
+  // Preflight strips buttons back to inherited text, so "has no rule" and "is
+  // not a button" are the same state on screen. The serial picker's Discover
+  // button looks right only because its wrapper happens to carry the class the
+  // shared rule keys on; this field reached the same layout under a name of its
+  // own and silently missed the styling that came with it.
+  it("puts its Discover button under a rule that styles buttons", () => {
+    const styled = classesStylingButtons(allStylesheets());
+    // Negative control: an extractor that matched nothing would let the
+    // assertion below pass by finding no rule to hold the field to.
+    expect(styled.has("pf-field-column")).toBe(true);
+
+    renderField({ kind: "kernel", adapter: "CP2112" });
+    const discover = screen.getByRole("button", { name: "Discover" });
+    const selector = [...styled].map((name) => `.${name}`).join(",");
+    expect(discover.parentElement?.closest(selector) ?? null).not.toBe(null);
   });
 
   it("renders nothing when the dep is hidden", () => {

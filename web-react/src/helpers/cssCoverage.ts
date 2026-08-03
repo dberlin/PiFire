@@ -57,6 +57,31 @@ export function declaredClasses(css: string): Set<string> {
 }
 
 /**
+ * The classes whose non-empty rules reach a nested `<button>`.
+ *
+ * Preflight resets every button to transparent, borderless, inherited text, so
+ * a button no rule reaches does not render as an unstyled button -- it renders
+ * as a run of prose that happens to be clickable. The `button` term has to be
+ * present in the selector rather than inferred from the class name: a class can
+ * style its own box without styling the buttons inside it, and that is exactly
+ * the gap this reports.
+ */
+export function classesStylingButtons(css: string): Set<string> {
+  const out = new Set<string>();
+  for (const [, selector, body] of stripComments(css).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!body.includes(":") && !body.includes("@apply")) continue;
+    // Per comma-separated part: `.a > button, .b .c` styles buttons under .a
+    // only, and crediting .b and .c from the same rule would report a class as
+    // covered because a SIBLING selector happened to mention a button.
+    for (const part of selector.split(",")) {
+      if (!/(?<![\w-])button(?![\w-])/.test(part)) continue;
+      for (const hit of part.matchAll(/\.(pf-[a-z0-9]+(?:-[a-z0-9]+)*)/g)) out.add(hit[1]);
+    }
+  }
+  return out;
+}
+
+/**
  * The animation names `css` defines.
  *
  * Components name keyframes in inline style strings -- SystemStatus sets
