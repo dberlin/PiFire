@@ -42,10 +42,12 @@ export async function saveAccent(baseUrl: string, accent: AccentName): Promise<b
     const path = accentPath(settings);
     if (!path) return false;
     // display.config is keyed by the installed display module and stays an
-    // open dict for the same reason controller.config does.
+    // open dict for the same reason controller.config does. accentPath()
+    // returns a plain string (the module name isn't known at the type level),
+    // so the cast narrows it to SettingsPath; the value needs none.
     const result = await applySettings(
       baseUrl,
-      setPath({}, path as SettingsPath, storedAccentName(accent) as never),
+      setPath({}, path as SettingsPath, storedAccentName(accent)),
       [],
     );
     return result.ok;

@@ -27,7 +27,7 @@ describe("emitSettingsDefaults", () => {
     expect(out).not.toContain("server_info");
   });
 
-  it("exports a frozen constant, so a consumer cannot mutate shared defaults", () => {
+  it("marks the exported constant `as const`, a compile-time immutability hint", () => {
     const out = emitSettingsDefaults(SCHEMA);
     expect(out).toContain("export const SETTINGS_DEFAULTS =");
     expect(out).toContain("as const");

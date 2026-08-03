@@ -527,7 +527,7 @@ def _validate_settings_in_store():
     from common.datastore_accessors import read_settings
 
     try:
-        settings_schema.validate_settings_tree(read_settings())
+        settings_schema.validate_settings_tree(read_settings(), persisted=False)
     except settings_schema.SettingsValidationError as exc:
         write_log("Stored settings do not match this build's schema: " + "; ".join(exc.errors))
 

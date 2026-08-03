@@ -1,9 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
 import { SETTINGS_DEFAULTS } from "../../../../src/helpers/settings/settingsDefaults.gen";
 
-// The values the tabs fall back to when the store carries no key. Pinned here
-// so a hand-typed literal cannot drift from the schema again: every entry is a
-// path a tab reads, and the expected value comes from the generated constant.
+// A sample of the values the tabs fall back to when the store carries no key
+// -- not the whole of SETTINGS_DEFAULTS, just the handful the shutdown/startup
+// tabs read. Pinned here so a hand-typed literal cannot drift from the schema
+// again: each expected value comes from the generated constant.
 describe("tab fallbacks match the schema", () => {
   it("carries the durations the tabs need", () => {
     expect(SETTINGS_DEFAULTS.shutdown.shutdown_duration).toBe(240);

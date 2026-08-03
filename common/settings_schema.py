@@ -978,12 +978,18 @@ def _strip_error_locs(tree: dict, errors: list[ErrorDetails]) -> None:
             cur.pop(loc[-1], None)
 
 
-def validate_settings_tree(settings: dict) -> dict:
+def validate_settings_tree(settings: dict, *, persisted: bool = True) -> dict:
     """Strict-validate a full settings tree; return the normalized dump.
 
     This is the single enforcement entry -- write_settings() calls it before
     persisting. Raises SettingsValidationError with dotted-path messages on
     failure.
+
+    `persisted` only changes what the repair-success log lines below say; it
+    never changes whether stripping/carrying/raising happens. Pass False for
+    a read-only caller (e.g. a startup drift check) that discards the
+    returned dump instead of writing it back, so the log doesn't claim a
+    repair was written when nothing was.
 
     `_Section` is `extra="forbid"`, so an unmodeled key anywhere in the tree
     fails validation. Rather than let that permanently block every subsequent
@@ -1023,13 +1029,14 @@ def validate_settings_tree(settings: dict) -> dict:
             ) from retry_exc
 
         carried_olds = {old for old, _ in carried}
+        verb = "during write-time repair" if persisted else "in a read-only check (not written back)"
         for old_path, new_path in carried:
-            write_log(f"settings: carried renamed key '{old_path}' -> '{new_path}' during write-time repair")
+            write_log(f"settings: carried renamed key '{old_path}' -> '{new_path}' {verb}")
         for err in errors:
             dotted = ".".join(str(part) for part in err["loc"])
             if dotted in carried_olds:
                 continue
-            write_log(f"settings: stripped unmodeled key '{dotted}' during write-time repair (was: {err['msg']})")
+            write_log(f"settings: stripped unmodeled key '{dotted}' {verb} (was: {err['msg']})")
     # by_alias=True: platform.system.one_wire must dump back out as "1WIRE"
     # (its defaults.py/on-disk key) -- see the alias comment on _SystemConfig.
     # No other field in the tree carries an alias, so this is a no-op for the

@@ -48,8 +48,10 @@ export function GeneralTab() {
     let delta = setPath({}, "globals.grill_name", v.grill_name);
     const path = accentPath(settings);
     // display.config is keyed by the installed display module and stays an
-    // open dict for the same reason controller.config does.
-    if (path) delta = setPath(delta, path as SettingsPath, v.accent_theme as never);
+    // open dict for the same reason controller.config does. accentPath()
+    // returns a plain string, so the cast narrows it to SettingsPath; the
+    // value needs none.
+    if (path) delta = setPath(delta, path as SettingsPath, v.accent_theme);
     delta = setPath(delta, "display.sleep_timeout", v.sleep_timeout);
     // No control flag: Flask's _settings_display does a bare write_settings
     // too, and the display process re-reads the store itself once a second.
