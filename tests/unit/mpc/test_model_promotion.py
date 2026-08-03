@@ -6,6 +6,8 @@ import pytest
 
 from controller.model_promotion import (
     PROMOTION_BOUNDS,
+    _COAST_BOUND,
+    _model_coast,
     braking_distance,
     effective_tau,
     evaluate,
@@ -539,6 +541,10 @@ def test_one_lag_state_brakes_on_the_closed_form_a_single_lag_has():
     than restated: a single charged lag of mean `theta` reaches the chamber's
     loss after theta * ln(flux/loss). Written out here so it pins the
     implementation instead of importing it.
+
+    Against `_model_coast` rather than `braking_distance`, because the closed
+    form is a property of the model's own decay; the bound the public function
+    adds on top is a separate claim, pinned separately below.
     """
     one = dict(GOOD, n_delay=1)
     loss = one["h_amb"] * (_HAZARD_C - one["T_amb"]) + one["sigma"] * (
@@ -546,7 +552,7 @@ def test_one_lag_state_brakes_on_the_closed_form_a_single_lag_has():
     )
     expected = one["theta"] * math.log(one["K_Q"] * 100.0 / loss)
     assert expected > 0.0
-    assert braking_distance(one, _HAZARD_C) == pytest.approx(expected, rel=1e-9)
+    assert _model_coast(one, _HAZARD_C) == pytest.approx(expected, rel=1e-9)
 
 
 def test_the_chain_is_the_transport_delay_and_nothing_longer():
@@ -560,7 +566,7 @@ def test_the_chain_is_the_transport_delay_and_nothing_longer():
     longer than this at every n_delay, so the check is that raising n_delay at
     a fixed theta leaves the chain sharper, not longer.
     """
-    at = {n: braking_distance(dict(GOOD, n_delay=n), _HAZARD_C) for n in (1, 2, 4, 8)}
+    at = {n: _model_coast(dict(GOOD, n_delay=n), _HAZARD_C) for n in (1, 2, 4, 8)}
     # More stages of the same total mean is a sharper, more plug-flow delay:
     # the flux is held up longer before it starts falling but then falls
     # faster, and the crossing this looks for is late in that fall.
@@ -579,6 +585,41 @@ def test_the_chain_is_the_transport_delay_and_nothing_longer():
         ),
         rel=1e-9,
     )
+
+
+def test_the_public_reading_is_the_model_s_own_coast_widened_exactly_once():
+    """`braking_distance` is a bound; `_model_coast` is the model's reading.
+
+    The two claims are separable and this pins the join between them: the
+    public function is the model's own decay scaled by `_COAST_BOUND` and by
+    nothing else. An implementation that forgot the bound, applied it twice, or
+    applied it in `longest_braking_distance` as well would all fail here.
+
+    Why a bound at all is in `_COAST_BOUND`'s own comment: the fitted chain
+    recovers only part of a real grill's transport delay, so the model's
+    reading lands under a real coast.
+    """
+    assert _COAST_BOUND > 1.0
+    for t_ref in (100.0, _HAZARD_C):
+        for n in (1, 4, 8):
+            params = dict(GOOD, n_delay=n)
+            assert braking_distance(params, t_ref) == pytest.approx(
+                _COAST_BOUND * _model_coast(params, t_ref), rel=1e-12
+            )
+
+
+def test_the_bound_leaves_the_two_answers_that_are_already_bounds_alone():
+    """Scaling changes neither "nothing to brake" nor "no horizon suffices".
+
+    Both branches carry their meaning in the value itself rather than in its
+    magnitude, so the bound must pass them through untouched -- a scaled zero
+    that came back as anything but zero, or an infinity that came back finite,
+    would be a horizon requirement invented out of a refusal.
+    """
+    # Full fire cannot hold this temperature, so the chamber is not rising.
+    assert braking_distance(dict(GOOD, K_Q=0.01), _HAZARD_C) == 0.0
+    # No fire at all: nothing ever stops the chamber, and no horizon covers it.
+    assert braking_distance(dict(GOOD, K_Q=0.0), _HAZARD_C) == math.inf
 
 
 def test_the_radiative_loss_shortens_the_braking_distance():
@@ -674,27 +715,25 @@ def test_the_estimate_matches_the_coast_the_real_cook_shows_at_the_cook_s_own_te
     step delivers the same heat as the taper did -- is 968 s, so the step-
     equivalent coast is 140 s, not the 263 s the raw timestamps give.
 
-    THIS NO LONGER CLEARS THE GRILL'S OWN COAST, and the test says so rather
-    than asserting a conservatism the model has stopped having. The estimate is
-    136 s against the grill's 140 s: 0.97x, an under-prediction of 3%.
+    Against that, the estimate is 157 s: longer than the grill's, which is what
+    a horizon requirement has to be. The margin is 1.12x, and it is there by
+    construction rather than by luck -- `_COAST_BOUND` is what puts it there.
 
-    The margin was never physics. The two-lump model read 173 s here (1.24x),
-    and the single lump at n_delay=4 read 151 s (1.08x) while the fit still ran
-    through an Euler chain that inflated theta by about n_delay * sub-step.
-    Neither was the estimate being cautious. The shorter the chain, the fatter
-    its survival tail, and `braking_distance` integrates that tail; the Euler
-    bias then padded theta on top. Taking both away -- n_delay 4 -> 8 and an
-    exactly-advanced chain in the fit simulator -- leaves what the model
-    actually predicts: 146 s (1.04x) at n_delay=4 and 136 s here at 8. The
-    model still recovers only 71% of the reference plant's real dead time, so
-    what is exposed is that under-recovery, which the padding had covered.
+    Read straight off the model this lands at 136 s, UNDER the grill's own
+    coast. The model's chain is shorter than the grill's real transport (about
+    0.71x of it at the shipped n_delay), and the closed form reads that chain
+    faithfully, so a faithful reading under-states a real coast. The margin
+    that used to appear here without a bound was not physics: the two-lump
+    model read 173 s (1.24x) and the single lump at n_delay=4 read 151 s
+    (1.08x), but those were the SHORTER chain smearing the delay into a fatter
+    survival tail, plus a fit whose Euler integrator inflated theta by about
+    n_delay * sub-step. Sharpening the chain and fixing the integrator were
+    both correct and both removed that padding, which is what exposed the
+    shortfall the bound now covers.
 
-    That `braking_distance` no longer over-states a real grill's coast is a
-    live safety question, not a bound this test may widen: it is raised in
-    .superpowers/sdd/2026-08-02-mpc-online-identification/task-A11fix-report.md
-    and is not settled here. What bounds the exposure meanwhile is that the
-    horizon is sized from the COOL end, which reads 253 s -- 1.86x this one --
-    and the shipped 24-step, 25 s horizon covers even that 2.4 times over.
+    This test is the independent validation of that bound: `_COAST_BOUND` is
+    derived from the simulated plants in controller/grill_sim.py, never from
+    this record, so the real cook is free to check it.
     """
     # From the fixture: Q leaves 100 at t=846 s, reaches its floor of 5 at
     # t=1119 s, and the chamber peaks at 271.278 C at t=1109 s. The equal-area
@@ -704,11 +743,12 @@ def test_the_estimate_matches_the_coast_the_real_cook_shows_at_the_cook_s_own_te
     assert step_equivalent_coast_s == pytest.approx(140.0, abs=1.0)
 
     estimate = braking_distance(REAL_MAK_FIT, peak_temp_c)
-    assert estimate == pytest.approx(136.0, abs=1.0)
-    # Pinned as the measured ratio, two-sided and tight, so that a change in
-    # either direction has to be looked at: back above 1.0 would mean the
-    # conservatism returned, further below means the shortfall grew.
-    assert estimate / step_equivalent_coast_s == pytest.approx(0.97, abs=0.02)
+    assert estimate == pytest.approx(157.0, abs=1.0)
+    # The bound really is a bound on this record, and it is pinned two-sided
+    # and tight: dropping to 1.0 means the guard has stopped guarding, and
+    # climbing means it is refusing models for a shortfall that is not there.
+    assert 1.0 < estimate / step_equivalent_coast_s
+    assert estimate / step_equivalent_coast_s == pytest.approx(1.12, abs=0.02)
 
     # Read at the wrong temperature the same model says something else
     # entirely, which is why this test fixes the temperature.
@@ -720,9 +760,9 @@ def test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows():
 
     `horizon_needed` is sized from the cool end of the operating range, not
     from the temperature the cook happened to reach, because one horizon has
-    to be adequate everywhere the grill runs. That reading is 253 s -- longer
-    than the 136 s the cook's own temperature calls for, and just under the
-    263 s the log spans between fuel cut and peak.
+    to be adequate everywhere the grill runs. That reading is 291 s -- longer
+    than the 157 s the cook's own temperature calls for, and the same order as
+    the 263 s the log spans between fuel cut and peak.
 
     Sized from C_c/h_amb the demand was 7184 s, 288 steps: a horizon the log
     contains no evidence for, since a ramp that never approaches steady state
@@ -732,7 +772,7 @@ def test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows():
     assert raw_coast_s == pytest.approx(263.0, abs=1.0)
 
     brake = longest_braking_distance(REAL_MAK_FIT)
-    assert brake == pytest.approx(253.0, abs=2.0)
+    assert brake == pytest.approx(291.0, abs=2.0)
     assert brake < 2.0 * raw_coast_s
 
     v = _ev(REAL_MAK_FIT, n_horizon=1, t_step=25.0)

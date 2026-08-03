@@ -94,6 +94,29 @@ Q_FULL_FIRE = 100.0
 #: enough that the exactness costs nothing.
 _BISECT_STEPS = 60
 
+#: What makes `braking_distance` a bound rather than a best estimate.
+#:
+#: The closed form reads the fitted model's own transport chain exactly, and a
+#: fitted chain is SHORTER than the grill it describes: the Erlang
+#: approximation recovers about 0.71x of the reference plant's real dead time
+#: at the shipped n_delay, so an estimate faithful to the model under-states a
+#: real coast. Measured directly against both plants in controller/grill_sim.py
+#: -- fitted as a calibration would fit them, then cut at full fire across the
+#: operating range -- the worst recovery is 0.880 at the shipped 40% fan floor,
+#: so 1.15 covers every case measured with a little to spare. The measurement
+#: is docs/superpowers/experiments/braking_bound.py.
+#:
+#: Inflating is the fail-safe direction: a longer reading makes the promotion
+#: gate refuse MORE models and `_warn_about_model` speak EARLIER, and no path
+#: exists by which it drives the fire harder.
+#:
+#: This is a bound over a modelling shortfall, not a constant of nature. It
+#: exists to be REMOVED when the model's dead-time recovery improves -- raise
+#: n_delay far enough, or give the chain a structure that transports rather
+#: than smears, and the measurement above is what says how much of it is still
+#: needed.
+_COAST_BOUND = 1.15
+
 #: The grill's hottest permitted operating point -- the hard safety shutoff
 #: (`maxtemp` in common/settings_schema.py, 550 F) converted to the Celsius
 #: this model's chamber temperature is expressed in. The radiative loss
@@ -175,13 +198,13 @@ def _chain_survival(t, *, stages, mean):
     return math.exp(-x) * total
 
 
-def braking_distance(params, t_ref_c, *, q_full=Q_FULL_FIRE):
-    """Seconds a chamber at `t_ref_c` keeps rising after full fire is cut.
+def _model_coast(params, t_ref_c, *, q_full=Q_FULL_FIRE):
+    """Seconds the FITTED MODEL keeps rising after full fire is cut.
 
-    This is what a prediction horizon has to cover: unless the horizon reaches
-    past this, no plan the controller can make ends with the chamber having
-    stopped, and the overshoot it is trying to avoid happens outside anything
-    it can see. It is a necessary length, not a sufficient one.
+    The model's own reading, faithful to it and nothing more. `braking_distance`
+    is what callers want: this under-states a real grill, for the reason stated
+    there. Kept separate so the arithmetic below can be checked against the
+    closed form the Erlang chain has, without the bound in the way.
 
     At the instant of the cut the grill has been at `q_full` long enough for
     the transport chain to be charged, so the heat reaching the chamber is
@@ -237,6 +260,27 @@ def braking_distance(params, t_ref_c, *, q_full=Q_FULL_FIRE):
         else:
             hi = mid
     return hi
+
+
+def braking_distance(params, t_ref_c, *, q_full=Q_FULL_FIRE):
+    """Seconds a REAL GRILL at `t_ref_c` keeps rising after full fire is cut.
+
+    This is what a prediction horizon has to cover: unless the horizon reaches
+    past this, no plan the controller can make ends with the chamber having
+    stopped, and the overshoot it is trying to avoid happens outside anything
+    it can see. It is a necessary length, not a sufficient one.
+
+    A bound rather than a best estimate, because the horizon requirement it
+    feeds has to fail closed. `_model_coast` reads the fitted model exactly, and
+    the fitted model is shorter than the grill it describes -- so the reading
+    faithful to the model lands under a real coast, and `_COAST_BOUND` is what
+    closes that gap.
+
+    The zero and infinite branches of `_model_coast` are already bounds --
+    nothing to brake, and no horizon suffices -- and scaling them changes
+    neither, so this applies at one point and every caller inherits it.
+    """
+    return _COAST_BOUND * _model_coast(params, t_ref_c, q_full=q_full)
 
 
 #: How far above ambient the steady-state search will look before it gives up
