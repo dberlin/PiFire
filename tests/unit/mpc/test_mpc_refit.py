@@ -13,10 +13,14 @@ from controller.mpc import _DEFAULTS, _HISTORY_MAX, _REFIT_INIT, Controller
 from controller.mpc_model import simulate_grey_box
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
-TRUTH = dict(C_f=9.0, C_c=11000.0, h_fc=1.3, h_amb=2.7, K_Q=32.0, theta=110.0)
+#: h_amb matches the shipped default rather than differing from it: `_FREE`
+#: holds h_amb and sigma both, so a cook whose sigma/h_amb differs from the
+#: fitter's is one the fitter cannot represent, and the refit would be judged
+#: on a target outside its reach. Everything else here is far from the default.
+TRUTH = dict(C_f=9.0, C_c=11000.0, h_fc=1.3, h_amb=0.5, K_Q=32.0, theta=110.0)
 
-# The fitted free parameters, plus the C_f that holds the scale they are
-# measured against -- exactly what a refit's starting point supplies.
+# The fitted free parameters, plus the held ones a refit's starting point
+# supplies alongside them -- see update_mpc._FREE.
 FITTED_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta")
 
 

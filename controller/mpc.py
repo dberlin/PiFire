@@ -97,7 +97,8 @@ _HISTORY_MAX = 8640
 # enters neither. Dropping rows therefore discards evidence for nothing, and
 # the worse-conditioned problem left behind takes MORE iterations, so it is
 # not even faster in practice. It costs an order of magnitude of accuracy in
-# C_c/h_amb, which is the quantity model_promotion gates on.
+# C_c/h_amb, and the braking distance model_promotion gates on is read off the
+# same fit.
 _REFIT_MIN_SAMPLES = 120
 
 # Parameters the least-squares solve starts from, and the magnitudes it scales
@@ -108,10 +109,11 @@ _REFIT_MIN_SAMPLES = 120
 # before it, through a solver path (update_mpc._solve_scale conditions the
 # solve on `init` too) that no measurement of the finished model can unwind.
 #
-# Only the fitted parameters and the held scale anchor C_f appear here -- see
-# update_mpc._FREE. T_amb, sigma and n_delay are passed through the fit
-# unchanged and so are taken from the running config, where an operator's own
-# calibration of them lives.
+# Every parameter the fit reads a starting value for -- the ones update_mpc's
+# `_FREE` moves and the ones it holds at the value they came in with. T_amb,
+# sigma and n_delay are not here: the fit passes them through unchanged, so
+# they come from the running config where an operator's own calibration of them
+# lives.
 _REFIT_INIT = {key: float(_DEFAULTS[key]) for key in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta")}
 
 

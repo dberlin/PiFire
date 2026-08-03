@@ -81,6 +81,21 @@ _INCUMBENT_KEYS = ("C_c", "h_amb", "theta", "n_delay", "sigma")
 #: controller/mpc_model.py's own constant.
 _KELVIN = 273.15
 
+#: Firing-rate demand that counts as full fire. Q is not a physical unit -- it
+#: is the abstract scalar controller/mpc_allocator.py maps affinely onto auger
+#: duty, and 100 is the top of that range (`Q_max` in controller/mpc.py's
+#: defaults). It appears here because the braking distance depends on how much
+#: heat was in flight when the fuel was cut, and it is a keyword rather than
+#: only a constant so a grill configured to a different top of range can be
+#: asked about its own.
+Q_FULL_FIRE = 100.0
+
+#: Bisection steps used to invert the lag chain's survival. The bracket halves
+#: each step, so this resolves the answer to about a part in 10**15 of it --
+#: past the point where the estimate's own approximations matter, and cheap
+#: enough that the exactness costs nothing.
+_BISECT_STEPS = 60
+
 #: The grill's hottest permitted operating point -- the hard safety shutoff
 #: (`maxtemp` in common/settings_schema.py, 550 F) converted to the Celsius
 #: this model's chamber temperature is expressed in. The radiative loss
@@ -104,13 +119,16 @@ class Verdict:
 
     `reason` reasons about the effective time constant -- C_c over the linear
     plus linearized-radiative conductance -- at the ends of the operating
-    range, since that is the quantity a late brake is measured against and it
-    varies with temperature. `horizon_needed` is sized instead from C_c/h_amb,
-    the radiation-free supremum of that same effective time constant, so that
-    one horizon covers every temperature the grill runs at rather than only
-    the end it was evaluated at. The two numbers are deliberately different
-    quantities: the larger, temperature-free bound for sizing, the
-    temperature-aware pair for judging.
+    range, since a shortened one is the shape of a model that brakes late, and
+    it varies with temperature.
+
+    `horizon_needed` is a different quantity, not a scaled version of that
+    one. It is the braking distance: the seconds the chamber goes on rising
+    after full fire is cut, at whichever end of the range takes longest. A
+    horizon shorter than that cannot contain the end of any brake the
+    controller might plan. The time constant is the wrong number to size from
+    -- a heat-up ramp that never approaches steady state does not determine
+    it, so a horizon derived from it is a demand no measurement supports.
     """
 
     accepted: bool
@@ -140,17 +158,150 @@ def n_delay_is_whole(value):
     return float(value).is_integer()
 
 
-def slowest_tau(params):
-    """The longest chamber time constant any operating point can produce.
+def _chain_survival(t, *, stages, mean):
+    """The fraction of a charged lag chain's output still present at `t`.
 
-    The linearized radiative conductance below is non-negative, so C_c/h_amb
-    bounds C_c/(h_amb + it) from above at every temperature. Sizing the
-    horizon from this bound rather than from an operating-range endpoint keeps
-    one horizon adequate across the whole range instead of only at the end it
-    was measured at.
+    A chain of `stages` equal first-order lags totalling `mean` seconds, every
+    stage starting full and its input cut to zero, has output
+    exp(-x) * sum(x**k/k!) for x = stages*t/mean -- the Erlang survival
+    function. Strictly decreasing from 1 at t=0 to 0, which is what lets
+    `braking_distance` invert it by bisection.
     """
-    h_amb = float(params["h_amb"])
-    return float(params["C_c"]) / h_amb if h_amb > 0 else math.inf
+    x = stages * t / mean
+    if x > 700.0:
+        return 0.0
+    term, total = 1.0, 1.0
+    for k in range(1, stages):
+        term *= x / k
+        total += term
+    return math.exp(-x) * total
+
+
+def braking_distance(params, t_ref_c, *, q_full=Q_FULL_FIRE):
+    """Seconds a chamber at `t_ref_c` keeps rising after full fire is cut.
+
+    This is what a prediction horizon has to cover: unless the horizon reaches
+    past this, no plan the controller can make ends with the chamber having
+    stopped, and the overshoot it is trying to avoid happens outside anything
+    it can see. It is a necessary length, not a sufficient one.
+
+    At the instant of the cut the grill has been at `q_full` long enough for
+    the transport chain to be charged and the firepot to have settled
+    K_Q*q_full/h_fc above the chamber, so the heat reaching the chamber is
+    K_Q*q_full. The chamber stops rising when that heat has fallen to the
+    chamber's own loss at `t_ref_c` -- controller/mpc_model.py's
+    h_amb*(T-T_amb) plus its radiative term. So the braking distance is the
+    time the flux takes to decay by the factor between them.
+
+    The flux decays through the n_delay lag stages of theta/n_delay each and
+    then through the firepot, whose own time constant is C_f/h_fc. Those
+    stages are not equal, so the chain is read as n_delay+1 stages all set to
+    the slowest of them. Slowing a stage only makes it hold heat longer, so
+    that chain's output is above the real cascade's at every instant and its
+    crossing is never early. With n_delay 0 there is one stage and it is the
+    firepot's own, which is exact.
+
+    The chamber warming during the coast is left out too, and a warmer chamber
+    loses more, so the real crossing arrives sooner than this says. Both
+    approximations err long, which for a horizon requirement is the safe
+    direction; docs/superpowers/experiments/braking_distance_check.py measures
+    how far, against a direct integration of the same grey box.
+    """
+    h_fc = float(params["h_fc"])
+    flux = float(params["K_Q"]) * float(q_full)
+    if not (flux > 0.0 and h_fc > 0.0):
+        return math.inf
+    t_amb = float(params["T_amb"])
+    loss = float(params["h_amb"]) * (t_ref_c - t_amb) + float(params["sigma"]) * (
+        (t_ref_c + _KELVIN) ** 4 - (t_amb + _KELVIN) ** 4
+    )
+    if loss <= 0.0:
+        # Nothing at this temperature pulls heat out of the chamber, so it
+        # never stops rising on its own. No horizon covers that.
+        return math.inf
+    ratio = loss / flux
+    if ratio >= 1.0:
+        # Full fire cannot even hold this temperature, so the chamber is not
+        # rising and there is nothing to brake.
+        return 0.0
+    # n_delay == 0 removes the transport chain outright, leaving theta with
+    # nothing to delay -- the same reading `_effective_theta` takes.
+    n_delay = max(int(params["n_delay"]), 0)
+    stages = n_delay + 1
+    firepot = float(params["C_f"]) / h_fc
+    transport = float(params["theta"]) / n_delay if n_delay > 0 else 0.0
+    mean = stages * max(firepot, transport)
+    if mean <= 0.0:
+        return 0.0
+    lo, hi = 0.0, mean
+    while _chain_survival(hi, stages=stages, mean=mean) > ratio:
+        hi *= 2.0
+        if hi > 1e9 * mean:
+            return math.inf
+    for _ in range(_BISECT_STEPS):
+        mid = 0.5 * (lo + hi)
+        if _chain_survival(mid, stages=stages, mean=mean) > ratio:
+            lo = mid
+        else:
+            hi = mid
+    return hi
+
+
+def steady_state_at_full_fire(params, *, q_full=Q_FULL_FIRE, ceiling_c=100000.0):
+    """The chamber temperature this model settles at under sustained full fire.
+
+    The asymptote the fitted parameters imply: where the chamber's loss,
+    h_amb*(T-T_amb) plus the radiative term, has risen to meet K_Q*q_full. Loss
+    is strictly increasing in T above ambient, so there is one such point and
+    bisection finds it.
+
+    A cook that never approaches steady state does not determine this, which is
+    exactly why it is worth looking at: it is where a fit that has traded the
+    chamber's parameters against each other along a direction the log cannot
+    see ends up saying something absurd. The MAK cook peaked at 520 F; fits of
+    it have implied anything from 1067 F to 5664 F depending on what was left
+    free. Reported rather than enforced -- see this module's own tests for why
+    the separation between a sound value and an absurd one is not wide enough
+    here to draw a refusal line on.
+    """
+    t_amb = float(params["T_amb"])
+    h_amb, sigma = float(params["h_amb"]), float(params["sigma"])
+    target = float(params["K_Q"]) * float(q_full)
+    if target <= 0.0:
+        return t_amb
+    if not (h_amb > 0.0 or sigma > 0.0):
+        return math.inf
+
+    def loss(t_c):
+        return h_amb * (t_c - t_amb) + sigma * ((t_c + _KELVIN) ** 4 - (t_amb + _KELVIN) ** 4)
+
+    lo, hi = t_amb, t_amb + 1.0
+    while loss(hi) < target:
+        hi = t_amb + (hi - t_amb) * 2.0
+        if hi - t_amb > ceiling_c:
+            return math.inf
+    for _ in range(_BISECT_STEPS):
+        mid = 0.5 * (lo + hi)
+        if loss(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return hi
+
+
+def longest_braking_distance(params, *, q_full=Q_FULL_FIRE):
+    """The braking distance at whichever end of the operating range is worst.
+
+    One horizon has to be adequate everywhere the grill runs, so it is sized
+    from the end that takes longest to stop. That is the cool end: the loss
+    the decaying flux has to fall below is smallest there, so the flux has
+    furthest to fall. Reference points at or below ambient are skipped -- a
+    chamber the surroundings are warming is not braking, and the hazard end is
+    above any ambient PROMOTION_BOUNDS admits, so at least one point remains.
+    """
+    t_amb = float(params["T_amb"])
+    refs = [t for t in (T_FLOOR_C, T_HAZARD_C) if t > t_amb]
+    return max(braking_distance(params, t, q_full=q_full) for t in refs)
 
 
 def effective_tau(params, t_ref_c):
@@ -241,10 +392,16 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
     if _finite(n_horizon) is None or float(n_horizon) <= 0:
         return Verdict(False, "n_horizon must be a positive, finite number")
 
+    # What the horizon has to cover is the braking distance -- how long the
+    # chamber goes on rising after the fuel is cut -- not a time constant. The
+    # two are not the same size and need not even be the same order: a ramp
+    # that never approaches steady state does not determine C_c/h_amb, so a
+    # horizon sized from it asks for a length no measurement supports, while
+    # the coast after a cut is directly observable in the same log.
     horizon_needed = None
-    tau = slowest_tau(candidate)
-    if math.isfinite(tau) and float(n_horizon) * float(t_step) < tau:
-        horizon_needed = int(math.ceil(tau / float(t_step)))
+    brake = longest_braking_distance(candidate)
+    if math.isfinite(brake) and float(n_horizon) * float(t_step) < brake:
+        horizon_needed = int(math.ceil(brake / float(t_step)))
 
     if incumbent is None:
         return Verdict(True, "no incumbent", horizon_needed)
