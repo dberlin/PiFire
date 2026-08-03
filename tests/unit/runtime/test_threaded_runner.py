@@ -240,6 +240,13 @@ def test_hold_teardown_stops_threaded_runner():
     thread = runner._thread
     hold = HoldMode.__new__(HoldMode)
     hold._runner = runner
+    # Scaffolding for a mode built without setup(): the shape a real HoldMode
+    # always has by teardown, with identification simply off. Without it the
+    # refit step logs a real ERROR about a mode this test never intended to
+    # build. That teardown survives a malformed settings dict at all is
+    # asserted in test_hold_refit_trigger.py, not here.
+    hold.settings = {"controller": {"config": {}}}
+    hold._controller_name = "mpc"
     hold.teardown(70.0)
     assert not thread.is_alive()
 

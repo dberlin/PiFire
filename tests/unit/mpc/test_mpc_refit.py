@@ -9,7 +9,7 @@ import pytest
 import controller.update_mpc as update_mpc
 from common.controller_model_state import ControllerModelStore
 from controller.model_promotion import PROMOTION_BOUNDS, evaluate
-from controller.mpc import _DEFAULTS, _REFIT_INIT, _REFIT_MAX_SAMPLES, Controller
+from controller.mpc import _DEFAULTS, _HISTORY_MAX, _REFIT_INIT, Controller
 from controller.mpc_model import simulate_grey_box
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
@@ -128,31 +128,33 @@ def test_the_longest_cook_stays_inside_the_teardown_budget(fits):
     inside this bound delays the cool-down by at most an eighth of itself,
     with the auger and igniter already off.
 
-    A 12-hour cook is ~8640 rows and every least-squares evaluation
-    re-simulates all of them, so the row cap bounds what an iteration costs.
-    It does not bound how many iterations the solver takes, which is the
-    larger term -- hence the second assertion: the cap is the part that still
-    means something on hardware slower than the machine this runs on.
+    This is the worst case there is: `_HISTORY_MAX` rows at the shipped
+    control period is a full 12-hour history, and the companion test below
+    holds the history to that length, so no cook can present the teardown path
+    with more work than this one does.
     """
-    t = np.arange(0.0, 43200.0, 5.0)
+    t = np.arange(0.0, 5.0 * _HISTORY_MAX, 5.0)
     Q = np.where((t // 1800) % 2 == 0, 100.0, 20.0)
     temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=4, **TRUTH)
     history = list(zip(t.tolist(), temp.tolist(), Q.tolist()))
-    assert len(history) > _REFIT_MAX_SAMPLES
+    assert len(history) == _HISTORY_MAX
     c = _c()
     t0 = time.perf_counter()
     c.refit_from_cook(history)
     assert time.perf_counter() - t0 < 30.0
-    assert fits[0]["rows"] <= _REFIT_MAX_SAMPLES
+    # The whole cook was fit: thinning it first would cost accuracy in
+    # C_c/h_amb and, since simulate_grey_box sub-steps to max_dt regardless,
+    # would not even buy the time it appears to.
+    assert fits[0]["rows"] == _HISTORY_MAX
 
 
-def test_a_cook_just_past_the_cap_keeps_its_resolution(fits):
-    """A stride can only halve, so one row past the cap would have cost half
-    the resolution of a ~100-minute cook to save a single sample."""
-    rows = _synthetic_cook(rows=_REFIT_MAX_SAMPLES + 1)
-    assert len(rows) == _REFIT_MAX_SAMPLES + 1
-    _c().refit_from_cook(rows)
-    assert fits[0]["rows"] == _REFIT_MAX_SAMPLES
+def test_the_cook_a_refit_can_be_handed_is_bounded_by_the_history():
+    """What keeps the timed budget above meaningful: the live history is a
+    bounded deque, so the longest cook a teardown refit can ever see is the
+    one that test measures."""
+    c = _c()
+    c._history.extend(_synthetic_cook(rows=_HISTORY_MAX + 500))
+    assert len(c.cook_history()) == _HISTORY_MAX
 
 
 # ---- the fit's starting point is fixed, and stays fixed across cooks ----

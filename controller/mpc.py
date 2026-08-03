@@ -80,21 +80,24 @@ _DEFAULTS = dict(
 
 # One row per control period. At the 5 s default that is ~12 hours, which is
 # longer than any single cook; a longer one loses its beginning rather than
-# its end, and the end is what describes the grill's current state.
+# its end, and the end is what describes the grill's current state. This is
+# also what bounds a refit: the longest cook the fit can ever be handed off
+# the teardown path is one full history.
 _HISTORY_MAX = 8640
 
-# A refit re-simulates the whole series once per least-squares evaluation, so
-# cost is linear in samples while the answer is not: a cook's SHAPE identifies
-# the grill, not the density it was sampled at. Fit at most this many rows,
-# selected evenly across the cook. This is where the answer stops improving:
-# a coarser sampling of a long cook starts smearing the slow chamber
-# structure the model is mostly about, and a finer one recovers nothing --
-# what a refit's wall clock actually tracks is the solver's iteration count,
-# which the row cap bounds the per-iteration cost of rather than sets.
-_REFIT_MAX_SAMPLES = 1200
-
 # Below this a record is an interrupted cook rather than a description of a
-# grill, and fitting it would produce a confident answer from nothing.
+# grill, and fitting it would produce a confident answer from nothing. There
+# is deliberately no upper limit to match: a refit fits the whole cook.
+#
+# Thinning the rows first looks like it should be cheaper and is not.
+# mpc_model.simulate_grey_box sub-steps every interval to max_dt, so one
+# residual evaluation costs (cook duration / max_dt) integration steps no
+# matter how many rows were sampled from it -- the fit's price is set by how
+# long the cook was and how many iterations the solver takes, and row count
+# enters neither. Dropping rows therefore discards evidence for nothing, and
+# the worse-conditioned problem left behind takes MORE iterations, so it is
+# not even faster in practice. It costs an order of magnitude of accuracy in
+# C_c/h_amb, which is the quantity model_promotion gates on.
 _REFIT_MIN_SAMPLES = 120
 
 # Parameters the least-squares solve starts from, and the magnitudes it scales
@@ -542,10 +545,10 @@ class Controller(ControllerBase):
 
         Between cooks only: a refit re-simulates the whole history once per
         least-squares evaluation, so it belongs nowhere near the control path.
-        It runs synchronously on its caller's thread and takes seconds -- see
-        `_REFIT_MAX_SAMPLES` for the budget and HoldMode._refit_model for why
-        spending it at teardown is safe. An accepted model changes `cfg` but
-        rebuilds nothing: it reaches the grill through the next cook's restore.
+        It runs synchronously on its caller's thread and takes seconds, bounded
+        by `_HISTORY_MAX` -- see HoldMode._refit_model for why spending them at
+        teardown is safe. An accepted model changes `cfg` but rebuilds nothing:
+        it reaches the grill through the next cook's restore.
         """
         from controller.model_promotion import evaluate
         from controller.update_mpc import fit_params, fit_quality
@@ -554,12 +557,6 @@ class Controller(ControllerBase):
         if len(rows) < _REFIT_MIN_SAMPLES:
             return _Verdict(False, f"only {len(rows)} samples; need {_REFIT_MIN_SAMPLES}")
 
-        if len(rows) > _REFIT_MAX_SAMPLES:
-            # Evenly spaced indices rather than a stride: a stride can only
-            # halve, so one row past the cap would cost half the resolution of
-            # the whole cook. This lands on the cap itself at any length.
-            keep = np.unique(np.linspace(0, len(rows) - 1, _REFIT_MAX_SAMPLES).round().astype(int))
-            rows = [rows[i] for i in keep]
         started = time.perf_counter()
         t = np.array([r[0] for r in rows], dtype=float)
         temp = np.array([r[1] for r in rows], dtype=float)
