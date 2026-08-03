@@ -172,14 +172,14 @@ export function HistoryTab() {
             checked={v.ext_data}
             onChange={(b) => set("ext_data", b)}
             disabled={ext_data_disabled}
+            hint={
+              ext_data_disabled
+                ? modeUnknown
+                  ? "Can't confirm the grill is stopped — extended-data logging stays locked"
+                  : "Stop the grill to change extended-data logging"
+                : undefined
+            }
           />
-          {ext_data_disabled && (
-            <span className="pf-settings-hint">
-              {modeUnknown
-                ? "Can't confirm the grill is stopped — extended-data logging stays locked"
-                : "Stop the grill to change extended-data logging"}
-            </span>
-          )}
         </div>
       </Section>
 

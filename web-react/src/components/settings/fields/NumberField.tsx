@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { clampToBounds } from "../../../helpers/settings/bounds";
 
 export function NumberField({
@@ -21,6 +22,7 @@ export function NumberField({
   hint?: string;
   disabled?: boolean;
 }) {
+  const hintId = useId();
   return (
     <label className="pf-field">
       <span className="pf-field-label">{label}</span>
@@ -33,6 +35,7 @@ export function NumberField({
           max={max}
           step={step}
           disabled={disabled}
+          aria-describedby={hint ? hintId : undefined}
           onChange={(e) => onChange(Number(e.target.value))}
           // Bounds enforcement lives here, not in onChange. There is no <form>
           // anywhere in the settings tree, so the browser never runs constraint
@@ -49,7 +52,11 @@ export function NumberField({
         />
         {suffix && <span className="pf-field-suffix">{suffix}</span>}
       </span>
-      {hint && <span className="pf-field-hint">{hint}</span>}
+      {hint && (
+        <span className="pf-field-hint" id={hintId}>
+          {hint}
+        </span>
+      )}
     </label>
   );
 }
