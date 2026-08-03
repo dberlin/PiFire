@@ -26,6 +26,7 @@ from common.common import (
     strip_null_members,
 )
 from common.control_delta import apply_control_delta, is_control_delta, validate_control_delta
+from common.current_schema import build_current, dump_legacy, load_current, to_snapshot, zeroed_current
 from common.defaults import (
     METRIC_COLUMNS,
     default_control,
@@ -655,45 +656,9 @@ def write_current(in_data):
 
     :param in_data: dictionary containing current temperatures
     """
-    now_ms = int(time.time() * 1000)
-    previous = _read_json_blob("control:current", dict)
-    current = {}
-    current["P"] = in_data["probe_history"]["primary"]
-    current["F"] = in_data["probe_history"]["food"]
-    current["AUX"] = in_data["probe_history"]["aux"]
-    current["PSP"] = in_data["primary_setpoint"]
-    current["NT"] = in_data["notify_targets"]
-    current["TS"] = now_ms  # Timestamp
-    current["LAST"] = _carry_last_readings(current, previous.get("LAST", {}), now_ms)
-    _write_json_blob("control:current", current)
-
-
-def _carry_last_readings(current, previous, now_ms):
-    """
-    Per-probe last real reading and when it was taken, keyed by probe label.
-
-    A probe device may have no reading to give -- a network-polled one whose
-    cache has gone stale returns None rather than inventing a number -- and
-    that None reaches the UIs, which cannot work out how old the last real
-    value was because ``TS`` timestamps the whole blob and keeps advancing
-    while one probe is stale. Carrying the value here rather than in a UI
-    keeps the two UIs telling one story about the same probe, and survives a
-    client reload.
-
-    :param current: the structure about to be written, sections already filled
-    :param previous: the ``LAST`` map from the preceding write
-    :param now_ms: timestamp being written, so a reading is stamped with the
-        pass that produced it
-    :return: {label: {"temp": value, "ts": epoch_ms}}
-    """
-    last = {}
-    for section in ("P", "F", "AUX"):
-        for label, value in current[section].items():
-            if value is not None:
-                last[label] = {"temp": value, "ts": now_ms}
-            elif label in previous:
-                last[label] = previous[label]
-    return last
+    previous = load_current(_read_json_blob("control:current", dict))
+    schema = build_current(in_data, previous, int(time.time() * 1000))
+    _write_json_blob("control:current", dump_legacy(schema))
 
 
 def flush_current():
@@ -711,20 +676,10 @@ def flush_current():
     :return: Zeroed current probe temps structure
     """
     settings = read_settings()
-    # LAST is emptied with the readings: carrying a last-good value across a
-    # flush would date it to a cook that is over.
-    current = {"P": {}, "F": {}, "PSP": 0, "NT": {}, "AUX": {}, "LAST": {}}
-
-    for probe in settings["probe_settings"]["probe_map"]["probe_info"]:
-        if probe["type"] == "Primary":
-            current["P"][probe["label"]] = 0
-        if probe["type"] == "Food":
-            current["F"][probe["label"]] = 0
-        if probe["type"] == "Aux":
-            current["AUX"][probe["label"]] = 0
-        current["NT"][probe["label"]] = 0
-
-    datastore.set_blob("control:current", json.dumps(current))
+    schema = zeroed_current(settings["probe_settings"]["probe_map"]["probe_info"])
+    # TS is dropped: a flushed structure holds no readings, so there is no time
+    # at which they were taken.
+    _write_json_blob("control:current", dump_legacy(schema, exclude_timestamp=True))
 
     return _read_json_blob("control:current", dict)
 
@@ -736,6 +691,22 @@ def read_current():
     :return: Current probe temps structure
     """
     return _read_json_blob("control:current", dict)
+
+
+def read_current_snapshot():
+    """
+    Read the current probe temps as a validated snapshot.
+
+    An unparseable blob is discarded rather than repaired: it is a cache of the
+    last control pass, and the next pass refills it.
+
+    :return: CurrentSnapshot
+    """
+    schema = load_current(_read_json_blob("control:current", dict))
+    if schema is None:
+        settings = read_settings()
+        schema = zeroed_current(settings["probe_settings"]["probe_map"]["probe_info"])
+    return to_snapshot(schema)
 
 
 def write_tr(tr_data):
