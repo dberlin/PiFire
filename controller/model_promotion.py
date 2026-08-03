@@ -41,9 +41,7 @@ from dataclasses import dataclass
 #: because sigma's effect on braking distance is priced into the guarded
 #: quantity below rather than left to this bound to police.
 PROMOTION_BOUNDS = {
-    "C_f": (0.1, 1e4),
     "C_c": (1.0, 1e6),
-    "h_fc": (1e-3, 1e3),
     "h_amb": (1e-4, 1e3),
     "T_amb": (-40.0, 60.0),
     "theta": (0.0, 1200.0),
@@ -186,30 +184,27 @@ def braking_distance(params, t_ref_c, *, q_full=Q_FULL_FIRE):
     it can see. It is a necessary length, not a sufficient one.
 
     At the instant of the cut the grill has been at `q_full` long enough for
-    the transport chain to be charged and the firepot to have settled
-    K_Q*q_full/h_fc above the chamber, so the heat reaching the chamber is
+    the transport chain to be charged, so the heat reaching the chamber is
     K_Q*q_full. The chamber stops rising when that heat has fallen to the
     chamber's own loss at `t_ref_c` -- controller/mpc_model.py's
     h_amb*(T-T_amb) plus its radiative term. So the braking distance is the
     time the flux takes to decay by the factor between them.
 
-    The flux decays through the n_delay lag stages of theta/n_delay each and
-    then through the firepot, whose own time constant is C_f/h_fc. Those
-    stages are not equal, so the chain is read as n_delay+1 stages all set to
-    the slowest of them. Slowing a stage only makes it hold heat longer, so
-    that chain's output is above the real cascade's at every instant and its
-    crossing is never early. With n_delay 0 there is one stage and it is the
-    firepot's own, which is exact.
+    The flux decays through the n_delay lag stages of theta/n_delay each, and
+    that is the whole cascade: the chamber is the only thermal mass left, and
+    the flux has already arrived once it reaches the chamber. Every stage is
+    the same length, so the Erlang survival below is the model's own decay
+    exactly rather than a bound on it. With n_delay 0 there is no chain and
+    nothing in flight at the cut, so the chamber stops rising at once.
 
-    The chamber warming during the coast is left out too, and a warmer chamber
-    loses more, so the real crossing arrives sooner than this says. Both
-    approximations err long, which for a horizon requirement is the safe
+    The chamber warming during the coast is left out, and a warmer chamber
+    loses more, so the real crossing arrives sooner than this says. That
+    approximation errs long, which for a horizon requirement is the safe
     direction; docs/superpowers/experiments/braking_distance_check.py measures
     how far, against a direct integration of the same grey box.
     """
-    h_fc = float(params["h_fc"])
     flux = float(params["K_Q"]) * float(q_full)
-    if not (flux > 0.0 and h_fc > 0.0):
+    if flux <= 0.0:
         return math.inf
     t_amb = float(params["T_amb"])
     loss = float(params["h_amb"]) * (t_ref_c - t_amb) + float(params["sigma"]) * (
@@ -226,11 +221,8 @@ def braking_distance(params, t_ref_c, *, q_full=Q_FULL_FIRE):
         return 0.0
     # n_delay == 0 removes the transport chain outright, leaving theta with
     # nothing to delay -- the same reading `_effective_theta` takes.
-    n_delay = max(int(params["n_delay"]), 0)
-    stages = n_delay + 1
-    firepot = float(params["C_f"]) / h_fc
-    transport = float(params["theta"]) / n_delay if n_delay > 0 else 0.0
-    mean = stages * max(firepot, transport)
+    stages = max(int(params["n_delay"]), 0)
+    mean = float(params["theta"]) if stages > 0 else 0.0
     if mean <= 0.0:
         return 0.0
     lo, hi = 0.0, mean
@@ -335,7 +327,7 @@ def _effective_theta(params):
     """The dead time the controller actually anticipates.
 
     n_delay == 0 removes the transport-lag chain outright -- heat is routed
-    straight to the firepot -- so theta contributes a delay only when at
+    straight to the chamber -- so theta contributes a delay only when at
     least one lag state exists. A candidate that zeroes n_delay while leaving
     theta untouched has, in effect, cut the dead time to zero.
     """
