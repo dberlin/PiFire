@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from controller.mpc import Controller, _DEFAULTS
 from controller.grill_sim import GrillSim
-from controller.mpc_net import net_path_for
+from controller.mpc_net import NetPolicy, net_path_for
 
 ART = os.path.join(os.path.dirname(__file__), "..", "..", "..", "controller", "mpc_policy_net.npz")
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
@@ -12,6 +12,31 @@ TS = 25.0
 needs_art = pytest.mark.skipif(not os.path.exists(ART), reason="net artifact not exported")
 
 _FAN_ART = net_path_for(ART, True)
+
+
+def _usable(path, cfg):
+    """Whether an artifact on disk is one THIS model's state vector can drive.
+
+    The tests below need a net the controller will actually adopt, and an
+    artifact trained against a different state vector is not that even though
+    the file is present. Asking `os.path.exists` alone turns "this artifact
+    predates the current model" into a red suite rather than a skip, and the
+    two want different responses: a missing artifact is a build that did not
+    run, a mismatched one is a regeneration that has not been done yet.
+    """
+    if not os.path.exists(path):
+        return False
+    try:
+        return NetPolicy.load(path).matches_config(cfg)
+    except Exception:
+        return False
+
+
+needs_fan_art = pytest.mark.skipif(
+    not _usable(_FAN_ART, {**_DEFAULTS, "enable_fan_input": True}),
+    reason="fan-on net artifact missing, or trained against a different state vector "
+    "(regenerate: tools/regenerate_mpc_net.py --mode fan-on)",
+)
 
 
 def _run(cfg, setpoint, seed=0, minutes=90):
@@ -91,7 +116,7 @@ def test_net_calibration_mismatch_falls_back_to_nlp():
     assert c.mpc is not None
 
 
-@pytest.mark.skipif(not os.path.exists(_FAN_ART), reason="fan-on net artifact not exported")
+@needs_fan_art
 def test_fan_on_net_is_offset_free():
     # net policy + enable_fan_input=True should hold offset-free, matching the
     # regime it was trained on (fan-on closed-loop states).
