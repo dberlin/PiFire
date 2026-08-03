@@ -1,49 +1,62 @@
 #!/usr/bin/env python3
 """
-PINNED TO THE TWO-LUMP GREY BOX (model schema 1). controller/mpc_model.py
-now implements a single chamber lump, so the numbers below describe a model
-this repo no longer has. Kept as a record of a finished question, not re-run.
-See _pinned_two_lump.py.
-
 Why `controller/update_mpc.py` does not fit the radiative coefficient.
 
 RESULT: it cannot, and no cook can make it possible. Someone will propose
 fitting `sigma` again -- this file is the evidence that stops the work being
 repeated.
 
+Ported from the two-lump grey box to the single chamber lump when
+controller/mpc_model.py collapsed to schema 2. It is cited by a LIVE comment
+-- `_FREE` in controller/update_mpc.py, the reasoning that holds h_amb and
+sigma and so keeps every fit inside PROMOTION_BOUNDS -- so pinning it would
+have left that decision resting on evidence about a model this repo no longer
+has. Every number below is from the single-lump structure. What the port
+changed: the firepot lump and its conductance leave the plant, the batched
+twin and the free set; the scaling family loses C_f and h_fc with them; and
+the transport chain is advanced in closed form on both sides, matching the
+shipped simulator.
+
 Three findings, in the order they matter:
 
 1. THE QUESTION IS MOOT. The grey-box model is invariant under scaling
-   (C_f, C_c, h_fc, h_amb, K_Q, sigma) by one common factor: both state
-   equations are homogeneous in them, so the trajectory of the one measured
-   state is bit-identical. Six parameters carry five identifiable degrees of
+   (C_c, h_amb, K_Q, sigma) by one common factor: the state equation is
+   homogeneous in them, so the trajectory of the one measured state is
+   bit-identical. Four parameters carry three identifiable degrees of
    freedom. A log determines the RATIOS, never the values, so one parameter
    must be held to fix the scale -- and `sigma` is as good a choice as any.
    Freeing it while `K_Q` is also free does not learn anything; it lets the
    solver drift along an unobservable direction and report a confident,
-   arbitrary number. Measured here: the recovered `sigma` ranged over a factor
-   of 200 across noise seeds of the SAME cook, at every temperature span, with
-   RMSE equal to or better than the truth parameters'.
+   arbitrary number. Measured here, over the 330 fits in the grid: the
+   recovered `sigma` spans a factor of 1.1e14 across noise seeds of one
+   isothermal cell -- the solve simply parks it wherever it started drifting --
+   and even in the cells whose temperature range DOES identify `sigma` (100%
+   recovery once the degeneracy is pinned), the shipped free set's median lands
+   at 0.70x to 1.18x truth depending on the cell rather than on the data. It
+   costs nothing in fit quality either way: held RMSE is within 0.01 C of free
+   RMSE on all 330 fits, both sitting at the 0.50 C noise floor.
 
    The corollary is the reassuring half: holding `sigma` at a wrong value costs
    nothing. Holding it at `s_h` against a truth `s_t` is exactly compensated by
    scaling the rest by `s_h/s_t`, and the effective time constant
    `C_c/(h_amb + 4*sigma*(T+273.15)**3)` -- the quantity the braking argument
-   rests on -- is invariant along that direction. Confirmed to 5 significant
-   figures: truth and its `sigma`-held equivalent give tau 1203.9 s and 324.2 s
-   at both ends of the operating range, identically.
+   rests on -- is invariant along that direction. With one lump that invariance
+   is EXACT rather than approximate: truth and its `sigma`-held equivalent give
+   1203.91202 s and 324.16440 s at the two ends of the operating range, equal
+   in every digit a float carries.
 
 2. RAW TEMPERATURE SPAN IS THE WRONG VARIABLE, if anyone does gate on
-   identifiability elsewhere. Two grid cells here have identical span (23.8 C)
-   and identical min-to-max radiative swing, yet recover `sigma` 10% versus
-   100% of the time. A record that starts off its setpoint, sags once and then
-   sits there covers a wide range while HOLDING exactly one operating point.
+   identifiability elsewhere. Two grid cells here have identical span (24.0 C)
+   and identical min-to-max radiative swing (0.0934), yet recover `sigma` 20%
+   versus 100% of the time -- the isothermal 220 C hold against the 220->225 C
+   step. A record that starts off its setpoint, sags once and then sits there
+   covers a wide range while HOLDING exactly one operating point.
 
 3. WHAT DOES SEPARATE THEM is the dwell-weighted spread of radiative
    conductance `4*sigma*(T+273.15)**3` -- measured between the 10th and 90th
    percentiles, so it weights by how long the grill actually spent at a
    temperature. It separated identifiable cells from unidentifiable ones in 94%
-   of the grid, against 88% for raw span.
+   of the grid, against 91% for raw span.
 
 Finding 1 is why `_FREE` in `controller/update_mpc.py` holds `sigma`, and why
 findings 2 and 3 are recorded but unused.
@@ -76,21 +89,34 @@ proxy for reaching a hot enough temperature".
 Cost, and what is done about it
 -------------------------------
 `controller.mpc_model.simulate_grey_box` integrates with a Python loop over
-sub-steps, so one forward simulation of a 20-minute cook costs ~5 ms. Two
-things make a sweep of this size affordable:
+sub-steps at a 0.125 s sub-step, so one forward simulation of a 20-minute cook
+costs ~12 ms and a fit costs tens of those. Three things make a sweep of this
+size affordable:
 
-1. VECTORIZE. `simulate_batch` evaluates B parameter sets at once with numpy,
-   which is how the truth trajectories and the sigma/h_amb trade-off surface
-   are computed. `verify_twins()` asserts it reproduces `simulate_grey_box`
-   before any result is trusted -- the sweep is only evidence about the shipped
-   fitter if it is solving the shipped fitter's problem. Batching only pays
-   above B~16 (see `--bench`): one fit's finite-difference Jacobian needs just
-   len(_FREE)+1 columns, which is below that crossover, so the per-fit path
-   calls `simulate_grey_box` directly. Vectorization is applied where the work
-   is actually wide, not everywhere.
-2. PARALLELIZE. Grid points are independent, so they run across a
+1. JIT THE PER-FIT PATH. `ndelay_sweep_plants._sim` is a numba twin carrying
+   both grey-box structures; this file drives it at `two_state=0`. That is
+   where nearly all the work is -- one finite-difference Jacobian per solver
+   iteration, tens of iterations, hundreds of grid points.
+2. VECTORIZE THE WIDE WORK. `simulate_batch` evaluates B parameter sets at once
+   with numpy, which is how the sigma/h_amb trade-off surface is computed.
+   Batching only pays above B~16 (see `--bench`), and one fit's Jacobian needs
+   just len(_FREE)+1 columns, so vectorization is applied where the work is
+   actually wide rather than everywhere.
+3. PARALLELIZE. Grid points are independent, so they run across a
    `ProcessPoolExecutor`. Workers are capped at `cpu_count() - 2` because a
    live `control.py` and gunicorn share this machine.
+
+`verify_twins()` asserts BOTH twins reproduce `simulate_grey_box` before any
+result is trusted -- the sweep is only evidence about the shipped fitter if it
+is solving the shipped fitter's problem, at the shipped fitter's sub-step,
+which `_MAX_DT` reads off the shipped function rather than restating.
+
+Numba is an opt-in extra here, never a project dependency: it pins numpy below
+the version this project runs, and downgrading the numeric library under the
+control loop, the web app and the test suite to speed up a dev-only sweep is
+not a trade this repo makes. `uv run --with numba` installs it for the sweep
+process alone. The fit that runs at cook teardown on a Raspberry Pi is
+single-process, pure numpy/scipy, and calls `simulate_grey_box` directly.
 
 What made the fits affordable in the first place is not in this file: the
 scaled-variable solve in `fit_params` conditions the problem well enough that
@@ -98,22 +124,14 @@ the solver makes real progress per evaluation instead of crawling. It does not
 make every fit converge -- on a real cook it still runs out of evaluations --
 but it reaches a materially better point inside the same budget.
 
-This harness deliberately depends on nothing the project does not already
-install. An earlier version jitted the integrator with numba for a further
-176x on the scalar path, which was not worth what it cost: numba pins numpy
-below the version this project uses, so a dev-only sweep tool would have
-downgraded the numeric library under the control loop, the web app and the
-whole test suite. The recorded agreement numbers for that twin are in the
-task's report. The fit that runs at cook teardown on a Raspberry Pi is
-single-process, pure numpy/scipy, and calls `simulate_grey_box` directly.
-
-Usage:
-    python -m docs.superpowers.experiments.sigma_identifiability          # full sweep
-    python -m docs.superpowers.experiments.sigma_identifiability --bench  # timings only
-    python -m docs.superpowers.experiments.sigma_identifiability --quick  # small grid
+Usage (numba is required for the jitted twin):
+    uv run --with numba python -m docs.superpowers.experiments.sigma_identifiability
+    uv run --with numba python -m docs.superpowers.experiments.sigma_identifiability --bench
+    uv run --with numba python -m docs.superpowers.experiments.sigma_identifiability --quick
 """
 
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -125,12 +143,8 @@ from scipy.optimize import least_squares
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from controller.mpc_model import simulate_grey_box  # noqa: E402
+from controller.mpc_model import _erlang_coefficients, simulate_grey_box  # noqa: E402
 from controller.model_promotion import PROMOTION_BOUNDS, T_FLOOR_C, T_HAZARD_C, effective_tau  # noqa: E402
-
-from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
-
-_pinned_two_lump.require_pinned_model(__name__)
 
 OUT = "./docs/superpowers/experiments/_sigma_identifiability.json"
 
@@ -143,11 +157,11 @@ _KELVIN = 273.15
 #: starting 1.4e-9 and 3.3x below the PROMOTION_BOUNDS ceiling, so a sigma
 #: parked at its upper bound is visibly a failure rather than something that
 #: could be mistaken for success.
-TRUTH = dict(C_f=9.0, C_c=800.0, h_fc=0.90, h_amb=0.35, K_Q=5.0, theta=80.0, n_delay=4, sigma=3.0e-9)
+TRUTH = dict(C_c=800.0, h_amb=0.35, K_Q=5.0, theta=80.0, n_delay=8, sigma=3.0e-9)
 
 #: Where the fit starts -- controller/mpc.py's _DEFAULTS. A gate that simply
 #: never frees sigma therefore scores zero here rather than looking perfect.
-INIT = dict(C_f=9.0, C_c=320.0, h_fc=1.3, h_amb=0.50, K_Q=3.5, theta=50.0)
+INIT = dict(C_c=320.0, h_amb=0.50, K_Q=3.5, theta=50.0)
 INIT_SIGMA = 1.4e-9
 
 T_AMB = 20.0
@@ -159,8 +173,15 @@ DT = 5.0  # log cadence, matching the MPC controller's default control period
 #: grill ever produces.
 NOISE_C = 0.5
 
-_FREE = ("K_Q", "C_c", "h_fc", "h_amb", "theta", "sigma")
+_FREE = ("K_Q", "C_c", "h_amb", "theta", "sigma")
 _SIGMA_MAX = PROMOTION_BOUNDS["sigma"][1]
+
+#: The integration sub-step the SHIPPED fitter runs at, read off
+#: `simulate_grey_box`'s own signature rather than restated here. A harness
+#: that is evidence about controller/update_mpc.py has to be discretized the
+#: way controller/update_mpc.py is, and a restated constant is one edit away
+#: from silently not being.
+_MAX_DT = float(inspect.signature(simulate_grey_box).parameters["max_dt"].default)
 
 
 # --------------------------------------------------------------------------
@@ -169,14 +190,12 @@ _SIGMA_MAX = PROMOTION_BOUNDS["sigma"][1]
 # --------------------------------------------------------------------------
 
 
-def _sim(t, Q, C_f, C_c, h_fc, h_amb, T_amb, T0, K_Q, sigma, theta, n_delay, max_dt=1.0):
+def _sim(t, Q, C_c, h_amb, T_amb, T0, K_Q, sigma, theta, n_delay, max_dt=_MAX_DT):
     """`simulate_grey_box` behind a positional signature the harness can pass around."""
     return simulate_grey_box(
         t,
         Q,
-        C_f=C_f,
         C_c=C_c,
-        h_fc=h_fc,
         h_amb=h_amb,
         T_amb=T_amb,
         T0=T0,
@@ -188,25 +207,59 @@ def _sim(t, Q, C_f, C_c, h_fc, h_amb, T_amb, T0, K_Q, sigma, theta, n_delay, max
     )
 
 
-def simulate_batch(t, Q, *, T_amb, T0, C_f, C_c, h_fc, h_amb, K_Q, sigma, theta, n_delay=0, max_dt=1.0):
+def _jit_sim(t, Q, C_c, h_amb, T_amb, T0, K_Q, sigma, theta, n_delay, max_dt=_MAX_DT):
+    """The jitted twin, in the same positional signature, for the per-fit path.
+
+    ndelay_sweep_plants._sim carries both grey-box structures; `two_state=0`
+    selects the single chamber lump this file is now about. It is imported
+    rather than written again here so there is one jitted twin in this
+    directory and one place `verify_twins` has to check.
+    """
+    from docs.superpowers.experiments.ndelay_sweep_plants import _sim as _njit_sim
+
+    return _njit_sim(
+        np.ascontiguousarray(t, dtype=float),
+        np.ascontiguousarray(Q, dtype=float),
+        0.0,  # C_f: unused with two_state=0
+        C_c,
+        0.0,  # h_fc: unused with two_state=0
+        h_amb,
+        T_amb,
+        T0,
+        K_Q,
+        sigma,
+        theta,
+        int(n_delay),
+        0,
+        max_dt,
+    )
+
+
+def simulate_batch(t, Q, *, T_amb, T0, C_c, h_amb, K_Q, sigma, theta, n_delay=0, max_dt=_MAX_DT):
     """`simulate_grey_box` for B parameter sets at once; returns shape (len(t), B).
 
     Every thermal parameter may be a length-B array. The time loop stays in
     Python because the integration is sequential, but each step is one numpy
     operation over all B sets, which is what makes a wide sweep affordable.
+
+    The transport chain is advanced in closed form, per set, exactly as
+    `simulate_grey_box` does: it is linear with a constant input across the
+    sample interval, so `_erlang_coefficients` gives its state at every
+    sub-step. That is not an optimisation here -- it is what makes this a twin
+    of the shipped simulator rather than of the Euler scheme the shipped one
+    stopped using, and `verify_twins` measures the difference at 1e-9 C.
     """
     t = np.asarray(t, dtype=float)
     Q = np.asarray(Q, dtype=float)
-    C_f, C_c, h_fc, h_amb, K_Q, sigma, theta = np.broadcast_arrays(
-        *(np.atleast_1d(np.asarray(v, dtype=float)) for v in (C_f, C_c, h_fc, h_amb, K_Q, sigma, theta))
+    C_c, h_amb, K_Q, sigma, theta = np.broadcast_arrays(
+        *(np.atleast_1d(np.asarray(v, dtype=float)) for v in (C_c, h_amb, K_Q, sigma, theta))
     )
-    B = C_f.shape[0]
+    B = C_c.shape[0]
     n = max(int(n_delay), 0)
     lag_tau = (theta / n) if n > 0 else np.zeros(B)
     active = lag_tau > 0.0
     safe_tau = np.where(active, lag_tau, 1.0)
     lags = np.zeros((max(n, 1), B))
-    T_f = np.full(B, float(T0))
     T_c = np.full(B, float(T0))
     out = np.empty((len(t), B))
     amb4 = (T_amb + _KELVIN) ** 4
@@ -220,46 +273,59 @@ def simulate_batch(t, Q, *, T_amb, T0, C_f, C_c, h_fc, h_amb, K_Q, sigma, theta,
         steps = max(1, int(np.ceil(span / max_dt)))
         dt = span / steps
         u = float(Q[i])
-        for _ in range(steps):
-            if n > 0:
-                prev = np.full(B, u)
-                for j in range(n):
-                    lags[j] += np.where(active, dt * (prev - lags[j]) / safe_tau, 0.0)
-                    prev = lags[j]
-                heat_in = np.where(active, prev, u)
-            else:
-                heat_in = np.full(B, u)
-            dT_f = (K_Q * heat_in - h_fc * (T_f - T_c)) / C_f
+        if n > 0:
+            # (steps, B, n) Erlang coefficients: one closed-form propagator per
+            # sub-step per parameter set, built by the same recurrence the
+            # shipped simulator uses so an over-long sub-step underflows to
+            # zero rather than overflowing on the way to an exp.
+            a = np.arange(1, steps + 1)[:, None] * (dt / safe_tau)[None, :]
+            coef = np.empty((steps, B, n))
+            coef[:, :, 0] = np.exp(-a)
+            for m in range(1, n):
+                coef[:, :, m] = coef[:, :, m - 1] * a / m
+            dev = lags[:n] - u  # (n, B) departure from this input's equilibrium
+            heat = u + np.einsum("sbm,mb->sb", coef, dev[::-1])
+            last = coef[-1]  # (B, n)
+            advanced = np.empty((n, B))
+            for j in range(n):
+                advanced[j] = u + np.einsum("bm,mb->b", last[:, : j + 1], dev[j::-1])
+            lags[:n] = np.where(active, advanced, lags[:n])
+            heat = np.where(active[None, :], heat, u)
+        else:
+            heat = np.full((steps, B), u)
+        for k in range(steps):
             rad = sigma * ((T_c + _KELVIN) ** 4 - amb4)
-            dT_c = (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb) - rad) / C_c
-            T_f = T_f + dt * dT_f
-            T_c = T_c + dt * dT_c
+            T_c = T_c + dt * (K_Q * heat[k] - h_amb * (T_c - T_amb) - rad) / C_c
     return out
 
 
 def verify_twins(verbose=True):
-    """The batched twin must reproduce `simulate_grey_box` before anything is trusted."""
+    """Both twins must reproduce `simulate_grey_box` before anything is trusted."""
     rng = np.random.default_rng(0)
     t = np.arange(0.0, 1800.0, DT)
     Q = np.clip(50.0 + 50.0 * np.sin(t / 300.0), 5.0, 100.0)
     worst_batch = 0.0
+    worst_jit = 0.0
     for _ in range(8):
         p = dict(
-            C_f=float(rng.uniform(4.0, 20.0)),
             C_c=float(rng.uniform(150.0, 3000.0)),
-            h_fc=float(rng.uniform(0.2, 2.0)),
             h_amb=float(rng.uniform(0.05, 1.0)),
             K_Q=float(rng.uniform(1.0, 9.0)),
             sigma=float(rng.uniform(0.0, 8e-9)),
             theta=float(rng.uniform(0.0, 200.0)),
-            n_delay=int(rng.integers(0, 6)),
+            n_delay=int(rng.integers(0, 12)),
         )
-        ref = simulate_grey_box(t, Q, T_amb=T_AMB, T0=25.0, max_dt=1.0, **p)
+        ref = simulate_grey_box(t, Q, T_amb=T_AMB, T0=25.0, max_dt=_MAX_DT, **p)
         got_batch = simulate_batch(t, Q, T_amb=T_AMB, T0=25.0, **p)[:, 0]
         worst_batch = max(worst_batch, float(np.max(np.abs(got_batch - ref))))
+        got_jit = _jit_sim(
+            t, Q, p["C_c"], p["h_amb"], T_AMB, 25.0, p["K_Q"], p["sigma"], p["theta"], p["n_delay"], _MAX_DT
+        )
+        worst_jit = max(worst_jit, float(np.max(np.abs(got_jit - ref))))
     if verbose:
-        print(f"twin check: batched max|diff| = {worst_batch:.3e} C")
+        print(f"twin check: batched max|diff| = {worst_batch:.3e} C, jitted max|diff| = {worst_jit:.3e} C")
     assert worst_batch < 1e-9, f"batched twin disagrees with simulate_grey_box by {worst_batch} C"
+    assert worst_jit < 1e-9, f"jitted twin disagrees with simulate_grey_box by {worst_jit} C"
 
     # Negative control on the generator: the truth parameters must reproduce
     # each synthetic record to within the measurement noise. If they cannot,
@@ -288,11 +354,11 @@ def make_cook(t_cold, t_hot, seed, *, noise_c=NOISE_C, leg_s=1350.0):
     is exactly [t_cold, t_hot] and span and hot end are set independently --
     `t_cold == t_hot` gives the isothermal case the gate must refuse.
 
-    The truth plant starts at `T_f = T_c = t_cold` with an empty transport-lag
+    The truth plant starts at `T_c = t_cold` with an empty transport-lag
     chain, which is precisely how `simulate_grey_box` initialises itself. That
     matters more than it looks: an earlier version of this harness generated a
-    long cook and returned a mid-cook slice, where the plant's firepot and lag
-    states are nothing like the simulator's assumed ones. The fit then spent
+    long cook and returned a mid-cook slice, where the plant's lag states are
+    nothing like the simulator's assumed ones. The fit then spent
     its freedom explaining that initial-condition step instead of the physics,
     drove `sigma` to its upper bound, and scored the data as unidentifiable at
     every span. Truth parameters must reproduce the record to within the noise,
@@ -311,27 +377,32 @@ def make_cook(t_cold, t_hot, seed, *, noise_c=NOISE_C, leg_s=1350.0):
     n_lag = int(p["n_delay"])
     lag_tau = p["theta"] / n_lag if n_lag > 0 else 0.0
     lags = np.zeros(n_lag)
-    T_f = float(t_cold)
     T_c = float(t_cold)
     temp = np.empty(n)
     Q = np.empty(n)
     amb4 = (T_AMB + _KELVIN) ** 4
+    # The plant integrates at the shipped sub-step, and its chain in closed
+    # form, so what separates the fit from the truth is the parameters and the
+    # noise rather than two different discretizations of the same equations.
+    sub = max(1, int(np.ceil(DT / _MAX_DT)))
+    dt = DT / sub
     for i in range(n):
         temp[i] = T_c
         Q[i] = float(np.clip(5.0 + 3.0 * (setpoint[i] - T_c), 5.0, 100.0))
         if i == n - 1:
             break
-        for _ in range(int(DT)):
-            dt = 1.0
-            prev = Q[i]
-            for j in range(n_lag):
-                lags[j] += dt * (prev - lags[j]) / lag_tau
-                prev = lags[j]
-            heat_in = lags[-1] if n_lag > 0 else Q[i]
-            T_f += dt * (p["K_Q"] * heat_in - p["h_fc"] * (T_f - T_c)) / p["C_f"]
+        u = Q[i]
+        if lag_tau > 0.0:
+            dev = lags - u
+            coef = _erlang_coefficients(n_lag, np.arange(1, sub + 1) * (dt / lag_tau))
+            heat = (u + coef @ dev[::-1]).tolist()
+            lags = u + np.convolve(coef[-1], dev)[:n_lag]
+        else:
+            heat = [u] * sub
+        for k in range(sub):
             T_c += (
                 dt
-                * (p["h_fc"] * (T_f - T_c) - p["h_amb"] * (T_c - T_AMB) - p["sigma"] * ((T_c + _KELVIN) ** 4 - amb4))
+                * (p["K_Q"] * heat[k] - p["h_amb"] * (T_c - T_AMB) - p["sigma"] * ((T_c + _KELVIN) ** 4 - amb4))
                 / p["C_c"]
             )
     return t, temp + rng.normal(0.0, noise_c, n), Q
@@ -351,7 +422,7 @@ def fit(t, temp, Q, *, free_sigma, sigma0=INIT_SIGMA, sim=None, free=None, init=
     `eps**0.5 * max(1, |x|)`, so an unscaled `sigma` near 1.4e-9 is probed with
     a step ten times its own value and the solver sees noise.
     """
-    sim = sim or _sim
+    sim = sim or _jit_sim
     init = dict(INIT if init is None else init)
     if free is None:
         free = _FREE if free_sigma else _FREE[:-1]
@@ -360,14 +431,13 @@ def fit(t, temp, Q, *, free_sigma, sigma0=INIT_SIGMA, sim=None, free=None, init=
     x0 = np.array([(init[k] if k != "sigma" else sigma0) for k in free])
     lo = np.array([(1e-9 if k != "sigma" else 0.0) for k in free])
     hi = np.array([(np.inf if k != "sigma" else _SIGMA_MAX) for k in free])
-    C_f = init["C_f"]
     n_delay = int(TRUTH["n_delay"])
     T0 = float(temp[0])
 
     def residual(z):
         p = {**init, **dict(zip(free, z * scale))}
         s = p.get("sigma", sigma0)
-        return sim(t, Q, C_f, p["C_c"], p["h_fc"], p["h_amb"], T_AMB, T0, p["K_Q"], s, p["theta"], n_delay, 1.0) - temp
+        return sim(t, Q, p["C_c"], p["h_amb"], T_AMB, T0, p["K_Q"], s, p["theta"], n_delay, _MAX_DT) - temp
 
     res = least_squares(residual, x0 / scale, method="trf", bounds=(lo / scale, hi / scale), max_nfev=2000)
     out = dict(zip(free, (float(v) for v in res.x * scale)))
@@ -379,13 +449,16 @@ def fit(t, temp, Q, *, free_sigma, sigma0=INIT_SIGMA, sim=None, free=None, init=
 
 #: The parameterisation with the scaling degeneracy removed. Scaling
 #: (K_Q, C_c, h_amb, sigma) by a common factor leaves the measured chamber
-#: temperature almost unchanged -- the firepot is quasi-steady, so the chamber
-#: only ever sees the product K_Q*heat_in, and C_c/h_amb/sigma then divide out.
+#: temperature EXACTLY unchanged: with one lump the chamber's state equation is
+#: the only one, and it is homogeneous of degree zero in those four -- multiply
+#: all of them and the numerator and the C_c below it scale together. Under two
+#: lumps this held only approximately, through the firepot being quasi-steady;
+#: the collapse to one lump made the degeneracy exact rather than removing it.
 #: Holding any one of the four pins the family. Holding K_Q isolates the
 #: question this sweep is actually asking -- "does the record's temperature
 #: range separate sigma from h_amb?" -- from the entirely separate question of
 #: whether the record fixes the overall scale.
-_FREE_NO_SCALE = ("C_c", "h_fc", "h_amb", "theta", "sigma")
+_FREE_NO_SCALE = ("C_c", "h_amb", "theta", "sigma")
 
 
 def _rad_conductance_span(temp, sigma_ref=INIT_SIGMA, dwell=False):
@@ -478,9 +551,7 @@ def trade_off_surface(t_cold, t_hot, seed=0, n=61):
         Q,
         T_amb=T_AMB,
         T0=float(temp[0]),
-        C_f=TRUTH["C_f"],
         C_c=np.full(S.size, TRUTH["C_c"]),
-        h_fc=TRUTH["h_fc"],
         h_amb=H,
         K_Q=TRUTH["K_Q"],
         sigma=S,
@@ -515,9 +586,17 @@ def bench():
     reps = 20
     t0 = time.perf_counter()
     for _ in range(reps):
-        simulate_grey_box(t, Q, T_amb=T_AMB, T0=25.0, **p)
+        simulate_grey_box(t, Q, T_amb=T_AMB, T0=25.0, max_dt=_MAX_DT, **p)
     scalar_ms = (time.perf_counter() - t0) / reps * 1e3
     print(f"simulate_grey_box  {scalar_ms:8.3f} ms/sim")
+
+    jit_args = (p["C_c"], p["h_amb"], T_AMB, 25.0, p["K_Q"], p["sigma"], p["theta"], p["n_delay"], _MAX_DT)
+    _jit_sim(t, Q, *jit_args)  # compile before timing
+    t0 = time.perf_counter()
+    for _ in range(reps):
+        _jit_sim(t, Q, *jit_args)
+    jit_ms = (time.perf_counter() - t0) / reps * 1e3
+    print(f"jitted twin        {jit_ms:8.3f} ms/sim  ({scalar_ms / jit_ms:5.1f}x)")
     # Where batching starts paying. A single fit's finite-difference Jacobian
     # needs only len(_FREE)+1 columns, which lands below the crossover -- so
     # the per-fit path calls simulate_grey_box directly and batching is saved
