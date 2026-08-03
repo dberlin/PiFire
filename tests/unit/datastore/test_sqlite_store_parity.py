@@ -267,10 +267,9 @@ def _settings_with_probe_map(store):
 
 
 def test_write_current_shape_parity(store):
-    # The control loop hands write_current() probe_history-shaped data and what
-    # gets STORED is the transformed blob. The fake used to keep the input
-    # verbatim, so a test that wrote and then read through it was asserting
-    # against a shape production never produces.
+    # The control loop hands write_current() probe_history-shaped data, and what
+    # gets STORED is the transformed blob. A fake that kept the input verbatim
+    # would let a test write and then read a shape production never produces.
     from common import datastore_accessors as dsa
     from controller.runtime.store import InMemoryStore
 

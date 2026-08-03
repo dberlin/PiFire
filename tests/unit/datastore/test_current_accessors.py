@@ -119,8 +119,8 @@ def test_write_current_carries_a_stale_probe_across_passes(db):
 
 
 def test_get_temp_reports_a_stale_probe_as_none(db):
-    # A probe with no reading must reach the API as null, not as 0. The bare
-    # dict let each consumer decide that for itself.
+    # A probe with no reading must reach the API as null, not as 0, and an
+    # unknown label must be an error rather than a null reading.
     from common import api_commands, datastore_accessors as dsa
 
     _seed_probe_map(db)
