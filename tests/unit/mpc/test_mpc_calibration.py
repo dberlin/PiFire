@@ -278,6 +278,44 @@ def test_the_fit_reports_whether_it_converged():
     assert all(key in starved for key in CONFIG_KEYS)
 
 
+def test_a_fit_the_model_cannot_be_simulated_at_is_reported_as_not_converged():
+    """A solve that reaches a point the grey box blows up at is not a result.
+
+    C_c is a FREE parameter bounded below only by `_LOWER_BOUND`, and the
+    chamber's own Euler step is stable only for a sub-step under 2*C_c/h_amb,
+    so a small enough C_c takes the chamber away inside one sample interval.
+    The radiative term is what actually goes first: the chamber state is a
+    Python float, so `(T_c + 273.15)**4` raises OverflowError rather than
+    returning inf, and a guard that only asks `np.isfinite` never sees it.
+    Either shape must come back as "not converged", never as an exception out
+    of the middle of `refit_from_cook` and never as parameters a live grill
+    is then offered.
+
+    The starting point is used as the non-simulable one because that is the
+    only place a record can put the solve deterministically; what is being
+    pinned is `fit_params`' behaviour at such a point, not how it got there.
+    """
+    t, Q, temp = _dataset()
+
+    # The negative control for the premise: this really is a parameter set the
+    # shipped simulator cannot produce a number for. Without it the test would
+    # pass on any init that merely fits badly.
+    with pytest.raises(OverflowError):
+        simulate_grey_box(
+            t, Q, C_c=1e-9, h_amb=0.5, T_amb=T_AMB, T0=float(temp[0]), K_Q=32.0, sigma=SIGMA, theta=110.0, n_delay=8
+        )
+
+    diverged = fit_params(t, temp, Q, T_amb=T_AMB, init=dict(_init(), C_c=1e-9), sigma=SIGMA, n_delay=N_DELAY)
+    assert diverged["converged"] is False
+    # And it is a complete result, not a half-built one: the caller reads the
+    # flag, so everything else has to be there to be read alongside it.
+    assert all(key in diverged for key in CONFIG_KEYS)
+
+    # The same record from a simulable start does converge, so what the
+    # assertion above catches is the non-simulable point and not the record.
+    assert fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)["converged"] is True
+
+
 def test_a_fit_to_a_real_cook_lands_where_the_promotion_policy_can_accept_it():
     """A fit outside PROMOTION_BOUNDS is refused however well it describes the log.
 

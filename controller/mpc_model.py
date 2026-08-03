@@ -150,6 +150,23 @@ def _rad_loss(T_c, T_amb, sigma):
     return sigma * ((T_c + _KELVIN) ** 4 - (T_amb + _KELVIN) ** 4)
 
 
+def _erlang_coefficients(n, a):
+    """exp(-a) * a**m / m! for m = 0 .. n-1, evaluated over a vector of a.
+
+    These are the entries of exp(A*dt) for the n-stage Erlang chain, which is a
+    lower-triangular Toeplitz matrix in them. Built by the recurrence
+    c_m = c_{m-1} * a / m rather than from a**m directly, so that a sub-step
+    long against the stage length (large a, meaning the chain has simply
+    finished responding) underflows to zero instead of overflowing a**m on the
+    way to an exp that would have divided it back down.
+    """
+    coef = np.empty((np.size(a), n))
+    coef[:, 0] = np.exp(-a)
+    for m in range(1, n):
+        coef[:, m] = coef[:, m - 1] * a / m
+    return coef
+
+
 def simulate_grey_box(
     t,
     Q,
@@ -162,7 +179,7 @@ def simulate_grey_box(
     sigma=0.0,
     theta=0.0,
     n_delay=0,
-    max_dt=1.0,
+    max_dt=0.125,
 ):
     """Forward-simulate chamber temperature for the plant the MPC plans against.
 
@@ -176,6 +193,30 @@ def simulate_grey_box(
     disturbance state `d` is absent: it exists to absorb model error at run
     time, and fitting against it would let it absorb the very mismatch a
     calibration exists to remove.
+
+    THE DELAY CHAIN IS ADVANCED EXACTLY, NOT INTEGRATED. It is linear and its
+    input is constant across a sample interval, so its state at every sub-step
+    is available in closed form (`_erlang_coefficients`). Integrating it with
+    explicit Euler instead -- as this function used to -- costs two things this
+    model cannot afford. It is stable only for a sub-step below 2*theta/n_delay,
+    and `theta` is a FITTED parameter with no lower bound worth the name, so a
+    grill with a short feed path could overflow the residual the calibration is
+    solving against; and it under-delays each stage, which the solve then
+    compensates for by inflating `theta` by about n_delay * sub-step. The
+    estimators below and the do-mpc NLP both discretize this same continuous
+    model exactly, so that inflation was a disagreement between what the fit
+    measured and what the controller then planned against.
+
+    `max_dt` is what remains: the sub-step for the chamber's own explicit Euler
+    step. With the chain exact, the resulting error is first order in the
+    sub-step and INDEPENDENT of theta and n_delay -- measured at 0.099 C RMS per
+    second of sub-step on the real MAK cook in tests/unit/mpc/fixtures,
+    uniformly to within 5% across theta from 3 s to 200 s and n_delay from 4 to
+    20. The 0.125 s default therefore holds the numerical error to 0.014 C RMS,
+    a ninth of the 0.16 C of model fidelity the single-lump structure was
+    adopted at, so that what a fit reports is the grill rather than the
+    integrator. The measurement is
+    docs/superpowers/experiments/substep_convergence.py.
     """
     t = np.asarray(t, dtype=float)
     Q = np.asarray(Q, dtype=float)
@@ -191,22 +232,27 @@ def simulate_grey_box(
         span = float(t[i + 1] - t[i])
         if span <= 0.0:
             continue
-        # Sub-step: each lag stage is theta/n_delay, tens of seconds at the
-        # shipped calibration and shorter on a grill fitted to less deadtime or
-        # more stages, so integrating at the sample spacing alone diverges.
         steps = max(1, int(np.ceil(span / max_dt)))
         dt = span / steps
         u = float(Q[i])
-        for _ in range(steps):
-            if lag_tau > 0.0:
-                prev = u
-                for j in range(n):
-                    lags[j] += dt * (prev - lags[j]) / lag_tau
-                    prev = lags[j]
-                heat_in = lags[-1]
-            else:
-                heat_in = u
-            dT_c = (K_Q * heat_in - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c
+        if lag_tau > 0.0:
+            # lags(k*dt) = u + exp(A*k*dt) @ (lags(0) - u), exactly, for every
+            # sub-step k at once: `dev` is the state's departure from the
+            # equilibrium this constant input drives it to, and exp(A*k*dt) is
+            # lower-triangular Toeplitz in the Erlang coefficients. `heat` is
+            # the tail stage, which is what feeds the chamber; `lags` carries
+            # the whole chain into the next interval.
+            dev = lags - u
+            coef = _erlang_coefficients(n, np.arange(1, steps + 1) * (dt / lag_tau))
+            # .tolist() because the chamber loop below is scalar Python: reading
+            # numpy scalars out of an array and doing float arithmetic on them
+            # costs more than the whole exact-chain build does.
+            heat = (u + coef @ dev[::-1]).tolist()
+            lags = u + np.convolve(coef[-1], dev)[:n]
+        else:
+            heat = [u] * steps
+        for k in range(steps):
+            dT_c = (K_Q * heat[k] - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c
             T_c += dt * dT_c
     return out
 

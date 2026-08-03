@@ -1,0 +1,69 @@
+=== 1. the reference is converged: halving the sub-step moves nothing ===
+  theta= 118.08 n_delay= 8   RMS(max_dt=0.002, max_dt=0.001) = 1.16e-04 C
+  theta=  50.00 n_delay= 8   RMS(max_dt=0.002, max_dt=0.001) = 1.17e-04 C
+  theta=  10.00 n_delay= 8   RMS(max_dt=0.002, max_dt=0.001) = 1.18e-04 C
+  theta=   8.00 n_delay= 8   RMS(max_dt=0.002, max_dt=0.001) = 1.18e-04 C
+  theta=   5.00 n_delay=20   RMS(max_dt=0.002, max_dt=0.001) = 1.18e-04 C
+  theta=  30.00 n_delay=12   RMS(max_dt=0.002, max_dt=0.001) = 1.18e-04 C
+  theta=   3.00 n_delay= 8   RMS(max_dt=0.002, max_dt=0.001) = 1.18e-04 C
+  theta= 200.00 n_delay= 4   RMS(max_dt=0.002, max_dt=0.001) = 1.13e-04 C
+
+=== 2. euler chain (the scheme this replaces): RMS error vs reference, C ===
+    max_dt th118.08/n8     th50/n8     th10/n8      th8/n8     th5/n20    th30/n12      th3/n8    th200/n4
+    1.0000     1.41105     1.43074     1.44150     1.44204         inf     2.15201         inf     0.68201
+    0.5000     0.76942     0.78017     0.78608     0.78636         inf     1.17357     0.78710     0.37184
+    0.2500     0.40288     0.40851     0.41160     0.41176     1.02696     0.61455     0.41225     0.19465
+    0.1250     0.20623     0.20911     0.21069     0.21078     0.52587     0.31463     0.21105     0.09958
+    0.0625     0.10428     0.10573     0.10652     0.10656     0.26598     0.15913     0.10670     0.05030
+  (inf = the residual overflowed: dt is past 2*theta/n_delay)
+
+=== 3. exact chain (the scheme now shipped): RMS error vs reference, C ===
+    max_dt th118.08/n8     th50/n8     th10/n8      th8/n8     th5/n20    th30/n12      th3/n8    th200/n4
+    1.0000     0.09734     0.09837     0.09890     0.09892     0.09896     0.09868     0.09905     0.09425
+    0.5000     0.05299     0.05355     0.05384     0.05385     0.05387     0.05372     0.05391     0.05130
+    0.2500     0.02764     0.02794     0.02809     0.02809     0.02810     0.02803     0.02813     0.02677
+    0.1250     0.01405     0.01419     0.01427     0.01427     0.01428     0.01424     0.01429     0.01360
+    0.0625     0.00700     0.00707     0.00711     0.00711     0.00711     0.00709     0.00712     0.00677
+
+=== 4. the criterion: error per second of sub-step, and what it costs ===
+    max_dt   worst C  per second   spread  /0.16 C  substeps
+    1.0000   0.09905      0.0990     4.8%    61.9%      1476
+    0.5000   0.05391      0.1078     4.8%    33.7%      2706
+    0.2500   0.02813      0.1125     4.8%    17.6%      5166
+    0.1250   0.01429      0.1143     4.8%     8.9%     10086
+    0.0625   0.00712      0.1139     4.8%     4.4%     19950
+
+  The error is first order in the sub-step and, to within the spread
+  column, INDEPENDENT of theta and n_delay -- because the chain no
+  longer contributes any. So the sub-step is derived from the
+  chamber alone, and 0.125 s is where the numerical error falls below
+  a ninth of the 0.16 C the single-lump structure was adopted at.
+
+=== 5. cost: wall clock for one simulation of the 247-row cook ===
+  euler chain, max_dt=1.0 (was)         4.91 ms
+  exact chain, max_dt=1.0               5.08 ms
+  exact chain, max_dt=0.25              7.58 ms
+  exact chain, max_dt=0.125 (now)      10.38 ms
+
+=== 5b. cost: wall clock for a real-cook fit, which is the inner loop ===
+  euler chain, max_dt=1.0 (was)           168 ms  (9 evaluations, theta 118.08)
+  exact chain, max_dt=0.125 (now)         391 ms  (10 evaluations, theta 111.32)
+
+=== 6. what the euler chain's under-delay did to a fitted theta ===
+  Synthetic records generated at a converged sub-step from a known theta,
+  then fitted back with the shipped free set through each integrator.
+   true theta  n_delay  euler fit  exact fit  euler bias
+          2.0        8       9.97       2.06        7.97
+          2.0       20      21.97       2.06       19.97
+          6.0        8      13.98       6.06        7.98
+          6.0       20      25.98       6.06       19.98
+         30.0        8      38.03      30.06        8.03
+         30.0       20      50.03      30.06       20.03
+        120.0        8     128.27     120.06        8.27
+        120.0       20     140.25     120.06       20.25
+
+  The euler bias column is n_delay * max_dt to two decimals -- the chain
+  under-delayed by half a sub-step per stage and the solve bought that
+  back with a longer theta. The estimator and the NLP discretize the
+  same continuous model exactly, so they never saw that theta as the
+  fit's own artifact; they planned against it as the grill's deadtime.

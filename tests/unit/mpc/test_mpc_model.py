@@ -96,26 +96,67 @@ def test_transport_delay_postpones_the_response():
     assert delayed[-1] < prompt[-1]
 
 
-def test_substepping_keeps_a_coarse_log_grid_stable():
-    # The fastest state is a transport lag stage, theta/n_delay -- 5 s for the
-    # pair below -- so an Euler step taken at a 20 s log cadence is four times
-    # past that stage's stability limit and runs away by orders of magnitude.
-    # Integrating at max_dt instead of the sample spacing makes the result
-    # independent of how often the log happened to be written.
-    #
-    # The chamber alone would NOT show this: C_c/h_amb is 640 s, stable at any
-    # cadence a log is written at, so a version of this test without the delay
-    # chain passes whether or not the sub-stepping exists.
+def test_substepping_makes_the_answer_independent_of_the_log_cadence():
+    # A log is written at whatever cadence the controller happened to run at,
+    # and the same grill must fit to the same parameters either way. Sub-
+    # stepping to max_dt is what decouples the two: without it the chamber's
+    # Euler step is the sample spacing, and a 20 s spacing is 160 times the
+    # shipped sub-step.
     #
     # Both grids END at the same instant, or the comparison would measure the
-    # trajectory's slope across the gap rather than the integrator's stability.
+    # trajectory's slope across the gap rather than the integrator.
     fast = dict(_P, theta=20.0, n_delay=4)
     t_coarse = np.arange(0.0, 601.0, 20.0)
     t_fine = np.arange(0.0, 601.0, 1.0)
     coarse = simulate_grey_box(t_coarse, np.full(t_coarse.shape, 100.0), T0=20.0, **fast)
     fine = simulate_grey_box(t_fine, np.full(t_fine.shape, 100.0), T0=20.0, **fast)
-    assert abs(coarse[-1] - fine[-1]) < 1.0
+    assert abs(coarse[-1] - fine[-1]) < 0.05
     # The negative control: the same coarse grid integrated AT the sample
-    # spacing is the divergence the sub-stepping exists to prevent.
-    unstable = simulate_grey_box(t_coarse, np.full(t_coarse.shape, 100.0), T0=20.0, max_dt=20.0, **fast)
-    assert abs(unstable[-1] - fine[-1]) > 100.0
+    # spacing, which is the log cadence leaking into the answer.
+    cadence_bound = simulate_grey_box(t_coarse, np.full(t_coarse.shape, 100.0), T0=20.0, max_dt=20.0, **fast)
+    assert abs(cadence_bound[-1] - fine[-1]) > 5.0
+
+
+def test_a_short_deadtime_simulates_instead_of_overflowing():
+    # theta = 3 s over 8 stages is a 0.375 s lag stage. Integrating the chain
+    # with explicit Euler is stable only below 2 * theta / n_delay = 0.75 s, so
+    # at the 1 s sub-step this function used to take, this record overflowed to
+    # inf and the calibration solve consumed it as data. theta is FITTED, with
+    # no lower bound worth the name, so nothing upstream can promise it away.
+    #
+    # The chain is now advanced in closed form, which has no stability limit at
+    # all -- so the assertion is the stronger one: not merely finite, but
+    # correct against a converged reference.
+    fast = dict(_P, theta=3.0, n_delay=8)
+    t = np.arange(0.0, 1200.0, 5.0)
+    Q = np.where(t < 600.0, 100.0, 20.0)
+    out = simulate_grey_box(t, Q, T0=20.0, **fast)
+    assert np.all(np.isfinite(out))
+    # A converged reference: a sub-step 60x shorter than the shipped one, which
+    # is far enough down the first-order error curve to be the answer.
+    converged = simulate_grey_box(t, Q, T0=20.0, max_dt=0.002, **fast)
+    # 0.044 C as shipped; an Euler chain given a sub-step short enough to be
+    # stable here at all still lands at 0.57 C.
+    assert float(np.sqrt(np.mean((out - converged) ** 2))) < 0.1
+
+
+def test_the_delay_chain_carries_no_discretization_error_of_its_own():
+    # The chain is linear and its input is constant across a sample interval,
+    # so its state is exact at any sub-step. That is what removed the bias the
+    # solve used to pay for by inflating theta: an Euler chain under-delays by
+    # about half a sub-step per stage, which at n_delay=8 and a 1 s sub-step is
+    # 8 s of deadtime the grill does not have.
+    #
+    # Measured as the whole simulation's sensitivity to the sub-step at a LONG
+    # theta, where the chamber contributes least: a 16x coarser sub-step must
+    # not move the trajectory by more than the chamber's own first-order error
+    # over that step, and nothing like the seconds of delay an Euler chain
+    # would shift it by.
+    slow = dict(_P, theta=160.0, n_delay=8)
+    t = np.arange(0.0, 2400.0, 5.0)
+    Q = np.where(t < 1200.0, 100.0, 0.0)
+    shipped = simulate_grey_box(t, Q, T0=20.0, **slow)
+    coarse = simulate_grey_box(t, Q, T0=20.0, max_dt=2.0, **slow)
+    # 0.81 C as shipped, all of it the chamber's; an Euler chain moves 10.9 C
+    # over the same change of sub-step, which is the 8 s of delay it loses.
+    assert float(np.max(np.abs(coarse - shipped))) < 2.0

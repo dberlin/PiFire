@@ -92,6 +92,13 @@ _LOWER_BOUND = 1e-9
 # exhausted solve as a finished one.
 _MAX_NFEV = 2000
 
+# The per-sample residual reported for a parameter set the model cannot be
+# simulated at. 1e4 degrees C is far outside anything a cook contains, so the
+# solve treats such a point as very bad, which is what it is; what matters is
+# that it is a NUMBER, because a NaN residual is not comparable to anything and
+# a trust region cannot step away from what it cannot compare.
+_DIVERGED = 1e4
+
 # Said in both output modes, so neither can be the one that stays quiet.
 _NOT_CONVERGED = (
     "WARNING: the solver ran out of evaluations after {nfev} without meeting a\n"
@@ -160,18 +167,47 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
     # from, so it starts at the floor rather than taking the solve down with it.
     x0 = np.array([_log_or_floor(init[k], lo) for k in _FREE], dtype=float)
 
-    def residual(z):
+    def simulate(z):
+        """The trajectory at `z`, or None where the model cannot be simulated.
+
+        A parameter set the solve is only trying out can drive the chamber
+        integration away, and it does so in either of two shapes. The chamber
+        state is a Python float, so its radiative term raises OverflowError
+        past about 1e77 -- an exception out of the middle of a fit, not a
+        number -- while an intermediate that goes through numpy instead
+        produces inf and NaN. Both are the same event and both are caught
+        here, because a caller that has to remember which one a given
+        parameter set produces has not been given a guard.
+        """
         params = dict(held)
         params.update(zip(_FREE, (math.exp(v) for v in z)))
         params.update(n_delay=n_delay)
-        return simulate_grey_box(t, Q, T_amb=T_amb, T0=float(temp[0]), **_sim_kwargs(params)) - temp
+        try:
+            y = simulate_grey_box(t, Q, T_amb=T_amb, T0=float(temp[0]), **_sim_kwargs(params))
+        except OverflowError:
+            return None
+        return y if np.all(np.isfinite(y)) else None
+
+    def residual(z):
+        y = simulate(z)
+        # NaN reaching least_squares is not a large residual -- every
+        # comparison against it is False, so the step that produced it is
+        # neither accepted nor rejected on its merits and the solve wanders
+        # from there. `_DIVERGED` is finite, so such a point is simply a very
+        # bad one and the trust region shrinks away from it.
+        if y is None:
+            return np.full_like(temp, _DIVERGED)
+        return y - temp
 
     res = least_squares(residual, x0, method="trf", bounds=(lo, np.inf), max_nfev=_MAX_NFEV)
     out = dict(held)
     out.update(zip(_FREE, (math.exp(float(v)) for v in res.x)))
     # status 0 is scipy's "the evaluation budget ran out"; every other
-    # non-negative status is one of its convergence criteria being met.
-    out.update(converged=bool(res.status > 0), nfev=int(res.nfev))
+    # non-negative status is one of its convergence criteria being met. A point
+    # the model cannot even be simulated at is not a fit whatever scipy makes
+    # of the residuals around it, so the finite check is ANDed in rather than
+    # left to the caller: this result is about to be offered to a live grill.
+    out.update(converged=bool(res.status > 0) and simulate(res.x) is not None, nfev=int(res.nfev))
     out.update(n_delay=int(n_delay), T_amb=float(T_amb))
     return out
 
