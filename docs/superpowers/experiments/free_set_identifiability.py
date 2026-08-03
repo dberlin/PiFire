@@ -43,13 +43,16 @@ from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
-from controller.grill_sim import DT, GrillSim, MAKGrillSim
-from controller.mpc_model import simulate_grey_box
-from controller.update_mpc import _sim_kwargs, fit_params, fit_quality
-
-from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
+# Ahead of the `controller` imports, not after them: the guard puts the repo
+# root on sys.path itself, so importing it first is what makes this refuse with
+# the reason rather than with a ModuleNotFoundError for `controller`.
+import _pinned_two_lump  # noqa: F401,E402
 
 _pinned_two_lump.require_pinned_model(__name__)
+
+from controller.grill_sim import DT, GrillSim, MAKGrillSim  # noqa: E402
+from controller.mpc_model import simulate_grey_box  # noqa: E402
+from controller.update_mpc import _sim_kwargs, fit_params, fit_quality  # noqa: E402
 
 #: Shipped grey-box defaults -- the point a calibration actually starts from.
 DEFAULTS = dict(C_f=9.0, C_c=320.0, h_fc=1.3, h_amb=0.50, T_amb=20.0, theta=50.0, n_delay=4, K_Q=3.5, sigma=1.4e-9)

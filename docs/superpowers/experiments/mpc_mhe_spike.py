@@ -16,7 +16,12 @@ warnings.filterwarnings("ignore")
 sys.path.insert(0, "docs/superpowers/experiments")
 import numpy as np
 import do_mpc
-import mpc_cascade_spike as S
+
+import _pinned_two_lump  # noqa: F401,E402
+
+_pinned_two_lump.require_pinned_model(__name__)
+
+import mpc_cascade_spike as S  # noqa: E402
 
 np.random.seed(0)
 

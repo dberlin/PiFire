@@ -26,7 +26,12 @@ sys.path.insert(0, ".")
 import numpy as np
 from scipy.linalg import expm
 import do_mpc
-from mpc_hifi_sim import HiFiGrill, SETPOINT
+
+import _pinned_two_lump  # noqa: F401,E402
+
+_pinned_two_lump.require_pinned_model(__name__)
+
+from mpc_hifi_sim import HiFiGrill, SETPOINT  # noqa: E402
 
 U_MIN, U_MAX = 0.10, 0.90
 Q_MIN, Q_MAX = 5.0, 100.0

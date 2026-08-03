@@ -26,6 +26,10 @@ warnings.filterwarnings("ignore")
 import numpy as np
 import do_mpc
 
+import _pinned_two_lump  # noqa: F401,E402
+
+_pinned_two_lump.require_pinned_model(__name__)
+
 np.random.seed(0)
 
 Ts = 25.0
