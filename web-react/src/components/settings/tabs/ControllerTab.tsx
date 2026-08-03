@@ -116,6 +116,9 @@ export function ControllerTab() {
   // Derived from the draft so the consequence is visible while deciding, not
   // after saving.
   const learning = selected === "mpc" && !!values.enable_identification;
+  // The NLP solve is already unconditional; only the neural-net fast path is
+  // displaced by a refit, so the cost only applies under that policy.
+  const netPolicy = selected === "mpc" && values.policy === "net";
 
   const onSave = async () => {
     if (fanConflict) return; // do NOT call save(): the fan lever would be wired to nothing
@@ -236,7 +239,7 @@ export function ControllerTab() {
         }
         return null;
       })}
-      {learning && (
+      {learning && netPolicy && (
         <p className="pf-settings-hint">
           A learned calibration no longer matches the pre-trained neural policy, so while this grill
           is learning, the controller falls back to solving the full optimisation every step.

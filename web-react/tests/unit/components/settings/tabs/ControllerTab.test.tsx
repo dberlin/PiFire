@@ -111,6 +111,17 @@ const controllerMeta: ControllerMetadata = {
           list_labels: ["EKF (nonlinear, fast)", "MHE (nonlinear)", "Kalman (linear)"],
         },
         {
+          option_name: "policy",
+          option_friendly_name: "Firing-Rate Policy",
+          option_description: "How the firing rate is computed.",
+          option_type: "list",
+          option_default: "nlp",
+          option_min: null,
+          option_max: null,
+          list_values: ["nlp", "net"],
+          list_labels: ["NLP solve (do_mpc)", "Neural net (fast, IPOPT-free)"],
+        },
+        {
           option_name: "policy_net_path",
           option_friendly_name: "Policy Net Path",
           option_description: "Path to the trained neural-net policy artifact.",
@@ -133,9 +144,9 @@ const controllerMeta: ControllerMetadata = {
           option_friendly_name: "Learn This Grill",
           option_description:
             "After each cook, refit the thermal model from that cook and keep it if it " +
-            "describes the grill better. A learned calibration no longer matches the " +
-            "pre-trained neural policy, so the controller falls back to solving the full " +
-            "optimisation every step.",
+            "describes the grill better. On the Neural Net firing-rate policy, a learned " +
+            "calibration no longer matches the trained artifact, so the controller falls " +
+            "back to the full optimisation until it is retrained.",
           option_type: "bool",
           option_default: false,
           option_min: null,
@@ -303,6 +314,7 @@ describe("ControllerTab", () => {
               mpc: {
                 n_horizon: 8,
                 estimator: "kf",
+                policy: "nlp",
                 policy_net_path: "./custom/net.npz",
                 enable_fan_input: false,
                 enable_identification: false,
@@ -483,32 +495,37 @@ describe("ControllerTab MPC fan authority", () => {
 });
 
 describe("ControllerTab identification note", () => {
-  const ctx = (learning: boolean) => ({
+  const ctx = (learning: boolean, policy = "net") => ({
     settings: {
       platform: { dc_fan: true },
       pwm: { pwm_control: true },
       controller: {
         selected: "mpc",
-        config: { mpc: { enable_fan_input: false, enable_identification: learning } },
+        config: { mpc: { enable_fan_input: false, enable_identification: learning, policy } },
       },
     },
     mode: "Stop",
     controllerMeta,
   });
 
-  it("explains the policy cost when learning is on", () => {
+  it("explains the fallback when learning is on and the fast path is in use", () => {
     renderRoute(<ControllerTab />, ctx(true));
-    expect(screen.getByText(/neural policy/i)).toBeInTheDocument();
+    expect(screen.getByText(/falls back to solving the full optimisation/i)).toBeInTheDocument();
   });
 
   it("says nothing when learning is off", () => {
     renderRoute(<ControllerTab />, ctx(false));
-    expect(screen.queryByText(/neural policy/i)).toBeNull();
+    expect(screen.queryByText(/falls back to solving the full optimisation/i)).toBeNull();
   });
 
   it("appears as soon as the toggle is flipped, before saving", () => {
     renderRoute(<ControllerTab />, ctx(false));
     fireEvent.click(screen.getByRole("button", { name: "Learn This Grill" }));
-    expect(screen.getByText(/neural policy/i)).toBeInTheDocument();
+    expect(screen.getByText(/falls back to solving the full optimisation/i)).toBeInTheDocument();
+  });
+
+  it("says nothing when learning is on but the firing-rate policy is NLP (already solves in full)", () => {
+    renderRoute(<ControllerTab />, ctx(true, "nlp"));
+    expect(screen.queryByText(/falls back to solving the full optimisation/i)).toBeNull();
   });
 });
