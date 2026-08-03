@@ -116,3 +116,30 @@ def test_write_current_carries_a_stale_probe_across_passes(db):
     stored = json.loads(db.get_blob("control:current"))
     assert stored["F"]["PinkProbe"] is None
     assert stored["LAST"]["PinkProbe"] == first
+
+
+def test_get_temp_reports_a_stale_probe_as_none(db):
+    # A probe with no reading must reach the API as null, not as 0. The bare
+    # dict let each consumer decide that for itself.
+    from common import api_commands, datastore_accessors as dsa
+
+    _seed_probe_map(db)
+    dsa.write_current(
+        {
+            "probe_history": {"primary": {"PitProbe": 210}, "food": {"PinkProbe": None}, "aux": {}},
+            "primary_setpoint": 225,
+            "notify_targets": {"PitProbe": 0, "PinkProbe": 165},
+        }
+    )
+    data = {"data": {}, "result": "OK"}
+    api_commands._cmd_get_temp(data, None, None, ["temp", "PinkProbe"], None, None)
+    assert data["result"] == "OK"
+    assert data["data"]["temp"] is None
+
+    data = {"data": {}, "result": "OK"}
+    api_commands._cmd_get_temp(data, None, None, ["temp", "PitProbe"], None, None)
+    assert data["data"]["temp"] == 210
+
+    data = {"data": {}, "result": "OK"}
+    api_commands._cmd_get_temp(data, None, None, ["temp", "NoSuchProbe"], None, None)
+    assert data["result"] == "ERROR"

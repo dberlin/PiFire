@@ -22,7 +22,7 @@ from common.datastore_accessors import (
     flush_autotune,
     read_autotune,
     read_control,
-    read_current,
+    read_current_snapshot,
     read_settings,
     read_tr,
     write_autotune,
@@ -265,13 +265,12 @@ def tuner_profile():
 def _reference_temp(current, reference):
     """The reference probe's temperature, or None if it is not reporting.
 
-    read_current() groups probes as P / F / AUX by label, and Flask checks them
-    in that order. None (not -1): a probe absent from every group is not
-    reporting, which the client renders as "waiting" -- distinct from a real
-    reading that happens to be zero.
+    Probes are checked primary, then food, then aux, matching Flask. None (not
+    -1): a probe absent from every group is not reporting, which the client
+    renders as "waiting" -- distinct from a real reading that happens to be
+    zero.
     """
-    for group in ("P", "F", "AUX"):
-        values = current.get(group, {})
+    for values in (current.primary, current.food, current.aux):
         if reference in values:
             return values[reference]
     return None
@@ -301,7 +300,7 @@ def tuner_auto_status():
         return error("bad_request", 400, field="reference")
 
     current_tr = read_tr().get(probe)
-    current_temp = _reference_temp(read_current(), reference)
+    current_temp = _reference_temp(read_current_snapshot(), reference)
 
     #  Record only a complete, warmed-up reading. `current_temp > 0` lets an
     #  early sample through once the probe is live; `autotune_length() > 4`

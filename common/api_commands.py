@@ -30,6 +30,7 @@ from common.modes import Mode
 from common.datastore_accessors import (
     read_control,
     read_current,
+    read_current_snapshot,
     read_pellet_db,
     read_settings,
     read_status,
@@ -297,17 +298,15 @@ def _cmd_get_temp(data, control, settings, arglist, origin, kind):
         'result' : 'OK'
     }
     """
-    current_temps = read_current()
+    current = read_current_snapshot()
 
-    if arglist[1] in current_temps["P"].keys():
-        data["data"]["temp"] = current_temps["P"][arglist[1]]
-    elif arglist[1] in current_temps["F"].keys():
-        data["data"]["temp"] = current_temps["F"][arglist[1]]
-    elif arglist[1] in current_temps["AUX"].keys():
-        data["data"]["temp"] = current_temps["AUX"][arglist[1]]
-    else:
-        data["result"] = "ERROR"
-        data["message"] = f"Probe {arglist[1]} not found or not specified."
+    for section in (current.primary, current.food, current.aux):
+        if arglist[1] in section:
+            data["data"]["temp"] = section[arglist[1]]
+            return
+
+    data["result"] = "ERROR"
+    data["message"] = f"Probe {arglist[1]} not found or not specified."
 
 
 def _cmd_get_current(data, control, settings, arglist, origin, kind):
