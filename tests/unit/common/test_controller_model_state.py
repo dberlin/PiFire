@@ -286,6 +286,25 @@ def test_load_priming_avoids_a_read_on_a_subsequent_cache_hit_save():
     assert fake.reads == reads_before  # cache hit primed by load(): no read needed
 
 
+def test_a_full_identifier_bank_round_trips():
+    """Slice B persists 25 RLS candidates: coefficients (25x3), covariances
+    (25x3x3) and residuals (25). That is ~7 KB of JSON -- under the old cap,
+    but with too little headroom to build on."""
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    snapshot = {
+        "revision": 3,
+        "Theta": rng.normal(size=(25, 3)).tolist(),
+        "P": rng.normal(size=(25, 3, 3)).tolist(),
+        "resid_ew": rng.normal(size=25).tolist(),
+        "trusted": {"K": 1.23, "tau": 3750.0, "theta": 95.0},
+    }
+    store, _ = _store()
+    assert store.save("mpc", snapshot) is True
+    assert store.load("mpc")["revision"] == 3
+
+
 def test_round_trips_through_the_real_datastore_seam(ds):
     # The fake in every other test matches read_generic_key's documented
     # behavior on purpose, but only this test exercises the actual seam:

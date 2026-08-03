@@ -52,7 +52,12 @@ from common.datastore_accessors import read_generic_key, write_generic_key
 
 MODEL_STATE_KEY = "controller_model_state"
 SCHEMA_VERSION = 1
-MAX_SNAPSHOT_BYTES = 8192
+
+# Large enough that the bound is not a design constraint on what a controller
+# may learn: a 25-candidate RLS bank with 3x3 covariances is ~7 KB of plain
+# JSON. Plain JSON is kept over a packed encoding at this size because a model
+# that drives a fire should stay readable in the datastore.
+MAX_SNAPSHOT_BYTES = 65536
 
 _logger = logging.getLogger("control")
 
