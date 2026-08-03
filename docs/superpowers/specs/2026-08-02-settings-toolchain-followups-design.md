@@ -2,7 +2,7 @@
 
 **Status:** design, awaiting review.
 **Scope:** the seven items left open under *Schema and toolchain follow-ups* in
-`react-migration-backlog.md` once persisted schema versioning shipped
+`backlogs/react-migration-backlog.md` once persisted schema versioning shipped
 (2026-08-02).
 
 ## Where these items came from
@@ -54,7 +54,7 @@ when a `defaults.py` literal drifts from its pydantic field default.
 Consolidation would upgrade that from *detected* to *structurally impossible* —
 real, but smaller than the item implies, and it cannot go all the way: the nine
 `MASKED_PATHS` entries have no static default to generate from. That half is
-Python-side and is filed as **`backend-backlog.md` item 1**, out of scope here.
+Python-side and is filed as **`backlogs/backend-backlog.md` item 1**, out of scope here.
 The half that is genuinely unguarded is the frontend's, and it is in scope: see
 Slice A4.
 
@@ -288,7 +288,7 @@ fields round on blur, where the existing clamp already runs.
   it does not add a second validator. The S1/S2 disagreement SS-3 records
   ("delete the duplicated React clamps" vs "client clamps STAY (UX)") is
   resolved in favour of S2: clamps stay, and C4 extends them.
-- **`defaults.py` generation** is `backend-backlog.md` item 1.
+- **`defaults.py` generation** is `backlogs/backend-backlog.md` item 1.
 - **No new settings surfaces.** Nothing here adds a field, tab or endpoint.
 
 ## Risks

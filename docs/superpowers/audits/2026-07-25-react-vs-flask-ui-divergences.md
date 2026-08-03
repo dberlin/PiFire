@@ -49,7 +49,7 @@ would mark almost every finding CRITICAL, which makes the grade useless. As appl
 
 ## Explicitly excluded (recorded decisions, verified — not findings)
 
-- `PlatformTab` read-only by design (`react-migration-backlog.md:70-76`).
+- `PlatformTab` read-only by design (`backlogs/react-migration-backlog.md:70-76`).
 - History slice is chart-only; cook-file list/upload/delete deferred (`backlog:93-98`).
 - Empty-history payload shape change; `datapoints`/LTTB semantic change
   (`history-chart-progress.md:388-410`, human-decided).
@@ -61,9 +61,9 @@ would mark almost every finding CRITICAL, which makes the grade useless. As appl
   as *disclosed*, for completeness.
 - Standalone un-migrated Flask pages (`/manual`, `/pellets`, `/admin`, `/recipes`,
   `/cookfile`, `/events`, `/logs`, `/probeconfig`, `/tuner`, `/update`, `/metrics`,
-  `/mobile`) — tracked in `react-migration-backlog.md:87-144`.
+  `/mobile`) — tracked in `backlogs/react-migration-backlog.md:87-144`.
 - The two already-known misses (no global nav; timer stopwatch toggle) are recorded
-  in `react-migration-backlog.md:24-48` and are not re-litigated here, except where a
+  in `backlogs/react-migration-backlog.md:24-48` and are not re-litigated here, except where a
   *third* thing rides on the same gap (see IMPORTANT-8).
 
 ---
@@ -92,7 +92,7 @@ The data is all present and unused: `helpers/types.ts:22-32` models `target`,
 `targetKeepWarm`, `hasNotifications` — **every one of them has zero non-test consumers**
 (verified by grep across `web-react/src`).
 
-**Disclosed?** No. Not in any report, not in `react-migration-backlog.md`. The
+**Disclosed?** No. Not in any report, not in `backlogs/react-migration-backlog.md`. The
 dashboard spec's Goal 2 (`specs/2026-07-22-dashboard-real-design.md:39-41`) enumerates
 "mode changes, setpoint, Smoke+, timer, system commands" and simply never mentions
 notifications; the Non-Goals list (`:47-51`) is about *other pages*, so nothing recorded
@@ -253,7 +253,7 @@ of **0.30**: the 66 px probe temperature (`ProbeCard.tsx:44`) renders at ~20 px 
 `plans/2026-07-22-dashboard-real.md`, or `dashboard-real-progress.md`. The only
 `viewport: {width: 1280, height: 720}` in the plan is a Playwright setting
 (`plans/2026-07-22-dashboard-real.md:1036`) — i.e. the test harness was configured to
-the one viewport where the problem is invisible. `react-migration-backlog.md:143` even
+the one viewport where the problem is invisible. `backlogs/react-migration-backlog.md:143` even
 writes *"mobile — may be obsolete if React is responsive"*, showing the backlog author
 believed it was.
 
@@ -677,7 +677,7 @@ category the audit brief asked to be called out.
   `wizard-finish.html`, `wizard.js`, both blueprints, the imported `probeconfig` macros
   and the real `wizard_manifest.json`, vs the whole `components/wizard/` tree. I
   independently re-verified C4, C5 (against the live manifest) and C6.
-- Ledgers/specs read for decision-vs-drift: `react-migration-backlog.md`,
+- Ledgers/specs read for decision-vs-drift: `backlogs/react-migration-backlog.md`,
   `dashboard-real-progress.md`, `history-chart-progress.md`, `settings-*-progress.md`,
   `toolchain-progress.md`, `wizard-family-inventory.md`, and the four
   `docs/superpowers/{specs,plans}` dashboard/history/shell/wizard documents.

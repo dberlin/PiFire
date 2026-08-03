@@ -1709,7 +1709,7 @@ Restart gunicorn first. Do **not** run `bun run test:e2e`.
 
 ### Task 18: backlog and closeout
 
-The standing rule in `docs/superpowers/react-migration-backlog.md`: a slice is
+The standing rule in `docs/superpowers/backlogs/react-migration-backlog.md`: a slice is
 not done until its deferrals are recorded there, because a plan document is read
 once and then never again.
 

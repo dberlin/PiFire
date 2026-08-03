@@ -190,7 +190,7 @@ that is not the tune target.
 | `web-react/tests/e2e/tuner.spec.ts` | Auto-flow e2e (Task 6) |
 | `web-react/tests/e2e/apiFixtures.ts` | `stubTuner` covers auto-status (Task 6) |
 | `web-react/tests/e2e/pageSpecs.ts` | tuner spec: capture the auto screen too, or note why not (Task 6) |
-| `docs/superpowers/react-migration-backlog.md` | Closeout (Task 6) |
+| `docs/superpowers/backlogs/react-migration-backlog.md` | Closeout (Task 6) |
 
 **Deliberately not created:** no new session, coefficients, profile, chart, or
 save module. If a task finds itself rewriting one of those, stop — the slice is
@@ -964,7 +964,7 @@ EOF
 **Files:**
 - Modify: `web-react/tests/e2e/tuner.spec.ts`, `apiFixtures.ts`, `pageSpecs.ts`,
   baselines
-- Modify: `docs/superpowers/react-migration-backlog.md`
+- Modify: `docs/superpowers/backlogs/react-migration-backlog.md`
 
 - [ ] **Step 1: Backend up with the RIGHT worker**
 
@@ -1032,7 +1032,7 @@ before treating it as real.
 
 - [ ] **Step 7: Close out the backlog**
 
-In `docs/superpowers/react-migration-backlog.md`:
+In `docs/superpowers/backlogs/react-migration-backlog.md`:
 
 - Mark the **tuner** §8 line `[x]` SHIPPED — both flows now exist.
 - Extend the Tuner SHIPPED entry with the auto flow: the one new endpoint, the

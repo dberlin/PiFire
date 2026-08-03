@@ -61,6 +61,14 @@ one section instead of being sprinkled through the entries.
   happens. Nobody did. Name the item the pass has to close, so the pass's own
   checklist carries it.
 
+- **2026-08-03** — pass after the settings-toolchain follow-ups shipped
+  (`v1.11.0-dev23`). Item 10's "Schema and toolchain follow-ups" said none of
+  the remaining seven had been started; all seven had shipped the day before.
+  Item 15's cause was recorded in its own entry but the triage list at the top
+  still called it unestablished — the same entry read two different ways
+  depending on which end you started from, which is the failure mode a summary
+  table exists to prevent and also the one it creates.
+
 This file previously lived in `.superpowers/sdd/`, which is gitignored scratch
 that `git clean -fdx` destroys. It is tracked now. Three audit documents cite
 it by path and line number; those citations point here.
@@ -778,12 +786,16 @@ biggest of those, in rough order of consequence:
    `/manual` is one instance of it.
 3. No PWA manifest.
 4. Wizard has no 800×480 coverage; no e2e for Exit Setup.
-5. The rest of the schema and toolchain follow-ups — none started.
+5. ~~The rest of the schema and toolchain follow-ups~~ — **all shipped
+   2026-08-02** in `v1.11.0-dev23`. What they left behind is items 16 and 17
+   here, and item 1 of `backend-backlog.md`.
 6. Shutdown does not read as destructive, and Stop/Shutdown sit in opposite
    orders here and on the attached display (item 12). Note what Shutdown
    actually does before scheduling this one — it is not a styling item.
 7. Probe cards intermittently read 0 while the attached display never does
-   (item 15) — reported from a live grill, cause not yet established.
+   (item 15) — reported from a live grill; **cause established**, fix not
+   written. A stale reading arrives as `null` and `Math.round(null)` is `0`;
+   QML refuses the same assignment, which is why only the web UI shows it.
 8. Two small ones: whether P-MODE/SMOKE+ should be Smoke-only (item 13, needs a
    ruling) and a superseded helper to delete (item 14).
 
@@ -1927,17 +1939,36 @@ on change makes a bounded field untypeable (`min={20}` turns the intermediate
 `settings/fields/NumberField.tsx:41-45`, `settings/RangeProfileTable.tsx:86,102,113`,
 `settings/tabs/StartupTab.tsx:111,115`.
 
-#### Schema and toolchain follow-ups — MIXED
+#### Schema and toolchain follow-ups — DONE 2026-08-02, shipped in `v1.11.0-dev23`
 
-Persisted schema versioning is **DONE** (below) and `additionalProperties`
-stripping is **DONE** (below). Per-controller schema generation is
-**IN PROGRESS** (below). The rest are still open; none has been started.
+All seven are closed. Spec:
+`specs/2026-08-02-settings-toolchain-followups-design.md`; plan:
+`plans/2026-08-02-settings-toolchain-followups.md` (12 tasks).
 
-S3 defaults consolidation and typed deep-path `setPath` helpers;
-`<path>: <why>` save-error display; read-path validation never scoped;
-mapping a dotted error path to the offending widget; the four 2b-1
-follow-ups (`waitFor`, `read*` fallback defaults, `aria-describedby`,
-float-vs-int audit).
+| Follow-up | Where it landed |
+|---|---|
+| Per-controller schema generation | `scripts/emitControllerTypes.ts` → `controllerTypes.gen.ts`, consumed by `ControllerTab` |
+| `additionalProperties` stripping | already closed by S2's `extra="forbid"` — see below |
+| S3 defaults consolidation | `scripts/emitSettingsDefaults.ts` → `SETTINGS_DEFAULTS`; the Python half is `backend-backlog.md` item 1 |
+| Typed deep-path `setPath` | `helpers/settings/paths.ts` — `PathsOf<T>` / `ValueAt<T, P>` |
+| `<path>: <why>` save-error display | `format_validation_pairs()` in `settings_schema.py`, carried to the client as `errors[]` |
+| Dotted error path → offending widget | `CLAIMED_PATHS` in `StartupTab`, `NumberField`'s `error` slot |
+| The four 2b-1 follow-ups | `waitFor`, `read*` fallbacks, `aria-describedby`, float-vs-int audit |
+
+Read-path validation was scoped and landed as `_validate_settings_in_store()`
+— deliberately **observe-only**: it logs what the persisted tree violates and
+never strips, rewrites, or raises, because a boot that refuses to start on a
+settings tree it dislikes is worse than one that cooks and complains.
+
+Three things this work left open, filed rather than folded in: items 16 and 17
+here, and `backend-backlog.md` item 1 (`defaults.py` / `settings_schema.py`
+dual authority — the Python half of S3).
+
+Two live bugs it fixed that nobody had scheduled: `cycle_data.u_max` defaulted
+to `100` on the client where the schema and `controller/mpc.py:143` say `0.9`,
+so `cycle.py:38`'s `ratio = min(ratio, u_max)` duty cap never engaged; and
+`NumberField`/`Toggle` folded their hint text into the control's accessible
+name (`"Sleep Timeout0 = never sleep."`).
 
 `additionalProperties` stripping is **DONE**, and was closed by S2 rather than
 by this work. `_Section` is `extra="forbid"`, so every modelled section emits
@@ -1951,12 +1982,12 @@ field already fails `bun run typecheck`. Exactly six nodes carry
 correct output, not leakage. Nothing was left to strip, and stripping the
 `dict[str, X]` form would have been a regression.
 
-Per-controller schema generation from `controllers.json` is **IN PROGRESS**.
-The generator (`web-react/scripts/emitControllerTypes.ts`) and the generated
-`ControllerConfigs` / `PidConfig` / `MpcConfig` / … types
-(`src/helpers/settings/controllerTypes.gen.ts`) have landed; `ControllerTab`
-does not consume them yet. Both halves are tracked in
-`docs/superpowers/plans/2026-08-02-settings-toolchain-followups.md`.
+Per-controller schema generation from `controllers.json` is **DONE**. The
+generator (`web-react/scripts/emitControllerTypes.ts`) emits
+`ControllerConfigs` / `PidConfig` / `MpcConfig` / … to
+`src/helpers/settings/controllerTypes.gen.ts`, `ControllerTab` consumes them,
+and `bun run gen:types:check` byte-compares the committed artifact against a
+fresh emit so the two cannot drift apart unnoticed.
 
 **DONE 2026-08-02 for both durable blobs; the wizard manifest is deliberately
 out of scope (see the corrections below).** The settings tree and the pellet

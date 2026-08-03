@@ -84,11 +84,11 @@ own sub-project.
 **Findings:** C8, M5, plus the audit's own uncovered-area caveats.
 **Real gap or nice-to-have:** these are the two places where nobody can write a task
 because nobody has decided what the answer is. Blocking, not optional.
-**Plan needed?** No plan — a decision, recorded in `react-migration-backlog.md`.
+**Plan needed?** No plan — a decision, recorded in `backlogs/react-migration-backlog.md`.
 
 | Item | The decision |
 |---|---|
-| **C8** — fixed 1280×720 uniformly-scaled stage | Ratify or reverse `hooks.ts:13-14`. Either *"the React dashboard targets the on-device 1280×720 touchscreen; phones keep the Flask/mobile UI"* — in which case `react-migration-backlog.md:143`'s *"mobile — may be obsolete if React is responsive"* is **wrong and must be corrected**, and the `/mobile` blueprint stays — or the stage reflows, which re-authors `Dashboard.tsx`, `ProbeCard.tsx`, `ControlButtons.tsx` and every fixed-pixel font in `dashboard.css`. **Confirm in a real browser at 390×844 first** — the audit's number is arithmetic. |
+| **C8** — fixed 1280×720 uniformly-scaled stage | Ratify or reverse `hooks.ts:13-14`. Either *"the React dashboard targets the on-device 1280×720 touchscreen; phones keep the Flask/mobile UI"* — in which case `backlogs/react-migration-backlog.md:143`'s *"mobile — may be obsolete if React is responsive"* is **wrong and must be corrected**, and the `/mobile` blueprint stays — or the stage reflows, which re-authors `Dashboard.tsx`, `ProbeCard.tsx`, `ControlButtons.tsx` and every fixed-pixel font in `dashboard.css`. **Confirm in a real browser at 390×844 first** — the audit's number is arithmetic. |
 | **M5** — no dashboard selection; `Basic` dashboard dropped wholesale | Flask ships two selectable dashboards plus a per-card hide/show modal (`hidden_cards`, `touch_screen_mode` — all three have zero React hits). Decide whether React ships one dashboard forever. If yes, `Basic`'s click-to-toggle manual outputs must be accounted for somewhere (it overlaps the un-migrated **manual** page already in the backlog). If no, someone must first do the comparison **nobody has done** — 795 lines of `dash_basic.js`. |
 
 **Why first:** C8 gates how Slice 3 is authored. Doing dashboard work before this decision
@@ -182,7 +182,7 @@ without the error surfacing means the next one is invisible too.
 
 **Findings:** I8, I9, M9.
 **Real gap:** yes for I8 and I9; M9 is mixed.
-**Plan needed?** **Fold into the existing backlog item** — `react-migration-backlog.md`
+**Plan needed?** **Fold into the existing backlog item** — `backlogs/react-migration-backlog.md`
 already owns the history surface with a recorded uPlot decision. This is a follow-up
 slice on that item, and it needs a plan only because I8 carries a live disagreement.
 
@@ -240,7 +240,7 @@ They touch three different tabs and can run fully in parallel.
 The audit's pattern note 2 is the point: *cross-cutting chrome has no home in a
 page-shaped backlog*. The shell slice hoists nav, timer and alerts — and stops there.
 Everything below still lives in `templates/base.html` with no React owner. **Add a
-"chrome" section to `react-migration-backlog.md` so the next one has a slot.**
+"chrome" section to `backlogs/react-migration-backlog.md` so the next one has a slot.**
 
 - **M2 — `page_theme` is settable but inert.** Verified: `GeneralTab.tsx:19,26,31` reads
   and writes it, **nothing reads it back**; `AppPrefs.tsx` handles `data-accent` only.

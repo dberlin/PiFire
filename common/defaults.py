@@ -361,7 +361,7 @@ def set_probe_map(settings, probe_map, control):
     /api/probe_map path and the installer, wizard.py) both used to regenerate
     settings["history_page"]["probe_config"] and nothing else, which left three
     other structures naming a probe that no longer exists (ruling 6, 2026-07-26,
-    docs/superpowers/react-migration-backlog.md):
+    docs/superpowers/backlogs/react-migration-backlog.md):
 
       * settings["recipe"]["probe_map"] -- controller/runtime/controller.py:158
         keys a recipe step's trigger_temps off these labels, so a stale one is

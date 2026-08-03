@@ -1,5 +1,5 @@
 """run_wizard has the same stale-probe-label hole the live /api/probe_map path
-had, and ruling 6 (2026-07-26, docs/superpowers/react-migration-backlog.md)
+had, and ruling 6 (2026-07-26, docs/superpowers/backlogs/react-migration-backlog.md)
 closes both.
 
 wizard.py wrote settings["probe_settings"]["probe_map"] and regenerated only

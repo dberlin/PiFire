@@ -157,7 +157,7 @@ describe("GeneralTab", () => {
     );
   });
 
-  // Ruling 4, 2026-07-26 (docs/superpowers/react-migration-backlog.md).
+  // Ruling 4, 2026-07-26 (docs/superpowers/backlogs/react-migration-backlog.md).
   // Flask put this field on its Display pane (settings/index.html:1080); the
   // React app has no Display tab, and General is where it belongs. It is not
   // decoration: the display process re-reads display.sleep_timeout once a

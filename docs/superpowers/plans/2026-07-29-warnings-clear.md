@@ -808,7 +808,7 @@ payload still reaches the user. Errors stay undismissable, matching Flask."
 ### Task 7: Full-suite gate and backlog
 
 **Files:**
-- Modify: `docs/superpowers/react-migration-backlog.md`
+- Modify: `docs/superpowers/backlogs/react-migration-backlog.md`
 
 **Interfaces:**
 - Consumes: everything above.
@@ -835,7 +835,7 @@ Expected: all green.
 
 - [ ] **Step 3: Update the backlog**
 
-In `docs/superpowers/react-migration-backlog.md`, find the "Deferred by the Flask-retirement pass" block and replace the "Warnings never auto-clear in React (behavioral gap)" bullet with a SHIPPED note naming the slice, the endpoint (`POST /api/dismiss_warnings`), the mechanism (high-water-mark clear, so a warning raised after the displayed payload is never lost), and the fact that `read_warnings`/`drain_warnings` and the Valkey-era warnings oracle scenario were retired with it. Leave the separate pre-existing e2e baseline-drift bullet alone.
+In `docs/superpowers/backlogs/react-migration-backlog.md`, find the "Deferred by the Flask-retirement pass" block and replace the "Warnings never auto-clear in React (behavioral gap)" bullet with a SHIPPED note naming the slice, the endpoint (`POST /api/dismiss_warnings`), the mechanism (high-water-mark clear, so a warning raised after the displayed payload is never lost), and the fact that `read_warnings`/`drain_warnings` and the Valkey-era warnings oracle scenario were retired with it. Leave the separate pre-existing e2e baseline-drift bullet alone.
 
 - [ ] **Step 4: Commit**
 

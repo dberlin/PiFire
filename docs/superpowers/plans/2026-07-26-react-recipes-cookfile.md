@@ -81,7 +81,7 @@ Every claim below cites the file and line it was read from.
 
 ### F1. The backlog's claim, adjudicated
 
-> "recipes + cookfile — recipe editor and cook-file browser (share a data model and need a JSON listing endpoint that does not exist yet)" — `docs/superpowers/react-migration-backlog.md:297-298`
+> "recipes + cookfile — recipe editor and cook-file browser (share a data model and need a JSON listing endpoint that does not exist yet)" — `docs/superpowers/backlogs/react-migration-backlog.md:297-298`
 
 - **"need a JSON listing endpoint that does not exist yet" — TRUE.** Both listings return **HTML fragments**, not JSON:
   - recipes: `_recipes_form_recipefilelist` → `render_template("recipes/_recipefile_list.html", ...)` (`blueprints/recipes/routes.py:112-123`), driven by `$('#recipefilelist').load('/recipes/data', ...)` (`blueprints/recipes/static/recipes/js/recipes.js:314`).
@@ -254,7 +254,7 @@ Write responses use `api_response(result, message, data)` (`common/app.py:422`),
 
 ### F7. Contradictions found between the docs and live code
 
-1. **`docs/superpowers/react-migration-backlog.md:297-298` — "share a data model."** They share a container and a listing shape, not a data model. Adjudicated above; drove the split.
+1. **`docs/superpowers/backlogs/react-migration-backlog.md:297-298` — "share a data model."** They share a container and a listing shape, not a data model. Adjudicated above; drove the split.
 2. **`tests/web/test_page_recipes.py:53-63` module docstring — "Latent bug: `create_recipefile()` has no same-title dedup."** **STALE.** `file_mgmt/recipes.py:166-169` now has the disambiguation loop, and `tests/unit/file_mgmt/test_recipes.py:45` pins it. Task 1 fixes the docstring.
 3. **Two live `os.system("rm -rf …")` shell-outs remain** at `file_mgmt/recipes.py:192-193` and `file_mgmt/cookfile.py:163-164`, despite commit `9baaed66` ("replace os.system rm with validated os.remove") — that commit only fixed the *delete route*, not the *create* path. Both are reachable from the code this work exercises. Task 1 removes them.
 4. **`prepare_metrics_csv` / `prepare_csv` mis-name the output when `HISTORY_FOLDER` is not literally `./history/`.** `common/app.py:173-176` and `:203-213` do `filename.replace("./history/", "")` and then `"/tmp/" + filename + ".csv"`. Given `/tmp/pifire_test_history_x/history/E2E.pifire`, that composes `/tmp//tmp/pifire_test_history_x/history/E2E.pifire-Pifire-Export.csv` and `open()` raises. This is exactly why the three `dl_*` branches are untestable under the isolated-folder fixture — and why they have no tests. **E6 passes `os.path.basename(...)` in, so the new endpoint is correct under any folder; `common/app.py` is not modified.**
@@ -3508,7 +3508,7 @@ jj desc -m "feat(web-react): cook-file comments and media panels"
 
 **Files:**
 - Create: `web-react/tests/e2e/cookfiles.spec.ts`
-- Modify: `docs/superpowers/react-migration-backlog.md`
+- Modify: `docs/superpowers/backlogs/react-migration-backlog.md`
 
 **Interfaces:** none — this task proves the whole slice against a real backend.
 
@@ -3582,7 +3582,7 @@ git status --short   # expect: no pifire.db, no settings.json, no os_info.json,
 
 - [x] **Step 3: Update the backlog**
 
-In `docs/superpowers/react-migration-backlog.md`:
+In `docs/superpowers/backlogs/react-migration-backlog.md`:
 - Move the cook-file half of the "recipes + cookfile" entry (line 297) into SHIPPED, naming this plan.
 - Rewrite the remaining entry as **recipes only**, and **correct the "share a data model" claim** — record that they share a container and a listing shape, that `/api/files/recipes` already exists, and point at the plan-2 outline below.
 - Add the History-page note: `/history` now hosts the saved-cook list.

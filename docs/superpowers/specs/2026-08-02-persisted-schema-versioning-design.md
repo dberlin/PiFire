@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-02
 **Status:** Approved design, pending implementation plan
-**Backlog:** `react-migration-backlog.md`, item 10, *Schema and toolchain
+**Backlog:** `backlogs/react-migration-backlog.md`, item 10, *Schema and toolchain
 follow-ups* — "nothing PiFire persists records the schema it was written
 against"
 

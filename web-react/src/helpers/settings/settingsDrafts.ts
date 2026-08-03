@@ -12,7 +12,7 @@ import type { Settings } from "./settingsApi";
  * navigation. Flask had no such problem because it persisted on change; React's
  * per-tab SaveBar is the deliberate replacement, so the edit has to be HELD
  * until that Save instead (ruling 3, 2026-07-26,
- * docs/superpowers/react-migration-backlog.md).
+ * docs/superpowers/backlogs/react-migration-backlog.md).
  *
  * The store therefore lives on SettingsShell, which stays mounted for the whole
  * visit, and is handed to tabs through the same Outlet context that already

@@ -2799,7 +2799,7 @@ QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest \
   tests/web/test_api_admin_backups.py -v
 ```
 
-- [ ] Strike the *Schema and toolchain follow-ups* line in `docs/superpowers/react-migration-backlog.md` — "nothing PiFire persists records the schema it was written against" — following that file's own convention: **DONE** carries the date it landed, and the wizard-manifest half stays open with no date, because the spec deliberately left it out of scope (the fingerprint is the better answer for staleness).
+- [ ] Strike the *Schema and toolchain follow-ups* line in `docs/superpowers/backlogs/react-migration-backlog.md` — "nothing PiFire persists records the schema it was written against" — following that file's own convention: **DONE** carries the date it landed, and the wizard-manifest half stays open with no date, because the spec deliberately left it out of scope (the fingerprint is the better answer for staleness).
 - [ ] Record in the same entry that the pellet log's second-resolution collision bug (spec §5.4) was fixed as part of the v2 migration, since the backlog does not mention it anywhere.
 - [ ] The grill is running `v1.11.0-dev20`. Nothing here reaches it until a release is tagged.
 

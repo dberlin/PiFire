@@ -215,7 +215,7 @@ partial), their tests, the dead top-level templates and legacy `static/`, and th
 
 **Out (recorded, not built):**
 - The post-update **"what's new" release-notes modal** — app-shell chrome,
-  already deferred by the updater slice in `react-migration-backlog.md`.
+  already deferred by the updater slice in `backlogs/react-migration-backlog.md`.
 - Any React source/feature change — this pass only serves the existing build and
   removes Flask pages.
 - Deleting `common/*` helpers that pages used but `api_*` still import — out of

@@ -221,7 +221,7 @@ def test_apply_rejects_a_malformed_map(ds, client):
         assert resp.get_json()["message"] == "bad_probe_map"
 
 
-"""Ruling 6 (2026-07-26, docs/superpowers/react-migration-backlog.md):
+"""Ruling 6 (2026-07-26, docs/superpowers/backlogs/react-migration-backlog.md):
 renaming a probe must not leave a stale reference behind. The map used to be
 swapped in with only history_page.probe_config regenerated, so every OTHER
 structure keyed by a probe LABEL kept naming a probe that no longer exists."""

@@ -962,7 +962,7 @@ Isolated jj workspaces per concurrent task; disjoint files are necessary but **n
 - **The exact fit scale at a 1280×720 window** (~0.92). It is arithmetic from the navbar's declared padding and font size (`shell.css:41,157`), not a measurement. Task 1 measures it for real — `s` is computed in `measureLandmarks` and worth logging on the first run.
 - **Whether the demo fixture has `hasDistanceSensor: true`.** Task 10 Step 4 depends on it and says what to do either way.
 - **Flask's `#recipe_group` unpause payload.** Task 5 records why it is not ported (an array-replacing `json_patch` merge) rather than porting it blind. Somebody must verify that reasoning against a live recipe before Slice 2 of the recipe work.
-- **`react-migration-backlog.md` does not exist.** The triage and two other docs reference it (`docs/superpowers/plans/2026-07-24-react-small-batch.md`, `docs/superpowers/specs/2026-07-23-wizard-module-config-display-first.md`), but `find docs -iname "*backlog*"` returns nothing and it is absent from every commit in this repo. The M5/M8/M7 divergence records this plan asks for therefore need a home — create the file or name a substitute.
+- **`backlogs/react-migration-backlog.md` does not exist.** The triage and two other docs reference it (`docs/superpowers/plans/2026-07-24-react-small-batch.md`, `docs/superpowers/specs/2026-07-23-wizard-module-config-display-first.md`), but `find docs -iname "*backlog*"` returns nothing and it is absent from every commit in this repo. The M5/M8/M7 divergence records this plan asks for therefore need a home — create the file or name a substitute.
 
 ## Self-Review
 

@@ -201,7 +201,7 @@ either — the only link into `/metrics` in the entire Flask tree is
 ```
 
 The React `HistoryPage` dropped it, which the backlog records as an open parity
-gap ("History→Metrics link dropped", `react-migration-backlog.md:1018`). Task 8
+gap ("History→Metrics link dropped", `backlogs/react-migration-backlog.md:1018`). Task 8
 restores it there and Task 9 strikes the backlog line.
 
 ---
@@ -239,7 +239,7 @@ restores it there and Task 9 strikes the backlog line.
 | `web-react/src/components/history/HistoryPage.test.tsx` | Link test (Task 8) |
 | `web-react/tests/e2e/apiFixtures.ts` | `stubMetrics` (Task 9) |
 | `web-react/tests/e2e/pageSpecs.ts` | `metrics` page spec (Task 9) |
-| `docs/superpowers/react-migration-backlog.md` | Closeout (Task 9) |
+| `docs/superpowers/backlogs/react-migration-backlog.md` | Closeout (Task 9) |
 
 **Deliberately not created:** no `metricsRoutes.ts` loader. `/metrics` reads on
 mount like `/admin` and `/events` do, so a failed read is retryable inside the
@@ -2278,7 +2278,7 @@ EOF
 - Modify: `web-react/tests/e2e/apiFixtures.ts`
 - Modify: `web-react/tests/e2e/pageSpecs.ts`
 - Modify: `web-react/tests/e2e/baselines/*.json` (captured, never hand-edited)
-- Modify: `docs/superpowers/react-migration-backlog.md`
+- Modify: `docs/superpowers/backlogs/react-migration-backlog.md`
 
 **Interfaces:**
 - Consumes: everything above.
@@ -2516,7 +2516,7 @@ Expected: green, two more tests than before.
 
 - [ ] **Step 8: Close out the backlog**
 
-In `docs/superpowers/react-migration-backlog.md`:
+In `docs/superpowers/backlogs/react-migration-backlog.md`:
 
 - Change the §8 line `- [ ] **metrics** — metrics/stats page` to `- [x]` with a
   SHIPPED note naming this plan and the two live defects it fixed.

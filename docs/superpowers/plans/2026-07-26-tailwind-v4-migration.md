@@ -3464,7 +3464,7 @@ jj commit -m 'refactor(web-react): author dashboard.css with @apply, no visual c
 **Files:**
 - Create (only if any difference is accepted): `docs/superpowers/audits/2026-07-26-tailwind-migration-diffs.md`
 - Modify: `docs/superpowers/specs/2026-07-25-tailwind-v4-migration-design.md` (status line)
-- Modify: `docs/superpowers/react-migration-backlog.md`
+- Modify: `docs/superpowers/backlogs/react-migration-backlog.md`
 
 **Interfaces:**
 - Consumes: every commit from Tasks 1-14.
@@ -3543,7 +3543,7 @@ stale by the time implementation started. The plan's "Corrections to the design
 spec" section records the measured values.
 ```
 
-In `docs/superpowers/react-migration-backlog.md`, mark the Tailwind item done and add the follow-up the spec identified as reversible: converting a component's `pf-*` rules to inline utilities in JSX is now a mechanical, component-at-a-time change **with the gate already in place** — which is the thing that was missing when a full utility rewrite was rejected.
+In `docs/superpowers/backlogs/react-migration-backlog.md`, mark the Tailwind item done and add the follow-up the spec identified as reversible: converting a component's `pf-*` rules to inline utilities in JSX is now a mechanical, component-at-a-time change **with the gate already in place** — which is the thing that was missing when a full utility rewrite was rejected.
 
 - [ ] **Step 6: Commit**
 

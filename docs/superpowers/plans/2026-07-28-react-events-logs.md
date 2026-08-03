@@ -2093,7 +2093,7 @@ jj new -m "test(web-react): live events and log view end to end"
 **Files:**
 - Modify: `web-react/tests/e2e/pageSpecs.ts`
 - Create: `web-react/tests/e2e/baselines/events-1280x720.json`, `events-390x844.json`
-- Modify: `docs/superpowers/react-migration-backlog.md`
+- Modify: `docs/superpowers/backlogs/react-migration-backlog.md`
 
 - [ ] **Step 1: Register the page spec**
 
@@ -2127,7 +2127,7 @@ Expected: all green; pytest at or above 3352.
 
 - [ ] **Step 5: Close out the backlog**
 
-In `docs/superpowers/react-migration-backlog.md`:
+In `docs/superpowers/backlogs/react-migration-backlog.md`:
 
 1. §8, mark `- [x] **events** + **logs** — SHIPPED 2026-07-28` with the plan path.
 2. Add an **Events + Logs** entry to the SHIPPED section covering: the one

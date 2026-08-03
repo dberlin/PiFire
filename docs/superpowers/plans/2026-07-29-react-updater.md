@@ -19,7 +19,7 @@
 - **Safety — the load-bearing rule:** every mutating endpoint fires its shell-out **only under `is_real_hardware(settings)`**, through a single `_fire()` seam. Tests monkeypatch `blueprints.api_update.routes.os.system` and assert the exact command — **no test runs git/pip/reboot**, and the e2e never triggers a real update.
 - **Server-side guards:** `pull`/`upgrade` refuse with **409** unless `read_control()["mode"] == Mode.STOP`; `branch` refuses with **400** unless `target` is in the fetched branch list; `log` refuses with **400** on a non-positive-integer `commits`.
 - **Untouched:** `blueprints/update/` and `tests/web/test_page_update.py` stay exactly as they are (the Flask net). `updater.py` is called, never modified.
-- **Out of scope:** the post-update "what's new" modal (shell chrome; recorded in `react-migration-backlog.md`).
+- **Out of scope:** the post-update "what's new" modal (shell chrome; recorded in `backlogs/react-migration-backlog.md`).
 - **New `pf-*` CSS classes** need a rule in a `.css` file AND a consumer (the `cssCoverage`/`styleCoverage` gates); do not add them to the `UNSTYLED` allowlist. Reuse `pf-admin-*` classes where they fit.
 
 ---
@@ -1131,7 +1131,7 @@ Note in a comment: unlike other specs this one is fully route-mocked and needs n
 
 - [ ] **Step 4: Full Python check.** `QT_QPA_PLATFORM=offscreen SDL_VIDEODRIVER=dummy uv run pytest tests/web/test_api_update.py tests/web/test_page_update.py -q` and confirm the repo-root artifacts (`os_info.json`/`settings.json`/`pelletdb.json`) are absent.
 
-- [ ] **Step 5: Update the backlog** — mark the updater page SHIPPED in `docs/superpowers/react-migration-backlog.md` (the `[ ] update` checklist line and the Pages-and-chrome section), and commit.
+- [ ] **Step 5: Update the backlog** — mark the updater page SHIPPED in `docs/superpowers/backlogs/react-migration-backlog.md` (the `[ ] update` checklist line and the Pages-and-chrome section), and commit.
 
 ---
 

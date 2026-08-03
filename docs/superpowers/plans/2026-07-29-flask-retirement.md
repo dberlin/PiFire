@@ -40,7 +40,7 @@
 **Modified:**
 - `app.py` — register `spa_bp` last; delete `index()`; remove now-dead imports and the 16 page-blueprint import/register lines. (Flask's `static_folder` stays default — do NOT repoint it.)
 - `blueprints/wizard/__init__.py`, `blueprints/tuner/__init__.py` — reduce to helper-only packages.
-- `docs/superpowers/react-migration-backlog.md` — mark #5, #71, and the closed "still reachable" items.
+- `docs/superpowers/backlogs/react-migration-backlog.md` — mark #5, #71, and the closed "still reachable" items.
 - `templates/server_error.html` — only if it references now-deleted legacy `/static` assets (inline styles).
 
 **Deleted:**
@@ -410,7 +410,7 @@ git commit -m "refactor: delete dead base template, macros, and legacy static tr
 
 **Files:**
 - Delete/repair: any straggler test that exercised a retired route (candidates from the fact-find: `tests/web/test_webapp_sqlite.py`, `tests/web/test_admin_restore_containment.py`, `tests/web/test_metrics_auger_rate.py`, `tests/web/test_settings_controller_render.py`, `tests/web/test_wizard_finish_reboot_modal.py`).
-- Modify: `docs/superpowers/react-migration-backlog.md`.
+- Modify: `docs/superpowers/backlogs/react-migration-backlog.md`.
 
 **Interfaces:**
 - Consumes: the full test suite as the oracle for what retirement broke.
@@ -464,7 +464,7 @@ Run the route-mocked e2e (`web-react`): confirm the suite passes as before — n
 
 - [ ] **Step 6: Update the backlog**
 
-In `docs/superpowers/react-migration-backlog.md`: mark **#5** (SPA serve) and **#71** (deregister legacy page blueprints) SHIPPED, and mark the batch of deferred "still reachable" items closed by this pass (traversal/template-injection doors on the retired pages are now unreachable — the routes don't exist). Note `/mobile` stays as the socket/API surface.
+In `docs/superpowers/backlogs/react-migration-backlog.md`: mark **#5** (SPA serve) and **#71** (deregister legacy page blueprints) SHIPPED, and mark the batch of deferred "still reachable" items closed by this pass (traversal/template-injection doors on the retired pages are now unreachable — the routes don't exist). Note `/mobile` stays as the socket/API surface.
 
 - [ ] **Step 7: Commit**
 

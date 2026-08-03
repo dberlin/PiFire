@@ -176,7 +176,7 @@ def test_settings_update_layer2_still_rejects_delta_invalid_against_merged_tree(
 
 # ---------------------------------------------------------------------------
 # The React General tab's screen-sleep control (ruling 4, 2026-07-26,
-# docs/superpowers/react-migration-backlog.md): it must actually drive the
+# docs/superpowers/backlogs/react-migration-backlog.md): it must actually drive the
 # DPMS behaviour, so this pins the seam between the two processes. The web
 # process writes settings["display"]["sleep_timeout"]; the display process
 # re-reads it through common.common.display_sleep_timeout() once a second

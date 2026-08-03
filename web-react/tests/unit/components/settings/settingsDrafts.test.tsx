@@ -6,7 +6,7 @@ import { SettingsShell } from "../../../../src/components/settings/SettingsShell
 import { PwmTab } from "../../../../src/components/settings/tabs/PwmTab";
 import { SafetyTab } from "../../../../src/components/settings/tabs/SafetyTab";
 
-// Ruling 3, 2026-07-26 (docs/superpowers/react-migration-backlog.md): a
+// Ruling 3, 2026-07-26 (docs/superpowers/backlogs/react-migration-backlog.md): a
 // settings edit must survive a tab switch. Flask persisted every field the
 // moment it changed; React's per-tab SaveBar is the deliberate replacement, so
 // the edit has to be HELD until that Save -- across navigation included --

@@ -67,7 +67,7 @@ several have since gone stale. Current disposition of every remaining finding:
 
 Findings closed after the 2026-07-26 sweep, re-verified against live code on
 2026-07-28 (reconciliation of the first 15 open findings; see
-`react-migration-backlog.md` item 10 and ruling 8). Each keeps its original
+`backlogs/react-migration-backlog.md` item 10 and ruling 8). Each keeps its original
 number and its original 2026-07-26 assessment below a RESOLVED header, for
 provenance.
 
@@ -634,8 +634,8 @@ line 1101), which later plans delivered in full. Nothing open from this plan.
       Status button does exist on the new pellets page
       (`components/pellets/CurrentLoadCard.tsx:102`). Plan text is stale.
 
-64. **`react-migration-backlog.md` does not exist** (line 965) — it does now:
-    `docs/superpowers/react-migration-backlog.md` (27 KB, modified today).
+64. **`backlogs/react-migration-backlog.md` does not exist** (line 965) — it does now:
+    `docs/superpowers/backlogs/react-migration-backlog.md` (27 KB, modified today).
 
 65. **M7 probe ETA "dropped — owned elsewhere"** (line 136) — delivered by the probe-notifications
     plan; `deriveView.ts` carries `etaStr` and `ProbeCard.tsx` renders it.

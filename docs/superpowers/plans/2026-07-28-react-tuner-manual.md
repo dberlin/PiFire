@@ -243,7 +243,7 @@ needs no library, and every coordinate is readable from the DOM in a unit test.
 | `web-react/src/components/settings/tabs/ProbesTab.tsx` | Link to `/tuner` (Task 10) |
 | `web-react/tests/e2e/apiFixtures.ts` | `stubTuner` (Task 11) |
 | `web-react/tests/e2e/pageSpecs.ts` | `tuner` page spec (Task 11) |
-| `docs/superpowers/react-migration-backlog.md` | Closeout (Task 11) |
+| `docs/superpowers/backlogs/react-migration-backlog.md` | Closeout (Task 11) |
 
 **Deliberately not created:** no auto-flow endpoint or component. `GET
 /api/tuner/auto-status` and the autotune store are slice 2; this slice's session
@@ -2433,7 +2433,7 @@ EOF
 **Files:**
 - Create: `web-react/tests/e2e/tuner.spec.ts`
 - Modify: `web-react/tests/e2e/apiFixtures.ts`, `pageSpecs.ts`, baselines
-- Modify: `docs/superpowers/react-migration-backlog.md`
+- Modify: `docs/superpowers/backlogs/react-migration-backlog.md`
 
 - [ ] **Step 1: Start a backend**
 
@@ -2507,7 +2507,7 @@ before treating it as real.
 
 - [ ] **Step 7: Close out the backlog**
 
-In `docs/superpowers/react-migration-backlog.md`:
+In `docs/superpowers/backlogs/react-migration-backlog.md`:
 
 - Change `- [ ] **tuner** — probe tuning tool` to reflect that the **manual**
   flow shipped and the auto flow is slice 2. Do NOT mark it `[x]`.

@@ -182,7 +182,7 @@ modal**. It is app-shell chrome — a one-time modal shown on *any* route when
 `settings["globals"]["updated_message"]` is set (`templates/base.html:165-230`),
 bodied by `GET /update/post-message`'s `render_template_string`. It belongs with
 the shell, not this page, and is recorded under *Deferred by the updater slice
-(design)* in `react-migration-backlog.md`.
+(design)* in `backlogs/react-migration-backlog.md`.
 
 **Untouched:** `blueprints/update/` stays live (the Flask UI and its
 characterization net remain), retiring only with the general Flask-retirement pass

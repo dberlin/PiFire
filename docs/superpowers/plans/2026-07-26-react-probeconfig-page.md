@@ -5,7 +5,7 @@
 
 ## READ THIS FIRST — the backlog entry is factually wrong
 
-`react-migration-backlog.md:289-290` says:
+`backlogs/react-migration-backlog.md:289-290` says:
 
 > **probeconfig** — standalone probe-config page; the wizard's probes step is done, so this
 > can likely reuse the shipped reducer and cards
@@ -473,7 +473,7 @@ blast radius. If the rebuild proves unreliable on real hardware, the fallback is
 | `web-react/src/components/wizard/wizardStyles.test.ts` | Guard reads `wizard.css` ∪ `probes/probes.css`. |
 | `web-react/src/components/settings/SettingsShell.tsx` | One `SETTINGS_TABS` entry. |
 | `web-react/src/components/App.tsx` | One child route with `probeModulesLoader`. |
-| `docs/superpowers/react-migration-backlog.md` | Correct the entry; record what shipped. |
+| `docs/superpowers/backlogs/react-migration-backlog.md` | Correct the entry; record what shipped. |
 
 ### Untouched (and must stay green)
 
@@ -2211,7 +2211,7 @@ assertion about behaviour** — only where rules live and what they are scoped t
 
 ### Task 9: Correct the backlog and record what shipped
 
-**Files:** Modify `docs/superpowers/react-migration-backlog.md`
+**Files:** Modify `docs/superpowers/backlogs/react-migration-backlog.md`
 
 **Interfaces:** Documentation only. No code.
 

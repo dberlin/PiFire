@@ -1,7 +1,7 @@
 # React WLED preset/profile editor — Design
 
 **Date:** 2026-07-28
-**Backlog:** item 10 finding #17 (`docs/superpowers/react-migration-backlog.md`;
+**Backlog:** item 10 finding #17 (`docs/superpowers/backlogs/react-migration-backlog.md`;
 `audits/2026-07-26-deferred-inventory-plans.md`).
 
 ## Goal

@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the seven open *Schema and toolchain follow-ups* from
-`react-migration-backlog.md`, per
+`backlogs/react-migration-backlog.md`, per
 `docs/superpowers/specs/2026-08-02-settings-toolchain-followups-design.md`.
 
 **Architecture:** Three independent slices. **A** turns two manifests
@@ -92,7 +92,7 @@ Every task's requirements implicitly include this section.
 - Modify: `web-react/scripts/gen-types.ts`
 - Create (generated, committed): `web-react/src/helpers/settings/controllerTypes.gen.ts`
 - Modify: `web-react/package.json` (no new script — `gen:types` drives all emitters)
-- Modify: `docs/superpowers/react-migration-backlog.md`
+- Modify: `docs/superpowers/backlogs/react-migration-backlog.md`
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
@@ -362,7 +362,7 @@ fields, `PidConfig` has 4, and `FuzzyConfig`/`MlConfig` are
 
 - [ ] **Step 7: Correct the backlog entry that scheduled this**
 
-In `docs/superpowers/react-migration-backlog.md`, item 10's schema/toolchain
+In `docs/superpowers/backlogs/react-migration-backlog.md`, item 10's schema/toolchain
 section records `additionalProperties` stripping as open. Replace that claim
 with the evidence:
 
