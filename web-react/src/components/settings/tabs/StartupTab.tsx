@@ -26,23 +26,20 @@ const SMARTSTART_COLUMNS: RangeProfileColumn[] = [
 const SHUTDOWN_DEFAULTS = SETTINGS_DEFAULTS.shutdown;
 const STARTUP_DEFAULTS = SETTINGS_DEFAULTS.startup;
 
-// Every dotted path this tab writes (mirrors the setPath calls in onSave), so
-// a rejection on any of them — even one no field here displays inline — still
-// has somewhere to surface.
-const TAB_PATHS = [
+// The paths whose widget on this tab can actually display a rejection
+// inline — the NumberFields wired to `error={errorFor(errors, ...)}` below.
+// Toggle, Select and RangeProfileTable have no error slot yet, so their
+// paths must stay OUT of this list: SaveBar treats everything here as
+// claimed and drops it from the fallback, and a path with no error slot that
+// is wrongly listed here would have its rejection shown nowhere at all.
+const CLAIMED_PATHS = [
   "shutdown.shutdown_duration",
-  "shutdown.auto_power_off",
   "startup.duration",
   "startup.startup_exit_temp",
   "startup.prime_on_startup",
   "startup.pwm_duty_cycle",
-  "startup.smartstart.enabled",
   "startup.smartstart.exit_temp",
-  "startup.smartstart.temp_range_list",
-  "startup.smartstart.profiles",
-  "startup.start_to_mode.after_startup_mode",
   "startup.start_to_mode.primary_setpoint",
-  "startup.start_to_mode.start_to_hold_prompt",
 ];
 
 type Startup = {
@@ -327,7 +324,7 @@ export function StartupTab() {
           status={status}
           dirty={dirty}
           errors={errors}
-          paths={TAB_PATHS}
+          paths={CLAIMED_PATHS}
         />
       </Section>
     </>
