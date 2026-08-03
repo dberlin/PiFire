@@ -96,11 +96,12 @@ def test_init_runs_the_upgrade(monkeypatch):
     monkeypatch.setattr(datastore, "_first_boot_import", lambda: calls.append("import"))
     monkeypatch.setattr(datastore, "_upgrade_settings_in_store", lambda: calls.append("upgrade"))
     monkeypatch.setattr(datastore, "_upgrade_pellets_in_store", lambda: calls.append("upgrade-pellets"))
+    monkeypatch.setattr(datastore, "_validate_settings_in_store", lambda: calls.append("validate"))
     monkeypatch.setattr(datastore, "connection", lambda: calls.append("connect"))
 
     datastore.init()
 
-    assert calls == ["connect", "drop-legacy-errors", "import", "upgrade", "upgrade-pellets"]
+    assert calls == ["connect", "drop-legacy-errors", "import", "upgrade", "upgrade-pellets", "validate"]
 
 
 def test_a_newer_stored_version_is_left_alone(ds):

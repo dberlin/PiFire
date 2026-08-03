@@ -334,6 +334,7 @@ def init():
     _first_boot_import()
     _upgrade_settings_in_store()
     _upgrade_pellets_in_store()
+    _validate_settings_in_store()
 
 
 def _drop_legacy_error_blobs():
@@ -510,6 +511,25 @@ def _upgrade_pellets_in_store():
             "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             ("pellets:general", json.dumps(pelletdb)),
         )
+
+
+def _validate_settings_in_store():
+    """Report a settings tree that does not match the models.
+
+    Observes only: the tree is returned to every reader exactly as stored,
+    whatever this finds. Runs after the migration steps, so a report here names
+    something migrations could not repair -- a hand-edited database, a
+    downgrade, or a gap in the registry -- rather than a tree merely waiting to
+    be brought forward.
+    """
+    from common import settings_schema  # deferred to avoid import cycle
+    from common.common import write_log
+    from common.datastore_accessors import read_settings
+
+    try:
+        settings_schema.validate_settings_tree(read_settings())
+    except settings_schema.SettingsValidationError as exc:
+        write_log("Stored settings do not match this build's schema: " + "; ".join(exc.errors))
 
 
 def _reset_for_tests(path):
