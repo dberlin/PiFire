@@ -730,6 +730,14 @@
           "hidden": false
         },
         {
+          "option_name": "enable_identification",
+          "option_friendly_name": "Learn This Grill",
+          "option_description": "After each cook, refit the thermal model from that cook and keep it if it describes the grill better. Requires the do-mpc extra and disables the fast neural policy. [Default=false]",
+          "option_type": "bool",
+          "option_default": false,
+          "hidden": false
+        },
+        {
           "option_name": "log_path",
           "option_friendly_name": "Calibration Log Path",
           "option_description": "CSV file path for the calibration data log (when logging is enabled).",

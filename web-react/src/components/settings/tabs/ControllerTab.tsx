@@ -113,6 +113,10 @@ export function ControllerTab() {
     settings,
   });
 
+  // Derived from the draft so the consequence is visible while deciding, not
+  // after saving.
+  const learning = selected === "mpc" && !!values.enable_identification;
+
   const onSave = async () => {
     if (fanConflict) return; // do NOT call save(): the fan lever would be wired to nothing
     let d: object = {};
@@ -232,6 +236,13 @@ export function ControllerTab() {
         }
         return null;
       })}
+      {learning && (
+        <p className="pf-settings-hint">
+          While this grill is learning, the controller solves the full optimisation each
+          step: a learned model no longer matches the pre-trained neural policy, so that
+          fast path is disabled and the do-mpc extra is required.
+        </p>
+      )}
       {fanConflict && (
         <p className="pf-settings-error-text" role="alert">
           {MPC_FAN_CONFLICT_MESSAGE}

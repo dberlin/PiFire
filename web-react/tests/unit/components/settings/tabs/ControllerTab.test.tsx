@@ -128,6 +128,18 @@ const controllerMeta: ControllerMetadata = {
           option_min: null,
           option_max: null,
         },
+        {
+          option_name: "enable_identification",
+          option_friendly_name: "Learn This Grill",
+          option_description:
+            "After each cook, refit the thermal model from that cook and keep it if it " +
+            "describes the grill better. Requires the do-mpc extra and disables the fast " +
+            "neural policy.",
+          option_type: "bool",
+          option_default: false,
+          option_min: null,
+          option_max: null,
+        },
       ],
     },
   },
@@ -292,6 +304,7 @@ describe("ControllerTab", () => {
                 estimator: "kf",
                 policy_net_path: "./custom/net.npz",
                 enable_fan_input: false,
+                enable_identification: false,
               },
             },
           },
@@ -465,5 +478,36 @@ describe("ControllerTab MPC fan authority", () => {
     renderRoute(<ControllerTab />, mpcContext(false));
     fireEvent.click(screen.getByRole("button", { name: "MPC Controls Fan" }));
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("ControllerTab identification note", () => {
+  const ctx = (learning: boolean) => ({
+    settings: {
+      platform: { dc_fan: true },
+      pwm: { pwm_control: true },
+      controller: {
+        selected: "mpc",
+        config: { mpc: { enable_fan_input: false, enable_identification: learning } },
+      },
+    },
+    mode: "Stop",
+    controllerMeta,
+  });
+
+  it("explains the policy cost when learning is on", () => {
+    renderRoute(<ControllerTab />, ctx(true));
+    expect(screen.getByText(/neural policy/i)).toBeInTheDocument();
+  });
+
+  it("says nothing when learning is off", () => {
+    renderRoute(<ControllerTab />, ctx(false));
+    expect(screen.queryByText(/neural policy/i)).toBeNull();
+  });
+
+  it("appears as soon as the toggle is flipped, before saving", () => {
+    renderRoute(<ControllerTab />, ctx(false));
+    fireEvent.click(screen.getByRole("button", { name: "Learn This Grill" }));
+    expect(screen.getByText(/neural policy/i)).toBeInTheDocument();
   });
 });
