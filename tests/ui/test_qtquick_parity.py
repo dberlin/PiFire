@@ -178,6 +178,18 @@ def test_recipe_paused_marks_next_active(qml_engine):
 def test_backend_exposes_parity_surface():
     b = PiFireBackend(lambda: (None, None), lambda c, d: None, {"primary": {"name": "G"}, "food": [], "aux": []})
     meta = b.metaObject()
-    for prop in ["modeText", "primaryNotifyTarget", "timerLabel", "pModeActive", "asleep"]:
+    # primaryHasTemp/primaryStale are bound by DashScreen's gauge. The
+    # DashScreen tests drive a stub backend, so only this one -- which builds
+    # the real bridge -- would notice either being dropped, and QML answers a
+    # missing property with `undefined`, which is silent until it is drawn.
+    for prop in [
+        "modeText",
+        "primaryNotifyTarget",
+        "timerLabel",
+        "pModeActive",
+        "asleep",
+        "primaryHasTemp",
+        "primaryStale",
+    ]:
         assert meta.indexOfProperty(prop) >= 0, f"backend missing property {prop}"
     assert meta.indexOfMethod("registerInteraction()") >= 0

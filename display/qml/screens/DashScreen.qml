@@ -174,6 +174,11 @@ Item {
 						label: dash.smoking ? "P-MODE" : "AUGER DUTY"
 						value: dash.smoking ? "P-" + backend.pMode : backend.augerDuty + "%"
 						highlighted: false
+						// Only while it reads P-MODE: an auger duty is a
+						// readout with nothing to set, and the same pill
+						// carries both.
+						clickable: dash.smoking
+						onTapped: dash.requestMenu("pmode")
 					}
 					DutyPill {
 						Layout.fillWidth: true

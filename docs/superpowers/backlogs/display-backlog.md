@@ -204,3 +204,31 @@ itself. `react-migration-backlog.md` item 15 carries the decision in full,
 including where the age has to come from: the producer, via the per-probe
 `status` block that already reaches both UIs. Take the null deliberately rather
 than by rejected assignment, and stop the log line while doing it.
+
+### 4. Two P-mode/Smoke+ asymmetries left after the Smoke-only ruling — OPEN
+
+**Status:** OPEN. Found 2026-08-03 while making the Qt P-MODE pill a control.
+
+Both are consistency questions, not faults. Recorded because each is a place
+where "the two UIs agree" is currently false.
+
+**The SMOKE+ pill is a readout on every dashboard.** The P-MODE pill now opens
+the P-Mode menu when tapped on the Qt display, matching the web, where the
+left pill is a button and the right one is not. So Smoke+ is toggled from the
+menu (`cmd_splus`) on the display and from the control panel on the web, but
+never from the pill that shows it. On a touchscreen that is the obvious thing
+to press. Making it a toggle is a one-line change on the Qt side
+(`clickable: dash.smoking`, `onTapped: backend.toggleSmokePlus()`), but the web
+would have to follow or the two diverge again -- which is the trap
+`backlogs/react-migration-backlog.md` item 13 was filed for.
+
+**The legacy pygame `p_mode` widget still shows in Startup and Reignite.**
+`_base_flex.py::_update_p_mode` gates on
+`mode in [STARTUP, REIGNITE, SMOKE]` -- the same set the unused
+`qtbackend.pModeActive` computes -- while the ember `duty_pill` is now
+Smoke-only. Two rules for the same reading in one file. The legacy widget is
+`PModeStatus`, used by the seven non-ember layouts (`dsi_800x480t.json` and
+friends); the ember layouts (`dsi_1280x720t.json`, `dsi_1024x600t.json`) use
+the pill. The Smoke-only ruling was made against the ember dashboards, so
+whether it reaches the older layouts is a separate call: those are a different
+design, and P-mode does govern the cycle in Startup and Reignite.
