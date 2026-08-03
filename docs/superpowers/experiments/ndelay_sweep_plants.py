@@ -45,6 +45,8 @@ def _sim(t, Q, C_f, C_c, h_fc, h_amb, T_amb, T0, K_Q, sigma, theta, n_delay, two
     n = n_delay if n_delay > 0 else 0
     lag_tau = (theta / n) if (n > 0 and theta > 0.0) else 0.0
     lags = np.zeros(n)
+    nxt = np.zeros(n)
+    coef = np.zeros(n)
     T_f = T0
     T_c = T0
     N = t.shape[0]
@@ -60,12 +62,28 @@ def _sim(t, Q, C_f, C_c, h_fc, h_amb, T_amb, T0, K_Q, sigma, theta, n_delay, two
         steps = max(1, int(np.ceil(span / max_dt)))
         dt = span / steps
         u = Q[i]
+        if lag_tau > 0.0:
+            # exp(A*dt) for the chain: lower-triangular Toeplitz in
+            # exp(-a) a**m / m!, a = dt/lag_tau. Mirrors
+            # controller.mpc_model._erlang_coefficients, including building the
+            # coefficients by recurrence so a long sub-step underflows to zero
+            # rather than overflowing a**m on the way.
+            a = dt / lag_tau
+            coef[0] = np.exp(-a)
+            for m in range(1, n):
+                coef[m] = coef[m - 1] * a / m
         for _s in range(steps):
             if lag_tau > 0.0:
-                prev = u
+                # lags <- u + exp(A*dt) @ (lags - u), which is exact for an
+                # input held constant across the interval and so has no
+                # stability limit in dt at all.
                 for j in range(n):
-                    lags[j] += dt * (prev - lags[j]) / lag_tau
-                    prev = lags[j]
+                    acc = 0.0
+                    for m in range(j + 1):
+                        acc += coef[m] * (lags[j - m] - u)
+                    nxt[j] = u + acc
+                for j in range(n):
+                    lags[j] = nxt[j]
                 heat_in = lags[n - 1]
             else:
                 heat_in = u
@@ -80,7 +98,7 @@ def _sim(t, Q, C_f, C_c, h_fc, h_amb, T_amb, T0, K_Q, sigma, theta, n_delay, two
     return out
 
 
-def sim(t, Q, p, *, two_state, n_delay=4, max_dt=1.0):
+def sim(t, Q, p, *, two_state, n_delay=4, max_dt=0.125):
     g = dict(DEFAULTS)
     g.update(p)
     return _sim(

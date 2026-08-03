@@ -1,0 +1,27 @@
+plant truth   MAK dead=112s coast=25.1C   generic dead=27s coast=0.1C
+real cook step-equivalent coast = 140.4 s at 271.3 C
+
+=== TWO-STATE reference (the model before the surgery) ===
+  n_delay= 4  MAK rmse=0.944 dead=68s coast=21.4C   real rmse=2.491 theta=105.7
+
+=== SINGLE LUMP across n_delay ===
+ nd | MAK rmse   dead   coast | gen rmse   dead   coast | real rmse   theta brakeHot  margin | solve ms
+-------------------------------------------------------------------------------------------------------
+  4 |    1.021    64s   21.2C |    1.682    18s    0.1C |     2.534   113.1     146s   1.04x |     24.0
+  6 |    0.769    74s   22.1C |    1.636    21s    0.1C |     2.400   111.8     140s   1.00x |     28.2
+  8 |    0.631    80s   22.7C |    1.621    23s    0.1C |     2.336   111.3     136s   0.97x |     27.5
+ 12 |    0.482    88s   23.3C |    1.612    25s    0.2C |     2.279   110.9     132s   0.94x |    113.3
+ 16 |    0.405    93s   23.8C |    1.610    27s    0.2C |     2.256   110.7     129s   0.92x |    101.2
+ 20 |    0.358    96s   24.0C |    1.611    28s    0.2C |     2.245   110.5     127s   0.90x |    118.6
+ 24 |    0.327    98s   24.2C |    1.612    28s    0.2C |     2.239   110.4     125s   0.89x |    200.9
+ 32 |    0.291   102s   24.5C |    1.615    29s    0.2C |     2.234   110.3     123s   0.88x |    263.8
+
+dead-time recovery as a fraction of the plant's own (MAK, truth 112s) and coast (truth 25.1C):
+  n_delay= 4  dead 0.57x  coast 0.84x  longest_brake 336s
+  n_delay= 6  dead 0.66x  coast 0.88x  longest_brake 282s
+  n_delay= 8  dead 0.71x  coast 0.90x  longest_brake 253s
+  n_delay=12  dead 0.79x  coast 0.93x  longest_brake 222s
+  n_delay=16  dead 0.83x  coast 0.94x  longest_brake 204s
+  n_delay=20  dead 0.86x  coast 0.96x  longest_brake 192s
+  n_delay=24  dead 0.88x  coast 0.96x  longest_brake 184s
+  n_delay=32  dead 0.91x  coast 0.98x  longest_brake 173s
