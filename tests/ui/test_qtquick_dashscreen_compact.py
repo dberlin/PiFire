@@ -1,3 +1,4 @@
+import pytest
 from PySide6.QtCore import QObject, QUrl, Property
 from PySide6.QtQml import QQmlComponent
 
@@ -6,10 +7,11 @@ from tests.conftest import QML_DIR
 
 class _StubBackend(QObject):
     # Minimal surface DashScreen reads at construction time.
-    def __init__(self):
+    def __init__(self, mode="Stop"):
         super().__init__()
+        self._mode = mode
 
-    mode = Property(str, lambda self: "Stop", constant=True)
+    mode = Property(str, lambda self: self._mode, constant=True)
     foodProbeCount = Property(int, lambda self: 0, constant=True)
     foodProbes = Property("QVariantList", lambda self: [], constant=True)
     units = Property(str, lambda self: "F", constant=True)
@@ -22,15 +24,17 @@ class _StubBackend(QObject):
     lidOpen = Property(bool, lambda self: False, constant=True)
     recipe = Property(bool, lambda self: False, constant=True)
     recipePaused = Property(bool, lambda self: False, constant=True)
-    augerDuty = Property(int, lambda self: 0, constant=True)
-    fanDuty = Property(int, lambda self: 0, constant=True)
+    augerDuty = Property(int, lambda self: 40, constant=True)
+    fanDuty = Property(int, lambda self: 100, constant=True)
     pMode = Property(int, lambda self: 2, constant=True)
-    smokePlus = Property(bool, lambda self: False, constant=True)
+    # Held ON so a mode that must not show SMOKE+ cannot pass by carrying a
+    # value that happened to be false.
+    smokePlus = Property(bool, lambda self: True, constant=True)
     fanOn = Property(bool, lambda self: False, constant=True)
 
 
-def _dash(engine, width):
-    backend = _StubBackend()
+def _dash(engine, width, mode="Stop"):
+    backend = _StubBackend(mode)
     engine.rootContext().setContextProperty("backend", backend)
     qml = 'import QtQuick\nimport "screens"\nDashScreen { width: %d; height: %d }' % (
         width,
@@ -56,3 +60,27 @@ def test_compact_true_at_1024(qml_engine):
 
 def test_compact_false_at_1280(qml_engine):
     assert _dash(qml_engine, 1280).property("compact") is False
+
+
+def _duty_pills(dash):
+    """The (label, value) of the two DutyPills, left to right.
+
+    DutyPill is the only thing under DashScreen carrying all three of
+    label/value/highlighted, and findChildren walks in construction order,
+    which is the order they are declared in the RowLayout.
+    """
+    pills = [
+        c
+        for c in dash.findChildren(QObject)
+        if c.property("label") is not None and c.property("value") is not None and c.property("highlighted") is not None
+    ]
+    return [(p.property("label"), p.property("value")) for p in pills]
+
+
+def test_duty_pills_show_p_mode_and_smoke_plus_in_smoke(qml_engine):
+    assert _duty_pills(_dash(qml_engine, 1280, "Smoke")) == [("P-MODE", "P-2"), ("SMOKE+", "ON")]
+
+
+@pytest.mark.parametrize("mode", ["Stop", "Hold", "Startup", "Reignite", "Prime", "Shutdown", "Monitor", "Manual"])
+def test_duty_pills_show_the_duties_everywhere_but_smoke(qml_engine, mode):
+    assert _duty_pills(_dash(qml_engine, 1280, mode)) == [("AUGER DUTY", "40%"), ("FAN DUTY", "100%")]

@@ -66,25 +66,37 @@ describe("probeCard etaStr", () => {
   });
 });
 
-// I1: the P-Mode badge is shown in every mode, but Flask offers the CONTROL
-// only in the five modes where the value is actually in play
-// (dash_default.js:248-293).
+// The P-Mode pill is a control only where it is shown at all, which is Smoke.
+// Flask offered the control in five modes (dash_default.js:248-293), but it
+// also showed the badge in all of them; here the badge is Smoke-only, and the
+// left pill reads AUGER DUTY everywhere else -- a pill that must never open a
+// P-Mode picker.
 describe("deriveView.pModeEditable", () => {
   const at = (over: Partial<LiveState>): LiveState => ({ ...FIXTURE_DASH, ...over });
 
-  it("is editable in Prime, Shutdown, Startup, Reignite and Smoke", () => {
-    for (const mode of ["Prime", "Shutdown", "Startup", "Reignite", "Smoke"]) {
-      expect(deriveView(at({ currentMode: mode })).pModeEditable).toBe(true);
-    }
+  it("is editable in Smoke", () => {
+    expect(deriveView(at({ currentMode: "Smoke" })).pModeEditable).toBe(true);
   });
 
   it("is NOT editable in Hold, where the PID owns the cycle", () => {
     expect(deriveView(at({ currentMode: "Hold" })).pModeEditable).toBe(false);
   });
 
-  it("is NOT editable in Stop, Monitor, Manual or Error", () => {
-    for (const mode of ["Stop", "Monitor", "Manual", "Error", ""]) {
-      expect(deriveView(at({ currentMode: mode })).pModeEditable).toBe(false);
+  it("is NOT editable wherever the left pill is the auger duty", () => {
+    for (const mode of [
+      "Prime",
+      "Shutdown",
+      "Startup",
+      "Reignite",
+      "Stop",
+      "Monitor",
+      "Manual",
+      "Error",
+      "",
+    ]) {
+      const view = deriveView(at({ currentMode: mode }));
+      expect(view.pillL.label, mode).toBe("AUGER DUTY");
+      expect(view.pModeEditable, mode).toBe(false);
     }
   });
 
@@ -100,41 +112,56 @@ describe("deriveView.pModeEditable", () => {
   });
 });
 
-// The two pills under the system card. Holding, P-mode and Smoke+ describe a
-// smoke cycle that is not running -- and P-mode is already read-only there --
-// so both are replaced by what the controller is actually commanding. The
-// physical display has always made this swap (display/qml/screens/DashScreen.qml:161-174);
-// only the web UI kept showing the pair in every mode.
+// The two pills under the system card. P-mode and Smoke+ describe the smoke
+// cycle, so they appear only in Smoke; in every other mode they reported
+// settings that governed nothing running, and the pills carry the actuator
+// duties instead. The attached display makes the same swap on the same
+// condition (display/qml/screens/DashScreen.qml).
 describe("duty pills", () => {
   const at = (over: Partial<LiveState>): LiveState => ({ ...FIXTURE_DASH, ...over });
 
-  it("shows the actuator duties while holding", () => {
-    const view = deriveView(at({ currentMode: "Hold", cycleRatio: 0.42, fanDuty: 65 }));
-    expect(view.pillL.label).toBe("AUGER DUTY");
-    expect(view.pillL.value).toBe("42%");
-    expect(view.pillR.label).toBe("FAN DUTY");
-    expect(view.pillR.value).toBe("65%");
+  it("shows P-mode and Smoke+ in Smoke, and only there", () => {
+    const view = deriveView(at({ currentMode: "Smoke", pMode: 3, smokePlus: true }));
+    expect(view.pillL.label).toBe("P-MODE");
+    expect(view.pillL.value).toBe("P-3");
+    expect(view.pillR.label).toBe("SMOKE+");
+    expect(view.pillR.value).toBe("ON");
+  });
+
+  it("reports Smoke+ off in Smoke when it is off", () => {
+    const view = deriveView(at({ currentMode: "Smoke", smokePlus: false }));
+    expect(view.pillR.value).toBe("OFF");
+  });
+
+  it("shows the actuator duties in every mode but Smoke", () => {
+    // Smoke+ is deliberately left ON here: outside Smoke it must not reach the
+    // pill at all, so a passing run proves the mode gate and not a false value.
+    for (const mode of [
+      "Hold",
+      "Startup",
+      "Stop",
+      "Shutdown",
+      "Prime",
+      "Reignite",
+      "Monitor",
+      "Manual",
+      "Error",
+      "",
+    ]) {
+      const view = deriveView(
+        at({ currentMode: mode, cycleRatio: 0.42, fanDuty: 65, pMode: 3, smokePlus: true }),
+      );
+      expect(view.pillL.label, mode).toBe("AUGER DUTY");
+      expect(view.pillL.value, mode).toBe("42%");
+      expect(view.pillR.label, mode).toBe("FAN DUTY");
+      expect(view.pillR.value, mode).toBe("65%");
+    }
   });
 
   it("rounds the auger's cycle share to whole percent", () => {
     const view = deriveView(at({ currentMode: "Hold", cycleRatio: 0.335, fanDuty: 0 }));
     expect(view.pillL.value).toBe("34%");
     expect(view.pillR.value).toBe("0%");
-  });
-
-  it("keeps P-mode and Smoke+ in every other mode", () => {
-    for (const mode of ["Smoke", "Startup", "Stop", "Shutdown", "Prime", "Monitor", "Manual"]) {
-      const view = deriveView(at({ currentMode: mode, pMode: 3, smokePlus: true }));
-      expect(view.pillL.label, mode).toBe("P-MODE");
-      expect(view.pillL.value, mode).toBe("P-3");
-      expect(view.pillR.label, mode).toBe("SMOKE+");
-      expect(view.pillR.value, mode).toBe("ON");
-    }
-  });
-
-  it("still reports Smoke+ off outside Hold", () => {
-    const view = deriveView(at({ currentMode: "Smoke", smokePlus: false }));
-    expect(view.pillR.value).toBe("OFF");
   });
 
   it("survives a payload from a backend too old to send the duties", () => {

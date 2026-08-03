@@ -18,7 +18,12 @@ Item {
 	signal requestMenu(string name)
 	signal requestInput(string name, string origin)
 
-	property bool hold: backend.mode === "Hold"
+	// P-mode and Smoke+ describe the smoke cycle, so the duty pills carry them
+	// only while that cycle is what the grill is doing. Everywhere else they
+	// report settings that govern nothing running, so the pills show the
+	// actuator duties, which are true in every mode. P-mode and Smoke+ stay
+	// reachable from the menu (Menus.js, "main_active_normal").
+	property bool smoking: backend.mode === "Smoke"
 	readonly property bool compact: width <= 1100
 
 	ColumnLayout {
@@ -162,17 +167,17 @@ Item {
 						Layout.fillWidth: true
 						Layout.fillHeight: true
 						compact: dash.compact
-						label: dash.hold ? "AUGER DUTY" : "P-MODE"
-						value: dash.hold ? backend.augerDuty + "%" : "P-" + backend.pMode
+						label: dash.smoking ? "P-MODE" : "AUGER DUTY"
+						value: dash.smoking ? "P-" + backend.pMode : backend.augerDuty + "%"
 						highlighted: false
 					}
 					DutyPill {
 						Layout.fillWidth: true
 						Layout.fillHeight: true
 						compact: dash.compact
-						label: dash.hold ? "FAN DUTY" : "SMOKE+"
-						value: dash.hold ? backend.fanDuty + "%" : (backend.smokePlus ? "ON" : "OFF")
-						highlighted: dash.hold ? backend.fanOn : backend.smokePlus
+						label: dash.smoking ? "SMOKE+" : "FAN DUTY"
+						value: dash.smoking ? (backend.smokePlus ? "ON" : "OFF") : backend.fanDuty + "%"
+						highlighted: dash.smoking ? backend.smokePlus : backend.fanOn
 					}
 				}
 

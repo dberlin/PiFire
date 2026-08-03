@@ -30,12 +30,6 @@ const EDGE = "var(--card-border)";
 // is treated as not-cooking.
 const COOKING_MODES = new Set(["Startup", "Smoke", "Hold", "Prime", "Reheat"]);
 
-// Modes in which the P-Mode pill is a control rather than a readout. Notably
-// NOT Hold -- the controller owns the cycle there. Hold does not show the pill
-// at all now (see the duty pills below); everywhere else it is shown, and this
-// set decides whether it can be clicked.
-const PMODE_EDITABLE_MODES = new Set(["Prime", "Shutdown", "Startup", "Reignite", "Smoke"]);
-
 // A soft accent tint that still tracks the active [data-accent] theme.
 const accentMix = (pct: number) => `color-mix(in srgb, var(--accent) ${pct}%, transparent)`;
 
@@ -171,17 +165,18 @@ export function deriveView(dash: LiveState): DashView {
   const probes = (dash.foodProbes ?? []).map((fp) => probeCard(fp, units));
 
   const smokeOn = dash.smokePlus;
-  // Holding, the two pills carry what the controller is asking of the auger and
-  // the fan. P-mode and Smoke+ describe the smoke cycle, which a hold does not
-  // run: P-mode is already read-only here (PMODE_EDITABLE_MODES), so the pair
-  // was two readouts of settings that changed nothing. The physical display
-  // makes the same swap (display/qml/screens/DashScreen.qml).
-  const holding = mode === "Hold";
+  // P-mode and Smoke+ describe the smoke cycle, so they are shown only where
+  // that cycle is what the grill is doing. Everywhere else the pair reported
+  // settings that governed nothing running -- a P-number in Stop describes a
+  // cycle that is not turning. The two pills carry the actuator duties instead,
+  // which are true in every mode. P-mode stays reachable off the dashboard:
+  // Settings > Work Mode here, the PMode menu on the attached display.
+  const smoking = mode === "Smoke";
   const neutral = { valColor: "var(--row-label)", bg: SURFACE, border: EDGE, labelColor: DIM };
-  const pillL: PillView = holding
-    ? { label: "AUGER DUTY", value: `${Math.round((dash.cycleRatio ?? 0) * 100)}%`, ...neutral }
-    : { label: "P-MODE", value: `P-${dash.pMode}`, ...neutral };
-  const pillR: PillView = holding
+  const pillL: PillView = smoking
+    ? { label: "P-MODE", value: `P-${dash.pMode}`, ...neutral }
+    : { label: "AUGER DUTY", value: `${Math.round((dash.cycleRatio ?? 0) * 100)}%`, ...neutral };
+  const pillR: PillView = !smoking
     ? { label: "FAN DUTY", value: `${Math.round(dash.fanDuty ?? 0)}%`, ...neutral }
     : smokeOn
       ? {
@@ -223,9 +218,12 @@ export function deriveView(dash: LiveState): DashView {
     pillR,
     hopper: hopperView(dash.hopperLevel),
     lidOpen: dash.lidOpenDetected,
-    // A recipe drives the mode itself, and Flask hides the whole control panel
-    // during one -- so the pill stays read-only however the sub-mode reads.
-    pModeEditable: !dash.recipeStatus?.recipeMode && PMODE_EDITABLE_MODES.has(mode),
+    // Tied to `smoking` rather than to a set of editable modes: this flag makes
+    // the LEFT pill clickable, and outside Smoke that pill is AUGER DUTY, which
+    // must not open a P-Mode picker. A recipe drives the mode itself, and Flask
+    // hides the whole control panel during one -- so the pill stays read-only
+    // however the sub-mode reads.
+    pModeEditable: !dash.recipeStatus?.recipeMode && smoking,
   };
 }
 

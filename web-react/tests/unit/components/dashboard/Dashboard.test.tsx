@@ -88,8 +88,10 @@ describe("Dashboard", () => {
     expect(screen.queryByText("Food Probes")).not.toBeInTheDocument();
   });
 
+  // Both pin currentMode: the pair is shown in Smoke and nowhere else, so a
+  // fixture default would decide the outcome instead of the assertion.
   it("shows the P-mode and an ON smoke+ pill when smokePlus is set", () => {
-    renderDashboard({ ...FIXTURE_DASH, pMode: 2, smokePlus: true });
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", pMode: 2, smokePlus: true });
     expect(screen.getByText("P-MODE")).toBeInTheDocument();
     expect(screen.getByText("P-2")).toBeInTheDocument();
     expect(screen.getByText("SMOKE+")).toBeInTheDocument();
@@ -97,7 +99,7 @@ describe("Dashboard", () => {
   });
 
   it("shows an OFF smoke+ pill when smokePlus is unset", () => {
-    renderDashboard({ ...FIXTURE_DASH, smokePlus: false });
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", smokePlus: false });
     expect(screen.getByText("OFF")).toBeInTheDocument();
   });
 
@@ -538,23 +540,21 @@ describe("Dashboard status readouts", () => {
 });
 
 // I1: the P-Mode value was displayed and could not be changed, while
-// command.setPMode sat there with no caller. Flask offers the control in five
-// modes and shows the badge in all of them (dash_default.js:248-293).
+// command.setPMode sat there with no caller. Flask showed the badge in every
+// mode and offered the control in five (dash_default.js:248-293); here both
+// the badge and the control are Smoke-only, because that is the mode whose
+// cycle a P-number describes. Settings > Work Mode still edits it anywhere.
 describe("Dashboard P-Mode control", () => {
-  it("is not shown at all in Hold, where the controller owns the cycle", () => {
-    // It used to render as a dead "P-2" readout here: not editable, and
-    // describing a smoke cycle a hold does not run. The pills carry the
-    // actuator duties instead, as the physical display already did.
-    renderDashboard({ ...FIXTURE_DASH, currentMode: "Hold", pMode: 2 });
-    expect(screen.queryByText("P-2")).not.toBeInTheDocument();
-    expect(screen.queryByText("P-MODE")).not.toBeInTheDocument();
-    expect(screen.queryByText("SMOKE+")).not.toBeInTheDocument();
-  });
-
-  it("is a plain readout in Stop", () => {
-    renderDashboard({ ...FIXTURE_DASH, currentMode: "Stop", pMode: 2 });
-    expect(screen.getByText("P-2")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /P-MODE/ })).not.toBeInTheDocument();
+  it("is not shown outside Smoke, where the pills carry the actuator duties", () => {
+    for (const mode of ["Hold", "Stop", "Startup", "Prime", "Shutdown", "Reignite", "Monitor"]) {
+      const { unmount } = renderDashboard({ ...FIXTURE_DASH, currentMode: mode, pMode: 2 });
+      expect(screen.queryByText("P-2"), mode).not.toBeInTheDocument();
+      expect(screen.queryByText("P-MODE"), mode).not.toBeInTheDocument();
+      expect(screen.queryByText("SMOKE+"), mode).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /P-MODE/ }), mode).not.toBeInTheDocument();
+      expect(screen.getByText("AUGER DUTY"), mode).toBeInTheDocument();
+      unmount();
+    }
   });
 
   it("becomes a button in Smoke and opens a ten-item menu", async () => {
@@ -573,7 +573,7 @@ describe("Dashboard P-Mode control", () => {
   it("sends the picked value through setPMode", async () => {
     const user = userEvent.setup();
     const command = makeCommand();
-    renderDashboard({ ...FIXTURE_DASH, currentMode: "Startup", pMode: 2 }, { command });
+    renderDashboard({ ...FIXTURE_DASH, currentMode: "Smoke", pMode: 2 }, { command });
     await user.click(screen.getByRole("button", { name: /P-MODE/ }));
     await user.click(screen.getByRole("button", { name: "7" }));
     await waitFor(() => expect(command.setPMode).toHaveBeenCalledWith(7));

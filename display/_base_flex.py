@@ -525,10 +525,20 @@ class DisplayBase:
     @staticmethod
     def _duty_pills(status_data):
         """Returns (left_data, right_data) dicts for duty_pill_left/duty_pill_right:
-        AUGER/FAN DUTY while Hold is active, otherwise P-MODE/SMOKE+."""
+        P-MODE/SMOKE+ while Smoke is active, otherwise AUGER/FAN DUTY.
+
+        P-mode and Smoke+ describe the smoke cycle, so they are shown only
+        where that cycle is what the grill is doing; everywhere else they
+        reported settings governing nothing running. The duties are true in
+        every mode. P-mode stays reachable from the PMode menu.
+        """
         mode = status_data.get("mode", Mode.STOP)
         outpins = status_data.get("outpins", {})
-        if mode == Mode.HOLD:
+        if mode == Mode.SMOKE:
+            left = {"label": "P-MODE", "value": f"P-{status_data.get('p_mode', 0)}", "highlight": False}
+            s_plus = bool(status_data.get("s_plus", False))
+            right = {"label": "SMOKE+", "value": "ON" if s_plus else "OFF", "highlight": s_plus}
+        else:
             left = {
                 "label": "AUGER DUTY",
                 "value": f"{round(status_data.get('cycle_ratio', 0) * 100)}%",
@@ -539,10 +549,6 @@ class DisplayBase:
                 "value": f"{round(status_data.get('fan_duty', 0))}%",
                 "highlight": bool(outpins.get("fan", False)),
             }
-        else:
-            left = {"label": "P-MODE", "value": f"P-{status_data.get('p_mode', 0)}", "highlight": False}
-            s_plus = bool(status_data.get("s_plus", False))
-            right = {"label": "SMOKE+", "value": "ON" if s_plus else "OFF", "highlight": s_plus}
         return left, right
 
     @staticmethod
@@ -999,7 +1005,7 @@ class DisplayBase:
             self.display_object_list[self.dash_map["hopper_vertical"]].update_object_data(object_data)
 
     def _update_duty_pills(self):
-        """Update Duty Pills (ember dash) - AUGER/FAN DUTY in Hold, else P-MODE/SMOKE+"""
+        """Update Duty Pills (ember dash) - P-MODE/SMOKE+ in Smoke, else AUGER/FAN DUTY"""
         if "duty_pill_left" in self.dash_map.keys() or "duty_pill_right" in self.dash_map.keys():
             left_data, right_data = self._duty_pills(self.status_data)
             if "duty_pill_left" in self.dash_map.keys():

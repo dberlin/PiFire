@@ -15,6 +15,8 @@ plumbing.
 import json
 import os
 
+import pytest
+
 from display._base_flex import DisplayBase, NEW_EMBER_FLEX_TYPES
 from display.flexobject import resolve_accent
 
@@ -364,10 +366,28 @@ def test_duty_pills_hold_mode():
     assert right == {"label": "FAN DUTY", "value": "100%", "highlight": True}
 
 
-def test_duty_pills_non_hold_mode():
+def test_duty_pills_smoke_mode():
     left, right = DisplayBase._duty_pills({"mode": "Smoke", "p_mode": 5, "s_plus": False, "outpins": {}})
     assert left == {"label": "P-MODE", "value": "P-5", "highlight": False}
     assert right == {"label": "SMOKE+", "value": "OFF", "highlight": False}
+
+
+@pytest.mark.parametrize("mode", ["Stop", "Startup", "Reignite", "Prime", "Shutdown", "Monitor", "Manual", "Error"])
+def test_duty_pills_show_the_duties_everywhere_but_smoke(mode):
+    # s_plus is left ON: outside Smoke it must not reach a pill at all, so a
+    # pass proves the mode gate rather than a value that happened to be false.
+    left, right = DisplayBase._duty_pills(
+        {
+            "mode": mode,
+            "cycle_ratio": 0.4,
+            "fan_duty": 100,
+            "p_mode": 5,
+            "s_plus": True,
+            "outpins": {"fan": True},
+        }
+    )
+    assert left == {"label": "AUGER DUTY", "value": "40%", "highlight": False}
+    assert right == {"label": "FAN DUTY", "value": "100%", "highlight": True}
 
 
 def test_duty_pills_smoke_plus_on_highlights():

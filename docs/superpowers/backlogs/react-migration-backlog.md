@@ -771,7 +771,7 @@ top-level item, so nobody has to read 900 lines to find that out:
 | 10. Deferred-work inventory | **MIXED** — the only large open surface |
 | 11. Recipes deliberate non-dos | **WON'T DO** — boundaries, not owed work |
 | 12. Shutdown affordance and ordering | **OPEN** |
-| 13. P-MODE/SMOKE+ visibility outside Smoke | **OPEN** — needs a ruling |
+| 13. P-MODE/SMOKE+ visibility outside Smoke | **DONE** 2026-08-03 — Smoke-only, in all three dashboards |
 | 14. `clampSetpoint` is superseded | **OPEN** — delete it |
 | 15. Probe cards intermittently read 0 | **OPEN** — live-grill report |
 | 16. Save-error placement wired for one tab | **OPEN** |
@@ -796,8 +796,9 @@ biggest of those, in rough order of consequence:
    (item 15) — reported from a live grill; **cause established**, fix not
    written. A stale reading arrives as `null` and `Math.round(null)` is `0`;
    QML refuses the same assignment, which is why only the web UI shows it.
-8. Two small ones: whether P-MODE/SMOKE+ should be Smoke-only (item 13, needs a
-   ruling) and a superseded helper to delete (item 14).
+8. ~~Whether P-MODE/SMOKE+ should be Smoke-only (item 13)~~ — **ruled and
+   shipped 2026-08-03**; a superseded helper still waits to be deleted
+   (item 14).
 
 Closed on 2026-08-02, listed here only because they were on this list the same
 day: persisted schema versioning for both durable blobs, **including modeling,
@@ -2237,28 +2238,47 @@ only on the `auto_power_off` path.
 They are a different control with their own confirmation; this item is the
 dashboard's mode button.
 
-### 13. Should P-MODE and SMOKE+ show outside Smoke at all? — OPEN, needs a ruling
+### 13. Should P-MODE and SMOKE+ show outside Smoke at all? — DONE 2026-08-03
 
-**Status:** OPEN. Raised 2026-08-02 while making the pills carry the actuator
-duties in Hold; deliberately not decided then.
+**Ruled: no.** They appear in Smoke and nowhere else; every other mode shows
+AUGER DUTY / FAN DUTY, which are true in every mode. Landed in all three
+dashboards at once — `helpers/dashboard/deriveView.ts` (web),
+`display/qml/screens/DashScreen.qml` (Qt Quick) and
+`display/_base_flex.py::_duty_pills` (the pygame/flex displays).
 
-The duty-pill change switches on `mode === "Hold"` and nothing else, which is
-exactly what the attached display does (`DashScreen.qml:21`,
-`property bool hold: backend.mode === "Hold"`). Mirroring it was the
-conservative reading of "they do not appear in hold mode in the qt UI".
+**The entry below was wrong about the attached display, and the third
+dashboard was missed entirely.** Recorded because both errors are the same
+mistake — asserting parity from one file instead of from every consumer.
 
-But the request that prompted it was that P-mode and Smoke+ "should only appear
-in **smoke** mode" — which is stricter. Under the shipped behaviour they still
-appear in Stop, Monitor, Startup, Prime, Shutdown and Manual, describing a
-smoke cycle that is not running in any of them.
+- Qt did **not** gate on Smoke. `DashScreen.qml` swapped on `hold`, so
+  P-MODE/SMOKE+ rendered in Stop, Monitor, Startup, Prime, Shutdown, Reignite
+  and Manual, exactly like the web UI. A P-number in Stop describes a cycle
+  that is not turning. What "does not appear in hold mode in the qt UI"
+  described was Hold and only Hold, which is where the labels swap.
+- **There is a third dashboard.** `display/_base_flex.py` drives the
+  pygame/DSI displays and carries its own copy of the pill rule
+  (`_duty_pills`, tested in `tests/ui/test_base_flex_dash_update.py`). It had
+  the same Hold-only swap. Any future statement about "both UIs" is wrong by
+  construction: there are three.
+- The `pModeActive` backend property (`display/qtbackend.py:334`) already
+  computes `mode in (STARTUP, REIGNITE, SMOKE)` and **nothing reads it**.
+  `PModeControl.qml` and `SmokePlusControl.qml` are likewise orphans, never
+  instantiated. The intent existed one layer down the whole time.
 
-The two readings differ only outside Hold, and the change is one condition in
-`helpers/dashboard/deriveView.ts` (`holding` becomes something like
-`mode !== "Smoke"`). What makes it a ruling rather than a fix: going Smoke-only
-means **the web UI leads and Qt trails**, so `DashScreen.qml` has to follow or
-the two diverge again — and there is a live counter-argument, that P-mode is
-editable in Prime, Shutdown, Startup and Reignite (`PMODE_EDITABLE_MODES`), so
-hiding the pill in those modes removes a control, not just a readout.
+The counter-argument the entry recorded — that hiding the pill removes a
+control, since P-mode was editable in Prime, Shutdown, Startup and Reignite —
+was checked and does not hold: both UIs keep a P-mode path off the dashboard
+(Settings > Work Mode on the web, the `PMode` item in `Menus.js`'s
+`main_active_normal` on the display). `PMODE_EDITABLE_MODES` is deleted;
+`pModeEditable` now tracks the same `smoking` flag that decides whether the
+pill is shown, because otherwise the left pill reads AUGER DUTY while still
+opening a P-Mode picker.
+
+**On the Qt test that did not exist.** `tests/ui/` had 527 passing tests and
+none of them read a DutyPill's label, so the QML change passed the suite
+untouched. The new ones drive `backend.mode` through the stub and read the
+labels back; reverting the condition fails exactly the seven non-Hold,
+non-Smoke modes, which is what makes them worth having.
 
 ### 14. `clampSetpoint` is superseded — delete it — OPEN
 
