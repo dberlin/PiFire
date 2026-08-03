@@ -25,7 +25,8 @@
    * the PLANT's own braking time: drive it at full fire from cold, and at the
      instant the chamber crosses the reference temperature, fork it and cut
      fuel to zero. Seconds from the cut to the chamber's peak.
-   * the ESTIMATE braking_distance(fitted, t_ref) would have returned.
+   * the ESTIMATE the model itself gives -- _model_coast(fitted, t_ref), the
+     reading BEFORE the bound, since the bound is what is being derived.
 
  The ratio of the two is what the bound has to cover. It is taken at the WORST
  observed recovery rather than the mean, because a bound is set by its worst
@@ -60,7 +61,12 @@ if REPO not in sys.path:
 
 from controller.grill_sim import DT, GrillSim, MAKGrillSim  # noqa: E402
 from controller.mpc import _DEFAULTS  # noqa: E402
-from controller.model_promotion import braking_distance  # noqa: E402
+
+# The MODEL's own reading, not the public `braking_distance` -- that one already
+# carries `_COAST_BOUND`, which is the number this script exists to derive, so
+# importing it would measure the factor against itself and report that whatever
+# is currently shipped is exactly right.
+from controller.model_promotion import _model_coast  # noqa: E402
 
 from docs.superpowers.experiments.ndelay_sweep_plants import (  # noqa: E402
     LUMP_FREE,
@@ -168,7 +174,7 @@ def main():
             if coasts[CUT_FANS[0]] is None:
                 print(f"  {t_ref:6.0f} | {'never reached':>11}")
                 continue
-            est = braking_distance(p, t_ref)
+            est = _model_coast(p, t_ref)
             note = ""
             scored = True
             if charged < charge_floor:

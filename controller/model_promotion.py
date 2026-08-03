@@ -100,11 +100,27 @@ _BISECT_STEPS = 60
 #: fitted chain is SHORTER than the grill it describes: the Erlang
 #: approximation recovers about 0.71x of the reference plant's real dead time
 #: at the shipped n_delay, so an estimate faithful to the model under-states a
-#: real coast. Measured directly against both plants in controller/grill_sim.py
-#: -- fitted as a calibration would fit them, then cut at full fire across the
-#: operating range -- the worst recovery is 0.880 at the shipped 40% fan floor,
-#: so 1.15 covers every case measured with a little to spare. The measurement
-#: is docs/superpowers/experiments/braking_bound.py.
+#: real coast. Measured against both plants in controller/grill_sim.py -- each
+#: fitted as a calibration would fit it, then cut at full fire across the
+#: operating range -- the worst recovery depends on what the fan does during
+#: the coast, because a fan left running dumps heat and stops the chamber
+#: sooner:
+#:
+#:     coast fan 1.00   worst recovery 1.033   bound needed 0.968
+#:     coast fan 0.40   worst recovery 0.881   bound needed 1.135
+#:     coast fan 0.00   worst recovery 0.691   bound needed 1.446
+#:
+#: 1.45 is set by the last row, not the middle one: 0.40 is the DEFAULT
+#: fan_min_pct in controller/controllers.json, but that field's own minimum is
+#: 0, so a coast with the fan at rest is a configuration an operator can
+#: select, and a bound that a shipped setting can step outside is not a bound.
+#: The 0.40 row is what a configuration-dependent factor could use instead, if
+#: the fan floor is ever threaded through to here.
+#:
+#: The measurement is docs/superpowers/experiments/braking_bound.py, and its
+#: committed output is _braking_bound.txt beside it. That script reads
+#: `_model_coast` deliberately: run against the public function it would be
+#: measuring this factor against itself.
 #:
 #: Inflating is the fail-safe direction: a longer reading makes the promotion
 #: gate refuse MORE models and `_warn_about_model` speak EARLIER, and no path
@@ -115,7 +131,7 @@ _BISECT_STEPS = 60
 #: n_delay far enough, or give the chain a structure that transports rather
 #: than smears, and the measurement above is what says how much of it is still
 #: needed.
-_COAST_BOUND = 1.15
+_COAST_BOUND = 1.45
 
 #: The grill's hottest permitted operating point -- the hard safety shutoff
 #: (`maxtemp` in common/settings_schema.py, 550 F) converted to the Celsius

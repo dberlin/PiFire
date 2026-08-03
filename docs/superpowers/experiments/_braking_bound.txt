@@ -1,0 +1,28 @@
+single-lump fits at the shipped n_delay=8, fitted per plant with ['K_Q', 'C_c', 'h_amb', 'theta']
+
+=== generic === C_c=316.8 h_amb=0.587 K_Q=4.322 theta=33.1 (chain charged after 99s)
+   T_ref |    fan=1.00   ratio |    fan=0.40   ratio |    fan=0.00   ratio |  estimate  full fire before cut
+      60 |       43.0s   1.202 |       56.0s   0.923 |       76.0s   0.680 |     51.7s  64s  (chain not yet charged -- not scored)
+     100 |       39.0s   1.160 |       50.0s   0.905 |       66.0s   0.686 |     45.3s  98s  (chain not yet charged -- not scored)
+     140 |       36.0s   1.133 |       46.0s   0.887 |       59.0s   0.691 |     40.8s  135s
+     180 |       34.0s   1.089 |       42.0s   0.882 |       52.0s   0.712 |     37.0s  176s
+     220 |       31.0s   1.081 |       38.0s   0.882 |       45.0s   0.745 |     33.5s  223s
+     260 |       29.0s   1.033 |       34.0s   0.881 |       37.0s   0.809 |     29.9s  281s
+
+=== mak === C_c=3145.5 h_amb=0.565 K_Q=9.697 theta=114.6 (chain charged after 344s)
+   T_ref |    fan=1.00   ratio |    fan=0.40   ratio |    fan=0.00   ratio |  estimate  full fire before cut
+      60 |      131.0s   1.539 |      151.0s   1.335 |      181.0s   1.114 |    201.6s  246s  (chain not yet charged -- not scored)
+     100 |      127.0s   1.430 |      143.0s   1.270 |      170.0s   1.068 |    181.6s  383s
+     140 |      124.0s   1.357 |      139.0s   1.210 |      162.0s   1.039 |    168.2s  526s
+     180 |      121.0s   1.302 |      135.0s   1.167 |      155.0s   1.016 |    157.5s  676s
+     220 |      119.0s   1.245 |      131.0s   1.131 |      149.0s   0.994 |    148.1s  831s
+     260 |      117.0s   1.191 |      128.0s   1.089 |      143.0s   0.975 |    139.4s  996s
+
+27 scored readings across both plants and 3 coast-fan conditions
+  coast fan 1.00: worst recovery 1.033  median 1.191  -> a bound needs 0.968   (9/9 already bound)
+  coast fan 0.40: worst recovery 0.881  median 1.089  -> a bound needs 1.135   (5/9 already bound)
+  coast fan 0.00: worst recovery 0.691  median 0.975  -> a bound needs 1.446   (3/9 already bound)
+
+  the fan floor is a CONFIGURATION choice (controllers.json fan_min_pct,
+  default 40%, settable to 0), so which row above sets the factor is a
+  decision about which configurations the bound is claimed to cover.

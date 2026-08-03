@@ -316,6 +316,39 @@ def test_a_fit_the_model_cannot_be_simulated_at_is_reported_as_not_converged():
     assert fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)["converged"] is True
 
 
+def test_a_fit_whose_simulation_goes_non_finite_without_raising_is_also_refused():
+    """The other half of the same guard: NaN that arrives quietly.
+
+    The test above pins the shape that announces itself. This pins the shape
+    that does not. A large enough `sigma` makes the radiative term inf by
+    ordinary float multiplication -- which does NOT raise, unlike the `**4`
+    that overflows -- and the next chamber step subtracts inf from inf and
+    carries NaN to the end of the record. `except OverflowError` never fires
+    here; only `np.all(np.isfinite(y))` stands between that and a set of
+    parameters offered to a live grill as a converged fit.
+
+    Both halves need their own record because the two shapes are reached by
+    different parameters, and a guard is only known to be doing its job where
+    something makes it fire.
+    """
+    t, Q, temp = _dataset()
+    quiet_nan = dict(sigma=1e300, n_delay=N_DELAY)
+
+    # The premise, as a negative control: non-finite AND no exception. If a
+    # future change made this raise instead, the test would still pass while
+    # having stopped testing the isfinite branch, so both halves are asserted.
+    y = simulate_grey_box(t, Q, T_amb=T_AMB, T0=float(temp[0]), **_init(), **quiet_nan)
+    assert not np.all(np.isfinite(y))
+
+    diverged = fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), **quiet_nan)
+    assert diverged["converged"] is False
+    assert all(key in diverged for key in CONFIG_KEYS)
+
+    # And the same record with a sigma the model survives converges, so what
+    # the assertion above catches is the non-finite simulation, not the data.
+    assert fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)["converged"] is True
+
+
 def test_a_fit_to_a_real_cook_lands_where_the_promotion_policy_can_accept_it():
     """A fit outside PROMOTION_BOUNDS is refused however well it describes the log.
 

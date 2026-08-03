@@ -209,10 +209,12 @@ def simulate_grey_box(
 
     `max_dt` is what remains: the sub-step for the chamber's own explicit Euler
     step. With the chain exact, the resulting error is first order in the
-    sub-step and INDEPENDENT of theta and n_delay -- measured at 0.099 C RMS per
-    second of sub-step on the real MAK cook in tests/unit/mpc/fixtures,
+    sub-step and INDEPENDENT of theta and n_delay -- measured at 0.099 to 0.114 C
+    RMS per second of sub-step on the real MAK cook in tests/unit/mpc/fixtures,
     uniformly to within 5% across theta from 3 s to 200 s and n_delay from 4 to
-    20. The 0.125 s default therefore holds the numerical error to 0.014 C RMS,
+    20. The coefficient is 0.114 at the default below and 0.099 at the coarsest
+    step measured, so the default is the expensive end of that range rather than
+    the flattering one. The default holds the numerical error to 0.014 C RMS,
     a ninth of the 0.16 C of model fidelity the single-lump structure was
     adopted at, so that what a fit reports is the grill rather than the
     integrator. The measurement is
