@@ -6,6 +6,45 @@ or is explicitly dropped; do not delete an entry to record that it shipped, mark
 
 ## Open
 
+### `PROMOTION_BOUNDS` bounds quantities the data cannot determine
+
+`controller/model_promotion.py`'s `PROMOTION_BOUNDS` places a range on each thermal
+parameter individually. Five of those parameters are not individually observable.
+
+The grey-box model is invariant under scaling `(C_f, C_c, h_fc, h_amb, K_Q, sigma)` by
+one common factor: both state equations are homogeneous in them, so the trajectory of
+the one measured state is unchanged — bit-identical at exact-binary factors. Six
+parameters, five identifiable degrees of freedom. A cook determines the ratios; the
+scale is fixed only by holding one parameter, which is why `update_mpc.py`'s `_FREE`
+holds `sigma` (and `C_f`).
+
+Measured with the shipped parameters: the scale factor can range over
+**[1.111e-02, 7.143]** — a **643x** span — with every point inside all six bounds,
+identical dynamics, and identical effective tau. `sigma`'s `1e-8` ceiling is what binds
+at the top. So the per-parameter bounds are considerably weaker than they look: a model
+that is correct in every observable respect can be refused for having drifted along a
+direction no measurement can see, and two models the bounds treat very differently may
+be the same model.
+
+This is not currently a live defect. The tau guard is the part of the policy that
+governs braking distance, and it reads `C_c/(h_amb + 4*sigma*(T+273.15)**3)` and
+`C_c/h_amb`, both of which are gauge-invariant — unaffected, and the reason nothing has
+gone wrong. The exposure is that the bounds check is doing less than its comment claims,
+and that a future check reading `C_c` or `h_amb` *alone* rather than as a ratio would be
+reading a number the data never pinned.
+
+Candidate fix, not a commitment: reparameterise the promotion check onto the five
+identifiable ratios and bound those, so every bounded quantity is one a cook can
+actually determine. That is a larger change than it sounds — it touches what a stored
+snapshot means — so it wants its own design pass rather than being folded into a
+bounds-tightening commit. A cheaper interim step is to say in `PROMOTION_BOUNDS`'s own
+comment which entries are gauge-dependent, so nobody tightens one believing it
+constrains something it does not.
+
+Evidence: `docs/superpowers/experiments/sigma_identifiability.py` and its committed
+output; `tests/unit/mpc/test_mpc_calibration.py::test_the_model_is_invariant_under_a_
+common_scaling_of_its_parameters` pins the invariance itself.
+
 ### The snapshot size cap is bounded far tighter than anything requires
 
 `MAX_SNAPSHOT_BYTES` is 65536. Nothing about the storage layer motivates a bound that

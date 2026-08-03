@@ -1,25 +1,63 @@
 #!/usr/bin/env python3
-"""Where does a cook contain enough information to fit the radiative coefficient?
+"""Why `controller/update_mpc.py` does not fit the radiative coefficient.
 
-`controller/update_mpc.py` fits the grey-box model *through* a radiative loss
-term but never fits its coefficient `sigma`, so a grill whose radiative
-behaviour differs from the shipped 1.4e-9 cannot learn its way to the right
-value -- the error is absorbed into `h_amb` and `C_c` instead, which are the two
-parameters `controller/model_promotion.py`'s time-constant guard watches.
+RESULT: it cannot, and no cook can make it possible. Someone will propose
+fitting `sigma` again -- this file is the evidence that stops the work being
+repeated.
 
-`sigma` and `h_amb` are both chamber loss terms. They are distinguishable only
-by their different temperature dependence: loss is
+Three findings, in the order they matter:
+
+1. THE QUESTION IS MOOT. The grey-box model is invariant under scaling
+   (C_f, C_c, h_fc, h_amb, K_Q, sigma) by one common factor: both state
+   equations are homogeneous in them, so the trajectory of the one measured
+   state is bit-identical. Six parameters carry five identifiable degrees of
+   freedom. A log determines the RATIOS, never the values, so one parameter
+   must be held to fix the scale -- and `sigma` is as good a choice as any.
+   Freeing it while `K_Q` is also free does not learn anything; it lets the
+   solver drift along an unobservable direction and report a confident,
+   arbitrary number. Measured here: the recovered `sigma` ranged over a factor
+   of 200 across noise seeds of the SAME cook, at every temperature span, with
+   RMSE equal to or better than the truth parameters'.
+
+   The corollary is the reassuring half: holding `sigma` at a wrong value costs
+   nothing. Holding it at `s_h` against a truth `s_t` is exactly compensated by
+   scaling the rest by `s_h/s_t`, and the effective time constant
+   `C_c/(h_amb + 4*sigma*(T+273.15)**3)` -- the quantity the braking argument
+   rests on -- is invariant along that direction. Confirmed to 5 significant
+   figures: truth and its `sigma`-held equivalent give tau 1203.9 s and 324.2 s
+   at both ends of the operating range, identically.
+
+2. RAW TEMPERATURE SPAN IS THE WRONG VARIABLE, if anyone does gate on
+   identifiability elsewhere. Two grid cells here have identical span (23.8 C)
+   and identical min-to-max radiative swing, yet recover `sigma` 10% versus
+   100% of the time. A record that starts off its setpoint, sags once and then
+   sits there covers a wide range while HOLDING exactly one operating point.
+
+3. WHAT DOES SEPARATE THEM is the dwell-weighted spread of radiative
+   conductance `4*sigma*(T+273.15)**3` -- measured between the 10th and 90th
+   percentiles, so it weights by how long the grill actually spent at a
+   temperature. It separated identifiable cells from unidentifiable ones in 94%
+   of the grid, against 88% for raw span.
+
+Finding 1 is why `_FREE` in `controller/update_mpc.py` holds `sigma`, and why
+findings 2 and 3 are recorded but unused.
+
+--- how it measures that ---
+
+`sigma` and `h_amb` are both chamber loss terms, distinguishable only by their
+different temperature dependence: loss is
 `h_amb*(T_c - T_amb) + sigma*((T_c+273.15)**4 - (T_amb+273.15)**4)`, so at a
-single chamber temperature any `sigma` can be traded for an `h_amb` that
-produces the identical loss, and the data cannot say which is right. This
-harness measures where that trade stops being possible, so the gate in
-`fit_params` is set from evidence instead of taste.
+single chamber temperature any `sigma` trades for an `h_amb` giving identical
+loss.
 
 It sweeps a grid of synthetic cooks generated from a KNOWN `sigma` that differs
 from the fitter's starting value -- recovery therefore requires the solver to
 actually move, and a gate that simply never frees `sigma` scores zero rather
-than looking perfect. The grid varies the two things that could plausibly
-govern identifiability independently:
+than looking perfect. Each grid point is fitted three ways: with `sigma` free
+(the shipped free set, which is degenerate), with `sigma` held, and with `K_Q`
+held instead so the scaling direction is pinned and the temperature-range
+question can be asked in isolation. The grid varies the two things that could
+plausibly govern identifiability independently:
 
 * the temperature SPAN the record covers (`T_hot - T_cold`), and
 * the HOT END it reaches (`T_hot`), because radiative conductance grows with
