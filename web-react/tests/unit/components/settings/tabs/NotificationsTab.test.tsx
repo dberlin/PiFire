@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { NotificationsTab } from "../../../../../src/components/settings/tabs/NotificationsTab";
 import { renderRoute } from "../../../test-utils";
 
@@ -183,16 +183,18 @@ describe("NotificationsTab", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      {
-        notify_services: {
-          ...NOTIFY_SERVICES,
-          ifttt: { enabled: true, APIKey: "my-ifttt-key" },
+    // Wait for the save call carrying the toggled ifttt subtree.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        {
+          notify_services: {
+            ...NOTIFY_SERVICES,
+            ifttt: { enabled: true, APIKey: "my-ifttt-key" },
+          },
         },
-      },
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
 
     // Explicitly confirm the untouched mqtt subtree is byte-identical.
@@ -209,8 +211,9 @@ describe("NotificationsTab", () => {
     fireEvent.change(portInput, { target: { value: "8883" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    // Wait for the save call, then inspect the delta it carried.
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
     const calledDelta = saveMock.mock.calls[0][0] as {
       notify_services: { mqtt: { port: unknown } };
     };
@@ -224,8 +227,9 @@ describe("NotificationsTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    // Wait for the save call, then inspect the delta it carried.
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
     const calledDelta = saveMock.mock.calls[0][0] as {
       notify_services: { apprise: { locations: string[] } };
     };
@@ -242,8 +246,9 @@ describe("NotificationsTab", () => {
     fireEvent.change(durationInput, { target: { value: "45" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    // Wait for the save call, then inspect the delta it carried.
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
     const calledDelta = saveMock.mock.calls[0][0] as {
       notify_services: { wled: { notify_duration: unknown } };
     };
@@ -311,42 +316,44 @@ describe("NotificationsTab", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      {
-        notify_services: {
-          ...NOTIFY_SERVICES,
-          apprise: { ...NOTIFY_SERVICES.apprise, enabled: true },
-          pushbullet: { enabled: true, APIKey: "pb-key", PublicURL: "https://pb.example.com" },
-          pushover: {
-            enabled: true,
-            APIKey: "po-key",
-            UserKeys: "user-1,user-2",
-            PublicURL: "https://po.example.com",
+    // Wait for the save call carrying the full edited delta.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        {
+          notify_services: {
+            ...NOTIFY_SERVICES,
+            apprise: { ...NOTIFY_SERVICES.apprise, enabled: true },
+            pushbullet: { enabled: true, APIKey: "pb-key", PublicURL: "https://pb.example.com" },
+            pushover: {
+              enabled: true,
+              APIKey: "po-key",
+              UserKeys: "user-1,user-2",
+              PublicURL: "https://po.example.com",
+            },
+            onesignal: { ...NOTIFY_SERVICES.onesignal, enabled: true },
+            influxdb: {
+              enabled: true,
+              url: "https://influx.example.com",
+              token: "tok",
+              org: "org1",
+              bucket: "bucket1",
+            },
+            mqtt: {
+              enabled: true,
+              id: "Grill1",
+              broker: "mqtt.example.com",
+              port: "1883",
+              username: "user",
+              password: "pass",
+              homeassistant_autodiscovery_topic: "ha",
+              update_sec: "60",
+            },
+            wled: { ...NOTIFY_SERVICES.wled, enabled: true, device_address: "wled2.local" },
           },
-          onesignal: { ...NOTIFY_SERVICES.onesignal, enabled: true },
-          influxdb: {
-            enabled: true,
-            url: "https://influx.example.com",
-            token: "tok",
-            org: "org1",
-            bucket: "bucket1",
-          },
-          mqtt: {
-            enabled: true,
-            id: "Grill1",
-            broker: "mqtt.example.com",
-            port: "1883",
-            username: "user",
-            password: "pass",
-            homeassistant_autodiscovery_topic: "ha",
-            update_sec: "60",
-          },
-          wled: { ...NOTIFY_SERVICES.wled, enabled: true, device_address: "wled2.local" },
         },
-      },
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
   });
 
@@ -415,8 +422,9 @@ describe("NotificationsTab", () => {
       });
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
+      // Wait for the save call, then inspect the delta it carried.
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const calledDelta = saveMock.mock.calls[0][0] as {
         notify_services: {
           onesignal: { devices: Record<string, Record<string, unknown>> };
@@ -439,8 +447,9 @@ describe("NotificationsTab", () => {
       fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
+      // Wait for the save call, then inspect the delta it carried.
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const calledDelta = saveMock.mock.calls[0][0] as {
         notify_services: {
           onesignal: { devices: Record<string, Record<string, unknown>> };
@@ -536,8 +545,9 @@ describe("NotificationsTab", () => {
       expect(screen.getByRole("button", { name: "Delete player-2" })).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
+      // Wait for the save call, then inspect the delta it carried.
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const [delta] = saveMock.mock.calls[0];
       expect(delta.notify_services.onesignal.devices["player-1"]).toBeUndefined();
       expect(delta.notify_services.onesignal.devices["player-2"]).toBeDefined();

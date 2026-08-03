@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { PwmTab } from "../../../../../src/components/settings/tabs/PwmTab";
 import type { SaveStatus } from "../../../../../src/helpers/settings/useSaveSettings";
 import { renderRoute } from "../../../test-utils";
@@ -118,30 +118,31 @@ describe("PwmTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      {
-        pwm: {
-          pwm_control: true,
-          update_time: 15,
-          min_duty_cycle: 20,
-          max_duty_cycle: 100,
-          frequency: 100,
-          temp_range_list: [3, 7, 10, 15],
-          profiles: [
-            { duty_cycle: 20 },
-            { duty_cycle: 35 },
-            { duty_cycle: 50 },
-            { duty_cycle: 75 },
-            { duty_cycle: 100 },
-          ],
+    // Wait for the save call carrying the edited fields plus the cross-section
+    // clamp of startup.pwm_duty_cycle (routes.py:495). This fixture has no
+    // `startup`, so the 100 default is used, already inside [20, 100].
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        {
+          pwm: {
+            pwm_control: true,
+            update_time: 15,
+            min_duty_cycle: 20,
+            max_duty_cycle: 100,
+            frequency: 100,
+            temp_range_list: [3, 7, 10, 15],
+            profiles: [
+              { duty_cycle: 20 },
+              { duty_cycle: 35 },
+              { duty_cycle: 50 },
+              { duty_cycle: 75 },
+              { duty_cycle: 100 },
+            ],
+          },
+          startup: { pwm_duty_cycle: 100 },
         },
-        // The delta now also carries the cross-section clamp of
-        // startup.pwm_duty_cycle (routes.py:495). This fixture has no
-        // `startup`, so the 100 default is used, already inside [20, 100].
-        startup: { pwm_duty_cycle: 100 },
-      },
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
   });
 
@@ -191,22 +192,24 @@ describe("PwmTab", () => {
     fireEvent.change(input, { target: { value: "60" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        pwm: expect.objectContaining({
-          temp_range_list: [3, 7, 10, 15],
-          profiles: [
-            { duty_cycle: 20 },
-            { duty_cycle: 35 },
-            { duty_cycle: 60 },
-            { duty_cycle: 75 },
-            { duty_cycle: 100 },
-          ],
+    // Wait for the save call carrying the edited cell in the full profiles array.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pwm: expect.objectContaining({
+            temp_range_list: [3, 7, 10, 15],
+            profiles: [
+              { duty_cycle: 20 },
+              { duty_cycle: 35 },
+              { duty_cycle: 60 },
+              { duty_cycle: 75 },
+              { duty_cycle: 100 },
+            ],
+          }),
         }),
-      }),
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
   });
 
@@ -306,10 +309,10 @@ describe("PwmTab", () => {
       renderRoute(<PwmTab />, boundsFixture(90, 50));
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
+      // Wait for the rejection alert naming the violated constraint.
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/Max Duty Cycle/i));
       expect(saveMock).not.toHaveBeenCalled();
-      expect(screen.getByRole("alert")).toHaveTextContent(/Max Duty Cycle/i);
     });
 
     // Flask's own check is `>=` (index.html:752): with equal bounds every
@@ -318,19 +321,19 @@ describe("PwmTab", () => {
       renderRoute(<PwmTab />, boundsFixture(50, 50));
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
+      // Wait for the rejection alert.
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
       expect(saveMock).not.toHaveBeenCalled();
-      expect(screen.getByRole("alert")).toBeInTheDocument();
     });
 
     it("saves once when the bounds are valid", async () => {
       renderRoute(<PwmTab />, boundsFixture(20, 100));
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
-      expect(saveMock).toHaveBeenCalledTimes(1);
+      // Wait for the single accepted save call.
+      await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
       expect(screen.queryByRole("alert")).toBeNull();
     });
 
@@ -338,11 +341,11 @@ describe("PwmTab", () => {
       renderRoute(<PwmTab />, boundsFixture(40, 60));
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Assert on the DELTA, not the rendered table: the table only clamps a
       // cell when that cell is edited, so narrowing min/max alone leaves the
       // on-screen rows untouched.
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const [delta] = saveMock.mock.calls[0];
       expect(delta.pwm.profiles).toEqual([
         { duty_cycle: 40 },
@@ -360,8 +363,9 @@ describe("PwmTab", () => {
       renderRoute(<PwmTab />, boundsFixture(40, 60, { startup: { pwm_duty_cycle: 100 } }));
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
+      // Wait for the save call, then inspect the delta it carried.
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const [delta, flags] = saveMock.mock.calls[0];
       expect(delta.startup.pwm_duty_cycle).toBe(60);
       // The flag list is a control-loop contract, not a style choice.
@@ -372,8 +376,9 @@ describe("PwmTab", () => {
       renderRoute(<PwmTab />, boundsFixture(40, 60, { startup: { pwm_duty_cycle: 55 } }));
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
+      // Wait for the save call, then inspect the delta it carried.
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const [delta] = saveMock.mock.calls[0];
       expect(delta.startup.pwm_duty_cycle).toBe(55);
     });

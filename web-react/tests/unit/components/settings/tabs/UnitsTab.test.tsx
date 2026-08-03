@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderRoute } from "../../../test-utils";
 
 const setUnitsMock = rs.fn();
@@ -58,9 +58,8 @@ describe("UnitsTab", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "C" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    expect(setUnitsMock).toHaveBeenCalledWith("C");
+    // Wait for the confirm to resolve and the displayed unit to switch.
+    await waitFor(() => expect(setUnitsMock).toHaveBeenCalledWith("C"));
     expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("C");
     expect(screen.queryByText(/Switch to/)).not.toBeInTheDocument(); // modal closed
   });
@@ -73,9 +72,8 @@ describe("UnitsTab", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "C" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    expect(setUnitsMock).toHaveBeenCalledWith("C");
+    // Wait for the confirm to resolve and the error to display.
+    await waitFor(() => expect(setUnitsMock).toHaveBeenCalledWith("C"));
     expect(screen.getByText("grill is busy")).toBeInTheDocument();
     // displayed unit must NOT have switched to C on failure
     expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("F");

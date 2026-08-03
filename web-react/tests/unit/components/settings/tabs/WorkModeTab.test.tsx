@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { WorkModeTab } from "../../../../../src/components/settings/tabs/WorkModeTab";
 import { renderRoute } from "../../../test-utils";
 
@@ -147,20 +147,20 @@ describe("WorkModeTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    // Wait for async save to complete
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    // Assert spy was called with delta touching both cycle_data and smoke_plus with settings_update flag
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cycle_data: expect.objectContaining({
-          HoldCycleTime: 15,
+    // Wait for the save call carrying the delta touching both cycle_data and
+    // smoke_plus with the settings_update flag.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cycle_data: expect.objectContaining({
+            HoldCycleTime: 15,
+          }),
+          smoke_plus: expect.objectContaining({
+            enabled: true,
+          }),
         }),
-        smoke_plus: expect.objectContaining({
-          enabled: true,
-        }),
-      }),
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
   });
 
@@ -234,37 +234,39 @@ describe("WorkModeTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "S Plus" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      {
-        cycle_data: {
-          HoldCycleTime: 21,
-          SmokeOnCycleTime: 26,
-          SmokeOffCycleTime: 27,
-          PMode: 41,
-          u_min: 42,
-          u_max: 43,
-          LidOpenDetectEnabled: true,
-          LidOpenThreshold: 44,
-          LidOpenPauseTime: 45,
-          FanPidEnabled: true,
+    // Wait for the save call carrying the full edited delta.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        {
+          cycle_data: {
+            HoldCycleTime: 21,
+            SmokeOnCycleTime: 26,
+            SmokeOffCycleTime: 27,
+            PMode: 41,
+            u_min: 42,
+            u_max: 43,
+            LidOpenDetectEnabled: true,
+            LidOpenThreshold: 44,
+            LidOpenPauseTime: 45,
+            FanPidEnabled: true,
+          },
+          smoke_plus: {
+            enabled: true,
+            min_temp: 46,
+            max_temp: 47,
+            on_time: 48,
+            off_time: 49,
+            duty_cycle: 53,
+            fan_ramp: true,
+          },
+          keep_warm: {
+            temp: 54,
+            s_plus: true,
+          },
         },
-        smoke_plus: {
-          enabled: true,
-          min_temp: 46,
-          max_temp: 47,
-          on_time: 48,
-          off_time: 49,
-          duty_cycle: 53,
-          fan_ramp: true,
-        },
-        keep_warm: {
-          temp: 54,
-          s_plus: true,
-        },
-      },
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
   });
   // Flask hides the Smoke-Plus fan-ramp NOTE, the sp_fan_ramp switch and the
@@ -300,8 +302,9 @@ describe("WorkModeTab", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    // Wait for the save call, then inspect the delta it carried.
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
     const [delta] = saveMock.mock.calls[0];
     expect(delta.smoke_plus.duty_cycle).toBe(65);
     expect(delta.smoke_plus.fan_ramp).toBe(true);

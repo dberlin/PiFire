@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { SafetyTab } from "../../../../../src/components/settings/tabs/SafetyTab";
 import { renderRoute } from "../../../test-utils";
 
@@ -90,15 +90,16 @@ describe("SafetyTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    // Wait for async save to complete and assert spy was called with correct delta and empty flags
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        safety: expect.objectContaining({
-          maxtemp: 600,
+    // Wait for the save call carrying the correct delta and empty flags.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          safety: expect.objectContaining({
+            maxtemp: 600,
+          }),
         }),
-      }),
-      [],
+        [],
+      ),
     );
   });
 
@@ -129,21 +130,23 @@ describe("SafetyTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Allow Manual Output Changes" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      {
-        safety: {
-          minstartuptemp: 85,
-          maxstartuptemp: 115,
-          maxtemp: 560,
-          reigniteretries: 3,
-          startup_check: true,
-          allow_manual_changes: true,
-          manual_override_time: 50,
+    // Wait for the save call carrying the full edited delta.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        {
+          safety: {
+            minstartuptemp: 85,
+            maxstartuptemp: 115,
+            maxtemp: 560,
+            reigniteretries: 3,
+            startup_check: true,
+            allow_manual_changes: true,
+            manual_override_time: 50,
+          },
         },
-      },
-      [],
+        [],
+      ),
     );
   });
   describe("input bounds", () => {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router";
 import { AppPrefsProvider } from "../../../../../src/components/AppPrefs";
@@ -110,8 +110,12 @@ describe("GeneralTab", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "Crimson" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock.mock.calls[0][0].display.config.qtquick_flex.accent_theme).toBe("Crimson");
+    // Wait for the save call carrying the chosen accent.
+    await waitFor(() =>
+      expect(saveMock.mock.calls[0]?.[0]?.display?.config?.qtquick_flex?.accent_theme).toBe(
+        "Crimson",
+      ),
+    );
   });
 
   it("saves the edited grill name with empty flags when Save is clicked", async () => {
@@ -132,22 +136,24 @@ describe("GeneralTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      {
-        globals: {
-          grill_name: "New Name",
+    // Wait for the save call carrying the edited grill name.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        {
+          globals: {
+            grill_name: "New Name",
+          },
+          // Written unconditionally, like PwmTab's cross-section
+          // startup.pwm_duty_cycle: this fixture has no `display.sleep_timeout`,
+          // so the 300 default round-trips. Harmless, and it keeps onSave
+          // branch-free.
+          display: {
+            config: { qtquick_flex: { accent_theme: "Ember" } },
+            sleep_timeout: 300,
+          },
         },
-        // Written unconditionally, like PwmTab's cross-section
-        // startup.pwm_duty_cycle: this fixture has no `display.sleep_timeout`,
-        // so the 300 default round-trips. Harmless, and it keeps onSave
-        // branch-free.
-        display: {
-          config: { qtquick_flex: { accent_theme: "Ember" } },
-          sleep_timeout: 300,
-        },
-      },
-      [],
+        [],
+      ),
     );
   });
 
@@ -190,8 +196,9 @@ describe("GeneralTab", () => {
     renderRoute(<GeneralTab />, context);
     fireEvent.change(screen.getByDisplayValue("300"), { target: { value: "60" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    // Wait for the save call, then inspect the delta it carried.
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
     const [delta, flags] = saveMock.mock.calls[0];
     expect(delta.display.sleep_timeout).toBe(60);
     // Flask's _settings_display does a bare write_settings with no control
@@ -211,9 +218,9 @@ describe("GeneralTab", () => {
     renderRoute(<GeneralTab />, context);
     fireEvent.change(screen.getByDisplayValue("300"), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock.mock.calls[0][0].display.sleep_timeout).toBe(0);
+    // Wait for the save call carrying the never-sleep value.
+    await waitFor(() => expect(saveMock.mock.calls[0]?.[0]?.display?.sleep_timeout).toBe(0));
   });
 
   it("resyncs displayed values when the settings object changes on re-render", () => {

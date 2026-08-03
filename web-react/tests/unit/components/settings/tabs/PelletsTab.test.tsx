@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { PelletsTab } from "../../../../../src/components/settings/tabs/PelletsTab";
 import { renderRoute } from "../../../test-utils";
 
@@ -94,15 +94,16 @@ describe("PelletsTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    // Wait for async save to complete and assert spy was called with correct flags
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        pelletlevel: expect.objectContaining({
-          warning_time: 20,
+    // Wait for the save call carrying the changed warning_time.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pelletlevel: expect.objectContaining({
+            warning_time: 20,
+          }),
         }),
-      }),
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
   });
 
@@ -134,15 +135,16 @@ describe("PelletsTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    // Wait for async save to complete and assert spy was called with correct flags
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        pelletlevel: expect.objectContaining({
-          empty: 10,
+    // Wait for the save call carrying the changed empty level.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pelletlevel: expect.objectContaining({
+            empty: 10,
+          }),
         }),
-      }),
-      ["settings_update", "distance_update"],
+        ["settings_update", "distance_update"],
+      ),
     );
   });
 
@@ -174,15 +176,16 @@ describe("PelletsTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    // Wait for async save to complete and assert spy was called with correct flags
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        pelletlevel: expect.objectContaining({
-          full: 85,
+    // Wait for the save call carrying the changed full level.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pelletlevel: expect.objectContaining({
+            full: 85,
+          }),
         }),
-      }),
-      ["settings_update", "distance_update"],
+        ["settings_update", "distance_update"],
+      ),
     );
   });
   describe("input bounds and prime-ignition danger copy", () => {

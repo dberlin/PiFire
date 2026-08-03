@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { HistoryTab } from "../../../../../src/components/settings/tabs/HistoryTab";
 import { renderRoute } from "../../../test-utils";
 
@@ -83,14 +83,16 @@ describe("HistoryTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        globals: expect.objectContaining({
-          ext_data: true,
+    // Wait for the save call carrying the toggled ext_data flag.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          globals: expect.objectContaining({
+            ext_data: true,
+          }),
         }),
-      }),
-      [],
+        [],
+      ),
     );
   });
 
@@ -191,12 +193,14 @@ describe("HistoryTab", () => {
     fireEvent.change(fidelity, { target: { value: "0.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        history_page: expect.objectContaining({ fidelity_degrees: 0.5, datapoints: 10000 }),
-      }),
-      [],
+    // Wait for the save call carrying the edited fidelity.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          history_page: expect.objectContaining({ fidelity_degrees: 0.5, datapoints: 10000 }),
+        }),
+        [],
+      ),
     );
   });
 
@@ -225,14 +229,16 @@ describe("HistoryTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        history_page: expect.objectContaining({
-          autorefresh: "on",
+    // Wait for the save call carrying the toggled autorefresh string.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          history_page: expect.objectContaining({
+            autorefresh: "on",
+          }),
         }),
-      }),
-      [],
+        [],
+      ),
     );
   });
 });
@@ -358,17 +364,19 @@ describe("HistoryTab — Chart Colors", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        history_page: expect.objectContaining({
-          probe_config: expect.objectContaining({
-            Grill: expect.objectContaining({ line_color: "rgb(255, 0, 0, 1)" }),
-            Probe1: PROBE_CONFIG.Probe1,
+    // Wait for the save call carrying the new color plus the untouched Probe1 subtree.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          history_page: expect.objectContaining({
+            probe_config: expect.objectContaining({
+              Grill: expect.objectContaining({ line_color: "rgb(255, 0, 0, 1)" }),
+              Probe1: PROBE_CONFIG.Probe1,
+            }),
           }),
         }),
-      }),
-      [],
+        [],
+      ),
     );
   });
 
@@ -381,16 +389,18 @@ describe("HistoryTab — Chart Colors", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        history_page: expect.objectContaining({
-          probe_config: expect.objectContaining({
-            Grill: expect.objectContaining({ fill: true }),
+    // Wait for the save call carrying the toggled fill flag.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          history_page: expect.objectContaining({
+            probe_config: expect.objectContaining({
+              Grill: expect.objectContaining({ fill: true }),
+            }),
           }),
         }),
-      }),
-      [],
+        [],
+      ),
     );
   });
 

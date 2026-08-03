@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { StartupTab } from "../../../../../src/components/settings/tabs/StartupTab";
 import { renderRoute } from "../../../test-utils";
 
@@ -143,17 +143,16 @@ describe("StartupTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    // Wait for async save to complete
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    // Assert that the saved delta has prime_on_startup clamped to 0
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        startup: expect.objectContaining({
-          prime_on_startup: 0,
+    // Wait for the save call carrying prime_on_startup clamped to 0.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          startup: expect.objectContaining({
+            prime_on_startup: 0,
+          }),
         }),
-      }),
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
   });
 
@@ -198,19 +197,18 @@ describe("StartupTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    // Wait for async save to complete
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    // Assert that the saved delta includes the mode change and has settings_update flag
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        startup: expect.objectContaining({
-          start_to_mode: expect.objectContaining({
-            after_startup_mode: "Hold",
+    // Wait for the save call carrying the mode change.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          startup: expect.objectContaining({
+            start_to_mode: expect.objectContaining({
+              after_startup_mode: "Hold",
+            }),
           }),
         }),
-      }),
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
   });
 
@@ -256,17 +254,16 @@ describe("StartupTab", () => {
     const saveButton = screen.getByRole("button", { name: "Save" });
     fireEvent.click(saveButton);
 
-    // Wait for async save to complete
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    // Assert that the saved delta has pwm_duty_cycle clamped to max 100
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        startup: expect.objectContaining({
-          pwm_duty_cycle: 100,
+    // Wait for the save call carrying pwm_duty_cycle clamped to max 100.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          startup: expect.objectContaining({
+            pwm_duty_cycle: 100,
+          }),
         }),
-      }),
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
   });
 
@@ -330,23 +327,25 @@ describe("StartupTab", () => {
     fireEvent.change(input, { target: { value: "300" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        startup: expect.objectContaining({
-          smartstart: expect.objectContaining({
-            temp_range_list: [60, 80, 90],
-            profiles: [
-              { startuptime: 360, augerontime: 15, p_mode: 0 },
-              { startuptime: 300, augerontime: 15, p_mode: 1 },
-              { startuptime: 240, augerontime: 15, p_mode: 3 },
-              { startuptime: 240, augerontime: 15, p_mode: 5 },
-            ],
+    // Wait for the save call carrying the edited cell in the full profiles array.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          startup: expect.objectContaining({
+            smartstart: expect.objectContaining({
+              temp_range_list: [60, 80, 90],
+              profiles: [
+                { startuptime: 360, augerontime: 15, p_mode: 0 },
+                { startuptime: 300, augerontime: 15, p_mode: 1 },
+                { startuptime: 240, augerontime: 15, p_mode: 3 },
+                { startuptime: 240, augerontime: 15, p_mode: 5 },
+              ],
+            }),
           }),
         }),
-      }),
-      ["settings_update"],
+        ["settings_update"],
+      ),
     );
   });
 
@@ -355,9 +354,9 @@ describe("StartupTab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "+ Add" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledTimes(1);
+    // Wait for the single save call.
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
     const [delta, flags] = saveMock.mock.calls[0];
     expect(delta.startup.smartstart.temp_range_list).toEqual([60, 80, 90, 100]);
     expect(delta.startup.smartstart.profiles).toHaveLength(5);
@@ -396,8 +395,9 @@ describe("StartupTab", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    // Wait for the save call, then inspect the delta it carried.
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
     const [delta] = saveMock.mock.calls[0];
     expect(delta.startup.pwm_duty_cycle).toBe(80);
   });
@@ -463,8 +463,9 @@ describe("StartupTab", () => {
       renderRoute(<StartupTab />, fixture());
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
+      // Wait for the save call, then inspect the delta it carried.
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const [delta] = saveMock.mock.calls[0];
       expect(delta.startup.start_to_mode.primary_setpoint).toBe(225);
     });
@@ -491,7 +492,9 @@ describe("StartupTab", () => {
       expect(screen.queryByText("Startup Exit Temp")).toBeNull();
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Wait for the save call, then inspect the delta it carried.
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const [delta] = saveMock.mock.calls[0];
       expect(delta.startup.startup_exit_temp).toBe(0);
     });
@@ -527,7 +530,9 @@ describe("StartupTab", () => {
 
       fireEvent.click(toggle);
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Wait for the save call, then inspect the delta it carried.
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const [delta] = saveMock.mock.calls[0];
       expect(delta.startup.prime_on_startup).toBe(0);
     });
@@ -580,8 +585,9 @@ describe("StartupTab", () => {
       renderRoute(<StartupTab />, fixture({ startup_exit_temp: 0, prime_on_startup: 0 }));
 
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
+      // Wait for the save call, then inspect the delta it carried.
+      await waitFor(() => expect(saveMock).toHaveBeenCalled());
       const [delta] = saveMock.mock.calls[0];
       expect(Object.keys(delta.shutdown).sort()).toEqual(["auto_power_off", "shutdown_duration"]);
       expect(Object.keys(delta.startup).sort()).toEqual([

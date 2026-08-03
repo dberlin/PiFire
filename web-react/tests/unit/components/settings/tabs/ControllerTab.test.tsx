@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { ControllerTab } from "../../../../../src/components/settings/tabs/ControllerTab";
 import type { ControllerMetadata } from "../../../../../src/helpers/settings/settingsApi";
 import { renderRoute } from "../../../test-utils";
@@ -168,11 +168,13 @@ describe("ControllerTab", () => {
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuzzy" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      { controller: { selected: "fuzzy", config: { fuzzy: {} } } },
-      ["controller_update"],
+    // Wait for the save call carrying the empty config.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        { controller: { selected: "fuzzy", config: { fuzzy: {} } } },
+        ["controller_update"],
+      ),
     );
   });
 
@@ -186,13 +188,18 @@ describe("ControllerTab", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      {
-        controller: { selected: "pid", config: { pid: { PB: 55, Td: 45, Ti: 180, center: 0.5 } } },
-      },
-      ["controller_update"],
+    // Wait for the save call carrying the pruned config.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        {
+          controller: {
+            selected: "pid",
+            config: { pid: { PB: 55, Td: 45, Ti: 180, center: 0.5 } },
+          },
+        },
+        ["controller_update"],
+      ),
     );
     const saved = saveMock.mock.calls[0]![0] as {
       controller: { config: { pid: Record<string, unknown> } };
@@ -217,18 +224,20 @@ describe("ControllerTab", () => {
 
     fireEvent.change(screen.getByDisplayValue("55"), { target: { value: "62.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      {
-        controller: {
-          selected: "pid",
-          config: {
-            pid: { PB: 62.5, Td: 45, Ti: 180, center: 0.5 },
+    // Wait for the save call carrying the rebuilt pid config.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        {
+          controller: {
+            selected: "pid",
+            config: {
+              pid: { PB: 62.5, Td: 45, Ti: 180, center: 0.5 },
+            },
           },
         },
-      },
-      ["controller_update"],
+        ["controller_update"],
+      ),
     );
   });
 
@@ -261,22 +270,24 @@ describe("ControllerTab", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      {
-        controller: {
-          selected: "mpc",
-          config: {
-            mpc: {
-              n_horizon: 8,
-              estimator: "kf",
-              policy_net_path: "./custom/net.npz",
+    // Wait for the save call carrying the coerced mpc config.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        {
+          controller: {
+            selected: "mpc",
+            config: {
+              mpc: {
+                n_horizon: 8,
+                estimator: "kf",
+                policy_net_path: "./custom/net.npz",
+              },
             },
           },
         },
-      },
-      ["controller_update"],
+        ["controller_update"],
+      ),
     );
   });
 
@@ -311,11 +322,13 @@ describe("ControllerTab", () => {
 
     fireEvent.change(screen.getByLabelText("Level"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(saveMock).toHaveBeenCalledWith(
-      { controller: { selected: "dummy", config: { dummy: { level: 3 } } } },
-      ["controller_update"],
+    // Wait for the save call carrying the type-preserved level.
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith(
+        { controller: { selected: "dummy", config: { dummy: { level: 3 } } } },
+        ["controller_update"],
+      ),
     );
     // Assert the numeric type is preserved, not just its loose-equal string form.
     const delta = saveMock.mock.calls[0]![0] as {
