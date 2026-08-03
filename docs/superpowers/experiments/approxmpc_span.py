@@ -42,7 +42,7 @@ SPAN_NPZ = next(
 )
 DCFG = _DEFAULTS
 ND = int(_DEFAULTS["n_delay"])
-DIDX = ND + 2  # index of d in the state vector
+DIDX = ND + 1  # index of d in the state vector [q0..q_{ND-1}, T_c, d]
 QMIN, QMAX = DCFG["Q_min"], DCFG["Q_max"]
 
 

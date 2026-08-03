@@ -43,7 +43,6 @@ OUT_SPAN = "./docs/superpowers/experiments/_ampc_data/pifire_span.npz"
 def generate_states(n, *, seed=0, op_frac=0.55):
     """Physically-structured, space-filling (state, u_prev) draws."""
     Qmin, Qmax = _DEFAULTS["Q_min"], _DEFAULTS["Q_max"]
-    Kq, hfc = _DEFAULTS["K_Q"], _DEFAULTS["h_fc"]
     rng = np.random.default_rng(seed)
     # LHS over global coords: [Q_lvl, T_c, slope, d, u_prev, mix]
     U = qmc.LatinHypercube(d=6, seed=seed).random(n)
@@ -61,11 +60,8 @@ def generate_states(n, *, seed=0, op_frac=0.55):
     mid = (ND - 1) / 2.0
     q = np.stack([Q_lvl + slope * (i - mid) for i in range(ND)], axis=1)
     q = np.clip(q + rng.normal(0, 3.0, size=q.shape), Qmin, Qmax)
-    # firepot: physically-consistent superheat for the firing level + transient spread
-    superheat = Kq * Q_lvl / hfc
-    T_f = np.clip(T_c + superheat + rng.normal(0, 25.0, size=n), T_c - 15.0, 360.0)
 
-    X0 = np.column_stack([q, T_f, T_c, d])  # [n, ND+3]
+    X0 = np.column_stack([q, T_c, d])  # [n, ND+2]
     return X0, u_prev
 
 
