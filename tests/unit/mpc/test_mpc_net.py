@@ -1,6 +1,9 @@
 import os
+import tempfile
+
 import numpy as np
 import pytest
+from controller.mpc_model import MODEL_SCHEMA
 from controller.mpc_net import NetPolicy, net_path_for
 from controller.mpc import _DEFAULTS
 
@@ -67,6 +70,50 @@ def test_the_artifact_was_trained_on_this_model_s_state_vector():
     stale.x_std = np.append(stale.x_std, 1.0)
     assert stale.input_dim == p.input_dim + 1
     assert not stale.matches_config(_DEFAULTS)
+
+
+def test_a_structure_change_that_keeps_the_width_is_still_refused():
+    """The gap the width test alone leaves.
+
+    Width catches a structure change that happens to RESIZE the state, which is
+    what collapsing to one lump did. A future change that reorders the slots or
+    swaps their meaning without resizing -- the disturbance and the chamber
+    trading places, say -- passes the width test while making every reading the
+    net takes wrong. `model_schema` is what such a change has to bump, so it is
+    checked independently of the width.
+
+    Forged both ways round: same width and a stale schema must be refused, and
+    the shipped artifact must genuinely declare the current one rather than
+    passing because the field defaulted to it.
+    """
+    p = _policy()
+    assert p.model_schema == MODEL_SCHEMA
+    assert p.matches_config(_DEFAULTS)
+
+    same_width_old_structure = _policy()
+    same_width_old_structure.model_schema = MODEL_SCHEMA - 1
+    assert same_width_old_structure.input_dim == p.input_dim
+    assert not same_width_old_structure.matches_config(_DEFAULTS)
+
+
+def test_an_artifact_predating_the_structure_field_reads_as_the_old_model():
+    """A missing declaration is the old model, never the current one.
+
+    Every artifact exported before `model_schema` existed was trained on the
+    two-lump model, so absence has to mean schema 1. Defaulting it to
+    MODEL_SCHEMA would make the check pass by default on precisely the files it
+    exists to catch.
+    """
+    z = dict(np.load(ART))
+    assert "model_schema" in z, "the shipped artifact must declare its structure"
+
+    legacy = {k: v for k, v in z.items() if k != "model_schema"}
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "legacy.npz")
+        np.savez_compressed(path, **legacy)
+        old = NetPolicy.load(path)
+    assert old.model_schema == 1
+    assert not old.matches_config(_DEFAULTS)
 
 
 def test_matches_config_rejects_recalibration():

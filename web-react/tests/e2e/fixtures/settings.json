@@ -23,7 +23,7 @@
           "h_amb": 0.5,
           "log_data": false,
           "log_path": "./controller/mpc_calibration_log.csv",
-          "n_delay": 4,
+          "n_delay": 8,
           "n_horizon": 24,
           "policy": "nlp",
           "policy_net_path": "./controller/mpc_policy_net.npz",

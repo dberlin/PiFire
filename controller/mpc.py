@@ -32,7 +32,7 @@ import numpy as np
 from controller.base import ControllerBase
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import longest_braking_distance
-from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE
+from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE, MODEL_SCHEMA
 from controller.mpc_allocator import allocate
 
 _DEFAULTS = dict(
@@ -51,7 +51,15 @@ _DEFAULTS = dict(
     h_amb=0.50,
     T_amb=20.0,
     theta=50.0,
-    n_delay=4,
+    # n_delay is a STRUCTURE constant, not a fitted parameter, so raising it
+    # costs no degrees of freedom -- it buys a sharper, more plug-flow delay
+    # for solver time alone. 8 is where that trade stops paying: against the
+    # MAK plant, going 4 -> 8 recovers the dead time the model predicts from
+    # 0.56x of the plant's own to 0.71x and the coast from 0.84x to 0.90x, for
+    # 27% more NLP solve time; 8 -> 12 buys a third as much for three times the
+    # increment, and 16 and 20 less again for more. Measured in
+    # docs/superpowers/experiments/ndelay_sweep.py.
+    n_delay=8,
     K_Q=3.5,
     sigma=1.4e-9,
     # 'ekf' linearizes the nonlinear radiative term each step (~us, default);
@@ -280,6 +288,9 @@ class Controller(ControllerBase):
         self._policy_u_prev = float(cfg["Q_min"])
         self._last_Q_raw = float(cfg["Q_min"])
         self._last_solve_failed = False
+        # How long the output has been frozen. A single failure is a hiccup the
+        # held command covers; a run of them means nothing is steering.
+        self._consecutive_policy_failures = 0
         self._history = collections.deque(maxlen=_HISTORY_MAX)
         self._model_revision = 0
         self._model_meta = None  # provenance of an adopted model, or None
@@ -433,6 +444,10 @@ class Controller(ControllerBase):
             "last_Q": _finite_float(self._last_Q),
             "applied_Q": _finite_float(self._applied_Q),
             "policy": "net" if self._net is not None else "nlp",
+            # Non-zero means update() is returning a held command rather than a
+            # computed one, so the number this reports is how many control
+            # periods the grill has been running open-loop.
+            "policy_failures": int(self._consecutive_policy_failures),
             "u_min": _finite_float(self.u_min),
             "u_max": _finite_float(self.u_max),
             "x_hat": None
@@ -457,15 +472,20 @@ class Controller(ControllerBase):
             },
         }
 
-    #: Version 2 is the single-lump model. A version 1 record describes the
-    #: two-lump model this controller no longer has: its C_f and h_fc name
-    #: nothing, and the C_c, h_amb and K_Q beside them were fitted against a
-    #: chamber that was fed through a firepot, so they are not this model's
-    #: parameters under a shorter name. Applying the subset that still has
-    #: matching keys would put a stranger's numbers on a live grill, so
-    #: `restore_model` refuses the record and says so; the next cook refits
-    #: from scratch, which is what a fresh install does anyway.
-    _MODEL_SCHEMA = 2
+    #: The model structure a snapshot describes, shared with every other thing
+    #: that outlives the process and claims to describe this model (see
+    #: mpc_model.MODEL_SCHEMA) rather than counted separately here -- two
+    #: numbers meaning the same thing is how they drift.
+    #:
+    #: A version 1 record describes the two-lump model this controller no
+    #: longer has: its C_f and h_fc name nothing, and the C_c, h_amb and K_Q
+    #: beside them were fitted against a chamber that was fed through a
+    #: firepot, so they are not this model's parameters under a shorter name.
+    #: Applying the subset that still has matching keys would put a stranger's
+    #: numbers on a live grill, so `restore_model` refuses the record and says
+    #: so; the next cook refits from scratch, which is what a fresh install
+    #: does anyway.
+    _MODEL_SCHEMA = MODEL_SCHEMA
     _MODEL_PARAM_KEYS = ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
 
     def _adopt_model(self, params, *, rmse, samples, band_c, nfev=None):
@@ -719,10 +739,31 @@ class Controller(ControllerBase):
                 Q = self._net.firing_rate(x_hat, self._policy_u_prev, self._set_point_c)
             else:
                 Q = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+            if self._consecutive_policy_failures:
+                print(f"[mpc] policy recovered after {self._consecutive_policy_failures} failed step(s)")
+            self._consecutive_policy_failures = 0
             self._last_solve_failed = False
-        except Exception:
+        except Exception as e:
+            # Holding the last move is the right reflex for ONE bad solve: the
+            # control loop must not break, and the previous firing rate is the
+            # best available guess for the next few seconds. It is the wrong
+            # answer forever. A policy that raises on every step -- an artifact
+            # whose state vector does not match the model is the way that
+            # happens -- leaves the grill on a frozen command, and this except
+            # is what makes that invisible, so the failure has to announce
+            # itself. Reported at a widening interval rather than every step,
+            # since a per-step message on a 5 s loop buries the first one, and
+            # surfaced in get_status() so it is visible without reading logs.
             Q = self._last_Q
             self._last_solve_failed = True
+            self._consecutive_policy_failures += 1
+            n = self._consecutive_policy_failures
+            if n == 1 or n in (10, 60) or n % 300 == 0:
+                print(
+                    f"[mpc] policy has failed {n} consecutive step(s) ({type(e).__name__}: {e}); "
+                    f"holding the last firing rate {Q:.1f}. The grill is not being controlled to "
+                    "setpoint -- check the policy artifact and the model configuration."
+                )
         self._last_Q_raw = float(Q)
         Q = float(np.clip(Q, self.cfg["Q_min"], self.cfg["Q_max"]))
         self._last_Q = Q

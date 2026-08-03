@@ -51,12 +51,17 @@
  loss term (3.3 C on MAK, 18 C on the generic plant, whose chamber reaches
  370 C).
 
- What the reduction costs the quantities that actually decide overshoot is
- small but real and in the unhelpful direction: against the same plants, the
- dead time the fitted model predicts falls by about 4 s (67 -> 63 s on the MAK
- plant, whose own is 112 s) and the coast by 0.2 C, because the firepot's own
- ~7 s stage is no longer in the cascade. Both were already under-predicted at
- the shipped n_delay=4, and by far more than this.
+ At an unchanged n_delay the reduction would cost the quantities that actually
+ decide overshoot: the firepot's own ~7 s stage leaves the cascade, so against
+ the MAK plant the dead time the fitted model predicts falls 67 -> 63 s and the
+ coast 21.3 -> 21.1 C. Both were already under-predicted by far more than that
+ -- the plant's own dead time is 112 s -- because the Erlang chain at
+ n_delay=4 smears the delay rather than transporting it.
+
+ n_delay is a structure constant and costs no parameters, so it pays for both:
+ at the shipped n_delay=8 the single lump predicts 79 s and 22.5 C, ahead of
+ the two-lump model's 67 s and 21.3 C rather than behind it. See
+ controller/mpc.py's _DEFAULTS for why 8 and not more.
 
  -----------------------------------------------------------------------------
  Physical / model parameters (shared by the builder and all three estimators)
@@ -121,6 +126,23 @@ from scipy.linalg import expm
 
 
 _KELVIN = 273.15
+
+#: Which model STRUCTURE this module implements -- what the state vector is and
+#: what the parameters mean. Bumped whenever either changes, which is not the
+#: same event as a parameter being recalibrated.
+#:
+#: 1  two lumps: [q0..q_{n_delay-1}, T_f, T_c, d], parameters C_f/C_c/h_fc/h_amb
+#: 2  one lump:  [q0..q_{n_delay-1}, T_c, d],      parameters C_c/h_amb
+#:
+#: Anything that outlives the process and describes this model has to carry it,
+#: because the alternative is comparing the model's own scalars and hoping they
+#: differ. They did not: collapsing to one lump left C_c, h_amb, K_Q, theta,
+#: sigma, T_amb and n_delay ALL numerically identical between the two
+#: structures, so a stale neural-policy artifact matched a calibration check on
+#: every field it had. The two consumers are controller/mpc.py's persisted
+#: model snapshot and controller/mpc_net.py's policy artifact; both refuse a
+#: record carrying a different value rather than trying to read it.
+MODEL_SCHEMA = 2
 
 
 def _rad_loss(T_c, T_amb, sigma):

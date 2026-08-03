@@ -28,6 +28,8 @@
 import os
 import numpy as np
 
+from controller.mpc_model import MODEL_SCHEMA
+
 _KELVIN = 273.15
 # Calibration the net policy depends on. The net approximates the MPC's policy,
 # which is a function of the full grey-box model, the MPC tuning AND the bounds --
@@ -46,6 +48,13 @@ _CALIB_FLOATS = (
     "Q_max",
 )
 _CALIB_INTS = ("n_delay", "n_horizon", "enable_fan_input")
+
+#: Which model structure the artifact was trained against. Absent from any
+#: artifact exported before this field existed, and every one of those was
+#: trained on schema 1, so that is what a missing value reads as -- never
+#: MODEL_SCHEMA, which would make the check pass by default on exactly the
+#: files it exists to catch.
+_LEGACY_SCHEMA = 1
 
 
 def net_path_for(base_path, enable_fan):
@@ -67,6 +76,7 @@ class NetPolicy:
         # tolerate a missing int key (e.g. a legacy calib dict without
         # enable_fan_input) the same way load() does -> default 0 (fan-off)
         self.calib.update({k: (int(calib[k]) if k in calib else 0) for k in _CALIB_INTS})
+        self.model_schema = int(calib.get("model_schema", _LEGACY_SCHEMA))
         self.n_delay = int(calib["n_delay"])
         self.sp_lo = float(sp_lo)
         self.sp_hi = float(sp_hi)
@@ -96,6 +106,7 @@ class NetPolicy:
         calib = {k: float(z[k]) for k in _CALIB_FLOATS}
         # enable_fan_input was added later; legacy artifacts lack it -> fan-off (0)
         calib.update({k: (int(z[k]) if k in z.files else 0) for k in _CALIB_INTS})
+        calib["model_schema"] = int(z["model_schema"]) if "model_schema" in z.files else _LEGACY_SCHEMA
         return cls(
             weights,
             z["x_mean"].astype(float),
@@ -110,16 +121,26 @@ class NetPolicy:
     def matches_config(self, cfg, rtol=1e-3, atol=1e-12):
         """True iff the net was trained for (essentially) this calibration.
 
-        The width test comes first and is not a calibration comparison: an
-        artifact trained against the two-lump model carries one extra state
-        slot, and every scalar this method could compare -- n_delay included --
-        is identical between the two. Nothing in the calibration distinguishes
-        them, so without this the net would be adopted and then raise inside
+        The first two tests are not calibration comparisons. An artifact
+        trained against the two-lump model carries one extra state slot, and
+        every scalar this method could compare -- n_delay included -- is
+        identical between the two. Nothing in the calibration distinguishes
+        them, so without these the net would be adopted and then raise inside
         `firing_rate` on every control step, where Controller.update() catches
-        the exception and holds the previous firing rate. A grill would run on
-        a frozen output with nothing said. The width cannot be faked: it is the
-        shape of the weights the net multiplies by.
+        the exception and holds the previous firing rate: a grill running on a
+        frozen output with nothing said.
+
+        Both tests are here because neither alone is enough. The WIDTH cannot
+        be faked -- it is the shape of the weights the net multiplies by -- but
+        it only catches a structure change that happens to resize the state,
+        and a future change that reorders the slots or swaps their meaning
+        without resizing would pass it. The SCHEMA catches those, because it is
+        a declaration that anything touching the state vector's layout must
+        bump; but it can only speak for artifacts new enough to carry it, which
+        is why the width still guards the ones that predate the field.
         """
+        if self.model_schema != MODEL_SCHEMA:
+            return False
         if self.input_dim != self.expected_input_dim(cfg):
             return False
         for k in _CALIB_INTS:

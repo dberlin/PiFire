@@ -47,7 +47,7 @@ def test_default_controller_config_includes_mpc():
     assert "mpc" in cfg
     assert cfg["mpc"]["control_period"] == 5.0
     assert cfg["mpc"]["theta"] == 50.0
-    assert cfg["mpc"]["n_delay"] == 4
+    assert cfg["mpc"]["n_delay"] == 8
     assert cfg["mpc"]["K_Q"] == 3.5
     assert cfg["mpc"]["estimator"] == "ekf"
     assert cfg["mpc"]["policy"] == "nlp"

@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau, longest_braking_distance
+from controller.mpc import _DEFAULTS
 from controller.mpc_model import simulate_grey_box
 from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality
 
@@ -24,7 +25,7 @@ from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality
 #: against a mismatched grill in tests/unit/mpc/test_model_promotion.py.
 TRUTH = dict(C_c=11000.0, h_amb=0.5, K_Q=32.0, theta=110.0)
 T_AMB = 20.0
-N_DELAY = 4
+N_DELAY = _DEFAULTS["n_delay"]
 SIGMA = 1.4e-9
 
 

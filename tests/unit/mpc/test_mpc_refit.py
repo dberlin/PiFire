@@ -32,7 +32,7 @@ def _synthetic_cook(seed=0, noise=0.5, rows=1200):
     """
     t = np.arange(0.0, 5.0 * rows, 5.0)
     Q = np.where(t < 2.5 * rows, 100.0, 20.0)
-    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=4, **TRUTH)
+    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=_DEFAULTS["n_delay"], **TRUTH)
     temp = temp + np.random.default_rng(seed).normal(0.0, noise, size=temp.shape)
     return list(zip(t.tolist(), temp.tolist(), Q.tolist()))
 
@@ -144,7 +144,14 @@ def test_an_uninformative_cook_is_accepted_and_the_gate_has_no_answer_for_it():
     assert c.refit_from_cook(_synthetic_cook()).accepted is True
     learned_theta = c.cfg["theta"]
 
-    flat = [(float(i * 5), 100.0, 50.0) for i in range(400)]
+    # Carrying a little sensor noise, so the record is uninformative on its
+    # merits rather than by fitting exactly. A noiseless flat cook scores an
+    # in-sample RMSE of exactly zero, which `evaluate` refuses under its
+    # non-positive-RMSE guard -- a refusal about arithmetic, not about whether
+    # the record determines anything. This cook carries the same information,
+    # none, and reaches the judgement the gate actually makes.
+    rng = np.random.default_rng(0)
+    flat = [(float(i * 5), 100.0 + float(rng.normal(0.0, 0.05)), 50.0) for i in range(400)]
     verdict = c.refit_from_cook(flat)
     assert verdict.accepted is True
     # Why it is dangerous, stated as an assertion rather than a comment: the
@@ -170,7 +177,7 @@ def test_the_longest_cook_stays_inside_the_teardown_budget(fits):
     """
     t = np.arange(0.0, 5.0 * _HISTORY_MAX, 5.0)
     Q = np.where((t // 1800) % 2 == 0, 100.0, 20.0)
-    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=4, **TRUTH)
+    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=_DEFAULTS["n_delay"], **TRUTH)
     history = list(zip(t.tolist(), temp.tolist(), Q.tolist()))
     assert len(history) == _HISTORY_MAX
     c = _c()

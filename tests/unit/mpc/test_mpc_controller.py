@@ -497,6 +497,84 @@ def test_a_record_without_the_retired_keys_says_nothing_about_them(capsys):
     assert "ignoring" not in capsys.readouterr().out.lower()
 
 
+def test_a_policy_that_always_raises_does_not_freeze_the_output_in_silence(capsys):
+    """The failure mode the net's width check exists to prevent, pinned directly.
+
+    `update()` catches every exception from the policy and holds the previous
+    firing rate. For one bad solve that is right: the control loop must not
+    break and the last move is the best guess for the next few seconds. Held
+    forever it means nothing is steering the fire, and the `except` is exactly
+    what would make that invisible -- which is how a stale policy artifact
+    could have run a grill on a frozen command with nothing in the log.
+
+    So the property is not that the output changes; it cannot, there is no
+    answer to compute. It is that the condition ANNOUNCES itself, in the log
+    and in the status a caller can read without one.
+    """
+    c = _make()
+
+    class _AlwaysRaises:
+        def firing_rate(self, *a, **k):
+            raise RuntimeError("simulated policy failure")
+
+    c._net = _AlwaysRaises()
+    c.mpc = None
+    capsys.readouterr()
+
+    outs = [c.update(110.0) for _ in range(60)]
+    log = capsys.readouterr().out
+
+    # It really is frozen -- otherwise this test proves nothing about silence.
+    assert len({o["cycle_ratio"] for o in outs}) == 1
+
+    # It said so, on the first step and again as the run went on, and not once
+    # per step (which on a 5 s loop would bury the first message).
+    assert log.count("policy has failed") >= 2
+    assert log.count("policy has failed") <= 10
+    assert "1 consecutive step" in log
+    assert "not being controlled to setpoint" in log
+    assert "simulated policy failure" in log
+
+    # And it is visible without reading the log at all.
+    assert c.get_status()["policy_failures"] == 60
+
+
+def test_a_recovering_policy_clears_the_frozen_output_report(capsys):
+    """The negative control: a working policy must never claim to be frozen.
+
+    Without this, a `policy_failures` that only ever counted up and a message
+    that fired unconditionally would both pass the test above.
+    """
+    c = _make()
+    assert c.get_status()["policy_failures"] == 0
+
+    class _FailsTwice:
+        def __init__(self):
+            self.calls = 0
+
+        def firing_rate(self, *a, **k):
+            self.calls += 1
+            if self.calls <= 2:
+                raise RuntimeError("transient")
+            return 42.0
+
+    c._net = _FailsTwice()
+    c.mpc = None
+    capsys.readouterr()
+
+    for _ in range(4):
+        c.update(110.0)
+    log = capsys.readouterr().out
+
+    assert c.get_status()["policy_failures"] == 0
+    assert "recovered after 2 failed step(s)" in log
+    # A healthy controller says nothing about failures at all.
+    c2 = _make()
+    capsys.readouterr()
+    c2.update(110.0)
+    assert "policy has failed" not in capsys.readouterr().out
+
+
 def test_a_horizon_shorter_than_the_braking_distance_is_reported(capsys):
     cfg = dict(_DEFAULTS)
     # 360 s of coast after a fuel cut, against a 24*25 = 600 s horizon... which
@@ -531,7 +609,7 @@ def test_the_running_warning_and_the_promotion_policy_size_the_horizon_alike(cap
     cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, t_step=25.0)
     brake = longest_braking_distance(cfg)
     discredited = cfg["C_c"] / cfg["h_amb"]
-    assert brake == pytest.approx(315.0, abs=5.0)
+    assert brake == pytest.approx(243.7, abs=5.0)
     assert discredited == pytest.approx(4074.0, abs=5.0)
 
     # 24 steps of 25 s is the shipped horizon and it sits BETWEEN the two

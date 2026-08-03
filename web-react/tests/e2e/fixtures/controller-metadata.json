@@ -163,10 +163,10 @@
         },
         {
           "hidden": false,
-          "option_default": 4,
-          "option_description": "Number of first-order lag states approximating the transport deadtime (more = sharper delay, larger model). 0 disables deadtime modeling. [Default=4]",
+          "option_default": 8,
+          "option_description": "Number of first-order lag states approximating the transport deadtime (more = sharper delay, larger model and slower solve). 0 disables deadtime modeling. Raising this costs no calibration - it is a model structure choice, not a fitted value. [Default=8]",
           "option_friendly_name": "Deadtime Lag States",
-          "option_max": 8,
+          "option_max": 20,
           "option_min": 0,
           "option_name": "n_delay",
           "option_step": 1,
