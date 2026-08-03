@@ -42,6 +42,10 @@ completion from a sweep:
   Python. Item 2 was added the same day. Nothing else has been swept into this
   file yet, so its shortness is not evidence that the server side has two open
   items.
+- **2026-08-03** — item 3 designed. Two of its "what to build" bullets were
+  overtaken by the design (versioning and the shape digest, both dropped) and
+  are struck through in place. Items 4 and 5 were carved out of that design as
+  its named out-of-scope work, not swept in from elsewhere.
 
 ---
 
@@ -128,9 +132,11 @@ Deleting a pushed tag is the only reason this is filed rather than done — it
 rewrites a ref other clones already have, which is the operator's call, not an
 agent's.
 
-### 3. `control:current` is a bare dict with no model — OPEN
+### 3. `control:current` is a bare dict with no model — SPEC WRITTEN
 
-**Status:** OPEN. Raised 2026-08-03 while adding per-probe freshness to it.
+**Status:** OPEN, spec written. Raised 2026-08-03 while adding per-probe
+freshness to it; designed the same day in
+`docs/superpowers/specs/2026-08-03-current-blob-model-design.md`.
 
 **The finding.** `control:current` is the highest-traffic durable blob PiFire
 has — written once per control pass, read by the web tier, the Qt Quick
@@ -161,18 +167,82 @@ and until 2026-08-03 the TypeScript declared `number`, which is why
 **What to build.** The same two-layer treatment `settings` and `pellets`
 already have (`common/settings_schema.py`, `common/pellets_schema.py`):
 
-- a pydantic model of the blob, including `schema_version` and an entry in an
+- a pydantic model of the blob, ~~including `schema_version` and an entry in an
   ordered `_SHAPE_MIGRATIONS` registry, so `LAST` and anything after it
-  arrives as a version bump rather than a key that silently appears;
+  arrives as a version bump rather than a key that silently appears~~ — the
+  design drops versioning and migrations: unlike `settings` and `pelletdb`,
+  this blob's contents are regenerated every control pass, so a shape mismatch
+  is discarded and refilled rather than migrated. `extra="forbid"` is what
+  stops a key silently appearing;
 - a dataclass (or the model itself) that consumers hold instead of a dict, so
   `current.food["Probe1"]` replaces `current["F"]["Probe1"]` and the optional
   reading is `float | None` in one declared place rather than five undeclared
   ones;
-- a committed shape digest, as both other blobs have, so the modeled shape
-  cannot move without the suite noticing.
+- ~~a committed shape digest, as both other blobs have, so the modeled shape
+  cannot move without the suite noticing.~~ Dropped for the same reason: a
+  digest pins a shape that must survive across restarts, and this one need not.
+  The `get_current` characterization golden already pins the part that is
+  publicly visible.
 
-**Two things to settle first.** Whether the single-letter wire keys are kept
-as pydantic aliases (they are on the socket payload and in the `get_current`
-response, so renaming them is a client-visible change), and whether the model
-is validated on every control pass or only at `init()` — this blob is written
-about once a second, which is a different budget from `settings`.
+**Two things settled by the design.** The single-letter keys are kept, as both
+validation and serialization aliases: the stored blob and the wire keep the
+letters, canonical names exist only in Python, and consumers move off the
+letters one at a time. The model is *not* validated on every control pass —
+`read_current()` stays an unvalidated raw-dict passthrough, and validation
+happens on write and on the new `read_current_snapshot()`.
+
+**Also found while sizing it, and fixed by the same change:**
+`InMemoryStore.write_current` stores `in_data` verbatim where `SqliteStore`
+transforms it, so the fake's `read_current()` returns a shape production never
+produces; and `InMemoryStore.flush_current` omits `LAST`, which production's
+includes.
+
+---
+
+### 4. History rows carry the same unmodeled single-letter vocabulary — OPEN
+
+**Status:** OPEN. Carved out of item 3's design on 2026-08-03 as explicitly out
+of its scope.
+
+`_history_row_to_dict` (`common/datastore_accessors.py:611`) hands back
+`{"T", "P", "F", "PSP", "NT", "AUX", "EXD"}` — the same letters as
+`control:current` plus `T` for the row timestamp and an `EXD` that is present
+or absent depending on whether extended data was logged. It has no model
+either, and it is read by more places than `control:current`: the history
+SQLite reads, the chart page, cookfile export and import, the `ext_data`
+toggle, and metrics.
+
+It should get the same two-layer treatment item 3 defines, reusing
+`common/current_schema.py`'s `LastReading`-style vocabulary where the fields
+genuinely coincide (`P`/`F`/`AUX`/`PSP`/`NT` are the same five things).
+
+**Sized separately for a reason.** Cookfiles are durable files on an operator's
+disk, not a regenerable cache, so anything that changes what a history row
+*persists* needs a real compatibility story — which is exactly the versioning
+and migration machinery item 3 was able to drop. Do not assume item 3's "no
+version, rebuild on mismatch" ruling transfers here; it does not.
+
+---
+
+### 5. Retire the single-letter keys from the stored blob and the wire — OPEN
+
+**Status:** OPEN. Depends on item 3 landing, and on every consumer it lists
+having moved to `read_current_snapshot()`.
+
+Item 3 deliberately keeps the letters on disk and in `/api/get/current` so the
+migration is incremental and the `get_current` characterization golden does not
+re-baseline. Once no consumer subscripts `current["P"]`, three things can go in
+one change:
+
+- drop the `serialization_alias` on every `CurrentSchema` field, so the stored
+  blob spells its keys `primary` / `food` / `aux` / `primary_setpoint` /
+  `notify_targets` / `timestamp` / `last_readings`;
+- delete `read_current()` and the legacy dict view entirely;
+- rename the keys in the `/api/get/current` and `/api/current` responses, which
+  **is** a client-visible break: it re-baselines the characterization golden,
+  and it touches `tests/web/test_page_api.py` and the e2e specs
+  (`notify.spec.ts`, `helpers.ts`) that read those routes. `web-react` app code
+  does not consume either route, which is what makes this affordable at all.
+
+The `validation_alias` `AliasChoices` stay for one release after that, so a
+blob written by the previous build still loads.
