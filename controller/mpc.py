@@ -296,7 +296,19 @@ class Controller(ControllerBase):
             n_horizon=int(cfg["n_horizon"]),
             t_step=float(cfg["t_step"]),
             store_full_solution=False,
-            nlpsol_opts={"ipopt.print_level": 0, "print_time": 0, "ipopt.sb": "yes"},
+            nlpsol_opts={
+                "ipopt.print_level": 0,
+                "print_time": 0,
+                "ipopt.sb": "yes",
+                # do_mpc supplies the previous solve's primal AND dual point on
+                # every step after the first; IPOPT ignores the duals unless
+                # warm starting is on. The cap bounds the tail -- the cold
+                # start needs ~60 iterations with nothing to warm from, while
+                # the median warm solve needs 6, so 10 truncates the spike
+                # without touching the typical step.
+                "ipopt.warm_start_init_point": "yes",
+                "ipopt.max_iter": 10,
+            },
         )
         T_c = self.model.x["T_c"]
         T_set = self.model.tvp["T_set"]
