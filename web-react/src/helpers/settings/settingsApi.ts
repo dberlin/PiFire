@@ -66,21 +66,42 @@ export async function getMode(baseUrl: string): Promise<string> {
   }
 }
 
+/** One field the backend refused, and why. `path` is dotted, matching the
+ *  settings tree: "startup.duration". */
+export interface SaveFieldError {
+  path: string;
+  message: string;
+}
+
 export async function applySettings(
   baseUrl: string,
   delta: object,
   flags: SettingsFlag[],
-): Promise<{ ok: boolean; message: string; data?: Settings }> {
+): Promise<{ ok: boolean; message: string; errors: SaveFieldError[]; data?: Settings }> {
   try {
     const res = await fetch(buildSettingsUrl(baseUrl, "settings_update"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ settings: delta, flags }),
     });
-    if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
-    const body = (await res.json()) as { result?: string; message?: string; data?: Settings };
-    return { ok: body.result === "success", message: body.message ?? "", data: body.data };
+    if (!res.ok) return { ok: false, message: `HTTP ${res.status}`, errors: [] };
+    const body = (await res.json()) as {
+      result?: string;
+      message?: string;
+      errors?: SaveFieldError[];
+      data?: Settings;
+    };
+    return {
+      ok: body.result === "success",
+      message: body.message ?? "",
+      errors: body.errors ?? [],
+      data: body.data,
+    };
   } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "network error" };
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "network error",
+      errors: [],
+    };
   }
 }

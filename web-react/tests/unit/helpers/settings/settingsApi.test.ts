@@ -142,3 +142,51 @@ describe("applySettings", () => {
     });
   });
 });
+
+describe("applySettings error detail", () => {
+  let fetchMock: ReturnType<typeof rs.fn>;
+  beforeEach(() => {
+    fetchMock = rs.fn(async () => ({
+      ok: true,
+      json: async () => ({ result: "success", message: "", data: {} }),
+    }));
+    rs.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  it("returns the per-field errors the backend sent", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: "error",
+        message: "Settings update failed: startup.duration: bad",
+        errors: [{ path: "startup.duration", message: "bad" }],
+      }),
+    });
+
+    const res = await applySettings("", {}, []);
+
+    expect(res.ok).toBe(false);
+    expect(res.errors).toEqual([{ path: "startup.duration", message: "bad" }]);
+  });
+
+  it("returns an empty list when the backend sends none", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: "error", message: "Unknown flag: nope" }),
+    });
+
+    expect((await applySettings("", {}, [])).errors).toEqual([]);
+  });
+
+  it("returns an empty list for a transport failure", async () => {
+    fetchMock.mockRejectedValue(new Error("network error"));
+
+    const res = await applySettings("", {}, []);
+
+    expect(res.ok).toBe(false);
+    expect(res.errors).toEqual([]);
+  });
+});

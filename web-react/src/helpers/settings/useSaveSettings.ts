@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useRevalidator } from "react-router";
-import { applySettings, type SettingsFlag } from "./settingsApi";
+import { applySettings, type SaveFieldError, type SettingsFlag } from "./settingsApi";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
@@ -25,12 +25,15 @@ export function useSaveSettings() {
   const revalidator = useRevalidator();
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
+  const [errors, setErrors] = useState<SaveFieldError[]>([]);
   const save = useCallback(
     async (delta: object, flags: SettingsFlag[]): Promise<boolean> => {
       setSaving(true);
       setStatus({ kind: "idle" }); // clear the previous outcome for this attempt
+      setErrors([]);
       const r = await applySettings(BASE_URL, delta, flags);
       setSaving(false);
+      setErrors(r.errors);
       setStatus(
         r.ok ? { kind: "saved" } : { kind: "error", message: normalizeSaveError(r.message) },
       );
@@ -39,5 +42,5 @@ export function useSaveSettings() {
     },
     [revalidator],
   );
-  return { save, saving, status, baseUrl: BASE_URL };
+  return { save, saving, status, errors, baseUrl: BASE_URL };
 }

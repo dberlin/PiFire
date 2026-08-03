@@ -25,7 +25,7 @@ afterEach(() => {
 // (reading its data via the loader / outlet context) would.
 function Probe() {
   useLoaderData();
-  const { save, saving, status } = useSaveSettings();
+  const { save, saving, status, errors } = useSaveSettings();
   const [result, setResult] = useState<string>("");
   return (
     <div>
@@ -33,6 +33,7 @@ function Probe() {
       <span data-testid="result">{result}</span>
       <span data-testid="status-kind">{status.kind}</span>
       <span data-testid="status-message">{status.kind === "error" ? status.message : ""}</span>
+      <span data-testid="errors">{JSON.stringify(errors)}</span>
       <button
         type="button"
         onClick={async () => {
@@ -169,6 +170,55 @@ describe("useSaveSettings status", () => {
     expect(screen.getByTestId("status-kind").textContent).toBe("idle");
 
     release({ ok: true, message: "" });
+    await waitFor(() => expect(screen.getByTestId("status-kind").textContent).toBe("saved"));
+  });
+});
+
+describe("useSaveSettings errors", () => {
+  it("exposes the per-field errors a failed save carries", async () => {
+    mockApplySettings.mockResolvedValueOnce({
+      ok: false,
+      message: "bad",
+      errors: [{ path: "startup.duration", message: "bad" }],
+    });
+    renderWithLoader(() => ({}));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("errors").textContent).toBe(
+        JSON.stringify([{ path: "startup.duration", message: "bad" }]),
+      ),
+    );
+  });
+
+  it("clears errors at the start of the next save attempt", async () => {
+    mockApplySettings.mockResolvedValueOnce({
+      ok: false,
+      message: "bad",
+      errors: [{ path: "startup.duration", message: "bad" }],
+    });
+    let release: (v: { ok: boolean; message: string; errors: unknown[] }) => void = () => {};
+    mockApplySettings.mockReturnValueOnce(
+      new Promise<{ ok: boolean; message: string; errors: unknown[] }>((resolve) => {
+        release = resolve;
+      }),
+    );
+    renderWithLoader(() => ({}));
+
+    const button = await screen.findByRole("button", { name: "Save" });
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(screen.getByTestId("errors").textContent).toBe(
+        JSON.stringify([{ path: "startup.duration", message: "bad" }]),
+      ),
+    );
+
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByTestId("saving").textContent).toBe("true"));
+    expect(screen.getByTestId("errors").textContent).toBe("[]");
+
+    release({ ok: true, message: "", errors: [] });
     await waitFor(() => expect(screen.getByTestId("status-kind").textContent).toBe("saved"));
   });
 });
