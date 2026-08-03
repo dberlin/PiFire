@@ -90,7 +90,7 @@ def _build_layout_dict():
             "splash_delay": 10,
             "framerate": 30,
             "max_food_probes": 5,
-            "dash_background": "./static/img/display/background_ember_1280x720.png",
+            "dash_background": "./static/img/display/background.png",
             "splash_image": "./static/img/display/splash_800x480.png",
         },
         "profile_1": {"home": [], "dash": dash, "menus": {"qrcode": {}}, "input": {}},

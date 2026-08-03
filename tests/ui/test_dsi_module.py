@@ -3,7 +3,9 @@ import importlib
 import pytest
 
 
-@pytest.mark.parametrize("module_name", ["dsi_1024x600t", "dsi_1024x768t", "dsi_1280x720t"])
+# The larger DSI resolutions moved to the Qt Quick display; these two are the
+# pygame engine's remaining stubs.
+@pytest.mark.parametrize("module_name", ["dsi_800x480t", "dsi_320x240t"])
 def test_module_reexports_display(module_name):
     mod = importlib.import_module(f"display.{module_name}")
     from display._base_dsi import Display as BaseDisplay

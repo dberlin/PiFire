@@ -1,8 +1,14 @@
 """
-Parity guard: the pygame dsi_1280x720t layout is the source of truth. This test
-parses every action out of that JSON and asserts the Qt Quick display has a
-matching capability — command dispatch, menu, input screen, or control-panel
-entry. If pygame later gains an action the QT side lacks, this fails.
+Parity guard: the pygame layout is the source of truth for the ACTION
+vocabulary, and this test parses every action out of that JSON and asserts the
+Qt Quick display has a matching capability — command dispatch, menu, input
+screen, or control-panel entry. If pygame later gains an action the QT side
+lacks, this fails.
+
+Reads dsi_800x480t, which is the reference pygame layout every other one was
+derived from and now the largest one left: the bigger DSI layouts were retired
+in favour of the Qt Quick display they duplicated. The resolution was never
+what this guard was about.
 
 Also asserts the backend exposes the status-driven parity surface, and that the
 dynamic control panel matches pygame's per-mode button sets (evaluated against
@@ -20,7 +26,7 @@ import display.qtquick_flex as qmod
 from display.qtbackend import PiFireBackend
 from tests.conftest import QML_DIR, REPO
 
-PYGAME_JSON = REPO / "display" / "dsi_1280x720t.json"
+PYGAME_JSON = REPO / "display" / "dsi_800x480t.json"
 
 
 # --------------------------------------------------------------------------

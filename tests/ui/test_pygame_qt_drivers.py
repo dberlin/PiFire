@@ -18,10 +18,10 @@
                           render/input methods directly rather than running
                           the real infinite _display_loop). This is the
                           resolution-agnostic engine behind the dsi_800x480t/
-                          dsi_1024x600t/dsi_1024x768t/dsi_1280x720t/
-                          dsi_320x240t stubs (the last of these re-homes a
-                          removed sibling module's unique compact 320x240
-                          layout onto this engine); this file exercises it
+                          dsi_320x240t stubs (the second re-homes a removed
+                          sibling module's unique compact 320x240 layout onto
+                          this engine; the larger resolutions it used to serve
+                          moved to the Qt Quick display); this file exercises it
                           via both the 800x480 and 320x240 JSON layouts.
   qtapp.py            -- the Qt Quick display-process host: build_engine/
                           build_backend/_fetch/_make_backlight/DummyBacklight
@@ -727,8 +727,8 @@ def test_dsi_320x240t_layout_constructs_and_renders(monkeypatch):
 
 def test_dsi_base_input_always_enabled_even_when_input_types_none(monkeypatch):
     """Characterizes a real quirk of the shared _base_dsi flex engine (now
-    behind dsi_800x480t/dsi_1024x600t/dsi_1024x768t/dsi_1280x720t/
-    dsi_320x240t): `_base_flex.DisplayBase.__init__` sets `input_enabled =
+    behind dsi_800x480t/dsi_320x240t): `_base_flex.DisplayBase.__init__`
+    sets `input_enabled =
     False` up front and derives `input_button`/`input_encoder`/`input_touch`
     from `config["input_types_supported"]`, but `_base_dsi.Display._init_input`
     then unconditionally sets `self.input_enabled = True` -- it never

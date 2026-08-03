@@ -121,23 +121,6 @@
     },
     "display": {
       "config": {
-        "dsi_1024x600t": {
-          "accent_theme": "Ember",
-          "display_data_filename": "./display/dsi_1024x600t.json",
-          "input_types_supported": ["button", "touch"],
-          "rotation": 0
-        },
-        "dsi_1024x768t": {
-          "display_data_filename": "./display/dsi_1024x768t.json",
-          "input_types_supported": ["button", "touch"],
-          "rotation": 0
-        },
-        "dsi_1280x720t": {
-          "accent_theme": "Ember",
-          "display_data_filename": "./display/dsi_1280x720t.json",
-          "input_types_supported": ["button", "touch"],
-          "rotation": 0
-        },
         "dsi_320x240t": {
           "display_data_filename": "./display/dsi_320x240t.json",
           "input_types_supported": ["button", "encoder", "touch"],
@@ -204,6 +187,12 @@
         "qtquick_dsi_1280x720t": {
           "accent_theme": "Ember",
           "display_data_filename": "./display/qtquick_dsi_1280x720t.json",
+          "input_types_supported": ["button", "touch"],
+          "rotation": 0
+        },
+        "qtquick_dsi_1024x768t": {
+          "accent_theme": "Ember",
+          "display_data_filename": "./display/qtquick_dsi_1024x768t.json",
           "input_types_supported": ["button", "touch"],
           "rotation": 0
         },

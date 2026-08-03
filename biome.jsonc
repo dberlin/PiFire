@@ -17,13 +17,6 @@
       // The rest are excluded because they carry byte-level contracts that a
       // formatter breaks -- not because anyone chose their style.
       //
-      // Emitted by tools/generate_dsi_layout.py; tests/ui/
-      // test_dsi_layout_generator.py asserts the committed files reproduce
-      // byte for byte, so reformatting them fails the suite until the
-      // generator agrees.
-      "!display/dsi_1024x768t.json",
-      "!display/dsi_1280x720t.json",
-      "!display/dsi_1024x600t.json",
       // Digest-pinned by tests/characterization/test_process_command_golden.py.
       "!tests/characterization/fixtures/**"
     ]

@@ -308,23 +308,6 @@
   },
   "control_mode": "Stop",
   "display_config": {
-    "dsi_1024x600t": {
-      "accent_theme": "Ember",
-      "display_data_filename": "./display/dsi_1024x600t.json",
-      "input_types_supported": ["button", "touch"],
-      "rotation": 0
-    },
-    "dsi_1024x768t": {
-      "display_data_filename": "./display/dsi_1024x768t.json",
-      "input_types_supported": ["button", "touch"],
-      "rotation": 0
-    },
-    "dsi_1280x720t": {
-      "accent_theme": "Ember",
-      "display_data_filename": "./display/dsi_1280x720t.json",
-      "input_types_supported": ["button", "touch"],
-      "rotation": 0
-    },
     "dsi_320x240t": {
       "display_data_filename": "./display/dsi_320x240t.json",
       "input_types_supported": ["button", "encoder", "touch"],
@@ -394,6 +377,12 @@
       "input_types_supported": ["button", "touch"],
       "rotation": 0
     },
+    "qtquick_dsi_1024x768t": {
+      "accent_theme": "Ember",
+      "display_data_filename": "./display/qtquick_dsi_1024x768t.json",
+      "input_types_supported": ["button", "touch"],
+      "rotation": 0
+    },
     "ssd1306": {},
     "ssd1306b": {},
     "st7789_240x320": {
@@ -429,224 +418,6 @@
   "has_draft": false,
   "modules_metadata": {
     "display": {
-      "dsi_1024x600t": {
-        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
-        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
-        "config": [
-          {
-            "default": 0,
-            "hidden": false,
-            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
-            "list_values": [0, 90, 180, 270],
-            "option_description": "Select the display rotation angle (Usually 0 degrees).",
-            "option_friendly_name": "Screen Rotation",
-            "option_name": "rotation",
-            "option_type": "list"
-          },
-          {
-            "default": "./display/dsi_1024x600t.json",
-            "hidden": false,
-            "option_description": "JSON file with all of the display data and information.",
-            "option_friendly_name": "Display Data Filename",
-            "option_name": "display_data_filename",
-            "option_type": "string"
-          },
-          {
-            "default": ["button", "touch"],
-            "hidden": false,
-            "list_labels": [
-              "Button",
-              "Encoder",
-              "Touch",
-              "Touch + Button",
-              "Touch + Encoder",
-              "No Input"
-            ],
-            "list_values": [
-              ["button"],
-              ["encoder"],
-              ["touch"],
-              ["button", "touch"],
-              ["encoder", "touch"],
-              ["none"]
-            ],
-            "option_description": "List of input types supported.  Separate multiple types with a comma.",
-            "option_friendly_name": "Input Types Supported",
-            "option_name": "input_types_supported",
-            "option_type": "list"
-          },
-          {
-            "default": "Ember",
-            "hidden": false,
-            "list_labels": ["Ember", "Ice", "Crimson"],
-            "list_values": ["Ember", "Ice", "Crimson"],
-            "option_description": "Dashboard accent color theme.",
-            "option_friendly_name": "Accent Theme",
-            "option_name": "accent_theme",
-            "option_type": "list"
-          }
-        ],
-        "default": false,
-        "description": "A 1024x600 DSI or HDMI connected touch display. Uses the same pygame display engine as the 800x480 DSI display, with a bespoke ember dashboard reflowed for 1024x600.",
-        "filename": "dsi_1024x600t",
-        "friendly_name": "DSI/HDMI Connected Display 1024x600 w/Touch",
-        "image": "dsi_touch.png",
-        "notes": "",
-        "py_dependencies": ["rpi-backlight>=2.6.0", "pillow>=11.1.0", "pygame-ce>=2.5.7"],
-        "settings_dependencies": {
-          "buttonslevel": {
-            "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
-            "friendly_name": "Button Level",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": ["platform", "buttonslevel"]
-          }
-        }
-      },
-      "dsi_1024x768t": {
-        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
-        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
-        "config": [
-          {
-            "default": 0,
-            "hidden": false,
-            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
-            "list_values": [0, 90, 180, 270],
-            "option_description": "Select the display rotation angle (Usually 0 degrees).",
-            "option_friendly_name": "Screen Rotation",
-            "option_name": "rotation",
-            "option_type": "list"
-          },
-          {
-            "default": "./display/dsi_1024x768t.json",
-            "hidden": false,
-            "option_description": "JSON file with all of the display data and information.",
-            "option_friendly_name": "Display Data Filename",
-            "option_name": "display_data_filename",
-            "option_type": "string"
-          },
-          {
-            "default": ["button", "touch"],
-            "hidden": false,
-            "list_labels": [
-              "Button",
-              "Encoder",
-              "Touch",
-              "Touch + Button",
-              "Touch + Encoder",
-              "No Input"
-            ],
-            "list_values": [
-              ["button"],
-              ["encoder"],
-              ["touch"],
-              ["button", "touch"],
-              ["encoder", "touch"],
-              ["none"]
-            ],
-            "option_description": "List of input types supported.  Separate multiple types with a comma.",
-            "option_friendly_name": "Input Types Supported",
-            "option_name": "input_types_supported",
-            "option_type": "list"
-          }
-        ],
-        "default": false,
-        "description": "A 1024x768 (4:3) DSI or HDMI connected touch display. Uses the same pygame display engine as the 800x480 DSI display, with the layout rescaled to 1024x768.",
-        "filename": "dsi_1024x768t",
-        "friendly_name": "DSI/HDMI Connected Display 1024x768 w/Touch",
-        "image": "dsi_touch.png",
-        "notes": "",
-        "py_dependencies": ["rpi-backlight>=2.6.0", "pillow>=11.1.0", "pygame-ce>=2.5.7"],
-        "settings_dependencies": {
-          "buttonslevel": {
-            "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
-            "friendly_name": "Button Level",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": ["platform", "buttonslevel"]
-          }
-        }
-      },
-      "dsi_1280x720t": {
-        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
-        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
-        "config": [
-          {
-            "default": 0,
-            "hidden": false,
-            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
-            "list_values": [0, 90, 180, 270],
-            "option_description": "Select the display rotation angle (Usually 0 degrees).",
-            "option_friendly_name": "Screen Rotation",
-            "option_name": "rotation",
-            "option_type": "list"
-          },
-          {
-            "default": "./display/dsi_1280x720t.json",
-            "hidden": false,
-            "option_description": "JSON file with all of the display data and information.",
-            "option_friendly_name": "Display Data Filename",
-            "option_name": "display_data_filename",
-            "option_type": "string"
-          },
-          {
-            "default": ["button", "touch"],
-            "hidden": false,
-            "list_labels": [
-              "Button",
-              "Encoder",
-              "Touch",
-              "Touch + Button",
-              "Touch + Encoder",
-              "No Input"
-            ],
-            "list_values": [
-              ["button"],
-              ["encoder"],
-              ["touch"],
-              ["button", "touch"],
-              ["encoder", "touch"],
-              ["none"]
-            ],
-            "option_description": "List of input types supported.  Separate multiple types with a comma.",
-            "option_friendly_name": "Input Types Supported",
-            "option_name": "input_types_supported",
-            "option_type": "list"
-          },
-          {
-            "default": "Ember",
-            "hidden": false,
-            "list_labels": ["Ember", "Ice", "Crimson"],
-            "list_values": ["Ember", "Ice", "Crimson"],
-            "option_description": "Dashboard accent color theme.",
-            "option_friendly_name": "Accent Theme",
-            "option_name": "accent_theme",
-            "option_type": "list"
-          }
-        ],
-        "default": false,
-        "description": "A 1280x720 (16:9) DSI or HDMI connected touch display. Uses the same pygame display engine as the 800x480 DSI display, with the layout rescaled to 1280x720.",
-        "filename": "dsi_1280x720t",
-        "friendly_name": "DSI/HDMI Connected Display 1280x720 w/Touch",
-        "image": "dsi_touch.png",
-        "notes": "",
-        "py_dependencies": ["rpi-backlight>=2.6.0", "pillow>=11.1.0", "pygame-ce>=2.5.7"],
-        "settings_dependencies": {
-          "buttonslevel": {
-            "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
-            "friendly_name": "Button Level",
-            "options": {
-              "HIGH": "Pullups",
-              "LOW": "Pulldowns"
-            },
-            "settings": ["platform", "buttonslevel"]
-          }
-        }
-      },
       "dsi_320x240t": {
         "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "python3-pygame"],
         "command_list": [["sudo", "python", "board-config.py", "-bl"]],
@@ -1397,6 +1168,93 @@
         "description": "A 1280x720 (16:9) DSI or HDMI connected touch display rendered with a native PySide6 / Qt Quick (QML) interface. Drop-in alternative to the pygame 1280x720 display.",
         "filename": "qtquick_dsi_1280x720t",
         "friendly_name": "DSI/HDMI Connected Display 1280x720 w/Touch (Qt Quick)",
+        "image": "dsi_touch.png",
+        "notes": "",
+        "py_dependencies": [
+          "rpi-backlight>=2.6.0",
+          "pillow>=11.1.0",
+          "pygame-ce>=2.5.7",
+          "pyside6>=6.11.1"
+        ],
+        "settings_dependencies": {
+          "buttonslevel": {
+            "description": "Select how your button hardware is configured if equipped. This will be ignored if buttons are not selected as an input type. (HIGH - Pullups, LOW - Pulldowns)",
+            "friendly_name": "Button Level",
+            "options": {
+              "HIGH": "Pullups",
+              "LOW": "Pulldowns"
+            },
+            "settings": ["platform", "buttonslevel"]
+          }
+        }
+      },
+      "qtquick_dsi_1024x768t": {
+        "apt_dependencies": [
+          "lightdm",
+          "libsdl2-2.0-0",
+          "python3-pygame",
+          "libgl1",
+          "libxcb-cursor0"
+        ],
+        "command_list": [["sudo", "python", "board-config.py", "-bl"]],
+        "config": [
+          {
+            "default": 0,
+            "hidden": false,
+            "list_labels": ["0 Degrees", "90 Degrees", "180 Degrees", "270 Degrees"],
+            "list_values": [0, 90, 180, 270],
+            "option_description": "Select the display rotation angle (Usually 0 degrees).",
+            "option_friendly_name": "Screen Rotation",
+            "option_name": "rotation",
+            "option_type": "list"
+          },
+          {
+            "default": "./display/qtquick_dsi_1024x768t.json",
+            "hidden": false,
+            "option_description": "JSON file with all of the display data and information.",
+            "option_friendly_name": "Display Data Filename",
+            "option_name": "display_data_filename",
+            "option_type": "string"
+          },
+          {
+            "default": ["button", "touch"],
+            "hidden": false,
+            "list_labels": [
+              "Button",
+              "Encoder",
+              "Touch",
+              "Touch + Button",
+              "Touch + Encoder",
+              "No Input"
+            ],
+            "list_values": [
+              ["button"],
+              ["encoder"],
+              ["touch"],
+              ["button", "touch"],
+              ["encoder", "touch"],
+              ["none"]
+            ],
+            "option_description": "List of input types supported.  Separate multiple types with a comma.",
+            "option_friendly_name": "Input Types Supported",
+            "option_name": "input_types_supported",
+            "option_type": "list"
+          },
+          {
+            "default": "Ember",
+            "hidden": false,
+            "list_labels": ["Ember", "Ice", "Crimson"],
+            "list_values": ["Ember", "Ice", "Crimson"],
+            "option_description": "Dashboard accent color theme.",
+            "option_friendly_name": "Accent Theme",
+            "option_name": "accent_theme",
+            "option_type": "list"
+          }
+        ],
+        "default": false,
+        "description": "A 1024x768 DSI or HDMI connected touch display rendered with a native PySide6 / Qt Quick (QML) interface. Drop-in alternative to the pygame 1024x768 display.",
+        "filename": "qtquick_dsi_1024x768t",
+        "friendly_name": "DSI/HDMI Connected Display 1024x768 w/Touch (Qt Quick)",
         "image": "dsi_touch.png",
         "notes": "",
         "py_dependencies": [

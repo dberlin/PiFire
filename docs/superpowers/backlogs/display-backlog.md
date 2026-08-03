@@ -62,7 +62,7 @@ legitimately cannot self-report, and web-only is correct for it.
 - The flex (PIL-rendered) family has a parallel concept:
   `display/flexobject.py::AlertMessage`, wired through `_base_flex.py:920
   _update_lid_alert` and the `"type": "alert"` entries in the per-resolution
-  JSON (`dsi_800x480t.json`, `dsi_1024x768t.json`, `ili9341f_480x320.json`, …).
+  JSON (`dsi_800x480t.json`, `dsi_320x240t.json`, `ili9341f_480x320.json`, …).
 
 So both major driver families already have an alert surface; each is claimed by
 lid-open and would need to arbitrate between the two, or gain a second slot.
@@ -231,8 +231,46 @@ on the web is the only route.
 `mode in [STARTUP, REIGNITE, SMOKE]` -- the same set the unused
 `qtbackend.pModeActive` computes -- while the ember `duty_pill` is now
 Smoke-only. Two rules for the same reading in one file. The legacy widget is
-`PModeStatus`, used by the seven non-ember layouts (`dsi_800x480t.json` and
-friends); the ember layouts (`dsi_1280x720t.json`, `dsi_1024x600t.json`) use
-the pill. The Smoke-only ruling was made against the ember dashboards, so
-whether it reaches the older layouts is a separate call: those are a different
-design, and P-mode does govern the cycle in Startup and Reignite.
+`PModeStatus`, used by the surviving pygame layouts (`dsi_800x480t.json`,
+`dsi_320x240t.json` and the SPI TFTs); nothing pygame-side uses the pill any
+more, since the two ember layouts that did were retired with the rest of the
+large-display pygame stack. So this is now purely about the older, smaller
+designs: P-mode does govern the cycle in Startup and Reignite, and those
+layouts were never part of the Smoke-only ruling.
+
+### 5. The large-display pygame stack is retired — DONE 2026-08-03
+
+Three pygame layouts duplicated a Qt Quick display that already existed or
+could: `dsi_1024x600t` and `dsi_1280x720t` had `qtquick_` counterparts
+shipping beside them, and `dsi_1024x768t` got one (`qtquick_dsi_1024x768t`),
+which is two small files because the Qt Quick display class is
+resolution-agnostic and reads its dimensions from JSON metadata.
+
+Removed with them, because nothing else used them: `tools/generate_dsi_layout.py`
+(its `RESOLUTIONS` list was exactly those three) with its bespoke
+`_dashboard_1280x720`/`_dashboard_1024x600` builders and its byte-for-byte
+generator test; `tools/generate_ember_background.py` and the two ember
+background PNGs it produced; `tests/ui/test_dsi_layout_common.py` and the three
+per-resolution layout tests, all of which covered only the deleted files; and
+two now-dead `tests/conftest.py` helpers.
+
+**`dsi_800x480t` stays, and this is why.** The Qt Quick dashboard does not fit
+at 800x480. Measured against its own declared layout minimums: the body row
+needs **806px** of width and the root column **520px** of height. 1024x600,
+1024x768 and 1280x720 all clear both; 800x480 misses on both axes. Retiring it
+would need the QML dashboard to gain a genuinely small-screen layout first,
+which is real design work and not a deletion. The smaller SPI/TFT layouts are
+bespoke for their hardware and were never in scope.
+
+**Where the parity guard moved.** `tests/ui/test_qtquick_parity.py` read
+`dsi_1280x720t.json` as its source of truth for the pygame action vocabulary;
+it reads `dsi_800x480t.json` now. The guard was never about resolution — it
+asserts every `cmd_`/`menu_`/`input_` the pygame engine can emit has a Qt
+counterpart — and the 800x480 layout is the one every other was derived from.
+
+**The manifest test is self-discovering now.** `test_dsi_manifest.py` was three
+resolutions hard-coded and is gone; `test_qtquick_manifest.py` enumerates every
+`qtquick_*` display module in the manifest and asserts each has its `.py`, its
+`.json`, and metadata whose `screen_width`/`screen_height` match the resolution
+in its own name. That is what would have caught shipping a manifest entry with
+no layout behind it.

@@ -84,21 +84,6 @@ def load_json(path):
         return json.load(f)
 
 
-def dsi_layout_out_path(resolution):
-    """Path to the generated layout JSON for a DSI resolution, e.g. 'dsi_1024x600t'."""
-    return os.path.join(REPO_BASE, "display", f"{resolution}.json")
-
-
-def iter_dsi_layout_objects(profile):
-    """Yield every flexobject dict in a DSI layout profile (home/dash/menus/input)."""
-    for section in ("home", "dash"):
-        for obj in profile.get(section, []):
-            yield obj
-    for section in ("menus", "input"):
-        for obj in profile.get(section, {}).values():
-            yield obj
-
-
 # Repo root (as a Path) and the QtQuick QML source tree, shared by the
 # QtQuick component/screen tests below.
 REPO = Path(__file__).resolve().parents[1]

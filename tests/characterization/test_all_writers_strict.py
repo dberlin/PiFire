@@ -551,7 +551,7 @@ def flex_display(ds, tmp_path):
             "splash_delay": 10,
             "framerate": 30,
             "max_food_probes": 5,
-            "dash_background": "./static/img/display/background_ember_1280x720.png",
+            "dash_background": "./static/img/display/background.png",
             "splash_image": "./static/img/display/splash_800x480.png",
         },
         "profile_1": {"home": [], "dash": [], "menus": {"qrcode": {}}, "input": {}},

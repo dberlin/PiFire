@@ -10,9 +10,10 @@ PiFire Display Interface Library
  This module is the resolution-agnostic DSI/pygame flex engine — it reads
  all dimensions and layout from its JSON layout file (display_data_filename),
  so a single Display class serves every DSI resolution. Per-resolution
- modules (dsi_800x480t, dsi_1024x600t, dsi_1024x768t, dsi_1280x720t) are thin
- stubs that re-export this module's Display and pair it with their own JSON
- layout file.
+ modules (dsi_800x480t, dsi_320x240t) are thin stubs that re-export this
+ module's Display and pair it with their own JSON layout file. The larger
+ resolutions this engine used to drive are served by the Qt Quick display
+ instead (display/qtquick_dsi_*).
 
  This version supports mouse for development.
 
