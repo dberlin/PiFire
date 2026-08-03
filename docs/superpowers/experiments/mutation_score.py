@@ -300,6 +300,19 @@ MUTATIONS = [
         '        return int(cfg.get("n_delay", self.n_delay)) + 4',
         '        return int(cfg.get("n_delay", self.n_delay)) + 5',
     ),
+    # ---- retired settings keys --------------------------------------------
+    (
+        "M39 a settings record's retired keys are ignored in silence",
+        MPC,
+        "    retired = [k for k in _RETIRED_PARAMS if k in cfg]",
+        "    retired = []",
+    ),
+    (
+        "M40 the retired-key message fires for every record",
+        MPC,
+        "    retired = [k for k in _RETIRED_PARAMS if k in cfg]",
+        "    retired = list(_RETIRED_PARAMS)",
+    ),
 ]
 
 

@@ -469,6 +469,34 @@ def test_calibrated_params_are_not_reported_as_uncalibrated(capsys):
     assert "uncalibrated" not in capsys.readouterr().out.lower()
 
 
+def test_a_two_lump_settings_record_still_starts_and_says_the_keys_do_nothing(capsys):
+    """Every install that ran the two-lump model arrives carrying C_f and h_fc.
+
+    They name nothing now, so no value could be right and there is nothing to
+    migrate them into -- but refusing to start a grill over an obsolete key is
+    worse than running and saying the key does nothing. Both are asserted here:
+    a Controller built from such a record works, and the message names them.
+    """
+    c = Controller(dict(CONFIG, C_f=9.0, h_fc=1.3), "C", dict(CYCLE))
+    out = capsys.readouterr().out
+    assert "C_f" in out and "h_fc" in out
+    assert "ignoring" in out.lower()
+
+    # Ignored, not absorbed: they reach neither the estimator's state vector nor
+    # anything the controller plans with.
+    c.set_target(110.0)
+    result = c.update(100.0)
+    assert 0.0 <= result["cycle_ratio"] <= 1.0
+    assert c.estimator.n == int(CONFIG.get("n_delay", _DEFAULTS["n_delay"])) + 2
+
+
+def test_a_record_without_the_retired_keys_says_nothing_about_them(capsys):
+    """The negative control for the message above -- otherwise it could be
+    unconditional and the test would not notice."""
+    Controller(dict(CONFIG), "C", dict(CYCLE))
+    assert "ignoring" not in capsys.readouterr().out.lower()
+
+
 def test_a_horizon_shorter_than_the_braking_distance_is_reported(capsys):
     cfg = dict(_DEFAULTS)
     # 360 s of coast after a fuel cut, against a 24*25 = 600 s horizon... which
