@@ -31,8 +31,15 @@ from dataclasses import dataclass
 #: one value used consistently as ground truth across this codebase (the
 #: plant simulator's own fitted truth parameter in controller/grill_sim.py,
 #: and the shipped grey-box default's calibration target) -- so the cap is a
-#: modest, grill-to-grill-variation multiple of THAT anchor, not an
-#: independently-derived physical number.
+#: multiple of THAT anchor, not an independently-derived physical number.
+#: sigma folds in the chamber's radiating area, which is a whole multiple
+#: larger on a big cabinet smoker than on the anchor grill, and a fit landing
+#: outside this range is refused outright rather than clipped -- so the cap
+#: sits an order of magnitude above the anchor. That still leaves sigma the
+#: tightest ratio in this table by a wide margin (every other parameter is
+#: given three or more decades around its shipped value), which is affordable
+#: because sigma's effect on braking distance is priced into the guarded
+#: quantity below rather than left to this bound to police.
 PROMOTION_BOUNDS = {
     "C_f": (0.1, 1e4),
     "C_c": (1.0, 1e6),
@@ -42,7 +49,7 @@ PROMOTION_BOUNDS = {
     "theta": (0.0, 1200.0),
     "n_delay": (0.0, 50.0),
     "K_Q": (1e-3, 1e4),
-    "sigma": (0.0, 2e-9),
+    "sigma": (0.0, 1e-8),
 }
 
 #: A candidate must beat the incumbent's error by this fraction to be adopted
@@ -78,12 +85,34 @@ _KELVIN = 273.15
 #: (`maxtemp` in common/settings_schema.py, 550 F) converted to the Celsius
 #: this model's chamber temperature is expressed in. The radiative loss
 #: term's linearized conductance grows with T**3, so this is where it is
-#: largest and where a candidate's true braking distance is shortest.
+#: largest and the chamber's response quickest.
 _T_HAZARD_C = (550.0 - 32.0) * 5.0 / 9.0
+
+#: The coolest point of that same range -- `minstartuptemp` in
+#: common/settings_schema.py (75 F), the floor of the flameout threshold below
+#: which the safety logic declares the fire out, in the same Celsius. It is
+#: _T_HAZARD_C's counterpart in the same settings section: between the two the
+#: controller is driving a live fire, and outside them it is not running at
+#: all. Here the radiative conductance is smallest and the chamber slowest,
+#: which is the far end of the curve a single hot reference cannot see.
+_T_FLOOR_C = (75.0 - 32.0) * 5.0 / 9.0
 
 
 @dataclass
 class Verdict:
+    """The promotion decision, and the horizon the candidate would need.
+
+    `reason` reasons about the effective time constant -- C_c over the linear
+    plus linearized-radiative conductance -- at the ends of the operating
+    range, since that is the quantity a late brake is measured against and it
+    varies with temperature. `horizon_needed` is sized instead from C_c/h_amb,
+    the radiation-free supremum of that same effective time constant, so that
+    one horizon covers every temperature the grill runs at rather than only
+    the end it was evaluated at. The two numbers are deliberately different
+    quantities: the larger, temperature-free bound for sizing, the
+    temperature-aware pair for judging.
+    """
+
     accepted: bool
     reason: str
     horizon_needed: int | None = None
@@ -98,23 +127,34 @@ def _finite(value):
     return f if math.isfinite(f) else None
 
 
-def _tau(params):
+def _slowest_tau(params):
+    """The longest chamber time constant any operating point can produce.
+
+    The linearized radiative conductance below is non-negative, so C_c/h_amb
+    bounds C_c/(h_amb + it) from above at every temperature. Sizing the
+    horizon from this bound rather than from an operating-range endpoint keeps
+    one horizon adequate across the whole range instead of only at the end it
+    was measured at.
+    """
     h_amb = float(params["h_amb"])
     return float(params["C_c"]) / h_amb if h_amb > 0 else math.inf
 
 
-def _effective_tau(params):
-    """The chamber time constant at the grill's hottest permitted
-    temperature. controller/mpc_model.py's radiative loss term,
+def _effective_tau(params, t_ref_c):
+    """The chamber time constant at chamber temperature `t_ref_c` (Celsius).
+
+    controller/mpc_model.py's radiative loss term,
     sigma*((T_c+273.15)**4 - (T_amb+273.15)**4), has linearized conductance
     4*sigma*(T_c+273.15)**3 (exactly what GreyBoxEKF._discretize computes as
     `rp` about its own operating point) -- an addition to h_amb that a plain
     C_c/h_amb tau cannot see. A candidate that raises sigma shortens this
-    tau exactly as cutting C_c or raising h_amb would.
+    tau exactly as cutting C_c or raising h_amb would. The conductance grows
+    with T**3 while h_amb is flat, so this is a genuine function of the
+    operating point and not one number for the whole grill.
     """
     h_amb = float(params["h_amb"])
     sigma = float(params["sigma"])
-    h_eff = h_amb + 4.0 * sigma * (_T_HAZARD_C + _KELVIN) ** 3
+    h_eff = h_amb + 4.0 * sigma * (t_ref_c + _KELVIN) ** 3
     return float(params["C_c"]) / h_eff if h_eff > 0 else math.inf
 
 
@@ -151,6 +191,18 @@ def _direction_label(candidate_value, incumbent_value):
     return "unchanged"
 
 
+def _range_label(labels):
+    """One label for a quantity read at several operating points.
+
+    Any shortening anywhere in the range is what the wide margin is charged
+    for, so it names the whole range; "longer" is claimed only when it holds
+    throughout.
+    """
+    if "shorter" in labels:
+        return "shorter"
+    return "longer" if all(label == "longer" for label in labels) else "unchanged"
+
+
 def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon, t_step):
     """Whether `candidate` may replace `incumbent`, and what horizon it needs."""
     for key, (lo, hi) in PROMOTION_BOUNDS.items():
@@ -177,7 +229,7 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
         return Verdict(False, "n_horizon must be a positive, finite number")
 
     horizon_needed = None
-    tau = _tau(candidate)
+    tau = _slowest_tau(candidate)
     if math.isfinite(tau) and float(n_horizon) * float(t_step) < tau:
         horizon_needed = int(math.ceil(tau / float(t_step)))
 
@@ -194,18 +246,29 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
         if _finite(incumbent.get(key)) is None:
             return Verdict(False, "incumbent model is missing required parameters", horizon_needed)
 
-    tau_eff_candidate = _effective_tau(candidate)
-    tau_eff_incumbent = _effective_tau(incumbent)
     theta_candidate = _effective_theta(candidate)
     theta_incumbent = _effective_theta(incumbent)
+    margin = _shrink_margin(theta_candidate, theta_incumbent)
 
-    margin = max(
-        _shrink_margin(tau_eff_candidate, tau_eff_incumbent),
-        _shrink_margin(theta_candidate, theta_incumbent),
-    )
+    # Both ends of the operating range, not just the hot one. The effective
+    # tau is monotone in temperature, and two candidates' curves are equal
+    # exactly where a linear equation in (T+_KELVIN)**3 holds, so they cross
+    # at most once unless they coincide everywhere. A candidate no shorter at
+    # both ends is therefore no shorter anywhere between them -- dipping below
+    # in the middle and returning would take two crossings. Reading one point
+    # instead lets a candidate trade sigma against h_amb so that its single
+    # crossing lands exactly there, reading "unchanged" while being genuinely
+    # quicker across the rest of the range.
+    tau_labels = []
+    for t_ref_c in (_T_FLOOR_C, _T_HAZARD_C):
+        tau_eff_candidate = _effective_tau(candidate, t_ref_c)
+        tau_eff_incumbent = _effective_tau(incumbent, t_ref_c)
+        margin = max(margin, _shrink_margin(tau_eff_candidate, tau_eff_incumbent))
+        tau_labels.append(_direction_label(tau_eff_candidate, tau_eff_incumbent))
+
     if candidate_rmse > incumbent_rmse * (1.0 - margin):
         direction = (
-            f"a {_direction_label(tau_eff_candidate, tau_eff_incumbent)} tau and "
+            f"a {_range_label(tau_labels)} tau across the operating range and "
             f"a {_direction_label(theta_candidate, theta_incumbent)} dead time"
         )
         return Verdict(

@@ -2,15 +2,36 @@
 
 import pytest
 
-from controller.model_promotion import PROMOTION_BOUNDS, evaluate
+from controller.model_promotion import PROMOTION_BOUNDS, _effective_tau, evaluate
 
 GOOD = dict(C_f=9.0, C_c=2520.0, h_fc=0.39, h_amb=0.224, T_amb=20.0, theta=93.0, n_delay=4, K_Q=6.95, sigma=1.4e-9)
 INCUMBENT = dict(GOOD, C_c=2000.0, h_amb=0.30)  # tau 6667 vs candidate 11250
 HORIZON = dict(n_horizon=144, t_step=25.0)
 
+#: Literals, not the module's own reference temperatures: 550 F is `maxtemp`
+#: and 75 F is `minstartuptemp`, both from common/settings_schema.py. Importing
+#: the module's constants here would move every expectation below along with
+#: any mutation of them, so the tests could never fail.
+_HAZARD_C = (550.0 - 32.0) * 5.0 / 9.0
+_FLOOR_C = (75.0 - 32.0) * 5.0 / 9.0
+
 
 def _ev(candidate, incumbent=INCUMBENT, cand_rmse=2.0, inc_rmse=5.0, **kw):
     return evaluate(candidate, incumbent, candidate_rmse=cand_rmse, incumbent_rmse=inc_rmse, **{**HORIZON, **kw})
+
+
+def _crossing_at(incumbent, t_cross_c, ratio):
+    """A candidate whose effective tau equals `incumbent`'s at `t_cross_c`.
+
+    Same sigma, C_c scaled by `ratio`, and h_amb solved so the two effective-tau
+    curves meet exactly there. ratio < 1 puts the candidate above the incumbent
+    below the crossing and below it above; ratio > 1 does the reverse. Which
+    side of the crossing a reference temperature falls on is therefore what the
+    verdict reports, which is what makes these pin the reference temperatures.
+    """
+    conductance = 4.0 * float(incumbent["sigma"]) * (t_cross_c + 273.15) ** 3
+    h_amb = ratio * float(incumbent["h_amb"]) + (ratio - 1.0) * conductance
+    return dict(incumbent, C_c=float(incumbent["C_c"]) * ratio, h_amb=h_amb)
 
 
 def test_a_better_fit_is_accepted():
@@ -139,26 +160,125 @@ def test_n_delay_equal_to_one_keeps_the_delay_chain_active():
 
 def test_raising_sigma_needs_the_same_wide_margin_as_shortening_tau():
     """sigma prices into the effective tau via its linearized radiative
-    conductance at the grill's hottest permitted temperature: raising it
-    shortens the true braking distance even though C_c and h_amb are
-    unchanged, and must face the same asymmetric bar."""
+    conductance: raising it shortens the true braking distance even though C_c
+    and h_amb are unchanged, and must face the same asymmetric bar."""
     incumbent = dict(GOOD, sigma=0.0)  # no radiative correction: effective tau == C_c/h_amb
-    hotter_sigma = dict(GOOD, sigma=2e-9)  # at PROMOTION_BOUNDS' cap
+    hotter_sigma = dict(GOOD, sigma=1e-8)  # at PROMOTION_BOUNDS' cap
     v = _ev(hotter_sigma, incumbent=incumbent, cand_rmse=4.85, inc_rmse=5.0)  # clears 2%, not 50%
     assert v.accepted is False
 
 
 def test_raising_sigma_is_accepted_on_strong_evidence():
     incumbent = dict(GOOD, sigma=0.0)
-    hotter_sigma = dict(GOOD, sigma=2e-9)
+    hotter_sigma = dict(GOOD, sigma=1e-8)
     assert _ev(hotter_sigma, incumbent=incumbent, cand_rmse=0.5, inc_rmse=5.0).accepted is True
 
 
 def test_the_sigma_bound_is_enforced():
     assert _ev(dict(GOOD, sigma=-1e-12)).accepted is False
     assert _ev(dict(GOOD, sigma=0.0)).accepted is True
-    assert _ev(dict(GOOD, sigma=2e-9)).accepted is True
-    assert _ev(dict(GOOD, sigma=2e-9 + 1e-15)).accepted is False
+    assert _ev(dict(GOOD, sigma=1e-8)).accepted is True
+    assert _ev(dict(GOOD, sigma=1e-8 + 1e-15)).accepted is False
+
+
+def test_the_radiative_conductance_is_four_sigma_at_absolute_temperature():
+    """The linearization of sigma*(T_c+273.15)**4 that GreyBoxEKF._discretize
+    actually applies, pinned against literals: the factor 4 and the Kelvin
+    offset both change how much braking distance a given sigma is charged
+    for, and nothing else in this file can tell either of them apart from a
+    different value."""
+    params = dict(GOOD, C_c=2000.0, h_amb=0.30, sigma=1.4e-9)
+    expected = 2000.0 / (0.30 + 4.0 * 1.4e-9 * (200.0 + 273.15) ** 3)
+    assert _effective_tau(params, 200.0) == pytest.approx(expected, rel=1e-12)
+
+
+def test_trading_sigma_against_h_amb_cannot_launder_a_shortening_past_the_hot_end():
+    """h_amb is flat in temperature while the radiative conductance grows as
+    T**3, so a candidate can cut sigma and raise h_amb by amounts that leave
+    the effective tau untouched at the hottest permitted temperature while
+    genuinely shortening it everywhere below. Read at one temperature that is
+    invisible; the whole operating range must be charged for."""
+    incumbent = dict(GOOD, C_c=2000.0, h_amb=0.30, sigma=1.4e-9)
+    cooler_sigma = 0.4e-9
+    laundered = dict(
+        incumbent,
+        sigma=cooler_sigma,
+        h_amb=0.30 + 4.0 * (1.4e-9 - cooler_sigma) * (_HAZARD_C + 273.15) ** 3,
+    )
+    assert _effective_tau(laundered, _HAZARD_C) == pytest.approx(_effective_tau(incumbent, _HAZARD_C), rel=1e-12)
+    assert _effective_tau(laundered, _FLOOR_C) < _effective_tau(incumbent, _FLOOR_C)
+
+    v = _ev(laundered, incumbent=incumbent, cand_rmse=4.85, inc_rmse=5.0)  # clears 2%, not 50%
+    assert v.accepted is False
+    assert "shorter tau" in v.reason.lower()
+
+
+def test_the_laundered_shortening_is_still_accepted_on_strong_evidence():
+    incumbent = dict(GOOD, C_c=2000.0, h_amb=0.30, sigma=1.4e-9)
+    cooler_sigma = 0.4e-9
+    laundered = dict(
+        incumbent,
+        sigma=cooler_sigma,
+        h_amb=0.30 + 4.0 * (1.4e-9 - cooler_sigma) * (_HAZARD_C + 273.15) ** 3,
+    )
+    assert _ev(laundered, incumbent=incumbent, cand_rmse=0.5, inc_rmse=5.0).accepted is True
+
+
+def test_repeated_sigma_for_h_amb_trades_cannot_walk_the_cool_end_tau_down():
+    """The single-step trade compounds: each step is invisible at the hot end
+    and small at the cool end, so on the narrow bar a chain of them deletes
+    the modelled radiative loss outright and halves the true time constant at
+    a low-and-slow hold."""
+    incumbent, incumbent_rmse = dict(GOOD, C_c=2000.0, h_amb=0.30, sigma=1.4e-9), 5.0
+    for _ in range(25):
+        step = incumbent["sigma"] * 0.05
+        candidate = dict(
+            incumbent,
+            sigma=incumbent["sigma"] - step,
+            h_amb=incumbent["h_amb"] + 4.0 * step * (_HAZARD_C + 273.15) ** 3,
+        )
+        candidate_rmse = incumbent_rmse * 0.97  # clears the 2% bar decisively, not the 50% bar
+        v = evaluate(candidate, incumbent, candidate_rmse=candidate_rmse, incumbent_rmse=incumbent_rmse, **HORIZON)
+        if v.accepted:
+            incumbent, incumbent_rmse = candidate, candidate_rmse
+    assert incumbent["sigma"] == GOOD["sigma"]
+    assert incumbent["h_amb"] == 0.30
+
+
+def test_a_crossing_above_the_hot_end_leaves_the_candidate_longer_throughout():
+    """Pins the hot reference from above. The two effective-tau curves meet
+    half a degree past the hard shutoff, so the candidate is the slower model
+    everywhere the grill may actually run and the narrow bar applies. A
+    reference read any hotter than the crossing would see a shortening that
+    the grill can never reach."""
+    candidate = _crossing_at(INCUMBENT, _HAZARD_C + 0.5, ratio=0.9)
+    assert _ev(candidate, cand_rmse=4.85, inc_rmse=5.0).accepted is True
+
+
+def test_a_crossing_below_the_hot_end_is_charged_the_wide_bar():
+    """Pins the hot reference from below. The curves meet half a degree under
+    the hard shutoff, so the candidate is quicker at the top of the range and
+    slower everywhere else -- invisible to any reference read cooler than the
+    crossing."""
+    candidate = _crossing_at(INCUMBENT, _HAZARD_C - 0.5, ratio=0.9)
+    assert _ev(candidate, cand_rmse=4.85, inc_rmse=5.0).accepted is False
+
+
+def test_a_crossing_below_the_cool_end_leaves_the_candidate_longer_throughout():
+    """Pins the cool reference from below. The curves meet half a degree under
+    the flameout floor, so the candidate is the slower model throughout the
+    range the controller drives, and the narrow bar applies."""
+    candidate = _crossing_at(INCUMBENT, _FLOOR_C - 0.5, ratio=1.1)
+    assert _ev(candidate, cand_rmse=4.85, inc_rmse=5.0).accepted is True
+
+
+def test_a_crossing_above_the_cool_end_is_charged_the_wide_bar():
+    """Pins the cool reference from above. The curves meet half a degree over
+    the flameout floor, so the candidate is quicker at the bottom of the range
+    and slower everywhere else -- invisible to any reference read hotter than
+    the crossing."""
+    candidate = _crossing_at(INCUMBENT, _FLOOR_C + 0.5, ratio=1.1)
+    assert _ev(candidate, cand_rmse=4.85, inc_rmse=5.0).accepted is False
 
 
 def test_repeated_small_sigma_increases_cannot_walk_true_tau_down_without_clearing_the_wide_bar():
@@ -325,6 +445,19 @@ def test_an_adequate_horizon_asks_for_nothing():
     assert _ev(GOOD, n_horizon=600, t_step=25.0).horizon_needed is None
 
 
+def test_the_horizon_is_sized_from_the_radiation_free_tau_and_tracks_h_amb():
+    """The horizon is sized from C_c/h_amb, which bounds the effective tau
+    from above at every temperature, so one horizon stays adequate across the
+    whole range rather than only at the end it was measured at. Pinned on
+    exact step counts: sizing it from either operating-range endpoint instead
+    would ask for fewer steps, and halving h_amb must double the request."""
+    v = _ev(dict(GOOD, C_c=2000.0, h_amb=0.5), n_horizon=10, t_step=25.0)
+    assert v.horizon_needed == 160  # 2000/0.5 = 4000 s over a 25 s step
+
+    halved = _ev(dict(GOOD, C_c=2000.0, h_amb=0.25), n_horizon=10, t_step=25.0)
+    assert halved.horizon_needed == 320
+
+
 def test_every_fitted_parameter_has_a_bound():
     for key in GOOD:
         assert key in PROMOTION_BOUNDS
@@ -343,7 +476,7 @@ _EXPECTED_BOUNDS = {
     "theta": (0.0, 1200.0),
     "n_delay": (0.0, 50.0),
     "K_Q": (1e-3, 1e4),
-    "sigma": (0.0, 2e-9),
+    "sigma": (0.0, 1e-8),
 }
 
 
