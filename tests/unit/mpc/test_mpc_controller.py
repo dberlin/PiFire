@@ -471,14 +471,16 @@ def test_calibrated_params_are_not_reported_as_uncalibrated(capsys):
     assert "uncalibrated" not in capsys.readouterr().out.lower()
 
 
-def test_a_horizon_shorter_than_the_chamber_time_constant_is_reported(capsys):
+def test_a_horizon_shorter_than_the_braking_distance_is_reported(capsys):
     cfg = dict(_DEFAULTS)
-    # 11000/2.7 = 4074 s time constant against a 24*25 = 600 s horizon.
-    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0)
+    # 360 s of coast after a fuel cut, against a 24*25 = 600 s horizon... which
+    # covers it. n_horizon is cut so the horizon is genuinely the short one.
+    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, n_horizon=8)
     _warn_about_model(cfg)
     out = capsys.readouterr().out
     assert "horizon" in out.lower()
-    assert "600" in out
+    assert "200" in out  # 8 * 25 s
+    assert "fuel cut" in out
 
 
 def test_an_adequate_horizon_is_not_reported(capsys):
@@ -486,6 +488,41 @@ def test_an_adequate_horizon_is_not_reported(capsys):
     cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, n_horizon=200, t_step=25.0)
     _warn_about_model(cfg)
     assert "horizon" not in capsys.readouterr().out.lower()
+
+
+def test_the_running_warning_and_the_promotion_policy_size_the_horizon_alike(capsys):
+    """One model, one answer, whichever code path says it.
+
+    This warning used to compute C_c/h_amb inline while `evaluate` sized its
+    demand from the braking distance, so a refit could print an adequate
+    horizon and the controller could call the same horizon short. Both read
+    the same function now, and this pins that: the warning fires exactly when
+    the promotion policy asks for more steps than the config has.
+    """
+    from controller.model_promotion import evaluate, longest_braking_distance
+
+    cfg = dict(_DEFAULTS)
+    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, t_step=25.0)
+    brake = longest_braking_distance(cfg)
+    discredited = cfg["C_c"] / cfg["h_amb"]
+    assert brake == pytest.approx(360.0, abs=5.0)
+    assert discredited == pytest.approx(4074.0, abs=5.0)
+
+    # 24 steps of 25 s is the shipped horizon and it sits BETWEEN the two
+    # quantities: past the braking distance, far short of C_c/h_amb. It is the
+    # only kind of point that can tell the two rules apart, so it has to be in
+    # here -- 8 and 200 steps agree under either rule and prove nothing.
+    assert brake < 24 * 25.0 < discredited
+
+    for n_horizon in (8, 24, 200):
+        cfg["n_horizon"] = n_horizon
+        _warn_about_model(cfg)
+        warned = "horizon" in capsys.readouterr().out.lower()
+        demanded = evaluate(
+            cfg, None, candidate_rmse=2.0, incumbent_rmse=None, n_horizon=n_horizon, t_step=25.0
+        ).horizon_needed
+        assert warned is (demanded is not None), f"n_horizon={n_horizon} disagreed"
+        assert warned is (n_horizon * 25.0 < brake), f"n_horizon={n_horizon} did not follow the braking distance"
 
 
 def test_set_target_keeps_the_applied_firing_rate_history():

@@ -464,12 +464,10 @@ def test_shortening_dead_time_needs_the_same_wide_margin_as_tau():
 def test_a_model_needing_more_horizon_than_configured_reports_it():
     """A braking distance of a few hundred seconds against a 2*25 = 50 s horizon.
 
-    The horizon this asks against used to be 24 steps -- 600 s -- because the
-    demand was sized from GOOD's C_c/h_amb of 11250 s and 600 s fell far short
-    of it. It no longer does: 600 s is already more than twice this model's
-    braking distance, which is the point of pinning
-    `test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows`
-    below. So the inadequate horizon here is a genuinely short one.
+    50 s is genuinely short for this model: GOOD's chamber goes on rising for
+    321 s after a fuel cut. The horizon has to be this small for the test to
+    bite, because 600 s -- what the grill ships with -- already covers GOOD
+    twice over.
     """
     v = _ev(GOOD, n_horizon=2, t_step=25.0)
     assert v.horizon_needed is not None
@@ -614,27 +612,60 @@ def test_a_reference_at_or_below_ambient_is_not_read_as_an_endless_brake():
     assert longest_braking_distance(warm_day) == braking_distance(warm_day, _HAZARD_C)
 
 
+def test_the_estimate_matches_the_coast_the_real_cook_shows_at_the_cook_s_own_temperature():
+    """Like for like: same temperature, and a step compared against a step.
+
+    The 450 F cook in tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv peaked at
+    271.3 C, so the estimate is read there and nowhere else -- the braking
+    distance is a function of chamber temperature, and comparing a reading at
+    one temperature against a coast measured at another says nothing about
+    either.
+
+    The cook's own coast also has to be reduced to a step before it can be
+    compared to one. The controller did not cut fuel; it tapered Q from 100
+    down to 5 over the 263 s to the peak, and `braking_distance` asks what a
+    cut does. The equal-area equivalent step -- the instant at which a single
+    step delivers the same heat as the taper did -- is 968 s, so the step-
+    equivalent coast is 140 s, not the 263 s the raw timestamps give.
+
+    Against that, the estimate is 173 s: longer than the grill's, which is the
+    direction the two approximations in `braking_distance` are argued to err.
+    """
+    # From the fixture: Q leaves 100 at t=846 s, reaches its floor of 5 at
+    # t=1119 s, and the chamber peaks at 271.278 C at t=1109 s. The equal-area
+    # equivalent step of that taper falls at t=968 s.
+    peak_temp_c, peak_t_s, equivalent_step_t_s = 271.278, 1108.573, 968.2
+    step_equivalent_coast_s = peak_t_s - equivalent_step_t_s
+    assert step_equivalent_coast_s == pytest.approx(140.0, abs=1.0)
+
+    estimate = braking_distance(REAL_MAK_FIT, peak_temp_c)
+    assert estimate == pytest.approx(173.0, abs=1.0)
+    assert 1.0 < estimate / step_equivalent_coast_s < 1.5
+
+    # Read at the wrong temperature the same model says something else
+    # entirely, which is why this test fixes the temperature.
+    assert braking_distance(REAL_MAK_FIT, _FLOOR_C) > 2.0 * estimate
+
+
 def test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows():
     """The defect that shipped: a demand two orders of magnitude past the cook.
 
-    These are the parameters fitted to tests/unit/mpc/fixtures/
-    mak_cook_2026-08-02.csv, the 450 F cook that overshot by 70 F. In that log
-    the controller began cutting fuel at t=846 s and the chamber peaked at
-    t=1109 s, so the grill's own coast was 263 s -- and the shipped 24-step,
-    25 s horizon covered 600 s of it.
+    `horizon_needed` is sized from the cool end of the operating range, not
+    from the temperature the cook happened to reach, because one horizon has
+    to be adequate everywhere the grill runs. That reading is 369 s -- longer
+    than the 173 s the cook's own temperature calls for, and still the same
+    order as the 263 s the log spans between fuel cut and peak.
 
     Sized from C_c/h_amb the demand was 7137 s, 286 steps: a horizon the log
     contains no evidence for, since a ramp that never approaches steady state
-    does not determine that ratio. The braking distance is a quantity the same
-    log does show, so the bound is written around what it shows -- no shorter
-    than the coast the cook itself displays, and within a factor of two of it
-    rather than a factor of twenty.
+    does not determine that ratio.
     """
-    measured_coast_s = 1108.573 - 845.966
-    assert measured_coast_s == pytest.approx(263.0, abs=1.0)
+    raw_coast_s = 1108.573 - 845.966
+    assert raw_coast_s == pytest.approx(263.0, abs=1.0)
 
     brake = longest_braking_distance(REAL_MAK_FIT)
-    assert measured_coast_s < brake < 2.0 * measured_coast_s
+    assert brake == pytest.approx(369.0, abs=2.0)
+    assert brake < 2.0 * raw_coast_s
 
     v = _ev(REAL_MAK_FIT, n_horizon=1, t_step=25.0)
     assert v.horizon_needed == int(math.ceil(brake / 25.0))
@@ -643,6 +674,70 @@ def test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows():
     # And the horizon the grill actually shipped with covers it, which is why
     # this incident was never the horizon's fault.
     assert _ev(REAL_MAK_FIT, n_horizon=24, t_step=25.0).horizon_needed is None
+
+
+def test_a_model_that_never_stops_rising_is_refused_rather_than_passed_quietly(monkeypatch):
+    """An unbounded brake must not read as "the horizon is fine".
+
+    `braking_distance` returns infinity for a chamber nothing pulls heat out
+    of. PROMOTION_BOUNDS makes that unreachable through `evaluate` today --
+    h_amb, K_Q and h_fc all have positive floors, and the reference points at
+    or below ambient are dropped before they can produce a non-positive loss --
+    so this reaches past the bounds to force the branch rather than pretending
+    a candidate can express it. The branch exists because `horizon_needed`
+    is advisory: leaving it None on a model with no finite braking distance
+    would let the worst case be the one that travels silently.
+    """
+    import controller.model_promotion as mp
+
+    monkeypatch.setattr(mp, "longest_braking_distance", lambda *a, **k: math.inf)
+    verdict = _ev(GOOD, n_horizon=24, t_step=25.0)
+    assert verdict.accepted is False
+    assert verdict.horizon_needed is None
+    assert "stops rising" in verdict.reason
+
+
+def test_holding_h_amb_narrows_the_believed_tau_far_more_than_the_braking_distance():
+    """What the fitter's held h_amb costs, in both directions.
+
+    controller/update_mpc.py holds h_amb, so a grill whose true ambient loss is
+    not the held value is described by a model carrying the right C_c/h_amb and
+    K_Q/h_amb and the wrong split between conductive and radiative loss. The
+    believed time constant is exposed to that in both directions: across a 50x
+    sweep of the true h_amb it reads anywhere from 0.40x to 3.66x the truth's.
+
+    The narrowing half is the one that matters. A believed tau shorter than the
+    truth is a model that thinks the grill stops sooner than it does, which is
+    the failure this whole policy exists to prevent -- and controller/grill_sim
+    sits on that side of nominal. The braking distance is far less exposed
+    there: 0.85x against tau's 0.40x, and the range-wide reading the horizon is
+    actually sized from holds to 0.98x, because it is taken at the cool end
+    where the radiative share the hold gets wrong is small.
+    """
+    believed = dict(REAL_MAK_FIT)
+    tau_ratios, brake_ratios, sizing_ratios = [], [], []
+    for mult in (0.2, 0.5, 1.0, 2.0, 5.0, 10.0):
+        # The same log, read as a grill with `mult` times the ambient loss: the
+        # ratios a cook determines are held, the absolute values are not.
+        truth = dict(
+            believed,
+            h_amb=believed["h_amb"] * mult,
+            C_c=believed["C_c"] * mult,
+            K_Q=believed["K_Q"] * mult,
+        )
+        for t_ref in (_FLOOR_C, _HAZARD_C):
+            tau_ratios.append(effective_tau(believed, t_ref) / effective_tau(truth, t_ref))
+            brake_ratios.append(braking_distance(believed, t_ref) / braking_distance(truth, t_ref))
+        sizing_ratios.append(longest_braking_distance(believed) / longest_braking_distance(truth))
+
+    # The exposure is real and it is stated, not claimed away.
+    assert min(tau_ratios) < 0.45
+    assert max(tau_ratios) > 3.0
+    # The braking distance narrows too, but by half as much on a log scale...
+    assert 0.80 < min(brake_ratios) < 0.90
+    assert min(brake_ratios) > 2.0 * min(tau_ratios)
+    # ...and the reading the horizon is sized from barely narrows at all.
+    assert min(sizing_ratios) > 0.95
 
 
 def test_every_fitted_parameter_has_a_bound():

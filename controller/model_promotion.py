@@ -247,7 +247,13 @@ def braking_distance(params, t_ref_c, *, q_full=Q_FULL_FIRE):
     return hi
 
 
-def steady_state_at_full_fire(params, *, q_full=Q_FULL_FIRE, ceiling_c=100000.0):
+#: How far above ambient the steady-state search will look before it gives up
+#: and calls the asymptote unbounded. Far past any temperature a grill reaches,
+#: so it bounds the search rather than the answer.
+_STEADY_STATE_CEILING_C = 100000.0
+
+
+def steady_state_at_full_fire(params, *, q_full=Q_FULL_FIRE):
     """The chamber temperature this model settles at under sustained full fire.
 
     The asymptote the fitted parameters imply: where the chamber's loss,
@@ -258,11 +264,14 @@ def steady_state_at_full_fire(params, *, q_full=Q_FULL_FIRE, ceiling_c=100000.0)
     A cook that never approaches steady state does not determine this, which is
     exactly why it is worth looking at: it is where a fit that has traded the
     chamber's parameters against each other along a direction the log cannot
-    see ends up saying something absurd. The MAK cook peaked at 520 F; fits of
-    it have implied anything from 1067 F to 5664 F depending on what was left
-    free. Reported rather than enforced -- see this module's own tests for why
-    the separation between a sound value and an absurd one is not wide enough
-    here to draw a refusal line on.
+    see says something visibly absurd. A grill that peaks at 520 F can be fitted
+    to imply anything from 1067 F to 5664 F depending on which parameters are
+    free.
+
+    It is reported and not enforced. Sound and absurd fits of the same cook sit
+    only about 1.6x apart on this quantity and both are far above the hazard
+    limit, so a refusal drawn here would be a guess; separating them needs the
+    temperature band the cook actually visited, which `evaluate` is not given.
     """
     t_amb = float(params["T_amb"])
     h_amb, sigma = float(params["h_amb"]), float(params["sigma"])
@@ -278,7 +287,7 @@ def steady_state_at_full_fire(params, *, q_full=Q_FULL_FIRE, ceiling_c=100000.0)
     lo, hi = t_amb, t_amb + 1.0
     while loss(hi) < target:
         hi = t_amb + (hi - t_amb) * 2.0
-        if hi - t_amb > ceiling_c:
+        if hi - t_amb > _STEADY_STATE_CEILING_C:
             return math.inf
     for _ in range(_BISECT_STEPS):
         mid = 0.5 * (lo + hi)
@@ -400,7 +409,12 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
     # the coast after a cut is directly observable in the same log.
     horizon_needed = None
     brake = longest_braking_distance(candidate)
-    if math.isfinite(brake) and float(n_horizon) * float(t_step) < brake:
+    if not math.isfinite(brake):
+        # A chamber this model never predicts will stop rising. No horizon
+        # covers that, so it is refused rather than passed with no demand
+        # attached -- silence here would read as "the horizon is fine".
+        return Verdict(False, "the model does not predict the chamber ever stops rising after a fuel cut")
+    if float(n_horizon) * float(t_step) < brake:
         horizon_needed = int(math.ceil(brake / float(t_step)))
 
     if incumbent is None:

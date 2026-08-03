@@ -26,10 +26,12 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 PROMOTION = ROOT / "controller" / "model_promotion.py"
 UPDATE = ROOT / "controller" / "update_mpc.py"
+MPC = ROOT / "controller" / "mpc.py"
 
 NODES = [
     "tests/unit/mpc/test_model_promotion.py",
     "tests/unit/mpc/test_mpc_calibration.py",
+    "tests/unit/mpc/test_mpc_controller.py",
 ]
 
 #: (label, file, old, new). Each `old` must appear exactly once.
@@ -152,6 +154,36 @@ MUTATIONS = [
         UPDATE,
         "        scale.append(magnitude if magnitude > 0.0 and np.isfinite(magnitude) else 1.0)",
         "        scale.append(1.0)",
+    ),
+    (
+        "M20 running warning back on the time constant",
+        MPC,
+        "    brake = longest_braking_distance(cfg)",
+        '    brake = float(cfg["C_c"]) / float(cfg["h_amb"])',
+    ),
+    (
+        "M21 running warning never fires",
+        MPC,
+        "    if math.isfinite(brake) and horizon < brake:",
+        "    if False:",
+    ),
+    (
+        "M22 running warning always fires",
+        MPC,
+        "    if math.isfinite(brake) and horizon < brake:",
+        "    if True:",
+    ),
+    (
+        "M23 an endless brake passes with no demand attached",
+        PROMOTION,
+        '        return Verdict(False, "the model does not predict the chamber ever stops rising after a fuel cut")',
+        "        return Verdict(True, 'unbounded brake', None)",
+    ),
+    (
+        "M24 steady-state search ceiling collapsed to nothing",
+        PROMOTION,
+        "_STEADY_STATE_CEILING_C = 100000.0",
+        "_STEADY_STATE_CEILING_C = 1.0",
     ),
 ]
 

@@ -55,18 +55,18 @@ CONFIG_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "T_amb", "theta", "n_delay", "K_Q"
 # is quasi-static: h_fc*(T_f - T_c) tracks K_Q*heat_in, C_f and h_fc leave the
 # chamber equation, and what is left depends only on C_c/h_amb, K_Q/h_amb and
 # sigma/h_amb. Holding C_f pins the global scaling above and does nothing about
-# this one, so one of the chamber's own three must be held too -- and whichever
-# of h_amb and sigma is left free, the solve escapes by inflating the rest
-# until the held one is negligible. Freeing h_amb, as the shipped set did,
-# converges on the real MAK cook at C_c 2.6e7 and h_amb 7.4e3, an order of
-# magnitude past model_promotion.PROMOTION_BOUNDS: the radiative term deleted
-# by dilution, and a model evaluate() refuses however well it describes the
-# log, which is what happened on 30 of the 35 logs measured. Freeing sigma
-# instead escapes the other way, to an all-radiative model with sigma 5e-3 and
-# C_c 3e8. Holding both is the only configuration measured that lands inside
-# the bounds on every log, and it costs only the ratio between the two loss
-# terms -- see this file's report for what that ratio being fixed does and does
-# not cover.
+# this one, so one of the chamber's own three must be held too. Leaving either
+# h_amb or sigma free lets the solve inflate the rest until the held one is
+# negligible: with h_amb free the real MAK cook lands at C_c 2.6e7 and
+# h_amb 7.4e3, an order of magnitude past model_promotion.PROMOTION_BOUNDS,
+# so evaluate() refuses the model however well it describes the log; with
+# sigma free it goes the other way, to an all-radiative model at sigma 5e-3
+# and C_c 3e8. Holding both keeps every fit inside the bounds. The price is
+# that sigma/h_amb, the share of the chamber's loss that is radiative, is
+# fixed rather than fitted, so a grill whose share differs is described by a
+# model carrying the right C_c/h_amb and the wrong split. What that costs the
+# quantity the horizon is sized from is measured in
+# tests/unit/mpc/test_model_promotion.py.
 #
 # WHAT THE LOG CANNOT RESOLVE AT ALL. h_fc appears only as the firepot's own
 # time constant C_f/h_fc -- seconds, against a chamber and a transport delay of
@@ -139,11 +139,10 @@ def _solve_scale(init):
 def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
     """Fit the free grey-box parameters to a logged temperature series.
 
-    `sigma` is a starting value like every other, and is subject to the same
-    rule: moved if `_FREE` names it, returned exactly as passed if not. It is a
-    named argument because every caller has it to hand separately from the
-    parameters it is fitting. `_FREE` does not name it today -- see there for
-    what that costs.
+    `sigma` is a starting value like every other in `init`, and gets the same
+    treatment: moved if `_FREE` names it, returned exactly as passed if not. It
+    is a separate argument only because every caller has it to hand apart from
+    the parameters it is fitting.
 
     The result carries `converged` alongside the parameters. A least-squares
     solve that runs out of evaluations still returns its best point so far, and
@@ -153,10 +152,6 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
     rather than being something the caller must think to ask for.
     """
     temp = np.asarray(temp, dtype=float)
-    # `sigma` is a starting value like any other, so it joins `init` and is
-    # then subject to the same rule as the rest: moved if `_FREE` names it,
-    # held at what came in if not. It stays a named argument because every
-    # caller has it to hand separately from the parameters it is fitting.
     init = dict(init, sigma=sigma)
     # Everything the solve does not move stays where the caller put it. Which
     # parameters those are is `_FREE`'s business alone, so shrinking that set

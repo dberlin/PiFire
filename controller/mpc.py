@@ -31,6 +31,7 @@ import numpy as np
 
 from controller.base import ControllerBase
 from controller.model_promotion import Verdict as _Verdict
+from controller.model_promotion import longest_braking_distance
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE
 from controller.mpc_allocator import allocate
 
@@ -97,8 +98,8 @@ _HISTORY_MAX = 8640
 # enters neither. Dropping rows therefore discards evidence for nothing, and
 # the worse-conditioned problem left behind takes MORE iterations, so it is
 # not even faster in practice. It costs an order of magnitude of accuracy in
-# C_c/h_amb, and the braking distance model_promotion gates on is read off the
-# same fit.
+# the chamber parameters, and the braking distance model_promotion sizes the
+# horizon from is read off the same fit.
 _REFIT_MIN_SAMPLES = 120
 
 # Parameters the least-squares solve starts from, and the magnitudes it scales
@@ -210,16 +211,17 @@ def _warn_about_model(cfg):
             "[mpc] model is uncalibrated (every thermal parameter is still the shipped default). "
             "Expect large overshoot until you fit this grill with controller/update_mpc.py."
         )
-    h_amb = float(cfg.get("h_amb") or 0.0)
-    if h_amb > 0.0:
-        tau = float(cfg["C_c"]) / h_amb
-        horizon = float(cfg["n_horizon"]) * float(cfg["t_step"])
-        if horizon < tau:
-            print(
-                f"[mpc] prediction horizon is {horizon:.0f} s but the model's chamber time "
-                f"constant is {tau:.0f} s; the controller cannot see far enough ahead to stop "
-                "in time. Raise n_horizon or t_step."
-            )
+    # The same quantity model_promotion.evaluate() sizes horizon_needed from,
+    # through the same function, so this message and the verdict a refit prints
+    # cannot describe one model in two ways.
+    brake = longest_braking_distance(cfg)
+    horizon = float(cfg["n_horizon"]) * float(cfg["t_step"])
+    if math.isfinite(brake) and horizon < brake:
+        print(
+            f"[mpc] prediction horizon is {horizon:.0f} s but the chamber keeps rising for "
+            f"{brake:.0f} s after a full fuel cut; the controller cannot see far enough ahead "
+            "to stop in time. Raise n_horizon or t_step."
+        )
 
 
 def requires_modules(config):

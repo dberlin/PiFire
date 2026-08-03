@@ -13,15 +13,14 @@ from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality
 #: The grill these tests fit: an order of magnitude slower than the shipped
 #: default, nearly ten times its gain, and twice its dead time.
 #:
-#: h_amb matches `_init()` rather than differing from it, because `_FREE` holds
-#: h_amb and sigma both -- so what a fit can express is C_c, K_Q and theta
-#: against THAT pair. It used to be 2.7, which put sigma/h_amb, the share of
-#: the chamber's loss that is radiative, 5.4x away from the one the fitter
-#: holds; the fit then absorbed the difference into C_c and recovered the time
-#: constant 2.1x wrong. That is a real limit of the parameterization and it is
-#: recorded as such in this task's report, not papered over here -- but a
-#: dataset outside what the fitter can represent is the wrong instrument for
-#: asking whether the fitter recovers what it is given.
+#: h_amb matches `_init()`, which puts this grill inside what a fit can
+#: express. `_FREE` holds h_amb and sigma both, so it fixes sigma/h_amb -- the
+#: share of the chamber's loss that is radiative -- and a grill whose share
+#: differs is outside the estimator's model class: fitting its own noiseless
+#: data leaves a residual, and C_c absorbs the difference. These tests ask
+#: whether the fitter recovers what it is given, which needs a grill it can
+#: represent. The cost of that restriction is its own question, measured
+#: against a mismatched grill in tests/unit/mpc/test_model_promotion.py.
 TRUTH = dict(C_f=9.0, C_c=11000.0, h_fc=1.3, h_amb=0.5, K_Q=32.0, theta=110.0)
 T_AMB = 20.0
 N_DELAY = 4
@@ -312,38 +311,37 @@ def test_a_fit_to_a_real_cook_lands_where_the_promotion_policy_can_accept_it():
         U._FREE = original
 
 
-def test_the_solve_is_conditioned_by_scaling_each_parameter_to_its_own_size():
-    """The free parameters differ by orders of magnitude.
+def test_the_solve_starts_every_free_parameter_at_the_same_size():
+    """The solve's coordinates are dimensionless, whatever units it is handed.
 
-    scipy's finite-difference step is eps**0.5 * max(1, |x|), so above 1 it is
-    relative and each parameter is probed on the scale of its own value --
-    which leaves the Jacobian columns sized by those values rather than
-    comparable to each other. Dividing each by its own starting magnitude puts
-    them all at exactly 1, so one trust-region radius means the same relative
-    move in every direction.
+    scipy sizes its finite-difference step and its trust region in the
+    coordinates it is given, so a solve posed directly in C_c (hundreds) and
+    K_Q (single digits) probes and moves those two on different scales. What
+    `_solve_scale` has to deliver is that the solve's own starting point is the
+    same number in every direction, regardless of how far apart the physical
+    values are.
 
-    This asserts that mechanism, not an outcome. It used to require a
-    materially better RMSE on the real MAK cook, and with the previous, larger
-    `_FREE` it got one: that solve exhausted its evaluation budget, and where
-    the solver stopped depended on how it was conditioned. The narrowed set
-    converges in under a hundred evaluations either way, to six matching
-    figures -- so that assertion no longer separates a scaled solve from an
-    unscaled one and would pass whatever `_solve_scale` returned.
+    That is asserted here as a property of the transform rather than of one
+    parameter's magnitude: any two starting points differing only by units --
+    the same grill described in a different scale -- must produce the same
+    solve coordinates. A `_solve_scale` returning a constant would fail it, and
+    so would one keyed to anything but the caller's own starting values.
     """
     import controller.update_mpc as U
 
     init = _init()
-    scale = U._solve_scale(init)
-    assert len(scale) == len(U._FREE)
-    for magnitude, key in zip(scale, U._FREE):
-        assert magnitude == pytest.approx(abs(init[key]))
-
-    # The spread the scaling exists to remove has to be in the shipped starting
-    # point, or the mechanism is being asserted against a case it never meets.
+    # The spread the scaling exists to remove has to be present, or the
+    # property below is being asserted against a case it never meets.
     magnitudes = [abs(init[key]) for key in U._FREE]
     assert max(magnitudes) / min(magnitudes) > 10.0
-    # ...and it is gone afterwards, exactly rather than approximately.
-    assert [m / s for m, s in zip(magnitudes, scale)] == [1.0] * len(U._FREE)
+
+    started_at = [m / s for m, s in zip(magnitudes, U._solve_scale(init))]
+    assert started_at == [1.0] * len(U._FREE)
+
+    # The same grill, every parameter restated 1000x larger: the physical
+    # values all move, the coordinates the solve works in do not.
+    rescaled = {k: v * 1000.0 for k, v in init.items()}
+    assert [abs(rescaled[k]) / s for k, s in zip(U._FREE, U._solve_scale(rescaled))] == started_at
 
 
 def test_the_solve_scale_follows_the_caller_rather_than_the_shipped_defaults():
