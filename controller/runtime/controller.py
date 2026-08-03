@@ -638,7 +638,15 @@ class Controller:
         store.write_control(self.control, WriteKind.OVERWRITE, origin="control")
         self.work_cycle(Mode.SHUTDOWN)
         self.next_mode(self.control["next_mode"])
-        if settings["shutdown"]["auto_power_off"]:
+        # Powering the host off is conditional on the shutdown having actually
+        # reached Stop. A cycle broken by an operator pressing Smoke or Hold has
+        # asked for the grill to KEEP running, and next_mode() yields to that
+        # request rather than overriding it -- so halting here would strand a
+        # lit firepot with nothing controlling it. A shutdown that ended in
+        # Error leaves the host up for the same reason, and so the error can be
+        # read.
+        self.control = store.read_control()
+        if settings["shutdown"]["auto_power_off"] and self.control["mode"] == Mode.STOP:
             self.eventLogger.info("Shutdown mode ended powering off grill")
             os.system("sleep 3 && sudo shutdown -h now &")
 

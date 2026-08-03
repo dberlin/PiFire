@@ -41,10 +41,22 @@ describe("buttonsForMode", () => {
       // startupCheck off explicitly: the fixture ships it ON, and with either
       // gate configured Startup is a "startup" intent rather than a bare
       // command (see the startup-confirmation block below).
+      // The leading four are the idle row proper; Error additionally carries a
+      // trailing Stop, which the "keeps a Stop in the idle row" case below owns.
       const buttons = buttonsForMode(at(mode, { primeAmount: 25, startupCheck: false }));
-      expect(buttons.map((b) => b.label)).toEqual(["Startup", "Prime", "Monitor", "Manual"]);
+      expect(buttons.slice(0, 4).map((b) => b.label)).toEqual([
+        "Startup",
+        "Prime",
+        "Monitor",
+        "Manual",
+      ]);
       // Startup / Monitor / Manual are bare commands; Prime opens a menu.
-      expect(buttons.map((b) => b.action.type)).toEqual(["command", "menu", "command", "command"]);
+      expect(buttons.slice(0, 4).map((b) => b.action.type)).toEqual([
+        "command",
+        "menu",
+        "command",
+        "command",
+      ]);
 
       const command = stubCommand();
       const monitor = buttons[2];
@@ -179,20 +191,77 @@ describe("buttonsForMode", () => {
     expect(command.setMode).toHaveBeenCalledWith("startup");
   });
 
-  it.each(["Startup", "Smoke", "Hold", "Prime", "Reignite", "Shutdown", "SomeUnknownMode"])(
+  // Priming happens before there is a fire. Both displays treat it as an idle
+  // mode (display/_base_flex.py:524, Menus.js's fallback), and the active-cook
+  // row is wrong twice over here: it hides Startup, which is the normal next
+  // step out of a prime, and it offers Smoke and Hold, which would run a cook
+  // cycle over an unlit firepot.
+  it("Prime offers the ways out of a prime, not a cook row", () => {
+    const buttons = buttonsForMode(at("Prime", { startupCheck: false }));
+    expect(buttons.map((b) => b.label)).toEqual(["Startup", "Prime", "Monitor", "Manual", "Stop"]);
+    // Same "you are here" mark Monitor carries in its own mode.
+    expect(buttons.filter((b) => b.variant === "accent").map((b) => b.label)).toEqual(["Prime"]);
+  });
+
+  // Stop is the one control every non-stopped idle mode needs and Stop itself
+  // does not. Error had no way out of the row at all.
+  it.each(["Prime", "Monitor", "Error"])("%s keeps a Stop in the idle row", (mode) => {
+    expect(buttonsForMode(at(mode)).map((b) => b.label)).toContain("Stop");
+  });
+
+  it.each(["Stop", ""])("%s offers no Stop -- it is already stopped", (mode) => {
+    expect(buttonsForMode(at(mode)).map((b) => b.label)).not.toContain("Stop");
+  });
+
+  it.each(["Startup", "Smoke", "Hold", "Reignite", "Shutdown", "SomeUnknownMode"])(
     "%s (active/unknown mode) renders Smoke / Hold / Smoke+ / Shutdown / Stop",
     (mode) => {
       const buttons = buttonsForMode(at(mode));
       expect(buttons.map((b) => b.label)).toEqual(["Smoke", "Hold", "Smoke+", "Shutdown", "Stop"]);
       expect(buttons[0].action.type).toBe("command");
       expect(buttons[1].action.type).toBe("setpoint");
-      expect(buttons[1].variant).toBe("accent");
       expect(buttons[2].action.type).toBe("command");
       expect(buttons[3].action.type).toBe("confirm");
       expect(buttons[4].action.type).toBe("confirm");
       expect(buttons[4].variant).toBe("danger");
     },
   );
+
+  // `accent` means "this is the mode you are in" (see ControlButton's doc
+  // comment). Hold carried it unconditionally, so it read as the running mode
+  // in Smoke, Startup, Prime, Reignite and Shutdown alike.
+  it.each([
+    ["Smoke", "Smoke"],
+    ["Hold", "Hold"],
+  ])("in %s mode only the %s button is accent", (mode, lit) => {
+    const buttons = buttonsForMode(at(mode, { smokePlus: false }));
+    expect(buttons.filter((b) => b.variant === "accent").map((b) => b.label)).toEqual([lit]);
+  });
+
+  it.each(["Startup", "Reignite", "Shutdown"])(
+    "%s lights neither Smoke nor Hold -- it is neither",
+    (mode) => {
+      const buttons = buttonsForMode(at(mode, { smokePlus: false }));
+      expect(buttons.filter((b) => b.variant === "accent")).toEqual([]);
+    },
+  );
+
+  // The controller's graph has no Smoke -> Smoke edge (ALLOWED_EXITS in
+  // controller/runtime/transitions.py), so commanding the mode you are already
+  // in is a request the seam can only reject.
+  it("does not command Smoke while already smoking", () => {
+    const smoke = buttonsForMode(at("Smoke")).find((b) => b.label === "Smoke");
+    expect(smoke?.disabled).toBe(true);
+    expect(buttonsForMode(at("Hold")).find((b) => b.label === "Smoke")?.disabled).toBeUndefined();
+  });
+
+  // Hold stays live in Hold: it opens the setpoint entry, and changing the
+  // target mid-cook is the whole point of the button.
+  it("keeps Hold pressable while holding", () => {
+    const hold = buttonsForMode(at("Hold")).find((b) => b.label === "Hold");
+    expect(hold?.disabled).toBeUndefined();
+    expect(hold?.action.type).toBe("setpoint");
+  });
 
   it("Smoke+ variant reflects dash.smokePlus and toggles the opposite value", async () => {
     const on = buttonsForMode(at("Hold", { smokePlus: true })).find((b) => b.label === "Smoke+");

@@ -105,6 +105,24 @@ def test_natural_yields_when_already_updated():
     assert store.flushed == 1
 
 
+def test_natural_yields_to_a_same_mode_request_from_a_listed_source():
+    # The operator presses Smoke while the grill is already smoking. The API
+    # writes mode=Smoke/updated=True, the smoke work cycle breaks out, and
+    # _dispatch_smoke hands control["next_mode"] -- still "Smoke", set from
+    # after_startup_mode at ignition and never reset -- to next_mode().
+    #
+    # Smoke is a LISTED source whose exits exclude itself, so this is the case
+    # the yield above cannot cover: mode="Error" dodges the legality check
+    # entirely because terminal modes are unlisted. A transition the seam is
+    # about to abandon must not be rejected on its way to being abandoned.
+    control = _base_control(mode="Smoke", updated=True)
+    ctx, store, notifier = _ctx(control)
+    out = request_transition(ctx, control, "Smoke", kind="natural", setpoint=0)
+    assert out["mode"] == "Smoke"
+    assert store.writes == []
+    assert store.flushed == 1
+
+
 # --------------------------------------------------------------------------
 # kind="safety"
 # --------------------------------------------------------------------------

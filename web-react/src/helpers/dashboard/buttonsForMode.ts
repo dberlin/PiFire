@@ -31,6 +31,11 @@ export interface ControlButton {
    *  rather than a lit border. Sharing one look made an always-primary Startup
    *  read as a second active mode. */
   variant?: "accent" | "danger" | "primary";
+  /** Set when the button names a state the grill is already in and pressing it
+   *  could only ask for something the controller's transition graph refuses.
+   *  Distinct from the row-wide dimming, which tracks whether the control
+   *  process is reachable and never withholds an exit. */
+  disabled?: boolean;
   action: ButtonAction;
 }
 
@@ -111,7 +116,7 @@ const idleRow = (dash: LiveState, mode: string): ControlButton[] => {
   const monitoring = mode === "Monitor";
   return [
     startupButton(dash),
-    PRIME,
+    { ...PRIME, variant: mode === "Prime" ? "accent" : undefined },
     {
       label: "Monitor",
       // Same "this one is active" idiom the Manual row uses for an energised
@@ -125,7 +130,10 @@ const idleRow = (dash: LiveState, mode: string): ControlButton[] => {
       action: cmd((c) => c.setMode(monitoring ? "stop" : "monitor")),
     },
     { label: "Manual", action: cmd((c) => c.setMode("manual")) },
-    ...(monitoring ? [STOP_IDLE] : []),
+    // Every idle mode that is not already stopped needs a way out of itself:
+    // Monitor and Prime are running, and Error is latched until something
+    // clears it. Stop is the one mode where the button would say nothing.
+    ...(mode === "Stop" || mode === "" ? [] : [STOP_IDLE]),
   ];
 };
 
@@ -159,7 +167,17 @@ export function buttonsForMode(dash: LiveState): ControlButton[] {
     ];
   }
 
-  if (mode === "Stop" || mode === "Error" || mode === "" || mode === "Monitor") {
+  // Prime belongs here, not with the cook modes: it runs before there is a
+  // fire, so Smoke and Hold would drive a cycle over an unlit firepot, and the
+  // cook row hides Startup -- the normal next step out of a prime. Both
+  // displays classify it the same way (display/_base_flex.py:524).
+  if (
+    mode === "Stop" ||
+    mode === "Error" ||
+    mode === "" ||
+    mode === "Monitor" ||
+    mode === "Prime"
+  ) {
     return idleRow(dash, mode);
   }
 
@@ -184,9 +202,24 @@ export function buttonsForMode(dash: LiveState): ControlButton[] {
   }
 
   // Active cook modes (Startup / Smoke / Hold / Prime / Reignite / Shutdown).
+  //
+  // Smoke and Hold each carry accent only in their own mode, the same way the
+  // idle row marks Monitor. Smoke additionally goes inert while smoking: the
+  // controller's graph has no Smoke -> Smoke edge, so the press could only ask
+  // for a transition the seam refuses. Hold stays live while holding, because
+  // it opens the setpoint entry rather than commanding a mode.
   return [
-    { label: "Smoke", action: cmd((c) => c.setMode("smoke")) },
-    { label: "Hold", variant: "accent", action: { type: "setpoint" } },
+    {
+      label: "Smoke",
+      variant: mode === "Smoke" ? "accent" : undefined,
+      disabled: mode === "Smoke" ? true : undefined,
+      action: cmd((c) => c.setMode("smoke")),
+    },
+    {
+      label: "Hold",
+      variant: mode === "Hold" ? "accent" : undefined,
+      action: { type: "setpoint" },
+    },
     {
       label: "Smoke+",
       variant: dash.smokePlus ? "accent" : undefined,

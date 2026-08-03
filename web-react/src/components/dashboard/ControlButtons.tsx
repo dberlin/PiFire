@@ -168,7 +168,7 @@ export function ControlButtons({
         // (templates/base.html:117-125). Keep the dimming as a signal, never
         // withhold the exits. `busy` still gates everything -- that one is a
         // real in-flight request, not a guess about the backend.
-        const off = (disabled && !SAFETY_LABELS.has(b.label)) || busy;
+        const off = (disabled && !SAFETY_LABELS.has(b.label)) || busy || b.disabled === true;
         const waiting = pending?.label === b.label;
         return (
           <button

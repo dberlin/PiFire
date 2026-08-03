@@ -11,9 +11,12 @@ a scenario exercises only the transition bookkeeping, not a full work cycle.
 
 SAFETY: build_controller() neutralizes controller.py's module-level os.system
 (via the loop-golden _neutralize_externals helper) AND sets
-shutdown.auto_power_off=False. None of these scenarios drive the Shutdown->Stop
-edge, so os.system is never on any path exercised here; the recorder confirms it
-is never invoked.
+shutdown.auto_power_off=False, so no scenario here can reach a real halt.
+
+Two scenarios DO drive the Shutdown->Stop edge with auto_power_off back on --
+the pair asserting that an aborted shutdown powers nothing off while a
+completed one still does. Both re-patch os through the recorder first and
+assert on what it recorded, which is the only way to test a halt at all.
 """
 
 from common.common import WriteKind
@@ -303,3 +306,51 @@ def test_reignite_dispatch_carries_last_state_and_setpoint(monkeypatch):
     assert out["next_mode"] == "Hold"
     assert ("work_cycle", "Reignite") in calls
     assert ("next_mode", "Hold", 250) in calls  # carried setpoint
+
+
+# --------------------------------------------------------------------------
+# Shutdown dispatch: auto_power_off is conditional on the shutdown finishing
+# --------------------------------------------------------------------------
+
+
+def _abort_shutdown_mid_cycle(c, store, to_mode):
+    """Stand in for the shutdown work cycle, with an operator pressing `to_mode`
+    partway through: the API writes the mode and sets `updated`, which is what
+    breaks the real cycle out."""
+
+    def fake_work_cycle(mode):
+        control = store.read_control()
+        control["mode"] = to_mode
+        control["updated"] = True
+        store.write_control(control, WriteKind.OVERWRITE, origin="test")
+
+    c.work_cycle = fake_work_cycle
+
+
+def test_shutdown_aborted_by_an_operator_powers_nothing_off(monkeypatch):
+    # Pressing Smoke during a shutdown asks for the grill to keep running. The
+    # host must stay up: halting it strands a lit firepot with nothing
+    # controlling it, and the abort itself succeeds, so the fire is still there.
+    c, store = build_controller(monkeypatch, mode="Shutdown", control_over={"updated": False})
+    sent = _neutralize_externals(monkeypatch)
+    c.settings["shutdown"]["auto_power_off"] = True
+    _abort_shutdown_mid_cycle(c, store, "Smoke")
+
+    c._dispatch_shutdown()
+
+    assert store.read_control()["mode"] == "Smoke"  # the abort took
+    assert [call for call in sent if call[0] == "os.system"] == []
+
+
+def test_shutdown_that_completes_still_powers_off(monkeypatch):
+    # The other half of the same guard: an uninterrupted shutdown reaches Stop
+    # and must still honour the setting.
+    c, store = build_controller(monkeypatch, mode="Shutdown", control_over={"updated": False})
+    sent = _neutralize_externals(monkeypatch)
+    c.settings["shutdown"]["auto_power_off"] = True
+    c.work_cycle = lambda mode: None
+
+    c._dispatch_shutdown()
+
+    assert store.read_control()["mode"] == "Stop"
+    assert [call[0] for call in sent if call[0] == "os.system"] == ["os.system"]

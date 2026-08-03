@@ -110,7 +110,6 @@ def _check_legal(from_mode, to_mode):
 
 def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite_from=None, notify=None, display=None):
     store = ctx.store
-    _check_legal(control.get("mode"), to_mode)
 
     if kind == TransitionKind.NATURAL:
         # Natural (post-cycle) progressions carry NO display push and NO
@@ -130,6 +129,13 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
         control = store.read_control()
         if control["updated"]:
             return control
+        # Checked here rather than on entry, so the graph guards the write that
+        # actually happens, against the mode that is actually current. A cycle
+        # broken by an operator request arrives with the requested mode already
+        # persisted and a stale `next_mode` in hand; rejecting that pairing on
+        # entry raised out of the control loop over a progression the yield
+        # above was about to discard.
+        _check_legal(control.get("mode"), to_mode)
         control["mode"] = to_mode
         if setpoint is not _UNSET:
             control["primary_setpoint"] = setpoint if to_mode == Mode.HOLD else 0
@@ -138,6 +144,7 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
         return control
 
     # authoritative: safety / terminal
+    _check_legal(control.get("mode"), to_mode)
     if display is not None:
         store.display_commands().push(display)
     control["mode"] = to_mode
