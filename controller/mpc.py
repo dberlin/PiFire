@@ -20,6 +20,7 @@
 *****************************************
 """
 
+import collections
 import math
 import os
 import time
@@ -75,6 +76,11 @@ _DEFAULTS = dict(
     log_data=False,
     log_path="./logs/mpc_calibration_log.csv",
 )
+
+# One row per control period. At the 5 s default that is ~12 hours, which is
+# longer than any single cook; a longer one loses its beginning rather than
+# its end, and the end is what describes the grill's current state.
+_HISTORY_MAX = 8640
 
 
 def _to_c(value, units):
@@ -191,6 +197,7 @@ class Controller(ControllerBase):
         self._policy_u_prev = float(cfg["Q_min"])
         self._last_Q_raw = float(cfg["Q_min"])
         self._last_solve_failed = False
+        self._history = collections.deque(maxlen=_HISTORY_MAX)
 
         n_delay = int(cfg["n_delay"])
 
@@ -364,6 +371,10 @@ class Controller(ControllerBase):
             "cycle_data": _sanitized_copy(self.cycle_data),
         }
 
+    def cook_history(self):
+        """The cook's (time_s, temp_c, Q_applied) rows, oldest first."""
+        return list(self._history)
+
     def set_output(self, applied):
         """Take the auger duty that actually ran and recover the firing rate.
 
@@ -405,8 +416,14 @@ class Controller(ControllerBase):
         #    not the command -- so a clamp, a lid-open pause, or a manual
         #    override is visible to the estimator instead of silently assumed
         #    away.
-        x_hat = self.estimator.update(self._applied_Q, y)
+        applied_Q = self._applied_Q
+        x_hat = self.estimator.update(applied_Q, y)
         self._x_hat = x_hat
+        # The rate the plant actually received over the interval ending now --
+        # the same value just handed to the estimator, not the Q computed below
+        # for the next interval -- so a fit against this row credits the plant,
+        # not the model, for a paused or clamped auger.
+        self._history.append((time.time(), float(y), float(applied_Q)))
         # The net's Q_prev feature was trained on values the sampler always
         # drove inside [Q_min, Q_max]; clamp for the net only, the estimator
         # above already saw the unclamped value.
