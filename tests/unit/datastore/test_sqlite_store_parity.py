@@ -242,3 +242,78 @@ def test_delta_envelope_parity_between_sqlite_and_in_memory(store):
     assert results[0]["timer"] == {"start": 0, "paused": 0, "end": 0}
     assert results[0]["notify_data"][0]["target"] == 203
     assert "origin" not in results[0]
+
+
+_PARITY_PROBE_INFO = [
+    {"label": "PitProbe", "name": "Pit", "type": "Primary", "enabled": True},
+    {"label": "PinkProbe", "name": "Pink", "type": "Food", "enabled": True},
+]
+
+_PARITY_IN_DATA = {
+    "probe_history": {
+        "primary": {"PitProbe": 210},
+        "food": {"PinkProbe": 140},
+        "aux": {},
+    },
+    "primary_setpoint": 225,
+    "notify_targets": {"PitProbe": 0, "PinkProbe": 165},
+}
+
+
+def _settings_with_probe_map(store):
+    settings = store.read_settings()
+    settings["probe_settings"]["probe_map"]["probe_info"] = _PARITY_PROBE_INFO
+    return settings
+
+
+def test_write_current_shape_parity(store):
+    # The control loop hands write_current() probe_history-shaped data and what
+    # gets STORED is the transformed blob. The fake used to keep the input
+    # verbatim, so a test that wrote and then read through it was asserting
+    # against a shape production never produces.
+    from common import datastore_accessors as dsa
+    from controller.runtime.store import InMemoryStore
+
+    settings = _settings_with_probe_map(store)
+    dsa.write_settings(settings)
+    fake = InMemoryStore(settings=settings)
+
+    store.write_current(_PARITY_IN_DATA)
+    fake.write_current(_PARITY_IN_DATA)
+
+    real_current = store.read_current()
+    fake_current = fake.read_current()
+    assert set(real_current) == set(fake_current)
+    for key in ("P", "F", "AUX", "PSP", "NT"):
+        assert real_current[key] == fake_current[key], key
+    assert real_current["LAST"] == fake_current["LAST"]
+
+
+def test_flush_current_shape_parity(store):
+    from common import datastore_accessors as dsa
+    from controller.runtime.store import InMemoryStore
+
+    settings = _settings_with_probe_map(store)
+    dsa.write_settings(settings)
+    fake = InMemoryStore(settings=settings)
+
+    assert store.flush_current() == fake.flush_current()
+
+
+def test_read_current_snapshot_parity(store):
+    from common import datastore_accessors as dsa
+    from controller.runtime.store import InMemoryStore
+
+    settings = _settings_with_probe_map(store)
+    dsa.write_settings(settings)
+    fake = InMemoryStore(settings=settings)
+
+    store.write_current(_PARITY_IN_DATA)
+    fake.write_current(_PARITY_IN_DATA)
+
+    real = store.read_current_snapshot()
+    fake_snap = fake.read_current_snapshot()
+    assert real.primary == fake_snap.primary == {"PitProbe": 210}
+    assert real.food == fake_snap.food == {"PinkProbe": 140}
+    assert real.primary_setpoint == fake_snap.primary_setpoint == 225
+    assert real.last_readings.keys() == fake_snap.last_readings.keys()
