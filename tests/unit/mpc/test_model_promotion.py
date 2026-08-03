@@ -50,8 +50,45 @@ def test_a_non_finite_incumbent_rmse_is_refused_not_accepted():
     assert v.accepted is False
 
 
+def test_a_live_incumbent_with_unrecorded_rmse_is_refused():
+    """A real incumbent whose RMSE was never recorded is not the same thing
+    as no incumbent at all: the comparison cannot be made, so this must
+    refuse rather than take the first-model acceptance path."""
+    faster = dict(GOOD, C_c=1000.0, h_amb=0.224)
+    v = _ev(faster, incumbent=INCUMBENT, cand_rmse=1e12, inc_rmse=None)
+    assert v.accepted is False
+
+
 def test_a_partial_incumbent_is_refused_not_a_crash():
     v = _ev(GOOD, incumbent={"C_c": 2000.0})
+    assert v.accepted is False
+
+
+def test_a_non_numeric_parameter_is_refused_not_a_crash():
+    assert _ev(dict(GOOD, C_f="nine")).accepted is False
+
+
+def test_a_negative_candidate_rmse_is_refused():
+    """A negative RMSE is nonsense, and left unchecked it beats every
+    incumbent automatically since it is less than any positive threshold."""
+    faster = dict(GOOD, C_c=1000.0, h_amb=0.224)
+    assert _ev(faster, cand_rmse=-1.0, inc_rmse=5.0).accepted is False
+
+
+def test_a_zero_incumbent_rmse_is_refused():
+    """A perfect incumbent cannot be fairly beaten; without this guard a
+    candidate claiming an equally 'perfect' zero RMSE ties its way past even
+    the wide margin regardless of how much tau or dead time it shortens."""
+    faster = dict(GOOD, C_c=1000.0, h_amb=0.224)
+    assert _ev(faster, cand_rmse=0.0, inc_rmse=0.0).accepted is False
+
+
+def test_an_incumbent_with_no_positive_reference_always_faces_the_wide_margin():
+    """A zero effective dead time on the incumbent side cannot be safely
+    divided into or compared against, so it is treated as the risky case
+    rather than silently taking the narrow bar."""
+    incumbent = dict(GOOD, C_c=2000.0, h_amb=0.30, theta=0.0, n_delay=0)
+    v = _ev(GOOD, incumbent=incumbent, cand_rmse=4.85, inc_rmse=5.0)  # clears the 2% bar, not the 50% bar
     assert v.accepted is False
 
 
@@ -92,11 +129,32 @@ def test_repeated_small_tau_cuts_cannot_walk_tau_down_without_clearing_the_wide_
     incumbent, incumbent_rmse = dict(GOOD), 5.0
     for _ in range(15):
         candidate = dict(incumbent, C_c=incumbent["C_c"] * 0.91)  # ~9% cut, just under the old deadband
-        candidate_rmse = incumbent_rmse * 0.99  # clears the 2% bar, not the 50% bar
+        candidate_rmse = incumbent_rmse * 0.97  # clears the 2% bar decisively, not the 50% bar
         v = evaluate(candidate, incumbent, candidate_rmse=candidate_rmse, incumbent_rmse=incumbent_rmse, **HORIZON)
         if v.accepted:
             incumbent, incumbent_rmse = candidate, candidate_rmse
     assert incumbent["C_c"] == GOOD["C_c"]
+
+
+def test_setting_n_delay_to_zero_needs_the_same_wide_margin_as_shortening_theta():
+    """n_delay=0 removes the transport-lag chain outright, so it cuts the
+    effective dead time to zero even if theta itself is untouched. That must
+    face the same asymmetric bar as shortening theta directly, not the
+    narrow one theta's own unchanged value would otherwise suggest."""
+    no_delay = dict(GOOD, n_delay=0)
+    v = _ev(no_delay, cand_rmse=4.85, inc_rmse=5.0)  # clears the 2% bar, not the 50% bar
+    assert v.accepted is False
+
+
+def test_setting_n_delay_to_zero_is_accepted_on_strong_evidence():
+    no_delay = dict(GOOD, n_delay=0)
+    assert _ev(no_delay, cand_rmse=0.5, inc_rmse=5.0).accepted is True
+
+
+def test_the_n_delay_bound_is_enforced():
+    assert _ev(dict(GOOD, n_delay=-1e-9)).accepted is False
+    assert _ev(dict(GOOD, n_delay=50.0)).accepted is True
+    assert _ev(dict(GOOD, n_delay=50.0 + 1e-6)).accepted is False
 
 
 def test_the_rmse_margin_is_exactly_two_percent():
@@ -174,7 +232,7 @@ _EXPECTED_BOUNDS = {
     "theta": (0.0, 1200.0),
     "n_delay": (0.0, 50.0),
     "K_Q": (1e-3, 1e4),
-    "sigma": (0.0, 1e-6),
+    "sigma": (0.0, 1e-7),
 }
 
 
@@ -182,7 +240,11 @@ def test_every_bound_is_pinned_by_a_literal():
     assert _EXPECTED_BOUNDS == PROMOTION_BOUNDS
 
 
-@pytest.mark.parametrize("key,lo,hi", [(k, *bounds) for k, bounds in _EXPECTED_BOUNDS.items()])
+#: n_delay is covered by test_the_n_delay_bound_is_enforced instead: its
+#: lower edge (0) interacts with theta through the effective-dead-time rule,
+#: so admissibility there depends on the evidence offered, not just on
+#: whether the bare value is in range.
+@pytest.mark.parametrize("key,lo,hi", [(k, *bounds) for k, bounds in _EXPECTED_BOUNDS.items() if k != "n_delay"])
 def test_each_bound_is_enforced_at_its_edge(key, lo, hi):
     assert _ev(dict(GOOD, **{key: lo})).accepted is True
     assert _ev(dict(GOOD, **{key: lo - abs(lo) * 1e-6 - 1e-9})).accepted is False

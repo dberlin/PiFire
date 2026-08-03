@@ -20,10 +20,11 @@ from dataclasses import dataclass
 #: purpose -- this rejects nonsense, it does not express a preference. T_amb
 #: spans a hard winter night to a hot afternoon; sigma must be non-negative (a
 #: negative radiative coefficient inverts the loss term into a gain) and is
-#: capped several decades above the physical default so a bad fit cannot make
-#: the model over-predict ambient loss; n_delay sizes the state vector and
-#: Jacobian one lag state at a time, so it is bounded well below values that
-#: stall the solver, and must additionally be a whole number of lag states.
+#: capped near the physical ceiling for a chamber-sized radiator (Stefan-
+#: Boltzmann constant times a generously large radiating area at blackbody
+#: emissivity); n_delay sizes the state vector and Jacobian one lag state at a
+#: time, so it is bounded well below values that stall the solver, and must
+#: additionally be a whole number of lag states.
 PROMOTION_BOUNDS = {
     "C_f": (0.1, 1e4),
     "C_c": (1.0, 1e6),
@@ -33,7 +34,7 @@ PROMOTION_BOUNDS = {
     "theta": (0.0, 1200.0),
     "n_delay": (0.0, 50.0),
     "K_Q": (1e-3, 1e4),
-    "sigma": (0.0, 1e-6),
+    "sigma": (0.0, 1e-7),
 }
 
 #: A candidate must beat the incumbent's error by this fraction to be adopted
@@ -41,25 +42,25 @@ PROMOTION_BOUNDS = {
 #: buys nothing.
 _RMSE_MARGIN = 0.02
 
-#: A candidate that SHORTENS the believed chamber time constant or dead time,
-#: by any amount, must beat the incumbent by this much instead. Braking
-#: distance grows with both, so a wrongly-short tau or theta brakes late --
-#: the failure this whole design exists to prevent -- while overestimating
-#: either brakes early and merely costs settling time. The bar applies to the
-#: smallest shortening as much as the largest: an incumbent must not be
-#: dislodged by a chain of individually-small cuts, each waved through on the
-#: narrow margin, that compounds into a large, unproven one.
+#: A candidate that SHORTENS the believed chamber time constant or effective
+#: dead time, by any amount, must beat the incumbent by this much instead.
+#: Braking distance grows with both, so a wrongly-short tau or dead time
+#: brakes late -- the failure this whole design exists to prevent -- while
+#: overestimating either brakes early and merely costs settling time. The bar
+#: applies to the smallest shortening as much as the largest: an incumbent
+#: must not be dislodged by a chain of individually-small cuts, each waved
+#: through on the narrow margin, that compounds into a large, unproven one.
 _RMSE_MARGIN_FASTER = 0.50
 
-#: How far tau or theta may grow past the incumbent's before the refusal
-#: reason calls it "longer" rather than "unchanged". Labels the growth side of
-#: the comparison only -- it never changes which margin applies, since any
-#: growth at all already takes the narrow one.
+#: How far tau or effective dead time may grow past the incumbent's before the
+#: refusal reason calls it "longer" rather than "unchanged". Labels the growth
+#: side of the comparison only -- it never changes which margin applies, since
+#: any growth at all already takes the narrow one.
 _TAU_DEADBAND = 0.10
 
 #: Incumbent fields the shrink comparison needs. A partial incumbent missing
 #: one of these cannot be judged, so it is refused rather than raising.
-_INCUMBENT_KEYS = ("C_c", "h_amb", "theta")
+_INCUMBENT_KEYS = ("C_c", "h_amb", "theta", "n_delay")
 
 
 @dataclass
@@ -81,6 +82,17 @@ def _finite(value):
 def _tau(params):
     h_amb = float(params["h_amb"])
     return float(params["C_c"]) / h_amb if h_amb > 0 else math.inf
+
+
+def _effective_theta(params):
+    """The dead time the controller actually anticipates.
+
+    n_delay == 0 removes the transport-lag chain outright -- heat is routed
+    straight to the firepot -- so theta contributes a delay only when at
+    least one lag state exists. A candidate that zeroes n_delay while leaving
+    theta untouched has, in effect, cut the dead time to zero.
+    """
+    return float(params["theta"]) if float(params["n_delay"]) > 0 else 0.0
 
 
 def _shrink_margin(candidate_value, incumbent_value):
@@ -108,17 +120,17 @@ def _direction_label(candidate_value, incumbent_value):
 def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon, t_step):
     """Whether `candidate` may replace `incumbent`, and what horizon it needs."""
     for key, (lo, hi) in PROMOTION_BOUNDS.items():
-        value = candidate.get(key)
-        if value is None or not math.isfinite(float(value)):
+        value = _finite(candidate.get(key))
+        if value is None:
             return Verdict(False, f"{key} is not a finite number")
-        if not (lo <= float(value) <= hi):
+        if not (lo <= value <= hi):
             return Verdict(False, f"{key}={value:g} is outside [{lo:g}, {hi:g}]")
 
     if not float(candidate["n_delay"]).is_integer():
         return Verdict(False, f"n_delay={candidate['n_delay']:g} must be a whole number")
 
-    if not math.isfinite(float(candidate_rmse)):
-        return Verdict(False, "candidate RMSE is not finite")
+    if _finite(candidate_rmse) is None or float(candidate_rmse) <= 0:
+        return Verdict(False, "candidate RMSE must be a positive, finite number")
 
     if _finite(t_step) is None or float(t_step) <= 0:
         return Verdict(False, "t_step must be a positive, finite number")
@@ -130,19 +142,22 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
     if math.isfinite(tau) and float(n_horizon) * float(t_step) < tau:
         horizon_needed = int(math.ceil(tau / float(t_step)))
 
-    if incumbent is None or incumbent_rmse is None:
+    if incumbent is None:
         return Verdict(True, "no incumbent", horizon_needed)
 
-    if _finite(incumbent_rmse) is None:
-        return Verdict(False, "incumbent RMSE is not a finite number", horizon_needed)
+    if incumbent_rmse is None:
+        return Verdict(False, "incumbent RMSE is not recorded; cannot compare", horizon_needed)
+
+    if _finite(incumbent_rmse) is None or float(incumbent_rmse) <= 0:
+        return Verdict(False, "incumbent RMSE must be a positive, finite number", horizon_needed)
 
     for key in _INCUMBENT_KEYS:
         if _finite(incumbent.get(key)) is None:
             return Verdict(False, "incumbent model is missing required parameters", horizon_needed)
 
     tau_incumbent = _tau(incumbent)
-    theta_candidate = float(candidate["theta"])
-    theta_incumbent = float(incumbent["theta"])
+    theta_candidate = _effective_theta(candidate)
+    theta_incumbent = _effective_theta(incumbent)
 
     margin = max(
         _shrink_margin(tau, tau_incumbent),
