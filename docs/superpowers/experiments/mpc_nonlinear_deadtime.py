@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """
+PINNED TO THE TWO-LUMP GREY BOX (model schema 1). controller/mpc_model.py
+now implements a single chamber lump, so the numbers below describe a model
+this repo no longer has. Kept as a record of a finished question, not re-run.
+See _pinned_two_lump.py.
+
 Does a NONLINEAR controller model help on the realistic plant?
 
 Compares, on the realistic plant (deadtime=20, fan lever, wind, sensor lag 4.5):
@@ -21,6 +26,10 @@ import do_mpc
 from collections import deque
 from controller.grill_sim import GrillSim
 from controller.mpc import Controller, _DEFAULTS
+
+from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
+
+_pinned_two_lump.require_pinned_model(__name__)
 
 THETA, ND, TSTEP, NH, CP = 50.0, 4, 25.0, 20, 25.0
 Cf, Cc, hfc, Tamb = 60.0, 306.0, 2.0, 20.0

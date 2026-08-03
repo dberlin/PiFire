@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """
+PINNED TO THE TWO-LUMP GREY BOX (model schema 1). controller/mpc_model.py
+now implements a single chamber lump, so the numbers below describe a model
+this repo no longer has. Kept as a record of a finished question, not re-run.
+See _pinned_two_lump.py.
+
 High-temperature cooking on the realistic plant. Checks the production controller
 (nonlinear + EKF) up to ~600F: can it REACH each high setpoint (or does firing
 saturate near the ~646F plant ceiling?), how tight is the steady band, and how a
@@ -16,6 +21,10 @@ sys.path.insert(0, ".")
 import numpy as np
 from controller.mpc import Controller, _DEFAULTS
 from controller.grill_sim import GrillSim
+
+from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
+
+_pinned_two_lump.require_pinned_model(__name__)
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 TS = 25.0

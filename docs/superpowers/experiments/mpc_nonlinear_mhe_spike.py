@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """
+PINNED TO THE TWO-LUMP GREY BOX (model schema 1). controller/mpc_model.py
+now implements a single chamber lump, so the numbers below describe a model
+this repo no longer has. Kept as a record of a finished question, not re-run.
+See _pinned_two_lump.py.
+
 Spike (for giggles): NONLINEAR grey-box model + do-mpc MHE.
 
 Two changes from the linear KF design:

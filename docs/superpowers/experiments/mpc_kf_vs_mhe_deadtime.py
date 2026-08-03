@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """
+PINNED TO THE TWO-LUMP GREY BOX (model schema 1). controller/mpc_model.py
+now implements a single chamber lump, so the numbers below describe a model
+this repo no longer has. Kept as a record of a finished question, not re-run.
+See _pinned_two_lump.py.
+
 Re-test KF vs do-mpc MHE, now on the AUGMENTED deadtime model (transport-lag
 states), against the realistic plant (deadtime=20, sensor lag 4.5).
 
@@ -19,6 +24,10 @@ import do_mpc
 from collections import deque
 from mpc_hifi_sim import HiFiGrill, SETPOINT
 from controller.mpc import Controller, _DEFAULTS
+
+from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
+
+_pinned_two_lump.require_pinned_model(__name__)
 
 THETA, NDELAY, TSTEP, NH = 50.0, 4, 25.0, 20
 CP = 25.0

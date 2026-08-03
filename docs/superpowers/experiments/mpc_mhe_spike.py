@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """
+PINNED TO THE TWO-LUMP GREY BOX (model schema 1). controller/mpc_model.py
+now implements a single chamber lump, so the numbers below describe a model
+this repo no longer has. Kept as a record of a finished question, not re-run.
+See _pinned_two_lump.py.
+
 Spike: do-mpc MHE as the estimator instead of the hand-rolled Kalman filter.
 Reuses the validated cascade plant + MPC from mpc_cascade_spike, swaps the
 estimator, and compares steady-state band + per-step timing.

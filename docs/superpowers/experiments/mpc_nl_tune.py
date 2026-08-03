@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """
+PINNED TO THE TWO-LUMP GREY BOX (model schema 1). controller/mpc_model.py
+now implements a single chamber lump, so the numbers below describe a model
+this repo no longer has. Kept as a record of a finished question, not re-run.
+See _pinned_two_lump.py.
+
 Tune the CASCADE nonlinear+MHE properly (single firing-rate input Q via the
 allocator; radiative T^4 model + deadtime; MHE estimator with Q a known tvp).
 
@@ -18,6 +23,10 @@ from casadi import exp as cexp  # noqa (kept for parity; unused)
 from collections import deque
 from controller.grill_sim import GrillSim
 from controller.mpc import Controller, _DEFAULTS
+
+from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
+
+_pinned_two_lump.require_pinned_model(__name__)
 
 TSTEP, CP, ND, THETA = 25.0, 25.0, 4, 50.0
 Cf, Cc, hfc, hamb, sigma, KQ, Tamb = 9.0, 320.0, 1.3, 0.50, 1.4e-9, 3.5, 17.0

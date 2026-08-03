@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """
+PINNED TO THE TWO-LUMP GREY BOX (model schema 1). controller/mpc_model.py
+now implements a single chamber lump, so the numbers below describe a model
+this repo no longer has. Kept as a record of a finished question, not re-run.
+See _pinned_two_lump.py.
+
 Feasibility spike: cascade MPC (firing-rate Q -> combustion allocator -> auger/fan)
 vs. direct two-input MPC, validated against a deliberately-MISMATCHED nonlinear
 grill plant. Answers: does the cascade hold +-1.0 C, and does it keep fuel/air

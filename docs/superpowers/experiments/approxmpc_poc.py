@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """
+PINNED TO THE TWO-LUMP GREY BOX (model schema 1). controller/mpc_model.py
+now implements a single chamber lump, so the numbers below describe a model
+this repo no longer has. Kept as a record of a finished question, not re-run.
+See _pinned_two_lump.py.
+
 ApproxMPC proof of concept (single setpoint, 110C). Approximate the production
 nonlinear MPC's policy (state -> firing rate Q) with a small neural net so the
 ~15ms NLP solve becomes a ~us net evaluation. Estimation uses the production
@@ -23,6 +28,10 @@ from controller.mpc import Controller, _DEFAULTS
 from controller.mpc_model import _rad_loss
 from controller.grill_sim import GrillSim
 from do_mpc.approximateMPC import AMPCSampler, ApproxMPC, Trainer
+
+from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
+
+_pinned_two_lump.require_pinned_model(__name__)
 
 SP = 110.0
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}

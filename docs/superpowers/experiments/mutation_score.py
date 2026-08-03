@@ -273,7 +273,7 @@ MUTATIONS = [
     (
         "M35 restore_model refuses an old snapshot without saying so",
         MPC,
-        '            print(\n'
+        "            print(\n"
         '                f"[mpc] discarding a version {version!r} model snapshot: this controller "\n'
         '                f"stores version {self._MODEL_SCHEMA}, the single-lump model. The next "\n'
         '                "cook refits from scratch."\n'
@@ -312,6 +312,57 @@ MUTATIONS = [
         MPC,
         "    retired = [k for k in _RETIRED_PARAMS if k in cfg]",
         "    retired = list(_RETIRED_PARAMS)",
+    ),
+    # ---- the model-structure version the artifact and snapshot key on ------
+    (
+        "M41 the net's structure check is gone, leaving only the width",
+        NET,
+        "        if self.model_schema != MODEL_SCHEMA:\n            return False",
+        "        if False:\n            return False",
+    ),
+    (
+        "M42 an artifact with no declared structure is assumed current",
+        NET,
+        "_LEGACY_SCHEMA = 1",
+        "_LEGACY_SCHEMA = 2",
+    ),
+    (
+        "M43 the snapshot counts its own schema instead of sharing the model's",
+        MPC,
+        "    _MODEL_SCHEMA = MODEL_SCHEMA",
+        "    _MODEL_SCHEMA = 1",
+    ),
+    # ---- the frozen output ------------------------------------------------
+    (
+        "M44 a failing policy freezes the output in silence again",
+        MPC,
+        "            if n == 1 or n in (10, 60) or n % 300 == 0:",
+        "            if False:",
+    ),
+    (
+        "M45 the failure report fires on every step, burying the first",
+        MPC,
+        "            if n == 1 or n in (10, 60) or n % 300 == 0:",
+        "            if True:",
+    ),
+    (
+        "M46 the frozen-output counter never advances",
+        MPC,
+        "            self._consecutive_policy_failures += 1",
+        "            self._consecutive_policy_failures += 0",
+    ),
+    (
+        "M47 the counter never clears, so a healthy policy reads as frozen",
+        MPC,
+        "            self._consecutive_policy_failures = 0\n            self._last_solve_failed = False",
+        "            self._last_solve_failed = False",
+    ),
+    # ---- the deadtime chain length ----------------------------------------
+    (
+        "M48 the deadtime chain back to the smeared n_delay=4",
+        MPC,
+        "    n_delay=8,",
+        "    n_delay=4,",
     ),
 ]
 

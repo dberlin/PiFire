@@ -35,8 +35,14 @@ def main(data_path, out, enable_fan):
     blob["r_mean"] = np.float32(rm)
     blob["r_std"] = np.float32(rs)
     # embed the FULL calibration the policy depends on (model + MPC tuning + bounds)
+    from controller.mpc_model import MODEL_SCHEMA
     from controller.mpc_net import _CALIB_FLOATS, _CALIB_INTS
 
+    # Which model STRUCTURE this was trained against, not which calibration.
+    # The calibration scalars cannot express it -- every one of them was
+    # identical across the two-lump/one-lump change -- so the controller has
+    # nothing else to refuse a structurally stale artifact by.
+    blob["model_schema"] = np.int64(MODEL_SCHEMA)
     for k in _CALIB_FLOATS:
         blob[k] = np.float32(_DEFAULTS[k])
     for k in _CALIB_INTS:
