@@ -86,16 +86,16 @@ _KELVIN = 273.15
 #: this model's chamber temperature is expressed in. The radiative loss
 #: term's linearized conductance grows with T**3, so this is where it is
 #: largest and the chamber's response quickest.
-_T_HAZARD_C = (550.0 - 32.0) * 5.0 / 9.0
+T_HAZARD_C = (550.0 - 32.0) * 5.0 / 9.0
 
 #: The coolest point of that same range -- `minstartuptemp` in
 #: common/settings_schema.py (75 F), the floor of the flameout threshold below
 #: which the safety logic declares the fire out, in the same Celsius. It is
-#: _T_HAZARD_C's counterpart in the same settings section: between the two the
+#: T_HAZARD_C's counterpart in the same settings section: between the two the
 #: controller is driving a live fire, and outside them it is not running at
 #: all. Here the radiative conductance is smallest and the chamber slowest,
 #: which is the far end of the curve a single hot reference cannot see.
-_T_FLOOR_C = (75.0 - 32.0) * 5.0 / 9.0
+T_FLOOR_C = (75.0 - 32.0) * 5.0 / 9.0
 
 
 @dataclass
@@ -127,7 +127,7 @@ def _finite(value):
     return f if math.isfinite(f) else None
 
 
-def _slowest_tau(params):
+def slowest_tau(params):
     """The longest chamber time constant any operating point can produce.
 
     The linearized radiative conductance below is non-negative, so C_c/h_amb
@@ -140,7 +140,7 @@ def _slowest_tau(params):
     return float(params["C_c"]) / h_amb if h_amb > 0 else math.inf
 
 
-def _effective_tau(params, t_ref_c):
+def effective_tau(params, t_ref_c):
     """The chamber time constant at chamber temperature `t_ref_c` (Celsius).
 
     controller/mpc_model.py's radiative loss term,
@@ -229,7 +229,7 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
         return Verdict(False, "n_horizon must be a positive, finite number")
 
     horizon_needed = None
-    tau = _slowest_tau(candidate)
+    tau = slowest_tau(candidate)
     if math.isfinite(tau) and float(n_horizon) * float(t_step) < tau:
         horizon_needed = int(math.ceil(tau / float(t_step)))
 
@@ -260,9 +260,9 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
     # crossing lands exactly there, reading "unchanged" while being genuinely
     # quicker across the rest of the range.
     tau_labels = []
-    for t_ref_c in (_T_FLOOR_C, _T_HAZARD_C):
-        tau_eff_candidate = _effective_tau(candidate, t_ref_c)
-        tau_eff_incumbent = _effective_tau(incumbent, t_ref_c)
+    for t_ref_c in (T_FLOOR_C, T_HAZARD_C):
+        tau_eff_candidate = effective_tau(candidate, t_ref_c)
+        tau_eff_incumbent = effective_tau(incumbent, t_ref_c)
         margin = max(margin, _shrink_margin(tau_eff_candidate, tau_eff_incumbent))
         tau_labels.append(_direction_label(tau_eff_candidate, tau_eff_incumbent))
 

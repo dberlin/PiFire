@@ -25,7 +25,7 @@ import json
 import numpy as np
 from scipy.optimize import least_squares
 
-from controller.model_promotion import _T_FLOOR_C, _T_HAZARD_C, _effective_tau, _slowest_tau
+from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau, slowest_tau
 from controller.mpc_model import simulate_grey_box
 
 # Keys the controller reads back out of a fitted result.
@@ -33,15 +33,16 @@ CONFIG_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "T_amb", "theta", "n_delay", "K_Q"
 
 # Fitted free parameters. C_f and sigma are held at their init values.
 #
-# The dynamics are invariant under scaling every capacitance, every conductance
-# and the input gain -- (C_f, C_c, h_fc, h_amb, K_Q, sigma) -- by one common
-# factor: both state equations are homogeneous in them, so the trajectory of
-# the one measured state is bit-identical. Six parameters therefore carry five
+# C_f is redundant with K_Q for the steady gain, so fitting both is ill-posed.
+# That is one instance of a more general fact: the dynamics are invariant under
+# scaling every capacitance, every conductance and the input gain --
+# (C_f, C_c, h_fc, h_amb, K_Q, sigma) -- by one common factor, because both
+# state equations are homogeneous in them, so the trajectory of the one
+# measured state is bit-identical. Six parameters therefore carry five
 # identifiable degrees of freedom, and one must be held to fix the scale. What
-# a log determines is the ratios among them, which is what the controller
-# plans against: the effective time constant
-# C_c/(h_amb + 4*sigma*(T+273.15)**3) is one of them, and is unchanged by the
-# choice of which parameter is held.
+# a log determines is the ratios among them, which is what the controller plans
+# against: the effective time constant C_c/(h_amb + 4*sigma*(T+273.15)**3) is
+# one of them, and is unchanged by the choice of which parameter is held.
 #
 # So holding sigma is not a limitation to be lifted -- freeing it while K_Q is
 # also free simply lets the solver wander along the unobservable direction and
@@ -51,23 +52,42 @@ _FREE = ("K_Q", "C_c", "h_fc", "h_amb", "theta")
 
 _SIM_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "sigma", "theta", "n_delay")
 
-# Magnitude each free parameter is scaled by before the solve. The free set
-# spans roughly 1e-1 to 1e3, and scipy's finite-difference step is
-# eps**0.5 * max(1, |x|) -- the max(1, ...) makes that step absolute rather
-# than relative for anything below 1, so parameters far apart in magnitude are
-# probed with wildly different effective precision. Solving in x/nominal puts
-# every free parameter near 1, which makes the step a true relative one: on the
-# reference cook the unscaled solve never converged at all, exhausting
-# max_nfev, where the scaled solve reaches a lower cost in ~70 evaluations.
-_NOMINAL = {"K_Q": 3.5, "C_c": 320.0, "h_fc": 1.3, "h_amb": 0.5, "theta": 50.0}
-
 # Strictly positive: theta divides the lag time constant, and every other free
 # parameter is a capacitance or a conductance.
 _LOWER_BOUND = 1e-9
 
+# Evaluations the solve is allowed. Not enough to converge on every log -- see
+# `fit_params`, which reports whether it did rather than presenting an
+# exhausted solve as a finished one.
+_MAX_NFEV = 2000
+
 
 def _sim_kwargs(params):
     return {k: params[k] for k in _SIM_KEYS}
+
+
+def _solve_scale(init):
+    """Magnitude each free parameter is divided by before the solve.
+
+    The free parameters differ by orders of magnitude, and scipy's
+    finite-difference step is eps**0.5 * max(1, |x|) -- the max(1, ...) makes
+    that step absolute rather than relative for anything below 1, so parameters
+    of different size are probed with wildly different effective precision.
+    Dividing each by its own magnitude puts them all near 1, which makes the
+    step a true relative one for every parameter and leaves the Jacobian
+    columns comparably sized.
+
+    Taken from `init` rather than a fixed table so it tracks whatever the
+    caller actually starts from: a refit begins at an already-fitted model, not
+    at the shipped defaults, and a table would be scaling against the wrong
+    reference exactly there. A non-positive or non-finite starting value
+    carries no magnitude to scale by, so it falls back to 1.
+    """
+    scale = []
+    for key in _FREE:
+        magnitude = abs(float(init[key]))
+        scale.append(magnitude if magnitude > 0.0 and np.isfinite(magnitude) else 1.0)
+    return np.array(scale, dtype=float)
 
 
 def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
@@ -76,10 +96,17 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
     `sigma` is returned exactly as passed: it is what fixes the scale the other
     parameters are measured against, and a log cannot determine it -- see
     `_FREE`.
+
+    The result carries `converged` alongside the parameters. A least-squares
+    solve that runs out of evaluations still returns its best point so far, and
+    that point can look entirely reasonable -- it simply has not been shown to
+    be a minimum. A caller deciding whether to put this model on a live grill
+    needs to tell the two apart, so the answer travels with the parameters
+    rather than being something the caller must think to ask for.
     """
     temp = np.asarray(temp, dtype=float)
     C_f = float(init["C_f"])
-    scale = np.array([_NOMINAL[k] for k in _FREE], dtype=float)
+    scale = _solve_scale(init)
     x0 = np.array([float(init[k]) for k in _FREE], dtype=float) / scale
     lo = _LOWER_BOUND / scale
 
@@ -88,8 +115,11 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
         params.update(C_f=C_f, sigma=sigma, n_delay=n_delay)
         return simulate_grey_box(t, Q, T_amb=T_amb, T0=float(temp[0]), **_sim_kwargs(params)) - temp
 
-    res = least_squares(residual, np.maximum(x0, lo), method="trf", bounds=(lo, np.inf), max_nfev=2000)
+    res = least_squares(residual, np.maximum(x0, lo), method="trf", bounds=(lo, np.inf), max_nfev=_MAX_NFEV)
     out = dict(zip(_FREE, (float(v) for v in res.x * scale)))
+    # status 0 is scipy's "the evaluation budget ran out"; every other
+    # non-negative status is one of its convergence criteria being met.
+    out.update(converged=bool(res.status > 0), nfev=int(res.nfev))
     out.update(C_f=C_f, sigma=float(sigma), n_delay=int(n_delay), T_amb=float(T_amb))
     return out
 
@@ -139,6 +169,14 @@ def main():
 
     rmse, max_err = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
     print(f"Fit quality: RMSE {rmse:.2f} C, max error {max_err:.2f} C")
+    if not fitted["converged"]:
+        print(
+            f"WARNING: the solver ran out of evaluations after {fitted['nfev']} without meeting a\n"
+            "         convergence criterion. The numbers below are its best point so far, not a\n"
+            "         finished fit -- a better one for this log may exist. Treat the RMSE above as\n"
+            "         a description of this point only, and do not read the parameters as this\n"
+            "         grill's measured values."
+        )
     if rmse > 10.0:
         print(
             "WARNING: RMSE above 10 C. This fit does not describe the log. Check that the log\n"
@@ -153,10 +191,10 @@ def main():
     # while the effective values below include radiative conductance and are
     # what the chamber's response actually is at each end of that range.
     horizon = float(_DEFAULTS["n_horizon"]) * float(_DEFAULTS["t_step"])
-    tau = _slowest_tau(payload)
+    tau = slowest_tau(payload)
     print(
-        f"Chamber time constant: {_effective_tau(payload, _T_HAZARD_C):.0f} s at "
-        f"{_T_HAZARD_C:.0f} C rising to {_effective_tau(payload, _T_FLOOR_C):.0f} s at {_T_FLOOR_C:.0f} C"
+        f"Chamber time constant: {effective_tau(payload, T_HAZARD_C):.0f} s at "
+        f"{T_HAZARD_C:.0f} C rising to {effective_tau(payload, T_FLOOR_C):.0f} s at {T_FLOOR_C:.0f} C"
     )
     if horizon < tau:
         print(

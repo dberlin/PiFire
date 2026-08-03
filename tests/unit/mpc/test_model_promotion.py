@@ -2,7 +2,7 @@
 
 import pytest
 
-from controller.model_promotion import PROMOTION_BOUNDS, _effective_tau, evaluate
+from controller.model_promotion import PROMOTION_BOUNDS, effective_tau, evaluate
 
 GOOD = dict(C_f=9.0, C_c=2520.0, h_fc=0.39, h_amb=0.224, T_amb=20.0, theta=93.0, n_delay=4, K_Q=6.95, sigma=1.4e-9)
 INCUMBENT = dict(GOOD, C_c=2000.0, h_amb=0.30)  # tau 6667 vs candidate 11250
@@ -189,7 +189,7 @@ def test_the_radiative_conductance_is_four_sigma_at_absolute_temperature():
     different value."""
     params = dict(GOOD, C_c=2000.0, h_amb=0.30, sigma=1.4e-9)
     expected = 2000.0 / (0.30 + 4.0 * 1.4e-9 * (200.0 + 273.15) ** 3)
-    assert _effective_tau(params, 200.0) == pytest.approx(expected, rel=1e-12)
+    assert effective_tau(params, 200.0) == pytest.approx(expected, rel=1e-12)
 
 
 def test_trading_sigma_against_h_amb_cannot_launder_a_shortening_past_the_hot_end():
@@ -205,8 +205,8 @@ def test_trading_sigma_against_h_amb_cannot_launder_a_shortening_past_the_hot_en
         sigma=cooler_sigma,
         h_amb=0.30 + 4.0 * (1.4e-9 - cooler_sigma) * (_HAZARD_C + 273.15) ** 3,
     )
-    assert _effective_tau(laundered, _HAZARD_C) == pytest.approx(_effective_tau(incumbent, _HAZARD_C), rel=1e-12)
-    assert _effective_tau(laundered, _FLOOR_C) < _effective_tau(incumbent, _FLOOR_C)
+    assert effective_tau(laundered, _HAZARD_C) == pytest.approx(effective_tau(incumbent, _HAZARD_C), rel=1e-12)
+    assert effective_tau(laundered, _FLOOR_C) < effective_tau(incumbent, _FLOOR_C)
 
     v = _ev(laundered, incumbent=incumbent, cand_rmse=4.85, inc_rmse=5.0)  # clears 2%, not 50%
     assert v.accepted is False
