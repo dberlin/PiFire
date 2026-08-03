@@ -123,6 +123,7 @@ export function WorkModeTab() {
     <>
       <Section title="Cycle Data">
         <NumberField
+          integer
           label="Hold Cycle Time"
           value={v.cycle_data.HoldCycleTime}
           onChange={(n) => setCycleData("HoldCycleTime", n)}
@@ -130,6 +131,7 @@ export function WorkModeTab() {
           suffix="s"
         />
         <NumberField
+          integer
           label="Smoke On Cycle Time"
           value={v.cycle_data.SmokeOnCycleTime}
           onChange={(n) => setCycleData("SmokeOnCycleTime", n)}
@@ -137,6 +139,7 @@ export function WorkModeTab() {
           suffix="s"
         />
         <NumberField
+          integer
           label="Smoke Off Cycle Time"
           value={v.cycle_data.SmokeOffCycleTime}
           onChange={(n) => setCycleData("SmokeOffCycleTime", n)}
@@ -144,6 +147,7 @@ export function WorkModeTab() {
           suffix="s"
         />
         <NumberField
+          integer
           label="PMode"
           value={v.cycle_data.PMode}
           onChange={(n) => setCycleData("PMode", n)}
@@ -172,6 +176,7 @@ export function WorkModeTab() {
           onChange={(b) => setCycleData("LidOpenDetectEnabled", b)}
         />
         <NumberField
+          integer
           label="Lid Open Threshold"
           value={v.cycle_data.LidOpenThreshold}
           onChange={(n) => setCycleData("LidOpenThreshold", n)}
@@ -181,6 +186,7 @@ export function WorkModeTab() {
           step={1}
         />
         <NumberField
+          integer
           label="Lid Open Pause Time"
           value={v.cycle_data.LidOpenPauseTime}
           onChange={(n) => setCycleData("LidOpenPauseTime", n)}
@@ -204,6 +210,7 @@ export function WorkModeTab() {
           onChange={(b) => setSmokePlus("enabled", b)}
         />
         <NumberField
+          integer
           label="Min Temp"
           value={v.smoke_plus.min_temp}
           onChange={(n) => setSmokePlus("min_temp", n)}
@@ -211,6 +218,7 @@ export function WorkModeTab() {
           suffix="°"
         />
         <NumberField
+          integer
           label="Max Temp"
           value={v.smoke_plus.max_temp}
           onChange={(n) => setSmokePlus("max_temp", n)}
@@ -218,6 +226,7 @@ export function WorkModeTab() {
           suffix="°"
         />
         <NumberField
+          integer
           label="On Time"
           value={v.smoke_plus.on_time}
           onChange={(n) => setSmokePlus("on_time", n)}
@@ -225,6 +234,7 @@ export function WorkModeTab() {
           suffix="s"
         />
         <NumberField
+          integer
           label="Off Time"
           value={v.smoke_plus.off_time}
           onChange={(n) => setSmokePlus("off_time", n)}
@@ -241,6 +251,7 @@ export function WorkModeTab() {
               Fan ramping and duty cycle apply to a PWM-driven DC fan.
             </p>
             <NumberField
+              integer
               label="Duty Cycle"
               value={v.smoke_plus.duty_cycle}
               onChange={(n) => setSmokePlus("duty_cycle", n)}
@@ -259,6 +270,7 @@ export function WorkModeTab() {
 
       <Section title="Keep Warm">
         <NumberField
+          integer
           label="Temp"
           value={v.keep_warm.temp}
           onChange={(n) => setKeepWarm("temp", n)}

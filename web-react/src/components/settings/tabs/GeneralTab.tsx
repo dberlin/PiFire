@@ -76,6 +76,7 @@ export function GeneralTab() {
           drives the backlight plus `swaymsg output * dpms off` through
           ScreenPowerController. */}
       <NumberField
+        integer
         label="Screen Sleep Timeout"
         value={v.sleep_timeout}
         onChange={(x) => set("sleep_timeout", x)}

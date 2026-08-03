@@ -73,6 +73,7 @@ export function PelletsTab() {
         onChange={(b) => set("warning_enabled", b)}
       />
       <NumberField
+        integer
         label="Warning Time"
         value={v.warning_time}
         onChange={(n) => set("warning_time", n)}
@@ -82,6 +83,7 @@ export function PelletsTab() {
         suffix="min"
       />
       <NumberField
+        integer
         label="Warning Level"
         value={v.warning_level}
         onChange={(n) => set("warning_level", n)}
@@ -90,6 +92,7 @@ export function PelletsTab() {
         suffix="%"
       />
       <NumberField
+        integer
         label="Empty"
         value={v.empty}
         onChange={(n) => set("empty", n)}
@@ -99,6 +102,7 @@ export function PelletsTab() {
         suffix="cm"
       />
       <NumberField
+        integer
         label="Full"
         value={v.full}
         onChange={(n) => set("full", n)}

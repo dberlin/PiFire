@@ -11,6 +11,7 @@ export function NumberField({
   suffix,
   hint,
   disabled,
+  integer,
 }: {
   label: string;
   value: number;
@@ -21,6 +22,7 @@ export function NumberField({
   suffix?: string;
   hint?: string;
   disabled?: boolean;
+  integer?: boolean;
 }) {
   const hintId = useId();
   return (
@@ -38,7 +40,7 @@ export function NumberField({
             value={value}
             min={min}
             max={max}
-            step={step}
+            step={step ?? (integer ? 1 : undefined)}
             disabled={disabled}
             aria-describedby={hint ? hintId : undefined}
             onChange={(e) => onChange(Number(e.target.value))}
@@ -48,10 +50,14 @@ export function NumberField({
             // spinner arrows and `:invalid` styling — nothing stops a typed 500 in
             // a max={9} field. Blur is the moment the value is finished; clamping
             // on change would make a bounded field untypeable (with min={20},
-            // typing "25" clamps the intermediate "2" to 20, yielding "205").
+            // typing "25" clamps the intermediate "2" to 20, yielding "205"). The
+            // same reasoning applies to rounding an integer-backed field: the
+            // strict backend refuses a float against an int field on save, so a
+            // typed fraction is rounded here rather than as each digit arrives.
             onBlur={(e) => {
               const typed = Number(e.target.value);
-              const clamped = clampToBounds(typed, min, max);
+              const rounded = integer ? Math.round(typed) : typed;
+              const clamped = clampToBounds(rounded, min, max);
               if (clamped !== typed) onChange(clamped);
             }}
           />

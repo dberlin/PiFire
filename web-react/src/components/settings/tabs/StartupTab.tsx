@@ -168,6 +168,7 @@ export function StartupTab() {
     <>
       <Section title="Shutdown">
         <NumberField
+          integer
           label="Shutdown Duration"
           value={v.shutdown_duration}
           onChange={(n) => set("shutdown_duration", n)}
@@ -183,6 +184,7 @@ export function StartupTab() {
 
       <Section title="Startup">
         <NumberField
+          integer
           label="Duration"
           value={v.duration}
           onChange={(n) => set("duration", n)}
@@ -196,6 +198,7 @@ export function StartupTab() {
         />
         {exitTempOn && (
           <NumberField
+            integer
             label="Startup Exit Temp"
             value={v.startup_exit_temp}
             onChange={(n) => set("startup_exit_temp", n)}
@@ -211,6 +214,7 @@ export function StartupTab() {
         />
         {primeOn && (
           <NumberField
+            integer
             label="Prime on Startup"
             value={v.prime_on_startup}
             onChange={(n) => set("prime_on_startup", n)}
@@ -221,6 +225,7 @@ export function StartupTab() {
         )}
         {dcFan && (
           <NumberField
+            integer
             label="PWM Duty Cycle"
             value={v.pwm_duty_cycle}
             onChange={(n) => set("pwm_duty_cycle", n)}
@@ -238,6 +243,7 @@ export function StartupTab() {
           onChange={(b) => set("smartstart_enabled", b)}
         />
         <NumberField
+          integer
           label="Exit Temp"
           value={v.smartstart_exit_temp}
           onChange={(n) => set("smartstart_exit_temp", n)}
@@ -272,6 +278,7 @@ export function StartupTab() {
         {holdSelected && (
           <>
             <NumberField
+              integer
               label="Primary Setpoint"
               value={v.primary_setpoint}
               onChange={(n) => set("primary_setpoint", n)}

@@ -125,6 +125,7 @@ export function HistoryTab() {
         {/* Floor is 1, not 0: blueprints/api_history/routes.py:36 rejects
             minutes < 1 with a 400 (invalid_minutes). */}
         <NumberField
+          integer
           label="Minutes"
           value={v.minutes}
           onChange={(n) => set("minutes", n)}
@@ -135,6 +136,7 @@ export function HistoryTab() {
             samples or fewer, and only downsamples above it. Two samples are
             the fewest that can draw a line, so that is the floor. */}
         <NumberField
+          integer
           label="Downsample above (samples)"
           value={v.datapoints}
           onChange={(n) => set("datapoints", n)}

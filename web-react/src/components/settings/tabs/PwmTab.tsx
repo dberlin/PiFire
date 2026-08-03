@@ -156,6 +156,7 @@ export function PwmTab() {
         onChange={(v) => set("pwm_control", v)}
       />
       <NumberField
+        integer
         label="Update Time"
         value={pwm.update_time}
         onChange={(v) => set("update_time", v)}
@@ -163,6 +164,7 @@ export function PwmTab() {
         suffix="s"
       />
       <NumberField
+        integer
         label="Min Duty Cycle"
         value={pwm.min_duty_cycle}
         onChange={(v) => set("min_duty_cycle", v)}
@@ -171,6 +173,7 @@ export function PwmTab() {
         suffix="%"
       />
       <NumberField
+        integer
         label="Max Duty Cycle"
         value={pwm.max_duty_cycle}
         onChange={(v) => set("max_duty_cycle", v)}
@@ -179,6 +182,7 @@ export function PwmTab() {
         suffix="%"
       />
       <NumberField
+        integer
         label="Frequency"
         value={pwm.frequency}
         onChange={(v) => set("frequency", v)}

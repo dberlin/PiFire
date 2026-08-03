@@ -155,6 +155,7 @@ export function WledCard({ wled, onChange }: WledCardProps) {
         <p className="pf-wled-subhead">No WLED devices found on your network.</p>
       )}
       <NumberField
+        integer
         label="WLED Notify Duration"
         value={asNum(wled.notify_duration, 120)}
         onChange={(n) => setKey("notify_duration", n)}
@@ -181,6 +182,7 @@ export function WledCard({ wled, onChange }: WledCardProps) {
             onChange={(v) => setSuggested("cooking_color", v)}
           />
           <NumberField
+            integer
             label="Idle Brightness"
             value={asNum(suggested.idle_brightness, 20)}
             onChange={(n) => setSuggested("idle_brightness", n)}
@@ -189,6 +191,7 @@ export function WledCard({ wled, onChange }: WledCardProps) {
             suffix="%"
           />
           <NumberField
+            integer
             label="LED Count"
             value={asNum(suggested.led_count, 6)}
             onChange={(n) => setSuggested("led_count", n)}
@@ -233,6 +236,7 @@ export function WledCard({ wled, onChange }: WledCardProps) {
             {PROFILE_STATES.map(([state, def]) => (
               <NumberField
                 key={state}
+                integer
                 label={state}
                 value={asNum(profileNumbers[state], def)}
                 onChange={(n) => setProfile(state, n)}

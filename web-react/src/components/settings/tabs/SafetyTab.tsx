@@ -49,6 +49,7 @@ export function SafetyTab() {
   return (
     <Section title="Safety">
       <NumberField
+        integer
         label="Min Startup Temp"
         value={v.minstartuptemp}
         onChange={(n) => set("minstartuptemp", n)}
@@ -57,6 +58,7 @@ export function SafetyTab() {
         suffix="°"
       />
       <NumberField
+        integer
         label="Max Startup Temp"
         value={v.maxstartuptemp}
         onChange={(n) => set("maxstartuptemp", n)}
@@ -65,6 +67,7 @@ export function SafetyTab() {
         suffix="°"
       />
       <NumberField
+        integer
         label="Max Grill Temp"
         value={v.maxtemp}
         onChange={(n) => set("maxtemp", n)}
@@ -73,6 +76,7 @@ export function SafetyTab() {
         suffix="°"
       />
       <NumberField
+        integer
         label="Reignite Retries"
         value={v.reigniteretries}
         onChange={(n) => set("reigniteretries", n)}
@@ -81,6 +85,7 @@ export function SafetyTab() {
         max={10}
       />
       <NumberField
+        integer
         label="Manual Override Time"
         value={v.manual_override_time}
         onChange={(n) => set("manual_override_time", n)}
