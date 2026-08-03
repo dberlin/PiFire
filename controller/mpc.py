@@ -105,8 +105,8 @@ _REFIT_MIN_SAMPLES = 120
 # else: it cannot inherit whatever the previous fit happened to land on, and
 # two identical cooks a season apart give the same answer. Seeding it from the
 # running model instead would make each result a function of every result
-# before it, through a solver path (update_mpc._solve_scale conditions the
-# solve on `init` too) that no measurement of the finished model can unwind.
+# before it, through a solver path -- which basin the solve lands in depends on
+# where it starts -- that no measurement of the finished model can unwind.
 #
 # Every parameter the fit reads a starting value for -- the ones update_mpc's
 # `_FREE` moves and the ones it holds at the value they came in with. T_amb,

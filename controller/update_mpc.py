@@ -21,6 +21,7 @@
 
 import argparse
 import json
+import math
 import sys
 
 import numpy as np
@@ -81,7 +82,9 @@ _SIM_KEYS = ("C_c", "h_amb", "K_Q", "sigma", "theta", "n_delay")
 _FIT_KEYS = ("C_c", "h_amb", "K_Q", "sigma", "theta")
 
 # Strictly positive: theta divides the lag time constant, and every other free
-# parameter is a capacitance or a conductance.
+# parameter is a capacitance or a conductance. The solve works in log space
+# (see `fit_params`), so this is expressed as a floor on the logarithm and the
+# positivity itself is structural rather than a constraint the solver enforces.
 _LOWER_BOUND = 1e-9
 
 # Evaluations the solve is allowed. Not enough to converge on every log -- see
@@ -103,30 +106,10 @@ def _sim_kwargs(params):
     return {k: params[k] for k in _SIM_KEYS}
 
 
-def _solve_scale(init):
-    """Magnitude each free parameter is divided by before the solve.
-
-    The free parameters differ by orders of magnitude, and scipy's
-    finite-difference step is eps**0.5 * max(1, |x|) -- the max(1, ...) makes
-    that step absolute rather than relative for anything below 1, so parameters
-    of different size are probed with wildly different effective precision.
-    Dividing each by its own magnitude puts them all near 1, which makes the
-    step a true relative one for every parameter and leaves the Jacobian
-    columns comparably sized.
-
-    Taken from `init` rather than a fixed table so it tracks whatever the
-    caller actually starts from -- a calibration run seeded from a previous
-    fit, a grill whose parameters are decades away from the shipped ones -- and
-    so that the scaling is fully determined by the starting point the caller
-    chose, with nothing else feeding into how the solve is conditioned. A
-    non-positive or non-finite starting value carries no magnitude to scale by,
-    so it falls back to 1.
-    """
-    scale = []
-    for key in _FREE:
-        magnitude = abs(float(init[key]))
-        scale.append(magnitude if magnitude > 0.0 and np.isfinite(magnitude) else 1.0)
-    return np.array(scale, dtype=float)
+def _log_or_floor(value, floor):
+    """log(value), or `floor` when there is no logarithm to take."""
+    value = float(value)
+    return math.log(value) if value > 0.0 and math.isfinite(value) else floor
 
 
 def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
@@ -136,6 +119,28 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
     treatment: moved if `_FREE` names it, returned exactly as passed if not. It
     is a separate argument only because every caller has it to hand apart from
     the parameters it is fitting.
+
+    THE SOLVE IS IN LOG SPACE. Every free parameter is a strictly positive
+    scale -- a capacitance, a gain, a duration -- so what a step of the solve
+    should mean is a RATIO, not a difference. scipy's finite-difference step is
+    eps**0.5 * max(1, |x|), whose max(1, ...) makes that step absolute rather
+    than relative for anything below 1, so parameters decades apart in size
+    would otherwise be probed with wildly different effective precision.
+    Optimising log(parameter) makes every step a true relative one at every
+    point of the solve rather than only at the starting point, and makes the
+    positivity structural instead of a bound the solver has to respect.
+
+    It also decides the answer on the record this model most has to fit. The
+    chamber equation is close to invariant under scaling C_c and K_Q together
+    -- the loss terms shrink against them, and the limit is a pure integrator
+    that describes a heat-up ramp nearly as well as the real model does. That
+    is a straight line in the parameters and a curve in their logarithms, so a
+    solve in the raw parameters slides down it: from the shipped starting point
+    the real 1240 s MAK cook in tests/unit/mpc/fixtures ends at C_c 1.4e9 and
+    an RMSE of 11.98 C, while the same solve in log space reaches the actual
+    minimum, C_c 3558 and 2.55 C, in ten evaluations. On the eight synthetic
+    scenarios across both plants in controller/grill_sim.py, where no such
+    escape is open, the two agree to three decimals on every one.
 
     The result carries `converged` alongside the parameters. A least-squares
     solve that runs out of evaluations still returns its best point so far, and
@@ -150,19 +155,20 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
     # parameters those are is `_FREE`'s business alone, so shrinking that set
     # holds the parameters it drops rather than dropping them from the model.
     held = {k: float(init[k]) for k in _FIT_KEYS if k not in _FREE}
-    scale = _solve_scale(init)
-    x0 = np.array([float(init[k]) for k in _FREE], dtype=float) / scale
-    lo = _LOWER_BOUND / scale
+    lo = math.log(_LOWER_BOUND)
+    # A non-positive or non-finite starting value has no logarithm to start
+    # from, so it starts at the floor rather than taking the solve down with it.
+    x0 = np.array([_log_or_floor(init[k], lo) for k in _FREE], dtype=float)
 
     def residual(z):
         params = dict(held)
-        params.update(zip(_FREE, z * scale))
+        params.update(zip(_FREE, (math.exp(v) for v in z)))
         params.update(n_delay=n_delay)
         return simulate_grey_box(t, Q, T_amb=T_amb, T0=float(temp[0]), **_sim_kwargs(params)) - temp
 
-    res = least_squares(residual, np.maximum(x0, lo), method="trf", bounds=(lo, np.inf), max_nfev=_MAX_NFEV)
+    res = least_squares(residual, x0, method="trf", bounds=(lo, np.inf), max_nfev=_MAX_NFEV)
     out = dict(held)
-    out.update(zip(_FREE, (float(v) for v in res.x * scale)))
+    out.update(zip(_FREE, (math.exp(float(v)) for v in res.x)))
     # status 0 is scipy's "the evaluation budget ran out"; every other
     # non-negative status is one of its convergence criteria being met.
     out.update(converged=bool(res.status > 0), nfev=int(res.nfev))
