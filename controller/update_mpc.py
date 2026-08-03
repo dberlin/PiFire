@@ -36,56 +36,49 @@ from controller.model_promotion import (
 from controller.mpc_model import simulate_grey_box
 
 # Keys the controller reads back out of a fitted result.
-CONFIG_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
+CONFIG_KEYS = ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
 
-# Fitted free parameters. C_f, h_fc, h_amb and sigma are held at their init
-# values.
+# Fitted free parameters. h_amb and sigma are held at their init values.
 #
-# WHY ONE OF THEM MUST BE HELD. The dynamics are invariant under scaling every
-# capacitance, every conductance and the input gain -- (C_f, C_c, h_fc, h_amb,
-# K_Q, sigma) -- by one common factor, because both state equations are
-# homogeneous in them, so the trajectory of the one measured state is
+# WHY ONE OF THEM MUST BE HELD. The dynamics are invariant under scaling the
+# chamber capacitance, both loss coefficients and the input gain --
+# (C_c, h_amb, sigma, K_Q) -- by one common factor, because the state equation
+# is homogeneous in them, so the trajectory of the one measured state is
 # bit-identical. What a log determines is the ratios among them, which is what
 # the controller plans against: the effective time constant
 # C_c/(h_amb + 4*sigma*(T+273.15)**3) is one of them, and is unchanged by which
 # parameter is held. See docs/superpowers/experiments/sigma_identifiability.py.
 #
-# WHY h_amb AND sigma ARE BOTH HELD. C_f is a handful of seconds' worth of
-# firepot against a chamber of minutes, so through most of a cook the firepot
-# is quasi-static: h_fc*(T_f - T_c) tracks K_Q*heat_in, C_f and h_fc leave the
-# chamber equation, and what is left depends only on C_c/h_amb, K_Q/h_amb and
-# sigma/h_amb. Holding C_f pins the global scaling above and does nothing about
-# this one, so one of the chamber's own three must be held too. Leaving either
-# h_amb or sigma free lets the solve inflate the rest until the held one is
-# negligible: with h_amb free the real MAK cook lands at C_c 2.6e7 and
-# h_amb 7.4e3, an order of magnitude past model_promotion.PROMOTION_BOUNDS,
-# so evaluate() refuses the model however well it describes the log; with
-# sigma free it goes the other way, to an all-radiative model at sigma 5e-3
-# and C_c 3e8. Holding both keeps every fit inside the bounds. The price is
-# that sigma/h_amb, the share of the chamber's loss that is radiative, is
-# fixed rather than fitted, so a grill whose share differs is described by a
-# model carrying the right C_c/h_amb and the wrong split. What that costs the
+# WHY h_amb AND sigma ARE BOTH HELD, not just one. Holding one of the four
+# fixes that scaling, and what a log leaves undetermined after that is the
+# SPLIT of the chamber's loss between its linear and radiative parts: h_amb and
+# sigma trade against each other with C_c following, at essentially no residual
+# cost. Leaving either free lets the solve run away along that trade -- with
+# h_amb free the real MAK cook lands at C_c 2.6e7 and h_amb 7.4e3, an order of
+# magnitude past model_promotion.PROMOTION_BOUNDS, so evaluate() refuses the
+# model however well it describes the log; with sigma free it goes the other
+# way, to an all-radiative model at sigma 5e-3 and C_c 3e8. Holding both keeps
+# every fit inside the bounds. The price is that the radiative share is fixed
+# rather than fitted, so a grill whose share differs is described by a model
+# carrying the right C_c/h_amb and the wrong split. What that costs the
 # quantity the horizon is sized from is measured in
 # tests/unit/mpc/test_model_promotion.py.
 #
-# WHAT THE LOG CANNOT RESOLVE AT ALL. h_fc appears only as the firepot's own
-# time constant C_f/h_fc -- seconds, against a chamber and a transport delay of
-# minutes -- so a chamber-temperature log at a five-second cadence carries
-# almost nothing about it, and a solver given it free moves it a long way for a
-# negligible residual gain. Freeing it buys 3% of RMSE and costs the answer the
-# controller brakes with: across both plants in controller/grill_sim.py and the
-# real cook, the braking distance the fit implied then reached 229x the plant's
-# own, against 1.8x with h_fc held, and moved by up to 783x between restarts of
-# the same fit. See docs/superpowers/experiments/free_set_identifiability.py,
-# which scores every subset of these on the recovered dead time and braking
-# distance rather than on RMSE.
+# WHAT THE THREE FREE ONES ARE. They are exactly the directions a cook
+# determines. K_Q/C_c, the steady input gain, is the best-determined quantity
+# in the model -- reproducible to 0.5% across nine cooks including ones where
+# the raw parameters ran away by 800x. C_c against the held conductances is the
+# effective time constant, recovered to within 2% of truth at every ambient-loss
+# level from 0.25x to 4x nominal. theta is the only parameter sharply
+# identifiable on every record measured including the real 1240 s cook, and the
+# largest single lever on both dead time and coast.
 _FREE = ("K_Q", "C_c", "theta")
 
-_SIM_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "sigma", "theta", "n_delay")
+_SIM_KEYS = ("C_c", "h_amb", "K_Q", "sigma", "theta", "n_delay")
 
 # Parameters a caller supplies a starting value for. `_FREE` selects which of
 # these the solve moves; the rest are held at the value they came in with.
-_FIT_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "sigma", "theta")
+_FIT_KEYS = ("C_c", "h_amb", "K_Q", "sigma", "theta")
 
 # Strictly positive: theta divides the lag time constant, and every other free
 # parameter is a capacitance or a conductance.
@@ -204,7 +197,7 @@ def main():
     Q = df["Q"].values
 
     T_amb = args.t_amb if args.t_amb is not None else float(_DEFAULTS["T_amb"])
-    init = {k: float(_DEFAULTS[k]) for k in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta")}
+    init = {k: float(_DEFAULTS[k]) for k in ("C_c", "h_amb", "K_Q", "theta")}
     fitted = fit_params(
         t,
         temp,

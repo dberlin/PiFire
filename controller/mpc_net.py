@@ -33,9 +33,7 @@ _KELVIN = 273.15
 # which is a function of the full grey-box model, the MPC tuning AND the bounds --
 # so ALL of these must match the active config or the net is stale.
 _CALIB_FLOATS = (
-    "C_f",
     "C_c",
-    "h_fc",
     "h_amb",
     "T_amb",
     "theta",
@@ -73,6 +71,23 @@ class NetPolicy:
         self.sp_lo = float(sp_lo)
         self.sp_hi = float(sp_hi)
 
+    @property
+    def input_dim(self):
+        """How wide an input vector this net was trained to take.
+
+        Read off the normalization statistics rather than declared, because
+        those are what `_net_residual` actually multiplies against.
+        """
+        return int(np.shape(self.x_mean)[0])
+
+    def expected_input_dim(self, cfg):
+        """How wide an input vector `cfg`'s model produces.
+
+        controller/mpc_model.py's state is [q0..q_{n_delay-1}, T_c, d], and
+        `firing_rate` appends u_prev and T_set to it.
+        """
+        return int(cfg.get("n_delay", self.n_delay)) + 4
+
     @classmethod
     def load(cls, path):
         z = np.load(path, allow_pickle=False)
@@ -93,7 +108,20 @@ class NetPolicy:
         )
 
     def matches_config(self, cfg, rtol=1e-3, atol=1e-12):
-        """True iff the net was trained for (essentially) this calibration."""
+        """True iff the net was trained for (essentially) this calibration.
+
+        The width test comes first and is not a calibration comparison: an
+        artifact trained against the two-lump model carries one extra state
+        slot, and every scalar this method could compare -- n_delay included --
+        is identical between the two. Nothing in the calibration distinguishes
+        them, so without this the net would be adopted and then raise inside
+        `firing_rate` on every control step, where Controller.update() catches
+        the exception and holds the previous firing rate. A grill would run on
+        a frozen output with nothing said. The width cannot be faked: it is the
+        shape of the weights the net multiplies by.
+        """
+        if self.input_dim != self.expected_input_dim(cfg):
+            return False
         for k in _CALIB_INTS:
             if k in cfg and int(cfg[k]) != self.calib[k]:
                 return False
@@ -124,7 +152,7 @@ class NetPolicy:
         forced back into [Q_min, Q_max]. Needed to measure how far the net
         extrapolates on states the clamp would otherwise hide."""
         x = np.asarray(x_hat, dtype=float).reshape(-1)
-        d = x[self.n_delay + 2]
+        d = x[self.n_delay + 1]
         # the net only saw T_set in [sp_lo, sp_hi]; clip its input to avoid
         # extrapolation, but anchor Q_ss on the ACTUAL target (analytic, exact)
         ts_net = float(np.clip(set_point_c, self.sp_lo, self.sp_hi))

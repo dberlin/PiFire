@@ -47,9 +47,7 @@ _DEFAULTS = dict(
     Q_min=5.0,
     Q_max=100.0,
     # Nominal grey-box thermal params -- CALIBRATE to your grill via update_mpc.py.
-    C_f=9.0,
     C_c=320.0,
-    h_fc=1.3,
     h_amb=0.50,
     T_amb=20.0,
     theta=50.0,
@@ -115,7 +113,7 @@ _REFIT_MIN_SAMPLES = 120
 # sigma and n_delay are not here: the fit passes them through unchanged, so
 # they come from the running config where an operator's own calibration of them
 # lives.
-_REFIT_INIT = {key: float(_DEFAULTS[key]) for key in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta")}
+_REFIT_INIT = {key: float(_DEFAULTS[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
 
 
 def _to_c(value, units):
@@ -191,21 +189,44 @@ def _load_net_policy(cfg):
         print(f"[mpc] could not load net policy ({e}); using NLP")
         return None
     if not net.matches_config(cfg):
-        print("[mpc] net policy calibration does not match config; using NLP")
+        if net.input_dim != net.expected_input_dim(cfg):
+            print(
+                f"[mpc] net policy at {path} takes a {net.input_dim}-wide input but this model "
+                f"produces {net.expected_input_dim(cfg)}; it was trained against a different "
+                "state vector. Using NLP -- regenerate it with tools/regenerate_mpc_net.py."
+            )
+        else:
+            print("[mpc] net policy calibration does not match config; using NLP")
         return None
     return net
 
 
-_PHYSICAL_PARAMS = ("C_f", "C_c", "h_fc", "h_amb", "theta", "n_delay", "K_Q", "sigma")
+_PHYSICAL_PARAMS = ("C_c", "h_amb", "theta", "n_delay", "K_Q", "sigma")
+
+#: Parameters of the two-lump model this controller used to plan against. A
+#: settings record written before the firepot state was dropped still carries
+#: them, and an operator's own calibration may too. They are reported and
+#: ignored rather than refused: they name nothing in the model any more, so
+#: there is no value they could be given that would mean something, and a
+#: controller that will not start because an obsolete key is present is worse
+#: for the grill than one that says the key does nothing.
+_RETIRED_PARAMS = ("C_f", "h_fc")
 
 
 def _warn_about_model(cfg):
     """Report a model that cannot govern this grill well.
 
-    Both conditions are advisory: the shipped parameters are a legitimate
+    Every condition is advisory: the shipped parameters are a legitimate
     starting point for a first cook, and a controller that refuses to run is
     worse than one that says what is wrong.
     """
+    retired = [k for k in _RETIRED_PARAMS if k in cfg]
+    if retired:
+        print(
+            f"[mpc] ignoring {', '.join(retired)}: the model is a single chamber lump and no "
+            "longer has a firepot state for them to describe. Remove them from "
+            "Settings > Controller."
+        )
     if all(cfg.get(k) == _DEFAULTS[k] for k in _PHYSICAL_PARAMS):
         print(
             "[mpc] model is uncalibrated (every thermal parameter is still the shipped default). "
@@ -272,9 +293,7 @@ class Controller(ControllerBase):
         est_kind = str(cfg.get("estimator", "ekf")).lower()
         if est_kind == "kf":
             self.estimator = GreyBoxKF(
-                C_f=cfg["C_f"],
                 C_c=cfg["C_c"],
-                h_fc=cfg["h_fc"],
                 h_amb=cfg["h_amb"],
                 T_amb=cfg["T_amb"],
                 t_step=float(cfg["control_period"]),
@@ -287,9 +306,7 @@ class Controller(ControllerBase):
             )
         elif est_kind == "ekf":
             self.estimator = GreyBoxEKF(
-                C_f=cfg["C_f"],
                 C_c=cfg["C_c"],
-                h_fc=cfg["h_fc"],
                 h_amb=cfg["h_amb"],
                 T_amb=cfg["T_amb"],
                 t_step=float(cfg["control_period"]),
@@ -303,9 +320,7 @@ class Controller(ControllerBase):
             )
         else:
             self.estimator = GreyBoxMHE(
-                C_f=cfg["C_f"],
                 C_c=cfg["C_c"],
-                h_fc=cfg["h_fc"],
                 h_amb=cfg["h_amb"],
                 T_amb=cfg["T_amb"],
                 t_step=float(cfg["control_period"]),
@@ -342,9 +357,7 @@ class Controller(ControllerBase):
         import do_mpc
 
         self.model = build_do_mpc_model(
-            C_f=cfg["C_f"],
             C_c=cfg["C_c"],
-            h_fc=cfg["h_fc"],
             h_amb=cfg["h_amb"],
             T_amb=cfg["T_amb"],
             theta=float(cfg["theta"]),
@@ -388,9 +401,8 @@ class Controller(ControllerBase):
         self.mpc.set_tvp_fun(tvp_fun)
         self.mpc.setup()
 
-        x0 = np.zeros((n_delay + 3, 1))
-        x0[n_delay, 0] = cfg["T_amb"]  # T_f
-        x0[n_delay + 1, 0] = cfg["T_amb"]  # T_c
+        x0 = np.zeros((n_delay + 2, 1))
+        x0[n_delay, 0] = cfg["T_amb"]  # T_c
         self.mpc.x0 = x0
         self.mpc.set_initial_guess()
 
@@ -445,8 +457,16 @@ class Controller(ControllerBase):
             },
         }
 
-    _MODEL_SCHEMA = 1
-    _MODEL_PARAM_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
+    #: Version 2 is the single-lump model. A version 1 record describes the
+    #: two-lump model this controller no longer has: its C_f and h_fc name
+    #: nothing, and the C_c, h_amb and K_Q beside them were fitted against a
+    #: chamber that was fed through a firepot, so they are not this model's
+    #: parameters under a shorter name. Applying the subset that still has
+    #: matching keys would put a stranger's numbers on a live grill, so
+    #: `restore_model` refuses the record and says so; the next cook refits
+    #: from scratch, which is what a fresh install does anyway.
+    _MODEL_SCHEMA = 2
+    _MODEL_PARAM_KEYS = ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
 
     def _adopt_model(self, params, *, rmse, samples, band_c, nfev=None):
         """Take `params` into the running config and bump the revision.
@@ -497,7 +517,17 @@ class Controller(ControllerBase):
 
         if not isinstance(snapshot, dict):
             return False
-        if snapshot.get("version") != self._MODEL_SCHEMA:
+        version = snapshot.get("version")
+        if version != self._MODEL_SCHEMA:
+            # Said out loud rather than refused quietly. A grill that has been
+            # learning for a season arrives here once after the upgrade, and
+            # the operator is owed the reason its model went back to the
+            # shipped defaults instead of finding it in the overshoot.
+            print(
+                f"[mpc] discarding a version {version!r} model snapshot: this controller "
+                f"stores version {self._MODEL_SCHEMA}, the single-lump model. The next "
+                "cook refits from scratch."
+            )
             return False
         params, revision = snapshot.get("params"), snapshot.get("revision")
         if not isinstance(params, dict) or not isinstance(revision, int):
