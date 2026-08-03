@@ -417,7 +417,7 @@ class Controller(ControllerBase):
         }
 
     def restore_model(self, snapshot):
-        from controller.model_promotion import PROMOTION_BOUNDS
+        from controller.model_promotion import PROMOTION_BOUNDS, n_delay_is_whole
 
         if not isinstance(snapshot, dict):
             return False
@@ -436,10 +436,10 @@ class Controller(ControllerBase):
                 return False
             # n_delay sizes the estimator's lag-state chain one whole state at
             # a time, so a fractional count is nonsense even though it lies
-            # inside the numeric bounds above. This is the same rule
-            # model_promotion.evaluate() applies to a freshly fitted
-            # candidate, reused rather than re-derived here.
-            if key == "n_delay" and not value.is_integer():
+            # inside the numeric bounds above. Imports model_promotion's own
+            # predicate rather than re-deriving it, so the two cannot drift
+            # apart on what "whole" means.
+            if key == "n_delay" and not n_delay_is_whole(value):
                 return False
         self.cfg.update({k: float(params[k]) for k in self._MODEL_PARAM_KEYS if k in params})
         # Continue the persisted counter rather than starting a new one: the

@@ -127,6 +127,19 @@ def _finite(value):
     return f if math.isfinite(f) else None
 
 
+def n_delay_is_whole(value):
+    """Whether `value` (already known finite) is a whole number of lag states.
+
+    n_delay sizes the estimator's lag-state chain one whole state at a time,
+    so a fractional count is nonsense even where it lies inside
+    PROMOTION_BOUNDS's numeric range. Exposed so this stays the one place
+    that decides what "whole" means here -- a caller re-validating a
+    persisted snapshot (controller/mpc.py's restore_model) imports this
+    rather than re-deriving it, so the two cannot drift apart.
+    """
+    return float(value).is_integer()
+
+
 def slowest_tau(params):
     """The longest chamber time constant any operating point can produce.
 
@@ -213,7 +226,7 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
             return Verdict(False, f"{key}={value:g} is outside [{lo:g}, {hi:g}]")
 
     n_delay = _finite(candidate["n_delay"])
-    if not n_delay.is_integer():
+    if not n_delay_is_whole(n_delay):
         return Verdict(False, f"n_delay={n_delay:g} must be a whole number")
 
     theta = _finite(candidate["theta"])

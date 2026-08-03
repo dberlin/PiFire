@@ -136,6 +136,63 @@ def test_a_non_integer_revision_is_refused_even_with_otherwise_valid_params():
         )
 
 
+def test_a_non_dict_or_missing_params_is_refused_even_with_a_valid_revision():
+    """Mirrors test_a_non_integer_revision_is_refused_even_with_otherwise_valid_params
+    for the OTHER half of the composite guard `not isinstance(params, dict) or
+    not isinstance(revision, int)`. Pairing a bad `params` with a valid
+    `revision` isolates `isinstance(params, dict)` on its own: without it, a
+    non-dict `params` would reach the PROMOTION_BOUNDS loop's `params.get(key)`
+    and raise AttributeError instead of returning False."""
+    c = _c()
+    for bad_params in (None, "not-a-dict", [1, 2, 3], 4):
+        assert (
+            c.restore_model(
+                {
+                    "version": 1,
+                    "revision": 1,
+                    "params": bad_params,
+                    "rmse": 2.0,
+                    "samples": 100,
+                    "band_c": [40.0, 232.0],
+                }
+            )
+            is False
+        )
+    # params omitted from the snapshot entirely behaves the same as params=None.
+    assert c.restore_model({"version": 1, "revision": 1, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}) is False
+
+
+def test_a_non_numeric_parameter_value_is_refused_without_raising():
+    """Pairs an otherwise fully valid snapshot with a single parameter value
+    that cannot be converted to float, isolating the try/float()/except guard
+    inside the PROMOTION_BOUNDS loop -- not merely reached as a side effect of
+    an out-of-range value or a non-dict params (both tested elsewhere)."""
+    c = _c()
+    bad = dict(PARAMS, h_amb="not-a-number")
+    assert (
+        c.restore_model(
+            {"version": 1, "revision": 1, "params": bad, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+        )
+        is False
+    )
+
+
+def test_a_params_dict_missing_a_required_key_is_refused():
+    """A params dict that IS a genuine dict but omits one of the nine
+    PROMOTION_BOUNDS keys reaches `params.get(key)` -> None inside the loop,
+    which float() cannot convert. Same guard as the non-numeric-value test
+    above, triggered by a missing key rather than an unconvertible value."""
+    c = _c()
+    bad = dict(PARAMS)
+    del bad["theta"]
+    assert (
+        c.restore_model(
+            {"version": 1, "revision": 1, "params": bad, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+        )
+        is False
+    )
+
+
 def test_a_non_integer_n_delay_is_refused():
     """PROMOTION_BOUNDS alone would admit n_delay=4.5 -- it lies inside (0, 50)
     -- but a fractional lag-state count cannot size the estimator's state
