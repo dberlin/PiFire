@@ -33,6 +33,32 @@ gone wrong. The exposure is that the bounds check is doing less than its comment
 and that a future check reading `C_c` or `h_amb` *alone* rather than as a ratio would be
 reading a number the data never pinned.
 
+**A refit-from-previous-output loop runs away along this direction.** Feeding each fit's
+output back as the next fit's `init`, against the same real cook, inflates the
+parameters monotonically while the error *improves* slightly:
+
+| iteration | K_Q | C_c | h_amb | h_fc | RMSE |
+|---|---|---|---|---|---|
+| 0 | 27.2 | 9,609 | 2.25 | 0.3855 | 2.42326 |
+| 2 | 1,041 | 364,756 | 103.9 | 0.3834 | 2.40358 |
+| 4 | 5,159 | 1,807,178 | 516.8 | 0.3833 | 2.40316 |
+| 8 | 9,116 | 3,192,954 | 913.5 | 0.3833 | 2.40311 |
+
+That is ~335x in eight iterations, with `h_fc` pinned and RMSE flat to four decimals —
+the signature of motion along the unobservable direction, not of learning. `C_c` leaves
+`PROMOTION_BOUNDS` at iteration 4, so the bounds do eventually stop it, but only after
+the model has drifted two orders of magnitude, and the tau guard never objects because
+effective tau is invariant the whole way. Any online identifier that refits from its own
+previous output needs a gauge-fixing step (renormalise one parameter, or fit the ratios)
+rather than relying on the bounds to catch the drift late.
+
+Note for whoever picks this up: an earlier version of this entry's evidence claimed the
+solver's ill-conditioning was a *separate* phenomenon from the gauge, based on a
+single-point Jacobian SVD. That was wrong — see the task report's Addendum 4. The
+condition number depends entirely on the coordinate convention (4.3e4, 4.2e5 or 5.8e6 at
+the same point, depending on what is scaled), so it is not a quantity to reason from
+without stating the convention. The runaway table above is the convention-free evidence.
+
 Candidate fix, not a commitment: reparameterise the promotion check onto the five
 identifiable ratios and bound those, so every bounded quantity is one a cook can
 actually determine. That is a larger change than it sounds — it touches what a stored

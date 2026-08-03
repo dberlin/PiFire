@@ -87,8 +87,10 @@ things make a sweep of this size affordable:
    live `control.py` and gunicorn share this machine.
 
 What made the fits affordable in the first place is not in this file: the
-scaled-variable solve in `fit_params` turned a fit that exhausted max_nfev
-without converging (~73 s) into one that converges in ~70 evaluations (~1.3 s).
+scaled-variable solve in `fit_params` conditions the problem well enough that
+the solver makes real progress per evaluation instead of crawling. It does not
+make every fit converge -- on a real cook it still runs out of evaluations --
+but it reaches a materially better point inside the same budget.
 
 This harness deliberately depends on nothing the project does not already
 install. An earlier version jitted the integrator with numba for a further
@@ -118,7 +120,7 @@ from scipy.optimize import least_squares
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from controller.mpc_model import simulate_grey_box  # noqa: E402
-from controller.model_promotion import _T_FLOOR_C, _T_HAZARD_C, PROMOTION_BOUNDS  # noqa: E402
+from controller.model_promotion import PROMOTION_BOUNDS, T_FLOOR_C, T_HAZARD_C, effective_tau  # noqa: E402
 
 OUT = "./docs/superpowers/experiments/_sigma_identifiability.json"
 
@@ -365,12 +367,6 @@ def fit(t, temp, Q, *, free_sigma, sigma0=INIT_SIGMA, sim=None, free=None, init=
     return out
 
 
-def _effective_tau(params, t_ref_c):
-    """model_promotion's effective tau, so the sweep judges what the gate judges."""
-    h_eff = params["h_amb"] + 4.0 * params["sigma"] * (t_ref_c + _KELVIN) ** 3
-    return params["C_c"] / h_eff if h_eff > 0 else float("inf")
-
-
 #: The parameterisation with the scaling degeneracy removed. Scaling
 #: (K_Q, C_c, h_amb, sigma) by a common factor leaves the measured chamber
 #: temperature almost unchanged -- the firepot is quasi-steady, so the chamber
@@ -412,8 +408,8 @@ def _point(args):
 
     def tau_err(p):
         return max(
-            abs(_effective_tau(p, T) - _effective_tau(TRUTH, T)) / _effective_tau(TRUTH, T)
-            for T in (_T_FLOOR_C, _T_HAZARD_C)
+            abs(effective_tau(p, T) - effective_tau(TRUTH, T)) / effective_tau(TRUTH, T)
+            for T in (T_FLOOR_C, T_HAZARD_C)
         )
 
     return dict(

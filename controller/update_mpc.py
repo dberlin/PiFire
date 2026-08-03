@@ -21,6 +21,7 @@
 
 import argparse
 import json
+import sys
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -60,6 +61,15 @@ _LOWER_BOUND = 1e-9
 # `fit_params`, which reports whether it did rather than presenting an
 # exhausted solve as a finished one.
 _MAX_NFEV = 2000
+
+# Said in both output modes, so neither can be the one that stays quiet.
+_NOT_CONVERGED = (
+    "WARNING: the solver ran out of evaluations after {nfev} without meeting a\n"
+    "         convergence criterion. These parameters are its best point so far, not a\n"
+    "         finished fit -- a better one for this log may exist. Treat the RMSE as a\n"
+    "         description of this point only, and do not read the parameters as this\n"
+    "         grill's measured values."
+)
 
 
 def _sim_kwargs(params):
@@ -164,19 +174,35 @@ def main():
     payload = {k: fitted[k] for k in CONFIG_KEYS}
 
     if args.json:
-        print(json.dumps(payload, indent=2))
+        # The config keys stay in their own object so they can still be pasted
+        # or ingested whole, but they no longer travel without the fit's own
+        # verdict on itself: this is the mode something else consumes, and a
+        # machine reading an exhausted solve as a finished one is the failure
+        # the `converged` flag exists to prevent. The human-readable warning
+        # goes to stderr so stdout remains parseable JSON.
+        rmse, max_err = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
+        print(
+            json.dumps(
+                {
+                    "config": payload,
+                    "fit": {
+                        "converged": fitted["converged"],
+                        "nfev": fitted["nfev"],
+                        "rmse_c": rmse,
+                        "max_error_c": max_err,
+                    },
+                },
+                indent=2,
+            )
+        )
+        if not fitted["converged"]:
+            print(_NOT_CONVERGED.format(nfev=fitted["nfev"]), file=sys.stderr)
         return
 
     rmse, max_err = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
     print(f"Fit quality: RMSE {rmse:.2f} C, max error {max_err:.2f} C")
     if not fitted["converged"]:
-        print(
-            f"WARNING: the solver ran out of evaluations after {fitted['nfev']} without meeting a\n"
-            "         convergence criterion. The numbers below are its best point so far, not a\n"
-            "         finished fit -- a better one for this log may exist. Treat the RMSE above as\n"
-            "         a description of this point only, and do not read the parameters as this\n"
-            "         grill's measured values."
-        )
+        print(_NOT_CONVERGED.format(nfev=fitted["nfev"]))
     if rmse > 10.0:
         print(
             "WARNING: RMSE above 10 C. This fit does not describe the log. Check that the log\n"

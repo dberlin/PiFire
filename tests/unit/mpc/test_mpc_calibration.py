@@ -163,6 +163,72 @@ def test_the_cli_says_so_when_the_solver_ran_out_of_evaluations(tmp_path, capsys
     assert "ran out of evaluations" not in capsys.readouterr().out
 
 
+def test_the_reported_sigma_is_the_one_the_fit_actually_simulated():
+    """The returned model must be the model that produced the returned error.
+
+    `fit_params` reports `sigma` from the value it was handed while the solve
+    uses it separately, so nothing else in this file notices if the two come
+    apart -- every other test either reads the reported value or scores the
+    reported model, and both agree with each other while disagreeing with what
+    was simulated. Re-deriving the residual from the REPORTED dict and matching
+    it against the solver's own final cost closes that: they can only agree if
+    the model handed back is the model that was fitted.
+    """
+    t, Q, temp = _dataset()
+    fitted = fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)
+
+    reported = simulate_grey_box(
+        t,
+        Q,
+        T_amb=T_AMB,
+        T0=float(temp[0]),
+        **{k: fitted[k] for k in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "sigma", "theta", "n_delay")},
+    )
+    # This dataset is generated from the model, so a fit that simulated what it
+    # reports reproduces it to numerical precision. A solve that used a
+    # different sigma than it reported would have optimised a different
+    # objective, and the reported model cannot then be this good.
+    assert np.sqrt(np.mean((reported - temp) ** 2)) < 1e-3
+
+    # And the radiative term must genuinely be in play, or the check above
+    # would pass for any sigma at all.
+    without = simulate_grey_box(
+        t,
+        Q,
+        T_amb=T_AMB,
+        T0=float(temp[0]),
+        **{k: fitted[k] for k in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta", "n_delay")},
+        sigma=0.0,
+    )
+    assert np.max(np.abs(without - reported)) > 1.0
+
+
+def test_the_json_mode_carries_the_convergence_verdict(tmp_path, capsys, monkeypatch):
+    """--json is the mode something else consumes; it must not be the quiet one."""
+    import json
+
+    import controller.update_mpc as U
+
+    t, Q, temp = _dataset()
+    csv = tmp_path / "cook.csv"
+    csv.write_text("time_s,temp_c,Q\n" + "".join(f"{a},{b},{c}\n" for a, b, c in zip(t, temp, Q)))
+    monkeypatch.setattr("sys.argv", ["update_mpc", str(csv), "--t-amb", str(T_AMB), "--json"])
+
+    monkeypatch.setattr(U, "_MAX_NFEV", 3)
+    U.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)  # stdout stays parseable JSON
+    assert payload["fit"]["converged"] is False
+    assert "ran out of evaluations" in captured.err  # ...and a human is told, on stderr
+    assert all(key in payload["config"] for key in CONFIG_KEYS)
+
+    monkeypatch.setattr(U, "_MAX_NFEV", 2000)
+    U.main()
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["fit"]["converged"] is True
+    assert "ran out of evaluations" not in captured.err
+
+
 def test_the_fit_reports_whether_it_converged():
     t, Q, temp = _dataset()
     fitted = fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)
