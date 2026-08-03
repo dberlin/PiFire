@@ -238,9 +238,8 @@ export function ControllerTab() {
       })}
       {learning && (
         <p className="pf-settings-hint">
-          While this grill is learning, the controller solves the full optimisation each
-          step: a learned model no longer matches the pre-trained neural policy, so that
-          fast path is disabled and the do-mpc extra is required.
+          A learned calibration no longer matches the pre-trained neural policy, so while this grill
+          is learning, the controller falls back to solving the full optimisation every step.
         </p>
       )}
       {fanConflict && (

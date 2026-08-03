@@ -133,8 +133,9 @@ const controllerMeta: ControllerMetadata = {
           option_friendly_name: "Learn This Grill",
           option_description:
             "After each cook, refit the thermal model from that cook and keep it if it " +
-            "describes the grill better. Requires the do-mpc extra and disables the fast " +
-            "neural policy.",
+            "describes the grill better. A learned calibration no longer matches the " +
+            "pre-trained neural policy, so the controller falls back to solving the full " +
+            "optimisation every step.",
           option_type: "bool",
           option_default: false,
           option_min: null,
