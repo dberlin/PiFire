@@ -198,6 +198,8 @@ class Controller(ControllerBase):
         self._last_Q_raw = float(cfg["Q_min"])
         self._last_solve_failed = False
         self._history = collections.deque(maxlen=_HISTORY_MAX)
+        self._model_revision = 0
+        self._model_meta = None  # provenance of an adopted model, or None
 
         n_delay = int(cfg["n_delay"])
 
@@ -369,7 +371,92 @@ class Controller(ControllerBase):
             # (see _build_core) -- _sanitized_copy hands back a copy, not that
             # live settings mapping.
             "cycle_data": _sanitized_copy(self.cycle_data),
+            # None until a model has been adopted this process (fresh install,
+            # or before the first fit completes): a model identified at one
+            # temperature does not describe another, so the band it was fit
+            # over travels with the fit error rather than being assumed global.
+            "model": None
+            if self._model_meta is None
+            else {
+                "band_c": [_finite_float(v) for v in self._model_meta["band_c"]],
+                "rmse": _finite_float(self._model_meta["rmse"]),
+            },
         }
+
+    _MODEL_SCHEMA = 1
+    _MODEL_PARAM_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
+
+    def _adopt_model(self, params, *, rmse, samples, band_c):
+        """Take `params` into the running config and bump the revision.
+
+        Rebuilding the NLP is the CALLER's business: adoption between cooks
+        needs no rebuild because the next Hold builds fresh, and adoption
+        during one is rate-limited elsewhere.
+        """
+        self.cfg.update({k: params[k] for k in self._MODEL_PARAM_KEYS if k in params})
+        self._model_revision += 1
+        self._model_meta = {
+            # Provenance, not a comparison input: what this model achieved on
+            # the cook it was fit from. model_promotion.evaluate() always
+            # RECOMPUTES the incumbent's error on the candidate's own data
+            # before adopting anything new, so this stored value is never fed
+            # into that comparison -- it is a record, not a gate.
+            "rmse": float(rmse),
+            "samples": int(samples),
+            "band_c": [float(band_c[0]), float(band_c[1])],
+        }
+
+    def get_model_snapshot(self):
+        if self._model_meta is None:
+            return None
+        return {
+            "version": self._MODEL_SCHEMA,
+            "revision": int(self._model_revision),
+            "params": {k: float(self.cfg[k]) for k in self._MODEL_PARAM_KEYS},
+            **self._model_meta,
+        }
+
+    def restore_model(self, snapshot):
+        from controller.model_promotion import PROMOTION_BOUNDS
+
+        if not isinstance(snapshot, dict):
+            return False
+        if snapshot.get("version") != self._MODEL_SCHEMA:
+            return False
+        params, revision = snapshot.get("params"), snapshot.get("revision")
+        if not isinstance(params, dict) or not isinstance(revision, int):
+            return False
+        for key, (lo, hi) in PROMOTION_BOUNDS.items():
+            value = params.get(key)
+            try:
+                value = float(value)
+            except TypeError, ValueError:
+                return False
+            if not (lo <= value <= hi):
+                return False
+            # n_delay sizes the estimator's lag-state chain one whole state at
+            # a time, so a fractional count is nonsense even though it lies
+            # inside the numeric bounds above. This is the same rule
+            # model_promotion.evaluate() applies to a freshly fitted
+            # candidate, reused rather than re-derived here.
+            if key == "n_delay" and not value.is_integer():
+                return False
+        self.cfg.update({k: float(params[k]) for k in self._MODEL_PARAM_KEYS if k in params})
+        # Continue the persisted counter rather than starting a new one: the
+        # store rejects a revision that does not advance, permanently.
+        self._model_revision = revision
+        self._model_meta = {
+            # Provenance only, exactly as in _adopt_model. inf -- never 0.0 --
+            # stands in for "unknown": 0.0 would read as a perfect fit, and if
+            # this field were ever wired into evaluate() as an incumbent_rmse,
+            # an unknown-error snapshot would then permanently refuse any
+            # replacement (evaluate() refuses a non-finite incumbent_rmse, so
+            # inf is safe; 0.0 would instead be an unbeatable one).
+            "rmse": float(snapshot.get("rmse", float("inf"))),
+            "samples": int(snapshot.get("samples", 0)),
+            "band_c": [float(v) for v in snapshot.get("band_c", (0.0, 0.0))],
+        }
+        return True
 
     def cook_history(self):
         """The cook's (time_s, temp_c, Q_applied) rows, oldest first."""
