@@ -26,7 +26,12 @@ PARAMS = dict(
 
 
 def _c(**over):
-    return Controller(dict(_DEFAULTS, policy="nlp", **over), "C", dict(CYCLE))
+    # Built at PARAMS' own n_delay, because a restore does not rebuild the lag
+    # chain and refuses a snapshot that disagrees with the one already built
+    # (pinned by test_a_snapshot_fitted_at_a_different_chain_length_is_refused
+    # below). Every other test here is about some OTHER field of the snapshot,
+    # so they must not trip that guard on the way to the thing they check.
+    return Controller(dict(_DEFAULTS, policy="nlp", n_delay=PARAMS["n_delay"], **over), "C", dict(CYCLE))
 
 
 def test_an_unidentified_controller_snapshots_nothing():
@@ -280,7 +285,7 @@ def test_a_non_integer_n_delay_is_refused():
         )
         is False
     )
-    assert c.cfg["n_delay"] == _DEFAULTS["n_delay"]
+    assert c.cfg["n_delay"] == PARAMS["n_delay"]
 
 
 def test_a_float_valued_whole_number_n_delay_is_accepted():
@@ -303,6 +308,50 @@ def test_a_float_valued_whole_number_n_delay_is_accepted():
         is True
     )
     assert c.cfg["n_delay"] == pytest.approx(4.0)
+
+
+def test_a_snapshot_fitted_at_a_different_chain_length_is_refused_and_says_why(capsys):
+    """An install that learned at one n_delay and was then reconfigured to another.
+
+    n_delay sizes the estimator, the NLP and the net policy, and all three are
+    built once in __init__ -- `restore_model` runs afterwards, from
+    controller/runtime/modes/hold.py, and rebuilds none of them. Writing the
+    snapshot's n_delay into cfg would therefore leave the config describing a
+    chain the running model does not have, and everything that reads it back --
+    longest_braking_distance, the promotion gate's horizon requirement,
+    _warn_about_model -- would size against the snapshot rather than against
+    what is actually solving.
+
+    The value used here is inside PROMOTION_BOUNDS and a whole number, so it
+    passes every other check in the method: what refuses it is the comparison
+    against the built chain and nothing else.
+    """
+    c = _c()
+    elsewhere = dict(PARAMS, n_delay=PARAMS["n_delay"] + 4)
+    assert (
+        c.restore_model(
+            {
+                "version": CURRENT_SCHEMA,
+                "revision": 7,
+                "params": elsewhere,
+                "rmse": 2.0,
+                "samples": 100,
+                "band_c": [40.0, 232.0],
+            }
+        )
+        is False
+    )
+    # Nothing crossed into the running model -- not n_delay, and not the other
+    # parameters that arrived with it and would otherwise have been adopted.
+    assert c.cfg["n_delay"] == PARAMS["n_delay"]
+    assert c.cfg["C_c"] == pytest.approx(_DEFAULTS["C_c"])
+    assert c.get_model_snapshot() is None
+    # Said out loud, naming both lengths, in the same shape as the schema
+    # mismatch: the operator is owed the reason the season's model went away.
+    out = capsys.readouterr().out
+    assert str(elsewhere["n_delay"]) in out
+    assert str(PARAMS["n_delay"]) in out
+    assert "snapshot" in out.lower()
 
 
 def test_status_reports_the_identified_band(capsys):

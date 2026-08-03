@@ -296,6 +296,11 @@ class Controller(ControllerBase):
         self._model_meta = None  # provenance of an adopted model, or None
 
         n_delay = int(cfg["n_delay"])
+        # The chain length everything below is BUILT at, kept so `restore_model`
+        # can refuse a snapshot that disagrees with it. Nothing built here is
+        # rebuilt afterwards, so the config key on its own stops describing the
+        # running model the moment a restore writes a different value into it.
+        self._built_n_delay = n_delay
 
         # State/disturbance estimator (independent of the policy). EKF linearizes
         # the nonlinear radiative term each step (default); MHE solves an NLP; KF
@@ -567,6 +572,24 @@ class Controller(ControllerBase):
             # apart on what "whole" means.
             if key == "n_delay" and not n_delay_is_whole(value):
                 return False
+        # n_delay is not a parameter this can adopt: it sizes the estimator, the
+        # NLP and the net policy, all of which were built in __init__ and none
+        # of which is rebuilt here. Adopting it would leave cfg["n_delay"]
+        # describing a chain the running model does not have, and every
+        # consumer that reads it back -- longest_braking_distance, the promotion
+        # gate's horizon requirement, _warn_about_model -- would size against
+        # the snapshot instead of against what is actually solving. Refused out
+        # loud in the same shape as the schema mismatch above, and for the same
+        # reason: the operator is owed the reason the season's model went back
+        # to the shipped defaults.
+        snapshot_n_delay = int(float(params["n_delay"]))
+        if snapshot_n_delay != self._built_n_delay:
+            print(
+                f"[mpc] discarding a model snapshot fitted at n_delay {snapshot_n_delay}: this "
+                f"controller was built with {self._built_n_delay} lag states and does not rebuild "
+                "them on restore. The next cook refits from scratch."
+            )
+            return False
         self.cfg.update({k: float(params[k]) for k in self._MODEL_PARAM_KEYS if k in params})
         # Continue the persisted counter rather than starting a new one: the
         # store rejects a revision that does not advance, permanently.

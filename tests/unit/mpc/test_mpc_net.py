@@ -126,6 +126,27 @@ def test_matches_config_rejects_recalibration():
     assert not p.matches_config(bad2)
 
 
+def test_a_config_without_n_delay_raises_rather_than_comparing_the_artifact_to_itself():
+    """The width guard's whole strength is that the two sides are independent.
+
+    `expected_input_dim` derives the width the CONFIG implies; `input_dim` is
+    read off the artifact's own `x_mean`. Defaulting the config's n_delay to
+    the artifact's turns that comparison into `x == x`, which passes for every
+    artifact ever produced -- a guard that cannot refuse. Every shipped config
+    carries n_delay through `_DEFAULTS`, so the honest failure for one that
+    does not is a KeyError, not a silent pass.
+    """
+    p = _policy()
+    partial = {k: v for k, v in _DEFAULTS.items() if k != "n_delay"}
+    with pytest.raises(KeyError):
+        p.expected_input_dim(partial)
+
+    # The negative control: with n_delay present the same cfg is compared for
+    # real and accepted, so what the KeyError above marks is the missing key
+    # and not some other disagreement in `partial`.
+    assert p.expected_input_dim(_DEFAULTS) == p.input_dim
+
+
 def test_net_path_for_fan_off_returns_base():
     assert net_path_for("./controller/mpc_policy_net.npz", False) == "./controller/mpc_policy_net.npz"
 

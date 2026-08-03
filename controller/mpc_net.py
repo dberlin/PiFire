@@ -95,8 +95,13 @@ class NetPolicy:
 
         controller/mpc_model.py's state is [q0..q_{n_delay-1}, T_c, d], and
         `firing_rate` appends u_prev and T_set to it.
+
+        A cfg without `n_delay` raises rather than falling back to the
+        artifact's own value: this guard's whole strength is that it compares
+        the artifact against the config, and defaulting to `self.n_delay` would
+        compare it against itself and pass whatever it was handed.
         """
-        return int(cfg.get("n_delay", self.n_delay)) + 4
+        return int(cfg["n_delay"]) + 4
 
     @classmethod
     def load(cls, path):

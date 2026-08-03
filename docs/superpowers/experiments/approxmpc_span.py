@@ -65,7 +65,7 @@ class SpanNet(nn.Module):
 def build_span_net(epochs=400, batch=4096, data_path=SPAN_NPZ):
     z = np.load(data_path)
     X0, UP, TS, U0 = z["X0"], z["u_prev"].flatten(), z["t_set"].flatten(), z["u0"].flatten()
-    Xin = np.column_stack([X0, UP, TS])  # [N, ND+5]
+    Xin = np.column_stack([X0, UP, TS])  # [N, ND+4] -- X0 is ND+2 wide
     resid = U0 - Q_ss(X0[:, DIDX], TS)  # target
 
     xm, xs = Xin.mean(0), Xin.std(0) + 1e-8

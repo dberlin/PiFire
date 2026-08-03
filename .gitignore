@@ -114,8 +114,6 @@ debug_*.html
 # ...but never track compiled bytecode, even under tests/
 tests/**/__pycache__/
 __pycache__/
-*.nbc
-*.nbi
 
 # approxMPC experiment artifacts
 docs/superpowers/experiments/_ampc_data/
