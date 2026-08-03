@@ -167,16 +167,21 @@ fail a cook rather than merely fail to help it.
   brake, which is half of what happened in the incident.
 - **R5.2** The horizon is **raised to cover the learned effective time
   constant**, bounded by a solve-time budget rather than refused. Measurement
-  (below) settles the affordability question: a 10× horizon costs 16× the solve
-  time but still only 8.5 % of the control period. The horizon that matters is
-  set by the *effective* τ at cooking temperature, not the linear `C_c/h_amb` —
-  radiative loss makes those differ by ~3× — so the target is `n_horizon` ≈ 144
-  (3600 s span, 3.0 % of budget), not 240.
+  (below) settles the affordability question: a 10× horizon costs ~12× the solve
+  time but still only 10.8 % of the control period at p95. The horizon that
+  matters is set by the *effective* τ at cooking temperature, not the linear
+  `C_c/h_amb` — radiative loss makes those differ by ~3× — so the target is
+  `n_horizon` ≈ 144 (3600 s span, 5.5 % of budget at p95), not 240.
 - **R5.3** The budget is expressed as a fraction of `control_period` and checked
   at promotion, not hard-coded to a step count. The nominal target is a Pi 5;
   the numbers below come from the machine that actually runs this grill, and a
   slower host must scale the horizon down rather than miss its control period.
-- **R5.4** Raising `n_horizon` changes `_CALIB_INTS` and invalidates the net —
+- **R5.4** The budget is evaluated against a **warm-started, iteration-capped**
+  IPOPT (`warm_start_init_point: yes`, `max_iter: 10`), which is ~24 % cheaper
+  at p95 and ~23 % lower at worst case than the shipped configuration for a
+  0.5 %-of-span control difference. That configuration change is separable from
+  this design and may land before it; the budget arithmetic assumes it.
+- **R5.5** Raising `n_horizon` changes `_CALIB_INTS` and invalidates the net —
   already accepted under R4. `t_step` is the cheaper lever for span (it buys
   horizon without adding decision variables, at coarser resolution) and is
   available if the solve-time budget binds.
@@ -205,6 +210,12 @@ fail a cook rather than merely fail to help it.
   and a rejected model leaves the incumbent untouched.
 - **R7.4** Identification is off by default. A grill that has never been
   identified behaves exactly as it does today.
+- **R7.5** On the online path a promotion is **rate-limited and never applied
+  mid-transient**. Adopting new constants rebuilds the NLP and discards the warm
+  start, costing a build plus a cold solve (see Measurements) — so an
+  unrestricted promoter can spend its control period rebuilding precisely when
+  the grill is moving fastest and the solve matters most. A promotion waits for
+  a quiescent interval and for a minimum interval since the last one.
 
 ### R8 — Two paths, and which comes first
 
@@ -228,7 +239,7 @@ Resolved 2026-08-02. Two were settled by measurement rather than judgement.
 |---|---|---|
 | D1 | Batch or online first? | **Batch first.** End-of-cook refit ships in v1; the live RLS identifier follows behind a setting once `fopdt_identifier.py` lands. |
 | D2 | Dependency policy under R4.2 | **`do_mpc` is required for MPC unconditionally**, net policy or not. Simplest correct thing; the conditional gate is revisited with the parameter-conditioned net, not here. |
-| D3 | Auto-raise `n_horizon`, or refuse and warn? | **Auto-raise, bounded by a measured budget.** 10× horizon costs 16× solve time but only 8.5 % of the control period; the ~3600 s span that matters costs 3.0 %. Affordable. |
+| D3 | Auto-raise `n_horizon`, or refuse and warn? | **Auto-raise, bounded by a measured budget.** Closed-loop p95: the ~3600 s span the learned model needs costs 5.5 % of the control period, and a 10× horizon 10.8 %. Affordable. |
 | D4 | One model, or a per-band schedule? | **One model plus a recorded band** in v1; escalate only if the 450 °F cell shows it failing. |
 | D5 | Persist the RLS bank, or re-seed it? | **Persist it, and raise the store's cap** to 65536. The 8192 bound was the thing to fix, not to design around. |
 
@@ -236,22 +247,104 @@ Resolved 2026-08-02. Two were settled by measurement rather than judgement.
 
 ### Horizon cost (settles D3)
 
-NLP solve time per control step, MPC built on the grey-box parameters fitted
-from the 2026-08-02 MAK cook, `t_step = 25 s`, `control_period = 5 s`. Mean of
-8–15 warm solves; build time is under 0.8 s at every size and is paid once.
+Solve time is measured through the production path — one `Controller` built per
+horizon *outside* the loop, then `update()` → `mpc.make_step()` per control
+step, exactly as Hold drives it. do-mpc reuses the previous solution as the
+primal initial guess, so its warm start is active; `_build_nlp` does not set
+`ipopt.warm_start_init_point`, so IPOPT's own dual/barrier warm start is not.
 
-| `n_horizon` | span | mean solve | vs. 24 | % of control period |
-|---|---|---|---|---|
-| 24 | 600 s | 26.1 ms | 1.00× | 0.5 % |
-| 48 | 1200 s | 43.3 ms | 1.66× | 0.9 % |
-| 96 | 2400 s | 87.6 ms | 3.36× | 1.8 % |
-| 144 | 3600 s | 148.1 ms | 5.68× | 3.0 % |
-| 192 | 4800 s | 259.9 ms | 9.96× | 5.2 % |
-| 240 | 6000 s | 426.0 ms | 16.32× | 8.5 % |
+A first pass held temperature and setpoint fixed, which lets every solve start
+from a nearly-optimal previous solution and understates the cost by 1.25–1.44×.
+**The figures below are closed-loop** on `MAKGrillSim` through a 900 s heat-up
+from 40 °C toward a 450 °F setpoint, so the initial guess is stale exactly when
+a real cook makes it stale. Grey-box parameters are those fitted from the
+2026-08-02 MAK cook; `t_step = 25 s`, `control_period = 5 s`; 180 solves each.
 
-Scaling is superlinear (~n^1.2), so a 10× horizon is a 16× solve — but the
-absolute cost is the binding question and it is small. Worst observed single
-solve at `n_horizon = 240` was 504 ms against a 5000 ms period.
+| `n_horizon` | span | mean | median | p95 | max | % of period (p95) |
+|---|---|---|---|---|---|---|
+| 24 | 600 s | 34.8 ms | 29.9 ms | 55.6 ms | 109.6 ms | 1.1 % |
+| 96 | 2400 s | 109.7 ms | 104.2 ms | 144.6 ms | 195.7 ms | 2.9 % |
+| 144 | 3600 s | 213.4 ms | 207.5 ms | 276.1 ms | 380.6 ms | 5.5 % |
+| 240 | 6000 s | 425.9 ms | 408.1 ms | 538.4 ms | 610.5 ms | 10.8 % |
+
+Scaling is superlinear (~n^1.2): a 10× horizon is a ~12× solve. The absolute
+cost is the binding question and it remains affordable — the ~3600 s span the
+learned model needs costs 5.5 % of the control period at p95.
+
+**In every row the maximum is the first solve**, before any warm start exists
+(109.6 / 195.7 / 380.6 / 610.5 ms). The worst case is therefore deterministic
+and located at startup rather than distributed through the cook. Rebuild cost
+itself is 0.2–0.8 s depending on horizon.
+
+### Solver configuration (loosens R5's budget)
+
+The horizon budget is set by solve cost, and solve cost turned out to be
+leaving ~20 % on the table. `_build_nlp` never enables IPOPT's warm start, even
+though do_mpc already hands the solver `lam_x0`/`lam_g0` on every solve after
+the first (`optimizer.py:762-768`) — so those duals were being discarded.
+
+Closed-loop at `n_horizon = 144`, 180 solves, same trajectory as above:
+
+| configuration | mean | p95 | max | IPOPT iters med/max | ratio Δ vs base |
+|---|---|---|---|---|---|
+| as shipped | 212.8 ms | 313.5 ms | 376.3 ms | 8 / 24 | — |
+| `warm_start_init_point` | 172.0 ms | 273.6 ms | 679.4 ms | 6 / 61 | 0.00e+00 |
+| **`warm_start_init_point` + `max_iter: 10`** | **171.7 ms** | **237.9 ms** | **289.1 ms** | 6 / 10 | 4.25e-03 |
+| + `max_iter: 5` | 138.6 ms | 178.6 ms | 248.6 ms | 5 / 5 | 1.80e-01 |
+| + `max_iter: 3` | 121.5 ms | 180.4 ms | 224.7 ms | 3 / 3 | 2.05e-01 |
+
+Warm start alone is bit-identical in control but *worsens* the cold start —
+679 ms, because the first solve has nothing to warm from and takes 61
+iterations. Capping iterations truncates exactly that spike, so the pair gives
+−19 % mean, −24 % p95 and −23 % worst case at once. A bounded tail is worth
+more than a lower mean to a loop with a deadline.
+
+`max_iter: 10` is chosen from the measured distribution, not picked: the median
+warm-started solve takes 6 iterations, so the cap binds on 7 of 180 solves and
+moves the commanded ratio by 0.5 % of actuator span with an unchanged peak.
+**Below 10 it stops being free** — at 5 and 3 every solve returns
+`Maximum_Iterations_Exceeded` and the trajectory difference jumps ~40× to a
+fifth of the actuator span. Faster, but no longer the controller that was
+tested.
+
+This change is **independent of identification and can land on its own.**
+
+Rejected, with reasons, so they are not re-investigated:
+
+- **HSL `ma27`/`ma57`/`ma86`/`ma97`** — not present; this CasADi build's IPOPT
+  reports `Invalid_Option` for every one, and `ipopt.hsllib` does not help.
+  Requires an IPOPT linked against HSL, which is a packaging project.
+- **`spral`** — present and correct, but 634 ms mean, 3× slower than MUMPS at
+  this problem size.
+- **`sqpmethod` + HiGHS / qrqp / OSQP** — never completed a run. All three QP
+  backends failed to finish setup plus 30 solves within 240 s, and HiGHS with
+  the `max_iter: 3` real-time cap failed to finish setup plus 12 solves within
+  400 s, against IPOPT's 0.2 s per solve. The total is what was bounded, not a
+  per-solve rate, so the cost is not attributed between construction and
+  solving — but at two to three orders of magnitude off the budget, it is not
+  worth attributing. The iteration cap does not rescue it, which points at
+  construction of the QP at this horizon rather than at SQP iteration count.
+- **`qrsqp`** — 62 ms mean, 3.4× *faster* than baseline, and wrong: commanded
+  ratio differs by 0.8 on a `[0.1, 0.9]` range and the cook peaks at 146 °F
+  instead of 444 °F. It is fast because it is not solving the problem. Recorded
+  because the timing alone is seductive.
+- **`fatrop`** — needs stage-interleaved variable ordering that do_mpc's NLP
+  does not produce; its structure detection bails out.
+
+Incidental: do_mpc 5.1.1 `_mpc.py:1312-1315` builds a defaults dict and calls
+`.update()` on the literal, which returns `None`, so its own `expand` and
+`ipopt.linear_solver` defaults are silently discarded. Harmless — both match
+the CasADi/IPOPT defaults — but it means whatever `nlpsol_opts` carries is what
+actually reaches the solver.
+
+### Promotion cost (constrains Path A)
+
+A promotion changes the model constants, so it rebuilds the do-mpc NLP and
+discards the warm start. Each promotion therefore costs one build (0.2–0.8 s)
+plus one cold solve (up to 610 ms at `n_horizon = 240`) — potentially exceeding
+a 5 s control period on slower hardware once combined. See R7.5.
+
+This does not affect the batch path, which promotes between cooks.
 
 **These are real numbers for the deployment** — this grill runs on the machine
 that produced them — but the nominal target is a Pi 5, where the same horizon
