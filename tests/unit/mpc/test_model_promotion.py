@@ -76,11 +76,122 @@ def test_a_negative_candidate_rmse_is_refused():
 
 
 def test_a_zero_incumbent_rmse_is_refused():
-    """A perfect incumbent cannot be fairly beaten; without this guard a
-    candidate claiming an equally 'perfect' zero RMSE ties its way past even
-    the wide margin regardless of how much tau or dead time it shortens."""
+    """A perfect incumbent cannot be fairly beaten. Pinned on the reason
+    text, not just accepted=False: with candidate_rmse guaranteed positive
+    by the earlier guard, the final RMSE-margin comparison alone would also
+    refuse a positive candidate RMSE against a zero incumbent RMSE (any
+    positive number beats a zero-or-negative threshold), so only the reason
+    distinguishes this explicit guard from being deleted."""
     faster = dict(GOOD, C_c=1000.0, h_amb=0.224)
-    assert _ev(faster, cand_rmse=0.0, inc_rmse=0.0).accepted is False
+    v = _ev(faster, cand_rmse=0.001, inc_rmse=0.0)
+    assert v.accepted is False
+    assert "incumbent rmse" in v.reason.lower()
+
+
+def test_a_non_numeric_delay_count_is_refused_not_a_crash():
+    """n_delay="4.5" parses as finite (4.5) and passes the range check, then
+    fails is_integer(); the refusal message must format the parsed number,
+    not re-index the raw (still-a-string) candidate value."""
+    assert _ev(dict(GOOD, n_delay="4.5")).accepted is False
+
+
+def test_theta_zero_with_an_active_delay_chain_is_refused():
+    """theta=0 with n_delay>=1 divides by zero building the transport-lag
+    chain's per-stage time constant (theta/n_delay) in GreyBoxKF/GreyBoxEKF;
+    a promoted model must be one the controller can actually run."""
+    v = _ev(dict(GOOD, theta=0.0))  # n_delay stays 4: the chain is active
+    assert v.accepted is False
+
+
+def test_the_theta_bound_is_enforced():
+    assert _ev(dict(GOOD, theta=-1e-9)).accepted is False
+    assert _ev(dict(GOOD, theta=0.0, n_delay=0)).accepted is True
+    assert _ev(dict(GOOD, theta=1200.0)).accepted is True
+    assert _ev(dict(GOOD, theta=1200.0 + 1e-3)).accepted is False
+
+
+def test_an_incumbent_missing_n_delay_is_refused_not_a_crash():
+    incumbent = dict(C_c=2000.0, h_amb=0.30, theta=93.0, sigma=1.4e-9)  # n_delay omitted
+    assert _ev(GOOD, incumbent=incumbent).accepted is False
+
+
+def test_an_incumbent_missing_sigma_is_refused_not_a_crash():
+    incumbent = dict(C_c=2000.0, h_amb=0.30, theta=93.0, n_delay=4)  # sigma omitted
+    assert _ev(GOOD, incumbent=incumbent).accepted is False
+
+
+def test_h_amb_alone_can_shrink_tau():
+    """Raising h_amb alone (C_c unchanged) shortens tau exactly like cutting
+    C_c does, so it must face the same wide margin -- pins h_amb's presence
+    in the tau computation, not just C_c's."""
+    faster = dict(GOOD, C_c=2000.0, h_amb=0.30 * 3)  # incumbent's own C_c, h_amb tripled
+    v = _ev(faster, cand_rmse=4.85, inc_rmse=5.0)  # clears the 2% bar, not the 50% bar
+    assert v.accepted is False
+
+
+def test_n_delay_equal_to_one_keeps_the_delay_chain_active():
+    """n_delay=1 is the smallest value that keeps the transport-delay chain
+    on -- theta must still contribute, unlike n_delay=0."""
+    one_delay = dict(GOOD, n_delay=1)
+    v = _ev(one_delay, cand_rmse=4.85, inc_rmse=5.0)  # clears the 2% bar, not the 50% bar; theta unchanged
+    assert v.accepted is True
+
+
+def test_raising_sigma_needs_the_same_wide_margin_as_shortening_tau():
+    """sigma prices into the effective tau via its linearized radiative
+    conductance at the grill's hottest permitted temperature: raising it
+    shortens the true braking distance even though C_c and h_amb are
+    unchanged, and must face the same asymmetric bar."""
+    incumbent = dict(GOOD, sigma=0.0)  # no radiative correction: effective tau == C_c/h_amb
+    hotter_sigma = dict(GOOD, sigma=2e-9)  # at PROMOTION_BOUNDS' cap
+    v = _ev(hotter_sigma, incumbent=incumbent, cand_rmse=4.85, inc_rmse=5.0)  # clears 2%, not 50%
+    assert v.accepted is False
+
+
+def test_raising_sigma_is_accepted_on_strong_evidence():
+    incumbent = dict(GOOD, sigma=0.0)
+    hotter_sigma = dict(GOOD, sigma=2e-9)
+    assert _ev(hotter_sigma, incumbent=incumbent, cand_rmse=0.5, inc_rmse=5.0).accepted is True
+
+
+def test_the_sigma_bound_is_enforced():
+    assert _ev(dict(GOOD, sigma=-1e-12)).accepted is False
+    assert _ev(dict(GOOD, sigma=0.0)).accepted is True
+    assert _ev(dict(GOOD, sigma=2e-9)).accepted is True
+    assert _ev(dict(GOOD, sigma=2e-9 + 1e-15)).accepted is False
+
+
+def test_repeated_small_sigma_increases_cannot_walk_true_tau_down_without_clearing_the_wide_bar():
+    """sigma raises the effective tau's radiative conductance the same way a
+    C_c/h_amb cut lowers it directly; a chain of small sigma increases must
+    face the same wide margin as any other tau-shrinking route."""
+    incumbent, incumbent_rmse = dict(GOOD, sigma=0.0), 5.0
+    for _ in range(15):
+        candidate = dict(incumbent, sigma=incumbent["sigma"] + 1e-10)  # small step toward the 2e-9 cap
+        candidate_rmse = incumbent_rmse * 0.97  # clears the 2% bar decisively, not the 50% bar
+        v = evaluate(candidate, incumbent, candidate_rmse=candidate_rmse, incumbent_rmse=incumbent_rmse, **HORIZON)
+        if v.accepted:
+            incumbent, incumbent_rmse = candidate, candidate_rmse
+    assert incumbent["sigma"] == 0.0
+
+
+def test_repeated_joint_sigma_and_tau_cuts_cannot_walk_true_tau_down_without_clearing_the_wide_bar():
+    """A candidate can cut C_c and raise sigma in the same promotion; the
+    guard must catch the combined effect on true tau, not just each
+    parameter considered alone."""
+    incumbent, incumbent_rmse = dict(GOOD, sigma=0.0), 5.0
+    for _ in range(15):
+        candidate = dict(
+            incumbent,
+            C_c=incumbent["C_c"] * 0.97,  # small cut, well under the old 10% deadband
+            sigma=incumbent["sigma"] + 5e-11,  # small step, well under the 2e-9 cap
+        )
+        candidate_rmse = incumbent_rmse * 0.97  # clears the 2% bar decisively, not the 50% bar
+        v = evaluate(candidate, incumbent, candidate_rmse=candidate_rmse, incumbent_rmse=incumbent_rmse, **HORIZON)
+        if v.accepted:
+            incumbent, incumbent_rmse = candidate, candidate_rmse
+    assert incumbent["C_c"] == GOOD["C_c"]
+    assert incumbent["sigma"] == 0.0
 
 
 def test_an_incumbent_with_no_positive_reference_always_faces_the_wide_margin():
@@ -232,7 +343,7 @@ _EXPECTED_BOUNDS = {
     "theta": (0.0, 1200.0),
     "n_delay": (0.0, 50.0),
     "K_Q": (1e-3, 1e4),
-    "sigma": (0.0, 1e-7),
+    "sigma": (0.0, 2e-9),
 }
 
 
@@ -240,11 +351,14 @@ def test_every_bound_is_pinned_by_a_literal():
     assert _EXPECTED_BOUNDS == PROMOTION_BOUNDS
 
 
-#: n_delay is covered by test_the_n_delay_bound_is_enforced instead: its
-#: lower edge (0) interacts with theta through the effective-dead-time rule,
-#: so admissibility there depends on the evidence offered, not just on
-#: whether the bare value is in range.
-@pytest.mark.parametrize("key,lo,hi", [(k, *bounds) for k, bounds in _EXPECTED_BOUNDS.items() if k != "n_delay"])
+#: n_delay and theta are covered by their own dedicated tests instead: n_delay's
+#: lower edge (0) interacts with theta through the effective-dead-time rule, and
+#: theta's lower edge (0) is only valid when n_delay is also 0 (otherwise the
+#: transport-delay chain divides by n_delay into a zero theta) -- both depend on
+#: the OTHER parameter's value, not just on whether the bare value is in range.
+@pytest.mark.parametrize(
+    "key,lo,hi", [(k, *bounds) for k, bounds in _EXPECTED_BOUNDS.items() if k not in ("n_delay", "theta")]
+)
 def test_each_bound_is_enforced_at_its_edge(key, lo, hi):
     assert _ev(dict(GOOD, **{key: lo})).accepted is True
     assert _ev(dict(GOOD, **{key: lo - abs(lo) * 1e-6 - 1e-9})).accepted is False

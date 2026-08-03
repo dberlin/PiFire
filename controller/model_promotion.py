@@ -18,13 +18,21 @@ from dataclasses import dataclass
 
 #: Ranges a fitted parameter must fall inside to be considered at all. Wide on
 #: purpose -- this rejects nonsense, it does not express a preference. T_amb
-#: spans a hard winter night to a hot afternoon; sigma must be non-negative (a
-#: negative radiative coefficient inverts the loss term into a gain) and is
-#: capped near the physical ceiling for a chamber-sized radiator (Stefan-
-#: Boltzmann constant times a generously large radiating area at blackbody
-#: emissivity); n_delay sizes the state vector and Jacobian one lag state at a
-#: time, so it is bounded well below values that stall the solver, and must
-#: additionally be a whole number of lag states.
+#: spans a hard winter night to a hot afternoon; n_delay sizes the state
+#: vector and Jacobian one lag state at a time, so it is bounded well below
+#: values that stall the solver, and must additionally be a whole number of
+#: lag states. sigma must be non-negative (a negative radiative coefficient
+#: inverts the loss term into a gain); its cap is NOT a real-watts physical
+#: ceiling -- C_c/h_amb in this model are not SI joules/watts (the shipped
+#: h_amb=0.50 would be an implausibly under-insulated chamber if they were),
+#: so a Stefan-Boltzmann-in-real-units bound is off by whatever unscaled
+#: factor the fitting process folds in, and cannot be compared to h_amb
+#: directly. What IS independently verifiable is that sigma=1.4e-9 is the
+#: one value used consistently as ground truth across this codebase (the
+#: plant simulator's own fitted truth parameter in controller/grill_sim.py,
+#: and the shipped grey-box default's calibration target) -- so the cap is a
+#: modest, grill-to-grill-variation multiple of THAT anchor, not an
+#: independently-derived physical number.
 PROMOTION_BOUNDS = {
     "C_f": (0.1, 1e4),
     "C_c": (1.0, 1e6),
@@ -34,7 +42,7 @@ PROMOTION_BOUNDS = {
     "theta": (0.0, 1200.0),
     "n_delay": (0.0, 50.0),
     "K_Q": (1e-3, 1e4),
-    "sigma": (0.0, 1e-7),
+    "sigma": (0.0, 2e-9),
 }
 
 #: A candidate must beat the incumbent's error by this fraction to be adopted
@@ -60,7 +68,18 @@ _TAU_DEADBAND = 0.10
 
 #: Incumbent fields the shrink comparison needs. A partial incumbent missing
 #: one of these cannot be judged, so it is refused rather than raising.
-_INCUMBENT_KEYS = ("C_c", "h_amb", "theta", "n_delay")
+_INCUMBENT_KEYS = ("C_c", "h_amb", "theta", "n_delay", "sigma")
+
+#: Kelvin offset for the Celsius T_c/T_amb this model works in, matching
+#: controller/mpc_model.py's own constant.
+_KELVIN = 273.15
+
+#: The grill's hottest permitted operating point -- the hard safety shutoff
+#: (`maxtemp` in common/settings_schema.py, 550 F) converted to the Celsius
+#: this model's chamber temperature is expressed in. The radiative loss
+#: term's linearized conductance grows with T**3, so this is where it is
+#: largest and where a candidate's true braking distance is shortest.
+_T_HAZARD_C = (550.0 - 32.0) * 5.0 / 9.0
 
 
 @dataclass
@@ -82,6 +101,21 @@ def _finite(value):
 def _tau(params):
     h_amb = float(params["h_amb"])
     return float(params["C_c"]) / h_amb if h_amb > 0 else math.inf
+
+
+def _effective_tau(params):
+    """The chamber time constant at the grill's hottest permitted
+    temperature. controller/mpc_model.py's radiative loss term,
+    sigma*((T_c+273.15)**4 - (T_amb+273.15)**4), has linearized conductance
+    4*sigma*(T_c+273.15)**3 (exactly what GreyBoxEKF._discretize computes as
+    `rp` about its own operating point) -- an addition to h_amb that a plain
+    C_c/h_amb tau cannot see. A candidate that raises sigma shortens this
+    tau exactly as cutting C_c or raising h_amb would.
+    """
+    h_amb = float(params["h_amb"])
+    sigma = float(params["sigma"])
+    h_eff = h_amb + 4.0 * sigma * (_T_HAZARD_C + _KELVIN) ** 3
+    return float(params["C_c"]) / h_eff if h_eff > 0 else math.inf
 
 
 def _effective_theta(params):
@@ -126,8 +160,13 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
         if not (lo <= value <= hi):
             return Verdict(False, f"{key}={value:g} is outside [{lo:g}, {hi:g}]")
 
-    if not float(candidate["n_delay"]).is_integer():
-        return Verdict(False, f"n_delay={candidate['n_delay']:g} must be a whole number")
+    n_delay = _finite(candidate["n_delay"])
+    if not n_delay.is_integer():
+        return Verdict(False, f"n_delay={n_delay:g} must be a whole number")
+
+    theta = _finite(candidate["theta"])
+    if n_delay > 0 and theta <= 0:
+        return Verdict(False, "theta must be positive whenever n_delay enables the transport-delay chain")
 
     if _finite(candidate_rmse) is None or float(candidate_rmse) <= 0:
         return Verdict(False, "candidate RMSE must be a positive, finite number")
@@ -155,17 +194,18 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
         if _finite(incumbent.get(key)) is None:
             return Verdict(False, "incumbent model is missing required parameters", horizon_needed)
 
-    tau_incumbent = _tau(incumbent)
+    tau_eff_candidate = _effective_tau(candidate)
+    tau_eff_incumbent = _effective_tau(incumbent)
     theta_candidate = _effective_theta(candidate)
     theta_incumbent = _effective_theta(incumbent)
 
     margin = max(
-        _shrink_margin(tau, tau_incumbent),
+        _shrink_margin(tau_eff_candidate, tau_eff_incumbent),
         _shrink_margin(theta_candidate, theta_incumbent),
     )
     if candidate_rmse > incumbent_rmse * (1.0 - margin):
         direction = (
-            f"a {_direction_label(tau, tau_incumbent)} tau and "
+            f"a {_direction_label(tau_eff_candidate, tau_eff_incumbent)} tau and "
             f"a {_direction_label(theta_candidate, theta_incumbent)} dead time"
         )
         return Verdict(
