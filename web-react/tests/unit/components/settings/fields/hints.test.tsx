@@ -21,6 +21,17 @@ describe("field hints are announced", () => {
     expect(screen.getByRole("spinbutton").getAttribute("aria-describedby")).toBeNull();
   });
 
+  it("keeps a NumberField's accessible name as the label alone, not label + hint", () => {
+    render(
+      <NumberField label="Sleep Timeout" value={300} onChange={rs.fn()} hint="0 = never sleep." />,
+    );
+    // A <label> wrapping a control folds all of its descendant text into
+    // that control's accessible name -- a hint left inside would double as
+    // part of the name instead of staying a separate description. Exact
+    // match: any leakage of the hint text into the name fails this.
+    expect(screen.getByRole("spinbutton", { name: "Sleep Timeout" })).toBeInTheDocument();
+  });
+
   it("associates a Toggle's hint with its control", () => {
     render(
       <Toggle
