@@ -6,6 +6,7 @@ import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import type { PwmProfile } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
@@ -102,18 +103,24 @@ export function PwmTab() {
     };
 
     let d: object = {};
-    // pwm.temp_range_list and pwm.profiles ride the same delta wholesale
-    // (single Save per tab, using the existing ["settings_update"] flag) —
-    // they're already keys of `pwm`, so this loop covers them too.
+    // pwm.temp_range_list rides the same delta wholesale (single Save per
+    // tab, using the existing ["settings_update"] flag) — it's already a key
+    // of `pwm`, so this loop covers it too. `profiles` is written separately
+    // below, since its local shape needs a cast the other keys don't.
     // Object.entries widens its key to string, which erases exactly the fact
-    // this loop depends on: every key of `clamped` is a field of settings.pwm.
+    // this loop depends on: every key of `clamped` (bar `profiles`) is a
+    // field of settings.pwm with a matching value type.
     type PwmKey = keyof NonNullable<Settings["pwm"]>;
-    for (const k of Object.keys(clamped) as PwmKey[]) {
-      // `profiles` is RangeProfileTable's generic Record<string, number>[]
-      // representation of the schema's PwmProfile[]; the value cast bridges
-      // that shape difference, the key stays checked against settings.pwm.
-      d = setPath(d, `pwm.${k}`, clamped[k] as never);
+    const scalarKeys = (Object.keys(clamped) as PwmKey[]).filter(
+      (k) => k !== "profiles",
+    ) as Exclude<PwmKey, "profiles">[];
+    for (const k of scalarKeys) {
+      d = setPath(d, `pwm.${k}`, clamped[k]);
     }
+    // `profiles` is RangeProfileTable's generic Record<string, number>[]
+    // representation of the schema's closed PwmProfile[] (duty_cycle only);
+    // this is the one field of settings.pwm that needs the cast.
+    d = setPath(d, "pwm.profiles", clamped.profiles as unknown as PwmProfile[]);
     // Cross-section: startup.pwm_duty_cycle lives on another tab but is bound
     // to this range (routes.py:495). Written unconditionally — writing back an
     // unchanged value is harmless and keeps this branch-free.
