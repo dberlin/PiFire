@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
+import type { SettingsPath } from "../../../helpers/settings/paths";
 import type { ControllerMetadata, Settings } from "../../../helpers/settings/settingsApi";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { SaveStatus } from "../../../helpers/settings/useSaveSettings";
@@ -133,7 +134,10 @@ export function ControllerTab() {
     const declared = new Set((entry?.config ?? []).map((opt) => opt.option_name));
     const unknownKeys = Object.keys(rebuilt).filter((key) => !declared.has(key));
     for (const key of unknownKeys) delete rebuilt[key];
-    d = setPath(d, `controller.config.${selected}`, rebuilt);
+    // Genuinely dynamic: which controller is selected is a runtime fact, and
+    // controller.config stays an open dict server-side so an install can add
+    // one. Narrowing here would claim otherwise.
+    d = setPath(d, `controller.config.${selected}` as SettingsPath, rebuilt as never);
     const ok = await save(d, ["controller_update"]);
     setDroppedOptions(ok ? unknownKeys : []);
     if (ok) markSaved();

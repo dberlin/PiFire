@@ -38,7 +38,10 @@ export function SafetyTab() {
 
   const onSave = async () => {
     let d: object = {};
-    for (const [k, val] of Object.entries(v)) d = setPath(d, `safety.${k}`, val);
+    // Object.entries widens its key to string, which erases exactly the fact
+    // this loop depends on: every key of `v` is a field of settings.safety.
+    type SafetyKey = keyof NonNullable<Settings["safety"]>;
+    for (const k of Object.keys(v) as SafetyKey[]) d = setPath(d, `safety.${k}`, v[k]);
     // _settings_safety does a bare write — no control flag
     if (await save(d, [])) markSaved();
   };

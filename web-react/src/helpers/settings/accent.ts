@@ -1,5 +1,6 @@
 import type { AccentName } from "../types";
 import { setPath } from "./delta";
+import type { SettingsPath } from "./paths";
 import { applySettings, getSettings, type Settings } from "./settingsApi";
 
 // One accent covers the whole appliance. This is the key display/qtapp.py's
@@ -40,7 +41,13 @@ export async function saveAccent(baseUrl: string, accent: AccentName): Promise<b
     const settings = await getSettings(baseUrl);
     const path = accentPath(settings);
     if (!path) return false;
-    const result = await applySettings(baseUrl, setPath({}, path, storedAccentName(accent)), []);
+    // display.config is keyed by the installed display module and stays an
+    // open dict for the same reason controller.config does.
+    const result = await applySettings(
+      baseUrl,
+      setPath({}, path as SettingsPath, storedAccentName(accent) as never),
+      [],
+    );
     return result.ok;
   } catch {
     return false;

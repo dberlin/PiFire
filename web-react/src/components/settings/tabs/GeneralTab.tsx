@@ -1,6 +1,7 @@
 import { useOutletContext } from "react-router";
 import { accentPath, readAccent, storedAccentName } from "../../../helpers/settings/accent";
 import { setPath } from "../../../helpers/settings/delta";
+import type { SettingsPath } from "../../../helpers/settings/paths";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
@@ -46,7 +47,9 @@ export function GeneralTab() {
   const onSave = async () => {
     let delta = setPath({}, "globals.grill_name", v.grill_name);
     const path = accentPath(settings);
-    if (path) delta = setPath(delta, path, v.accent_theme);
+    // display.config is keyed by the installed display module and stays an
+    // open dict for the same reason controller.config does.
+    if (path) delta = setPath(delta, path as SettingsPath, v.accent_theme as never);
     delta = setPath(delta, "display.sleep_timeout", v.sleep_timeout);
     // No control flag: Flask's _settings_display does a bare write_settings
     // too, and the display process re-reads the store itself once a second.

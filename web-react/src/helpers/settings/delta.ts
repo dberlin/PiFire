@@ -1,4 +1,11 @@
-export function setPath(obj: object, path: string, value: unknown): object {
+import type { SettingsPath, ValueAt } from "./paths";
+import type { SettingsSchema } from "./settingsTypes.gen";
+
+export function setPath<P extends SettingsPath>(
+  obj: object,
+  path: P,
+  value: ValueAt<SettingsSchema, P>,
+): object {
   const keys = path.split(".");
   const root: Record<string, unknown> = { ...(obj as Record<string, unknown>) };
   let cur = root as Record<string, unknown>;

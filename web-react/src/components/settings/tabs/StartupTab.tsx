@@ -4,6 +4,10 @@ import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
+import type {
+  AfterStartupMode,
+  SmartStartProfile,
+} from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
 import { Section } from "../fields/Section";
@@ -133,10 +137,22 @@ export function StartupTab() {
     // Table-driven arrays ride the same delta wholesale (plan ruling: single
     // Save per tab, existing ["settings_update"] flag kept).
     d = setPath(d, "startup.smartstart.temp_range_list", v.smartstartTemps);
-    d = setPath(d, "startup.smartstart.profiles", v.smartstartProfiles);
+    // RangeProfileTable is generic over Record<string, number>; every key it
+    // writes back is one of SmartStartProfile's number fields.
+    d = setPath(
+      d,
+      "startup.smartstart.profiles",
+      v.smartstartProfiles as unknown as SmartStartProfile[],
+    );
 
     // Build delta for start_to_mode fields
-    d = setPath(d, "startup.start_to_mode.after_startup_mode", v.after_startup_mode);
+    // The Select only ever offers modeOptions's two values; the wider string
+    // on Startup.after_startup_mode is the field's edit-box type, not its range.
+    d = setPath(
+      d,
+      "startup.start_to_mode.after_startup_mode",
+      v.after_startup_mode as AfterStartupMode,
+    );
     d = setPath(d, "startup.start_to_mode.primary_setpoint", v.primary_setpoint);
     d = setPath(d, "startup.start_to_mode.start_to_hold_prompt", v.start_to_hold_prompt);
 

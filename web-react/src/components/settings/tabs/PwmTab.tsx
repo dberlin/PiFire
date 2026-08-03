@@ -105,7 +105,15 @@ export function PwmTab() {
     // pwm.temp_range_list and pwm.profiles ride the same delta wholesale
     // (single Save per tab, using the existing ["settings_update"] flag) —
     // they're already keys of `pwm`, so this loop covers them too.
-    for (const [k, v] of Object.entries(clamped)) d = setPath(d, `pwm.${k}`, v);
+    // Object.entries widens its key to string, which erases exactly the fact
+    // this loop depends on: every key of `clamped` is a field of settings.pwm.
+    type PwmKey = keyof NonNullable<Settings["pwm"]>;
+    for (const k of Object.keys(clamped) as PwmKey[]) {
+      // `profiles` is RangeProfileTable's generic Record<string, number>[]
+      // representation of the schema's PwmProfile[]; the value cast bridges
+      // that shape difference, the key stays checked against settings.pwm.
+      d = setPath(d, `pwm.${k}`, clamped[k] as never);
+    }
     // Cross-section: startup.pwm_duty_cycle lives on another tab but is bound
     // to this range (routes.py:495). Written unconditionally — writing back an
     // unchanged value is harmless and keeps this branch-free.

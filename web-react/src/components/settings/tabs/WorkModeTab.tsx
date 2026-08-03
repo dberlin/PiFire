@@ -101,9 +101,21 @@ export function WorkModeTab() {
 
   const onSave = async () => {
     let d: object = {};
-    for (const [k, val] of Object.entries(v.cycle_data)) d = setPath(d, `cycle_data.${k}`, val);
-    for (const [k, val] of Object.entries(v.smoke_plus)) d = setPath(d, `smoke_plus.${k}`, val);
-    for (const [k, val] of Object.entries(v.keep_warm)) d = setPath(d, `keep_warm.${k}`, val);
+    // Object.entries widens its key to string, which erases exactly the fact
+    // these loops depend on: every key of `v.<section>` is a field of the
+    // matching settings section.
+    type CycleDataKey = keyof NonNullable<Settings["cycle_data"]>;
+    type SmokePlusKey = keyof NonNullable<Settings["smoke_plus"]>;
+    type KeepWarmKey = keyof NonNullable<Settings["keep_warm"]>;
+    for (const k of Object.keys(v.cycle_data) as CycleDataKey[]) {
+      d = setPath(d, `cycle_data.${k}`, v.cycle_data[k]);
+    }
+    for (const k of Object.keys(v.smoke_plus) as SmokePlusKey[]) {
+      d = setPath(d, `smoke_plus.${k}`, v.smoke_plus[k]);
+    }
+    for (const k of Object.keys(v.keep_warm) as KeepWarmKey[]) {
+      d = setPath(d, `keep_warm.${k}`, v.keep_warm[k]);
+    }
     if (await save(d, ["settings_update"])) markSaved();
   };
 
