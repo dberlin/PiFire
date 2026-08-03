@@ -42,10 +42,12 @@ completion from a sweep:
   Python. Item 2 was added the same day. Nothing else has been swept into this
   file yet, so its shortness is not evidence that the server side has two open
   items.
-- **2026-08-03** — item 3 designed. Two of its "what to build" bullets were
-  overtaken by the design (versioning and the shape digest, both dropped) and
-  are struck through in place. Items 4 and 5 were carved out of that design as
-  its named out-of-scope work, not swept in from elsewhere.
+- **2026-08-03** — item 3 designed, then landed the same day. Two of its "what
+  to build" bullets were overtaken by the design (versioning and the shape
+  digest, both dropped) and are struck through in place. Items 4 and 5 were
+  carved out of that design as its named out-of-scope work, not swept in from
+  elsewhere. Item 6 was found by running the suite during that work and is
+  pre-existing — verified by reproducing it at the prior commit, not inferred.
 
 ---
 
@@ -132,11 +134,34 @@ Deleting a pushed tag is the only reason this is filed rather than done — it
 rewrites a ref other clones already have, which is the operator's call, not an
 agent's.
 
-### 3. `control:current` is a bare dict with no model — SPEC WRITTEN
+### 3. `control:current` is a bare dict with no model — DONE 2026-08-03
 
-**Status:** OPEN, spec written. Raised 2026-08-03 while adding per-probe
-freshness to it; designed the same day in
-`docs/superpowers/specs/2026-08-03-current-blob-model-design.md`.
+**Status:** DONE 2026-08-03. Raised, designed, planned and landed the same day
+— spec `docs/superpowers/specs/2026-08-03-current-blob-model-design.md`, plan
+`docs/superpowers/plans/2026-08-03-current-blob-model.md`, four commits from
+`feat(common): model the control:current blob` through
+`refactor: read the current snapshot in get_temp and the tuner`, plus a
+follow-up fix commit from the whole-branch review.
+
+`common/current_schema.py` now holds the model, the frozen `CurrentSnapshot`,
+and the two builders both the accessors and both `Store` implementations share.
+Both in-memory-store defects below are fixed. Two consumers (`_cmd_get_temp`,
+`_reference_temp`) read the snapshot; the rest stay on `read_current()` and
+move one at a time — see item 5 for the endgame.
+
+**Residuals, deliberately not fixed.** Both were raised by the whole-branch
+review and declined with reasons, so they do not get silently re-discovered:
+
+- `build_current` does not wrap `CurrentSchema(...)` in a `try/except`, so a
+  non-numeric `primary_setpoint` would raise out of `write_current` and kill a
+  control pass where the old code stored it verbatim. Unreachable from all four
+  producers (`api_commands.py`, `socket_io.py`, `defaults.py`), and swallowing
+  it would hide a producer bug rather than fix one.
+- `InMemoryStore._probe_info()` reaches the probe map through `.get()` chains
+  where production indexes `settings["probe_settings"]["probe_map"]["probe_info"]`
+  directly, so a settings-less fake flushes where production would `KeyError`.
+  This asymmetry pre-dates the change; it is the same fake-fidelity class as
+  the two defects that were fixed, and it wants its own pass.
 
 **The finding.** `control:current` is the highest-traffic durable blob PiFire
 has — written once per control pass, read by the web tier, the Qt Quick
@@ -246,3 +271,25 @@ one change:
 
 The `validation_alias` `AliasChoices` stay for one release after that, so a
 blob written by the previous build still loads.
+
+---
+
+### 6. A caplog test passes alone and fails after `tests/unit/runtime` — OPEN
+
+**Status:** OPEN. Found 2026-08-03 while running the broad suite for item 3;
+pre-existing, not caused by that work.
+
+`tests/unit/datastore/test_read_path_validation.py::test_a_broken_tree_is_reported_with_its_paths`
+asserts `"startup.duration" in caplog.text` and finds `''` — but only when the
+run includes `tests/unit/runtime` and `tests/unit/controller` first. It passes
+in isolation, and it passes when `tests/unit/datastore` is run alone.
+
+**Established, not assumed.** Reproduced at the commit before item 3's work
+began, in an isolated `jj workspace`, with the identical command and the
+identical failure; independently reproduced a second time by ordering the two
+directories by hand. `tests/unit/runtime` touches logger propagation in
+`test_controller_build_failure.py` and `test_devices.py`, neither of which
+restores it — that is where to look first.
+
+It does not fail in a plain `pytest tests/` run, which is why it has stayed
+invisible: the full-suite ordering happens not to trigger it.
