@@ -1,5 +1,6 @@
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
+import { errorFor } from "../../../helpers/settings/fieldErrors";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
@@ -24,6 +25,25 @@ const SMARTSTART_COLUMNS: RangeProfileColumn[] = [
 
 const SHUTDOWN_DEFAULTS = SETTINGS_DEFAULTS.shutdown;
 const STARTUP_DEFAULTS = SETTINGS_DEFAULTS.startup;
+
+// Every dotted path this tab writes (mirrors the setPath calls in onSave), so
+// a rejection on any of them — even one no field here displays inline — still
+// has somewhere to surface.
+const TAB_PATHS = [
+  "shutdown.shutdown_duration",
+  "shutdown.auto_power_off",
+  "startup.duration",
+  "startup.startup_exit_temp",
+  "startup.prime_on_startup",
+  "startup.pwm_duty_cycle",
+  "startup.smartstart.enabled",
+  "startup.smartstart.exit_temp",
+  "startup.smartstart.temp_range_list",
+  "startup.smartstart.profiles",
+  "startup.start_to_mode.after_startup_mode",
+  "startup.start_to_mode.primary_setpoint",
+  "startup.start_to_mode.start_to_hold_prompt",
+];
 
 type Startup = {
   shutdown_duration: number;
@@ -87,7 +107,7 @@ function readStartup(s: Settings): Startup {
 
 export function StartupTab() {
   const { settings } = useOutletContext<{ settings: Settings; mode: string }>();
-  const { save, saving, status } = useSaveSettings();
+  const { save, saving, status, errors } = useSaveSettings();
   // Held on SettingsShell, so an unfinished edit survives a trip to another tab.
   const { value: v, setValue: setV, dirty, markSaved } = useSettingsDraft("startup", readStartup);
 
@@ -172,6 +192,7 @@ export function StartupTab() {
           label="Shutdown Duration"
           value={v.shutdown_duration}
           onChange={(n) => set("shutdown_duration", n)}
+          error={errorFor(errors, "shutdown.shutdown_duration")}
           min={0}
           suffix="s"
         />
@@ -188,6 +209,7 @@ export function StartupTab() {
           label="Duration"
           value={v.duration}
           onChange={(n) => set("duration", n)}
+          error={errorFor(errors, "startup.duration")}
           min={0}
           suffix="s"
         />
@@ -202,6 +224,7 @@ export function StartupTab() {
             label="Startup Exit Temp"
             value={v.startup_exit_temp}
             onChange={(n) => set("startup_exit_temp", n)}
+            error={errorFor(errors, "startup.startup_exit_temp")}
             min={0}
             suffix="°"
             hint="0 = disabled"
@@ -218,6 +241,7 @@ export function StartupTab() {
             label="Prime on Startup"
             value={v.prime_on_startup}
             onChange={(n) => set("prime_on_startup", n)}
+            error={errorFor(errors, "startup.prime_on_startup")}
             min={0}
             max={200}
             hint="0 = disabled"
@@ -229,6 +253,7 @@ export function StartupTab() {
             label="PWM Duty Cycle"
             value={v.pwm_duty_cycle}
             onChange={(n) => set("pwm_duty_cycle", n)}
+            error={errorFor(errors, "startup.pwm_duty_cycle")}
             min={0}
             max={100}
             suffix="%"
@@ -247,6 +272,7 @@ export function StartupTab() {
           label="Exit Temp"
           value={v.smartstart_exit_temp}
           onChange={(n) => set("smartstart_exit_temp", n)}
+          error={errorFor(errors, "startup.smartstart.exit_temp")}
           min={0}
           suffix="°"
         />
@@ -282,6 +308,7 @@ export function StartupTab() {
               label="Primary Setpoint"
               value={v.primary_setpoint}
               onChange={(n) => set("primary_setpoint", n)}
+              error={errorFor(errors, "startup.start_to_mode.primary_setpoint")}
               // index.html:819 — the bound is dynamic, read off the Safety tab.
               min={settings.safety?.maxstartuptemp ?? SETTINGS_DEFAULTS.safety.maxstartuptemp}
               max={settings.safety?.maxtemp ?? SETTINGS_DEFAULTS.safety.maxtemp}
@@ -294,7 +321,14 @@ export function StartupTab() {
             />
           </>
         )}
-        <SaveBar onSave={onSave} saving={saving} status={status} dirty={dirty} />
+        <SaveBar
+          onSave={onSave}
+          saving={saving}
+          status={status}
+          dirty={dirty}
+          errors={errors}
+          paths={TAB_PATHS}
+        />
       </Section>
     </>
   );

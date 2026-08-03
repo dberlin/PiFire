@@ -1,3 +1,5 @@
+import { unmatchedErrors } from "../../helpers/settings/fieldErrors";
+import type { SaveFieldError } from "../../helpers/settings/settingsApi";
 import type { SaveStatus } from "../../helpers/settings/useSaveSettings";
 
 /**
@@ -14,6 +16,8 @@ export function SaveBar({
   saving,
   status,
   dirty = false,
+  errors = [],
+  paths = [],
 }: {
   onSave: () => void | Promise<void>;
   saving: boolean;
@@ -23,6 +27,10 @@ export function SaveBar({
    *  pill (helpers/settings/settingsDrafts.ts), so "still on screen" no longer
    *  implies "already saved". */
   dirty?: boolean;
+  /** The last save attempt's per-field rejections. */
+  errors?: SaveFieldError[];
+  /** Every path this tab writes, so errors no field on it claims still surface. */
+  paths?: string[];
 }) {
   return (
     <div className="pf-settings-actions">
@@ -36,6 +44,11 @@ export function SaveBar({
           {status.message}
         </p>
       )}
+      {unmatchedErrors(errors, paths).map((e) => (
+        <p key={e.path} className="pf-settings-error-text" role="alert">
+          {e.path}: {e.message}
+        </p>
+      ))}
     </div>
   );
 }

@@ -4,19 +4,22 @@ import { StartupTab } from "../../../../../src/components/settings/tabs/StartupT
 import { renderRoute } from "../../../test-utils";
 
 const saveMock = rs.fn().mockResolvedValue(true);
+const useSaveSettingsMock = rs.fn();
 
 // Mock the useSaveSettings module
 rs.mock("../../../../../src/helpers/settings/useSaveSettings", () => ({
-  useSaveSettings: () => ({
-    save: saveMock,
-    saving: false,
-    status: { kind: "idle" } as const,
-    baseUrl: "",
-  }),
+  useSaveSettings: () => useSaveSettingsMock(),
 }));
 
 beforeEach(() => {
   saveMock.mockClear();
+  useSaveSettingsMock.mockReset().mockReturnValue({
+    save: saveMock,
+    saving: false,
+    status: { kind: "idle" } as const,
+    errors: [],
+    baseUrl: "",
+  });
 });
 
 // NumberField wraps its input in a <label> whose text also carries the suffix,
@@ -609,6 +612,81 @@ describe("StartupTab", () => {
         "primary_setpoint",
         "start_to_hold_prompt",
       ]);
+    });
+  });
+
+  describe("per-field save errors", () => {
+    const fixture = () => ({
+      settings: {
+        platform: { dc_fan: true },
+        shutdown: { shutdown_duration: 60, auto_power_off: false },
+        startup: {
+          duration: 60,
+          startup_exit_temp: 150,
+          prime_on_startup: 0,
+          pwm_duty_cycle: 50,
+          smartstart: { enabled: false, exit_temp: 150 },
+          start_to_mode: {
+            after_startup_mode: "Smoke",
+            primary_setpoint: 225,
+            start_to_hold_prompt: false,
+          },
+        },
+        pwm: { min_duty_cycle: 20, max_duty_cycle: 100 },
+      },
+      mode: "Stop",
+    });
+
+    // Would still pass if the error were rendered anywhere at all — e.g. only
+    // under the SaveBar — rather than wired to the field that caused it, so
+    // this reaches the input via its own aria-describedby rather than
+    // grabbing the first role="alert" on the page.
+    it("puts the backend's rejection on the field that caused it", () => {
+      useSaveSettingsMock.mockReturnValue({
+        save: saveMock,
+        saving: false,
+        status: { kind: "error", message: "startup.duration: Input should be a valid integer" },
+        errors: [{ path: "startup.duration", message: "Input should be a valid integer" }],
+        baseUrl: "",
+      });
+
+      renderRoute(<StartupTab />, fixture());
+
+      const durationInput = inputFor("Duration");
+      const describedIds = (durationInput.getAttribute("aria-describedby") ?? "").split(" ");
+      const errorEl = describedIds
+        .map((id) => document.getElementById(id))
+        .find((el) => el?.getAttribute("role") === "alert");
+      expect(errorEl).toBeDefined();
+      expect(errorEl?.textContent).toBe("Input should be a valid integer");
+      expect(durationInput).toHaveAttribute("aria-invalid", "true");
+
+      // A field this tab does not write is untouched by the rejection.
+      const shutdownInput = inputFor("Shutdown Duration");
+      expect(shutdownInput).not.toHaveAttribute("aria-invalid");
+    });
+
+    // A cross-section rule can reject a path this tab does not render at
+    // all. Dropping it (rather than falling through to unmatchedErrors)
+    // would leave a failed save with no visible reason on screen.
+    it("still shows an error whose path no field on this tab claims", () => {
+      useSaveSettingsMock.mockReturnValue({
+        save: saveMock,
+        saving: false,
+        // Deliberately distinct from the per-field text below: the summary
+        // line comes from normalizeSaveError, the per-field line from
+        // unmatchedErrors — a test where both happen to read the same string
+        // would pass even if the unmatched-error rendering were deleted.
+        status: { kind: "error", message: "Save failed." },
+        errors: [{ path: "pwm.frequency", message: "Input should be greater than 0" }],
+        baseUrl: "",
+      });
+
+      renderRoute(<StartupTab />, fixture());
+
+      const alerts = screen.getAllByRole("alert").map((el) => el.textContent);
+      expect(alerts).toContain("pwm.frequency: Input should be greater than 0");
+      expect(alerts).toContain("Save failed.");
     });
   });
 });
