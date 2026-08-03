@@ -2,6 +2,7 @@ import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
@@ -17,13 +18,8 @@ const SMARTSTART_COLUMNS: RangeProfileColumn[] = [
   { key: "p_mode", label: "P-Mode", min: 0, max: 9 },
 ];
 
-const DEFAULT_SMARTSTART_TEMPS = [60, 80, 90];
-const DEFAULT_SMARTSTART_PROFILES: Record<string, number>[] = [
-  { startuptime: 360, augerontime: 15, p_mode: 0 },
-  { startuptime: 360, augerontime: 15, p_mode: 1 },
-  { startuptime: 240, augerontime: 15, p_mode: 3 },
-  { startuptime: 240, augerontime: 15, p_mode: 5 },
-];
+const SHUTDOWN_DEFAULTS = SETTINGS_DEFAULTS.shutdown;
+const STARTUP_DEFAULTS = SETTINGS_DEFAULTS.startup;
 
 type Startup = {
   shutdown_duration: number;
@@ -53,25 +49,34 @@ function readStartup(s: Settings): Startup {
   const ss = st.smartstart ?? {};
   const stm = st.start_to_mode ?? {};
   return {
-    shutdown_duration: sh.shutdown_duration ?? 60,
+    shutdown_duration: sh.shutdown_duration ?? SHUTDOWN_DEFAULTS.shutdown_duration,
     auto_power_off: !!sh.auto_power_off,
-    duration: st.duration ?? 60,
+    duration: st.duration ?? STARTUP_DEFAULTS.duration,
+    // Pre-fill for the box, not a schema default: the stored 0 means the
+    // exit-temp check is off, and this is the value to offer when it is
+    // turned on.
     startup_exit_temp: st.startup_exit_temp ?? 150,
-    prime_on_startup: st.prime_on_startup ?? 0,
+    prime_on_startup: st.prime_on_startup ?? STARTUP_DEFAULTS.prime_on_startup,
+    // Pre-fill for the box, not a schema default: offered only when the
+    // stored exit temp is 0 ("disabled") and the user switches it on.
     exit_temp_default: (st.startup_exit_temp ?? 0) > 0 ? (st.startup_exit_temp as number) : 140,
+    // Pre-fill for the box, not a schema default: offered only when the
+    // stored prime amount is 0 ("disabled") and the user switches it on.
     prime_default: (st.prime_on_startup ?? 0) > 0 ? (st.prime_on_startup as number) : 10,
-    pwm_duty_cycle: st.pwm_duty_cycle ?? 50,
+    pwm_duty_cycle: st.pwm_duty_cycle ?? STARTUP_DEFAULTS.pwm_duty_cycle,
     smartstart_enabled: !!ss.enabled,
-    smartstart_exit_temp: ss.exit_temp ?? 150,
+    smartstart_exit_temp: ss.exit_temp ?? STARTUP_DEFAULTS.smartstart.exit_temp,
     // Cloned (never aliased into the widget's onChange arrays) — the widget
     // emits fresh arrays on edit, but our local state must not share
     // references with `settings`.
-    smartstartTemps: structuredClone((ss.temp_range_list ?? DEFAULT_SMARTSTART_TEMPS) as number[]),
-    smartstartProfiles: structuredClone(
-      (ss.profiles ?? DEFAULT_SMARTSTART_PROFILES) as Record<string, number>[],
+    smartstartTemps: structuredClone(
+      (ss.temp_range_list ?? STARTUP_DEFAULTS.smartstart.temp_range_list) as number[],
     ),
-    after_startup_mode: stm.after_startup_mode ?? "Smoke",
-    primary_setpoint: stm.primary_setpoint ?? 225,
+    smartstartProfiles: structuredClone(
+      (ss.profiles ?? STARTUP_DEFAULTS.smartstart.profiles) as unknown as Record<string, number>[],
+    ),
+    after_startup_mode: stm.after_startup_mode ?? STARTUP_DEFAULTS.start_to_mode.after_startup_mode,
+    primary_setpoint: stm.primary_setpoint ?? STARTUP_DEFAULTS.start_to_mode.primary_setpoint,
     start_to_hold_prompt: !!stm.start_to_hold_prompt,
   };
 }
@@ -111,8 +116,8 @@ export function StartupTab() {
     // Apply coercions to pwm_duty_cycle: clamp to [settings.pwm.min_duty_cycle, settings.pwm.max_duty_cycle]
     let pwm_duty_cycle = v.pwm_duty_cycle;
     const pwm_bounds = settings.pwm ?? {};
-    const min_duty_cycle = pwm_bounds.min_duty_cycle ?? 20;
-    const max_duty_cycle = pwm_bounds.max_duty_cycle ?? 100;
+    const min_duty_cycle = pwm_bounds.min_duty_cycle ?? SETTINGS_DEFAULTS.pwm.min_duty_cycle;
+    const max_duty_cycle = pwm_bounds.max_duty_cycle ?? SETTINGS_DEFAULTS.pwm.max_duty_cycle;
     if (pwm_duty_cycle < min_duty_cycle) pwm_duty_cycle = min_duty_cycle;
     if (pwm_duty_cycle > max_duty_cycle) pwm_duty_cycle = max_duty_cycle;
 
@@ -255,9 +260,8 @@ export function StartupTab() {
               value={v.primary_setpoint}
               onChange={(n) => set("primary_setpoint", n)}
               // index.html:819 — the bound is dynamic, read off the Safety tab.
-              // Defaults match settings_schema.py:48-49.
-              min={settings.safety?.maxstartuptemp ?? 100}
-              max={settings.safety?.maxtemp ?? 550}
+              min={settings.safety?.maxstartuptemp ?? SETTINGS_DEFAULTS.safety.maxstartuptemp}
+              max={settings.safety?.maxtemp ?? SETTINGS_DEFAULTS.safety.maxtemp}
               suffix="°"
             />
             <Toggle

@@ -1,5 +1,6 @@
 import { setPath } from "../../../helpers/settings/delta";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
@@ -19,13 +20,13 @@ type Safety = {
 function readSafety(s: Settings): Safety {
   const x = s.safety ?? {};
   return {
-    minstartuptemp: x.minstartuptemp ?? 75,
-    maxstartuptemp: x.maxstartuptemp ?? 100,
-    maxtemp: x.maxtemp ?? 550,
-    reigniteretries: x.reigniteretries ?? 1,
+    minstartuptemp: x.minstartuptemp ?? SETTINGS_DEFAULTS.safety.minstartuptemp,
+    maxstartuptemp: x.maxstartuptemp ?? SETTINGS_DEFAULTS.safety.maxstartuptemp,
+    maxtemp: x.maxtemp ?? SETTINGS_DEFAULTS.safety.maxtemp,
+    reigniteretries: x.reigniteretries ?? SETTINGS_DEFAULTS.safety.reigniteretries,
     startup_check: !!x.startup_check,
     allow_manual_changes: !!x.allow_manual_changes,
-    manual_override_time: x.manual_override_time ?? 30,
+    manual_override_time: x.manual_override_time ?? SETTINGS_DEFAULTS.safety.manual_override_time,
   };
 }
 

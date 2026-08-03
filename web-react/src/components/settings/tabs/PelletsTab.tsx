@@ -1,6 +1,7 @@
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import type { Settings, SettingsFlag } from "../../../helpers/settings/settingsApi";
+import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
@@ -23,11 +24,11 @@ function readPellets(s: Settings): Pellets {
   const gl = s.globals ?? {};
   return {
     warning_enabled: !!pl.warning_enabled,
-    warning_time: pl.warning_time ?? 0,
-    warning_level: pl.warning_level ?? 0,
-    empty: pl.empty ?? 0,
-    full: pl.full ?? 0,
-    augerrate: gl.augerrate ?? 0,
+    warning_time: pl.warning_time ?? SETTINGS_DEFAULTS.pelletlevel.warning_time,
+    warning_level: pl.warning_level ?? SETTINGS_DEFAULTS.pelletlevel.warning_level,
+    empty: pl.empty ?? SETTINGS_DEFAULTS.pelletlevel.empty,
+    full: pl.full ?? SETTINGS_DEFAULTS.pelletlevel.full,
+    augerrate: gl.augerrate ?? SETTINGS_DEFAULTS.globals.augerrate,
     prime_ignition: !!gl.prime_ignition,
   };
 }

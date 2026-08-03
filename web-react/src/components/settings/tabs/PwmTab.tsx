@@ -4,6 +4,7 @@ import { clampToBounds } from "../../../helpers/settings/bounds";
 import { setPath } from "../../../helpers/settings/delta";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
@@ -12,14 +13,7 @@ import { Toggle } from "../fields/Toggle";
 import { type RangeProfileColumn, RangeProfileTable } from "../RangeProfileTable";
 import { SaveBar } from "../SaveBar";
 
-const DEFAULT_PWM_TEMPS = [3, 7, 10, 15];
-const DEFAULT_PWM_PROFILES: Record<string, number>[] = [
-  { duty_cycle: 20 },
-  { duty_cycle: 35 },
-  { duty_cycle: 50 },
-  { duty_cycle: 75 },
-  { duty_cycle: 100 },
-];
+const PWM_DEFAULTS = SETTINGS_DEFAULTS.pwm;
 
 type Pwm = {
   pwm_control: boolean;
@@ -35,15 +29,19 @@ function readPwm(settings: Settings): Pwm {
   const p = settings.pwm ?? {};
   return {
     pwm_control: !!p.pwm_control,
-    update_time: p.update_time ?? 10,
-    min_duty_cycle: p.min_duty_cycle ?? 20,
-    max_duty_cycle: p.max_duty_cycle ?? 100,
-    frequency: p.frequency ?? 100,
+    update_time: p.update_time ?? PWM_DEFAULTS.update_time,
+    min_duty_cycle: p.min_duty_cycle ?? PWM_DEFAULTS.min_duty_cycle,
+    max_duty_cycle: p.max_duty_cycle ?? PWM_DEFAULTS.max_duty_cycle,
+    frequency: p.frequency ?? PWM_DEFAULTS.frequency,
     // Cloned (never aliased into the widget's onChange arrays) — the widget
     // emits fresh arrays on edit, but our local state must not share
     // references with `settings`.
-    temp_range_list: structuredClone((p.temp_range_list ?? DEFAULT_PWM_TEMPS) as number[]),
-    profiles: structuredClone((p.profiles ?? DEFAULT_PWM_PROFILES) as Record<string, number>[]),
+    temp_range_list: structuredClone(
+      (p.temp_range_list ?? PWM_DEFAULTS.temp_range_list) as number[],
+    ),
+    profiles: structuredClone(
+      (p.profiles ?? PWM_DEFAULTS.profiles) as unknown as Record<string, number>[],
+    ),
   };
 }
 
@@ -115,7 +113,7 @@ export function PwmTab() {
       d,
       "startup.pwm_duty_cycle",
       clampToBounds(
-        settings.startup?.pwm_duty_cycle ?? 100,
+        settings.startup?.pwm_duty_cycle ?? SETTINGS_DEFAULTS.startup.pwm_duty_cycle,
         pwm.min_duty_cycle,
         pwm.max_duty_cycle,
       ),

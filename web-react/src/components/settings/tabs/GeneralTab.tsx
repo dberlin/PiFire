@@ -2,6 +2,7 @@ import { useOutletContext } from "react-router";
 import { accentPath, readAccent, storedAccentName } from "../../../helpers/settings/accent";
 import { setPath } from "../../../helpers/settings/delta";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import type { AccentName } from "../../../helpers/types";
@@ -28,11 +29,9 @@ type General = {
 
 function readGeneral(s: Settings): General {
   return {
-    grill_name: s.globals?.grill_name ?? "",
+    grill_name: s.globals?.grill_name ?? SETTINGS_DEFAULTS.globals.grill_name,
     accent_theme: storedAccentName(readAccent(s)),
-    // Same default as common/common.py's display_sleep_timeout() and the
-    // schema (settings_schema.py: ge=0, default 300).
-    sleep_timeout: s.display?.sleep_timeout ?? 300,
+    sleep_timeout: s.display?.sleep_timeout ?? SETTINGS_DEFAULTS.display.sleep_timeout,
   };
 }
 

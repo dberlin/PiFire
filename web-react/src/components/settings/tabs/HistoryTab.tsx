@@ -1,6 +1,7 @@
 import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import type { ProbeChartConfig } from "../../../helpers/settings/settingsTypes.gen";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
@@ -66,19 +67,13 @@ function computeLabelPrefixes(probeConfig: ProbeConfig): Record<string, string> 
   return prefixes;
 }
 
-// Fallbacks mirror common/defaults.py's history_page block -- a missing key
-// means "never saved", and the server will be using the default, so the tab
-// has to show the same number or the next save silently rewrites it.
-const DEFAULT_DATAPOINTS = 10000;
-const DEFAULT_FIDELITY_DEGREES = 2.0;
-
 function readHistory(s: Settings): History {
   const hp = s.history_page ?? {};
   const g = s.globals ?? {};
   return {
-    minutes: hp.minutes ?? 240,
-    datapoints: hp.datapoints ?? DEFAULT_DATAPOINTS,
-    fidelity_degrees: hp.fidelity_degrees ?? DEFAULT_FIDELITY_DEGREES,
+    minutes: hp.minutes ?? SETTINGS_DEFAULTS.history_page.minutes,
+    datapoints: hp.datapoints ?? SETTINGS_DEFAULTS.history_page.datapoints,
+    fidelity_degrees: hp.fidelity_degrees ?? SETTINGS_DEFAULTS.history_page.fidelity_degrees,
     clearhistoryonstart: !!hp.clearhistoryonstart,
     autorefresh: hp.autorefresh === "on",
     ext_data: !!g.ext_data,

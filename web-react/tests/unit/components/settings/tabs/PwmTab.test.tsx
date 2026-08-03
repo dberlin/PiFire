@@ -78,9 +78,11 @@ describe("PwmTab", () => {
     // min_duty_cycle default (20) also collides with the default profiles'
     // 1st duty_cycle (20).
     expect(screen.getAllByDisplayValue("20")[0]).toBeInTheDocument();
-    // max_duty_cycle and frequency both default to 100, and the default
-    // profiles' 5th duty_cycle is also 100.
-    expect(screen.getAllByDisplayValue("100")).toHaveLength(3);
+    // max_duty_cycle defaults to 100, also the default profiles' 5th
+    // duty_cycle.
+    expect(screen.getAllByDisplayValue("100")).toHaveLength(2);
+    // frequency defaults to 25000, not 100.
+    expect(screen.getByDisplayValue("25000")).toBeInTheDocument();
 
     // The table itself: default temp_range_list [3, 7, 10, 15] and default
     // duty_cycle profiles [20, 35, 50, 75, 100].

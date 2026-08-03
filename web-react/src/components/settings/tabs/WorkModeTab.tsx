@@ -2,6 +2,7 @@ import { useOutletContext } from "react-router";
 import { setPath } from "../../../helpers/settings/delta";
 import { hasDcFan } from "../../../helpers/settings/platform";
 import type { Settings } from "../../../helpers/settings/settingsApi";
+import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";
 import { useSettingsDraft } from "../../../helpers/settings/settingsDrafts";
 import { useSaveSettings } from "../../../helpers/settings/useSaveSettings";
 import { NumberField } from "../fields/NumberField";
@@ -43,28 +44,28 @@ function readWorkMode(s: Settings): WorkMode {
   const kw = s.keep_warm ?? {};
   return {
     cycle_data: {
-      HoldCycleTime: cd.HoldCycleTime ?? 10,
-      SmokeOnCycleTime: cd.SmokeOnCycleTime ?? 5,
-      SmokeOffCycleTime: cd.SmokeOffCycleTime ?? 5,
-      PMode: cd.PMode ?? 0,
-      u_min: cd.u_min ?? 0,
-      u_max: cd.u_max ?? 100,
+      HoldCycleTime: cd.HoldCycleTime ?? SETTINGS_DEFAULTS.cycle_data.HoldCycleTime,
+      SmokeOnCycleTime: cd.SmokeOnCycleTime ?? SETTINGS_DEFAULTS.cycle_data.SmokeOnCycleTime,
+      SmokeOffCycleTime: cd.SmokeOffCycleTime ?? SETTINGS_DEFAULTS.cycle_data.SmokeOffCycleTime,
+      PMode: cd.PMode ?? SETTINGS_DEFAULTS.cycle_data.PMode,
+      u_min: cd.u_min ?? SETTINGS_DEFAULTS.cycle_data.u_min,
+      u_max: cd.u_max ?? SETTINGS_DEFAULTS.cycle_data.u_max,
       LidOpenDetectEnabled: !!cd.LidOpenDetectEnabled,
-      LidOpenThreshold: cd.LidOpenThreshold ?? 30,
-      LidOpenPauseTime: cd.LidOpenPauseTime ?? 60,
+      LidOpenThreshold: cd.LidOpenThreshold ?? SETTINGS_DEFAULTS.cycle_data.LidOpenThreshold,
+      LidOpenPauseTime: cd.LidOpenPauseTime ?? SETTINGS_DEFAULTS.cycle_data.LidOpenPauseTime,
       FanPidEnabled: !!cd.FanPidEnabled,
     },
     smoke_plus: {
       enabled: !!sp.enabled,
-      min_temp: sp.min_temp ?? 150,
-      max_temp: sp.max_temp ?? 275,
-      on_time: sp.on_time ?? 5,
-      off_time: sp.off_time ?? 5,
-      duty_cycle: sp.duty_cycle ?? 50,
+      min_temp: sp.min_temp ?? SETTINGS_DEFAULTS.smoke_plus.min_temp,
+      max_temp: sp.max_temp ?? SETTINGS_DEFAULTS.smoke_plus.max_temp,
+      on_time: sp.on_time ?? SETTINGS_DEFAULTS.smoke_plus.on_time,
+      off_time: sp.off_time ?? SETTINGS_DEFAULTS.smoke_plus.off_time,
+      duty_cycle: sp.duty_cycle ?? SETTINGS_DEFAULTS.smoke_plus.duty_cycle,
       fan_ramp: !!sp.fan_ramp,
     },
     keep_warm: {
-      temp: kw.temp ?? 150,
+      temp: kw.temp ?? SETTINGS_DEFAULTS.keep_warm.temp,
       s_plus: !!kw.s_plus,
     },
   };
