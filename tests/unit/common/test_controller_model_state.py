@@ -305,6 +305,26 @@ def test_a_full_identifier_bank_round_trips():
     assert store.load("mpc")["revision"] == 3
 
 
+def test_a_bank_larger_than_the_identifier_will_ever_build_still_fits():
+    # A bank of this size (70 candidates) exceeds anything the identifier is
+    # expected to grow to; it exists to discriminate the raised cap from the
+    # old one, not to model a realistic snapshot.
+    import numpy as np
+
+    rng = np.random.default_rng(1)
+    n = 70
+    snapshot = {
+        "revision": 3,
+        "Theta": rng.normal(size=(n, 3)).tolist(),
+        "P": rng.normal(size=(n, 3, 3)).tolist(),
+        "resid_ew": rng.normal(size=n).tolist(),
+        "trusted": {"K": 1.23, "tau": 3750.0, "theta": 95.0},
+    }
+    store, _ = _store()
+    assert store.save("mpc", snapshot) is True
+    assert store.load("mpc") == snapshot
+
+
 def test_round_trips_through_the_real_datastore_seam(ds):
     # The fake in every other test matches read_generic_key's documented
     # behavior on purpose, but only this test exercises the actual seam:
