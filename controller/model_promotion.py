@@ -265,8 +265,30 @@ _HORIZON_CAP_S = 2400.0
 #: steps at t_step = 1 covers 96 s, short of even the shipped default model's
 #: own 150 s coast, so refusing on it would reject every model at a fine t_step
 #: and blame the model for an operator's setting. Where it truncates the
-#: horizon, controller/mpc.py's `_warn_about_model` says so and names t_step.
+#: horizon, controller/mpc.py's `_warn_about_model` says so.
 _HORIZON_CAP_STEPS = 96
+
+#: The furthest ahead this controller can be configured to plan, in seconds.
+#:
+#: Neither bound above lowers the configured horizon -- both hold down the
+#: raise, and `built_n_horizon` takes an outer max against `n_horizon` -- so
+#: coverage is at least `n_horizon * t_step` whatever a model asks for, and the
+#: most any configuration reaches is the product of the two settings' maxima:
+#:
+#:     n_horizon  option_max 60   x   t_step  option_max 60.0  =  3600 s
+#:
+#: Both come from the `mpc` controller's option list in
+#: controller/controllers.json. This is the number that decides whether a coast
+#: is reachable at ALL, and so whether the operator has anything to change; the
+#: caps above only decide how much of the reach a model gets without being
+#: asked for. Reading it as _HORIZON_CAP_S instead would tell an operator whose
+#: settings already span 3000 s that their 2600 s coast is out of range.
+#:
+#: Derived here rather than read from the schema so this module stays a pure
+#: computation over a parameter dict, and pinned to the schema by
+#: tests/unit/mpc/test_model_promotion.py, which fails if either option_max
+#: moves.
+_MAX_CONFIGURABLE_HORIZON_S = 60 * 60.0
 
 
 @dataclass

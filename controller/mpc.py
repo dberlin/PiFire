@@ -31,7 +31,7 @@ import numpy as np
 
 from controller.base import ControllerBase
 from controller.model_promotion import Verdict as _Verdict
-from controller.model_promotion import _HORIZON_CAP_S, built_n_horizon, longest_braking_distance
+from controller.model_promotion import _MAX_CONFIGURABLE_HORIZON_S, built_n_horizon, longest_braking_distance
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE, MODEL_SCHEMA
 from controller.mpc_allocator import allocate
 
@@ -265,34 +265,36 @@ def _warn_about_model(cfg):
         # A model that predicts no end to the coast has no number to report, and
         # is the one case where no horizon is enough at any length.
         coast = f"for {brake:.0f} s" if math.isfinite(brake) else "with no end this model predicts"
+        # What decides whether the operator has anything to change is whether ANY
+        # setting spans this coast, not which of the two caps truncated the
+        # raise. Both caps hold down the raise only, so a configured horizon is
+        # always built in full -- which means a coast past the caps can still be
+        # inside a configuration, and saying otherwise sends an operator who
+        # could fix this away to refit a model that is not the problem.
         if covered >= brake:
             reach = f"planning over {steps} steps ({covered:.0f} s) instead"
-        elif brake <= _HORIZON_CAP_S:
-            # The shortfall is _HORIZON_CAP_STEPS truncating a demand the seconds
-            # bound would have allowed, which only happens at a t_step fine
-            # enough to turn an ordinary coast into an extraordinary NLP. A
-            # longer t_step spans the same seconds in fewer steps, so it buys
-            # the missing window at no extra solve cost. It is offered rather
-            # than taken because it also re-discretizes the model the MPC
-            # solves -- a larger change to controller behaviour than lengthening
-            # the window, and not one to make on a grill's behalf.
+        elif brake <= _MAX_CONFIGURABLE_HORIZON_S:
+            # A setting exists, so the useful thing to say is which one and how
+            # far. Both levers are named because either reaches it, and t_step
+            # is marked as the cheaper because it spans the same window in fewer
+            # steps -- n_horizon buys the same seconds by growing the NLP. It is
+            # offered rather than taken: t_step also re-discretizes the model the
+            # MPC solves, a larger change to controller behaviour than
+            # lengthening the window and not one to make on a grill's behalf.
             reach = (
-                f"planning over {steps} steps ({covered:.0f} s), the largest solve this controller "
-                "builds, which does not reach the end of that coast. Raise t_step in "
-                "Settings > Controller: it spans the same window in fewer steps, so the horizon "
-                "lengthens and the solve does not grow"
+                f"planning over {steps} steps ({covered:.0f} s), which does not reach the end of "
+                f"that coast. Raise n_horizon and/or t_step in Settings > Controller until their "
+                f"product reaches {brake:.0f} s; t_step is the cheaper of the two, since a longer "
+                "step spans the same window in fewer steps and does not grow the solve"
             )
         else:
-            # The seconds bound is what truncated, and no setting moves it: the
-            # horizon is capped at _HORIZON_CAP_S seconds however t_step slices
-            # them, so this coast is outside the range the controller plans for
-            # whatever the configuration. Offering a lever here would be advice
-            # that cannot work.
+            # Past every reachable configuration, so there is no lever to offer
+            # and naming one would be advice that cannot work.
             reach = (
-                f"planning over {steps} steps ({covered:.0f} s), the furthest ahead this controller "
-                f"plans at any setting. A coast past {_HORIZON_CAP_S:.0f} s is longer than this "
-                "controller is built to brake, so it is the model that is out of range and not the "
-                "configuration; refit this grill with controller/update_mpc.py"
+                f"planning over {steps} steps ({covered:.0f} s). No setting reaches the end of this "
+                f"coast -- the furthest this controller can be configured to plan is "
+                f"{_MAX_CONFIGURABLE_HORIZON_S:.0f} s -- so it is the model that is out of range "
+                "and not the configuration; refit this grill with controller/update_mpc.py"
             )
         print(
             f"[mpc] configured prediction horizon is {horizon:.0f} s but the chamber keeps rising "

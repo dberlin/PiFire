@@ -1,13 +1,17 @@
 """What may replace a model that is currently driving a fire."""
 
+import json
 import math
+import pathlib
 
 import pytest
 
 from controller.model_promotion import (
     PROMOTION_BOUNDS,
     _COAST_BOUND,
+    _HORIZON_CAP_S,
     _HORIZON_CAP_STEPS,
+    _MAX_CONFIGURABLE_HORIZON_S,
     _model_coast,
     braking_distance,
     built_n_horizon,
@@ -613,6 +617,41 @@ def test_the_step_bound_holds_the_build_but_never_the_refusal():
 def test_the_step_bound_does_not_lower_a_horizon_the_operator_configured():
     """Like the seconds bound, it holds down the raise and not the setting."""
     assert built_n_horizon(GOOD, n_horizon=200, t_step=25.0) == 200
+
+
+def test_the_reachable_horizon_matches_the_settings_schema():
+    """Pins `_MAX_CONFIGURABLE_HORIZON_S` to the two options it is a product of.
+
+    It decides whether a coast is reachable at all, and so whether an operator
+    reading a short-horizon warning is told to change a setting or to refit the
+    model. That answer is only right while the number matches the ranges the
+    settings UI actually offers, and nothing else would notice either
+    `option_max` moving -- the constant lives in code and the ranges live in a
+    JSON blob loaded by a different process.
+    """
+    schema = json.loads((pathlib.Path(__file__).parents[3] / "controller" / "controllers.json").read_text())
+
+    found = {}
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("option_name") in ("n_horizon", "t_step"):
+                found[node["option_name"]] = node
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(schema)
+    assert set(found) == {"n_horizon", "t_step"}, "the options this constant is derived from are gone"
+
+    reachable = float(found["n_horizon"]["option_max"]) * float(found["t_step"]["option_max"])
+    assert reachable == _MAX_CONFIGURABLE_HORIZON_S
+
+    # And the caps are genuinely below it, which is what makes the distinction
+    # the warning draws a real one rather than a branch that never fires.
+    assert _HORIZON_CAP_S < _MAX_CONFIGURABLE_HORIZON_S
 
 
 def test_the_horizon_built_never_reaches_past_the_seconds_bound():

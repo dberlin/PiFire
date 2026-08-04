@@ -28,6 +28,7 @@ import numpy as np
 from scipy.optimize import least_squares
 
 from controller.model_promotion import (
+    _MAX_CONFIGURABLE_HORIZON_S,
     T_FLOOR_C,
     T_HAZARD_C,
     built_n_horizon,
@@ -385,18 +386,24 @@ def main():
         # quicker model from shortening the horizon again.
         steps = built_n_horizon(payload, n_horizon=_DEFAULTS["n_horizon"], t_step=_DEFAULTS["t_step"])
         covered = steps * float(_DEFAULTS["t_step"])
-        # This reads the shipped t_step, where _HORIZON_CAP_S // t_step is
-        # exactly _HORIZON_CAP_STEPS, so the step bound has nothing left to
-        # truncate and cannot be why the horizon falls short here. The only
-        # shortfall reachable on this path is a coast past the seconds bound,
-        # which no setting lengthens -- so the advice this prints is about the
-        # model, and t_step is deliberately not offered.
-        outcome = (
-            "n_horizon does not need changing"
-            if covered >= brake
-            else f"that spans {covered:.0f} s, the furthest ahead it plans at any setting, so this\n"
-            f"      fit's coast is longer than the controller is built to brake"
-        )
+        # Read against every reachable configuration, not against the defaults
+        # this line happens to print: the caps hold down the raise only, so a
+        # coast past them can still sit inside a horizon somebody configures.
+        # Which of the two is true decides whether there is anything to change.
+        if covered >= brake:
+            outcome = "n_horizon does not need changing"
+        elif brake <= _MAX_CONFIGURABLE_HORIZON_S:
+            outcome = (
+                f"that spans {covered:.0f} s. Raise n_horizon and/or t_step in\n"
+                f"      Settings > Controller until their product reaches {brake:.0f} s; a longer\n"
+                f"      t_step is the cheaper of the two, spanning the same window in fewer steps"
+            )
+        else:
+            outcome = (
+                f"that spans {covered:.0f} s. No setting reaches this coast -- the furthest this\n"
+                f"      controller can be configured to plan is {_MAX_CONFIGURABLE_HORIZON_S:.0f} s"
+                f" -- so this fit's coast is\n      longer than the controller is built to brake"
+            )
         print(
             f"NOTE: the chamber keeps rising for {brake:.0f} s after a full fuel cut, past the\n"
             f"      {horizon:.0f} s the default prediction horizon spans. The controller plans over\n"
