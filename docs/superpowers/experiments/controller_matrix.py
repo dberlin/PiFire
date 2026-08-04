@@ -40,9 +40,15 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from common.defaults import default_settings  # noqa: E402
-from controller.grill_sim import GrillSim  # noqa: E402
+from controller.grill_sim import GrillSim, MAKGrillSim  # noqa: E402
 
 OUT = "./docs/superpowers/experiments/_matrix_baseline.json"
+
+# Plants a run may be driven against, by name. Resolved out of this module's
+# globals at call time rather than captured in a mapping here, so a test that
+# substitutes `controller_matrix.GrillSim` is still substituting the plant the
+# loop builds.
+PLANTS = ("GrillSim", "MAKGrillSim")
 
 CYCLE_DATA = {"HoldCycleTime": 20, "u_min": 0.15, "u_max": 0.9, "PMode": 2}
 
@@ -75,6 +81,7 @@ class Scenario:
 
 SCENARIOS = {
     "steady_225": Scenario("steady_225", 3 * 3600 + 1800, [(0, 225.0)]),
+    "steady_325": Scenario("steady_325", 3 * 3600, [(0, 325.0)]),
     "steady_350": Scenario("steady_350", 3 * 3600 + 1800, [(0, 350.0)]),
     "steady_450": Scenario("steady_450", 3 * 3600 + 1800, [(0, 450.0)]),
     "step_225_275": Scenario("step_225_275", 4 * 3600, [(0, 225.0), (2 * 3600, 275.0)]),
@@ -188,7 +195,21 @@ class _SimClock:
         return self.t
 
 
-def run_scenario(controller, scenario, seed):
+def run_scenario(controller, scenario, seed, *, plant="GrillSim", config=None, refit=False):
+    """Drive `controller` through `scenario` on `plant` and score the result.
+
+    `config` is merged over CONTROLLER_CONFIGS[controller] before the core is
+    built. That is how a model an earlier cook learned reaches this one: mpc.py
+    adopts a fit into `cfg` and rebuilds nothing, because production carries it
+    across through the next cook's build from settings -- so a run that starts
+    from learned parameters starts from them at CONSTRUCTION, exactly as the
+    next Hold would, and not by mutating a core that has already sized its
+    horizon and assembled its NLP.
+
+    `refit` runs the end-of-cook refit the same way HoldMode's teardown does,
+    after the metrics above are taken, and reports the gate's verdict and the
+    parameters it left behind. It changes nothing about the run just scored.
+    """
     # Some controllers (pid_sp, pid_ac) read time.time() for their own dt;
     # replacing it with a clock this loop drives makes their dt match the
     # simulated second the loop models, instead of the wall-clock nanoseconds
@@ -201,8 +222,11 @@ def run_scenario(controller, scenario, seed):
     time.time = clock
     try:
         mod = importlib.import_module(f"controller.{controller}")
-        core = mod.Controller(dict(CONTROLLER_CONFIGS[controller]), "F", dict(CYCLE_DATA))
-        plant = GrillSim(seed=seed)
+        core_config = dict(CONTROLLER_CONFIGS[controller])
+        core_config.update(config or {})
+        core = mod.Controller(core_config, "F", dict(CYCLE_DATA))
+        plant_name = plant
+        plant = globals()[plant_name](seed=seed)
         u_min, u_max = CYCLE_DATA["u_min"], CYCLE_DATA["u_max"]
 
         setpoint = _setpoint_at(scenario, 0)
@@ -294,6 +318,7 @@ def run_scenario(controller, scenario, seed):
         result = {
             "controller": controller,
             "scenario": scenario.name,
+            "plant": plant_name,
             "seed": seed,
             "iae": float(np.abs(err).sum()),
             "pct_within_5f": float((np.abs(err) <= 5.0).mean() * 100.0),
@@ -316,26 +341,76 @@ def run_scenario(controller, scenario, seed):
         status = getattr(core, "get_status", lambda: None)()
         if status is not None:
             result["status"] = json.loads(json.dumps(status, allow_nan=False, default=str))
+        cfg = getattr(core, "cfg", None)
+        if cfg is not None and "n_horizon" in cfg:
+            result["configured_n_horizon"] = int(cfg["n_horizon"])
+            # What the NLP was actually assembled with. Before the horizon was
+            # derived from the model's own coast there is no such attribute and
+            # the configured length is the built one.
+            built = getattr(core, "_built_n_horizon", None)
+            result["built_n_horizon"] = int(cfg["n_horizon"]) if built is None else int(built)
+        if refit:
+            result["refit"] = _refit_after_cook(core)
         return result
     finally:
         time.time = real_time_time
 
 
+def _refit_after_cook(core):
+    """Run the end-of-cook refit and report what the gate decided.
+
+    Stdout is captured rather than left to interleave across pool workers: the
+    fitter and the gate both narrate, and those lines are the evidence for why
+    a promotion was refused.
+    """
+    import contextlib
+    import io
+
+    if not hasattr(core, "refit_from_cook"):
+        return None
+    buf = io.StringIO()
+    started = time.perf_counter()
+    with contextlib.redirect_stdout(buf):
+        verdict = core.refit_from_cook()
+    snapshot = getattr(core, "get_model_snapshot", lambda: None)()
+    return {
+        "accepted": bool(verdict.accepted),
+        "reason": str(verdict.reason),
+        "horizon_needed": getattr(verdict, "horizon_needed", None),
+        "samples": len(getattr(core, "cook_history", list)()),
+        "seconds": round(time.perf_counter() - started, 2),
+        "params": None if snapshot is None else dict(snapshot["params"]),
+        "rmse": None if snapshot is None else snapshot.get("rmse"),
+        "log": buf.getvalue().strip().splitlines(),
+    }
+
+
 def _job(arg):
-    controller, scenario_name, seed = arg
-    return run_scenario(controller, SCENARIOS[scenario_name], seed)
+    controller, scenario_name, seed, plant = arg
+    return run_scenario(controller, SCENARIOS[scenario_name], seed, plant=plant)
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Run the GrillSim controller scenario matrix.")
     ap.add_argument("--controllers", nargs="+", default=["pid_sp", "mpc"])
+    # Defaults to every scenario, which since `steady_325` was added is a
+    # SUPERSET of what `_matrix_baseline.json` currently holds: a bare
+    # regeneration now writes seven scenarios where that file has six. Pass
+    # `--scenarios` explicitly to reproduce the committed baseline.
     ap.add_argument("--scenarios", nargs="+", default=sorted(SCENARIOS))
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
+    ap.add_argument("--plants", nargs="+", default=["GrillSim"], choices=PLANTS)
     ap.add_argument("--out", default=OUT)
     ap.add_argument("-w", "--workers", type=int, default=None)
     args = ap.parse_args(argv)
 
-    jobs = [(c, s, seed) for c in args.controllers for s in args.scenarios for seed in args.seeds]
+    jobs = [
+        (c, s, seed, plant)
+        for c in args.controllers
+        for s in args.scenarios
+        for seed in args.seeds
+        for plant in args.plants
+    ]
     with Pool(args.workers) as pool:
         rows = pool.map(_job, jobs)
     with open(args.out, "w") as f:

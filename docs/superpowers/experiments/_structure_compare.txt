@@ -1,0 +1,136 @@
+Task A9a -- 3-parameter vs 5-parameter MPC, closed-loop at 325 F
+==============================================================================
+
+BUDGET AND RUN LIST (fixed before anything ran; see the header of
+structure_compare.py for what each arm is)
+  budget      90 minutes wall clock
+  scenario    steady_325 -- 3 h at 325 F, cold start, no lid events
+  plants      GrillSim (generic), MAKGrillSim (identified from a real MAK cook)
+  seeds       0, 1, 2
+  arms        U5, F5 (at 282ee65c9309); U3, F3 (at 64c52ab18893)
+  cooks       3 successive per learning arm, 1 per uncalibrated arm
+  total       48 closed-loop runs
+
+  F5: commit 282ee65c9309  _FREE=['K_Q', 'C_c', 'h_fc', 'h_amb', 'theta']  model=two-lump (T_f, T_c)
+      n_delay default 4, harness sha256 d152b44db011
+  F3: commit 64c52ab18893  _FREE=['K_Q', 'C_c', 'theta']  model=single lump (T_c)
+      n_delay default 8, harness sha256 d152b44db011
+
+MAKGrillSim IS NOT A REPLAY. The real 450 F MAK cook is a fixed log; a
+controller that acts differently gets nothing different back from a CSV, so
+real data cannot be run closed-loop at all. MAKGrillSim carries that log's
+identified parameters (C_c=3115.9, H=958.8, 100 s deadtime), which is the
+closest a closed-loop measurement can get to that grill.
+
+SETPOINT TRACKING -- median over seeds
+------------------------------------------------------------------------------
+plant        arm   cook    %<5F   over F   peak F  settle s        IAE
+GrillSim     U5       1   97.27      4.7    329.7       298      36146
+GrillSim     F5       1   97.27      4.7    329.7       298      36146
+GrillSim     F5       2   97.27      4.7    329.7       298      36146
+GrillSim     F5       3   97.27      4.7    329.7       298      36146
+GrillSim     U3       1   97.56      4.4    329.4       264      35226
+GrillSim     F3       1   97.56      4.4    329.4       264      35226
+GrillSim     F3       2   98.10      2.2    327.2       209      32610
+GrillSim     F3       3   98.10      2.2    327.2       209      32610
+
+MAKGrillSim  U5       1    0.21     81.2    406.2     never     642113
+MAKGrillSim  F5       1    0.21     81.2    406.2     never     642113
+MAKGrillSim  F5       2    0.21     81.2    406.2     never     642113
+MAKGrillSim  F5       3    0.21     81.2    406.2     never     642113
+MAKGrillSim  U3       1    0.21     82.7    407.7     never     646557
+MAKGrillSim  F3       1    0.21     82.7    407.7     never     646557
+MAKGrillSim  F3       2    0.70     42.7    367.7     never     427520
+MAKGrillSim  F3       3    5.25     42.4    367.4     never     403478
+
+SEED SPREAD -- min..max of %<5F, so a difference smaller than this is noise
+------------------------------------------------------------------------------
+plant        arm   cook   %<5F min   %<5F max   spread
+GrillSim     U5       1      97.23      97.28     0.05
+GrillSim     F5       1      97.23      97.28     0.05
+GrillSim     F5       2      97.23      97.28     0.05
+GrillSim     F5       3      97.23      97.28     0.05
+GrillSim     U3       1      97.56      97.59     0.04
+GrillSim     F3       1      97.56      97.59     0.04
+GrillSim     F3       2      98.07      98.10     0.03
+GrillSim     F3       3      98.07      98.10     0.03
+MAKGrillSim  U5       1       0.20       0.22     0.02
+MAKGrillSim  F5       1       0.20       0.22     0.02
+MAKGrillSim  F5       2       0.20       0.22     0.02
+MAKGrillSim  F5       3       0.20       0.22     0.02
+MAKGrillSim  U3       1       0.20       0.22     0.02
+MAKGrillSim  F3       1       0.20       0.22     0.02
+MAKGrillSim  F3       2       0.68       0.72     0.05
+MAKGrillSim  F3       3       5.10       5.36     0.26
+
+PROMOTION GATE -- every verdict, both arms
+------------------------------------------------------------------------------
+plant        arm   seed cook  accepted  reason
+GrillSim     F5       0    1     False  h_amb=1.00001e-09 is outside [0.0001, 1000]
+GrillSim     F5       0    2     False  h_amb=1.00001e-09 is outside [0.0001, 1000]
+GrillSim     F5       0    3     False  h_amb=1.00001e-09 is outside [0.0001, 1000]
+GrillSim     F5       1    1     False  h_amb=1.14321e-09 is outside [0.0001, 1000]
+GrillSim     F5       1    2     False  h_amb=1.14321e-09 is outside [0.0001, 1000]
+GrillSim     F5       1    3     False  h_amb=1.14321e-09 is outside [0.0001, 1000]
+GrillSim     F5       2    1     False  h_amb=1.00052e-09 is outside [0.0001, 1000]
+GrillSim     F5       2    2     False  h_amb=1.00052e-09 is outside [0.0001, 1000]
+GrillSim     F5       2    3     False  h_amb=1.00052e-09 is outside [0.0001, 1000]
+GrillSim     F3       0    1      True  better fit on the same data
+GrillSim     F3       0    2     False  candidate RMSE 0.772 does not beat incumbent 0.794 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+GrillSim     F3       0    3     False  candidate RMSE 0.772 does not beat incumbent 0.794 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+GrillSim     F3       1    1      True  better fit on the same data
+GrillSim     F3       1    2     False  candidate RMSE 0.715 does not beat incumbent 0.744 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+GrillSim     F3       1    3     False  candidate RMSE 0.715 does not beat incumbent 0.744 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+GrillSim     F3       2    1      True  better fit on the same data
+GrillSim     F3       2    2     False  candidate RMSE 0.798 does not beat incumbent 0.825 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+GrillSim     F3       2    3     False  candidate RMSE 0.798 does not beat incumbent 0.825 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+MAKGrillSim  F5       0    1     False  h_amb=1.00743e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       0    2     False  h_amb=1.00743e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       0    3     False  h_amb=1.00743e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       1    1     False  h_amb=1.00163e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       1    2     False  h_amb=1.00163e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       1    3     False  h_amb=1.00163e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       2    1     False  h_amb=1.00158e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       2    2     False  h_amb=1.00158e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       2    3     False  h_amb=1.00158e-09 is outside [0.0001, 1000]
+MAKGrillSim  F3       0    1      True  better fit on the same data
+MAKGrillSim  F3       0    2      True  better fit on the same data
+MAKGrillSim  F3       0    3      True  better fit on the same data
+MAKGrillSim  F3       1    1      True  better fit on the same data
+MAKGrillSim  F3       1    2      True  better fit on the same data
+MAKGrillSim  F3       1    3      True  better fit on the same data
+MAKGrillSim  F3       2    1      True  better fit on the same data
+MAKGrillSim  F3       2    2      True  better fit on the same data
+MAKGrillSim  F3       2    3      True  better fit on the same data
+
+  F5: 0 accepted of 18 refits (0%)
+  F3: 12 accepted of 18 refits (67%)
+
+HORIZON -- configured floor vs what was built, and what the gate demanded
+------------------------------------------------------------------------------
+`brake s` is longest_braking_distance of the model the run was BUILT with,
+which is what effective_n_horizon raises the horizon to cover. It is blank
+for the two-lump arms: their coast is not this estimator's to compute.
+plant        arm   cook  configured   built   brake s  gate needed
+GrillSim     U5       1          24      24                      -
+GrillSim     F5       1          24      24                      -
+GrillSim     F5       2          24      24                      -
+GrillSim     F5       3          24      24                      -
+GrillSim     U3       1          24      24       150            -
+GrillSim     F3       1          24      24       150            -
+GrillSim     F3       2          24      24        94            -
+GrillSim     F3       3          24      24        94            -
+MAKGrillSim  U5       1          24      24                      -
+MAKGrillSim  F5       1          24      24                      -
+MAKGrillSim  F5       2          24      24                      -
+MAKGrillSim  F5       3          24      24                      -
+MAKGrillSim  U3       1          24      24       150            -
+MAKGrillSim  F3       1          24      24       150            -
+MAKGrillSim  F3       2          24      24       323            -
+MAKGrillSim  F3       3          24      24       420            -
+
+WALL CLOCK
+------------------------------------------------------------------------------
+  F5 shard: 208 s over 8 workers, 24 runs
+  F3 shard: 316 s over 8 workers, 24 runs
+  Nothing was dropped from the planned run list.
