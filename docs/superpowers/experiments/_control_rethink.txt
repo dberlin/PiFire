@@ -1,0 +1,157 @@
+Control rethink -- is 325 F reachable on the realistic plant?
+==============================================================================
+
+BUDGET AND RUN LIST (fixed before anything ran)
+  budget      60 minutes wall clock
+  R1  reachable band: closed form + drift check on the shipped plant object
+  R2  largest admissible u_min per setpoint, per plant, per fan
+  R3  coast after fuel cut, per coast fan, vs the shipped brake estimator
+  R4  time to fall back into the 5 F band from A9a's observed +42.4 F
+  R5  crude FF/PI + lead controller, 4x5 grid, 2 Ti, u_min in (0.15, 0.1), seeds (0, 1, 2)
+  R6  horizon arithmetic
+  NOT run: the MPC itself (A9a's numbers are quoted), lid events, startup.
+
+THE TWO u_min VALUES IN PLAY. common/defaults.py ships u_min=0.10 with a
+25 s HoldCycleTime. The A9a harness (controller_matrix.py:53) runs
+u_min=0.15 with a 20 s cycle. Every A9a number was measured at 0.15.
+
+R1 -- REACHABLE BAND
+------------------------------------------------------------------------------
+Steady chamber temperature at a fixed auger duty. `closed` is the energy
+balance; `sim` places the shipped plant object at `closed`, runs it an hour
+at the real 20 s pulse cycle and reports where it ended and how fast it was
+still moving. A wrong closed form shows up as drift.
+
+plant         duty   fan  closed F    sim F  drift F/h
+GrillSim      0.10  0.00     203.0    203.2       1.61
+GrillSim      0.10  0.50     182.2    182.3       1.77
+GrillSim      0.10  1.00     166.3    166.3       2.04
+GrillSim      0.15  0.00     260.8    261.1       2.04
+GrillSim      0.15  0.50     234.1    234.4       2.37
+GrillSim      0.15  1.00     213.0    213.1       2.80
+GrillSim      0.20  0.00     312.2    312.6       2.34
+GrillSim      0.20  0.50     281.6    282.0       2.81
+GrillSim      0.20  1.00     256.5    256.8       3.43
+GrillSim      0.30  0.00     400.2    400.7       2.30
+GrillSim      0.30  0.50     365.3    365.8       2.83
+GrillSim      0.30  1.00     335.2    335.6       3.61
+MAKGrillSim   0.10  0.00     342.0    339.2       3.33
+MAKGrillSim   0.10  0.50     310.3    307.9       3.16
+MAKGrillSim   0.10  1.00     283.8    281.7       3.14
+MAKGrillSim   0.15  0.00     435.4    432.1       5.01
+MAKGrillSim   0.15  0.50     400.0    397.1       4.70
+MAKGrillSim   0.15  1.00     368.9    366.3       4.64
+MAKGrillSim   0.20  0.00     512.5    509.0       6.52
+MAKGrillSim   0.20  0.50     475.9    472.7       6.12
+MAKGrillSim   0.20  1.00     442.7    439.8       6.03
+MAKGrillSim   0.30  0.00     635.7    632.3       8.69
+MAKGrillSim   0.30  0.50     599.4    596.2       8.14
+MAKGrillSim   0.30  1.00     565.2    562.2       8.00
+
+Duty required to hold 325 F, from the same balance:
+plant          fan 0.00   fan 0.25   fan 0.50   fan 0.75   fan 1.00
+GrillSim         0.2134     0.2316     0.2498     0.2680     0.2863
+MAKGrillSim      0.0920     0.0998     0.1076     0.1154     0.1233
+
+  GrillSim     u_min=0.15 (harness): floor 213.0..260.8 F  ->  325 F reachable at fan >= 0.00
+  GrillSim     u_min=0.10 (shipped): floor 166.3..203.0 F  ->  325 F reachable at fan >= 0.00
+  MAKGrillSim  u_min=0.15 (harness): floor 368.9..435.4 F  ->  325 F UNREACHABLE at every fan
+  MAKGrillSim  u_min=0.10 (shipped): floor 283.8..342.0 F  ->  325 F reachable at fan >= 0.50
+
+R2 -- LARGEST ADMISSIBLE u_min
+------------------------------------------------------------------------------
+The duty that exactly balances losses at the setpoint IS the largest u_min
+that leaves it holdable. Below the setpoint the grill can only wait; it has
+no cooling actuator.
+
+ setpoint F    GrillSim f0.0    GrillSim f1.0 MAKGrillSim f0.0 MAKGrillSim f1.0
+        200           0.0976           0.1357           0.0413           0.0573
+        225           0.1183           0.1634           0.0503           0.0695
+        250           0.1402           0.1923           0.0599           0.0821
+        275           0.1633           0.2223           0.0700           0.0952
+        300           0.1876           0.2536           0.0807           0.1089
+        325           0.2134           0.2863           0.0920           0.1233
+        350           0.2406           0.3204           0.1039           0.1382
+        400           0.2998           0.3935           0.1298           0.1702
+        450           0.3660           0.4736           0.1588           0.2053
+
+Read the MAKGrillSim columns against the two u_min in play, 0.15 and 0.10.
+
+R3 -- BRAKING, AND WHAT THE FAN IS WORTH AS A BRAKE
+------------------------------------------------------------------------------
+Charged 2 h at u_max with the fan at 1.0, then fuel cut. `rise F` is how
+much further the chamber climbs after the cut; `t_peak s` is how long that
+takes; `T+1h F` is where it has fallen to an hour later.
+
+plant        coast fan  T_cut F  rise F  t_peak s   T+1h F
+GrillSim          0.00    657.8     0.0         0     64.1
+GrillSim          0.50    657.8     0.0         0     63.1
+GrillSim          1.00    657.8     0.1        21     62.7
+MAKGrillSim       0.00    990.9     0.0         0    400.8
+MAKGrillSim       0.50    990.9     1.2       103    373.3
+MAKGrillSim       1.00    990.9     0.7       101    345.1
+
+The shipped brake estimator on the shipped nominal model: 150.01211157822874 s.
+Compare that to the MAKGrillSim t_peak above -- and note the estimator
+answers about the CONTROLLER's model, so it is blind to any coast the
+model does not carry.
+
+R4 -- WHAT AN OVERSHOOT COSTS
+------------------------------------------------------------------------------
+Placed at 325+42.4 F (A9a's observed MAK overshoot) and firing at
+u_min, time to fall back inside the 5 F band. `never` means not within 4 h.
+
+plant         u_min   fan  recovery s   as min
+GrillSim       0.15  0.00         107      1.8
+GrillSim       0.15  1.00          72      1.2
+GrillSim       0.10  0.00          82      1.4
+GrillSim       0.10  1.00          60      1.0
+MAKGrillSim    0.15  0.00       never        -
+MAKGrillSim    0.15  1.00       never        -
+MAKGrillSim    0.10  0.00       never        -
+MAKGrillSim    0.10  1.00        1614     26.9
+
+R5 -- WHAT A CRUDE CONTROLLER ACHIEVES
+------------------------------------------------------------------------------
+Same plants, same 3 h at 325 F, same seeds, same metric definitions as A9a.
+`ff` gets its steady duty from the plant's own equation (an ORACLE -- an
+upper bound on a perfect steady-state model, not an implementable arm);
+`pi` learns the same duty with an integrator and knows nothing. Fan is
+pinned at 1.0, exactly as the A9a harness pinned it. Medians over seeds.
+
+`rise s` is the first crossing of setpoint-5 F: a controller cannot buy low
+overshoot by simply refusing to heat without it showing here.
+
+plant        arm  u_min      Kp  lead     Ti    %<5F  over F  peak F  rise s  settle       IAE
+GrillSim      ff   0.15  0.0040     0      -   97.86     6.7   331.7     189     260     33296
+GrillSim      pi   0.15  0.0040     0    900   98.20     4.4   329.4     194     194     34360
+GrillSim      ff   0.10  0.0040     0      -   97.86     6.7   331.7     189     260     33296
+GrillSim      pi   0.10  0.0040     0    900   88.42     1.6   326.6    1036    2028     44664
+MAKGrillSim   ff   0.15  0.0040     0      -    6.25    42.1   367.1    1216   never    392316
+MAKGrillSim   pi   0.15  0.0040   800    900    6.34    40.9   365.9    2662   never    423995
+MAKGrillSim   ff   0.10  0.0040     0      -   88.56     1.0   326.0    1216    1249    116971
+MAKGrillSim   pi   0.10  0.0040   200    900   65.93    34.2   359.2     938    3828    173328
+
+Best row per (plant, u_min, arm) by IAE, out of the fixed grid above. A9a's
+published MPC medians, for the same scenario and metric code:
+
+plant       arm                         %<5F  over F  peak F  settle       IAE
+GrillSim    MPC best (F3 cook 3)       98.10     2.2   327.2     209     32610
+MAKGrillSim MPC best (F3 cook 3)        5.25    42.4   367.4   never    403478
+MAKGrillSim MPC uncalibrated (U3)       0.21    82.7   407.7   never    646557
+(A9a ran u_min=0.15. Compare it to the u_min=0.15 rows, not the 0.10 rows.)
+
+R6 -- HORIZON ARITHMETIC
+------------------------------------------------------------------------------
+plant          fan    tau s  tau min  600s/tau
+GrillSim      0.00      893     14.9     0.672
+GrillSim      1.00      549      9.2     1.092
+MAKGrillSim   0.00     9274    154.6     0.065
+MAKGrillSim   1.00     5707     95.1     0.105
+
+The best lead time R5 found is in the `lead` column above; read it against
+the plant deadtime (GrillSim 20 s, MAKGrillSim 100 s) and against 600 s.
+
+WALL CLOCK
+------------------------------------------------------------------------------
+  total 132.9 s
