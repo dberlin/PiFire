@@ -266,7 +266,7 @@ def _settings_with_probe_map(store):
     return settings
 
 
-def test_write_current_shape_parity(store):
+def test_write_current_shape_parity(store, monkeypatch):
     # The control loop hands write_current() probe_history-shaped data, and what
     # gets STORED is the transformed blob. A fake that kept the input verbatim
     # would let a test write and then read a shape production never produces.
@@ -276,6 +276,10 @@ def test_write_current_shape_parity(store):
     settings = _settings_with_probe_map(store)
     dsa.write_settings(settings)
     fake = InMemoryStore(settings=settings)
+    # Both writers call the shared stdlib time module independently. Freeze it
+    # so this parity assertion tests their transformation rather than whether
+    # both calls happened within the same millisecond.
+    monkeypatch.setattr(dsa.time, "time", lambda: 1_700_000_000.123)
 
     store.write_current(_PARITY_IN_DATA)
     fake.write_current(_PARITY_IN_DATA)
