@@ -1,6 +1,7 @@
 """A finished cook improves the model, or is refused with a reason."""
 
 import json
+import math
 import time
 
 import numpy as np
@@ -223,6 +224,16 @@ def test_the_floor_sits_above_the_weakest_record_that_determines_nothing():
     between that number and the shipped floor, and it is refused. A floor
     dropped to the bare lower bound would admit it, and with it the models the
     measurement recorded at 200.5 C worse than the incumbent.
+
+    THE RECORD HERE IS SIMULATED WHILE 0.261203 CAME FROM A PLANT-GENERATED
+    ONE, which is a real limitation and not a convenience. No genuine record
+    lands in this gap: the only real cook available scores 1.098 at 600 s, and
+    every shorter truncation of it falls below `_REFIT_MIN_SAMPLES`, which
+    controller/mpc.py refuses before the gate is reached -- so the production
+    path cannot produce a real record in the gap to test with. What keeps this
+    honest is that the score is not asserted as a literal: the record is fitted
+    by the shipped fitter here, and its identifiability measured, so the number
+    below is produced rather than quoted.
     """
     t, temp, Q = _heatup_only(180)
     fitted, s_min = _shipped_fit(t, temp, Q)
@@ -267,28 +278,47 @@ def test_the_floor_still_admits_the_shortest_real_cook_the_controller_will_fit()
     assert s_min >= _IDENTIFIABILITY_FLOOR
 
 
-def test_identifiability_does_not_look_at_the_measured_temperatures():
-    """The statistic reads the record's inputs, never its residual.
+def test_the_two_statistics_rank_the_same_pair_of_records_in_opposite_orders():
+    """The whole claim the floor rests on: fit quality ranks records backwards.
 
-    This is the property that makes it worth sitting beside the RMSE rather
-    than duplicating it. Two records with identical `t`, `Q` and starting
-    temperature, judged at the same fitted point, must score identically
-    however differently the thermometer behaved after the first sample -- the
-    Jacobian is the model's, and the model is not told the measurements. A
-    refactor that let the residual leak in here would quietly turn the floor
-    back into a second reading of the error it was installed to distrust.
+    A flat cook and a cook with a step in it, scored both ways. The flat cook
+    -- which determines nothing beyond the steady gain -- fits its own record
+    BETTER, because there is less in it for a model to disagree with, so the
+    statistic the gate used to decide by prefers precisely the record that
+    should never promote anything. `identifiability` puts them the other way
+    round, and puts them either side of the floor: the empty record is refused
+    and the informative one is free to be judged on its merits.
+
+    This is the property worth defending. That the measured temperatures cannot
+    reach `identifiability` is guaranteed by its signature rather than by a
+    test -- the series is not one of its arguments. What a test can catch is a
+    refactor that reintroduces a dependence on the residual by some other
+    route, and any such dependence lands here: a record informative enough to
+    promote a model is one whose temperature moves a long way, so a statistic
+    that shrinks with the spread of the data deflates exactly the records that
+    should clear the floor, and this pair stops straddling it.
     """
-    t, temp, Q = _heatup_only(240)
-    fitted, _ = _shipped_fit(t, temp, Q)
+    flat_rng = np.random.default_rng(0)
+    flat_t = np.arange(400, dtype=float) * 5.0
+    flat_temp = 100.0 + flat_rng.normal(0.0, 0.05, size=400)
+    flat_Q = np.full(400, 50.0)
+    flat_fit, flat_s_min = _shipped_fit(flat_t, flat_temp, flat_Q)
+    flat_rmse, _ = update_mpc.fit_quality(flat_t, flat_temp, flat_Q, flat_fit, T_amb=20.0)
 
-    other = temp.copy()
-    other[1:] = other[1:] + np.linspace(0.0, 60.0, len(other) - 1)  # a wildly different cook
-    assert not np.allclose(temp[1:], other[1:])
-    assert other[0] == temp[0]
+    rows = _synthetic_cook()
+    step_t = np.array([r[0] for r in rows])
+    step_temp = np.array([r[1] for r in rows])
+    step_Q = np.array([r[2] for r in rows])
+    step_fit, step_s_min = _shipped_fit(step_t, step_temp, step_Q)
+    step_rmse, _ = update_mpc.fit_quality(step_t, step_temp, step_Q, step_fit, T_amb=20.0)
 
-    a = update_mpc.identifiability(t, Q, fitted, T_amb=20.0, T0=float(temp[0]))
-    b = update_mpc.identifiability(t, Q, fitted, T_amb=20.0, T0=float(other[0]))
-    assert a == pytest.approx(b, rel=1e-12)
+    # Ranked by fit quality, the record that determines nothing wins.
+    assert flat_rmse < step_rmse
+    # Ranked by identifiability, it loses -- the opposite order, on the same pair.
+    assert flat_s_min < step_s_min
+    # And the disagreement is the whole of the decision: the floor falls between
+    # them, so the two statistics do not merely differ, they decide differently.
+    assert flat_s_min < _IDENTIFIABILITY_FLOOR <= step_s_min
 
 
 def test_a_fitted_point_with_no_logarithm_is_unmeasurable_and_is_refused():
@@ -296,7 +326,14 @@ def test_a_fitted_point_with_no_logarithm_is_unmeasurable_and_is_refused():
 
     `identifiability` says None rather than guessing, and the gate treats that
     as it treats a low score: the record has not been shown to determine
-    anything, so nothing may be promoted on it.
+    anything, so nothing may be promoted on it. All three cases here are the
+    same guard reached by its three doors -- zero, negative, and not a number.
+    The two ways the SIMULATION can fail are separate branches: the raised
+    OverflowError has its own test below, and the quiet non-finite result has
+    none, because no parameter set found so far reaches it within a probe short
+    enough to test. It is kept because a diverging simulation that returns NaN
+    without raising is a real shape, pinned for the fitter itself in
+    tests/unit/mpc/test_mpc_calibration.py.
     """
     t, temp, Q = _heatup_only(240)
     fitted, _ = _shipped_fit(t, temp, Q)
@@ -318,6 +355,34 @@ def test_a_fitted_point_with_no_logarithm_is_unmeasurable_and_is_refused():
     assert "identifiability" in verdict.reason
     # A refused model imposes no horizon demand on the grill.
     assert verdict.horizon_needed is None
+
+
+def test_a_simulation_that_overflows_is_unmeasurable_rather_than_an_exception():
+    """The other way the measurement can fail, and the one that would escape.
+
+    A parameter set can drive the chamber integration away, and where the
+    radiative term goes past what a Python float holds it RAISES rather than
+    returning a number. `Controller.refit_from_cook` runs this inside a `try`
+    that catches ValueError and FloatingPointError only, so an OverflowError
+    getting out of here would get out of `refit_from_cook` -- and that runs in
+    HoldMode's teardown, where the next thing owed to the grill is the
+    cool-down fan. It is answered as `None` instead, which the gate already
+    knows how to refuse.
+
+    The parameter set below is checked to raise before the answer is asserted,
+    so this reaches the raising branch rather than passing through the
+    non-positive guard or the NaN guard on its way.
+    """
+    t, temp, Q = _heatup_only(240)
+    runaway = dict(C_c=1e-9, h_amb=0.5, K_Q=1e12, T_amb=20.0, sigma=1e3, theta=110.0, n_delay=8)
+
+    # Every free parameter is a positive finite scale, so the first guard does
+    # not fire and the simulation is actually attempted.
+    assert all(runaway[k] > 0.0 and math.isfinite(runaway[k]) for k in update_mpc._FREE)
+    with pytest.raises(OverflowError):
+        update_mpc._sim_at(t, Q, runaway, "K_Q", 1e12 * math.e, T_amb=20.0, T0=float(temp[0]))
+
+    assert update_mpc.identifiability(t, Q, runaway, T_amb=20.0, T0=float(temp[0])) is None
 
 
 def test_the_identifiability_argument_is_required_of_every_caller():

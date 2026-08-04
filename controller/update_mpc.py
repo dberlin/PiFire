@@ -240,20 +240,28 @@ def identifiability(t, Q, fitted, *, T_amb, T0):
     record that leaves some direction free scores near zero, and the model it
     produces is determined by the starting point rather than by the cook.
 
-    IT DOES NOT LOOK AT THE MEASURED TEMPERATURES beyond the `T0` the simulation
-    starts from. The Jacobian is the model's, and the model is driven by `t`, `Q`
-    and the fitted point alone -- so this is a property of what the record ASKED
-    the grill to do, not of how well the fit turned out. That independence is
-    what lets it stand beside a residual statistic and say something the residual
-    cannot: an in-sample RMSE is minimised just as neatly on a record that
-    determines nothing, and is therefore silent about exactly the case this
-    catches.
+    NO MEASURED TEMPERATURE ENTERS THIS BEYOND `T0`, and the signature is the
+    guarantee: the record's temperature series is not an argument, so there is
+    no channel through which the fit residual could reach the arithmetic below.
+    What is read is `t`, `Q`, the starting temperature and the fitted point --
+    what the record ASKED the grill to do, not how well the fit turned out.
+
+    That is what lets this stand beside a residual statistic and say something
+    the residual cannot. An in-sample RMSE is minimised just as neatly on a
+    record that determines nothing -- more neatly, in fact, since there is less
+    for the model to disagree with -- so the two rank records in opposite
+    orders, and only this one ranks them the way the risk runs.
 
     `None` where no such measurement exists: a free parameter that is not a
     positive finite scale has no logarithm to perturb, and a simulation that
     leaves the reals says nothing about the record. Both shapes of the latter
     are caught -- a raised OverflowError out of the chamber's float arithmetic
     and a quiet NaN out of numpy -- for the reason `fit_params.simulate` states.
+    The raised shape is the one that matters to the caller: `Controller.
+    refit_from_cook` runs this inside a `try` that catches ValueError and
+    FloatingPointError only, so an OverflowError leaving here would leave
+    `refit_from_cook` altogether, into a grill teardown that has a cool-down
+    fan to start.
     """
     cols = []
     for key in _FREE:

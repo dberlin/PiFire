@@ -643,8 +643,8 @@ def gate_verdict(row, incumbent, cand_rmse, inc_rmse):
         # Deliberately clears any floor. Every rule this experiment measures
         # applies its own s_min threshold OUTSIDE this function -- Section 9
         # sweeps the floor as its own axis, and its `off` row is what this
-        # function has to be able to produce -- so the floor now inside
-        # evaluate() would double-count and erase the arm being compared to.
+        # function has to be able to produce -- so the floor inside evaluate()
+        # would double-count and erase the arm being compared to.
         identifiability=_NO_FLOOR,
         n_horizon=N_HORIZON,
         t_step=T_STEP,
