@@ -1,0 +1,185 @@
+============================================================================================================
+OFFSET NUISANCE -- does a fourth free parameter buy a better model, or only a better fit?
+============================================================================================================
+shipped fitter : _REFIT_INIT={'C_c': 320.0, 'h_amb': 0.5, 'K_Q': 3.5, 'theta': 50.0} sigma=1.4e-09 n_delay=8 free=['K_Q', 'C_c', 'theta']
+arms           : A_shipped (3 free)  B_offset (+d, linear C)  C_free_amb (+T_amb, log)
+held-out split : 0.6667 of the record, scored warm on the suffix
+floor read     : model_promotion._IDENTIFIABILITY_FLOOR = 0.5 (imported, not derived here)
+
+--- population: 178 distinct records (18 collapsed as byte-identical), 42 dropped below the 120-sample refit floor, 136 fitted ---
+    The dropped ones are the 300 s and 450 s truncations. controller/mpc.py refuses a refit
+    shorter than that before the gate is reached, so they produce no verdict to be right about.
+    Nothing else is dropped and no arm is measured on a smaller population than another.
+--- fitting 136 records x 3 arms x 2 (full + prefix) on 8 workers ---
+    done at t+121s
+    122 carry a truth error (a plant behind them); the 14 that do not
+    are the real MAK cook and the flat synthetic cooks, which are read on held-out RMSE only.
+
+--- harness self-checks ------------------------------------------------------------------
+1. arm A on the real cook reproduces tests/unit/mpc/test_model_promotion.REAL_MAK_FIT: C_c=3591.9(rec 3591.95) theta=111.32(rec 111.32) K_Q=9.9208(rec 9.9208)
+   worst relative disagreement 3.26e-05
+   -- arm A is update_mpc.fit_params called unmodified, so this pins the control to the shipped
+      fitter. If it drifts, nothing below is about the code that ships.
+2. arm B's solve reaches the separable optimum in d on every converged record: worst departure
+   from sqrt(rmse_discarded^2 - rmse_kept^2) == |d| is 5.30e-05 C, at None/flat_synth_0.15/900s
+   -- d enters the model linearly, so that identity is exact at the optimum. A departure would
+      mean the 4-parameter solve stopped short of its own best d and arm B was understated,
+      which would bias this experiment TOWARDS the answer it is being asked to challenge.
+3. solves that did not converge, by arm: A_shipped=0  B_offset=0  C_free_amb=0
+4. arm C's T_amb ran to a bound on 61 records (fitted below 1 C) and above 40 C on 13.
+   -- reported because a fitted ambient outside roughly 0-40 C is not an ambient; it is the solve
+      using T_amb as a free level and running out of record before anything stops it.
+
+============================================================================================================
+SECTION 1 -- does the nuisance improve TRUTH error, or only in-sample error?
+============================================================================================================
+Population: the simulated records only, because only they have a plant to be right about.
+'in-sample kept' is the oracle column the claim came from. 'truth' is the fitted model's
+prediction of behaviour it never saw, scored WITH THE NUISANCE DISCARDED -- the model as the
+controller would carry it. Every value is degrees C.
+
+  arm                      in-sample kept        in-sample discarded          TRUTH (discarded)
+                      median   p90    max        median   p90    max        median   p90    max
+  A_shipped      0.549   1.101     1.715    0.549   1.101     1.715    3.108  26.275   229.104
+  B_offset       0.534   0.964     1.412    0.895   1.963     5.654    2.944  24.534   229.103
+  C_free_amb     0.492   0.874    15.356    3.895   7.982   225.108    5.232  27.250   229.100
+
+The same question as a PAIRED comparison against arm A, record by record. A win is the arm
+beating arm A on that record; 'median delta' is the arm minus arm A, so negative is better;
+'worst regression' is the largest amount by which the arm is worse than arm A on any record.
+
+  arm          metric                    n   win   tie  loss   median delta   worst regression
+  B_offset     in-sample kept          122   122     0     0        -0.0239            -0.0001
+  B_offset     in-sample discarded     122     1     0   121         0.2359             4.2083
+  B_offset     TRUTH (discarded)       122    98     0    24        -0.3923            43.0368
+  B_offset     held-out (discarded)    122    72     0    50        -0.1872             1.9975
+  C_free_amb   in-sample kept          122   111     8     3        -0.0357            14.7133
+  C_free_amb   in-sample discarded     122     0     0   122         3.3188           224.4653
+  C_free_amb   TRUTH (discarded)       122    43     0    79         1.1919           199.9473
+  C_free_amb   held-out (discarded)    122    17     0   105         3.3604            54.0706
+
+
+The worst-regressing records behind that table, named, because a median that improves while the
+tail blows out is the shape a gate has to survive rather than the shape an average describes.
+  arm          record                              arm A truth    arm truth      delta
+  B_offset     mak/steady_hold/1200s                    14.648       57.685     43.037
+  B_offset     mak/steady_hold/600s                    150.989      175.512     24.523
+  B_offset     mak/steady_hold/3600s                    26.275       38.003     11.728
+  C_free_amb   mak/steps_down/1800s                      1.087      201.034    199.947
+  C_free_amb   generic/step_small/1800s                 62.998       87.367     24.369
+  C_free_amb   generic/steady_hold/1800s                62.998       87.367     24.369
+
+And the correlation between what the nuisance buys IN-SAMPLE and what it buys in TRUTH.
+If the in-sample improvement predicted the truth improvement this would be strongly positive;
+A12a measured the analogous correlation for the level of in-sample RMSE at -0.160.
+  B_offset     Spearman(in-sample gain, truth gain) =   0.112  over n=122
+  C_free_amb   Spearman(in-sample gain, truth gain) =   0.105  over n=122
+
+Arm C only: the same truth error with T_amb KEPT rather than discarded. d has nowhere to be
+stored -- there is no such field in Controller._MODEL_PARAM_KEYS -- but T_amb is one of those
+keys, so for arm C alone 'carry it forward' is an option the code already supports.
+  C_free_amb  truth with T_amb kept  n=122 win=43 tie=0 loss=79 median delta=    1.1919 worst regression=  199.9473
+              median   5.232  p90  27.250  max   229.100
+
+============================================================================================================
+SECTION 2 -- what the fourth parameter costs in identifiability
+============================================================================================================
+s_min is the smallest singular value of d(prediction)/d(parameter) over the arm's free set,
+per sample. Adding a column can only lower it: the minimum is taken over a larger space.
+Arm B's fourth column is exactly ones, so its NORM is exactly 1 and arm B's s_min is bounded
+above by 1.0 on every record that exists -- see the arm_svals docstring. Arm C's log column
+is about T_amb=20 times the same physical move, so its per-degree reading is also printed and
+is the one comparable to arm B.
+
+  arm               median       p10       min   below 0.50    of   newly refused
+  A_shipped         2.8224    0.0000    0.0000           36   136               0
+  B_offset          0.2206    0.0000    0.0000          136   136             100
+  C_free_amb (log)    0.0000    0.0000    0.0000          117   136              81
+  C_free_amb (per C)    0.0054    0.0000    0.0000          136   136             100
+
+'below 0.50' counts records the floor would refuse under that arm; 'newly refused' counts those
+that clear it today under arm A and would stop clearing it. Population is every fitted record,
+including the flat synthetic ones the floor exists to refuse -- they are already below it under
+arm A, so they cannot be newly refused and do not inflate that column.
+
+THE REAL COOK, which is the record the whole learning feature exists to learn from:
+
+    length     n     A_shipped      B_offset         C log       C per C
+      600s   120   1.0982        0.3850 X      0.3714 X      0.0143 X   
+      900s   179   1.2302        0.3267 X      0.0000 X      0.0036 X   
+     1200s   239   1.5219        0.2826 X      0.0000 X      0.0036 X   
+     1240s   247   1.8136        0.2796 X      0.0000 X      0.0038 X   
+  (X marks a value below the 0.5 floor -- the record would be refused, i.e. no model is learned)
+
+Could the floor simply be RE-DERIVED under a four-parameter arm? That is the obvious rescue, so
+it is measured rather than dismissed. A12 set 0.50 between the records that determine nothing and
+the records that do, and the room it had is the ratio between the two classes. UNINFORM here is
+A12's own structural class, constant-free: the flat synthetic cooks and each plant's steady_hold,
+which contain exactly one transient-free operating point by construction. The real cook is the
+record the feature exists to learn from, so any floor must sit below it and above that class.
+
+  arm                 max over UNINFORM  min over real cook   room (ratio)
+  A_shipped                      0.2612              1.0982           4.20
+  B_offset                       0.2012              0.2796           1.39
+  C_free_amb (log)               0.0001              0.0000           0.00
+  C_free_amb (per C)             0.0000              0.0036         474.59
+
+UNINFORM population n=22; real cook n=4. A ratio at or below 1.0 means no
+floor exists that admits the real cook and refuses the cooks that determine nothing -- the two
+classes have crossed, and re-deriving the constant cannot recover what the fourth parameter cost.
+
+============================================================================================================
+SECTION 3 -- how big is the nuisance, and is it stable?
+============================================================================================================
+A stable offset across cooks of the same grill would be a real bias -- worth surfacing to the
+operator as a probe calibration issue rather than silently absorbing. One that swings from cook
+to cook is absorbing whatever that record happened to contain. 'full vs prefix' is the same
+record's offset fitted on all of it and on its first two thirds: a real bias does not move.
+
+  arm          plant        n    median       p10       p90       min       max  |full-prefix| med
+  B_offset     mak         61    -0.530    -1.001     0.083    -1.870     2.607              0.062
+  B_offset     generic     61    -0.507    -2.306     0.620    -5.587     1.156              0.143
+  B_offset     real_mak_cook    4    -0.453    -0.685     0.464    -0.685     0.464              0.786
+  C_free_amb   mak         61   -20.000   -20.000    34.047   -20.000   479.689              0.000
+  C_free_amb   generic     61    -9.297   -19.997     0.288   -20.000    77.835              3.875
+  C_free_amb   real_mak_cook    4   -20.000   -20.000     6.936   -20.000     6.936             15.912
+
+Degrees C in every column. Arm C's is reported as (fitted T_amb - 20 C), the level shift it
+amounts to, so it sits on the same axis as arm B's d.
+
+The real cook's nuisance at each length, which is the one an operator would ever see:
+     600s  d=  +0.464 C (prefix   +2.127)   T_amb=  26.936 C, i.e.   +6.936 C (prefix  +22.154)
+     900s  d=  -0.313 C (prefix   +0.503)   T_amb=   0.000 C, i.e.  -20.000 C (prefix   +7.878)
+    1200s  d=  -0.593 C (prefix   +0.162)   T_amb=   0.000 C, i.e.  -20.000 C (prefix   -3.394)
+    1240s  d=  -0.685 C (prefix   +0.062)   T_amb=   0.000 C, i.e.  -20.000 C (prefix   -9.092)
+
+============================================================================================================
+SECTION 4 -- does it help the REAL cook?
+============================================================================================================
+MAKGrillSim was identified FROM this cook, so it cannot serve as truth for it and no truth
+column exists here -- promotion_signal.py declines the same comparison for the same reason.
+What can be measured is held-out: the arm's fitter run on the first two thirds and scored on
+the last third, with the nuisance discarded. The offset is free to fit the prefix and cannot
+touch the suffix, so this is not a metric the nuisance can game.
+
+    length     n                     in-sample kept             held-out, nuisance discarded
+                   A_shipped    B_offset  C_free_amb      A_shipped     B_offset   C_free_amb
+      600s   120      1.4507      1.4387      1.4469         2.7399       9.4766      33.5973
+      900s   179      2.1385      2.1358      2.1303         8.9820      10.0391      12.0184
+     1200s   239      2.2981      2.2908      2.2828        17.4455      17.6382      16.4282
+     1240s   247      2.3358      2.3265      2.3114        16.2577      16.3241      13.7567
+
+The same two columns over every record that has no plant behind it, and over all records:
+
+  population                   arm            in-sample kept med   held-out med   held-out p90
+  all fitted records           A_shipped                  0.5346         1.0761         3.5008
+  all fitted records           B_offset                   0.5189         0.8937         3.2898
+  all fitted records           C_free_amb                 0.4790         4.3645         9.8819
+  simulated only               A_shipped                  0.5489         1.1038         3.1920
+  simulated only               B_offset                   0.5338         0.9585         2.9650
+  simulated only               C_free_amb                 0.4919         4.5240         9.4000
+  real MAK cook                A_shipped                  2.2183        12.6198        17.4455
+  real MAK cook                B_offset                   2.2133        13.1816        17.6382
+  real MAK cook                C_free_amb                 2.2066        15.0924        33.5973
+
+total elapsed 121s
