@@ -385,18 +385,22 @@ def main():
         # quicker model from shortening the horizon again.
         steps = built_n_horizon(payload, n_horizon=_DEFAULTS["n_horizon"], t_step=_DEFAULTS["t_step"])
         covered = steps * float(_DEFAULTS["t_step"])
-        # The step count is what the controller builds, so it is also the honest
-        # place to notice that the build has run out of steps -- at which point
-        # t_step, not n_horizon, is the setting with anything left to give.
-        lever = (
+        # This reads the shipped t_step, where _HORIZON_CAP_S // t_step is
+        # exactly _HORIZON_CAP_STEPS, so the step bound has nothing left to
+        # truncate and cannot be why the horizon falls short here. The only
+        # shortfall reachable on this path is a coast past the seconds bound,
+        # which no setting lengthens -- so the advice this prints is about the
+        # model, and t_step is deliberately not offered.
+        outcome = (
             "n_horizon does not need changing"
             if covered >= brake
-            else f"that spans only {covered:.0f} s -- raise t_step to lengthen the window"
+            else f"that spans {covered:.0f} s, the furthest ahead it plans at any setting, so this\n"
+            f"      fit's coast is longer than the controller is built to brake"
         )
         print(
             f"NOTE: the chamber keeps rising for {brake:.0f} s after a full fuel cut, past the\n"
             f"      {horizon:.0f} s the default prediction horizon spans. The controller plans over\n"
-            f"      {steps} steps for this model on its own; {lever}."
+            f"      {steps} steps for this model on its own; {outcome}."
         )
     print("\nPaste into Settings > Controller (controller.config.mpc):")
     print(json.dumps(payload, indent=2))

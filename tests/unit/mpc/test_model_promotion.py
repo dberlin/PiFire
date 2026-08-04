@@ -849,10 +849,10 @@ def test_the_implied_steady_state_is_where_full_fire_meets_the_chamber_loss():
     assert loss == pytest.approx(GOOD["K_Q"] * 100.0, rel=1e-9)
     assert steady_state_at_full_fire(dict(GOOD, K_Q=GOOD["K_Q"] * 4)) > t_ss
     assert steady_state_at_full_fire(dict(GOOD, h_amb=GOOD["h_amb"] * 4)) < t_ss
-    # The escape this exists to expose. Both this task and the parallel
-    # parsimony study fitted the real cook with the old five-parameter free
-    # set and landed at C_c 1.06e5 with C_c/h_amb 3552 -- an asymptote of
-    # 1713 F on a grill that peaked at 520 F. The sound fit says 1067 F.
+    # The escape this exists to expose. Fitting the real cook with the old
+    # five-parameter free set lands at C_c 1.06e5 with C_c/h_amb 3552 -- an
+    # asymptote of 1713 F on a grill that peaked at 520 F, reproduced
+    # independently by the parsimony study. The sound fit says 1067 F.
     escaped = dict(REAL_MAK_FIT, C_c=1.06e5, h_amb=1.06e5 / 3552.0, K_Q=302.4)
     assert steady_state_at_full_fire(escaped) * 9.0 / 5.0 + 32.0 == pytest.approx(1713.0, abs=2.0)
     assert steady_state_at_full_fire(REAL_MAK_FIT) * 9.0 / 5.0 + 32.0 == pytest.approx(1067.0, abs=2.0)

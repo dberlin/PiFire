@@ -601,7 +601,8 @@ def test_a_coast_with_no_end_is_reported_as_one_no_horizon_reaches(capsys):
     A model with no firing-rate gain never predicts the chamber stops rising,
     so the longest horizon this controller will build is still short of the
     coast. The controller runs anyway -- every condition here is advisory --
-    which is why saying so is the whole of what it can do.
+    which is why saying so is the whole of what it can do. No setting is
+    offered, because an endless coast is not a shortfall any setting closes.
     """
     from controller.model_promotion import longest_braking_distance
 
@@ -612,7 +613,8 @@ def test_a_coast_with_no_end_is_reported_as_one_no_horizon_reaches(capsys):
     _warn_about_model(cfg)
     out = capsys.readouterr().out
     assert "no end this model predicts" in out
-    assert "does not reach the end of that coast" in out
+    assert "the furthest ahead this controller plans at any setting" in out
+    assert "t_step" not in out
     assert "inf s" not in out  # a coast with no end has no number to print
 
 
@@ -658,21 +660,21 @@ def test_a_coast_the_configured_horizon_covers_is_built_at_the_configured_one():
     assert c.mpc.settings.n_horizon == CONFIG["n_horizon"]
 
 
-def test_a_horizon_the_step_bound_cuts_short_is_said_out_loud(capsys):
-    """The step bound must not reintroduce the defect it sits next to.
+def test_a_horizon_the_step_bound_cuts_short_offers_the_setting_that_helps(capsys):
+    """A shortfall the step bound caused is one `t_step` can repair.
 
-    `_HORIZON_CAP_STEPS` can leave the built horizon short of the coast at a
-    fine `t_step`. Running short in silence is exactly what this task removed,
-    so the shortfall is reported, and it names `t_step` -- the only setting with
-    anything left to give, since raising it lengthens the window without
-    enlarging the solve. Deriving a longer horizon is not on offer: that is the
-    bound.
+    `_HORIZON_CAP_STEPS` truncates only where `t_step` is fine enough to turn an
+    ordinary coast into an extraordinary NLP, and a longer `t_step` spans the
+    same seconds in fewer steps -- so the window grows and the solve does not.
+    Running short in silence is the failure this message exists to prevent, and
+    advice that cannot work is the same failure wearing a message.
     """
-    from controller.model_promotion import _HORIZON_CAP_STEPS, longest_braking_distance
+    from controller.model_promotion import _HORIZON_CAP_S, _HORIZON_CAP_STEPS, longest_braking_distance
 
     cfg = dict(CONFIG, **_SLOW_COAST, t_step=1.0, n_horizon=60)  # settings maxima
     brake = longest_braking_distance(cfg)
-    assert brake > _HORIZON_CAP_STEPS * cfg["t_step"]  # the bound genuinely bites
+    assert brake > _HORIZON_CAP_STEPS * cfg["t_step"]  # the step bound bites
+    assert brake <= _HORIZON_CAP_S  # and the seconds bound does not, so t_step helps
 
     c = Controller(cfg, "C", dict(CYCLE))
     assert c._built_n_horizon == _HORIZON_CAP_STEPS
@@ -680,8 +682,38 @@ def test_a_horizon_the_step_bound_cuts_short_is_said_out_loud(capsys):
 
     out = capsys.readouterr().out
     assert "does not reach the end of that coast" in out
-    assert "t_step" in out  # the operator's lever, named
+    assert "Raise t_step" in out  # the setting that repairs this cause
     assert f"{_HORIZON_CAP_STEPS} steps" in out
+
+
+def test_a_horizon_the_seconds_bound_cuts_short_offers_no_setting_at_all(capsys):
+    """A shortfall no configuration repairs must not pretend otherwise.
+
+    The horizon stops at `_HORIZON_CAP_S` seconds however `t_step` slices them,
+    so a coast past that is out of range at every setting. `t_step` is the
+    obvious thing to reach for and it is exactly the wrong advice here: it
+    leaves coverage at the same 2400 s. What is true is that the model, not the
+    configuration, is outside what this controller brakes.
+    """
+    from controller.model_promotion import _HORIZON_CAP_S, longest_braking_distance
+
+    cfg = dict(CONFIG, **dict(_SLOW_COAST, theta=900.0), t_step=25.0)
+    brake = longest_braking_distance(cfg)
+    assert brake > _HORIZON_CAP_S  # past what any t_step reaches
+
+    c = Controller(cfg, "C", dict(CYCLE))
+    covered = c._built_n_horizon * cfg["t_step"]
+    assert covered == _HORIZON_CAP_S
+
+    out = capsys.readouterr().out
+    assert "the furthest ahead this controller plans at any setting" in out
+    assert "out of range" in out
+    assert "t_step" not in out  # no lever, because none of them move this
+
+    # And raising t_step -- the advice the other branch gives -- buys nothing
+    # here, which is why the two branches cannot share a message.
+    wider = Controller(dict(cfg, t_step=60.0), "C", dict(CYCLE))
+    assert wider._built_n_horizon * 60.0 == _HORIZON_CAP_S
 
 
 def test_adopting_a_slow_model_then_a_quick_one_brings_the_horizon_back_down():

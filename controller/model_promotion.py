@@ -235,11 +235,16 @@ T_FLOOR_C = (75.0 - 32.0) * 5.0 / 9.0
 #: running may size the same physical coast no better.
 _HORIZON_CAP_S = 2400.0
 
-#: The most prediction steps the NLP is ever BUILT with, whatever the seconds
-#: bound above works out to. It exists because _HORIZON_CAP_S converts to steps
-#: through t_step, and t_step is settings-reachable down to 1 s: at that
-#: setting even the real MAK cook's ordinary 367 s coast would ask for 367
-#: steps, and a capped model for 2400.
+#: How many prediction steps a fitted model's coast may add to the build, on
+#: top of whatever the operator configured. Like _HORIZON_CAP_S it holds down
+#: the RAISE and not the setting: an operator who configures 200 steps gets 200,
+#: because a horizon somebody asked for is not this constant's business. What it
+#: bounds is how much larger a learned model may make the NLP than the length
+#: the grill was set up with.
+#:
+#: It exists because _HORIZON_CAP_S converts to steps through t_step, and t_step
+#: is settings-reachable down to 1 s: at that setting even the real MAK cook's
+#: ordinary 367 s coast would ask for 367 steps, and a capped model for 2400.
 #:
 #: 96 is the largest step count this project has a committed warm-solve
 #: measurement for, and the largest measured at BOTH selectable chain lengths

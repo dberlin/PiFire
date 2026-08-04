@@ -31,7 +31,7 @@ import numpy as np
 
 from controller.base import ControllerBase
 from controller.model_promotion import Verdict as _Verdict
-from controller.model_promotion import built_n_horizon, longest_braking_distance
+from controller.model_promotion import _HORIZON_CAP_S, built_n_horizon, longest_braking_distance
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE, MODEL_SCHEMA
 from controller.mpc_allocator import allocate
 
@@ -263,22 +263,37 @@ def _warn_about_model(cfg):
         steps = built_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
         covered = steps * float(cfg["t_step"])
         # A model that predicts no end to the coast has no number to report, and
-        # is the one case where the horizon below cannot be enough at any length.
+        # is the one case where no horizon is enough at any length.
         coast = f"for {brake:.0f} s" if math.isfinite(brake) else "with no end this model predicts"
-        # t_step is the operator's lever and this code's is the step count. The
-        # two are not interchangeable: a longer t_step buys foresight at no
-        # extra NLP size, but it also re-discretizes the model the MPC solves,
-        # which is a larger change to controller behaviour than lengthening the
-        # window and not one to make on a grill's behalf. So it is offered here
-        # and never taken automatically -- and only where the step count has run
-        # out, since otherwise there is nothing to ask for.
-        reach = (
-            f"planning over {steps} steps ({covered:.0f} s) instead"
-            if covered >= brake
-            else f"planning over {steps} steps ({covered:.0f} s), the most this controller builds, "
-            "which does not reach the end of that coast. Raise t_step in Settings > Controller: "
-            "it lengthens the window without enlarging the solve"
-        )
+        if covered >= brake:
+            reach = f"planning over {steps} steps ({covered:.0f} s) instead"
+        elif brake <= _HORIZON_CAP_S:
+            # The shortfall is _HORIZON_CAP_STEPS truncating a demand the seconds
+            # bound would have allowed, which only happens at a t_step fine
+            # enough to turn an ordinary coast into an extraordinary NLP. A
+            # longer t_step spans the same seconds in fewer steps, so it buys
+            # the missing window at no extra solve cost. It is offered rather
+            # than taken because it also re-discretizes the model the MPC
+            # solves -- a larger change to controller behaviour than lengthening
+            # the window, and not one to make on a grill's behalf.
+            reach = (
+                f"planning over {steps} steps ({covered:.0f} s), the largest solve this controller "
+                "builds, which does not reach the end of that coast. Raise t_step in "
+                "Settings > Controller: it spans the same window in fewer steps, so the horizon "
+                "lengthens and the solve does not grow"
+            )
+        else:
+            # The seconds bound is what truncated, and no setting moves it: the
+            # horizon is capped at _HORIZON_CAP_S seconds however t_step slices
+            # them, so this coast is outside the range the controller plans for
+            # whatever the configuration. Offering a lever here would be advice
+            # that cannot work.
+            reach = (
+                f"planning over {steps} steps ({covered:.0f} s), the furthest ahead this controller "
+                f"plans at any setting. A coast past {_HORIZON_CAP_S:.0f} s is longer than this "
+                "controller is built to brake, so it is the model that is out of range and not the "
+                "configuration; refit this grill with controller/update_mpc.py"
+            )
         print(
             f"[mpc] configured prediction horizon is {horizon:.0f} s but the chamber keeps rising "
             f"{coast} after a full fuel cut; {reach}."

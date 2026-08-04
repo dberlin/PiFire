@@ -19,6 +19,7 @@
 *****************************************
 """
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -402,11 +403,18 @@ MUTATIONS = [
 
 
 def _score():
+    # PYTHONDONTWRITEBYTECODE stops the child caching bytecode for the sources
+    # being mutated. CPython validates a .pyc on the source's (mtime, size) at
+    # one-second granularity, so a mutation and its restore that are the same
+    # length and land in the same second leave the MUTATED bytecode looking
+    # current -- the file reads as restored while the import is not.
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", *NODES, "-q", "--no-header", "-p", "no:cacheprovider"],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        env=env,
     )
     tail = [line for line in proc.stdout.splitlines() if " passed" in line or " failed" in line]
     return tail[-1] if tail else f"NO SUMMARY ({proc.returncode})"
