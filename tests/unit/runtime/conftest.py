@@ -2,7 +2,7 @@ import pytest
 
 import controller.runtime.runner as controller_runtime_runner
 from controller.runtime.modes.hold import HoldMode
-from controller.runtime.runner import NormalizedOutput
+from controller.runtime.runner import ControllerUpdateResult
 from controller.runtime.state import WorkCycleState
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.characterization.harness import make_ctx
@@ -10,7 +10,7 @@ from tests.fakes.probes import FakeProbes
 
 
 def _output(ratio):
-    return NormalizedOutput(cycle_ratio=ratio, fan=None)
+    return ControllerUpdateResult(cycle_ratio=ratio, fan=None)
 
 
 def _off():

@@ -20,12 +20,124 @@ for why both of those matter.
 import collections
 import importlib
 import threading
+import time
 from abc import ABC, abstractmethod
-from collections import namedtuple
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import TypeAlias
 
-from controller.base import normalize_controller_output
+from controller.base import ControllerTraceDiagnostics, normalize_controller_output
 
-NormalizedOutput = namedtuple("NormalizedOutput", ["cycle_ratio", "fan"])
+
+StatusScalar: TypeAlias = None | bool | int | float | str
+StatusValue: TypeAlias = StatusScalar | Mapping[str, "StatusValue"] | tuple["StatusValue", ...]
+
+
+def _freeze_status_value(value: object) -> StatusValue:
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, Mapping):
+        frozen: dict[str, StatusValue] = {}
+        for key, nested_value in value.items():
+            if not isinstance(key, str):
+                raise TypeError("controller status keys must be strings")
+            frozen[key] = _freeze_status_value(nested_value)
+        return MappingProxyType(frozen)
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_status_value(item) for item in value)
+    raise TypeError(f"unsupported controller status value: {type(value).__name__}")
+
+
+def _freeze_status(status: Mapping[str, object]) -> Mapping[str, StatusValue]:
+    return MappingProxyType({key: _freeze_status_value(value) for key, value in status.items()})
+
+
+MutableStatusValue: TypeAlias = StatusScalar | dict[str, "MutableStatusValue"] | list["MutableStatusValue"]
+
+
+def _thaw_status_value(value: object) -> MutableStatusValue:
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, Mapping):
+        thawed: dict[str, MutableStatusValue] = {}
+        for key, nested_value in value.items():
+            if not isinstance(key, str):
+                raise TypeError("controller status keys must be strings")
+            thawed[key] = _thaw_status_value(nested_value)
+        return thawed
+    if isinstance(value, tuple | list):
+        return [_thaw_status_value(item) for item in value]
+    raise TypeError(f"unsupported controller status value: {type(value).__name__}")
+
+
+def _thaw_status(status: Mapping[str, object]) -> dict[str, MutableStatusValue]:
+    thawed = _thaw_status_value(status)
+    if not isinstance(thawed, dict):
+        raise TypeError("controller status must be a mapping")
+    return thawed
+
+
+@dataclass(frozen=True, slots=True)
+class ControllerUpdateResult:
+    """One atomically captured controller completion."""
+
+    cycle_ratio: float
+    fan: Mapping[str, float] | None
+    diagnostics: ControllerTraceDiagnostics | None = None
+    status: Mapping[str, StatusValue] | None = None
+    revision: int = 0
+    solve_start_monotonic: float | None = None
+    solve_end_monotonic: float | None = None
+    solve_duration_seconds: float | None = None
+    completed_wall_time: float | None = None
+
+    def __post_init__(self):
+        if self.fan is not None:
+            object.__setattr__(self, "fan", MappingProxyType(dict(self.fan)))
+        if self.status is not None:
+            object.__setattr__(self, "status", _freeze_status(self.status))
+        if self.revision < 0:
+            raise ValueError("revision must be non-negative")
+        solve_start = self.solve_start_monotonic
+        solve_end = self.solve_end_monotonic
+        solve_duration = self.solve_duration_seconds
+        completion_wall_time = self.completed_wall_time
+        if self.revision == 0:
+            if (
+                solve_start is not None
+                or solve_end is not None
+                or solve_duration is not None
+                or completion_wall_time is not None
+            ):
+                raise ValueError("an uncompleted result has no completion timestamps")
+            return
+        if solve_start is None or solve_end is None or solve_duration is None or completion_wall_time is None:
+            raise ValueError("a completed result requires all completion timestamps")
+        if solve_end < solve_start:
+            raise ValueError("solve end must not precede solve start")
+        if solve_duration != solve_end - solve_start:
+            raise ValueError("solve duration must equal its monotonic interval")
+
+
+def _capture_completed_result(core, temp, revision):
+    solve_start = time.monotonic()
+    raw = core.update(temp)
+    solve_end = time.monotonic()
+    cycle_ratio, fan = normalize_controller_output(raw)
+    status = core.get_status()
+    diagnostics = core.trace_diagnostics()
+    return ControllerUpdateResult(
+        cycle_ratio=cycle_ratio,
+        fan=fan,
+        diagnostics=diagnostics,
+        status=status,
+        revision=revision,
+        solve_start_monotonic=solve_start,
+        solve_end_monotonic=solve_end,
+        solve_duration_seconds=solve_end - solve_start,
+        completed_wall_time=time.time(),
+    )
 
 
 class ControllerRunner(ABC):
@@ -34,7 +146,7 @@ class ControllerRunner(ABC):
     @abstractmethod
     def submit(self, temp): ...
     @abstractmethod
-    def latest(self): ...
+    def latest(self) -> ControllerUpdateResult: ...
     @abstractmethod
     def reconfigure(self, settings, control, logger=None): ...
     @abstractmethod
@@ -52,7 +164,7 @@ class ControllerRunner(ABC):
     @abstractmethod
     def refit_from_cook(self): ...
     @abstractmethod
-    def controller_state(self): ...
+    def controller_state(self) -> dict[str, object]: ...
     @abstractmethod
     def stop(self): ...
 
@@ -61,6 +173,8 @@ class SyncControllerRunner(ControllerRunner):
     def __init__(self, core):
         self._core = core
         self._temp = None
+        self._revision = 0
+        self._latest_result = None
 
     def set_target(self, setpoint):
         self._core.set_target(setpoint)
@@ -68,10 +182,10 @@ class SyncControllerRunner(ControllerRunner):
     def submit(self, temp):
         self._temp = temp
 
-    def latest(self):
-        raw = self._core.update(self._temp)
-        ratio, fan = normalize_controller_output(raw)
-        return NormalizedOutput(cycle_ratio=ratio, fan=fan)
+    def latest(self) -> ControllerUpdateResult:
+        self._revision += 1
+        self._latest_result = _capture_completed_result(self._core, self._temp, self._revision)
+        return self._latest_result
 
     def latest_from(self, temp):
         self.submit(temp)
@@ -116,16 +230,11 @@ class SyncControllerRunner(ControllerRunner):
         return fn() if fn is not None else None
 
     def controller_state(self):
-        """A mapping the caller owns outright and may mutate freely -- Hold adds
-        "cycle_ratio" to it before publishing to MQTT -- without touching the
-        controller's own state. `status is None` (not merely falsy) is what
-        selects the fallback, so a controller whose get_status() legitimately
-        returns {} is trusted rather than second-guessed.
-        """
+        """A mutable, JSON-safe copy of the current status snapshot."""
+        if self._latest_result is not None:
+            return {} if self._latest_result.status is None else _thaw_status(self._latest_result.status)
         status = self._core.get_status()
-        if status is None:
-            return dict(self._core.__dict__)
-        return dict(status)
+        return {} if status is None else _thaw_status(status)
 
 
 _UNSET = object()
@@ -166,21 +275,25 @@ class ThreadedControllerRunner(ControllerRunner):
         self._core = core
         self._lock = threading.Lock()
         self._temp = None
-        self._output = NormalizedOutput(cycle_ratio=0.0, fan=None)
+        self._output = ControllerUpdateResult(
+            cycle_ratio=0.0,
+            fan=None,
+            diagnostics=None,
+            status=None,
+            revision=0,
+            solve_start_monotonic=None,
+            solve_end_monotonic=None,
+            solve_duration_seconds=None,
+            completed_wall_time=None,
+        )
+        self._revision = 0
         self._pending_target = _UNSET
         self._pending_core = None
         self._pending_outputs = collections.deque(maxlen=_MAX_PENDING_OUTPUTS)
         self._pending_dropped = 0
         self._pending_restore = None
         self._model_snapshot = _owned_model_snapshot(core.get_model_snapshot())
-        # Mirrors the post-solve seeding in _loop below: a get_status() that
-        # returns non-None is the one JSON-safe to publish, so the very first
-        # snapshot -- read before the worker's first solve completes -- must
-        # come from it too, not from a core.__dict__ that may hold do-mpc/casadi
-        # objects for the whole first control period (or forever, if the worker
-        # dies inside update()).
-        initial_status = _safe_initial_status(core)
-        self._state_snapshot = dict(initial_status) if initial_status is not None else dict(core.__dict__)
+        self._initial_status = _safe_initial_status(core)
         self._control_period = core.get_control_period()
         self._commands_fan = core.commands_fan()
         self._stop_event = threading.Event()
@@ -210,14 +323,11 @@ class ThreadedControllerRunner(ControllerRunner):
             for applied in sorted(pending_outputs, key=lambda a: a.timestamp):
                 self._core.set_output(applied)
             if temp is not None:
-                raw = self._core.update(temp)
-                ratio, fan = normalize_controller_output(raw)
-                snap = dict(self._core.__dict__)
-                status = self._core.get_status()
+                result = _capture_completed_result(self._core, temp, self._revision + 1)
                 model = _owned_model_snapshot(self._core.get_model_snapshot())
                 with self._lock:
-                    self._output = NormalizedOutput(cycle_ratio=ratio, fan=fan)
-                    self._state_snapshot = status if status is not None else snap
+                    self._revision = result.revision
+                    self._output = result
                     self._model_snapshot = model
             # Interruptible sleep; wait(None/0) would block forever, so floor it.
             self._stop_event.wait(self._control_period or 1.0)
@@ -230,7 +340,7 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._temp = temp
 
-    def latest(self):
+    def latest(self) -> ControllerUpdateResult:
         with self._lock:
             return self._output
 
@@ -254,7 +364,9 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def controller_state(self):
         with self._lock:
-            state = dict(self._state_snapshot)
+            status = self._output.status
+            source = self._initial_status if status is None else status
+            state = {} if source is None else _thaw_status(source)
             state["pending_dropped"] = self._pending_dropped
             return state
 

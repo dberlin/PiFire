@@ -21,6 +21,7 @@ def test_base_defaults_are_inert():
     core = ControllerBase({}, "F", dict(CYCLE_DATA))
     assert core.set_output(AppliedOutput(0.4, OutputSource.CONTROLLER, 1.0)) is None
     assert core.get_status() is None
+    assert core.trace_diagnostics() is None
     assert core.get_model_snapshot() is None
     assert core.restore_model({"revision": 1}) is False
 
@@ -33,8 +34,8 @@ def test_set_output_does_not_change_a_plain_controller_s_output():
 
 
 @pytest.mark.parametrize("name", PLAIN_CONTROLLERS)
-def test_every_shipped_controller_answers_all_four(name):
+def test_every_shipped_controller_answers_all_typed_capabilities(name):
     mod = importlib.import_module(f"controller.{name}")
     core = mod.Controller({}, "F", dict(CYCLE_DATA))
-    for method in ("set_output", "get_status", "get_model_snapshot", "restore_model"):
+    for method in ("set_output", "get_status", "trace_diagnostics", "get_model_snapshot", "restore_model"):
         assert callable(getattr(core, method)), f"{name} is missing {method}"

@@ -68,9 +68,16 @@ class ModelEventType(StrEnum):
 
 class ControllerBranch(StrEnum):
     NONE = "none"
-    NEW_TARGET = "new_target"
+    INITIALIZATION = "initialization"
+    FULL_HEAT = "full_heat"
+    TARGET_REACHED = "target_reached"
     RESET = "reset"
     OVERSHOOT = "overshoot"
+
+
+class MpcFailureState(StrEnum):
+    SUCCESS = "success"
+    POLICY_EXCEPTION = "policy_exception"
 
 
 class SafetyEventType(StrEnum):
@@ -217,7 +224,8 @@ class PidSpUpdatePayload(_ControlUpdatePayload):
     theta_seconds: NonNegativeFloat
     stable_window_seconds: PositiveFloat
     center_factor: FiniteFloat
-    new_target: bool
+    new_target_before: bool
+    new_target_after: bool
     target_change_temperature: FiniteFloat
     target_change_ms: NonNegativeInt
     branch: ControllerBranch
@@ -237,12 +245,12 @@ class MpcUpdatePayload(_ControlUpdatePayload):
     disturbance_estimate: FiniteFloat
     model_revision: NonNegativeInt
     model_provenance: NonBlankString
-    raw_policy_firing_load: FiniteFloat
-    equilibrium_feed_forward: FiniteFloat
-    residual_move: FiniteFloat
+    raw_policy_firing_load: FiniteFloat | None
+    equilibrium_feed_forward: FiniteFloat | None
+    residual_move: FiniteFloat | None
     bounded_firing_load: FiniteFloat
     policy_kind: NonBlankString
-    failure_state: NonBlankString | None
+    failure_state: MpcFailureState
     solve_start_ms: NonNegativeInt
     solve_end_ms: NonNegativeInt
     deadline_miss_count: NonNegativeInt
@@ -260,6 +268,11 @@ class MpcUpdatePayload(_ControlUpdatePayload):
             raise ValueError("state_names and state_values must have equal length")
         if self.solve_start_ms > self.solve_end_ms:
             raise ValueError("solve_start_ms must not exceed solve_end_ms")
+        raw_components = (self.raw_policy_firing_load, self.equilibrium_feed_forward, self.residual_move)
+        if self.failure_state is MpcFailureState.SUCCESS and any(value is None for value in raw_components):
+            raise ValueError("successful MPC diagnostics require raw policy components")
+        if self.failure_state is not MpcFailureState.SUCCESS and any(value is not None for value in raw_components):
+            raise ValueError("failed MPC diagnostics must omit unknown raw policy components")
         return self
 
 

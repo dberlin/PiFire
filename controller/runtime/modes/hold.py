@@ -185,8 +185,8 @@ class HoldMode(ControlMode):
         # Check to see if it's time to update pid and update if needed.
         controller_interval = self._runner.control_period() or self.state.cycle.cycle_time
         if (now - self.state.controller.cycle_start) > controller_interval:
-            _out = self._runner.latest()
-            self.state.controller.output, fan_cmd = _out.cycle_ratio, _out.fan
+            result = self._runner.latest()
+            self.state.controller.output, fan_cmd = result.cycle_ratio, result.fan
             self.state.controller.cycle_start = now
             self.state.cycle.ratio = self.state.cycle.raw_ratio = (
                 settings["cycle_data"]["u_min"] if self.state.lid.open_detected else self.state.controller.output

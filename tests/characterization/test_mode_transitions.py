@@ -25,7 +25,7 @@ from tests.characterization.fixtures import base_settings, base_control, base_pe
 from tests.fakes.probes import FakeProbes
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.runner import FakeControllerRunner
-from controller.runtime.runner import NormalizedOutput
+from controller.runtime.runner import ControllerUpdateResult
 
 
 class _SwitchOffGrill(FakeGrillPlatform):
@@ -239,7 +239,7 @@ def test_maxtemp_trip_breaks_before_actuation():
     control_data["safety"]["startuptemp"] = 150
     control_data["safety"]["afterstarttemp"] = 200  # setup_safety OK
     probes = FakeProbes().script([200, 550, 550])
-    runner = FakeControllerRunner(period=0.0).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 4)
+    runner = FakeControllerRunner(period=0.0).script([ControllerUpdateResult(cycle_ratio=0.5, fan=None)] * 4)
     result = run_mode(
         "Hold",
         settings=settings,
@@ -267,7 +267,7 @@ def test_check_safety_flameout_breaks_before_actuation():
     control_data["safety"]["afterstarttemp"] = 200
     control_data["safety"]["reigniteretries"] = 0  # -> ERROR verdict
     probes = FakeProbes().script([200, 100, 100])
-    runner = FakeControllerRunner(period=0.0).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 4)
+    runner = FakeControllerRunner(period=0.0).script([ControllerUpdateResult(cycle_ratio=0.5, fan=None)] * 4)
     result = run_mode(
         "Hold",
         settings=settings,
@@ -294,7 +294,7 @@ def test_setup_safety_inactive_skips_loop_but_runs_teardown():
     control_data["safety"]["afterstarttemp"] = 100  # < startuptemp -> flameout at setup
     control_data["safety"]["reigniteretries"] = 0  # -> ERROR verdict, Inactive
     probes = FakeProbes().script([100, 100, 100])
-    runner = _StopRecordingRunner(period=0.0).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 2)
+    runner = _StopRecordingRunner(period=0.0).script([ControllerUpdateResult(cycle_ratio=0.5, fan=None)] * 2)
     result = run_mode(
         "Hold",
         settings=settings,

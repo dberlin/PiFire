@@ -15,6 +15,70 @@
 Imported Libraries
 """
 import time
+from dataclasses import dataclass
+from typing import TypeAlias
+
+from common.control_trace import ControllerBranch, MpcFailureState
+
+
+@dataclass(frozen=True, slots=True)
+class PidTraceDiagnostics:
+    observed_dt_seconds: float
+    error: float
+    proportional_term: float
+    integral_term: float
+    derivative_term: float
+    integral_accumulator: float
+    integral_clamped: bool
+    derivative_input: float
+    derivative_state: float
+    proportional_band: float
+    kp: float
+    ki: float
+    kd: float
+    center: float
+    previous_temperature: float
+    previous_update_time: float
+    raw_output: float
+    final_output: float
+
+
+@dataclass(frozen=True, slots=True)
+class PidSpTraceDiagnostics(PidTraceDiagnostics):
+    measured_rate: float
+    predicted_temperature: float
+    predicted_error: float
+    tau_seconds: float
+    theta_seconds: float
+    stable_window_seconds: float
+    center_factor: float
+    new_target_before: bool
+    new_target_after: bool
+    target_change_temperature: float
+    target_change_time: float
+    branch: ControllerBranch
+
+
+@dataclass(frozen=True, slots=True)
+class MpcTraceDiagnostics:
+    state_names: tuple[str, ...]
+    state_values: tuple[float, ...]
+    disturbance_estimate: float
+    model_revision: int
+    model_provenance: str
+    raw_policy_firing_load: float | None
+    equilibrium_feed_forward: float | None
+    residual_move: float | None
+    bounded_firing_load: float
+    policy_kind: str
+    failure_state: MpcFailureState
+    consecutive_policy_failures: int
+    solve_start_monotonic: float
+    solve_end_monotonic: float
+    solve_duration_seconds: float
+
+
+ControllerTraceDiagnostics: TypeAlias = PidTraceDiagnostics | PidSpTraceDiagnostics | MpcTraceDiagnostics
 
 """
 Class Definition
@@ -64,28 +128,17 @@ class ControllerBase:
     def set_output(self, applied):
         """Report the duty that actually reached the auger.
 
-        `applied` is a controller.applied_output.AppliedOutput. Controllers that
-        model the plant use it so their model follows the grill rather than the
-        request. A report whose `controller_commanded` is False is NOT a report
-        to discard -- the grill really did run at that duty, so it belongs in
-        the command history. What it suppresses is *identification* across the
-        interval, so no estimator computes a temperature slope over time the
-        controller did not drive.
+        ``applied`` is a controller.applied_output.AppliedOutput. Controllers
+        that model the plant use it so their model follows the grill rather than
+        the request.
         """
 
     def get_status(self):
-        """JSON-safe diagnostics for the MQTT payload.
+        """JSON-safe diagnostics for the MQTT payload, if this core exposes it."""
+        return None
 
-        Return None to publish the controller's __dict__, which is the legacy
-        behavior and correct for controllers whose attributes are all scalars.
-
-        An override may assume set_target() has already been called at least
-        once: `_build_core` (controller/runtime/runner.py) constructs the core
-        and calls set_target() in the same try/except, so a core that failed to
-        take a setpoint never escapes to have get_status() (or anything else)
-        called on it. An implementation that reads a set_target()-assigned
-        attribute does not need to guard against it being unset.
-        """
+    def trace_diagnostics(self) -> ControllerTraceDiagnostics | None:
+        """Immutable typed diagnostics from the most recent completed update."""
         return None
 
     def get_model_snapshot(self):

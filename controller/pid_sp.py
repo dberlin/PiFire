@@ -33,8 +33,11 @@
 """
 Imported Libraries
 """
-import time
 import math
+import time
+
+from common.control_trace import ControllerBranch
+from controller.base import PidSpTraceDiagnostics
 from controller.pid_base import PIDControllerBase
 
 """
@@ -81,75 +84,109 @@ class Controller(PIDControllerBase):
         self.start_change_temp = 0.0
         self.new_target = False
 
+        self._trace_diagnostics = None
         self.set_target(0.0)
 
     def update(self, current):
-        # Elapsed time since last update
         current_time = time.time()
-        dt = current_time - self.last_update
-
-        # Fix self.last being set to 0.0 on set point change
+        previous_update_time = self.last_update
+        previous_temperature = self.last
+        dt = current_time - previous_update_time
+        branch = ControllerBranch.NONE
+        new_target_before = self.new_target
         if self.last == 0.0 and self.new_target:
             self.last = current
+            previous_temperature = current
+            branch = ControllerBranch.INITIALIZATION
 
-        # Error Calculation
         error = current - self.set_point
-
-        # Rate of Change Calculation
-        self.roc = (current - self.last) / dt  # Rate of change in Degrees per second
-
-        # Predict future temperature and error
+        self.roc = (current - self.last) / dt
         predicted_temp = current + (self.roc * self.theta) * (1 - math.exp(-dt / self.tau))
         predicted_error = predicted_temp - self.set_point
 
-        # Determine output
         if predicted_error < -self.pb:
             self.u = 1.0
-        # If overshooting, minimize output
+            if branch is ControllerBranch.NONE:
+                branch = ControllerBranch.FULL_HEAT
         elif predicted_error > self.stable_window:
             self.u = 0.0
+            if branch is ControllerBranch.NONE:
+                branch = ControllerBranch.OVERSHOOT
         else:
-            # Reset integral term when current temperature first reaches or exceeds set point after a set point change
             if self.new_target and abs(error) <= 3:
                 self.new_target = False
+                if branch is ControllerBranch.NONE:
+                    branch = ControllerBranch.TARGET_REACHED
 
-            # Reset integral if the system is not within stable window or has not reached halfway to the set point within 3 cycles. Prevents overshoots on small set point changes.
-            if (abs(error) > self.stable_window) or (
+            reset_integral = (abs(error) > self.stable_window) or (
                 self.new_target
                 and current_time - self.last_set_time >= self.cycle_time * 3
                 and abs(error) <= abs(self.start_change_temp - self.set_point) / 2
-            ):
+            )
+            if reset_integral:
                 self.inter = 0.0
+                if branch is ControllerBranch.NONE:
+                    branch = ControllerBranch.RESET
 
-            # Minimize derivative to maximize descent rate when setting new lower Set Point
             if (self.new_target and self.set_point < current) or (abs(error) > self.pb / 2):
                 self.derv = 0.0
 
-            # P
             self.p = self.kp * predicted_error + self.center
-
-            # I
             self.inter += predicted_error * dt
             self.i = self.ki * self.inter
+            unclamped_integral_term = self.i
             self.i = max(min(self.i, self.center), -self.center)
+            integral_clamped = self.i != unclamped_integral_term
 
-            # D
             self.derv = (predicted_temp - self.last) / dt
             self.d = self.kd * self.derv
 
-            # If error is within PB, reduce output to prevent overshoots
             if error < self.pb and current_time - self.last_set_time < self.cycle_time * 3:
                 self.u = self.u * 0.65
 
-            # PID
             self.u = self.p + self.i + self.d
+        if predicted_error < -self.pb or predicted_error > self.stable_window:
+            integral_clamped = False
 
-        # Update for next cycle
         self.error = error
         self.last = current
         self.last_update = current_time
-
+        self._trace_diagnostics = PidSpTraceDiagnostics(
+            observed_dt_seconds=dt,
+            error=error,
+            proportional_term=self.p,
+            integral_term=self.i,
+            derivative_term=self.d,
+            integral_accumulator=self.inter,
+            integral_clamped=integral_clamped,
+            derivative_input=predicted_temp - previous_temperature,
+            derivative_state=self.derv,
+            proportional_band=self.pb,
+            kp=self.kp,
+            ki=self.ki,
+            kd=self.kd,
+            center=self.center,
+            previous_temperature=previous_temperature,
+            previous_update_time=previous_update_time,
+            raw_output=self.u,
+            final_output=self.u,
+            measured_rate=self.roc,
+            predicted_temperature=predicted_temp,
+            predicted_error=predicted_error,
+            tau_seconds=self.tau,
+            theta_seconds=self.theta,
+            stable_window_seconds=self.stable_window,
+            center_factor=self.center_factor,
+            new_target_before=new_target_before,
+            new_target_after=self.new_target,
+            target_change_temperature=self.start_change_temp,
+            target_change_time=self.last_set_time,
+            branch=branch,
+        )
         return self.u
+
+    def trace_diagnostics(self) -> PidSpTraceDiagnostics | None:
+        return self._trace_diagnostics
 
     def set_target(self, set_point):
         self.set_point = set_point

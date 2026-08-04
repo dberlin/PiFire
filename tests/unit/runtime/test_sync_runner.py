@@ -1,5 +1,7 @@
+import json
+
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.runtime.runner import SyncControllerRunner, NormalizedOutput, build_runner, _build_core
+from controller.runtime.runner import ControllerUpdateResult, SyncControllerRunner, build_runner, _build_core
 
 
 class _Core:
@@ -16,12 +18,18 @@ class _Core:
     def get_control_period(self):
         return self.period
 
+    def get_status(self):
+        return {"target": self.target}
+
+    def trace_diagnostics(self):
+        return None
+
 
 def test_sync_runner_normalizes_dict_output():
     r = SyncControllerRunner(_Core())
     r.set_target(225)
     out = r.latest_from(200.0)
-    assert isinstance(out, NormalizedOutput)
+    assert isinstance(out, ControllerUpdateResult)
     assert out.cycle_ratio == 0.4
     assert out.fan == {"duty": 60}
 
@@ -33,6 +41,51 @@ def test_sync_runner_float_output_has_no_fan():
 
     out = SyncControllerRunner(FloatCore()).latest_from(190.0)
     assert out.cycle_ratio == 0.25 and out.fan is None
+
+
+def test_sync_runner_result_revision_and_status_match_one_completed_update():
+    class AtomicCore(_Core):
+        def __init__(self):
+            super().__init__()
+            self.completed = 0
+
+        def update(self, temp):
+            self.completed += 1
+            return 0.25
+
+        def get_status(self):
+            return {"completed": self.completed}
+
+    runner = SyncControllerRunner(AtomicCore())
+    first = runner.latest_from(190.0)
+    second = runner.latest_from(191.0)
+
+    assert (first.revision, first.status) == (1, {"completed": 1})
+    assert (second.revision, second.status) == (2, {"completed": 2})
+    assert first.solve_end_monotonic >= first.solve_start_monotonic
+    assert first.solve_duration_seconds == first.solve_end_monotonic - first.solve_start_monotonic
+
+
+def test_sync_controller_state_thaws_nested_completed_status_without_mutating_result():
+    class NestedStatusCore(_Core):
+        def __init__(self):
+            super().__init__()
+            self.status = {"nested": {"samples": [1.0]}}
+
+        def get_status(self):
+            return self.status
+
+    core = NestedStatusCore()
+    runner = SyncControllerRunner(core)
+    result = runner.latest_from(190.0)
+    core.status["nested"]["samples"].append(2.0)
+
+    state = runner.controller_state()
+    assert state == {"nested": {"samples": [1.0]}}
+    assert json.loads(json.dumps(state)) == state
+    state["nested"]["samples"].append(3.0)
+    assert result.status == {"nested": {"samples": (1.0,)}}
+    assert runner.controller_state() == {"nested": {"samples": [1.0]}}
 
 
 class _RecordingLogger:
@@ -174,6 +227,9 @@ class _RecordingCore:
         self.restored = snapshot
         return True
 
+    def trace_diagnostics(self):
+        return None
+
 
 def test_sync_runner_forwards_set_output():
     core = _RecordingCore()
@@ -215,14 +271,10 @@ def test_controller_state_treats_empty_status_dict_as_present():
     assert SyncControllerRunner(core).controller_state() == {}
 
 
-def test_controller_state_falls_back_to_dunder_dict():
+def test_controller_state_does_not_expose_core_internals_when_status_absent():
     core = _RecordingCore(status=None)
     core.p = 0.25
-    state = SyncControllerRunner(core).controller_state()
-    assert state["p"] == 0.25
-    # a copy, not the live __dict__
-    state["p"] = 99
-    assert core.p == 0.25
+    assert SyncControllerRunner(core).controller_state() == {}
 
 
 def test_controller_state_from_get_status_is_a_copy():

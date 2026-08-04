@@ -16,6 +16,7 @@ from common.control_trace import (
     ControlTraceDbRow,
     ControlTraceRecord,
     ControllerBranch,
+    MpcFailureState,
     ControllerType,
     FixedCycleFramePayload,
     FramedPulseFramePayload,
@@ -64,7 +65,9 @@ def test_trace_enums_have_exact_members():
     }
     assert set(ControllerBranch) == {
         ControllerBranch.NONE,
-        ControllerBranch.NEW_TARGET,
+        ControllerBranch.INITIALIZATION,
+        ControllerBranch.FULL_HEAT,
+        ControllerBranch.TARGET_REACHED,
         ControllerBranch.RESET,
         ControllerBranch.OVERSHOOT,
     }
@@ -178,10 +181,11 @@ def _payload_cases():
                 theta_seconds=5.0,
                 stable_window_seconds=60.0,
                 center_factor=0.8,
-                new_target=True,
+                new_target_before=True,
+                new_target_after=True,
                 target_change_temperature=218.0,
                 target_change_ms=4,
-                branch=ControllerBranch.NEW_TARGET,
+                branch=ControllerBranch.FULL_HEAT,
             ),
         ),
         (
@@ -215,7 +219,7 @@ def _payload_cases():
                 residual_move=0.1,
                 bounded_firing_load=0.6,
                 policy_kind="linear_mpc",
-                failure_state=None,
+                failure_state=MpcFailureState.SUCCESS,
                 solve_start_ms=8,
                 solve_end_ms=10,
                 deadline_miss_count=0,
@@ -325,6 +329,31 @@ def _payload_cases():
             RecorderGapPayload(lost_record_count=3, gap_start_ms=101, gap_end_ms=102),
         ),
     ]
+
+
+def test_mpc_failure_payload_records_only_the_held_bounded_command():
+    payload = _mpc_update_payload()
+    failure = replace(
+        payload,
+        raw_policy_firing_load=None,
+        equilibrium_feed_forward=None,
+        residual_move=None,
+        bounded_firing_load=0.42,
+        failure_state=MpcFailureState.POLICY_EXCEPTION,
+    )
+    assert failure.bounded_firing_load == pytest.approx(0.42)
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        {"failure_state": MpcFailureState.SUCCESS, "raw_policy_firing_load": None},
+        {"failure_state": MpcFailureState.POLICY_EXCEPTION, "raw_policy_firing_load": 0.5},
+    ],
+)
+def test_mpc_failure_state_requires_truthful_raw_components(replacement):
+    with pytest.raises(ValidationError):
+        replace(_mpc_update_payload(), **replacement)
 
 
 def _pid_session_payload() -> SessionPayload:

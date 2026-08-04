@@ -29,7 +29,7 @@ import numpy as np
 # do_mpc (CasADi/IPOPT) is imported lazily only when the NLP policy is built; the
 # net policy + EKF path is pure numpy/scipy and never imports it.
 
-from controller.base import ControllerBase
+from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import _MAX_CONFIGURABLE_HORIZON_S, built_n_horizon, longest_braking_distance
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE, MODEL_SCHEMA
@@ -343,6 +343,7 @@ class Controller(ControllerBase):
         self._history = collections.deque(maxlen=_HISTORY_MAX)
         self._model_revision = 0
         self._model_meta = None  # provenance of an adopted model, or None
+        self._trace_diagnostics = None
 
         # Everything the thermal parameters size -- the estimator, the horizon
         # and the policy -- is built through the same call `restore_model` uses,
@@ -853,62 +854,57 @@ class Controller(ControllerBase):
 
     def update(self, current):
         y = _to_c(current, self.units)
-        # 1) estimate states from the duty that actually reached the auger --
-        #    not the command -- so a clamp, a lid-open pause, or a manual
-        #    override is visible to the estimator instead of silently assumed
-        #    away.
         applied_Q = self._applied_Q
         x_hat = self.estimator.update(applied_Q, y)
         self._x_hat = x_hat
-        # The rate the plant actually received over the interval ending now --
-        # the same value just handed to the estimator, not the Q computed below
-        # for the next interval -- so a fit against this row credits the plant,
-        # not the model, for a paused or clamped auger.
+        state_values = tuple(float(value) for value in np.asarray(x_hat).reshape(-1))
+        state_names = tuple(f"q{index}" for index in range(int(self.cfg["n_delay"]))) + ("T_c", "d")
+        disturbance = state_values[-1]
         self._history.append((time.time(), float(y), float(applied_Q)))
-        # The net's Q_prev feature was trained on values the sampler always
-        # drove inside [Q_min, Q_max]; clamp for the net only, the estimator
-        # above already saw the unclamped value.
         self._policy_u_prev = float(np.clip(self._applied_Q, self.cfg["Q_min"], self.cfg["Q_max"]))
-        # 2) compute firing rate Q from the active policy (net or NLP). On any
-        #    error we hold the previous move so the control loop never breaks.
+
+        solve_start = time.monotonic()
+        failure_state = MpcFailureState.SUCCESS
+        failure_error = None
         try:
             if self._net is not None:
-                Q = self._net.firing_rate(x_hat, self._policy_u_prev, self._set_point_c)
+                raw_policy = (
+                    self._net.firing_rate_raw if hasattr(self._net, "firing_rate_raw") else self._net.firing_rate
+                )
+                Q = raw_policy(x_hat, self._policy_u_prev, self._set_point_c)
             else:
                 Q = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+        except Exception as error:
+            Q = self._last_Q
+            failure_state = MpcFailureState.POLICY_EXCEPTION
+            failure_error = error
+        finally:
+            solve_end = time.monotonic()
+
+        if failure_state is MpcFailureState.SUCCESS:
             if self._consecutive_policy_failures:
                 print(f"[mpc] policy recovered after {self._consecutive_policy_failures} failed step(s)")
             self._consecutive_policy_failures = 0
             self._last_solve_failed = False
-        except Exception as e:
-            # Holding the last move is the right reflex for ONE bad solve: the
-            # control loop must not break, and the previous firing rate is the
-            # best available guess for the next few seconds. It is the wrong
-            # answer forever. A policy that raises on every step -- an artifact
-            # whose state vector does not match the model is the way that
-            # happens -- leaves the grill on a frozen command, and this except
-            # is what makes that invisible, so the failure has to announce
-            # itself. Reported at a widening interval rather than every step,
-            # since a per-step message on a 5 s loop buries the first one, and
-            # surfaced in get_status() so it is visible without reading logs.
-            Q = self._last_Q
+            raw_firing_load = float(Q)
+            self._last_Q_raw = raw_firing_load
+        else:
             self._last_solve_failed = True
             self._consecutive_policy_failures += 1
             n = self._consecutive_policy_failures
             if n == 1 or n in (10, 60) or n % 300 == 0:
                 print(
-                    f"[mpc] policy has failed {n} consecutive step(s) ({type(e).__name__}: {e}); "
+                    f"[mpc] policy has failed {n} consecutive step(s) ({type(failure_error).__name__}: {failure_error}); "
                     f"holding the last firing rate {Q:.1f}. The grill is not being controlled to "
                     "setpoint -- check the policy artifact and the model configuration."
                 )
-        self._last_Q_raw = float(Q)
+            raw_firing_load = None
+
         Q = float(np.clip(Q, self.cfg["Q_min"], self.cfg["Q_max"]))
         self._last_Q = Q
-        # Assume the command is applied until a report says otherwise.
         self._applied_Q = Q
         if self._log_path:
             self._log_row(y, Q)
-        # 3) allocate Q -> actuators
         auger, fan_duty = allocate(
             Q,
             Q_min=self.cfg["Q_min"],
@@ -919,4 +915,35 @@ class Controller(ControllerBase):
             fan_max_pct=self.cfg["fan_max_pct"],
             enable_fan=bool(self.cfg["enable_fan_input"]),
         )
+        if raw_firing_load is None:
+            equilibrium = None
+            residual_move = None
+        else:
+            equilibrium = (
+                self.cfg["h_amb"] * (self._set_point_c - self.cfg["T_amb"])
+                + self.cfg["sigma"] * ((self._set_point_c + 273.15) ** 4 - (self.cfg["T_amb"] + 273.15) ** 4)
+                - disturbance
+            ) / self.cfg["K_Q"]
+            equilibrium = float(equilibrium)
+            residual_move = raw_firing_load - equilibrium
+        self._trace_diagnostics = MpcTraceDiagnostics(
+            state_names=state_names,
+            state_values=state_values,
+            disturbance_estimate=disturbance,
+            model_revision=self._model_revision,
+            model_provenance="adopted" if self._model_meta is not None else "configured",
+            raw_policy_firing_load=raw_firing_load,
+            equilibrium_feed_forward=equilibrium,
+            residual_move=residual_move,
+            bounded_firing_load=Q,
+            policy_kind="net" if self._net is not None else "nlp",
+            failure_state=failure_state,
+            consecutive_policy_failures=self._consecutive_policy_failures,
+            solve_start_monotonic=solve_start,
+            solve_end_monotonic=solve_end,
+            solve_duration_seconds=solve_end - solve_start,
+        )
         return {"cycle_ratio": auger, "fan": {"duty": fan_duty}}
+
+    def trace_diagnostics(self) -> MpcTraceDiagnostics | None:
+        return self._trace_diagnostics

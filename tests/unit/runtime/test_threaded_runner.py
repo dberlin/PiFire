@@ -1,6 +1,8 @@
 import collections
 import threading
 import time
+import json
+
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.runtime.runner import (
@@ -47,6 +49,9 @@ class FakeCore:
     def get_status(self):
         return None
 
+    def trace_diagnostics(self):
+        return None
+
     def get_model_snapshot(self):
         return None
 
@@ -82,6 +87,51 @@ def test_threaded_runner_solves_submitted_temp():
         assert r.wants_async() is True
     finally:
         r.stop()
+
+
+def test_threaded_runner_repoll_returns_same_completed_result_revision():
+    core = FakeCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.submit(70.0)
+        assert core.updated.wait(2.0)
+        first = runner.latest()
+        second = runner.latest()
+        assert first is second
+        assert first.revision >= 1
+        assert first.solve_duration_seconds == first.solve_end_monotonic - first.solve_start_monotonic
+    finally:
+        runner.stop()
+
+
+def test_threaded_result_recursively_freezes_nested_status_across_repolls():
+    class _NestedStatusCore(FakeCore):
+        def __init__(self):
+            super().__init__()
+            self.status = {"nested": {"samples": [1.0]}}
+
+        def get_status(self):
+            return self.status
+
+    core = _NestedStatusCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        runner.submit(70.0)
+        assert core.updated.wait(2.0)
+        result = runner.latest()
+        core.status["nested"]["samples"].append(2.0)
+        core.status["nested"]["extra"] = 3.0
+
+        repolled = runner.latest()
+        state = runner.controller_state()
+        assert repolled is result
+        assert state == {"nested": {"samples": [1.0]}, "pending_dropped": 0}
+        assert json.loads(json.dumps(state)) == state
+        state["nested"]["samples"].append(3.0)
+        assert result.status == {"nested": {"samples": (1.0,)}}
+        assert runner.controller_state() == {"nested": {"samples": [1.0]}, "pending_dropped": 0}
+    finally:
+        runner.stop()
 
 
 def test_threaded_runner_latest_does_not_block_during_solve():
@@ -129,13 +179,11 @@ def test_threaded_runner_set_target_and_reconfigure_applied_by_thread():
         r.stop()
 
 
-def test_threaded_runner_controller_state_snapshot():
+def test_threaded_runner_never_exposes_core_internals_before_first_result():
     core = FakeCore()
     r = ThreadedControllerRunner(core)
     try:
-        snap = r.controller_state()
-        assert snap["tag"] == "core-a"  # well-formed before first solve
-        assert snap is not core.__dict__  # a copy, not the live dict
+        assert r.controller_state() == {"pending_dropped": 0}
     finally:
         r.stop()
 
@@ -178,8 +226,7 @@ def test_threaded_runner_survives_get_status_raising_during_init():
     core = _RaisingStatusCore()
     r = ThreadedControllerRunner(core)
     try:
-        snap = r.controller_state()
-        assert snap["tag"] == "core-a"  # fell back to __dict__ instead of crashing __init__
+        assert r.controller_state() == {"pending_dropped": 0}
     finally:
         r.stop()
 
@@ -282,6 +329,9 @@ class _OrderRecordingCore:
         return True
 
     def get_status(self):
+        return None
+
+    def trace_diagnostics(self):
         return None
 
     def get_model_snapshot(self):

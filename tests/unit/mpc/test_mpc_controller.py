@@ -381,7 +381,9 @@ def test_with_no_report_the_command_is_assumed_applied(mpc_controller, monkeypat
 
 def test_the_net_sees_the_applied_input_clamped_to_its_trained_span(net_mpc_controller, monkeypatch):
     seen = []
-    monkeypatch.setattr(net_mpc_controller._net, "firing_rate", lambda x, u_prev, sp: (seen.append(u_prev), 50.0)[1])
+    monkeypatch.setattr(
+        net_mpc_controller._net, "firing_rate_raw", lambda x, u_prev, sp: (seen.append(u_prev), 50.0)[1]
+    )
     net_mpc_controller.set_target(225.0)
     net_mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
     net_mpc_controller.update(200.0)
