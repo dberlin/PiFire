@@ -3,6 +3,7 @@ import type { CommandClient, CommandResult } from "../../helpers/command";
 import {
   type ButtonAction,
   buttonsForMode,
+  type ControlButton,
   type MenuItem,
 } from "../../helpers/dashboard/buttonsForMode";
 import { applySettings } from "../../helpers/settings/settingsApi";
@@ -76,23 +77,40 @@ export function ControlButtons({
   const [startupPrompt, setStartupPrompt] = useState<StartupPrompt>("none");
   const [startupError, setStartupError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
-  // Which button is waiting for the grill to catch up, and what the mode was
-  // when it was pressed. A command's effect is not visible until the control
-  // loop has applied it and the next socket frame carries the result, which is
-  // most of a second at best and several seconds across a mode change (the
-  // transition drives the output relays and can write a cookfile). Without this
-  // the press produces no acknowledgement at all and the row simply changes
-  // shape later, so the natural read is that nothing happened.
-  const [pending, setPending] = useState<{ label: string; mode: string } | null>(null);
+  // Which button is waiting for the grill to catch up, and what observable
+  // state it had when pressed. A command's effect is not visible until the
+  // control loop has applied it and the next socket frame carries the result.
+  const [pending, setPending] = useState<
+    (Pick<ControlButton, "label" | "variant"> & { mode: string }) | null
+  >(null);
 
-  // Render-phase transition, not an effect: the awaited command has landed once
-  // the mode moves off what it was at press time.
-  if (pending !== null && pending.mode !== dash.currentMode) setPending(null);
+  // Render-phase transition, not an effect: the command has landed when the
+  // pressed button disappears or changes mode/variant. Mode commands change
+  // the mode; same-mode toggles such as Smoke+ change their accent variant.
+  const pendingButton =
+    pending === null ? undefined : buttons.find((button) => button.label === pending.label);
+  if (
+    pending !== null &&
+    (pending.mode !== dash.currentMode ||
+      pendingButton === undefined ||
+      pendingButton.variant !== pending.variant)
+  ) {
+    setPending(null);
+  }
 
-  const fire = async (run: (c: CommandClient) => Promise<CommandResult>, label?: string) => {
+  const fire = async (
+    run: (c: CommandClient) => Promise<CommandResult>,
+    button?: ControlButton,
+  ) => {
     setBusy(true);
     setCommandError(null);
-    if (label !== undefined) setPending({ label, mode: dash.currentMode });
+    if (button !== undefined) {
+      setPending({
+        label: button.label,
+        mode: dash.currentMode,
+        variant: button.variant,
+      });
+    }
     try {
       const res = await run(command);
       if (!res.ok) {
@@ -106,8 +124,8 @@ export function ControlButtons({
     }
   };
 
-  const onClick = (action: ButtonAction, label?: string) => {
-    if (action.type === "command") fire(action.run, label);
+  const onClick = (action: ButtonAction, button: ControlButton) => {
+    if (action.type === "command") fire(action.run, button);
     else if (action.type === "setpoint") setSetpointOpen(true);
     else if (action.type === "pwm") setPwmOpen(true);
     else if (action.type === "menu")
@@ -186,7 +204,7 @@ export function ControlButtons({
               color: look.color,
               opacity: disabled || busy ? 0.5 : 1,
             }}
-            onClick={() => onClick(b.action, b.label)}
+            onClick={() => onClick(b.action, b)}
           >
             {waiting ? `${b.label}…` : b.label}
           </button>

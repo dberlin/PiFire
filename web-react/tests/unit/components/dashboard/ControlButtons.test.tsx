@@ -126,6 +126,33 @@ describe("ControlButtons", () => {
       expect(screen.getByRole("button", { name: /^Monitor/ })).not.toHaveAttribute("data-pending");
     });
 
+    it("stops marking Smoke+ pending when a same-mode frame reports the toggle applied", async () => {
+      const command = stubCommand();
+      const before = at("Hold", { smokePlus: true });
+      const { rerender } = render(
+        <ControlButtons apiBase="" dash={before} command={command} disabled={false} />,
+      );
+
+      await userEvent.click(screen.getByRole("button", { name: /^Smoke\+/ }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^Smoke\+/ })).toHaveAttribute(
+          "data-pending",
+          "true",
+        ),
+      );
+
+      rerender(
+        <ControlButtons
+          apiBase=""
+          dash={{ ...before, smokePlus: false }}
+          command={command}
+          disabled={false}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: /^Smoke\+/ })).not.toHaveAttribute("data-pending");
+    });
+
     it("does not leave a failed command looking like it is still working", async () => {
       const command = stubCommand();
       command.setMode = rs.fn(async () => ({ ok: false, message: "nope" }));
