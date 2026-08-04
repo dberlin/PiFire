@@ -310,6 +310,20 @@ def _sim_at(t, Q, fitted, key, value, *, T_amb, T0):
     return simulate_grey_box(t, Q, T_amb=T_amb, T0=float(T0), **_sim_kwargs(params))
 
 
+def _dump_json(document):
+    """Encode the machine-readable document, refusing any non-finite number.
+
+    RFC 8259 has no `Infinity`, `-Infinity` or `NaN` literal, and Python's own
+    decoder accepts all three, so an unconverted non-finite value would leave
+    here as text only Python can read back. `allow_nan=False` -- the same
+    setting the model store's snapshot validator encodes with -- makes that a
+    ValueError at the emit, beside the value that caused it, instead of a parse
+    error in whatever consumes this. Finite substitutes belong at the point the
+    quantity is assembled; see `_optional_float`.
+    """
+    return json.dumps(document, indent=2, allow_nan=False)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Fit MPC grey-box parameters to a calibration log.")
     ap.add_argument("csv")
@@ -319,7 +333,7 @@ def main():
 
     import pandas as pd
 
-    from controller.mpc import _DEFAULTS
+    from controller.mpc import _DEFAULTS, _optional_float
 
     df = pd.read_csv(args.csv)
     t = df["time_s"].values
@@ -346,19 +360,26 @@ def main():
         # machine reading an exhausted solve as a finished one is the failure
         # the `converged` flag exists to prevent. The human-readable warning
         # goes to stderr so stdout remains parseable JSON.
+        #
+        # The two errors go through `_optional_float`, so a model the grey box
+        # cannot be simulated at reports `null` rather than the infinities
+        # `fit_quality` returns for it -- the same encoding controller/mpc.py's
+        # snapshot uses for an RMSE nobody could measure, so a consumer meets
+        # one convention across both. The keys stay present: dropped, they
+        # would be indistinguishable from an older build of this utility, and
+        # "unmeasurable" is exactly what the reader needs told.
         rmse, max_err = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
         print(
-            json.dumps(
+            _dump_json(
                 {
                     "config": payload,
                     "fit": {
                         "converged": fitted["converged"],
                         "nfev": fitted["nfev"],
-                        "rmse_c": rmse,
-                        "max_error_c": max_err,
+                        "rmse_c": _optional_float(rmse),
+                        "max_error_c": _optional_float(max_err),
                     },
-                },
-                indent=2,
+                }
             )
         )
         if not fitted["converged"]:
@@ -430,7 +451,7 @@ def main():
             f"      {steps} steps for this model on its own; {outcome}."
         )
     print("\nPaste into Settings > Controller (controller.config.mpc):")
-    print(json.dumps(payload, indent=2))
+    print(_dump_json(payload))
 
 
 if __name__ == "__main__":

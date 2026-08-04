@@ -259,6 +259,95 @@ def test_the_json_mode_carries_the_convergence_verdict(tmp_path, capsys, monkeyp
     assert "ran out of evaluations" not in captured.err
 
 
+def _reject_constant(literal):
+    """A `json.loads` hook that turns Python's Infinity/NaN extension into a refusal."""
+    raise ValueError(f"not RFC 8259: {literal}")
+
+
+def test_the_json_mode_reports_an_unscorable_fit_as_null_not_as_infinity(tmp_path, capsys, monkeypatch):
+    """`Infinity` is not JSON, and Python's own decoder is the reason that hides.
+
+    `fit_quality` answers infinity where the grey box cannot be simulated at
+    the fitted parameters at all -- correct at that layer, and what its caller
+    in `model_promotion.evaluate` compares against. But RFC 8259 has no such
+    literal, so the number cannot be serialised as itself: `json.dumps` writes
+    a bare `Infinity` that only Python reads back. The encoding this codebase
+    already chose for an error nobody could measure is `None` -- see
+    `controller/mpc.py`'s snapshot -- and the CLI owes a consumer the same one.
+
+    The strict parse is the assertion that matters. `json.loads` alone accepts
+    `Infinity` and would pass against the defect, which is exactly how it
+    shipped.
+    """
+    import json
+
+    import controller.update_mpc as U
+
+    t, Q, temp = _dataset()
+    csv = tmp_path / "cook.csv"
+    csv.write_text("time_s,temp_c,Q\n" + "".join(f"{a},{b},{c}\n" for a, b, c in zip(t, temp, Q)))
+    monkeypatch.setattr("sys.argv", ["update_mpc", str(csv), "--t-amb", str(T_AMB), "--json"])
+
+    # The premise as a negative control: the solve starts where the chamber's
+    # own float arithmetic overflows, so `fit_quality` really is reporting the
+    # absence of a trajectory here and not merely a bad one.
+    with pytest.raises(OverflowError):
+        simulate_grey_box(
+            t,
+            Q,
+            T_amb=T_AMB,
+            T0=float(temp[0]),
+            C_c=1e-9,
+            h_amb=float(_DEFAULTS["h_amb"]),
+            K_Q=float(_DEFAULTS["K_Q"]),
+            theta=float(_DEFAULTS["theta"]),
+            sigma=float(_DEFAULTS["sigma"]),
+            n_delay=N_DELAY,
+        )
+    shipped_C_c = float(_DEFAULTS["C_c"])
+    monkeypatch.setitem(_DEFAULTS, "C_c", 1e-9)
+
+    U.main()
+    unscorable = capsys.readouterr().out
+    for literal in ("Infinity", "NaN"):
+        assert literal not in unscorable
+    payload = json.loads(unscorable, parse_constant=_reject_constant)
+    assert payload["fit"]["converged"] is False
+    # None only ever arrives here from a non-finite float, so this is the same
+    # statement as "the error could not be measured", in the JSON that says so.
+    assert payload["fit"]["rmse_c"] is None
+    assert payload["fit"]["max_error_c"] is None
+    assert all(key in payload["config"] for key in CONFIG_KEYS)
+
+    # And the ordinary fit still reports numbers: `null` marks the unmeasurable
+    # case only, so the same record from a simulable start must not read as one.
+    monkeypatch.setitem(_DEFAULTS, "C_c", shipped_C_c)
+    U.main()
+    scored = json.loads(capsys.readouterr().out, parse_constant=_reject_constant)
+    assert scored["fit"]["converged"] is True
+    assert math.isfinite(scored["fit"]["rmse_c"])
+    assert math.isfinite(scored["fit"]["max_error_c"])
+
+
+def test_the_json_encoder_refuses_a_non_finite_number_rather_than_emitting_one():
+    """The guard behind the conversion, for every value that is not yet converted.
+
+    Substituting `None` fixes the error this utility knows about today. This
+    fixes the class: any non-finite number reaching the emit raises here,
+    beside the value that produced it, instead of leaving as text a consumer
+    cannot parse. It is what `controller/mpc.py`'s snapshot validator already
+    encodes with.
+    """
+    import controller.update_mpc as U
+
+    for bad in (math.inf, -math.inf, math.nan):
+        with pytest.raises(ValueError):
+            U._dump_json({"fit": {"rmse_c": bad}})
+
+    # The negative control: the refusal is of the value, not of the document.
+    assert '"rmse_c": 1.5' in U._dump_json({"fit": {"rmse_c": 1.5}})
+
+
 def test_the_fit_reports_whether_it_converged():
     t, Q, temp = _dataset()
     fitted = fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)
