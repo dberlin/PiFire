@@ -441,14 +441,7 @@ def _upgrade_settings_in_store():
                 f"{SETTINGS_SCHEMA_VERSION}; no shape migration was run."
             )
         else:
-            for target, migrate in settings_migration._SHAPE_MIGRATIONS:
-                if stamp < target and migrate(settings):
-                    changed = True
-            if stamp != SETTINGS_SCHEMA_VERSION:
-                # Written last, inside the same BEGIN IMMEDIATE the read took,
-                # so a crash mid-chain leaves the old stamp and the whole chain
-                # retries from scratch.
-                settings["schema_version"] = SETTINGS_SCHEMA_VERSION
+            if settings_migration._apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION):
                 changed = True
 
         if not changed:

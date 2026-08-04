@@ -136,6 +136,8 @@ def read_settings_file(filename="settings.json", init=False, retry_count=0):
         if settings["versions"].get("build", None) != settings_default["versions"]["build"]:
             settings["versions"]["build"] = settings_default["versions"]["build"]
 
+        _apply_shape_migrations(settings, settings_default["schema_version"])
+
         # Overlay the original settings on top of the default settings
         settings = deep_update(settings_default, settings)
         settings["history_page"]["probe_config"] = default_probe_config(
@@ -295,6 +297,24 @@ _SHAPE_MIGRATIONS = [
     (2, _migrate_mpc_log_path),
     (3, _migrate_retired_controllers),
 ]
+
+
+def _apply_shape_migrations(settings, target_version):
+    """Apply every missing shape migration, then atomically advance its stamp."""
+    stamp = settings.get("schema_version", 0)
+    if stamp > target_version:
+        return False
+
+    changed = False
+    for target, migrate in _SHAPE_MIGRATIONS:
+        if stamp < target and migrate(settings):
+            changed = True
+    if stamp != target_version:
+        # The stamp is written only after every applicable migration succeeds,
+        # so an interrupted import retries the complete sequence.
+        settings["schema_version"] = target_version
+        changed = True
+    return changed
 
 
 def upgrade_settings(prev_ver, settings, settings_default):

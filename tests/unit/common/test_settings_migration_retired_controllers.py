@@ -1,11 +1,12 @@
 import copy
+import json
 
 import pytest
 
 from common import datastore
 from common.datastore_accessors import read_settings_store, write_settings_store
 from common.defaults import default_settings
-from common.settings_migration import _migrate_retired_controllers
+from common.settings_migration import _migrate_retired_controllers, read_settings_file
 
 RETIRED = (
     "pid_clamping",
@@ -76,3 +77,19 @@ def test_store_upgrade_migrates_a_schema_v2_retired_controller_selection(ds):
     assert stored["controller"]["selected"] == "pid"
     assert stored["controller"]["config"]["pid"] == expected_pid
     assert not (set(stored["controller"]["config"]) & set(RETIRED))
+
+
+def test_unstamped_file_import_migrates_retired_controller_before_default_overlay(tmp_path):
+    settings = _settings("ml")
+    settings.pop("schema_version")
+    settings["controller"]["config"]["pid"]["custom_setting"] = "preserve me"
+    expected_pid = copy.deepcopy(settings["controller"]["config"]["pid"])
+    source = tmp_path / "settings.json"
+    source.write_text(json.dumps(settings))
+
+    imported = read_settings_file(filename=str(source), init=True)
+
+    assert imported["schema_version"] == 3
+    assert imported["controller"]["selected"] == "pid"
+    assert imported["controller"]["config"]["pid"] == expected_pid
+    assert not (set(imported["controller"]["config"]) & set(RETIRED))

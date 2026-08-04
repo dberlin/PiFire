@@ -2,14 +2,7 @@ import json
 from pathlib import Path
 
 CATALOG = Path(__file__).resolve().parents[3] / "controller" / "controllers.json"
-FIXTURE = (
-    Path(__file__).resolve().parents[3]
-    / "web-react"
-    / "tests"
-    / "e2e"
-    / "fixtures"
-    / "controller-metadata.json"
-)
+FIXTURE = Path(__file__).resolve().parents[3] / "web-react" / "tests" / "e2e" / "fixtures" / "controller-metadata.json"
 RETAINED = {"pid", "pid_sp", "mpc"}
 
 
