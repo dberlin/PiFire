@@ -74,21 +74,16 @@ const controllerMeta: ControllerMetadata = {
         },
       ],
     },
-    fuzzy: {
-      friendly_name: "Fuzzy Logic Controller",
-      description: "Experimental fuzzy logic controller.",
-      config: [],
-    },
-    pid_parallel: {
-      friendly_name: "Parallel PID w/ optional Integrator Clamping",
-      description: "PID in parallel form with optional integral anti-windup protection.",
+    pid_sp: {
+      friendly_name: "PID Smith Predictor",
+      description: "PID with a Smith Predictor.",
       config: [
         {
-          option_name: "Clamping",
-          option_friendly_name: "Integral Windup Protection",
-          option_description: "Stops integration when output limits are exceeded.",
-          option_type: "bool",
-          option_default: true,
+          option_name: "tau",
+          option_friendly_name: "Tau (s)",
+          option_description: "Time constant for the Smith Predictor.",
+          option_type: "float",
+          option_default: 115,
           option_min: null,
           option_max: null,
         },
@@ -188,7 +183,13 @@ describe("ControllerTab", () => {
   it("renders the Select with the selected controller and shows config value + fallback defaults", () => {
     renderRoute(<ControllerTab />, makeContext());
 
-    expect(screen.getByRole("combobox")).toHaveValue("pid");
+    const selector = screen.getByRole("combobox") as HTMLSelectElement;
+    expect(selector).toHaveValue("pid");
+    expect(Array.from(selector.options, (option) => option.value)).toEqual([
+      "pid",
+      "pid_sp",
+      "mpc",
+    ]);
     expect(screen.getByText("PID Standard")).toBeInTheDocument();
     expect(screen.getByDisplayValue("55")).toBeInTheDocument(); // PB from config
     expect(screen.getByDisplayValue("45")).toBeInTheDocument(); // Td default
@@ -196,26 +197,33 @@ describe("ControllerTab", () => {
     expect(screen.getByDisplayValue("0.5")).toBeInTheDocument(); // center default
   });
 
-  it("switching the Select to fuzzy hides fields and shows the no-config hint without saving", () => {
+  it("selecting MPC renders its field and saves into the MPC config", async () => {
     renderRoute(<ControllerTab />, makeContext());
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuzzy" } });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "mpc" } });
 
-    expect(screen.queryByDisplayValue("55")).not.toBeInTheDocument();
-    expect(screen.getByText(/no configuration options/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Prediction Horizon (steps)")).toHaveValue(24);
     expect(saveMock).not.toHaveBeenCalled();
-  });
 
-  it("saves an empty config for a controller with no declared options", async () => {
-    renderRoute(<ControllerTab />, makeContext());
-
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuzzy" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    // Wait for the save call carrying the empty config.
     await waitFor(() =>
       expect(saveMock).toHaveBeenCalledWith(
-        { controller: { selected: "fuzzy", config: { fuzzy: {} } } },
+        {
+          controller: {
+            selected: "mpc",
+            config: {
+              mpc: {
+                n_horizon: 24,
+                estimator: "ekf",
+                policy: "nlp",
+                policy_net_path: "./controller/mpc_policy_net.npz",
+                enable_fan_input: false,
+                enable_identification: false,
+              },
+            },
+          },
+        },
         ["controller_update"],
       ),
     );
@@ -251,15 +259,12 @@ describe("ControllerTab", () => {
     expect(screen.getByRole("alert").textContent).toContain("ancient_option");
   });
 
-  it("renders a Toggle for a bool-typed option when a controller with one is selected", () => {
+  it("renders a PID-SP-only field when the Smith Predictor controller is selected", () => {
     renderRoute(<ControllerTab />, makeContext());
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "pid_parallel" } });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "pid_sp" } });
 
-    expect(screen.getByRole("button", { name: "Integral Windup Protection" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(inputFor("Tau (s)")).toHaveValue(115);
   });
 
   it("saves the exact delta after editing PB, rebuilding the whole pid config with coerced floats", async () => {
@@ -438,19 +443,25 @@ describe("ControllerTab", () => {
   });
 });
 
-// Type-level only: the generated map must name every controller and give each
-// its own option set, so indexing one with another's option is a compile error.
+// Type-level only: retained controllers receive their generated option sets.
 // Runtime behaviour is unchanged and is covered by the cases above.
 import type { ControllerConfigs } from "../../../../../src/helpers/settings/controllerTypes.gen";
 
 describe("generated controller config types", () => {
-  it("gives each controller its own option set", () => {
+  it("includes the retained PID and PID-SP option sets", () => {
     const pid: ControllerConfigs["pid"] = { PB: 60, Td: 45, Ti: 180, center: 0.5 };
-    expect(pid.PB).toBe(60);
+    const pidSp: ControllerConfigs["pid_sp"] = {
+      PB: 60,
+      Td: 45,
+      Ti: 180,
+      stable_window: 12,
+      center_factor: 0.001,
+      tau: 115,
+      theta: 65,
+    };
 
-    // @ts-expect-error -- Kp belongs to pid_parallel, not pid
-    const wrong: ControllerConfigs["pid"] = { PB: 60, Td: 45, Ti: 180, center: 0.5, Kp: 1 };
-    expect(wrong).toBeTruthy();
+    expect(pid.PB).toBe(60);
+    expect(pidSp.tau).toBe(115);
   });
 
   it("constrains a list option to its declared values", () => {

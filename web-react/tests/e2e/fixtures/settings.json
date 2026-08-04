@@ -2,8 +2,6 @@
   "settings": {
     "controller": {
       "config": {
-        "fuzzy": {},
-        "ml": {},
         "mpc": {
           "C_c": 320.0,
           "K_Q": 3.5,
@@ -36,29 +34,6 @@
           "Td": 45.0,
           "Ti": 180.0,
           "center": 0.5
-        },
-        "pid_ac": {
-          "PB": 60.0,
-          "Td": 45.0,
-          "Ti": 180.0,
-          "center_factor": 0.001,
-          "stable_window": 12
-        },
-        "pid_clamping": {
-          "PB": 100.0,
-          "Td": 45.0,
-          "Ti": 180.0
-        },
-        "pid_clamping_percent_pb": {
-          "PB": 42.0,
-          "Td": 45.0,
-          "Ti": 180.0
-        },
-        "pid_parallel": {
-          "Clamping": true,
-          "Kd": 0.45,
-          "Ki": 5.5e-5,
-          "Kp": 0.01
         },
         "pid_sp": {
           "PB": 60.0,

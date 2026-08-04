@@ -1,41 +1,5 @@
 {
   "metadata": {
-    "fuzzy": {
-      "attributions": ["Sci-Kit Fuzzy"],
-      "author": "Ben Parmeter",
-      "config": [],
-      "contributors": [],
-      "description": "**EXPERIMENTAL** Use of this controller is at your own risk.  This is an attempt at designing a fuzzy logic controller for set temperature control.  It is currently using Scikit Fuzzy's Python Module to implement a relatively straightforward fuzzy logic controller.  This controller should be considered pre-Alpha and extremely experimental.  This module will store the fuzzy logic controller in an object, which is saved/pickled in the controller directory, named 'fuzzy.pickle'.  If any changes are made to the default fuzzy logic controller settings, then this pickle file should be deleted so that a new object can be created with new settings.  Note that it may take a very long time for the object to be generated on the Raspberry Pi due to the limited performance capabilities of that processor.",
-      "friendly_name": "Fuzzy Logic Controller",
-      "image": "fuzzy.png",
-      "link": "http://docs.pifire.io",
-      "module_name": "fuzzy",
-      "recommendations": {
-        "cycle": {
-          "cycle_ratio_max": 1.0,
-          "cycle_ratio_min": 0.1,
-          "cycle_time": 25
-        }
-      }
-    },
-    "ml": {
-      "attributions": ["Sci-Kit Learn"],
-      "author": "Ben Parmeter",
-      "config": [],
-      "contributors": [],
-      "description": "**EXPERIMENTAL** This controller is NOT recommended for use at this time.  REQUIRES SCIKIT-LEARN which may not install on 32-bit OSes.  This is an attempt at designing a machine learning based controller for set temperature control.  It is currently using Scikit Learn Python Module to implement a relatively straightforward machine learning controller.  This controller should be considered pre-Alpha and extremely experimental.  This module will store the machine learning controller in an object, which is saved in the controller directory, named 'ml_model.joblib'.  If any changes are made to the default controller settings, then this joblib file should be deleted so that a new object can be created with new settings.  Note that it may take a very long time for the object to be generated on the Raspberry Pi due to the limited performance capabilities of that processor.",
-      "friendly_name": "Machine Learning Controller",
-      "image": "",
-      "link": "http://docs.pifire.io",
-      "module_name": "ml",
-      "recommendations": {
-        "cycle": {
-          "cycle_ratio_max": 1.0,
-          "cycle_ratio_min": 0.1,
-          "cycle_time": 25
-        }
-      }
-    },
     "mpc": {
       "attributions": [],
       "author": "PiFire",
@@ -164,9 +128,9 @@
         {
           "hidden": false,
           "option_default": 8,
-          "option_description": "Number of first-order lag states approximating the transport deadtime (more = sharper delay, larger model and slower solve). 0 disables deadtime modeling. Raising this costs no calibration - it is a model structure choice, not a fitted value. [Default=8]",
+          "option_description": "Number of first-order lag states approximating the transport deadtime (more = sharper delay, larger model and slower solve). 0 disables deadtime modeling. Raising this costs no calibration - it is a model structure choice, not a fitted value. What it buys is how much of the grill's real deadtime the model reproduces instead of smearing: against the reference plant 4 states recover 57% of it, 8 recover 71%, and 12 recover 79% for four times the solver time. Past 12 each further step recovers 4% more or less, so the ceiling is set there. [Default=8]",
           "option_friendly_name": "Deadtime Lag States",
-          "option_max": 20,
+          "option_max": 12,
           "option_min": 0,
           "option_name": "n_delay",
           "option_step": 1,
@@ -295,7 +259,15 @@
         },
         {
           "hidden": false,
-          "option_default": "./controller/mpc_calibration_log.csv",
+          "option_default": false,
+          "option_description": "After each cook, refit the thermal model from that cook and keep it if it describes the grill better. On the Neural Net firing-rate policy, a learned calibration no longer matches the trained artifact, so the controller falls back to the full optimisation until it is retrained. [Default=false]",
+          "option_friendly_name": "Learn This Grill",
+          "option_name": "enable_identification",
+          "option_type": "bool"
+        },
+        {
+          "hidden": false,
+          "option_default": "./logs/mpc_calibration_log.csv",
           "option_description": "CSV file path for the calibration data log (when logging is enabled).",
           "option_friendly_name": "Calibration Log Path",
           "option_name": "log_path",
@@ -380,244 +352,6 @@
           "cycle_ratio_max": 0.9,
           "cycle_ratio_min": 0.1,
           "cycle_time": 25
-        }
-      }
-    },
-    "pid_ac": {
-      "attributions": [],
-      "author": "Dan Borello",
-      "config": [
-        {
-          "hidden": false,
-          "option_default": 60.0,
-          "option_description": "This is the temperature band centered around the set point, that the controller is active.  If the error is less than PB/2, the command is 1.0. Higher PB's decrease controller response to error. [Default=60.0]",
-          "option_friendly_name": "Proportional Band(PB)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "PB",
-          "option_step": 0.1,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 45.0,
-          "option_description": "Time (in seconds) to predict the future value. Higher Td makes the controller more responsive to the Error Rate of Change. [Default=45.0]",
-          "option_friendly_name": "Derivative Time (Td)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "Td",
-          "option_step": 0.1,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 180.0,
-          "option_description": "Time (in seconds) to eliminate the integral error. Higher Ti makes the controller less responsive to accumulated error over time. [Default=180.0]",
-          "option_friendly_name": "Integral Time (Ti)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "Ti",
-          "option_step": 0.1,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 12,
-          "option_description": "Window +/- from Set Point for triggering Overshoot condition. When in Overshoot, Output is set to min. [Default=12]",
-          "option_friendly_name": "Stable Window (Degrees)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "stable_window",
-          "option_step": 1,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 0.001,
-          "option_description": "Center Factor multiplied by Set Point. Higher Center Factors increase system response at high set points. Lower Center Factors increase system stability at low set points but may keep the system from reaching high set points. Controller accounts for F to C conversion. EX: At 240F(115C) center is 240 * 0.0012 = 0.288. [Default=0.0010]",
-          "option_friendly_name": "Center Factor",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "center_factor",
-          "option_step": 0.0001,
-          "option_type": "float"
-        }
-      ],
-      "contributors": ["Ben Parmeter", "James Weber", "Ryan Steel"],
-      "description": "The standard PID controller for PiFire, modified to include Auto Center calculations and Overshoot reduction code. This software was originally developed by GitHub user DBorello as part of his excellent PiSmoker project.  Slightly modified by @weberbox and @dogtreatfairy and adapted for PiFire. ",
-      "friendly_name": "PID Auto Center",
-      "image": "pid.png",
-      "link": "https://github.com/DBorello/PiSmoker",
-      "module_name": "pid_ac",
-      "recommendations": {
-        "cycle": {
-          "cycle_ratio_max": 0.9,
-          "cycle_ratio_min": 0.05,
-          "cycle_time": 15
-        }
-      }
-    },
-    "pid_clamping": {
-      "attributions": [],
-      "author": "Mark Alston",
-      "config": [
-        {
-          "hidden": false,
-          "option_default": 100.0,
-          "option_description": "The proportional band is the total range of the controlled output that can be produced within the controller\u2019s 0% and 100% limits. Within the PB the command output is between 1.0 and 0.  Outside the band the command output is 1 or -1 (fully on or off). Increase this if you are overshooting setpoint. [Default=30.0]",
-          "option_friendly_name": "Proportional Band(PB)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "PB",
-          "option_step": 0.1,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 180.0,
-          "option_description": "Time constant that determines how quickly we respond to accumulated error. Higher Ti makes the controller less responsive to accumulated error over time. Lower this if you cannot reach setpoint. [Default=120.0]",
-          "option_friendly_name": "Integral Time Constant (Ti)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "Ti",
-          "option_step": 0.1,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 45.0,
-          "option_description": "Time constant that determines how quickly the system reponds to changes in error rate. Higher Td makes the controller more responsive to the Error Rate of Change. Td basically acts as a damper on the system. Be cautious with this setting and start low and increase slowly. It might not even be needed and can easily drive a system into instability. [Default=20.0]",
-          "option_friendly_name": "Derivative Time Constant (Td)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "Td",
-          "option_step": 0.1,
-          "option_type": "float"
-        }
-      ],
-      "contributors": ["Ben Parmeter", "James Weber", "Mark Alston"],
-      "description": "The original PiFire PID modified to both calculate the derivative portion in the classic de/dt method instead of the dT/dt method and with integral anti-windup protection achieved with a clamping method.",
-      "friendly_name": "PID w/ Integrator Clamping",
-      "image": "pid.png",
-      "link": "https://github.com/markalston/PiFire",
-      "module_name": "pid_clamping",
-      "recommendations": {
-        "cycle": {
-          "cycle_ratio_max": 0.9,
-          "cycle_ratio_min": 0.05,
-          "cycle_time": 15
-        }
-      }
-    },
-    "pid_clamping_percent_pb": {
-      "attributions": [],
-      "author": "Mark Alston",
-      "config": [
-        {
-          "hidden": false,
-          "option_default": 42.0,
-          "option_description": "The proportional band is the total range of the controlled output that can be produced within the controller\u2019s 0% and 100% limits.   Within the PB the command output is between 1.0 and 0.  Outside the band the command output is 1 or -1 (fully on or off). Increase this if you are overshooting setpoint.[Default=20.0]",
-          "option_friendly_name": "Proportional Band(PB) as % of Setpoint",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "PB",
-          "option_step": 0.1,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 180.0,
-          "option_description": "Time constant that determines how quickly we respond to accumulated error. Higher Ti makes the controller less responsive to accumulated error over time. Lower this if you cannot reach setpoint. [Default=120.0]",
-          "option_friendly_name": "Integral Time Constant (Ti)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "Ti",
-          "option_step": 0.1,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 45.0,
-          "option_description": "Time constant that determines how quickly the system reponds to changes in error rate. Higher Td makes the controller more responsive to the Error Rate of Change. Td basically acts as a damper on the system. Be cautious with this setting and start low and increase slowly. It might not even be needed and can easily drive a system into instability. [Default=20.0]",
-          "option_friendly_name": "Derivative Time Constant (Td)",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "Td",
-          "option_step": 0.1,
-          "option_type": "float"
-        }
-      ],
-      "contributors": ["Ben Parmeter", "James Weber", "Mark Alston"],
-      "description": "The original PiFire PID modified to define PB as percentage of setpoint, to calculate the derivative portion in the classic de/dt method instead of the dT/dt method in the original pid, and with integral anti-windup protection achieved with a clamping method.",
-      "friendly_name": "PID w/ Integrator Clamping and PB as %",
-      "image": "pid.png",
-      "link": "https://github.com/markalston/PiFire",
-      "module_name": "pid_clamping_percent_pb",
-      "recommendations": {
-        "cycle": {
-          "cycle_ratio_max": 0.9,
-          "cycle_ratio_min": 0.05,
-          "cycle_time": 15
-        }
-      }
-    },
-    "pid_parallel": {
-      "attributions": [],
-      "author": "Mark Alston",
-      "config": [
-        {
-          "hidden": false,
-          "option_default": 0.01,
-          "option_description": "The proportional Gain. Kp = 1/PB. [Default=0.01]",
-          "option_friendly_name": "Proportional Gain",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "Kp",
-          "option_step": 0.0001,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 5.5e-5,
-          "option_description": "Lower Ki makes the controller less responsive to accumulated error over time. Ki = Kp/Ti or 1/(PB*Ti).  Increase this if you cannot reach setpoint. [Default=0.000228]",
-          "option_friendly_name": "Integral Gain",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "Ki",
-          "option_step": 1e-6,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": 0.45,
-          "option_description": "Kd basically acts as a damper on the system. Kd = Kp*Td or Kd = Td/PB. Be cautious with this setting and start low and increase slowly. It might not even be needed and can easily drive a system into instability. [Default=0.529]",
-          "option_friendly_name": "Derivative Gain",
-          "option_max": null,
-          "option_min": null,
-          "option_name": "Kd",
-          "option_step": 0.001,
-          "option_type": "float"
-        },
-        {
-          "hidden": false,
-          "option_default": true,
-          "option_description": "Stops integration when the sum of the block components exceeds the output limits and the integrator output and block input have the same sign. Resumes integration when either the sum of the block components exceeds the output limits and the integrator output and block input have opposite sign or the sum no longer exceeds the output limits. [Default=True]",
-          "option_friendly_name": "Integral Windup Protection",
-          "option_name": "Clamping",
-          "option_type": "bool"
-        }
-      ],
-      "contributors": ["Ben Parmeter", "James Weber", "Mark Alston"],
-      "description": "PID in parallel form with optional integral anti-windup protection achieved with a clamping method. This controller should only be used if you understand PID systems and wish to play around or have some specific need. This PID method might also be useful if you are following tuning guides such as Ziegler\u2013Nichols. However, the coefficients have less relationship to physical behaviors and is more usefull for theoretical testing of the pid system.",
-      "friendly_name": "Parallel PID w/ optional Integrator Clamping",
-      "image": "pid.png",
-      "link": "https://github.com/markalston/PiFire",
-      "module_name": "pid_parallel",
-      "recommendations": {
-        "cycle": {
-          "cycle_ratio_max": 0.99,
-          "cycle_ratio_min": 0.05,
-          "cycle_time": 10
         }
       }
     },

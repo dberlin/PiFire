@@ -9,13 +9,10 @@ const MANIFEST = {
         { option_name: "Td", option_type: "float" },
       ],
     },
-    pid_parallel: {
-      config: [
-        { option_name: "Kp", option_type: "float" },
-        { option_name: "Clamping", option_type: "bool" },
-      ],
+    pid_sp: {
+      config: [{ option_name: "tau", option_type: "float" }],
     },
-    fuzzy: { config: [] },
+    no_options: { config: [] },
     mpc: {
       config: [
         { option_name: "n_horizon", option_type: "int" },
@@ -34,8 +31,7 @@ describe("emitControllerTypes", () => {
   it("maps each declared option type to its TypeScript counterpart", () => {
     const out = emitControllerTypes(MANIFEST);
     expect(out).toContain("export interface PidConfig {\n  PB: number;\n  Td: number;\n}");
-    expect(out).toContain("Kp: number;");
-    expect(out).toContain("Clamping: boolean;");
+    expect(out).toContain("export interface PidSpConfig {\n  tau: number;\n}");
     expect(out).toContain("n_horizon: number;");
     expect(out).toContain("policy_net_path: string;");
   });
@@ -46,10 +42,10 @@ describe("emitControllerTypes", () => {
   });
 
   it("gives a controller that declares no options an empty record, not an index signature", () => {
-    // Record<string, never> keeps `fuzzy` closed. An index signature would put
-    // back exactly the looseness this emitter exists to remove.
+    // Record<string, never> keeps an optionless controller closed. An index
+    // signature would put back exactly the looseness this emitter exists to remove.
     expect(emitControllerTypes(MANIFEST)).toContain(
-      "export type FuzzyConfig = Record<string, never>;",
+      "export type NoOptionsConfig = Record<string, never>;",
     );
   });
 
@@ -57,8 +53,8 @@ describe("emitControllerTypes", () => {
     const out = emitControllerTypes(MANIFEST);
     expect(out).toContain("export interface ControllerConfigs {");
     expect(out).toContain("  pid: PidConfig;");
-    expect(out).toContain("  pid_parallel: PidParallelConfig;");
-    expect(out).toContain("  fuzzy: FuzzyConfig;");
+    expect(out).toContain("  pid_sp: PidSpConfig;");
+    expect(out).toContain("  no_options: NoOptionsConfig;");
     expect(out).toContain("  mpc: MpcConfig;");
   });
 
