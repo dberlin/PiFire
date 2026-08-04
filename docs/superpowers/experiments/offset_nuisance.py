@@ -2,8 +2,8 @@
 
 """Is a per-cook nuisance parameter worth a free parameter?
 
-A parameter-parsimony exploration found that freeing a direct offset `d`, or
-freeing `T_amb`, cuts the per-cook ORACLE fit error on the MAK plant from
+A parameter-parsimony exploration found that freeing a constant disturbance `d`,
+or freeing `T_amb`, cuts the per-cook ORACLE fit error on the MAK plant from
 1.860 C to 0.597 C while barely moving the joint fit. The online refit fits one
 cook at a time, so the oracle column is the relevant one, and the conclusion
 drawn was "most inter-cook variation is an offset".
@@ -14,6 +14,20 @@ about whether a model is right -- Spearman -0.160 against truth error over the
 in-scope population. This measures whether the offset buys anything the
 controller can actually use.
 
+WHICH ARM IS THE EXPLORATION'S MOVE. The exploration's `d` is a constant HEAT
+offset inside the chamber power balance -- mpc_model.py's documented dynamics
+puts it there, `dT_c/dt = (K_Q*heat_in - h_amb*(T_c - T_amb) - rad + d)/C_c` --
+and not an offset on the predicted temperature. That is why its table reports
+`full_d` and `full_Tamb` identical to three decimals rather than merely close: a
+constant heat `d` and a shifted ambient are the SAME perturbation of that
+balance, related by `d = h_amb * (T_amb shift)` up to the radiative term, which
+at the shipped sigma=1.4e-09 is negligible. So ARM C BELOW IS THE FAITHFUL
+REPRODUCTION of the exploration's move, and arm B is a different parameter: a
+per-cook offset on the temperature itself, which is the cheapest thing an
+implementer reaching for "absorb the level" would actually write. Both are
+measured because both are live options; only arm C answers "does the
+exploration's finding transfer".
+
 WHAT IS MEASURED. Three arms, over the same record population
 promotion_signal.py builds -- the two plants in controller/grill_sim.py across
 eleven excitation profiles and every truncation length at or above the refit
@@ -23,8 +37,10 @@ pins:
   A  shipped     free = (K_Q, C_c, theta), T_amb held at 20 C. The control,
                  which is update_mpc.fit_params called unmodified.
   B  offset      the same three, plus an additive offset d on the predicted
-                 temperature. Four free parameters.
-  C  free ambient  the same three, plus T_amb. Four free parameters.
+                 TEMPERATURE, in degrees C. Four free parameters. NOT the
+                 exploration's d, which is a heat offset -- see above.
+  C  free ambient  the same three, plus T_amb. Four free parameters. Equivalent
+                 to the exploration's constant heat offset, as above.
 
 Arms B and C reproduce fit_params exactly -- same starting point, same log-space
 solve for the three scales, same trust-region method, same evaluation budget,
@@ -72,20 +88,26 @@ cook is reported with no truth column at all and its generalisation question is
 answered by the held-out column instead.
 
 THE POPULATION IS IN-SCOPE ONLY. controller/mpc.py refuses a refit below
-mpc._REFIT_MIN_SAMPLES rows before the gate is reached, so the 300 s and 450 s
-truncations promotion_signal.py prints as out of scope are not fitted here at
-all. That is the only thing dropped, it is dropped on the live controller's own
-rule, and the count of what it removes is printed below.
+mpc._REFIT_MIN_SAMPLES rows before the gate is reached, so the truncations
+promotion_signal.py prints as out of scope are not fitted here at all. That is
+the only thing dropped, it is dropped on the live controller's own rule, and
+both the count and which lengths they are are printed below, derived from the
+records rather than asserted.
 
 A NOTE ON UNITS, because it decides how arms B and C compare. s_min under arm A
-is degrees C RMS per e-fold of a log-parameter direction. Arm B's fourth column
-is dimensionless -- one degree of prediction per degree of offset -- so its
-column norm is exactly 1 and s_min under B is therefore at most 1.0 whatever the
-record contains. Arm C's fourth column in log space is dT/dlog(T_amb) ~ T_amb,
-about twenty times the same physical move, which would flatter arm C purely by
-choice of units. Both are printed for arm C: the log one because that is the
-space the shipped floor is expressed in, and a per-degree one directly
-comparable to arm B's.
+is degrees C RMS per e-fold of a log-parameter direction. ARM B ONLY: its fourth
+column is dimensionless -- one degree of prediction per degree of offset -- so
+after the 1/sqrt(N) normalisation its column norm is exactly 1, and therefore
+s_min = min over unit x of ||Jx|| <= ||J e_d|| = 1.0 on every record that can
+exist, not merely on the ones measured here. That bound is exact RELATIVE TO d
+IN LINEAR DEGREES C: rescaling the parameter rescales the bound with it, so it
+is a statement about this parameterisation and not a law about offsets. It does
+NOT carry over to the exploration's heat offset, whose column is 1/C_c times a
+step response rather than ones. Arm C's fourth column in log space is
+dT/dlog(T_amb) ~ T_amb, about twenty times the same physical move, which would
+flatter arm C purely by choice of units. Both are printed for arm C: the log one
+because that is the space the shipped floor is expressed in, and a per-degree
+one directly comparable to arm B's.
 
 Usage:
   uv run python -m docs.superpowers.experiments.offset_nuisance
@@ -392,7 +414,12 @@ def main():
     say("OFFSET NUISANCE -- does a fourth free parameter buy a better model, or only a better fit?")
     say("=" * 108)
     say(f"shipped fitter : _REFIT_INIT={dict(_REFIT_INIT)} sigma={ps.SIGMA:g} n_delay={ps.N_DELAY} free={list(_FREE)}")
-    say("arms           : A_shipped (3 free)  B_offset (+d, linear C)  C_free_amb (+T_amb, log)")
+    say("arms           : A_shipped (3 free)  B_offset (+d on TEMPERATURE, linear C)  C_free_amb (+T_amb, log)")
+    say(
+        "                 the parsimony exploration's `d` is a constant HEAT offset in the power balance,"
+        "\n                 so ARM C reproduces its move (d = h_amb * ambient shift, up to a negligible"
+        "\n                 radiative term); ARM B is the different, cheaper thing an implementer would write."
+    )
     say(f"held-out split : {SPLIT_FRAC:.4f} of the record, scored warm on the suffix")
     say(
         f"floor read     : model_promotion._IDENTIFIABILITY_FLOOR = {_IDENTIFIABILITY_FLOOR:g} (imported, not derived here)"
@@ -413,9 +440,12 @@ def main():
         f"--- population: {len(cuts)} distinct records ({len(collapsed)} collapsed as byte-identical), "
         f"{dropped} dropped below the {_REFIT_MIN_SAMPLES}-sample refit floor, {len(jobs)} fitted ---"
     )
+    dropped_lengths = sorted({c["length_s"] for c in cuts if len(c["t"]) < _REFIT_MIN_SAMPLES})
+    kept_lengths = sorted({c["length_s"] for c in jobs})
     say(
-        "    The dropped ones are the 300 s and 450 s truncations. controller/mpc.py refuses a refit"
-        "\n    shorter than that before the gate is reached, so they produce no verdict to be right about."
+        f"    Dropped truncation lengths, read off the records rather than assumed: {dropped_lengths} s."
+        f"\n    Kept: {kept_lengths} s. controller/mpc.py refuses a refit shorter than {_REFIT_MIN_SAMPLES}"
+        "\n    samples before the gate is reached, so the dropped ones produce no verdict to be right about."
         "\n    Nothing else is dropped and no arm is measured on a smaller population than another."
     )
     say(f"--- fitting {len(jobs)} records x {len(ARMS)} arms x 2 (full + prefix) on {workers} workers ---")
@@ -562,10 +592,13 @@ def main():
     say("=" * 108)
     say("s_min is the smallest singular value of d(prediction)/d(parameter) over the arm's free set,")
     say("per sample. Adding a column can only lower it: the minimum is taken over a larger space.")
-    say("Arm B's fourth column is exactly ones, so its NORM is exactly 1 and arm B's s_min is bounded")
-    say("above by 1.0 on every record that exists -- see the arm_svals docstring. Arm C's log column")
-    say("is about T_amb=20 times the same physical move, so its per-degree reading is also printed and")
-    say("is the one comparable to arm B.")
+    say("ARM B ONLY: its fourth column is exactly ones, so after the 1/sqrt(N) normalisation its norm is")
+    say("exactly 1, hence s_min <= 1.0 on every record that can exist -- an identity, not a measurement.")
+    say("That bound is exact relative to d in LINEAR degrees C; rescaling the parameter rescales the")
+    say("bound, so it describes this parameterisation and is NOT a law about offsets in general. In")
+    say("particular it does not cover the exploration's heat offset, whose column is 1/C_c times a step")
+    say("response rather than ones. Arm C's log column is about T_amb=20 times the same physical move,")
+    say("so its per-degree reading is also printed and is the one comparable to arm B.")
     say()
     say(f"  {'arm':14s} {'median':>9s} {'p10':>9s} {'min':>9s} {'below 0.50':>12s} {'of':>5s} {'newly refused':>15s}")
     base_pass = {id(r): r["A_shipped"]["s_min"] >= _IDENTIFIABILITY_FLOOR for r in rows}

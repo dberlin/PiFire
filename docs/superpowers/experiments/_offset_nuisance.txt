@@ -2,13 +2,17 @@
 OFFSET NUISANCE -- does a fourth free parameter buy a better model, or only a better fit?
 ============================================================================================================
 shipped fitter : _REFIT_INIT={'C_c': 320.0, 'h_amb': 0.5, 'K_Q': 3.5, 'theta': 50.0} sigma=1.4e-09 n_delay=8 free=['K_Q', 'C_c', 'theta']
-arms           : A_shipped (3 free)  B_offset (+d, linear C)  C_free_amb (+T_amb, log)
+arms           : A_shipped (3 free)  B_offset (+d on TEMPERATURE, linear C)  C_free_amb (+T_amb, log)
+                 the parsimony exploration's `d` is a constant HEAT offset in the power balance,
+                 so ARM C reproduces its move (d = h_amb * ambient shift, up to a negligible
+                 radiative term); ARM B is the different, cheaper thing an implementer would write.
 held-out split : 0.6667 of the record, scored warm on the suffix
 floor read     : model_promotion._IDENTIFIABILITY_FLOOR = 0.5 (imported, not derived here)
 
 --- population: 178 distinct records (18 collapsed as byte-identical), 42 dropped below the 120-sample refit floor, 136 fitted ---
-    The dropped ones are the 300 s and 450 s truncations. controller/mpc.py refuses a refit
-    shorter than that before the gate is reached, so they produce no verdict to be right about.
+    Dropped truncation lengths, read off the records rather than assumed: [300, 450] s.
+    Kept: [600, 900, 1200, 1240, 1800, 1995, 2400, 3600] s. controller/mpc.py refuses a refit shorter than 120
+    samples before the gate is reached, so the dropped ones produce no verdict to be right about.
     Nothing else is dropped and no arm is measured on a smaller population than another.
 --- fitting 136 records x 3 arms x 2 (full + prefix) on 8 workers ---
     done at t+121s
@@ -86,10 +90,13 @@ SECTION 2 -- what the fourth parameter costs in identifiability
 ============================================================================================================
 s_min is the smallest singular value of d(prediction)/d(parameter) over the arm's free set,
 per sample. Adding a column can only lower it: the minimum is taken over a larger space.
-Arm B's fourth column is exactly ones, so its NORM is exactly 1 and arm B's s_min is bounded
-above by 1.0 on every record that exists -- see the arm_svals docstring. Arm C's log column
-is about T_amb=20 times the same physical move, so its per-degree reading is also printed and
-is the one comparable to arm B.
+ARM B ONLY: its fourth column is exactly ones, so after the 1/sqrt(N) normalisation its norm is
+exactly 1, hence s_min <= 1.0 on every record that can exist -- an identity, not a measurement.
+That bound is exact relative to d in LINEAR degrees C; rescaling the parameter rescales the
+bound, so it describes this parameterisation and is NOT a law about offsets in general. In
+particular it does not cover the exploration's heat offset, whose column is 1/C_c times a step
+response rather than ones. Arm C's log column is about T_amb=20 times the same physical move,
+so its per-degree reading is also printed and is the one comparable to arm B.
 
   arm               median       p10       min   below 0.50    of   newly refused
   A_shipped         2.8224    0.0000    0.0000           36   136               0
