@@ -30,6 +30,7 @@ from scipy.optimize import least_squares
 from controller.model_promotion import (
     T_FLOOR_C,
     T_HAZARD_C,
+    effective_n_horizon,
     effective_tau,
     longest_braking_distance,
     steady_state_at_full_fire,
@@ -377,10 +378,16 @@ def main():
     t_ss = steady_state_at_full_fire(payload)
     print(f"Implied steady state at full fire: {t_ss:.0f} C ({t_ss * 9.0 / 5.0 + 32.0:.0f} F)")
     if horizon < brake:
+        # Not a warning any more: the controller derives its own horizon from
+        # this same braking distance and plans over the longer one. All that is
+        # left to say is what it will do, and that no setting has to be changed
+        # to get it -- configuring that length by hand would only stop a later,
+        # quicker model from shortening the horizon again.
+        steps = effective_n_horizon(payload, n_horizon=_DEFAULTS["n_horizon"], t_step=_DEFAULTS["t_step"])
         print(
-            f"WARNING: the chamber keeps rising for {brake:.0f} s after a full fuel cut, but the\n"
-            f"         default prediction horizon is only {horizon:.0f} s. Raise n_horizon or\n"
-            "         t_step, or the controller cannot see far enough ahead to stop in time."
+            f"NOTE: the chamber keeps rising for {brake:.0f} s after a full fuel cut, past the\n"
+            f"      {horizon:.0f} s the default prediction horizon spans. The controller plans over\n"
+            f"      {steps} steps for this model on its own; n_horizon does not need changing."
         )
     print("\nPaste into Settings > Controller (controller.config.mpc):")
     print(json.dumps(payload, indent=2))

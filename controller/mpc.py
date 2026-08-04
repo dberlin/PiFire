@@ -31,7 +31,7 @@ import numpy as np
 
 from controller.base import ControllerBase
 from controller.model_promotion import Verdict as _Verdict
-from controller.model_promotion import longest_braking_distance
+from controller.model_promotion import effective_n_horizon, longest_braking_distance
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE, MODEL_SCHEMA
 from controller.mpc_allocator import allocate
 
@@ -177,8 +177,13 @@ def _sanitized_copy(mapping):
     return {key: (_finite_float(value) if isinstance(value, float) else value) for key, value in mapping.items()}
 
 
-def _load_net_policy(cfg):
+def _load_net_policy(cfg, n_horizon):
     """Load the numpy net policy, or return None to fall back to the NLP.
+
+    The net approximates the NLP's policy at one horizon, so the horizon it is
+    judged against is the EFFECTIVE one the NLP would be built at, not cfg's
+    floor. An artifact trained at the shorter length is a policy that brakes
+    from a shorter view of the coast, which is the whole thing being fixed.
 
     Module-level (not a method) because `requires_modules` below has to ask the
     same question before any Controller exists -- and asking it any other way
@@ -196,7 +201,7 @@ def _load_net_policy(cfg):
     except Exception as e:
         print(f"[mpc] could not load net policy ({e}); using NLP")
         return None
-    if not net.matches_config(cfg):
+    if not net.matches_config({**cfg, "n_horizon": n_horizon}):
         if net.input_dim != net.expected_input_dim(cfg):
             print(
                 f"[mpc] net policy at {path} takes a {net.input_dim}-wide input but this model "
@@ -245,11 +250,30 @@ def _warn_about_model(cfg):
     # cannot describe one model in two ways.
     brake = longest_braking_distance(cfg)
     horizon = float(cfg["n_horizon"]) * float(cfg["t_step"])
-    if math.isfinite(brake) and horizon < brake:
+    if horizon < brake:
+        # t_step is not on offer even though raising it would also lengthen the
+        # horizon: it is the control cadence and the interval every stored cook
+        # record is sampled at, so moving it changes what the controller can
+        # resolve and what every past record means. Only the step count moves.
+        #
+        # Nor does this ask for n_horizon to be raised to the derived value. The
+        # build already reaches that far, and a configured floor that high would
+        # stop a later, quicker model from bringing the horizon down again --
+        # the hand-made version of the ratchet the derivation exists to avoid.
+        steps = effective_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
+        covered = steps * float(cfg["t_step"])
+        # A model that predicts no end to the coast has no number to report, and
+        # is the one case where the horizon below cannot be enough at any length.
+        coast = f"for {brake:.0f} s" if math.isfinite(brake) else "with no end this model predicts"
+        reach = (
+            f"planning over {steps} steps ({covered:.0f} s) instead"
+            if covered >= brake
+            else f"planning over {steps} steps ({covered:.0f} s), the furthest this controller sees, "
+            "which still does not reach the end of that coast"
+        )
         print(
-            f"[mpc] prediction horizon is {horizon:.0f} s but the chamber keeps rising for "
-            f"{brake:.0f} s after a full fuel cut; the controller cannot see far enough ahead "
-            "to stop in time. Raise n_horizon or t_step."
+            f"[mpc] configured prediction horizon is {horizon:.0f} s but the chamber keeps rising "
+            f"{coast} after a full fuel cut; {reach}."
         )
 
 
@@ -301,6 +325,13 @@ class Controller(ControllerBase):
         # rebuilt afterwards, so the config key on its own stops describing the
         # running model the moment a restore writes a different value into it.
         self._built_n_delay = n_delay
+
+        # The horizon everything below is BUILT at: the configured n_horizon
+        # raised, where this model's coast needs it, to a length that contains
+        # the end of a full brake. Derived here rather than written into cfg so
+        # a later, quicker model shortens it again and the operator's setting
+        # keeps meaning what they set.
+        self._built_n_horizon = effective_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
 
         # State/disturbance estimator (independent of the policy). EKF linearizes
         # the nonlinear radiative term each step (default); MHE solves an NLP; KF
@@ -354,9 +385,9 @@ class Controller(ControllerBase):
         self.mpc = None
         self._net = None
         if str(cfg.get("policy", "nlp")).lower() == "net":
-            self._net = _load_net_policy(cfg)
+            self._net = _load_net_policy(cfg, self._built_n_horizon)
         if self._net is None:
-            self._build_nlp(cfg, n_delay)
+            self._build_nlp(cfg, n_delay, self._built_n_horizon)
 
         # Optional data logging for offline calibration (update_mpc.py): one
         # (time_s, temp_c, Q) row per control step. Logs internal Celsius.
@@ -368,8 +399,13 @@ class Controller(ControllerBase):
             except OSError:
                 self._log_path = None  # disable logging if the path is unwritable
 
-    def _build_nlp(self, cfg, n_delay):
-        """Build the do-mpc NLP policy (lazily imports do_mpc/CasADi/IPOPT)."""
+    def _build_nlp(self, cfg, n_delay, n_horizon):
+        """Build the do-mpc NLP policy (lazily imports do_mpc/CasADi/IPOPT).
+
+        `n_horizon` is the effective horizon, which is at least cfg's and may
+        be longer; cfg's own value is the floor it was derived from and is
+        never the length built.
+        """
         import do_mpc
 
         self.model = build_do_mpc_model(
@@ -383,7 +419,7 @@ class Controller(ControllerBase):
         )
         self.mpc = do_mpc.controller.MPC(self.model)
         self.mpc.set_param(
-            n_horizon=int(cfg["n_horizon"]),
+            n_horizon=int(n_horizon),
             t_step=float(cfg["t_step"]),
             store_full_solution=False,
             nlpsol_opts={
@@ -410,7 +446,7 @@ class Controller(ControllerBase):
         tvp_template = self.mpc.get_tvp_template()
 
         def tvp_fun(t_now):
-            for k in range(int(cfg["n_horizon"]) + 1):
+            for k in range(int(n_horizon) + 1):
                 tvp_template["_tvp", k, "T_set"] = self._set_point_c
             return tvp_template
 
@@ -693,10 +729,14 @@ class Controller(ControllerBase):
             f"incumbent {inc_rmse:.2f} C, {fitted['nfev']} evaluations over "
             f"{len(rows)} samples in {time.perf_counter() - started:.1f} s)"
         )
-        if verdict.horizon_needed:
+        if verdict.accepted and verdict.horizon_needed:
+            # Reported only where it has a consequence. A refused model is not
+            # what the next build plans with, so what horizon it would have
+            # wanted is not a fact about this grill.
             print(
-                f"[mpc] refit: this model wants n_horizon >= {verdict.horizon_needed} "
-                f"at t_step {self.cfg['t_step']:.0f} s"
+                f"[mpc] refit: this model's coast needs {verdict.horizon_needed} prediction steps "
+                f"at t_step {self.cfg['t_step']:.0f} s, past the configured n_horizon "
+                f"{int(self.cfg['n_horizon'])}; the next build plans over that many."
             )
         if verdict.accepted:
             self._adopt_model(

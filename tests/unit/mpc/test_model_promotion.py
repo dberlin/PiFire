@@ -9,6 +9,7 @@ from controller.model_promotion import (
     _COAST_BOUND,
     _model_coast,
     braking_distance,
+    effective_n_horizon,
     effective_tau,
     evaluate,
     longest_braking_distance,
@@ -166,10 +167,20 @@ def test_theta_zero_with_an_active_delay_chain_is_refused():
 
 
 def test_the_theta_bound_is_enforced():
+    """Exactly 1200 is in, and the next representable step out of it is out.
+
+    The at-bound case is asked at a horizon wide enough to hold its own coast.
+    theta that long implies a 5280 s brake, which the horizon cap refuses on
+    its own -- PROMOTION_BOUNDS is a box on one parameter at a time and the cap
+    is a joint statement about the model, so the two disagree here. Asking at
+    the narrower horizon would let that refusal stand in for this bound and the
+    test would pass with the bound deleted.
+    """
+    wide = dict(n_horizon=212, t_step=25.0)  # 5300 s, past this candidate's coast
     assert _ev(dict(GOOD, theta=-1e-9)).accepted is False
     assert _ev(dict(GOOD, theta=0.0, n_delay=0)).accepted is True
-    assert _ev(dict(GOOD, theta=1200.0)).accepted is True
-    assert _ev(dict(GOOD, theta=1200.0 + 1e-3)).accepted is False
+    assert _ev(dict(GOOD, theta=1200.0), **wide).accepted is True
+    assert _ev(dict(GOOD, theta=1200.0 + 1e-3), **wide).accepted is False
 
 
 def test_an_incumbent_missing_n_delay_is_refused_not_a_crash():
@@ -518,6 +529,91 @@ def test_a_model_needing_more_horizon_than_configured_reports_it():
 
 def test_an_adequate_horizon_asks_for_nothing():
     assert _ev(GOOD, n_horizon=600, t_step=25.0).horizon_needed is None
+
+
+def test_a_coast_the_configured_horizon_cannot_hold_is_adopted_at_a_longer_one():
+    """The demand is met by building further ahead, not by refusing the model.
+
+    A horizon is nearly free next to a 25 s control period, while refusing
+    would keep an incumbent this gate has just called the worse description of
+    the same grill -- and the coast is the grill's, so the incumbent does not
+    make it shorter by being kept. The verdict and the horizon the build uses
+    are asserted together here because the defect this closes was precisely
+    that they disagreed.
+    """
+    slow = dict(GOOD, theta=600.0, n_delay=8)
+    brake = longest_braking_distance(slow)
+    assert 24 * 25.0 < brake < 2400.0  # past the shipped horizon, inside the cap
+
+    v = _ev(slow, n_horizon=24, t_step=25.0)
+    assert v.accepted is True
+    assert v.horizon_needed == math.ceil(brake / 25.0)
+    assert effective_n_horizon(slow, n_horizon=24, t_step=25.0) == v.horizon_needed
+
+
+def test_a_coast_longer_than_the_cap_can_cover_is_refused():
+    """The one horizon refusal. Past here no buildable horizon contains the
+    brake, so the controller would be planning without its end in view."""
+    wild = dict(GOOD, C_c=1.0, h_amb=1e-4, theta=1200.0, n_delay=1, K_Q=1e4, sigma=0.0)
+    brake = longest_braking_distance(wild)
+    assert brake > 2400.0
+
+    v = _ev(wild, n_horizon=24, t_step=25.0)
+    assert v.accepted is False
+    assert f"{brake:.0f} s" in v.reason  # what the model asks for
+    assert "2400 s" in v.reason  # and the cap that will not stretch to it
+
+
+def test_the_cap_bounds_what_a_wild_model_can_demand_of_the_build():
+    wild = dict(GOOD, C_c=1.0, h_amb=1e-4, theta=1200.0, n_delay=1, K_Q=1e4, sigma=0.0)
+    assert effective_n_horizon(wild, n_horizon=24, t_step=25.0) == 96  # 2400 s / 25 s
+
+
+def test_the_configured_horizon_is_a_floor_that_a_quick_model_does_not_lower():
+    """GOOD stops well inside 144 steps, and the operator still gets 144."""
+    assert longest_braking_distance(GOOD) < 144 * 25.0
+    assert effective_n_horizon(GOOD, n_horizon=144, t_step=25.0) == 144
+    # Including past the cap: what the cap bounds is the demand a fitted model
+    # can make of the build, never the length the operator asked for.
+    assert effective_n_horizon(GOOD, n_horizon=200, t_step=25.0) == 200  # 5000 s, past the 2400 s cap
+
+
+def test_the_horizon_follows_the_model_down_again():
+    """No ratchet, at the level of the function every build goes through.
+
+    A horizon written into the configuration could only ever grow: the next
+    model would be compared against the raised value rather than against what
+    the operator set. Derived, a quicker model takes it straight back to the
+    floor.
+    """
+    slow = dict(GOOD, theta=600.0, n_delay=8)
+    assert effective_n_horizon(slow, n_horizon=24, t_step=25.0) > 24
+    assert effective_n_horizon(GOOD, n_horizon=24, t_step=25.0) == 24
+
+
+def test_the_cap_is_seconds_so_a_finer_t_step_covers_the_same_coast():
+    """What the cap bounds is the coast, which is seconds.
+
+    A step count means nothing without t_step, so the cap is stated in seconds
+    and the step count follows it: the same 2400 s of foresight is 96 steps at
+    the shipped 25 s cadence and 2400 steps at controllers.json's minimum of
+    1 s. A coast the controller can plan around therefore stays acceptable at
+    every cadence, rather than the cadence deciding which models exist.
+    """
+    slow = dict(GOOD, theta=600.0, n_delay=8)
+    brake = longest_braking_distance(slow)
+    assert 24 * 25.0 < brake < 2400.0
+
+    assert effective_n_horizon(slow, n_horizon=24, t_step=25.0) == math.ceil(brake / 25.0)
+    assert effective_n_horizon(slow, n_horizon=24, t_step=1.0) == math.ceil(brake / 1.0)
+    assert _ev(slow, n_horizon=24, t_step=25.0).accepted is True
+    assert _ev(slow, n_horizon=24, t_step=1.0).accepted is True
+
+    # And the cap itself follows the cadence the same way, so what it refuses is
+    # a coast rather than a step count.
+    wild = dict(GOOD, C_c=1.0, h_amb=1e-4, theta=1200.0, n_delay=1, K_Q=1e4, sigma=0.0)
+    assert effective_n_horizon(wild, n_horizon=24, t_step=1.0) == 2400
+    assert _ev(wild, n_horizon=24, t_step=1.0).accepted is False
 
 
 def test_the_horizon_is_sized_from_the_braking_distance_not_from_the_time_constant():

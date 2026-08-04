@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import shutil
 import time
@@ -592,6 +593,90 @@ def test_an_adequate_horizon_is_not_reported(capsys):
     cfg.update(C_c=11000.0, h_amb=2.7, K_Q=32.0, theta=110.0, n_horizon=200, t_step=25.0)
     _warn_about_model(cfg)
     assert "horizon" not in capsys.readouterr().out.lower()
+
+
+def test_a_coast_with_no_end_is_reported_as_one_no_horizon_reaches(capsys):
+    """The one config raising the horizon cannot rescue.
+
+    A model with no firing-rate gain never predicts the chamber stops rising,
+    so the longest horizon this controller will build is still short of the
+    coast. The controller runs anyway -- every condition here is advisory --
+    which is why saying so is the whole of what it can do.
+    """
+    from controller.model_promotion import longest_braking_distance
+
+    cfg = dict(_DEFAULTS)
+    cfg.update(C_c=11000.0, h_amb=2.7, theta=110.0, K_Q=0.0, n_horizon=8)
+    assert longest_braking_distance(cfg) == math.inf
+
+    _warn_about_model(cfg)
+    out = capsys.readouterr().out
+    assert "no end this model predicts" in out
+    assert "does not reach the end of that coast" in out
+    assert "inf s" not in out  # a coast with no end has no number to print
+
+
+#: A model whose chamber goes on rising for about 2015 s after a fuel cut --
+#: past CONFIG's 20 * 25 = 500 s horizon and well inside the cap. Written out
+#: rather than derived so the numbers the tests below assert are pinned to
+#: parameters and not to whatever the module currently computes.
+_SLOW_COAST = dict(C_c=2520.0, h_amb=0.224, T_amb=20.0, theta=600.0, n_delay=8, K_Q=6.95, sigma=1.4e-9)
+_QUICK_COAST = dict(_SLOW_COAST, theta=50.0)
+
+
+def test_a_coast_the_configured_horizon_cannot_hold_is_BUILT_at_the_longer_one(capsys):
+    """The configured n_horizon is a floor; what gets built is what the coast needs.
+
+    Both the intention and the NLP are asserted: the whole defect was a
+    controller that computed a horizon requirement, said it out loud, and then
+    built the short horizon anyway.
+    """
+    from controller.model_promotion import longest_braking_distance
+
+    cfg = dict(CONFIG, **_SLOW_COAST)
+    brake = longest_braking_distance(cfg)
+    needed = math.ceil(brake / cfg["t_step"])
+    assert needed > cfg["n_horizon"]
+
+    c = Controller(cfg, "C", dict(CYCLE))
+    assert c._built_n_horizon == needed
+    assert c.mpc.settings.n_horizon == needed
+    assert c.cfg["n_horizon"] == CONFIG["n_horizon"]  # the operator's setting is untouched
+
+    out = capsys.readouterr().out
+    assert f"{needed} steps" in out
+    assert "t_step" not in out  # only the step count is on offer
+
+
+def test_a_coast_the_configured_horizon_covers_is_built_at_the_configured_one():
+    """The negative control: without it the raise above could be unconditional."""
+    from controller.model_promotion import longest_braking_distance
+
+    c = Controller(dict(CONFIG), "C", dict(CYCLE))
+    assert longest_braking_distance(c.cfg) < CONFIG["n_horizon"] * CONFIG["t_step"]
+    assert c._built_n_horizon == CONFIG["n_horizon"]
+    assert c.mpc.settings.n_horizon == CONFIG["n_horizon"]
+
+
+def test_adopting_a_slow_model_then_a_quick_one_brings_the_horizon_back_down():
+    """The property the derived-not-stored horizon exists to guarantee.
+
+    Writing an adopted model's demand into n_horizon would leave the horizon
+    only able to grow: this grill's next model would be sized against the last
+    one's coast rather than against what the operator set, and the solve cost
+    would rise once and stay. Each build is asked afresh here, which is what a
+    later refactor to a stored value would fail.
+    """
+    floor = CONFIG["n_horizon"]
+    c = Controller(dict(CONFIG), "C", dict(CYCLE))
+
+    c._adopt_model(_SLOW_COAST, rmse=2.0, samples=100, band_c=(20.0, 200.0))
+    assert c.cfg["n_horizon"] == floor
+    assert Controller(dict(c.cfg), "C", dict(CYCLE))._built_n_horizon > floor
+
+    c._adopt_model(_QUICK_COAST, rmse=1.0, samples=100, band_c=(20.0, 200.0))
+    assert c.cfg["n_horizon"] == floor
+    assert Controller(dict(c.cfg), "C", dict(CYCLE))._built_n_horizon == floor
 
 
 def test_the_running_warning_and_the_promotion_policy_size_the_horizon_alike(capsys):

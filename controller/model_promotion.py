@@ -193,6 +193,40 @@ T_HAZARD_C = (550.0 - 32.0) * 5.0 / 9.0
 #: which is the far end of the curve a single hot reference cannot see.
 T_FLOOR_C = (75.0 - 32.0) * 5.0 / 9.0
 
+#: The longest coast this controller will build a horizon for, in SECONDS. A
+#: step count says nothing on its own -- 96 steps is 2400 s at the shipped
+#: t_step and 96 s at controllers.json's minimum of 1 s -- so the bound is the
+#: foresight it buys and the step count follows, ceil(_HORIZON_CAP_S / t_step).
+#: A finer control cadence then covers the same coast rather than less of it.
+#:
+#: What bounds this is the coast a pellet grill can physically have, not the
+#: cost of the solve. Two coasts have been measured here: the shipped default
+#: model's is 150 s, and controller/update_mpc.py's fit to the real MAK cook
+#: (tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv, recorded as REAL_MAK_FIT in
+#: tests/unit/mpc/test_model_promotion.py) reads 367 s. 2400 s is 16x the first
+#: and 6.5x the second. A chamber still climbing 40 minutes after every pellet
+#: has stopped burning is not a grill this controller can brake; it is a fit
+#: that has run away along a direction the cook did not determine, and refusing
+#: it is what this constant is for.
+#:
+#: Compute does not set it, because at this length compute is not scarce. At
+#: the shipped t_step = 25 s the cap is n_horizon = 96, and the worst of 15
+#: warm solves there is 121 ms at the shipped n_delay = 8 and 192 ms at
+#: controllers.json's largest selectable n_delay = 12, against a 25 000 ms
+#: control period -- 0.48 % and 0.77 % of it. The n_delay = 12 row is the one
+#: that has to hold: a bound a shipped setting can step outside is not a bound.
+#: Those are x86 Core Ultra readings and PiFire's nominal target is a Raspberry
+#: Pi 5; at an assumed 6x slowdown they are 2.9 % and 4.6 % of the period, so
+#: the cap sits far below any point where the solve competes with the cadence.
+#: The measurement is docs/superpowers/experiments/horizon_solve_cost.py and
+#: its committed output is _horizon_solve_cost.txt beside it.
+#:
+#: Neither direction is free. Too high adopts a model whose brake the
+#: controller only appears to plan around. Too low refuses a model the gate has
+#: just judged the better description of this grill, and the incumbent left
+#: running may size the same physical coast no better.
+_HORIZON_CAP_S = 2400.0
+
 
 @dataclass
 class Verdict:
@@ -409,6 +443,41 @@ def longest_braking_distance(params, *, q_full=Q_FULL_FIRE):
     return max(braking_distance(params, t, q_full=q_full) for t in refs)
 
 
+def effective_n_horizon(params, *, n_horizon, t_step):
+    """How many prediction steps a controller planning with `params` builds.
+
+    The configured `n_horizon` is a floor, not the answer. A chamber that goes
+    on rising past the end of the horizon leaves the end of its own brake out
+    of view, so the horizon is raised to cover `longest_braking_distance` and
+    stops at the `_HORIZON_CAP_S` seconds that bound a believable coast. A
+    model needing less than the operator configured lowers nothing: the setting
+    is a floor in both senses.
+
+    Derived on every build rather than written back into the configuration, so
+    the horizon tracks the current model in BOTH directions -- a later, quicker
+    model brings it down again -- and the stored `n_horizon` goes on meaning
+    what the operator set. A stored value could only ratchet upwards.
+
+    A model that never predicts the chamber stops rising asks for the cap: no
+    horizon satisfies it, and the cap is the most this controller will spend.
+    `evaluate` refuses such a model outright, so this is the reading for one
+    that arrives in a configuration instead of through the gate.
+    """
+    steps = int(n_horizon)
+    step_s = float(t_step)
+    if not (step_s > 0.0 and math.isfinite(step_s)):
+        return steps
+    cap = int(math.ceil(_HORIZON_CAP_S / step_s))
+    brake = longest_braking_distance(params)
+    if math.isfinite(brake):
+        needed = int(math.ceil(brake / step_s))
+    elif brake == math.inf:
+        needed = cap
+    else:
+        needed = 0  # nothing was computed, so nothing is being asked for
+    return max(steps, min(needed, cap))
+
+
 def effective_tau(params, t_ref_c):
     """The chamber time constant at chamber temperature `t_ref_c` (Celsius).
 
@@ -533,6 +602,20 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, identifiab
         # covers that, so it is refused rather than passed with no demand
         # attached -- silence here would read as "the horizon is fine".
         return Verdict(False, "the model does not predict the chamber ever stops rising after a fuel cut")
+    # The cap is the one thing here that refuses a model for its horizon. A
+    # demand under it is met by building a longer horizon -- the seconds are
+    # nearly free next to a 25 s control period -- so refusing there would keep
+    # a model the comparison below has just called worse, over a coast the
+    # grill has whatever the verdict says. Past the cap there is no horizon to
+    # build: the controller cannot see the end of this model's brake at any
+    # cost it can pay, so it must not plan with it.
+    covered = effective_n_horizon(candidate, n_horizon=n_horizon, t_step=t_step) * float(t_step)
+    if covered < brake:
+        return Verdict(
+            False,
+            f"the chamber keeps rising for {brake:.0f} s after a fuel cut, past the {covered:.0f} s "
+            f"this controller plans over under a {_HORIZON_CAP_S:.0f} s horizon cap",
+        )
     if float(n_horizon) * float(t_step) < brake:
         horizon_needed = int(math.ceil(brake / float(t_step)))
 

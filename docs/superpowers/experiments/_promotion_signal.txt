@@ -492,11 +492,11 @@ Population: in-scope records only (n >= 120 samples), duplicates collapsed.
 
 incumbent   signal                  n   TP   FP   TN   FN   wrong  worst FP c_err  worst FP truth
 --------------------------------------------------------------------------------------------------------
-shipped     in-sample (today)     122  114    7    1    0    5.7%          -25.15         +200.49
-shipped     held-out cold         122   64    7    1   50   46.7%          -25.15         +200.49
-shipped     held-out warm         122  114    7    1    0    5.7%          -25.15         +200.49
-calibrated  in-sample (today)     120    4   69   45    2   59.2%          -25.15         +223.73
-calibrated  held-out cold         120    2   26   88    4   25.0%          -25.15         +223.73
+shipped     in-sample (today)     122  114    6    2    0    4.9%          -25.15         +200.49
+shipped     held-out cold         122   64    6    2   50   45.9%          -25.15         +200.49
+shipped     held-out warm         122  114    6    2    0    4.9%          -25.15         +200.49
+calibrated  in-sample (today)     120    4   68   46    2   58.3%          -25.15         +223.73
+calibrated  held-out cold         120    2   25   89    4   24.2%          -25.15         +223.73
 calibrated  held-out warm         120    2   40   74    4   36.7%          -25.15         +223.73
 
 A false positive is a model put on a grill that predicts it WORSE than what it replaced.
@@ -671,7 +671,7 @@ None     flat_synth_0.15    300   -   0.1309   0.0075380       31.1    46.00   4
 generic  steady_hold       3600   y   0.6855   0.2612030       21.9   661.08   66768.5  226.203    4.28      ACCEPT
 generic  steady_hold       2400   y   0.7703   0.2439287       14.3   602.81   65893.2  226.234    3.74      ACCEPT
 generic  steady_hold       1800   y   0.8363   0.0000000         --     0.01     751.4   62.998   -0.07      ACCEPT
-generic  steady_hold       1200   y   0.7597   0.1538430       21.5   814.97   59533.2  222.849   11.88      ACCEPT
+generic  steady_hold       1200   y   0.7597   0.1538430       21.5   814.97   59533.2  222.849   11.88      refuse
 generic  steady_hold        900   y   0.8724   0.0000000         --     0.02    2240.7  136.172   -0.07      ACCEPT
 generic  steady_hold        600   y   0.8497   0.0000000         --     0.03   64962.8  229.104   -0.07      refuse
 generic  steady_hold        450   -   0.2636   0.0000001  1700311.7     0.21  227259.9  229.097   -0.07      refuse
@@ -741,39 +741,39 @@ would be measuring the wrong plant.
 ### incumbent = shipped -----------------------------------------------------------------------------
 signal         statistic           best threshold    n  acc  wrong  DANGER  worst c_err |  zero-DANGER thr  wrong there   real cook
 --------------------------------------------------------------------------------------------------------------------------
-in-sample (today) s_min@fit                     -inf  122  121      7       9        -0.47 |         0.014744           12  1.814 PASS
-in-sample (today) s_min@incumbent             2.0055  122  115      5       8        -0.47 |           2.5261           14  10.14 PASS
-in-sample (today) inv_cond                      -inf  122  121      7       9        -0.47 |        9.715e-05           12 0.009218 PASS
+in-sample (today) s_min@fit                     -inf  122  120      6       9        -0.47 |         0.014744           11  1.814 PASS
+in-sample (today) s_min@incumbent             2.0055  122  114      4       8        -0.47 |           2.5261           14  10.14 PASS
+in-sample (today) inv_cond                      -inf  122  120      6       9        -0.47 |        9.715e-05           11 0.009218 PASS
 in-sample (today) temp_span                   4.9673  122  114      0       8        -0.47 |            35.12           10  230.6 PASS
 in-sample (today) len_over_tau               0.23674  122  118      4       9        -0.47 |           2.7838           71 0.3426 refused
-in-sample (today) q_std                         -inf  122  121      7       9        -0.47 |           3.2141           58  34.44 PASS
-in-sample (today) split_disagree              225.85  122  118      6       9        -0.47 |           1.7504          111 104.7 refused
+in-sample (today) q_std                         -inf  122  120      6       9        -0.47 |           3.2141           58  34.44 PASS
+in-sample (today) split_disagree                 inf  122  120      6       9        -0.47 |           1.7504          111 104.7 refused
 in-sample (today) split_brake_ratio              inf  122  118      6       9        -0.47 |           2.6831           89 18.96 refused
-in-sample (today) split_tau_ratio          1.057e+06  122  119      7       8        -0.47 |           1.0038          110 6.383 refused
-in-sample (today) brake_vs_inc            1.5718e-06  122  119      7       8        -0.47 |        0.0022008           12   2.45 PASS
-in-sample (today) (none)                        -inf  122  121      7       9        -0.47 |              inf          114   1 refused
-held-out cold  s_min@fit                     -inf  122   71     57       9        -0.47 |         0.014744           61  1.814 PASS
-held-out cold  s_min@incumbent             2.0055  122   65     55       8        -0.47 |           2.5261           61  10.14 PASS
-held-out cold  inv_cond                      -inf  122   71     57       9        -0.47 |        9.715e-05           61 0.009218 PASS
+in-sample (today) split_tau_ratio          1.057e+06  122  118      6       8        -0.47 |           1.0038          110 6.383 refused
+in-sample (today) brake_vs_inc            1.5718e-06  122  118      6       8        -0.47 |        0.0022008           11   2.45 PASS
+in-sample (today) (none)                        -inf  122  120      6       9        -0.47 |              inf          114   1 refused
+held-out cold  s_min@fit                     -inf  122   70     56       9        -0.47 |         0.014744           60  1.814 PASS
+held-out cold  s_min@incumbent             2.0055  122   64     54       8        -0.47 |           2.5261           61  10.14 PASS
+held-out cold  inv_cond                      -inf  122   70     56       9        -0.47 |        9.715e-05           60 0.009218 PASS
 held-out cold  temp_span                   4.9673  122   64     50       8        -0.47 |            35.12           59  230.6 PASS
 held-out cold  len_over_tau               0.23674  122   68     54       9        -0.47 |           2.7838           91 0.3426 refused
-held-out cold  q_std                         -inf  122   71     57       9        -0.47 |           3.2141           76  34.44 PASS
+held-out cold  q_std                         -inf  122   70     56       9        -0.47 |           3.2141           76  34.44 PASS
 held-out cold  split_disagree              188.96  122   65     55       8        -0.47 |           1.7504          111 104.7 refused
 held-out cold  split_brake_ratio              inf  122   68     56       9        -0.47 |           2.6831           94 18.96 refused
-held-out cold  split_tau_ratio          1.057e+06  122   70     56       8        -0.47 |           1.0038          110 6.383 refused
-held-out cold  brake_vs_inc            1.5718e-06  122   70     56       8        -0.47 |        0.0022008           61   2.45 PASS
-held-out cold  (none)                        -inf  122   71     57       9        -0.47 |              inf          114   1 refused
-held-out warm  s_min@fit                     -inf  122  121      7       9        -0.47 |         0.014744           12  1.814 PASS
-held-out warm  s_min@incumbent             2.0055  122  115      5       8        -0.47 |           2.5261           14  10.14 PASS
-held-out warm  inv_cond                      -inf  122  121      7       9        -0.47 |        9.715e-05           12 0.009218 PASS
+held-out cold  split_tau_ratio          1.057e+06  122   69     55       8        -0.47 |           1.0038          110 6.383 refused
+held-out cold  brake_vs_inc            1.5718e-06  122   69     55       8        -0.47 |        0.0022008           60   2.45 PASS
+held-out cold  (none)                        -inf  122   70     56       9        -0.47 |              inf          114   1 refused
+held-out warm  s_min@fit                     -inf  122  120      6       9        -0.47 |         0.014744           11  1.814 PASS
+held-out warm  s_min@incumbent             2.0055  122  114      4       8        -0.47 |           2.5261           14  10.14 PASS
+held-out warm  inv_cond                      -inf  122  120      6       9        -0.47 |        9.715e-05           11 0.009218 PASS
 held-out warm  temp_span                   4.9673  122  114      0       8        -0.47 |            35.12           10  230.6 PASS
 held-out warm  len_over_tau               0.23674  122  118      4       9        -0.47 |           2.7838           71 0.3426 refused
-held-out warm  q_std                         -inf  122  121      7       9        -0.47 |           3.2141           58  34.44 PASS
-held-out warm  split_disagree              225.85  122  118      6       9        -0.47 |           1.7504          111 104.7 refused
+held-out warm  q_std                         -inf  122  120      6       9        -0.47 |           3.2141           58  34.44 PASS
+held-out warm  split_disagree                 inf  122  120      6       9        -0.47 |           1.7504          111 104.7 refused
 held-out warm  split_brake_ratio              inf  122  118      6       9        -0.47 |           2.6831           89 18.96 refused
-held-out warm  split_tau_ratio          1.057e+06  122  119      7       8        -0.47 |           1.0038          110 6.383 refused
-held-out warm  brake_vs_inc            1.5718e-06  122  119      7       8        -0.47 |        0.0022008           12   2.45 PASS
-held-out warm  (none)                        -inf  122  121      7       9        -0.47 |              inf          114   1 refused
+held-out warm  split_tau_ratio          1.057e+06  122  118      6       8        -0.47 |           1.0038          110 6.383 refused
+held-out warm  brake_vs_inc            1.5718e-06  122  118      6       8        -0.47 |        0.0022008           11   2.45 PASS
+held-out warm  (none)                        -inf  122  120      6       9        -0.47 |              inf          114   1 refused
 'best threshold' minimises wrong decisions, then DANGER. 'zero-DANGER thr' is the loosest
 threshold at which no accepted model reads a shorter coast than the one it replaced, and
 'wrong there' is what that costs in total wrong decisions. 'real cook' is the full 1240 s
@@ -782,27 +782,27 @@ MAK cook's value of the statistic and whether it clears the zero-DANGER threshol
 ### incumbent = calibrated --------------------------------------------------------------------------
 signal         statistic           best threshold    n  acc  wrong  DANGER  worst c_err |  zero-DANGER thr  wrong there   real cook
 --------------------------------------------------------------------------------------------------------------------------
-in-sample (today) s_min@fit                      inf  120    0      6       0        +0.00 |         0.014744           58  1.814 PASS
-in-sample (today) s_min@incumbent                inf  120    0      6       0        +0.00 |           2.1932           55  10.14 PASS
-in-sample (today) inv_cond                       inf  120    0      6       0        +0.00 |        9.715e-05           58 0.009218 PASS
+in-sample (today) s_min@fit                      inf  120    0      6       0        +0.00 |         0.014744           57  1.814 PASS
+in-sample (today) s_min@incumbent                inf  120    0      6       0        +0.00 |           2.1932           54  10.14 PASS
+in-sample (today) inv_cond                       inf  120    0      6       0        +0.00 |        9.715e-05           57 0.009218 PASS
 in-sample (today) temp_span                      inf  120    0      6       0        +0.00 |            35.12           54  230.6 PASS
 in-sample (today) len_over_tau                   inf  120    0      6       0        +0.00 |           2.7838           39 0.3426 refused
 in-sample (today) q_std                          inf  120    0      6       0        +0.00 |           3.2141           30  34.44 PASS
 in-sample (today) split_disagree             0.20865  120    0      6       0        +0.00 |           1.7504           10 104.7 refused
 in-sample (today) split_brake_ratio             -inf  120    0      6       0        +0.00 |           2.6831           16 18.96 refused
 in-sample (today) split_tau_ratio             1.0016  120    0      6       0        +0.00 |           1.0038            9 6.383 refused
-in-sample (today) brake_vs_inc                   inf  120    0      6       0        +0.00 |       0.00056725           59   2.45 PASS
+in-sample (today) brake_vs_inc                26.533  120    0      6       0        +0.00 |       0.00056725           58   2.45 PASS
 in-sample (today) (none)                         inf  120    0      6       0        +0.00 |              inf            6   1 refused
-held-out cold  s_min@fit                      inf  120    0      6       0        +0.00 |         0.014744           18  1.814 PASS
-held-out cold  s_min@incumbent                inf  120    0      6       0        +0.00 |           2.1932           18  10.14 PASS
-held-out cold  inv_cond                   0.13862  120    0      6       0        +0.00 |        9.715e-05           18 0.009218 PASS
+held-out cold  s_min@fit                      inf  120    0      6       0        +0.00 |         0.014744           17  1.814 PASS
+held-out cold  s_min@incumbent                inf  120    0      6       0        +0.00 |           2.1932           17  10.14 PASS
+held-out cold  inv_cond                   0.13862  120    0      6       0        +0.00 |        9.715e-05           17 0.009218 PASS
 held-out cold  temp_span                   350.56  120    0      6       0        +0.00 |            35.12           14  230.6 PASS
 held-out cold  len_over_tau                   inf  120    0      6       0        +0.00 |           2.7838           15 0.3426 refused
 held-out cold  q_std                          inf  120    0      6       0        +0.00 |           3.2141           11  34.44 PASS
 held-out cold  split_disagree             0.20865  120    0      6       0        +0.00 |           1.7504            9 104.7 refused
 held-out cold  split_brake_ratio           1.0015  120    0      6       0        +0.00 |           2.6831           12 18.96 refused
 held-out cold  split_tau_ratio             1.0016  120    0      6       0        +0.00 |           1.0038            8 6.383 refused
-held-out cold  brake_vs_inc                   inf  120    0      6       0        +0.00 |       0.00056725           19   2.45 PASS
+held-out cold  brake_vs_inc                26.533  120    0      6       0        +0.00 |       0.00056725           18   2.45 PASS
 held-out cold  (none)                         inf  120    0      6       0        +0.00 |              inf            6   1 refused
 held-out warm  s_min@fit                      inf  120    0      6       0        +0.00 |         0.014744           35  1.814 PASS
 held-out warm  s_min@incumbent                inf  120    0      6       0        +0.00 |           2.1932           31  10.14 PASS
@@ -919,16 +919,16 @@ evaluate() with the stated additions. T and B are the q0.60 and q0.25 grid value
 
 incumbent   rule                                    n  acc   TP   FP   FN  DANGER  d_gen  worst c_err  worst FP truth
 --------------------------------------------------------------------------------------------------------------------
-shipped     today (in-sample)                     122  121  114    7    0       9     57        -0.47         +200.49
-shipped     held-out warm                         122  121  114    7    0       9     57        -0.47         +200.49
-shipped     held-out warm + dir                   122   55   52    3   62       0      0        +0.00         +200.49
+shipped     today (in-sample)                     122  120  114    6    0       9     57        -0.47         +200.49
+shipped     held-out warm                         122  120  114    6    0       9     57        -0.47         +200.49
+shipped     held-out warm + dir                   122   54   52    2   62       0      0        +0.00         +200.49
 shipped     held-out warm + s_min>=4.38           122   49   49    0   65       0     36        +0.00           +0.00
 shipped     held-out warm + split_brk<=2.98       122   30   29    1   85       1     14        -0.47         +200.46
 shipped     held-out warm + s_min + split_brk     122   18   18    0   96       0     13        +0.00           +0.00
 shipped     held-out warm + all three             122    5    5    0  109       0      0        +0.00           +0.00
 shipped     in-sample + all three                 122    5    5    0  109       0      0        +0.00           +0.00
 shipped     never promote                         122    0    0    0  114       0      0        +0.00           +0.00
-calibrated  today (in-sample)                     120   73    4   69    2       9     10       -22.73         +223.73
+calibrated  today (in-sample)                     120   72    4   68    2       9     10       -22.73         +223.73
 calibrated  held-out warm                         120   42    2   40    4       9      3       -22.73         +223.73
 calibrated  held-out warm + dir                   120   33    2   31    4       0      3        +0.00         +223.73
 calibrated  held-out warm + s_min>=4.38           120   19    2   17    4       0      3        +0.00           +0.96
@@ -993,27 +993,27 @@ What each candidate floor in and around that interval does, against every incumb
 every fit-quality signal. The recommended value is marked >>.
 incumbent   signal                  floor    n  acc   TP   FP   FN  DANGER  d_gen  worst c_err  worst FP truth  real cook
 ------------------------------------------------------------------------------------------------------------------------------
-shipped     in-sample (today)         off  122  121  114    7    0       9     57        -0.47         +200.49        4/4
+shipped     in-sample (today)         off  122  120  114    6    0       9     57        -0.47         +200.49        4/4
 shipped     in-sample (today)      0.2612  122  102  101    1   13       0     52        +0.00         +200.46        4/4
 shipped     in-sample (today)      >>0.50  122   96   96    0   18       0     52        +0.00           +0.00        4/4
 shipped     in-sample (today)      0.5356  122   93   93    0   21       0     52        +0.00           +0.00        4/4
 shipped     in-sample (today)       1.098  122   85   85    0   29       0     52        +0.00           +0.00        4/4
-shipped     held-out cold             off  122   71   64    7   50       9     30        -0.47         +200.49        4/4
+shipped     held-out cold             off  122   70   64    6   50       9     30        -0.47         +200.49        4/4
 shipped     held-out cold          0.2612  122   56   55    1   59       0     26        +0.00         +200.46        4/4
 shipped     held-out cold          >>0.50  122   53   53    0   61       0     26        +0.00           +0.00        4/4
 shipped     held-out cold          0.5356  122   52   52    0   62       0     26        +0.00           +0.00        4/4
 shipped     held-out cold           1.098  122   51   51    0   63       0     26        +0.00           +0.00        4/4
-shipped     held-out warm             off  122  121  114    7    0       9     57        -0.47         +200.49        4/4
+shipped     held-out warm             off  122  120  114    6    0       9     57        -0.47         +200.49        4/4
 shipped     held-out warm          0.2612  122  102  101    1   13       0     52        +0.00         +200.46        4/4
 shipped     held-out warm          >>0.50  122   96   96    0   18       0     52        +0.00           +0.00        4/4
 shipped     held-out warm          0.5356  122   93   93    0   21       0     52        +0.00           +0.00        4/4
 shipped     held-out warm           1.098  122   85   85    0   29       0     52        +0.00           +0.00        4/4
-calibrated  in-sample (today)         off  120   73    4   69    2       9     10       -22.73         +223.73        4/4
+calibrated  in-sample (today)         off  120   72    4   68    2       9     10       -22.73         +223.73        4/4
 calibrated  in-sample (today)      0.2612  120   57    4   53    2       0      5        +0.00         +223.70        4/4
 calibrated  in-sample (today)      >>0.50  120   56    4   52    2       0      5        +0.00           +2.56        4/4
 calibrated  in-sample (today)      0.5356  120   56    4   52    2       0      5        +0.00           +2.56        4/4
 calibrated  in-sample (today)       1.098  120   56    4   52    2       0      5        +0.00           +2.56        4/4
-calibrated  held-out cold             off  120   28    2   26    4       9      6       -22.73         +223.73        4/4
+calibrated  held-out cold             off  120   27    2   25    4       9      6       -22.73         +223.73        4/4
 calibrated  held-out cold          0.2612  120   13    2   11    4       0      2        +0.00         +223.70        4/4
 calibrated  held-out cold          >>0.50  120   12    2   10    4       0      2        +0.00           +1.14        4/4
 calibrated  held-out cold          0.5356  120   12    2   10    4       0      2        +0.00           +1.14        4/4

@@ -176,13 +176,13 @@ MUTATIONS = [
     (
         "M21 running warning never fires",
         MPC,
-        "    if math.isfinite(brake) and horizon < brake:",
+        "    if horizon < brake:",
         "    if False:",
     ),
     (
         "M22 running warning always fires",
         MPC,
-        "    if math.isfinite(brake) and horizon < brake:",
+        "    if horizon < brake:",
         "    if True:",
     ),
     (
@@ -363,6 +363,23 @@ MUTATIONS = [
         MPC,
         "    n_delay=8,",
         "    n_delay=4,",
+    ),
+    # ---- the horizon cap, in both directions -------------------------------
+    # The cap is the only thing that refuses a model for its horizon, so it has
+    # to be pinned from both sides: raised, a coast no pellet grill has gets
+    # adopted anyway; lowered, a coast the controller could plan around is
+    # refused and the worse incumbent is kept.
+    (
+        "M49 the horizon cap raised past any believable coast",
+        PROMOTION,
+        "_HORIZON_CAP_S = 2400.0",
+        "_HORIZON_CAP_S = 48000.0",
+    ),
+    (
+        "M50 the horizon cap lowered under the coasts this project has measured",
+        PROMOTION,
+        "_HORIZON_CAP_S = 2400.0",
+        "_HORIZON_CAP_S = 300.0",
     ),
 ]
 
