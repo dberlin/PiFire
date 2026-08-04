@@ -430,6 +430,12 @@ class Controller:
                 grill_platform.auger_off()
                 grill_platform.igniter_off()
                 grill_platform.fan_off()
+                # Terminal modes have driven every actuator off. Publish zero
+                # duties before cook-file archival, which can take long enough
+                # for dashboards to read this terminal state.
+                self.status["cycle_ratio"] = 0
+                self.status["fan_duty"] = 0
+                store.write_status(self.status)
                 # Register Stop Mode in Metrics DB if this is not initial stop-mode on startup (i.e. DB is empty)
                 metrics_list = store.read_all_metrics()
                 if len(metrics_list) != 0:

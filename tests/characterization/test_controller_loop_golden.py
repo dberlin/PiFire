@@ -279,15 +279,30 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     control_data = base_control(mode="Stop")
     control_data["updated"] = True
     c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    store.append_metric(dict(default_metrics(), mode="Smoke"))
     _spy_dispatch(c)
     c.setup()
+    c.status["cycle_ratio"] = 0.42
+    c.status["fan_duty"] = 65
+    store.write_status(c.status)
+    status_during_archive = {}
+    monkeypatch.setattr(
+        controller_mod,
+        "create_cookfile",
+        lambda: status_during_archive.update(store.read_status()),
+    )
     c.tick()
     # Outputs driven off, status reset to Stop, control reset, display cleared.
     names = [name for name, _ in grill.calls]
     assert "auger_off" in names and "igniter_off" in names and "fan_off" in names
     assert "power_off" in names
     assert ("clear", None) in store.display_commands().list()
-    assert store.read_status()["mode"] == "Stop"
+    assert status_during_archive["cycle_ratio"] == 0
+    assert status_during_archive["fan_duty"] == 0
+    status = store.read_status()
+    assert status["mode"] == "Stop"
+    assert status["cycle_ratio"] == 0
+    assert status["fan_duty"] == 0
     control = store.read_control()
     # Stop persists status='inactive' (bug fix): the assignment now runs AFTER the
     # `control = flush_control()` reset, mirroring the Error branch, instead
