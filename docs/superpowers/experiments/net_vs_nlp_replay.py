@@ -554,8 +554,8 @@ def replay(
         "n": int(diffs_clamped.size),
         "n_lid": int(lid_mask.sum()),
         # The gate's window, split into the two regimes it contains. n_lid is
-        # their sum and is unchanged by the split; what changed is that only
-        # n_lid_paused is now "while the auger is paused".
+        # their sum; only n_lid_paused is "while the auger is paused", which is
+        # how the plan's primary gate is defined.
         "n_lid_paused": int(lid_paused_mask.sum()),
         "n_lid_released": int(lid_released_mask.sum()),
         "warm_start_s": int(warm_start_s),
