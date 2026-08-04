@@ -193,39 +193,75 @@ T_HAZARD_C = (550.0 - 32.0) * 5.0 / 9.0
 #: which is the far end of the curve a single hot reference cannot see.
 T_FLOOR_C = (75.0 - 32.0) * 5.0 / 9.0
 
-#: The longest coast this controller will build a horizon for, in SECONDS. A
-#: step count says nothing on its own -- 96 steps is 2400 s at the shipped
-#: t_step and 96 s at controllers.json's minimum of 1 s -- so the bound is the
-#: foresight it buys and the step count follows, ceil(_HORIZON_CAP_S / t_step).
-#: A finer control cadence then covers the same coast rather than less of it.
+#: How far past the operator's configured horizon a fitted model may push it,
+#: in SECONDS of coast. This bounds the RAISE, not the model and not the
+#: setting: a configured horizon that already spans a long coast is left alone,
+#: because a controller that can see the end of a brake can plan it whatever
+#: the number. What this refuses is a model that would demand more foresight
+#: than the operator asked for AND more than a pellet grill's brake can
+#: plausibly need.
 #:
-#: What bounds this is the coast a pellet grill can physically have, not the
-#: cost of the solve. Two coasts have been measured here: the shipped default
-#: model's is 150 s, and controller/update_mpc.py's fit to the real MAK cook
-#: (tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv, recorded as REAL_MAK_FIT in
-#: tests/unit/mpc/test_model_promotion.py) reads 367 s. 2400 s is 16x the first
-#: and 6.5x the second. A chamber still climbing 40 minutes after every pellet
-#: has stopped burning is not a grill this controller can brake; it is a fit
-#: that has run away along a direction the cook did not determine, and refusing
-#: it is what this constant is for.
+#: Seconds rather than steps, because a step count says nothing on its own --
+#: 96 steps is 2400 s at the shipped t_step and 96 s at controllers.json's
+#: minimum of 1 s. The step count follows from it, rounded DOWN so the horizon
+#: built never reaches past the bound it is named for.
+#:
+#: What bounds the number is the coast a pellet grill can physically have, not
+#: the cost of the solve. Two coasts have been measured here: the shipped
+#: default model's is 150 s, and controller/update_mpc.py's fit to the real MAK
+#: cook (tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv, recorded as
+#: REAL_MAK_FIT in tests/unit/mpc/test_model_promotion.py) reads 367 s. 2400 s
+#: is 16x the first and 6.5x the second. A demand to plan 40 minutes past what
+#: the operator configured is a fit that has run away along a direction the
+#: cook did not determine.
 #:
 #: Compute does not set it, because at this length compute is not scarce. At
-#: the shipped t_step = 25 s the cap is n_horizon = 96, and the worst of 15
-#: warm solves there is 121 ms at the shipped n_delay = 8 and 192 ms at
-#: controllers.json's largest selectable n_delay = 12, against a 25 000 ms
-#: control period -- 0.48 % and 0.77 % of it. The n_delay = 12 row is the one
-#: that has to hold: a bound a shipped setting can step outside is not a bound.
-#: Those are x86 Core Ultra readings and PiFire's nominal target is a Raspberry
-#: Pi 5; at an assumed 6x slowdown they are 2.9 % and 4.6 % of the period, so
-#: the cap sits far below any point where the solve competes with the cadence.
-#: The measurement is docs/superpowers/experiments/horizon_solve_cost.py and
-#: its committed output is _horizon_solve_cost.txt beside it.
+#: the shipped t_step = 25 s the bound is 96 steps, and the worst of 15 warm
+#: solves there is 91 ms at the shipped n_delay = 8 and 169 ms at
+#: controllers.json's largest selectable n_delay = 12. The period those have to
+#: fit inside is control_period -- how often the runtime loop calls update(),
+#: which solves on every call -- and NOT t_step, which only spaces the horizon's
+#: steps. Against the shipped control_period = 5 s that is 1.8 % and 3.4 %.
+#: The n_delay = 12 row is the one that has to hold: a bound a shipped setting
+#: can step outside is not a bound. Those are x86 Core Ultra readings and
+#: PiFire's nominal target is a Raspberry Pi 5; at an assumed 6x slowdown they
+#: are 11 % and 20 % of the shipped period. The measurement is
+#: docs/superpowers/experiments/horizon_solve_cost.py and its committed output
+#: is _horizon_solve_cost.txt beside it.
 #:
 #: Neither direction is free. Too high adopts a model whose brake the
 #: controller only appears to plan around. Too low refuses a model the gate has
 #: just judged the better description of this grill, and the incumbent left
 #: running may size the same physical coast no better.
 _HORIZON_CAP_S = 2400.0
+
+#: The most prediction steps the NLP is ever BUILT with, whatever the seconds
+#: bound above works out to. It exists because _HORIZON_CAP_S converts to steps
+#: through t_step, and t_step is settings-reachable down to 1 s: at that
+#: setting even the real MAK cook's ordinary 367 s coast would ask for 367
+#: steps, and a capped model for 2400.
+#:
+#: 96 is the largest step count this project has a committed warm-solve
+#: measurement for, and the largest measured at BOTH selectable chain lengths
+#: (_horizon_solve_cost.txt: n_delay = 12, n_horizon = 96 -> 169 ms worst).
+#: Past it, headroom stops being a measured quantity and becomes an
+#: extrapolation up a curve that is already accelerating. It is derived against
+#: the shipped control_period = 5 s, where that worst solve is 3.4 % measured
+#: and 20 % at the assumed 6x Pi 5 slowdown. At controllers.json's minimum
+#: control_period = 1 s the same solve exceeds the period under that assumption
+#: -- which costs a cadence, not control: the runtime loop calls update() again
+#: when the solve returns, so the controller simply re-solves less often than
+#: configured, against a plant whose own time constants are minutes.
+#:
+#: It coincides with the step count _HORIZON_CAP_S already yields at the
+#: shipped t_step, so nothing about the shipped configuration turns on it.
+#:
+#: This bound belongs to the BUILD alone and must never reach `evaluate`. 96
+#: steps at t_step = 1 covers 96 s, short of even the shipped default model's
+#: own 150 s coast, so refusing on it would reject every model at a fine t_step
+#: and blame the model for an operator's setting. Where it truncates the
+#: horizon, controller/mpc.py's `_warn_about_model` says so and names t_step.
+_HORIZON_CAP_STEPS = 96
 
 
 @dataclass
@@ -444,14 +480,20 @@ def longest_braking_distance(params, *, q_full=Q_FULL_FIRE):
 
 
 def effective_n_horizon(params, *, n_horizon, t_step):
-    """How many prediction steps a controller planning with `params` builds.
+    """How many prediction steps a controller planning with `params` asks for.
 
     The configured `n_horizon` is a floor, not the answer. A chamber that goes
     on rising past the end of the horizon leaves the end of its own brake out
-    of view, so the horizon is raised to cover `longest_braking_distance` and
-    stops at the `_HORIZON_CAP_S` seconds that bound a believable coast. A
-    model needing less than the operator configured lowers nothing: the setting
-    is a floor in both senses.
+    of view, so the horizon is raised to cover `longest_braking_distance`, and
+    the raise stops at the `_HORIZON_CAP_S` seconds a demand may reach past the
+    configured length. A model needing less than the operator configured lowers
+    nothing: the setting is a floor in both senses.
+
+    This is the demand, not the length built. `built_n_horizon` applies the
+    separate bound on how large an NLP this controller will assemble; the two
+    part company only where `t_step` is short. `evaluate` reads THIS one, so
+    what it refuses a model for is always the model's own coast and never the
+    step count an operator's `t_step` happens to turn that coast into.
 
     Derived on every build rather than written back into the configuration, so
     the horizon tracks the current model in BOTH directions -- a later, quicker
@@ -459,7 +501,7 @@ def effective_n_horizon(params, *, n_horizon, t_step):
     what the operator set. A stored value could only ratchet upwards.
 
     A model that never predicts the chamber stops rising asks for the cap: no
-    horizon satisfies it, and the cap is the most this controller will spend.
+    horizon satisfies it, and the cap is the furthest a demand may reach.
     `evaluate` refuses such a model outright, so this is the reading for one
     that arrives in a configuration instead of through the gate.
     """
@@ -467,7 +509,9 @@ def effective_n_horizon(params, *, n_horizon, t_step):
     step_s = float(t_step)
     if not (step_s > 0.0 and math.isfinite(step_s)):
         return steps
-    cap = int(math.ceil(_HORIZON_CAP_S / step_s))
+    # Rounded down: a step count rounded up would plan up to one step past
+    # _HORIZON_CAP_S, and the reason strings below name that bound exactly.
+    cap = int(_HORIZON_CAP_S // step_s)
     brake = longest_braking_distance(params)
     if math.isfinite(brake):
         needed = int(math.ceil(brake / step_s))
@@ -476,6 +520,24 @@ def effective_n_horizon(params, *, n_horizon, t_step):
     else:
         needed = 0  # nothing was computed, so nothing is being asked for
     return max(steps, min(needed, cap))
+
+
+def built_n_horizon(params, *, n_horizon, t_step):
+    """How many prediction steps the NLP is actually assembled with.
+
+    `effective_n_horizon` is what the model's coast asks for; this is what gets
+    built, which is that demand additionally held to `_HORIZON_CAP_STEPS`. The
+    two agree at every shipped setting and part company only where `t_step` is
+    fine enough that covering a believable coast would take more steps than
+    this project has measured a solve for.
+
+    The shortfall that opens there is a property of the configuration rather
+    than of the model, which is why it stops here instead of reaching
+    `evaluate`, and why controller/mpc.py's `_warn_about_model` reports it. The
+    operator's own `n_horizon` is never lowered by this: like the seconds
+    bound, it holds down the raise and not the setting.
+    """
+    return max(int(n_horizon), min(effective_n_horizon(params, n_horizon=n_horizon, t_step=t_step), _HORIZON_CAP_STEPS))
 
 
 def effective_tau(params, t_ref_c):
@@ -602,13 +664,17 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, identifiab
         # covers that, so it is refused rather than passed with no demand
         # attached -- silence here would read as "the horizon is fine".
         return Verdict(False, "the model does not predict the chamber ever stops rising after a fuel cut")
-    # The cap is the one thing here that refuses a model for its horizon. A
-    # demand under it is met by building a longer horizon -- the seconds are
-    # nearly free next to a 25 s control period -- so refusing there would keep
-    # a model the comparison below has just called worse, over a coast the
-    # grill has whatever the verdict says. Past the cap there is no horizon to
-    # build: the controller cannot see the end of this model's brake at any
-    # cost it can pay, so it must not plan with it.
+    # The seconds bound is the one thing here that refuses a model for its
+    # horizon. A demand under it is met by building a longer horizon -- the
+    # extra steps cost single-digit percent of the 5 s control_period the solve
+    # actually has to fit inside -- so refusing there would keep a model the
+    # comparison below has just called worse, over a coast the grill has
+    # whatever the verdict says. Past it the demand is no longer a description
+    # of a pellet grill's brake, so it must not be planned with.
+    #
+    # Read from `effective_n_horizon` and never `built_n_horizon`: the step
+    # bound the build applies is a fact about t_step, and a model must not be
+    # refused for what an operator's discretization turns its coast into.
     covered = effective_n_horizon(candidate, n_horizon=n_horizon, t_step=t_step) * float(t_step)
     if covered < brake:
         return Verdict(

@@ -30,7 +30,7 @@ from scipy.optimize import least_squares
 from controller.model_promotion import (
     T_FLOOR_C,
     T_HAZARD_C,
-    effective_n_horizon,
+    built_n_horizon,
     effective_tau,
     longest_braking_distance,
     steady_state_at_full_fire,
@@ -383,11 +383,20 @@ def main():
         # left to say is what it will do, and that no setting has to be changed
         # to get it -- configuring that length by hand would only stop a later,
         # quicker model from shortening the horizon again.
-        steps = effective_n_horizon(payload, n_horizon=_DEFAULTS["n_horizon"], t_step=_DEFAULTS["t_step"])
+        steps = built_n_horizon(payload, n_horizon=_DEFAULTS["n_horizon"], t_step=_DEFAULTS["t_step"])
+        covered = steps * float(_DEFAULTS["t_step"])
+        # The step count is what the controller builds, so it is also the honest
+        # place to notice that the build has run out of steps -- at which point
+        # t_step, not n_horizon, is the setting with anything left to give.
+        lever = (
+            "n_horizon does not need changing"
+            if covered >= brake
+            else f"that spans only {covered:.0f} s -- raise t_step to lengthen the window"
+        )
         print(
             f"NOTE: the chamber keeps rising for {brake:.0f} s after a full fuel cut, past the\n"
             f"      {horizon:.0f} s the default prediction horizon spans. The controller plans over\n"
-            f"      {steps} steps for this model on its own; n_horizon does not need changing."
+            f"      {steps} steps for this model on its own; {lever}."
         )
     print("\nPaste into Settings > Controller (controller.config.mpc):")
     print(json.dumps(payload, indent=2))

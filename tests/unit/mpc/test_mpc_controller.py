@@ -658,6 +658,32 @@ def test_a_coast_the_configured_horizon_covers_is_built_at_the_configured_one():
     assert c.mpc.settings.n_horizon == CONFIG["n_horizon"]
 
 
+def test_a_horizon_the_step_bound_cuts_short_is_said_out_loud(capsys):
+    """The step bound must not reintroduce the defect it sits next to.
+
+    `_HORIZON_CAP_STEPS` can leave the built horizon short of the coast at a
+    fine `t_step`. Running short in silence is exactly what this task removed,
+    so the shortfall is reported, and it names `t_step` -- the only setting with
+    anything left to give, since raising it lengthens the window without
+    enlarging the solve. Deriving a longer horizon is not on offer: that is the
+    bound.
+    """
+    from controller.model_promotion import _HORIZON_CAP_STEPS, longest_braking_distance
+
+    cfg = dict(CONFIG, **_SLOW_COAST, t_step=1.0, n_horizon=60)  # settings maxima
+    brake = longest_braking_distance(cfg)
+    assert brake > _HORIZON_CAP_STEPS * cfg["t_step"]  # the bound genuinely bites
+
+    c = Controller(cfg, "C", dict(CYCLE))
+    assert c._built_n_horizon == _HORIZON_CAP_STEPS
+    assert c.mpc.settings.n_horizon == _HORIZON_CAP_STEPS
+
+    out = capsys.readouterr().out
+    assert "does not reach the end of that coast" in out
+    assert "t_step" in out  # the operator's lever, named
+    assert f"{_HORIZON_CAP_STEPS} steps" in out
+
+
 def test_adopting_a_slow_model_then_a_quick_one_brings_the_horizon_back_down():
     """The property the derived-not-stored horizon exists to guarantee.
 

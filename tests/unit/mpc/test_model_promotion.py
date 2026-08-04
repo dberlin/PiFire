@@ -7,8 +7,10 @@ import pytest
 from controller.model_promotion import (
     PROMOTION_BOUNDS,
     _COAST_BOUND,
+    _HORIZON_CAP_STEPS,
     _model_coast,
     braking_distance,
+    built_n_horizon,
     effective_n_horizon,
     effective_tau,
     evaluate,
@@ -578,13 +580,62 @@ def test_the_configured_horizon_is_a_floor_that_a_quick_model_does_not_lower():
     assert effective_n_horizon(GOOD, n_horizon=200, t_step=25.0) == 200  # 5000 s, past the 2400 s cap
 
 
-def test_the_horizon_follows_the_model_down_again():
-    """No ratchet, at the level of the function every build goes through.
+def test_the_step_bound_holds_the_build_but_never_the_refusal():
+    """The two bounds answer different questions and only one may refuse.
 
-    A horizon written into the configuration could only ever grow: the next
-    model would be compared against the raised value rather than against what
-    the operator set. Derived, a quicker model takes it straight back to the
-    floor.
+    `_HORIZON_CAP_S` is about the model: a demand to plan 40 minutes past the
+    configured horizon is not a description of a pellet grill. `_HORIZON_CAP_STEPS`
+    is about the configuration: at a fine `t_step` an ordinary coast turns into
+    an NLP larger than any this project has timed. Wiring the second into
+    `evaluate` would refuse every model at `t_step = 1` -- including the shipped
+    default's own parameters, whose 150 s coast needs 150 steps there -- and the
+    reason would blame the model for an operator's setting.
+    """
+    # An ordinary, believable model: the fit to the real MAK cook.
+    assert 96 < longest_braking_distance(REAL_MAK_FIT) < 2400.0
+
+    # At t_step = 1 its coast asks for more steps than the build will assemble.
+    asked = effective_n_horizon(REAL_MAK_FIT, n_horizon=24, t_step=1.0)
+    assert asked == math.ceil(longest_braking_distance(REAL_MAK_FIT))
+    assert built_n_horizon(REAL_MAK_FIT, n_horizon=24, t_step=1.0) == _HORIZON_CAP_STEPS
+    assert asked > _HORIZON_CAP_STEPS
+
+    # And it is still adopted, because the shortfall is the setting's, not its.
+    assert _ev(REAL_MAK_FIT, n_horizon=24, t_step=1.0).accepted is True
+
+    # At the shipped t_step the two agree, so nothing shipped turns on this.
+    for params in (GOOD, REAL_MAK_FIT, dict(GOOD, theta=600.0, n_delay=8)):
+        assert built_n_horizon(params, n_horizon=24, t_step=25.0) == effective_n_horizon(
+            params, n_horizon=24, t_step=25.0
+        )
+
+
+def test_the_step_bound_does_not_lower_a_horizon_the_operator_configured():
+    """Like the seconds bound, it holds down the raise and not the setting."""
+    assert built_n_horizon(GOOD, n_horizon=200, t_step=25.0) == 200
+
+
+def test_the_horizon_built_never_reaches_past_the_seconds_bound():
+    """The step count rounds DOWN, so the reason string's cap is not exceeded.
+
+    Rounding up would plan up to one step past `_HORIZON_CAP_S` while every
+    message still named that number, which is the sort of disagreement this
+    whole task exists to remove.
+    """
+    wild = dict(GOOD, C_c=1.0, h_amb=1e-4, theta=1200.0, n_delay=1, K_Q=1e4, sigma=0.0)
+    for t_step in (1.0, 7.0, 25.0, 60.0):
+        covered = effective_n_horizon(wild, n_horizon=1, t_step=t_step) * t_step
+        assert covered <= 2400.0, f"t_step={t_step} planned {covered} s"
+
+
+def test_the_horizon_follows_the_model_down_again():
+    """A quicker model reads back at the floor, asked model by model.
+
+    This is the shape of the no-ratchet property but not a pin on it: the
+    function is pure, so a stored-horizon implementation that ratcheted `cfg`
+    would still pass here. What pins no-ratchet is the Controller-level
+    `test_adopting_a_slow_model_then_a_quick_one_brings_the_horizon_back_down`,
+    which adopts one model then the other and re-reads the built value.
     """
     slow = dict(GOOD, theta=600.0, n_delay=8)
     assert effective_n_horizon(slow, n_horizon=24, t_step=25.0) > 24

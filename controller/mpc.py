@@ -31,7 +31,7 @@ import numpy as np
 
 from controller.base import ControllerBase
 from controller.model_promotion import Verdict as _Verdict
-from controller.model_promotion import effective_n_horizon, longest_braking_distance
+from controller.model_promotion import built_n_horizon, longest_braking_distance
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE, MODEL_SCHEMA
 from controller.mpc_allocator import allocate
 
@@ -251,25 +251,33 @@ def _warn_about_model(cfg):
     brake = longest_braking_distance(cfg)
     horizon = float(cfg["n_horizon"]) * float(cfg["t_step"])
     if horizon < brake:
-        # t_step is not on offer even though raising it would also lengthen the
-        # horizon: it is the control cadence and the interval every stored cook
-        # record is sampled at, so moving it changes what the controller can
-        # resolve and what every past record means. Only the step count moves.
-        #
-        # Nor does this ask for n_horizon to be raised to the derived value. The
+        # This does not ask for n_horizon to be raised to the derived value. The
         # build already reaches that far, and a configured floor that high would
         # stop a later, quicker model from bringing the horizon down again --
         # the hand-made version of the ratchet the derivation exists to avoid.
-        steps = effective_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
+        #
+        # The build's own step bound is read here, not the demand: where the two
+        # differ the horizon really is short, and saying so is the whole point
+        # of this message. Running under-horizoned in silence is the defect it
+        # exists to prevent.
+        steps = built_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
         covered = steps * float(cfg["t_step"])
         # A model that predicts no end to the coast has no number to report, and
         # is the one case where the horizon below cannot be enough at any length.
         coast = f"for {brake:.0f} s" if math.isfinite(brake) else "with no end this model predicts"
+        # t_step is the operator's lever and this code's is the step count. The
+        # two are not interchangeable: a longer t_step buys foresight at no
+        # extra NLP size, but it also re-discretizes the model the MPC solves,
+        # which is a larger change to controller behaviour than lengthening the
+        # window and not one to make on a grill's behalf. So it is offered here
+        # and never taken automatically -- and only where the step count has run
+        # out, since otherwise there is nothing to ask for.
         reach = (
             f"planning over {steps} steps ({covered:.0f} s) instead"
             if covered >= brake
-            else f"planning over {steps} steps ({covered:.0f} s), the furthest this controller sees, "
-            "which still does not reach the end of that coast"
+            else f"planning over {steps} steps ({covered:.0f} s), the most this controller builds, "
+            "which does not reach the end of that coast. Raise t_step in Settings > Controller: "
+            "it lengthens the window without enlarging the solve"
         )
         print(
             f"[mpc] configured prediction horizon is {horizon:.0f} s but the chamber keeps rising "
@@ -327,11 +335,14 @@ class Controller(ControllerBase):
         self._built_n_delay = n_delay
 
         # The horizon everything below is BUILT at: the configured n_horizon
-        # raised, where this model's coast needs it, to a length that contains
-        # the end of a full brake. Derived here rather than written into cfg so
-        # a later, quicker model shortens it again and the operator's setting
-        # keeps meaning what they set.
-        self._built_n_horizon = effective_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
+        # raised, where this model's coast needs it, towards a length that
+        # contains the end of a full brake, and held to the largest NLP this
+        # controller has a measured solve time for. Derived here rather than
+        # written into cfg so a later, quicker model shortens it again and the
+        # operator's setting keeps meaning what they set. Where that step bound
+        # leaves the horizon short of the coast, `_warn_about_model` has already
+        # said so above.
+        self._built_n_horizon = built_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
 
         # State/disturbance estimator (independent of the policy). EKF linearizes
         # the nonlinear radiative term each step (default); MHE solves an NLP; KF

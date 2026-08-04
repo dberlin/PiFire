@@ -381,6 +381,23 @@ MUTATIONS = [
         "_HORIZON_CAP_S = 2400.0",
         "_HORIZON_CAP_S = 300.0",
     ),
+    # ---- the step bound on the build, in both directions --------------------
+    # It bounds the NLP the build assembles, and only that. Raised, a fine
+    # t_step assembles a solve nothing has timed; lowered, a horizon the
+    # measurements cover is truncated and the controller runs short of the coast
+    # at the shipped settings.
+    (
+        "M51 the build's step bound raised past what has been timed",
+        PROMOTION,
+        "_HORIZON_CAP_STEPS = 96",
+        "_HORIZON_CAP_STEPS = 2400",
+    ),
+    (
+        "M52 the build's step bound cutting the shipped horizon short",
+        PROMOTION,
+        "_HORIZON_CAP_STEPS = 96",
+        "_HORIZON_CAP_STEPS = 32",
+    ),
 ]
 
 
