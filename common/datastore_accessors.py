@@ -13,11 +13,11 @@ Description: Read/write accessors for the SQLite-backed datastore -- the
 ==============================================================================
 """
 
+from collections.abc import Sequence
 import json
 import logging
 import math
 import time
-
 from common import datastore
 from common.common import (
     ErrorKind,
@@ -43,6 +43,7 @@ from common.defaults import (
 from common.pellets_schema import validate_pellet_db
 from common.settings_schema import validate_settings_tree
 from common.sqlite_queue import SqliteMembershipList, SqliteQueue
+from common.control_trace import ControlTraceDbRow, ControlTraceRecord
 
 
 def flush_control():
@@ -378,6 +379,159 @@ def append_metric(metrics=None):
     placeholders = ", ".join(["?"] * len(METRIC_COLUMNS))
     values = [metrics.get(k) for k in METRIC_COLUMNS]
     datastore.execute_write(f"INSERT INTO metrics({cols_sql}) VALUES({placeholders})", values)
+
+
+CONTROL_TRACE_MAX_LIMIT = 10_000
+_SQLITE_SIGNED_INT_MAX = 2**63 - 1
+_CONTROL_TRACE_COLUMNS = (
+    "ts_ms",
+    "session_id",
+    "cook_id",
+    "controller",
+    "event_kind",
+    "schema_version",
+    "payload",
+)
+_CONTROL_TRACE_COLUMNS_SQL = ", ".join(_CONTROL_TRACE_COLUMNS)
+
+ControlTraceSqliteRow = tuple[int, str, str | None, str, str, int, str]
+
+
+def _require_control_trace_identifier(value: str, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-blank string")
+    return value.strip()
+
+
+def _require_control_trace_timestamp(value: int, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= _SQLITE_SIGNED_INT_MAX:
+        raise ValueError(f"{name} must be an integer from 0 through {_SQLITE_SIGNED_INT_MAX}")
+    return value
+
+
+def _require_control_trace_limit(limit: int) -> int:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= CONTROL_TRACE_MAX_LIMIT:
+        raise ValueError(f"limit must be an integer from 1 through {CONTROL_TRACE_MAX_LIMIT}")
+    return limit
+
+
+def _validated_control_trace_rows(records: Sequence[ControlTraceRecord]) -> list[ControlTraceDbRow]:
+    if not isinstance(records, Sequence):
+        raise TypeError("records must be a sequence of ControlTraceRecord values")
+
+    rows = []
+    for record in records:
+        if not isinstance(record, ControlTraceRecord):
+            raise TypeError("records must contain only ControlTraceRecord values")
+        # Revalidate even a Pydantic model constructed through model_construct()
+        # before opening the write transaction.
+        validated_record = ControlTraceRecord.model_validate_json(record.model_dump_json())
+        _require_control_trace_timestamp(validated_record.ts_ms, "ts_ms")
+        rows.append(validated_record.to_db_row())
+    return rows
+
+
+def _control_trace_records(rows: Sequence[ControlTraceSqliteRow]) -> list[ControlTraceRecord]:
+    return [
+        ControlTraceRecord.from_db_row(
+            ControlTraceDbRow(
+                ts_ms=row[0],
+                session_id=row[1],
+                cook_id=row[2],
+                controller=row[3],
+                event_kind=row[4],
+                schema_version=row[5],
+                payload=row[6],
+            )
+        )
+        for row in rows
+    ]
+
+
+def append_control_trace(records: Sequence[ControlTraceRecord]) -> None:
+    """Persist a validated trace batch in one ordered SQLite transaction."""
+    rows = _validated_control_trace_rows(records)
+    if not rows:
+        return
+
+    placeholders = ", ".join("?" for _ in _CONTROL_TRACE_COLUMNS)
+    values = [
+        (
+            row.ts_ms,
+            row.session_id,
+            row.cook_id,
+            row.controller,
+            row.event_kind,
+            row.schema_version,
+            row.payload,
+        )
+        for row in rows
+    ]
+    with datastore.transaction() as conn:
+        conn.executemany(f"INSERT INTO control_trace ({_CONTROL_TRACE_COLUMNS_SQL}) VALUES ({placeholders})", values)
+
+
+def read_control_trace_session(session_id: str) -> list[ControlTraceRecord]:
+    """Return one session's typed trace records in insertion order."""
+    session_id = _require_control_trace_identifier(session_id, "session_id")
+    rows = (
+        datastore.connection()
+        .execute(
+            f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace WHERE session_id=? ORDER BY id", (session_id,)
+        )
+        .fetchall()
+    )
+    return _control_trace_records(rows)
+
+
+def read_control_trace_cook(cook_id: str) -> list[ControlTraceRecord]:
+    """Return one cook's typed trace records in insertion order."""
+    cook_id = _require_control_trace_identifier(cook_id, "cook_id")
+    rows = (
+        datastore.connection()
+        .execute(f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace WHERE cook_id=? ORDER BY id", (cook_id,))
+        .fetchall()
+    )
+    return _control_trace_records(rows)
+
+
+def read_control_trace_range(start_ms: int, end_ms: int, *, limit: int) -> list[ControlTraceRecord]:
+    """Return at most ``limit`` typed records whose timestamps are in the inclusive range."""
+    start_ms = _require_control_trace_timestamp(start_ms, "start_ms")
+    end_ms = _require_control_trace_timestamp(end_ms, "end_ms")
+    if start_ms > end_ms:
+        raise ValueError("start_ms must not exceed end_ms")
+    limit = _require_control_trace_limit(limit)
+    rows = (
+        datastore.connection()
+        .execute(
+            f"SELECT {_CONTROL_TRACE_COLUMNS_SQL} FROM control_trace "
+            "WHERE ts_ms >= ? AND ts_ms <= ? ORDER BY id LIMIT ?",
+            (start_ms, end_ms, limit),
+        )
+        .fetchall()
+    )
+    return _control_trace_records(rows)
+
+
+def prune_control_trace(before_ms: int, *, limit: int) -> int:
+    """Delete at most ``limit`` rows whose timestamp is strictly before ``before_ms``."""
+    before_ms = _require_control_trace_timestamp(before_ms, "before_ms")
+    limit = _require_control_trace_limit(limit)
+    with datastore.transaction() as conn:
+        cursor = conn.execute(
+            "DELETE FROM control_trace WHERE id IN (SELECT id FROM control_trace WHERE ts_ms < ? ORDER BY id LIMIT ?)",
+            (before_ms, limit),
+        )
+    return cursor.rowcount
+
+
+def delete_control_trace_session(session_id: str) -> int:
+    """Delete all trace rows for one session and return the deletion count."""
+    session_id = _require_control_trace_identifier(session_id, "session_id")
+    with datastore.transaction() as conn:
+        cursor = conn.execute("DELETE FROM control_trace WHERE session_id=?", (session_id,))
+    return cursor.rowcount
 
 
 def update_metrics(metrics):

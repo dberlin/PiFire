@@ -78,6 +78,25 @@ CREATE TABLE IF NOT EXISTS metrics (
 );
 """
 
+# Controller control-quality evidence (schema v5). Event-specific data stays in
+# a Pydantic-validated JSON payload; these envelope columns support bounded,
+# indexed retention and replay reads without exposing arbitrary JSON to callers.
+_CONTROL_TRACE_DDL = """
+CREATE TABLE IF NOT EXISTS control_trace (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts_ms          INTEGER NOT NULL,
+    session_id     TEXT NOT NULL,
+    cook_id        TEXT,
+    controller     TEXT NOT NULL,
+    event_kind     TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    payload        TEXT NOT NULL CHECK(json_valid(payload))
+);
+CREATE INDEX IF NOT EXISTS ix_control_trace_session_id ON control_trace(session_id, id);
+CREATE INDEX IF NOT EXISTS ix_control_trace_cook_id ON control_trace(cook_id, id);
+CREATE INDEX IF NOT EXISTS ix_control_trace_ts_ms ON control_trace(ts_ms);
+"""
+
 #: The file sink is capped by RotatingFileHandler at 1 MiB x 3 backups, roughly
 #: 4 MiB per logger. Nothing capped the table, so it grew onto the SD card
 #: forever. ~20k rows is the same order of magnitude as those files.
@@ -146,6 +165,7 @@ CREATE TABLE IF NOT EXISTS kv (
 """
     + _HISTORY_DDL
     + _METRICS_DDL
+    + _CONTROL_TRACE_DDL
     + """
 CREATE TABLE IF NOT EXISTS logs (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -246,8 +266,11 @@ def _ensure_schema(conn):
         # separate sqlite3 connection.
         with transaction(conn):
             _migrate_history_to_numeric_psp(conn)
-    if version < 4:
-        conn.execute("PRAGMA user_version=4")
+    if version < 5:
+        # Schema v5 introduces an additive control_trace table. `SCHEMA` has
+        # already created it with IF NOT EXISTS, so an existing database keeps
+        # every current row and starts with an empty trace table.
+        conn.execute("PRAGMA user_version=5")
 
 
 def connection():
