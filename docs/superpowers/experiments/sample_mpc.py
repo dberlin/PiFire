@@ -19,6 +19,9 @@ process):
 
 control.py must never be imported (module-level while True). We import only
 controller.mpc, which is import-safe.
+
+Only `_episode_span` (`--mode span`) models a lid-open pause; `_episode`
+(`--mode closed`, the CLI default) has no lid regime at all.
 """
 
 import warnings, sys, os, time, argparse, math
@@ -429,7 +432,10 @@ if __name__ == "__main__":
         "--mode",
         choices=["box", "closed", "span"],
         default="closed",
-        help="box=structured open-loop; closed=single-setpoint DAgger; span=setpoint-spanning DAgger",
+        help=(
+            "box=structured open-loop; closed=single-setpoint DAgger (no lid regime); "
+            "span=setpoint-spanning DAgger (models a lid pause)"
+        ),
     )
     ap.add_argument("-n", type=int, default=16000, help="box mode: number of samples")
     ap.add_argument("-e", "--episodes", type=int, default=120, help="closed/span: episodes")

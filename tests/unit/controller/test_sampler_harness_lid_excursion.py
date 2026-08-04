@@ -20,12 +20,11 @@ Everything below drives the real `_episode_span` -- the real MPC, the real
 sequence the plant was actually driven with off a recording subclass. Only the
 draw that decides *whether* an episode gets a lid event is stubbed, so the
 episode is deterministic; `test_the_drawn_lid_events_match_the_window_under_test`
-keeps that stub honest against the real draw. An MPC episode costs about three
-seconds here, which is what makes driving the harness itself affordable rather
-than reconstructing its schedule.
+keeps that stub honest against the real draw. Driving the harness end to end
+this way is affordable, so nothing here needs to reconstruct the schedule
+instead.
 """
 
-import math
 import os
 import sys
 
@@ -54,9 +53,9 @@ LID_START_STEP = 40
 LID_WINDOW_STEPS = 5
 LID_EVENT = (LID_START_STEP, LID_START_STEP + LID_WINDOW_STEPS)
 # Seconds from the lid opening until the chamber is back inside the 5 F band the
-# other two harnesses use. Placed between the two models it has to separate:
-# under the modelled pause the sampler recovers in 155-159 s, and under a pause
-# running the whole opening in 199-201 s.
+# other two harnesses use. Set strictly between the modelled pause's recovery
+# and the slower recovery a pause held for the whole opening produces, so it
+# separates the two without being sensitive to run-to-run noise in either.
 MAX_RECOVERY_S = 180
 BAND_C = 5.0 / 1.8
 SEEDS = (0, 1)
@@ -151,7 +150,6 @@ def test_the_actuator_pause_is_the_shortest_whole_cycle_covering_lidopenpausetim
         f"{sample_mpc.LID_PAUSE_STEPS} steps holds the actuators {held_s} s, which is not the "
         f"shortest whole cycle covering a {sample_mpc.LID_PAUSE_S} s pause on a {CYCLE_S} s grid"
     )
-    assert sample_mpc.LID_PAUSE_STEPS == math.ceil(sample_mpc.LID_PAUSE_S / CYCLE_S)
 
 
 def test_the_actuator_pause_is_shorter_than_the_lid_is_open():
@@ -261,4 +259,10 @@ def test_the_sampler_drives_the_two_windows_at_their_own_lengths(episodes):
     assert not any(plant.fan_fracs[opened:resumed]), "the fan must be off for the actuator pause"
     assert all(plant.fan_fracs[resumed:shut]), (
         "the fan must be running again while the lid is still open -- the third phase the split creates"
+    )
+    # Pinned to the nominal LidOpenPauseTime directly, independent of how the
+    # grid rounds it to steps -- the shortest-whole-cycle test above pins the
+    # rounding, this pins the actuators to what that rounding is supposed to cover.
+    assert not any(plant.fan_fracs[opened : opened + int(sample_mpc.LID_PAUSE_S)]), (
+        "the actuators must stay surrendered for the whole LidOpenPauseTime"
     )
