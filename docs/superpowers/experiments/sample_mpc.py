@@ -21,14 +21,16 @@ control.py must never be imported (module-level while True). We import only
 controller.mpc, which is import-safe.
 """
 
-import warnings, sys, os, time, argparse
+import warnings, sys, os, time, argparse, math
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 import numpy as np
 import multiprocessing as mp
 from scipy.stats import qmc
 
+from common.defaults import default_settings
 from controller.mpc import Controller, _DEFAULTS
 from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
 from controller.mpc_model import MODEL_SCHEMA
@@ -84,6 +86,16 @@ def span_dataset_metadata(*, episodes, sampled_state_count, minutes, dither, sp_
     for key in _CALIB_INTS:
         metadata[key] = np.int64(bool(enable_fan) if key == "enable_fan_input" else _DEFAULTS[key])
     return metadata
+
+
+# Hold arms a LidOpenPauseTime timer when the lid opens (`hold.py:285`,
+# `hold.py:316`) but only re-decides the auger ratio on a cycle boundary
+# (`hold.py:187`, `hold.py:191-193`). A pause beginning on a boundary therefore
+# holds the actuators for every boundary at which it is still latched, which on
+# this grid is `ceil(pause / cycle)` steps; rounding down would hand control
+# back a whole cycle earlier than production ever does.
+LID_PAUSE_S = default_settings()["cycle_data"]["LidOpenPauseTime"]
+LID_PAUSE_STEPS = math.ceil(LID_PAUSE_S / CYCLE["HoldCycleTime"])
 
 
 def generate_states(n, *, seed=0, op_frac=0.55):
@@ -197,6 +209,36 @@ def _episode(arg):
     return np.array(Xh), np.array(Up), np.array(Q)
 
 
+def _draw_lid_events(rng, nsteps):
+    """Physical lid openings for one episode, as `[start, end)` step indices.
+
+    About a third of episodes stand the chamber open once or twice, for 2-6
+    steps (50-150 s) each.
+    """
+    if rng.random() >= 0.35:
+        return []
+    events = []
+    for _ in range(int(rng.integers(1, 3))):
+        start = int(rng.integers(8, max(9, nsteps - 8)))
+        events.append((start, start + int(rng.integers(2, 7))))
+    return events
+
+
+def _lid_windows(k, lid_events):
+    """The two windows a lid opening drives, as production drives them.
+
+    The chamber leaks heat to ambient for as long as it stands open; Hold
+    surrenders the actuators for `LID_PAUSE_STEPS` only. They are different
+    lengths, so collapsing them into one flag either pins the auger down for the
+    whole opening -- which no production path does -- or seals the chamber the
+    moment control resumes.
+    """
+    return (
+        any(lo <= k < hi for lo, hi in lid_events),
+        any(lo <= k < lo + LID_PAUSE_STEPS for lo, _hi in lid_events),
+    )
+
+
 # ----- setpoint-spanning closed-loop sampling -------------------------------
 # Like the single-setpoint DAgger rollout, but each episode follows a random
 # setpoint SCHEDULE across the operating range -- so the data covers steady holds
@@ -225,15 +267,15 @@ def _episode_span(arg):
     c.set_target(float(seg_sp[0]))
     seg = 0
     Xh, Up, Ts, Q = [], [], [], []
-    # Lid-open pauses use zero applied normalized load, so training includes
-    # the estimator regime encountered when the auger is inhibited.
-    pauses = []
-    if rng.random() < 0.35:
-        n_pause = int(rng.integers(1, 3))
-        for _ in range(n_pause):
-            start = int(rng.integers(8, max(9, nsteps - 8)))
-            length = int(rng.integers(2, 7))  # 25 s steps -> 50-150 s
-            pauses.append((start, start + length))
+    # Lid-open events: hold.py fires one AppliedOutput(0.0) at detection, then
+    # pins cycle.ratio to u_min (auger still cycling, fan off) for the rest of
+    # the pause. The estimator's transport-lag states carry that one below-Q_min
+    # tick on every real lid event; without it here the net never learns the
+    # regime and extrapolates exactly where the NLP does not. The chamber keeps
+    # leaking heat after the pause expires, so the net also sees the state
+    # production actually hands it back: a cold chamber at full authority.
+    lid_events = _draw_lid_events(rng, nsteps)
+    lid_starts = {lo for lo, _hi in lid_events}
     for k in range(nsteps):
         if seg + 1 < nseg and k >= seg_bounds[seg + 1]:
             seg += 1
@@ -251,11 +293,14 @@ def _episode_span(arg):
             Up.append(lastQ)
             Ts.append(float(c._set_point_c))
             Q.append(q_exp)
-        pause = next(((lo, hi) for lo, hi in pauses if lo <= k < hi), None)
+        lid, lid_paused = _lid_windows(k, lid_events)
         q_app = q_exp + (rng.normal(0, dither) if rng.random() < 0.5 else 0.0)
         q_app = float(np.clip(q_app, 0.0, 1.0))
-        if pause is not None:
-            ratio = 0.0
+        if lid_paused:
+            # detection tick: auger forced fully off (ratio 0.0, below u_min);
+            # remaining ticks: ratio pinned at u_min while the auger keeps
+            # cycling. Fan is off for the whole pause either way.
+            ratio = 0.0 if k in lid_starts else c.u_min
             fan = 0.0
             q_app = 0.0
         else:
@@ -270,7 +315,7 @@ def _episode_span(arg):
             fan = allocation.fan_duty if allocation.fan_duty is not None else 100.0
         on = int(round(ratio * 25))
         for s in range(25):
-            plant.step(auger_on=(s < on), fan_frac=fan / 100.0)
+            plant.step(auger_on=(s < on), fan_frac=fan / 100.0, lid_open=lid)
         lastQ = q_app
     return np.array(Xh), np.array(Up), np.array(Ts), np.array(Q)
 
