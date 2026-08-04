@@ -109,7 +109,7 @@ _TAU_DEADBAND = 0.10
 #: 2.56 C worse on the calibrated arm. Six of 102 acceptances buy that.
 #:
 #: Both bounds are drawn only from records of at least controller/mpc.py's
-#: `_REFIT_MIN_SAMPLES`, because mpc.py:634 refuses a shorter refit before
+#: `_REFIT_MIN_SAMPLES`, because its `refit_from_cook` refuses a shorter refit before
 #: `evaluate` is reached -- a bound set by a record this gate cannot be shown is
 #: not a bound on anything, and the shorter records are the extremes that would
 #: otherwise set one.

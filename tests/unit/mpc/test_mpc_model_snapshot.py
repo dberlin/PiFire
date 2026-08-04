@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from controller.model_promotion import longest_braking_distance
 from controller.mpc import _DEFAULTS, Controller
 
 #: The schema this controller writes and is the only one it will read back.
@@ -26,8 +27,8 @@ PARAMS = dict(
 
 
 def _c(**over):
-    # Built at PARAMS' own n_delay, because a restore does not rebuild the lag
-    # chain and refuses a snapshot that disagrees with the one already built
+    # Built at PARAMS' own n_delay, because a restore refuses a snapshot fitted
+    # against a different lag chain outright
     # (pinned by test_a_snapshot_fitted_at_a_different_chain_length_is_refused
     # below). Every other test here is about some OTHER field of the snapshot,
     # so they must not trip that guard on the way to the thing they check.
@@ -313,14 +314,13 @@ def test_a_float_valued_whole_number_n_delay_is_accepted():
 def test_a_snapshot_fitted_at_a_different_chain_length_is_refused_and_says_why(capsys):
     """An install that learned at one n_delay and was then reconfigured to another.
 
-    n_delay sizes the estimator, the NLP and the net policy, and all three are
-    built once in __init__ -- `restore_model` runs afterwards, from
-    controller/runtime/modes/hold.py, and rebuilds none of them. Writing the
-    snapshot's n_delay into cfg would therefore leave the config describing a
-    chain the running model does not have, and everything that reads it back --
-    longest_braking_distance, the promotion gate's horizon requirement,
-    _warn_about_model -- would size against the snapshot rather than against
-    what is actually solving.
+    n_delay is the one parameter in a snapshot that no refit ever learned: the
+    fitter is handed the configured chain length and fits the rest against it.
+    A snapshot that disagrees with the configured length therefore describes an
+    install that has since been reconfigured, and the whole record goes --
+    adopting the count would override the operator's deliberate setting, and
+    adopting the parameters without it would put a fit made against one lag
+    chain onto a different one.
 
     The value used here is inside PROMOTION_BOUNDS and a whole number, so it
     passes every other check in the method: what refuses it is the comparison
@@ -352,6 +352,82 @@ def test_a_snapshot_fitted_at_a_different_chain_length_is_refused_and_says_why(c
     assert str(elsewhere["n_delay"]) in out
     assert str(PARAMS["n_delay"]) in out
     assert "snapshot" in out.lower()
+
+
+#: A model whose chamber coasts far past the shipped one's: 1800 s of rise
+#: after a fuel cut against the shipped model's 312 s, which is more than the
+#: 600 s a default-configured horizon plans over. Every value is inside
+#: PROMOTION_BOUNDS and its n_delay is PARAMS' own, so the only thing that can
+#: refuse it is a defect.
+SLOW_PARAMS = dict(PARAMS, C_c=31000.0, theta=536.0)
+
+
+def _snapshot(params, revision=3):
+    return {
+        "version": CURRENT_SCHEMA,
+        "revision": revision,
+        "params": dict(params),
+        "rmse": 2.0,
+        "samples": 900,
+        "band_c": [40.0, 232.0],
+    }
+
+
+def test_a_restored_model_reaches_the_estimator_the_horizon_and_the_solve():
+    """The seam a restore has to cross, checked on the far side of it.
+
+    This is what production does: `HoldMode.setup` builds the controller from
+    settings and THEN hands it the stored snapshot, so anything a restore only
+    writes into `cfg` never reaches the three things sized from cfg at build
+    time -- the estimator's thermal parameters, the horizon derived from the
+    model's braking distance, and the policy that solves. A cfg-only restore
+    leaves a season of learning inert while `restore_model` reports True, and
+    sizes the horizon from the shipped model's short coast: brakes applied late
+    on a grill whose own model says it coasts three times further.
+
+    Checked as observable behaviour rather than as a rebuild: which objects are
+    replaced is this class's business, but that the restored model steers is
+    not.
+    """
+    c = _c()
+    reference = _c()
+    for each in (c, reference):
+        each.set_target(110.0)
+    shipped_horizon = c._built_n_horizon
+
+    assert c.restore_model(_snapshot(SLOW_PARAMS)) is True
+
+    # The estimator predicts with the restored parameters, not the ones it was
+    # constructed from.
+    assert c.estimator.C_c == pytest.approx(SLOW_PARAMS["C_c"])
+    # The horizon is re-derived from the restored model's coast, so the plan
+    # still contains the end of a full brake.
+    assert c._built_n_horizon > shipped_horizon
+    assert c._built_n_horizon * float(c.cfg["t_step"]) >= longest_braking_distance(c.cfg)
+    # And the policy solving is the restored one: same setpoint, same
+    # measurement, different firing rate from the controller that did not
+    # restore.
+    assert c.update(40.0)["cycle_ratio"] != pytest.approx(reference.update(40.0)["cycle_ratio"])
+
+
+def test_a_model_that_cannot_be_built_leaves_the_running_one_alone():
+    """A restore replaces the estimator and the policy, so it can fail where a
+    config update could not. Half a controller is worse than an old one: the
+    parts are built before anything is committed, and a build that raises
+    leaves the model that was already solving in place, refused rather than
+    raised through the worker thread that called it."""
+    c = _c()
+    before = dict(c.cfg)
+    estimator = c.estimator
+
+    def boom(cfg):
+        raise RuntimeError("no solver today")
+
+    c._build_for = boom
+    assert c.restore_model(_snapshot(SLOW_PARAMS)) is False
+    assert c.cfg == before
+    assert c.estimator is estimator
+    assert c.get_model_snapshot() is None
 
 
 def test_status_reports_the_identified_band(capsys):

@@ -110,11 +110,18 @@ MIN_PEAK_DROP_F = 10.0
 def _cook(config, *, refit):
     """One cook, scored, with the end-of-cook refit run afterwards if asked.
 
-    `config` is the model the previous cook got promoted. It is merged over the
-    shipped defaults when the core is built, which is how production carries a
-    learned model across: `_adopt_model` writes into `cfg` and rebuilds
-    nothing, so a model reaches the grill only through the next build -- which
-    is also the only way the horizon it implies gets re-derived.
+    `config` is the model the previous cook got promoted, merged over the
+    shipped defaults when the core is built.
+
+    That is NOT the path production takes. Production persists the promoted
+    model to the store and the next Hold builds its core from settings alone,
+    then hands the snapshot to `Controller.restore_model`, which rebuilds the
+    estimator, the horizon and the policy against it. Both routes end with the
+    learned model built into the objects that solve, which is what this test
+    measures; the seam between them is pinned by
+    tests/unit/mpc/test_mpc_model_snapshot.py's
+    test_a_restored_model_reaches_the_estimator_the_horizon_and_the_solve, and
+    a cook here would not notice if the restore stopped carrying it.
     """
     saved = controller_matrix.CYCLE_DATA
     controller_matrix.CYCLE_DATA = dict(CYCLE_DATA)

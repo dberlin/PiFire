@@ -344,78 +344,11 @@ class Controller(ControllerBase):
         self._model_revision = 0
         self._model_meta = None  # provenance of an adopted model, or None
 
-        n_delay = int(cfg["n_delay"])
-        # The chain length everything below is BUILT at, kept so `restore_model`
-        # can refuse a snapshot that disagrees with it. Nothing built here is
-        # rebuilt afterwards, so the config key on its own stops describing the
-        # running model the moment a restore writes a different value into it.
-        self._built_n_delay = n_delay
-
-        # The horizon everything below is BUILT at: the configured n_horizon
-        # raised, where this model's coast needs it, towards a length that
-        # contains the end of a full brake, and held to the largest NLP this
-        # controller has a measured solve time for. Derived here rather than
-        # written into cfg so a later, quicker model shortens it again and the
-        # operator's setting keeps meaning what they set. Where that step bound
-        # leaves the horizon short of the coast, `_warn_about_model` has already
-        # said so above.
-        self._built_n_horizon = built_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
-
-        # State/disturbance estimator (independent of the policy). EKF linearizes
-        # the nonlinear radiative term each step (default); MHE solves an NLP; KF
-        # is linear-only. All expose update(Q_applied, y) -> state estimate and are
-        # discretized at the control period so faster re-solves track elapsed time.
-        est_kind = str(cfg.get("estimator", "ekf")).lower()
-        if est_kind == "kf":
-            self.estimator = GreyBoxKF(
-                C_c=cfg["C_c"],
-                h_amb=cfg["h_amb"],
-                T_amb=cfg["T_amb"],
-                t_step=float(cfg["control_period"]),
-                q_temp=cfg["est_q_temp"],
-                q_dist=cfg["est_q_dist"],
-                r_meas=cfg["est_r_meas"],
-                theta=float(cfg["theta"]),
-                n_delay=n_delay,
-                K_Q=float(cfg["K_Q"]),
-            )
-        elif est_kind == "ekf":
-            self.estimator = GreyBoxEKF(
-                C_c=cfg["C_c"],
-                h_amb=cfg["h_amb"],
-                T_amb=cfg["T_amb"],
-                t_step=float(cfg["control_period"]),
-                q_temp=cfg["est_q_temp"],
-                q_dist=cfg["est_q_dist"],
-                r_meas=cfg["est_r_meas"],
-                theta=float(cfg["theta"]),
-                n_delay=n_delay,
-                K_Q=float(cfg["K_Q"]),
-                sigma=float(cfg["sigma"]),
-            )
-        else:
-            self.estimator = GreyBoxMHE(
-                C_c=cfg["C_c"],
-                h_amb=cfg["h_amb"],
-                T_amb=cfg["T_amb"],
-                t_step=float(cfg["control_period"]),
-                theta=float(cfg["theta"]),
-                n_delay=n_delay,
-                K_Q=float(cfg["K_Q"]),
-                sigma=float(cfg["sigma"]),
-                r_meas=cfg["est_r_meas"],
-            )
-
-        # Firing-rate policy. 'net' uses the pure-numpy neural approximation (no
-        # IPOPT/CasADi); it falls back to the NLP if the artifact is missing or its
-        # calibration does not match this config.
-        self.model = None
-        self.mpc = None
-        self._net = None
-        if str(cfg.get("policy", "nlp")).lower() == "net":
-            self._net = _load_net_policy(cfg, self._built_n_horizon)
-        if self._net is None:
-            self._build_nlp(cfg, n_delay, self._built_n_horizon)
+        # Everything the thermal parameters size -- the estimator, the horizon
+        # and the policy -- is built through the same call `restore_model` uses,
+        # so a model that arrives from the store reaches the solver the same way
+        # a configured one does.
+        self.estimator, self._net, self.model, self.mpc, self._built_n_horizon = self._build_for(cfg)
 
         # Optional data logging for offline calibration (update_mpc.py): one
         # (time_s, temp_c, Q) row per control step. Logs internal Celsius.
@@ -427,6 +360,81 @@ class Controller(ControllerBase):
             except OSError:
                 self._log_path = None  # disable logging if the path is unwritable
 
+    def _build_for(self, cfg):
+        """Everything the thermal parameters size, built from `cfg`.
+
+        Returns the parts rather than assigning them, so a caller adopting a
+        model can build against the merged config and commit only once every
+        part exists -- a failed build leaves the running controller untouched
+        rather than half-replaced.
+
+        The horizon is derived here rather than written into cfg: the
+        configured n_horizon is raised, where this model's coast needs it,
+        towards a length that contains the end of a full brake, and held to the
+        largest NLP this controller has a measured solve time for. Keeping cfg's
+        own value means a later, quicker model shortens the horizon again and
+        the operator's setting keeps meaning what they set.
+        """
+        n_delay = int(cfg["n_delay"])
+        n_horizon = built_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
+        estimator = self._build_estimator(cfg, n_delay)
+        # Firing-rate policy. 'net' uses the pure-numpy neural approximation (no
+        # IPOPT/CasADi); it falls back to the NLP if the artifact is missing or
+        # its calibration does not match this config -- which is what a model
+        # learned since the artifact was fit does.
+        net, model, mpc = None, None, None
+        if str(cfg.get("policy", "nlp")).lower() == "net":
+            net = _load_net_policy(cfg, n_horizon)
+        if net is None:
+            model, mpc = self._build_nlp(cfg, n_delay, n_horizon)
+        return estimator, net, model, mpc, n_horizon
+
+    def _build_estimator(self, cfg, n_delay):
+        """State/disturbance estimator (independent of the policy). EKF linearizes
+        the nonlinear radiative term each step (default); MHE solves an NLP; KF
+        is linear-only. All expose update(Q_applied, y) -> state estimate and are
+        discretized at the control period so faster re-solves track elapsed time.
+        """
+        est_kind = str(cfg.get("estimator", "ekf")).lower()
+        if est_kind == "kf":
+            return GreyBoxKF(
+                C_c=cfg["C_c"],
+                h_amb=cfg["h_amb"],
+                T_amb=cfg["T_amb"],
+                t_step=float(cfg["control_period"]),
+                q_temp=cfg["est_q_temp"],
+                q_dist=cfg["est_q_dist"],
+                r_meas=cfg["est_r_meas"],
+                theta=float(cfg["theta"]),
+                n_delay=n_delay,
+                K_Q=float(cfg["K_Q"]),
+            )
+        if est_kind == "ekf":
+            return GreyBoxEKF(
+                C_c=cfg["C_c"],
+                h_amb=cfg["h_amb"],
+                T_amb=cfg["T_amb"],
+                t_step=float(cfg["control_period"]),
+                q_temp=cfg["est_q_temp"],
+                q_dist=cfg["est_q_dist"],
+                r_meas=cfg["est_r_meas"],
+                theta=float(cfg["theta"]),
+                n_delay=n_delay,
+                K_Q=float(cfg["K_Q"]),
+                sigma=float(cfg["sigma"]),
+            )
+        return GreyBoxMHE(
+            C_c=cfg["C_c"],
+            h_amb=cfg["h_amb"],
+            T_amb=cfg["T_amb"],
+            t_step=float(cfg["control_period"]),
+            theta=float(cfg["theta"]),
+            n_delay=n_delay,
+            K_Q=float(cfg["K_Q"]),
+            sigma=float(cfg["sigma"]),
+            r_meas=cfg["est_r_meas"],
+        )
+
     def _build_nlp(self, cfg, n_delay, n_horizon):
         """Build the do-mpc NLP policy (lazily imports do_mpc/CasADi/IPOPT).
 
@@ -436,7 +444,7 @@ class Controller(ControllerBase):
         """
         import do_mpc
 
-        self.model = build_do_mpc_model(
+        model = build_do_mpc_model(
             C_c=cfg["C_c"],
             h_amb=cfg["h_amb"],
             T_amb=cfg["T_amb"],
@@ -445,8 +453,8 @@ class Controller(ControllerBase):
             K_Q=float(cfg["K_Q"]),
             sigma=float(cfg["sigma"]),
         )
-        self.mpc = do_mpc.controller.MPC(self.model)
-        self.mpc.set_param(
+        mpc = do_mpc.controller.MPC(model)
+        mpc.set_param(
             n_horizon=int(n_horizon),
             t_step=float(cfg["t_step"]),
             store_full_solution=False,
@@ -464,27 +472,28 @@ class Controller(ControllerBase):
                 "ipopt.max_iter": 10,
             },
         )
-        T_c = self.model.x["T_c"]
-        T_set = self.model.tvp["T_set"]
-        self.mpc.set_objective(mterm=cfg["Q_w"] * (T_c - T_set) ** 2, lterm=cfg["Q_w"] * (T_c - T_set) ** 2)
-        self.mpc.set_rterm(Q=cfg["R_dQ"])
-        self.mpc.bounds["lower", "_u", "Q"] = cfg["Q_min"]
-        self.mpc.bounds["upper", "_u", "Q"] = cfg["Q_max"]
+        T_c = model.x["T_c"]
+        T_set = model.tvp["T_set"]
+        mpc.set_objective(mterm=cfg["Q_w"] * (T_c - T_set) ** 2, lterm=cfg["Q_w"] * (T_c - T_set) ** 2)
+        mpc.set_rterm(Q=cfg["R_dQ"])
+        mpc.bounds["lower", "_u", "Q"] = cfg["Q_min"]
+        mpc.bounds["upper", "_u", "Q"] = cfg["Q_max"]
 
-        tvp_template = self.mpc.get_tvp_template()
+        tvp_template = mpc.get_tvp_template()
 
         def tvp_fun(t_now):
             for k in range(int(n_horizon) + 1):
                 tvp_template["_tvp", k, "T_set"] = self._set_point_c
             return tvp_template
 
-        self.mpc.set_tvp_fun(tvp_fun)
-        self.mpc.setup()
+        mpc.set_tvp_fun(tvp_fun)
+        mpc.setup()
 
         x0 = np.zeros((n_delay + 2, 1))
         x0[n_delay, 0] = cfg["T_amb"]  # T_c
-        self.mpc.x0 = x0
-        self.mpc.set_initial_guess()
+        mpc.x0 = x0
+        mpc.set_initial_guess()
+        return model, mpc
 
     def _log_row(self, temp_c, Q):
         try:
@@ -565,8 +574,9 @@ class Controller(ControllerBase):
         ever becoming part of the model.
 
         Rebuilding the NLP is the CALLER's business: adoption between cooks
-        needs no rebuild because the next Hold builds fresh, and adoption
-        during one is rate-limited elsewhere.
+        needs no rebuild because the next Hold's `restore_model` builds against
+        the model it restores, and adoption during one is rate-limited
+        elsewhere.
         """
         self.cfg.update({k: params[k] for k in self._MODEL_PARAM_KEYS if k in params})
         self._model_revision += 1
@@ -636,25 +646,51 @@ class Controller(ControllerBase):
             # apart on what "whole" means.
             if key == "n_delay" and not n_delay_is_whole(value):
                 return False
-        # n_delay is not a parameter this can adopt: it sizes the estimator, the
-        # NLP and the net policy, all of which were built in __init__ and none
-        # of which is rebuilt here. Adopting it would leave cfg["n_delay"]
-        # describing a chain the running model does not have, and every
-        # consumer that reads it back -- longest_braking_distance, the promotion
-        # gate's horizon requirement, _warn_about_model -- would size against
-        # the snapshot instead of against what is actually solving. Refused out
-        # loud in the same shape as the schema mismatch above, and for the same
-        # reason: the operator is owed the reason the season's model went back
-        # to the shipped defaults.
+        # n_delay is the one parameter here a refit never learns -- `fit_params`
+        # is handed the configured chain length and fits the rest against it --
+        # so a snapshot that disagrees came from an install the operator has
+        # since reconfigured. The whole record goes, not just the count:
+        # adopting it would override a setting the operator deliberately
+        # changed, and adopting the rest without it would put parameters fitted
+        # against one lag chain onto a different one, where the dead time they
+        # absorbed is not the dead time being solved. Refused out loud in the
+        # same shape as the schema mismatch above, and for the same reason: the
+        # operator is owed the reason the season's model went back to the
+        # shipped defaults.
+        configured_n_delay = int(self.cfg["n_delay"])
         snapshot_n_delay = int(float(params["n_delay"]))
-        if snapshot_n_delay != self._built_n_delay:
+        if snapshot_n_delay != configured_n_delay:
             print(
                 f"[mpc] discarding a model snapshot fitted at n_delay {snapshot_n_delay}: this "
-                f"controller was built with {self._built_n_delay} lag states and does not rebuild "
-                "them on restore. The next cook refits from scratch."
+                f"controller is configured for {configured_n_delay} lag states, and a model fitted "
+                "against a different chain is not this model's parameters. The next cook refits "
+                "from scratch."
             )
             return False
-        self.cfg.update({k: float(params[k]) for k in self._MODEL_PARAM_KEYS if k in params})
+        merged = dict(self.cfg)
+        merged.update({k: float(params[k]) for k in self._MODEL_PARAM_KEYS if k in params})
+        # The restored parameters have to reach the estimator, the horizon and
+        # the policy, not just the config those three were sized from -- a
+        # config-only restore leaves the season's learning inert and, where the
+        # restored model coasts further than the shipped one, plans over a
+        # horizon that stops short of the brake. Built before anything is
+        # committed so a build that fails leaves the controller solving the
+        # model it already had.
+        try:
+            rebuilt = self._build_for(merged)
+        except Exception as exc:
+            print(f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with.")
+            return False
+        self.cfg.update(merged)
+        self.estimator, self._net, self.model, self.mpc, self._built_n_horizon = rebuilt
+        # The state estimate belonged to the estimator just replaced. The new
+        # one starts from its own initial state, so there is nothing to report
+        # until it has seen a measurement.
+        self._x_hat = None
+        # Said for the model that will actually solve. __init__'s own call saw
+        # only the configured parameters, which for a grill that has been
+        # learning are not the ones about to steer it.
+        _warn_about_model(self.cfg)
         # Continue the persisted counter rather than starting a new one: the
         # store rejects a revision that does not advance, permanently.
         self._model_revision = revision
