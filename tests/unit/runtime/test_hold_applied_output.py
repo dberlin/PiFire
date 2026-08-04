@@ -217,7 +217,8 @@ def test_per_tick_during_an_active_pause_is_lid_open(hold_cycle):
     hold.on_tick(now=150.0, ptemp=225.0, current_output_status=_off())  # past the control interval
     (applied,) = runner.applied
     assert applied.source is OutputSource.LID_OPEN
-    assert applied.ratio == hold.settings["cycle_data"]["u_min"]
+    assert applied.ratio == 0.0
+    assert applied.requested == 0.5
 
 
 def test_lid_open_toggle_reports_the_controllers_request(hold_cycle):

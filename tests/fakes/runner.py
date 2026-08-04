@@ -1,3 +1,6 @@
+from typing import Any
+
+
 class FakeControllerRunner:
     def __init__(self, period=None, commands_fan=False, wants_async=False):
         self._script = []
@@ -9,13 +12,14 @@ class FakeControllerRunner:
         self._wants_async = wants_async
         self.applied = []
         self.restored = []
-        self.snapshot = None
+        self.snapshot: dict[str, Any] | None = None
         # A single ordered log across restore_model()/set_output() calls, since
         # `restored` and `applied` are separate lists and so cannot express
         # relative ordering between a restore and the report that follows it.
         self.calls = []
         self.refits = 0
         self.refit_raises = None
+        self.refit_verdict: object | None = None
         self.stops = 0
         # How many stop() calls had happened at each refit_from_cook() call, so
         # a test can hold the refit to after the worker was asked to stop
@@ -45,6 +49,9 @@ class FakeControllerRunner:
     def wants_async(self):
         return self._wants_async
 
+    def runs_async(self):
+        return self._wants_async
+
     def stop(self):
         self.stops += 1
 
@@ -65,6 +72,7 @@ class FakeControllerRunner:
         self.stops_before_each_refit.append(self.stops)
         if self.refit_raises:
             raise self.refit_raises
+        return self.refit_verdict
 
     def controller_state(self):
         return {"fake": True}

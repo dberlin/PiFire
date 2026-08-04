@@ -725,14 +725,38 @@ def test_controller_updates_require_their_matching_actuation_mode():
     mpc_update = _mpc_update_payload()
     with pytest.raises(ValidationError, match="FIXED_CYCLE"):
         replace(pid_update, actuation_mode=ActuationMode.FRAMED_PULSE)
-    with pytest.raises(ValidationError, match="FRAMED_PULSE"):
-        replace(mpc_update, actuation_mode=ActuationMode.FIXED_CYCLE)
+    assert replace(mpc_update, actuation_mode=ActuationMode.FIXED_CYCLE).actuation_mode is ActuationMode.FIXED_CYCLE
 
 
 def test_fixed_cycle_frame_records_typed_inhibit_cause_without_boolean_alias():
     frame = _fixed_cycle_frame_payload()
     assert frame.inhibit_reason is InhibitReason.NONE
     assert "inhibited" not in FixedCycleFramePayload.__annotations__
+
+
+def test_current_mpc_fixed_cycle_update_and_frame_round_trip():
+    mpc_update = _mpc_update_payload()
+    current_update = replace(mpc_update, actuation_mode=ActuationMode.FIXED_CYCLE)
+    frame = _fixed_cycle_frame_payload()
+    record = ControlTraceRecord(
+        ts_ms=25_100,
+        session_id="mpc-current",
+        cook_id="cook-current",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.ACTUATION_FRAME,
+        payload=frame,
+    )
+    update_record = ControlTraceRecord(
+        ts_ms=25_000,
+        session_id="mpc-current",
+        cook_id="cook-current",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.CONTROL_UPDATE,
+        payload=current_update,
+    )
+
+    assert ControlTraceRecord.from_db_row(record.to_db_row()) == record
+    assert ControlTraceRecord.from_db_row(update_record.to_db_row()) == update_record
 
 
 @pytest.mark.parametrize("invalid", ["1", True])

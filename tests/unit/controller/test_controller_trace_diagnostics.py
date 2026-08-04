@@ -4,9 +4,10 @@ import collections
 
 import pytest
 
-from common.control_trace import ControllerBranch, MpcFailureState
+from common.control_trace import AllocationClampReason, ControllerBranch, MpcFailureState
 from controller import mpc, pid, pid_sp
 from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
+from controller.mpc_allocator import AllocationResult
 
 CYCLE_DATA = {"HoldCycleTime": 20.0, "u_min": 0.1, "u_max": 0.9}
 
@@ -113,12 +114,22 @@ def _bare_mpc_controller():
     return core
 
 
+def _allocation(_q, **_):
+    return AllocationResult(
+        normalized_combustion_load=100.0,
+        auger_duty=0.5,
+        fan_duty=0.0,
+        auger_clamp_reason=AllocationClampReason.NONE,
+        fan_clamp_reason=AllocationClampReason.NONE,
+    )
+
+
 def test_mpc_trace_diagnostics_capture_one_solve_without_recomputing_policy(monkeypatch):
     core = _bare_mpc_controller()
     monotonic = iter((10.0, 10.25))
     monkeypatch.setattr(mpc.time, "monotonic", lambda: next(monotonic))
     monkeypatch.setattr(mpc.time, "time", lambda: 1000.0)
-    monkeypatch.setattr(mpc, "allocate", lambda q, **_: (0.5, 0.0))
+    monkeypatch.setattr(mpc, "allocate", _allocation)
 
     assert core.update(100.0) == {"cycle_ratio": 0.5, "fan": {"duty": 0.0}}
 
@@ -135,6 +146,7 @@ def test_mpc_trace_diagnostics_capture_one_solve_without_recomputing_policy(monk
     assert diagnostic.solve_start_monotonic == pytest.approx(10.0)
     assert diagnostic.solve_end_monotonic == pytest.approx(10.25)
     assert diagnostic.solve_duration_seconds == pytest.approx(0.25)
+    assert diagnostic.applied_combustion_load == pytest.approx(7.0)
 
 
 def test_mpc_failure_diagnostics_omit_unknown_raw_policy_components(monkeypatch):
@@ -148,7 +160,7 @@ def test_mpc_failure_diagnostics_omit_unknown_raw_policy_components(monkeypatch)
     monotonic = iter((10.0, 10.25))
     monkeypatch.setattr(mpc.time, "monotonic", lambda: next(monotonic))
     monkeypatch.setattr(mpc.time, "time", lambda: 1000.0)
-    monkeypatch.setattr(mpc, "allocate", lambda q, **_: (0.5, 0.0))
+    monkeypatch.setattr(mpc, "allocate", _allocation)
 
     core.update(100.0)
 
@@ -171,7 +183,7 @@ def test_mpc_policy_timing_excludes_failure_logging(monkeypatch):
     monotonic = iter((10.0, 10.25))
     monkeypatch.setattr(mpc.time, "monotonic", lambda: (events.append("clock"), next(monotonic))[1])
     monkeypatch.setattr(mpc.time, "time", lambda: 1000.0)
-    monkeypatch.setattr(mpc, "allocate", lambda q, **_: (0.5, 0.0))
+    monkeypatch.setattr(mpc, "allocate", _allocation)
     monkeypatch.setattr("builtins.print", lambda *_: events.append("log"))
 
     core.update(100.0)

@@ -109,11 +109,16 @@ class ControlMode:
         pass
 
     def _on_manual_output(self, name, output):
-        """A human just drove an actuator directly. `name` is the actuator;
-        fires once per consumed change, not per tick of the override window
-        (derive that window from state.manual_override[name] instead). For the
-        four boolean actuators `output` is True/False; for "pwm" it is the
-        applied duty-cycle percentage."""
+        """A human just drove an actuator directly."""
+
+    def _on_manual_release(self, name, now):
+        pass
+
+    def _on_safety_event(self, event, now):
+        pass
+
+    def _on_auger_off(self, now):
+        pass
 
     # ---- shared helpers ----
     def _auger_cycle_tick(self, now, current_output_status):
@@ -125,8 +130,10 @@ class ControlMode:
         import control as _control
 
         if self.state.manual_override["auger"] < now:
+            had_manual_override = self.state.manual_override["auger"] != 0
             self.state.manual_override["auger"] = 0
-            # If Auger is OFF and time since toggle is greater than Off Time
+            if had_manual_override:
+                self._on_manual_release("auger", now)
             if not current_output_status["auger"] and (now - self.state.timers.auger_toggle) > (
                 self.state.cycle.cycle_time * (1 - self.state.cycle.ratio)
             ):
@@ -140,6 +147,7 @@ class ControlMode:
                 self.state.cycle.cycle_time * self.state.cycle.ratio
             ):
                 self.grill.auger_off()
+                self._on_auger_off(now)
                 # Add auger ON time to the metrics
                 self.state.metrics["augerontime"] += now - self.state.timers.auger_toggle
                 self.ctx.store.update_metrics(self.state.metrics)
@@ -682,8 +690,9 @@ class ControlMode:
 
             process_system_commands(ctx)
 
-            # Check if new mode has been requested
             if control["updated"]:
+                if control["mode"] in (Mode.STOP, Mode.ERROR):
+                    self._on_safety_event(str(control["mode"]).lower(), now)
                 break
 
             # Per-tick settings/distance/hopper/switch flag handling
@@ -733,6 +742,7 @@ class ControlMode:
             # max-temp trip (walked first, so it keeps priority), then the mode's
             # flameout edges (GUARDS["Smoke"]/["Hold"]). A fired guard breaks.
             if evaluate_phase(self, ctx, "pre_act", now, ptemp):
+                self._on_safety_event("temperature_guard", now)
                 break
 
             # ---- mode-specific per-tick safety check (base default no-op now

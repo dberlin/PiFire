@@ -137,7 +137,7 @@ def _episode(arg):
         # DAgger exploration: perturb the APPLIED input to visit off-policy states
         q_app = q_exp + (rng.normal(0, dither) if rng.random() < 0.5 else 0.0)
         q_app = float(np.clip(q_app, qmin, qmax))
-        auger, fan_duty = allocate(
+        allocation = allocate(
             q_app,
             Q_min=qmin,
             Q_max=qmax,
@@ -147,8 +147,8 @@ def _episode(arg):
             fan_max_pct=cfg["fan_max_pct"],
             enable_fan=bool(cfg["enable_fan_input"]),
         )
-        ratio = float(np.clip(auger, c.u_min, c.u_max))
-        fan = fan_duty if fan_duty is not None else 100.0
+        ratio = float(np.clip(allocation.auger_duty, c.u_min, c.u_max))
+        fan = allocation.fan_duty if allocation.fan_duty is not None else 100.0
         on = int(round(ratio * 25))
         for s in range(25):
             plant.step(auger_on=(s < on), fan_frac=fan / 100.0)
@@ -227,7 +227,7 @@ def _episode_span(arg):
             frac = (ratio - c.u_min) / (c.u_max - c.u_min)
             q_app = qmin + frac * (qmax - qmin)
         else:
-            auger, fan_duty = allocate(
+            allocation = allocate(
                 q_app,
                 Q_min=qmin,
                 Q_max=qmax,
@@ -237,8 +237,8 @@ def _episode_span(arg):
                 fan_max_pct=cfg["fan_max_pct"],
                 enable_fan=bool(cfg["enable_fan_input"]),
             )
-            ratio = float(np.clip(auger, c.u_min, c.u_max))
-            fan = fan_duty if fan_duty is not None else 100.0
+            ratio = float(np.clip(allocation.auger_duty, c.u_min, c.u_max))
+            fan = allocation.fan_duty if allocation.fan_duty is not None else 100.0
         on = int(round(ratio * 25))
         for s in range(25):
             plant.step(auger_on=(s < on), fan_frac=fan / 100.0)

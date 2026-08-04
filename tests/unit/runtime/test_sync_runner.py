@@ -24,6 +24,9 @@ class _Core:
     def trace_diagnostics(self):
         return None
 
+    def trace_allocation(self):
+        return None
+
 
 def test_sync_runner_normalizes_dict_output():
     r = SyncControllerRunner(_Core())
@@ -228,6 +231,9 @@ class _RecordingCore:
         return True
 
     def trace_diagnostics(self):
+        return None
+
+    def trace_allocation(self):
         return None
 
 

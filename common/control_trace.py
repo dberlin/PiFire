@@ -262,8 +262,11 @@ class MpcUpdatePayload(_ControlUpdatePayload):
 
     @model_validator(mode="after")
     def validate_state_solve_interval_and_actuation_mode(self) -> MpcUpdatePayload:
-        if self.actuation_mode is not ActuationMode.FRAMED_PULSE:
-            raise ValueError("MPC diagnostics require FRAMED_PULSE actuation")
+        # Hold currently applies MPC's allocation through its fixed-cycle
+        # producer. The later framed scheduler switches only that producer, so
+        # both modes are durable trace contract values.
+        if self.actuation_mode not in (ActuationMode.FIXED_CYCLE, ActuationMode.FRAMED_PULSE):
+            raise ValueError("MPC diagnostics require a supported actuation mode")
         if len(self.state_names) != len(self.state_values):
             raise ValueError("state_names and state_values must have equal length")
         if self.solve_start_ms > self.solve_end_ms:
@@ -474,8 +477,6 @@ class ControlTraceRecord(BaseModel):
             raise ValueError("allocation records are MPC-only")
         if isinstance(self.payload, FramedPulseFramePayload) and self.controller is not ControllerType.MPC:
             raise ValueError("framed-pulse records are MPC-only")
-        if isinstance(self.payload, FixedCycleFramePayload) and self.controller is ControllerType.MPC:
-            raise ValueError("fixed-cycle records require a fixed-cycle controller")
         return self
 
     def to_db_row(self) -> ControlTraceDbRow:

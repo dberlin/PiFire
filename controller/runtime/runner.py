@@ -28,6 +28,7 @@ from types import MappingProxyType
 from typing import TypeAlias
 
 from controller.base import ControllerTraceDiagnostics, normalize_controller_output
+from controller.mpc_allocator import AllocationResult
 
 
 StatusScalar: TypeAlias = None | bool | int | float | str
@@ -85,6 +86,7 @@ class ControllerUpdateResult:
     cycle_ratio: float
     fan: Mapping[str, float] | None
     diagnostics: ControllerTraceDiagnostics | None = None
+    allocation: AllocationResult | None = None
     status: Mapping[str, StatusValue] | None = None
     revision: int = 0
     solve_start_monotonic: float | None = None
@@ -127,10 +129,12 @@ def _capture_completed_result(core, temp, revision):
     cycle_ratio, fan = normalize_controller_output(raw)
     status = core.get_status()
     diagnostics = core.trace_diagnostics()
+    allocation = core.trace_allocation()
     return ControllerUpdateResult(
         cycle_ratio=cycle_ratio,
         fan=fan,
         diagnostics=diagnostics,
+        allocation=allocation,
         status=status,
         revision=revision,
         solve_start_monotonic=solve_start,
@@ -155,6 +159,8 @@ class ControllerRunner(ABC):
     def commands_fan(self): ...
     @abstractmethod
     def wants_async(self): ...
+    @abstractmethod
+    def runs_async(self) -> bool: ...
     @abstractmethod
     def set_output(self, applied): ...
     @abstractmethod
@@ -207,6 +213,9 @@ class SyncControllerRunner(ControllerRunner):
 
     def wants_async(self):
         return self._core.wants_async()
+
+    def runs_async(self) -> bool:
+        return False
 
     def stop(self):
         pass
@@ -360,6 +369,9 @@ class ThreadedControllerRunner(ControllerRunner):
         return self._commands_fan
 
     def wants_async(self):
+        return True
+
+    def runs_async(self) -> bool:
         return True
 
     def controller_state(self):

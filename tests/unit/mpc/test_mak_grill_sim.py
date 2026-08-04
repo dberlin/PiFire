@@ -42,7 +42,7 @@ def _replay(sim, t, Q):
         out[i] = sim.true_Tc
         if i == len(grid) - 1:
             break
-        ratio, _ = allocate(
+        allocation = allocate(
             held[i],
             Q_min=Q_MIN,
             Q_max=Q_MAX,
@@ -52,6 +52,7 @@ def _replay(sim, t, Q):
             fan_max_pct=100.0,
             enable_fan=False,
         )
+        ratio = allocation.auger_duty
         # Hold runs the auger ON for ratio*cycle seconds of each cycle window.
         sim.step((now % HOLD_CYCLE_S) < ratio * HOLD_CYCLE_S, 1.0)
     return grid, out

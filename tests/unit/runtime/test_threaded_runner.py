@@ -52,6 +52,9 @@ class FakeCore:
     def trace_diagnostics(self):
         return None
 
+    def trace_allocation(self):
+        return None
+
     def get_model_snapshot(self):
         return None
 
@@ -332,6 +335,9 @@ class _OrderRecordingCore:
         return None
 
     def trace_diagnostics(self):
+        return None
+
+    def trace_allocation(self):
         return None
 
     def get_model_snapshot(self):

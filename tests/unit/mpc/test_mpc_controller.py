@@ -334,7 +334,7 @@ def test_set_output_inverts_the_allocation_exactly(mpc_controller):
 
     cfg = mpc_controller.cfg
     for q in (cfg["Q_min"], 0.5 * (cfg["Q_min"] + cfg["Q_max"]), cfg["Q_max"]):
-        auger, _ = allocate(
+        allocation = allocate(
             q,
             Q_min=cfg["Q_min"],
             Q_max=cfg["Q_max"],
@@ -344,7 +344,7 @@ def test_set_output_inverts_the_allocation_exactly(mpc_controller):
             fan_max_pct=cfg["fan_max_pct"],
             enable_fan=bool(cfg["enable_fan_input"]),
         )
-        mpc_controller.set_output(AppliedOutput(auger, OutputSource.CONTROLLER, 1.0))
+        mpc_controller.set_output(AppliedOutput(allocation.auger_duty, OutputSource.CONTROLLER, 1.0))
         assert mpc_controller._applied_Q == pytest.approx(q)
 
 

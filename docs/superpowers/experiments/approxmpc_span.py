@@ -108,7 +108,7 @@ def build_span_net(epochs=400, batch=4096, data_path=SPAN_NPZ):
 
 def _drive(plant, Q, c):
     Q = float(np.clip(Q, QMIN, QMAX))
-    auger, fan_duty = allocate(
+    allocation = allocate(
         Q,
         Q_min=QMIN,
         Q_max=QMAX,
@@ -118,8 +118,8 @@ def _drive(plant, Q, c):
         fan_max_pct=c.cfg["fan_max_pct"],
         enable_fan=bool(c.cfg["enable_fan_input"]),
     )
-    ratio = float(np.clip(auger, c.u_min, c.u_max))
-    fan = fan_duty if fan_duty is not None else 100.0
+    ratio = float(np.clip(allocation.auger_duty, c.u_min, c.u_max))
+    fan = allocation.fan_duty if allocation.fan_duty is not None else 100.0
     on = int(round(ratio * 25))
     T = []
     for s in range(25):

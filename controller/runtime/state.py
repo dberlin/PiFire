@@ -14,12 +14,31 @@ class CycleState:
 
 @dataclass
 class ControllerState:
-    """Hold's PID/MPC controller output and its cycle-update bookkeeping."""
+    """Hold controller output, cycle bookkeeping, and trace accounting."""
 
     output: float = 0.0
     fan_duty: float | None = None
     controls_fan: bool = False
     cycle_start: float = 0.0
+    trace_result_revision: int = -1
+    trace_frame_start_ms: int | None = None
+    trace_frame_result_revision: int = 0
+    trace_frame_raw_duty: float = 0.0
+    trace_frame_bounded_duty: float = 0.0
+    trace_frame_scheduled_on_seconds: float = 0.0
+    trace_frame_scheduled_off_seconds: float = 0.0
+    trace_frame_actual_on_seconds: float = 0.0
+    trace_frame_transition_count: int = 0
+    trace_frame_active: bool = False
+    trace_interval_start_ms: int | None = None
+    trace_prior_requested_auger_duty: float = 0.0
+    trace_frame_on_started_ms: int | None = None
+    trace_prior_realized_auger_duty: float = 0.0
+    trace_prior_fan_duty: float | None = None
+    trace_combustion_load: float | None = None
+    trace_mpc_stale: bool = False
+    trace_prior_output_source: object | None = None
+    trace_prior_combustion_load: float | None = None
 
 
 @dataclass

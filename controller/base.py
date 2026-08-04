@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 from common.control_trace import ControllerBranch, MpcFailureState
+from controller.mpc_allocator import AllocationResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +71,7 @@ class MpcTraceDiagnostics:
     equilibrium_feed_forward: float | None
     residual_move: float | None
     bounded_firing_load: float
+    applied_combustion_load: float
     policy_kind: str
     failure_state: MpcFailureState
     consecutive_policy_failures: int
@@ -139,6 +141,10 @@ class ControllerBase:
 
     def trace_diagnostics(self) -> ControllerTraceDiagnostics | None:
         """Immutable typed diagnostics from the most recent completed update."""
+        return None
+
+    def trace_allocation(self) -> AllocationResult | None:
+        """Immutable allocation corresponding to the most recent MPC update."""
         return None
 
     def get_model_snapshot(self):

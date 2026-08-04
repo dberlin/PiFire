@@ -33,7 +33,7 @@ from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import Verdict as _Verdict
 from controller.model_promotion import _MAX_CONFIGURABLE_HORIZON_S, built_n_horizon, longest_braking_distance
 from controller.mpc_model import build_do_mpc_model, GreyBoxKF, GreyBoxEKF, GreyBoxMHE, MODEL_SCHEMA
-from controller.mpc_allocator import allocate
+from controller.mpc_allocator import AllocationResult, allocate
 
 _DEFAULTS = dict(
     # R_dQ (firing-move penalty) kept low: 1.0 was over-damped -> sluggish rise AND
@@ -344,6 +344,7 @@ class Controller(ControllerBase):
         self._model_revision = 0
         self._model_meta = None  # provenance of an adopted model, or None
         self._trace_diagnostics = None
+        self._trace_allocation: AllocationResult | None = None
 
         # Everything the thermal parameters size -- the estimator, the horizon
         # and the policy -- is built through the same call `restore_model` uses,
@@ -905,7 +906,7 @@ class Controller(ControllerBase):
         self._applied_Q = Q
         if self._log_path:
             self._log_row(y, Q)
-        auger, fan_duty = allocate(
+        allocation = allocate(
             Q,
             Q_min=self.cfg["Q_min"],
             Q_max=self.cfg["Q_max"],
@@ -915,6 +916,9 @@ class Controller(ControllerBase):
             fan_max_pct=self.cfg["fan_max_pct"],
             enable_fan=bool(self.cfg["enable_fan_input"]),
         )
+        auger = allocation.auger_duty
+        self._trace_allocation = allocation
+        fan_duty = allocation.fan_duty
         if raw_firing_load is None:
             equilibrium = None
             residual_move = None
@@ -936,6 +940,7 @@ class Controller(ControllerBase):
             equilibrium_feed_forward=equilibrium,
             residual_move=residual_move,
             bounded_firing_load=Q,
+            applied_combustion_load=applied_Q,
             policy_kind="net" if self._net is not None else "nlp",
             failure_state=failure_state,
             consecutive_policy_failures=self._consecutive_policy_failures,
@@ -947,3 +952,6 @@ class Controller(ControllerBase):
 
     def trace_diagnostics(self) -> MpcTraceDiagnostics | None:
         return self._trace_diagnostics
+
+    def trace_allocation(self) -> AllocationResult | None:
+        return self._trace_allocation
