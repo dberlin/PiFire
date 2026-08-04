@@ -99,7 +99,17 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = ["--random-order"]
+# `pytest tests/` is the documented run and is expected to take minutes, not
+# tens of minutes. The `slow` tests simulate whole multi-hour cooks; they are
+# excluded here so the default run selects them out rather than silently
+# absorbing a quarter-hour. Run them with `pytest -m slow` (a later `-m` wins
+# over this one), and never alongside the suite's wall-clock budget
+# assertions -- a loaded machine fails those on timing alone.
+addopts = ["--random-order", "-m", "not slow"]
+markers = [
+    "slow: simulates whole cooks and runs for minutes; excluded from the default run by addopts above.",
+]
+
 
 [tool.coverage.run]
 branch = true

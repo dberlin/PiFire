@@ -30,8 +30,12 @@ WHAT IS DELIBERATELY NOT DONE HERE. `n_horizon` is never raised by hand. A14
 derives the effective horizon at build time from the model's own braking
 distance and deliberately does not store it, because a stored horizon is a
 ratchet: it can only grow, and a later, faster model could never bring it down.
-The test asserts that the derivation ran and that no adopted model smuggled an
-`n_horizon` into the config, rather than doing the raising itself.
+What the test asserts is that no adopted model smuggles an `n_horizon` into the
+carried config, which is how that ratchet would come back. It does not check the
+derived value itself: on this plant every model's braking distance (150 s at the
+defaults, 352 s learned) sits well under the 600 s the configured horizon
+already covers, so the derivation returns the configured 24 steps for everything
+these cooks can produce, and an assertion on it could not fail.
 
 HOW IDENTIFICATION IS SWITCHED ON. Not by the `enable_identification` config
 key: that is a settings-surface flag consumed on Hold's teardown path
@@ -66,7 +70,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 import docs.superpowers.experiments.controller_matrix as controller_matrix
 from common.defaults import default_settings
-from controller.model_promotion import built_n_horizon
 from controller.mpc import _DEFAULTS, Controller
 
 MODEL_KEYS = Controller._MODEL_PARAM_KEYS
@@ -136,11 +139,6 @@ def _min_firing_equilibrium_f(fan):
     return plant.T_c * 9 / 5 + 32
 
 
-def _model_of(config):
-    """The full parameter set a cook built with `config` actually planned with."""
-    return {key: config.get(key, _DEFAULTS[key]) for key in MODEL_KEYS}
-
-
 def _verdict_lines(verdicts):
     return "\n".join(
         f"  cook {i}: accepted={v['accepted']} rmse={v['rmse']} :: {v['reason']}" for i, v in enumerate(verdicts, 1)
@@ -150,13 +148,13 @@ def _verdict_lines(verdicts):
 @pytest.mark.slow
 def test_overshoot_falls_across_successive_cooks():
     """Three cooks from the shipped defaults, each offering its refit to the gate."""
-    # The setpoint has to sit far enough above the auger's floor that the fall
-    # being asserted is control authority and not the chamber arriving at a
-    # temperature it could not have gone below anyway. "Far enough" is the fall
-    # itself: measure an improvement only across a range the controller has.
+    # Cheap pre-flight: a setpoint at or under the auger's floor makes the whole
+    # run meaningless, and it costs ten minutes to find that out from the cooks.
+    # The real check is against the measured fall, after the cooks, below.
     floor_f = max(_min_firing_equilibrium_f(0.0), _min_firing_equilibrium_f(1.0))
-    assert SETPOINT_F - floor_f > MIN_PEAK_DROP_F, (
-        f"the {SETPOINT_F:.0f} F setpoint is only {SETPOINT_F - floor_f:.1f} F above this plant's "
+    authority_f = SETPOINT_F - floor_f
+    assert authority_f > MIN_PEAK_DROP_F, (
+        f"the {SETPOINT_F:.0f} F setpoint is only {authority_f:.1f} F above this plant's "
         f"minimum-firing equilibrium ({floor_f:.1f} F at u_min={CYCLE_DATA['u_min']}), so overshoot "
         "here reads the actuator floor rather than the controller"
     )
@@ -168,25 +166,42 @@ def test_overshoot_falls_across_successive_cooks():
         rows.append(row)
         verdicts.append(verdict)
 
-        # A14: the horizon the NLP was assembled with is derived from the model
-        # this cook planned with, not read back from a stored one.
-        assert row["built_n_horizon"] == built_n_horizon(
-            _model_of(config), n_horizon=row["configured_n_horizon"], t_step=_DEFAULTS["t_step"]
-        ), f"the built horizon {row['built_n_horizon']} is not the one this model's coast implies"
+        # A14 keeps the horizon derived at build time and deliberately does not
+        # store it, because a stored horizon is a ratchet: it can only grow, and
+        # a later, faster model could never bring it down. Promotion carrying an
+        # `n_horizon` across is exactly how that ratchet would reappear.
         assert "n_horizon" not in config, "an adopted model stored a horizon; that is the ratchet A14 removed"
 
         if verdict["accepted"]:
             config = dict(verdict["params"])
 
     peaks = [row["peak_temp_f"] for row in rows]
-    report = f"peaks {[round(p, 1) for p in peaks]} F against a {SETPOINT_F:.0f} F setpoint\n{_verdict_lines(verdicts)}"
+    fall_f = peaks[0] - peaks[-1]
+    report = (
+        f"peaks {[round(p, 1) for p in peaks]} F against a {SETPOINT_F:.0f} F setpoint\n"
+        f"fall {fall_f:.1f} F, control authority {authority_f:.1f} F above a {floor_f:.1f} F floor\n"
+        f"{_verdict_lines(verdicts)}"
+    )
+    # Visible on success too: which cooks were promoted and why one was refused
+    # is the story of the run, and a run that stopped improving because the gate
+    # started refusing should not have to be re-run to find that out.
+    print(report)
 
     assert any(v["accepted"] for v in verdicts), f"the gate refused every cook, so nothing could improve:\n{report}"
     assert peaks[1] < peaks[0], f"the second cook did not improve on the first:\n{report}"
     for i in range(1, COOKS):
         assert peaks[i] <= peaks[i - 1], f"cook {i + 1} regressed against cook {i}:\n{report}"
-    assert peaks[0] - peaks[-1] >= MIN_PEAK_DROP_F, (
+    assert fall_f >= MIN_PEAK_DROP_F, (
         f"the peak fell by less than the {MIN_PEAK_DROP_F:.0f} F this claims to buy:\n{report}"
+    )
+    # The whole fall has to fit inside the range the controller actually had.
+    # Sized to what was measured rather than to the 10 F floor above, because a
+    # configuration can clear that floor and still spend most of the fall
+    # arriving somewhere it could not have gone below (u_min=0.15 leaves 14.7 F
+    # of authority here, and would pass the pre-flight while failing this).
+    assert fall_f < authority_f, (
+        f"the {fall_f:.1f} F fall is not smaller than the {authority_f:.1f} F of authority above the "
+        f"{floor_f:.1f} F minimum-firing floor, so it is partly the actuator and not the controller:\n{report}"
     )
 
 

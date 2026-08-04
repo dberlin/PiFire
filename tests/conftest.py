@@ -59,15 +59,6 @@ REPO_BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # Pinned by tests/unit/common/test_os_info_read_path_is_pure.py.
 
 
-def pytest_configure(config):
-    """Register the marks this suite uses, so `-m` selects rather than warns."""
-    config.addinivalue_line(
-        "markers",
-        "slow: a test that simulates whole cooks and runs for minutes; never run one alongside "
-        "the wall-clock budget assertions elsewhere in this suite.",
-    )
-
-
 def load_wizard_manifest():
     """Load and parse wizard/wizard_manifest.json from the repo root."""
     with open(os.path.join(REPO_BASE, "wizard", "wizard_manifest.json")) as f:
