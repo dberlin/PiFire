@@ -22,6 +22,8 @@ Description: Reading a settings JSON FILE and migrating its contents across
 ==============================================================================
 """
 
+from collections.abc import MutableMapping
+
 import copy
 import json
 import os
@@ -252,6 +254,37 @@ def _migrate_mpc_log_path(settings):
     return True
 
 
+_RETIRED_CONTROLLER_IDS = (
+    "pid_clamping",
+    "pid_clamping_percent_pb",
+    "pid_ac",
+    "pid_parallel",
+    "fuzzy",
+    "ml",
+)
+
+
+def _migrate_retired_controllers(settings):
+    """Retire old controller selections without disturbing the PID config."""
+    controller = settings.get("controller")
+    if not isinstance(controller, MutableMapping):
+        return False
+    config = controller.get("config")
+    if not isinstance(config, MutableMapping):
+        return False
+
+    changed = False
+    if controller.get("selected") in _RETIRED_CONTROLLER_IDS:
+        controller["selected"] = "pid"
+        changed = True
+
+    sentinel = object()
+    for name in _RETIRED_CONTROLLER_IDS:
+        if config.pop(name, sentinel) is not sentinel:
+            changed = True
+    return changed
+
+
 #: The shape migrations, in ascending order, as (target_version, migration).
 #: A step's number is the version the tree is AT once that step has run, and
 #: each callable mutates the tree in place and returns True if it changed
@@ -260,6 +293,7 @@ def _migrate_mpc_log_path(settings):
 _SHAPE_MIGRATIONS = [
     (1, _migrate_i2c_buses),
     (2, _migrate_mpc_log_path),
+    (3, _migrate_retired_controllers),
 ]
 
 
