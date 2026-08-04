@@ -349,6 +349,55 @@ def test_a_fit_whose_simulation_goes_non_finite_without_raising_is_also_refused(
     assert fit_params(t, temp, Q, T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)["converged"] is True
 
 
+def test_a_quality_score_where_the_simulation_raises_is_infinite_not_an_exception():
+    """Scoring a model is asking a question, and it must always get an answer.
+
+    `fit_quality` is handed whatever parameters its caller holds -- including
+    an incumbent that arrived from imported or hand-edited settings, which
+    nothing on the way in checks can be simulated. The raised shape is the one
+    that escapes: `Controller.refit_from_cook` scores two models inside a
+    `try` that catches ValueError and FloatingPointError only, and it runs in
+    HoldMode's teardown, where the next thing owed to the grill is the
+    cool-down fan.
+    """
+    t, Q, temp = _dataset()
+    runaway = dict(TRUTH, C_c=1e-9, sigma=SIGMA, n_delay=N_DELAY)
+
+    # The premise as a negative control: the simulator really does RAISE at
+    # this parameter set, so what is asserted below is the OverflowError
+    # branch and not the isfinite one.
+    with pytest.raises(OverflowError):
+        simulate_grey_box(t, Q, T_amb=T_AMB, T0=float(temp[0]), **runaway)
+
+    assert fit_quality(t, temp, Q, runaway, T_amb=T_AMB) == (math.inf, math.inf)
+
+
+def test_a_quality_score_where_the_simulation_goes_quietly_non_finite_is_also_infinite():
+    """The half of the same guard that announces nothing.
+
+    A large enough `sigma` makes the radiative term inf by ordinary float
+    multiplication, which does not raise, and NaN reaches the end of the
+    record. `except OverflowError` never fires here, and a NaN RMSE is worse
+    than an infinite one: every comparison against it is False, so a model
+    that could not be simulated at all would neither beat nor lose to the one
+    driving the grill.
+    """
+    t, Q, temp = _dataset()
+    quiet_nan = dict(TRUTH, sigma=1e300, n_delay=N_DELAY)
+
+    # Non-finite AND no exception: without both halves this could pass while
+    # having stopped covering the isfinite branch.
+    y = simulate_grey_box(t, Q, T_amb=T_AMB, T0=float(temp[0]), **quiet_nan)
+    assert not np.all(np.isfinite(y))
+
+    assert fit_quality(t, temp, Q, quiet_nan, T_amb=T_AMB) == (math.inf, math.inf)
+
+    # The same record at a parameter set the model survives scores finitely,
+    # so what the infinities report is the simulation and not the data.
+    survivable = fit_quality(t, temp, Q, dict(TRUTH, sigma=SIGMA, n_delay=N_DELAY), T_amb=T_AMB)
+    assert all(math.isfinite(v) for v in survivable)
+
+
 def test_a_fit_to_a_real_cook_lands_where_the_promotion_policy_can_accept_it():
     """A fit outside PROMOTION_BOUNDS is refused however well it describes the log.
 

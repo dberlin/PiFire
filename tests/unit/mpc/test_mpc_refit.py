@@ -556,6 +556,134 @@ def test_a_converged_solve_is_not_by_itself_a_promotion(monkeypatch):
     assert c.cfg["C_c"] == pytest.approx(TRUTH["C_c"])
 
 
+# ---- a model that cannot be simulated is a verdict, not an exception ----
+
+
+def _columns(cook):
+    rows = list(cook)
+    return (
+        np.array([r[0] for r in rows]),
+        np.array([r[1] for r in rows]),
+        np.array([r[2] for r in rows]),
+    )
+
+
+def test_an_incumbent_the_model_cannot_be_simulated_at_ends_the_cook_with_a_verdict():
+    """The incumbent comes from `cfg`, which imported settings can populate.
+
+    Nothing between a settings file and this call asks whether the parameters
+    in it can be simulated, so the first thing to find out is the score taken
+    against them -- at the end of a real cook, in HoldMode's teardown, where
+    the next thing owed to the grill is the cool-down fan.
+    """
+    cook = _synthetic_cook()
+    t, temp, Q = _columns(cook)
+
+    c = _c()
+    c.cfg["C_c"] = 1e-9
+    incumbent = {k: float(c.cfg[k]) for k in Controller._MODEL_PARAM_KEYS}
+    # The premise: this really is an incumbent no score can be taken against.
+    assert math.isinf(update_mpc.fit_quality(t, temp, Q, incumbent, T_amb=float(c.cfg["T_amb"]))[0])
+
+    verdict = c.refit_from_cook(cook)
+    assert verdict.accepted is False
+    # And the refusal names which of the two models could not be scored.
+    assert "incumbent RMSE" in verdict.reason
+    assert c.get_model_snapshot() is None
+
+    # The same cook against a simulable incumbent is promoted, so what the
+    # refusal reports is the incumbent and not the record.
+    assert _c().refit_from_cook(cook).accepted is True
+
+
+def test_a_solve_that_diverged_is_refused_before_anything_is_measured_on_it(monkeypatch):
+    """A solve that ran out of evaluations returns its best point so far, and
+    that point can be one the model cannot be simulated at.
+
+    The convergence veto stands above both scores, so such a point is refused
+    for the reason that is actually true of it and is never simulated.
+    """
+    real_params = update_mpc.fit_params
+    real_quality = update_mpc.fit_quality
+    landed = []
+    scored = []
+
+    def diverged(*args, **kwargs):
+        out = real_params(*args, **kwargs)
+        out.update(C_c=1e-9, converged=False, nfev=update_mpc._MAX_NFEV)
+        landed.append(dict(out))
+        return out
+
+    def spy(t, temp, Q, params, **kwargs):
+        scored.append(dict(params))
+        return real_quality(t, temp, Q, params, **kwargs)
+
+    monkeypatch.setattr(update_mpc, "fit_params", diverged)
+    monkeypatch.setattr(update_mpc, "fit_quality", spy)
+
+    cook = _synthetic_cook()
+    c = _c()
+    verdict = c.refit_from_cook(cook)
+
+    assert verdict.accepted is False
+    assert "converge" in verdict.reason
+    assert c.get_model_snapshot() is None
+    # Nothing was scored at all -- neither the candidate nor the incumbent.
+    assert scored == []
+
+    # The premise, checked after the fact so the assertion above is not merely
+    # about ordering: the point that solve landed on is one no score can be
+    # taken against, which is what makes not taking one there matter.
+    t, temp, Q = _columns(cook)
+    assert math.isinf(real_quality(t, temp, Q, landed[0], T_amb=20.0)[0])
+
+
+def test_an_unmeasurable_candidate_is_refused_by_the_gate_that_owns_the_judgement():
+    """An infinite score is a verdict the gate can already read, and it reads
+    it by name: the reason says which model could not be scored, which a raise
+    out of `fit_quality` could not have said."""
+    t, temp, Q = _columns(_synthetic_cook())
+    runaway = dict(TRUTH, C_c=1e-9, T_amb=20.0, sigma=1.4e-9, n_delay=4)
+    cand_rmse, _ = update_mpc.fit_quality(t, temp, Q, runaway, T_amb=20.0)
+    assert math.isinf(cand_rmse)
+
+    verdict = evaluate(
+        dict(TRUTH, T_amb=20.0, sigma=1.4e-9, n_delay=4),
+        dict(TRUTH, T_amb=20.0, sigma=1.4e-9, n_delay=4, C_c=2000.0),
+        candidate_rmse=cand_rmse,
+        incumbent_rmse=5.0,
+        # Clear of the floor: what is pinned here is the unmeasurable
+        # candidate, not whether the record determined it.
+        identifiability=_IDENTIFIABILITY_FLOOR * 2.0,
+        n_horizon=24,
+        t_step=25.0,
+    )
+    assert verdict.accepted is False
+    assert "candidate RMSE" in verdict.reason
+
+
+def test_an_infinite_error_never_reaches_the_store(model_store):
+    """The gate's refusal is the only thing standing between the two.
+
+    `_adopt_model(rmse=cand_rmse, ...)` writes whatever the score was into the
+    model's provenance, and the store's validator encodes with
+    allow_nan=False. A promotion that stopped covering the unmeasurable case
+    would therefore not fail at the gate, where it would say why, but at the
+    write, losing the model the cook did learn.
+    """
+    c = _c()
+    assert c.refit_from_cook(_synthetic_cook()).accepted is True
+    assert model_store.save("mpc", c.get_model_snapshot()) is True
+
+    c._adopt_model(
+        dict(TRUTH, T_amb=20.0, sigma=1.4e-9, n_delay=4),
+        rmse=math.inf,
+        samples=1200,
+        band_c=(25.0, 240.0),
+    )
+    assert model_store.save("mpc", c.get_model_snapshot()) is False
+
+
 # ---- the fitter's bookkeeping is not part of the model ----
 
 

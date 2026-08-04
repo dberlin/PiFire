@@ -715,6 +715,24 @@ class Controller(ControllerBase):
                 sigma=float(self.cfg["sigma"]),
                 n_delay=int(self.cfg["n_delay"]),
             )
+            # A solve that ran out of evaluations reports its best point so
+            # far, and that point has not been shown to be a minimum -- so it
+            # is refused. The converse is not available: scipy calls a stalled
+            # step and a stalled cost "converged" too, and a one-evaluation
+            # solve that moved nowhere reports the same flag as a hard-won
+            # fit. Convergence can only veto here; what earns a promotion is
+            # the error comparison and the bounds below.
+            #
+            # It vetoes before anything is measured, so no statistic is ever
+            # taken at a point that is already refused -- including at one the
+            # model cannot be simulated at, which a diverging solve's best
+            # point can be.
+            if not fitted["converged"]:
+                print(
+                    f"[mpc] refit: abandoned after {fitted['nfev']} evaluations over "
+                    f"{len(rows)} samples in {time.perf_counter() - started:.1f} s"
+                )
+                return _Verdict(False, f"the solve did not converge within {fitted['nfev']} evaluations")
             # The candidate starts from a fixed reference, but it is judged
             # against the model actually driving the grill: the question this
             # answers is whether to replace THAT, on this cook's own data.
@@ -728,20 +746,6 @@ class Controller(ControllerBase):
             ident = identifiability(t, Q, fitted, T_amb=T_amb, T0=float(temp[0]))
         except (ValueError, FloatingPointError) as e:
             return _Verdict(False, f"fit failed: {e}")
-
-        # A solve that ran out of evaluations reports its best point so far, and
-        # that point has not been shown to be a minimum -- so it is refused.
-        # The converse is not available: scipy calls a stalled step and a
-        # stalled cost "converged" too, and a one-evaluation solve that moved
-        # nowhere reports the same flag as a hard-won fit. Convergence can only
-        # veto here; what earns a promotion is the error comparison and the
-        # bounds below.
-        if not fitted["converged"]:
-            print(
-                f"[mpc] refit: abandoned after {fitted['nfev']} evaluations over "
-                f"{len(rows)} samples in {time.perf_counter() - started:.1f} s"
-            )
-            return _Verdict(False, f"the solve did not converge within {fitted['nfev']} evaluations")
 
         verdict = evaluate(
             fitted,

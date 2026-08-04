@@ -215,11 +215,31 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0):
 
 
 def fit_quality(t, temp, Q, fitted, *, T_amb):
-    """(RMSE, max absolute error) in degrees C between the fit and the log."""
+    """(RMSE, max absolute error) in degrees C between the fit and the log.
+
+    Infinite in both where the model cannot be simulated at `fitted` at all,
+    in either of the two shapes `fit_params.simulate` describes -- a raised
+    OverflowError out of the chamber's float arithmetic and a quiet NaN out of
+    numpy. Neither is a large error; both are the absence of a trajectory to
+    take an error against.
+
+    Infinity rather than an exception because the caller comparing two models
+    is the one that owns the judgement. `model_promotion.evaluate` refuses a
+    non-finite RMSE and its reason names WHICH of the two models could not be
+    scored, while an exception raised here arrives at `Controller.
+    refit_from_cook` -- whose `try` catches ValueError and FloatingPointError
+    only, so the raised shape would leave it altogether, into a grill teardown
+    that has a cool-down fan to start.
+    """
     temp = np.asarray(temp, dtype=float)
     params = dict(fitted)
     params["T_amb"] = T_amb
-    sim = simulate_grey_box(t, Q, T_amb=T_amb, T0=float(temp[0]), **_sim_kwargs(params))
+    try:
+        sim = simulate_grey_box(t, Q, T_amb=T_amb, T0=float(temp[0]), **_sim_kwargs(params))
+    except OverflowError:
+        return math.inf, math.inf
+    if not np.all(np.isfinite(sim)):
+        return math.inf, math.inf
     err = sim - temp
     return float(np.sqrt(np.mean(err**2))), float(np.max(np.abs(err)))
 
