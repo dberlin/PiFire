@@ -17,7 +17,7 @@ const BANNER =
   "/* eslint-disable */\n" +
   "// GENERATED from controller/controllers.json — do not edit. Regenerate: bun run gen:types";
 
-/** `pid_parallel` -> `PidParallel`. */
+/** `pid_sp` -> `PidSp`. */
 function pascal(name: string): string {
   return name
     .split("_")

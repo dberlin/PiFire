@@ -190,7 +190,6 @@ it is a snapshot, never live state):
 ```JSON
 "controller": {
     "config": {
-      "fuzzy": {},
       "pid": {
         "PB": 60.0,
         "Td": 45.0,

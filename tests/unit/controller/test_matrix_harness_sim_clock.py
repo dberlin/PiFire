@@ -1,17 +1,17 @@
 """Pins run_scenario's simulated clock for controllers that read time.time().
 
-pid_sp and pid_ac compute their own `dt = time.time() - self.last_update`.
+pid_sp computes its own `dt = time.time() - self.last_update`.
 run_scenario calls `core.update()` in a tight loop with no real elapsed wall
 time between iterations, so without a simulated clock `dt` collapses to
 whatever a handful of Python bytecodes take -- orders of magnitude smaller
-than the control period the loop is modeling. Both controllers divide by
-`dt` when computing rate-of-change and derivative terms, so an unrealistic
-`dt` saturates their output regardless of the temperature error, and the
-controller never gets exercised at all. This test asserts on the `dt` the
-controller actually observed and on its output staying in a sane range,
-because a test that only checks the final temperature would not distinguish
-"the controller worked" from "the controller was driven off a cliff and the
-plant happened to end up somewhere plausible anyway".
+than the control period the loop is modeling. The controller divides by `dt`
+when computing rate-of-change and derivative terms, so an unrealistic `dt`
+saturates its output regardless of the temperature error, and the controller
+never gets exercised at all. This test asserts on the `dt` the controller
+actually observed and on its output staying in a sane range, because a test
+that only checks the final temperature would not distinguish "the controller
+worked" from "the controller was driven off a cliff and the plant happened to
+end up somewhere plausible anyway".
 
 `step_225_275` is included because its setpoint change lands exactly on a
 solve boundary: `set_target()` also resets the controller's own last-update
@@ -26,7 +26,7 @@ from docs.superpowers.experiments.controller_matrix import CYCLE_DATA, SCENARIOS
 
 
 @pytest.mark.parametrize("scenario_name", ["steady_225", "step_225_275"])
-@pytest.mark.parametrize("controller", ["pid_sp", "pid_ac"])
+@pytest.mark.parametrize("controller", ["pid_sp"])
 def test_controller_observes_the_intended_control_period(controller, scenario_name, monkeypatch):
     mod = importlib.import_module(f"controller.{controller}")
     real_update = mod.Controller.update

@@ -335,11 +335,9 @@ test("controller tab shows the live controller, and PB round-trips where the con
   const selectedOptionText = await select.locator("option:checked").textContent();
   expect(selectedOptionText).toBe(expectedLabel);
 
-  // Proportional Band is a PID-family field, and the selected controller is
-  // whatever this grill actually runs -- mpc, fuzzy and ml have no PB at all.
-  // The controller's own config block is the authority on which fields it has,
-  // and naming the controller in the skip keeps "not applicable here" from
-  // reading as "passed".
+  // Proportional Band is a PID-family field. MPC has no PB field, so the
+  // selected controller's own configuration block remains the authority on
+  // which fields it exposes.
   const selectedConfig = settingsBody.settings?.controller?.config?.[selectedKey] ?? {};
   test.skip(
     !("PB" in selectedConfig),
