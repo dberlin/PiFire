@@ -158,7 +158,7 @@ $SUDO dnf -y upgrade --refresh 2>&1 | tee -a "$LOG"
 log "*************************************************************************"
 log "**  Installing dependencies...                                        **"
 log "*************************************************************************"
-# Build toolchain + scientific libs (scipy/scikit-learn), web stack, supervisor,
+# Build toolchain + scientific libraries (scipy), web stack, supervisor,
 # bluetooth, image libs, and DejaVu fonts.
 $SUDO dnf -y install \
 	python3 python3-devel python3-pip python3-scipy \
@@ -325,10 +325,10 @@ source .venv/bin/activate
 
 # pyproject.toml + uv.lock are the single source of truth for Python
 # dependencies. The old auto-install/requirements.txt has been removed: it had
-# drifted from pyproject.toml in both directions, and the influxdb_client and
-# scikit-learn versions installed here contradicted the bounds pyproject
-# declares. Both now resolve from the lockfile like everything else; the
-# influxdb [ciso] extra moved into pyproject so it is still applied.
+# drifted from pyproject.toml in both directions, and the influxdb_client
+# version installed here contradicted the bound pyproject declares. It now
+# resolves from the lockfile like everything else; the influxdb [ciso] extra
+# moved into pyproject so it is still applied.
 log " + Installing module dependencies from pyproject.toml"
 uv sync --no-dev --inexact 2>&1 | tee -a "$LOG" ||
 	{

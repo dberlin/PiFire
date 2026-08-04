@@ -412,9 +412,9 @@ fi
 # pyproject.toml + uv.lock are the single source of truth for Python
 # dependencies. There is no auto-install/requirements.txt to keep in sync any
 # more: it had drifted from pyproject.toml in both directions (pydantic,
-# pydantic-partial, hidapi, pyserial, scikit-learn, influxdb-client and the
-# whole adafruit stack were declared but never installed on a real box), so it
-# has been removed rather than re-synced by hand.
+# pydantic-partial, hidapi, pyserial, influxdb-client and the whole adafruit
+# stack were declared but never installed on a real box), so it has been
+# removed rather than re-synced by hand.
 echo " + Installing UV" | tee -a ~/logs/pifire_install.log
 if ! /bin/curl -LsSf https://astral.sh/uv/install.sh | $SUDO env UV_INSTALL_DIR="/usr/local/bin" /bin/sh; then
 	echo " ! Failed to download or install UV. Exiting." | tee -a ~/logs/pifire_install.log

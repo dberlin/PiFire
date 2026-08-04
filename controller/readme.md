@@ -1,8 +1,8 @@
 ## Plugabble Controllers
 
-While the standard PID is good enough for most needs, it's been the desire of some to develop other control methods, or even other PIDs that may be tuned slightly differently.  
-
-In an effort to allow for more choice and options for the core controller of PiFire, a new feature called pluggable controllers has been introduced.  This feature allows for the ability to add/utilize different controller types for the HOLD mode of PiFire, other than the included PID.  
+PiFire supports three built-in controllers for HOLD mode: standard PID (`pid`),
+PID Smith Predictor (`pid_sp`), and Model Predictive Control (`mpc`).
+Pluggable controllers let you add future controller types alongside them.
 
 ### Implementation 
 

@@ -38,9 +38,7 @@
         },
         "control": {
           "py_dependencies": [
-            "apprise",
-            "scikit-fuzzy",
-            "scikit-learn>=1.4.2"
+            "apprise"
           ],
           "apt_dependencies": [
             "libatlas-base-dev"
@@ -112,8 +110,7 @@
         },
         "control": {
           "py_dependencies": [
-            "rpi-hardware-pwm",
-            "scikit-learn>=1.4.2"
+            "rpi-hardware-pwm"
           ],
           "apt_dependencies": [],
           "command_list": []

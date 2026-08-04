@@ -31,8 +31,6 @@ dependencies = [
     # ever in auto-install/requirements.txt, so the dev venv never had it --
     # the platform tests stub the module, which is why nothing noticed.
     "rpi-hardware-pwm>=0.2.2",
-    "scikit-fuzzy>=0.5.0",
-    "scikit-learn>=1.9.0",
     "thermoworks-cloud>=0.1.13",
     "uuid>=1.30",
     "zeroconf>=0.149.17",
