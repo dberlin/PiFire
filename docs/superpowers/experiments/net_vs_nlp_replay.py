@@ -45,10 +45,22 @@ transient ends instead of whether it ends. The lid-open window is always well
 past this point (its own onset is a controller/plan-defined disturbance, not a
 symptom of startup), so lid-window figures are not split into whole/warm.
 
+A lid opening drives two windows of different length, as production does:
+
+  * a PHYSICAL lid window, `lid_open_for` seconds long, over which the chamber
+    loses heat to ambient (`GrillSim.step(lid_open=True)`); and
+  * an ACTUATOR pause of `LID_PAUSE_S` (= `LidOpenPauseTime`) seconds, over
+    which the fan stops and the commanded ratio is pinned.
+
+They are not the same length, so the interval between them -- controller back at
+full authority, fan running, chamber still cold -- is a state this harness
+exercises rather than skips. `lid_model` below describes the ACTUATOR pause;
+the physical window is not a model choice, it is the plant losing heat.
+
 Two knobs select which experiment arm a run measures, and both are recorded
 into every output row so a later comparison can tell arms apart.
 
-`lid_model` chooses how the lid-open window is modelled:
+`lid_model` chooses how the actuator pause is modelled:
 
   * "faithful" (default) reproduces controller/runtime/modes/hold.py. At the
     detection instant hold.py:243-265 turns the auger off, reports a single
@@ -110,6 +122,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from common.defaults import default_settings  # noqa: E402
 from controller.applied_output import AppliedOutput, OutputSource  # noqa: E402
 from controller.grill_sim import GrillSim  # noqa: E402
 from controller.mpc import Controller  # noqa: E402
@@ -118,6 +131,17 @@ from controller_matrix import _auger_toggle_tick  # noqa: E402
 
 OUT = os.path.join(_ROOT, "docs/superpowers/experiments/_net_vs_nlp_baseline.json")
 ARTIFACT = os.path.join(_ROOT, "controller/mpc_policy_net.npz")
+
+# hold.py caps the actuator pause at LidOpenPauseTime on both the automatic
+# (hold.py:265) and the manual (hold.py:296) path, and hold.py:269-271 clears it
+# and restarts the fan on expiry. Read from settings so the harness tracks the
+# default rather than restating it.
+LID_PAUSE_S = default_settings()["cycle_data"]["LidOpenPauseTime"]
+
+# Seconds past the lid closing that `lid_min_temp_f` keeps watching. The chamber
+# is still climbing back when the lid shuts, so the coldest reading of the event
+# lands after the window rather than inside it.
+LID_RECOVERY_WINDOW_S = 300
 
 CYCLE_DATA = {"HoldCycleTime": 20, "u_min": 0.15, "u_max": 0.9}
 
@@ -164,6 +188,21 @@ def _split_is_live(cycle_data):
     before = getattr(probe, "_applied_Q", None)
     probe.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 0.0))
     return before is not None and getattr(probe, "_applied_Q", None) != before
+
+
+def _lid_windows(t, lid_open_at, lid_open_for):
+    """The two windows a lid opening drives, as production drives them.
+
+    The chamber is open -- and losing heat -- for `lid_open_for`, while the
+    actuators resume after `LID_PAUSE_S`. Returned separately because they are
+    different lengths: collapsing them into one flag either surrenders control
+    for as long as the lid is open, which no production path does, or seals the
+    chamber the moment the actuators come back.
+    """
+    return (
+        lid_open_at <= t < lid_open_at + lid_open_for,
+        lid_open_at <= t < lid_open_at + LID_PAUSE_S,
+    )
 
 
 def replay(
@@ -241,7 +280,7 @@ def replay(
     ratio, next_solve = core.u_min, 0.0
     auger_on, auger_toggle = False, 0.0
     for t in range(duration_s):
-        lid = lid_open_at <= t < lid_open_at + lid_open_for
+        lid, lid_paused = _lid_windows(t, lid_open_at, lid_open_for)
         temp_f = _c_to_f(plant.measured())
         if t >= next_solve:
             next_solve = t + period
@@ -305,19 +344,19 @@ def replay(
             # the whole pause, before the u_min floor and u_max ceiling below
             # it can apply. The stress model leaves the controller's answer in
             # place and reports 0.0 for it instead.
-            if lid and lid_model == "faithful":
+            if lid_paused and lid_model == "faithful":
                 ratio = core.u_min
             if estimator_input == "applied":
                 core.set_output(
                     AppliedOutput(
-                        ratio=0.0 if (lid and lid_model == "stress") else ratio,
-                        source=OutputSource.LID_OPEN if lid else OutputSource.CONTROLLER,
+                        ratio=0.0 if (lid_paused and lid_model == "stress") else ratio,
+                        source=OutputSource.LID_OPEN if lid_paused else OutputSource.CONTROLLER,
                         timestamp=float(t),
                     )
                 )
-        if lid and lid_model == "stress":
+        if lid_paused and lid_model == "stress":
             auger_on, auger_toggle, auger_frac = False, t, 0.0
-        elif lid and t == lid_open_at:
+        elif lid_paused and t == lid_open_at:
             # The harness imposes the pause rather than detecting it, so its
             # first second stands in for hold.py's detection instant: auger
             # off, cycle timer reset, and one AppliedOutput(0.0) report
@@ -333,11 +372,12 @@ def replay(
             # the auger keeps cycling at the pinned u_min.
             auger_on, auger_toggle, auger_frac = _auger_toggle_tick(auger_on, auger_toggle, t, ratio, cycle_time)
         # The fan is off for the whole pause under either model: hold.py:263
-        # cuts it at detection and hold.py:271 only restarts it at clear.
-        plant.step(auger_on=auger_frac, fan_frac=0.0 if lid else fan_frac)
+        # cuts it at detection and hold.py:271 only restarts it at clear. The
+        # chamber keeps losing heat past that, for as long as the lid is open.
+        plant.step(auger_on=auger_frac, fan_frac=0.0 if lid_paused else fan_frac, lid_open=lid)
         temps.append(temp_f)
         realized_duty.append(auger_frac)
-        commanded_duty.append(0.0 if (lid and lid_model == "stress") else ratio)
+        commanded_duty.append(0.0 if (lid_paused and lid_model == "stress") else ratio)
 
     n_failed = int(sum(solve_failed))
     if n_failed:
@@ -352,6 +392,10 @@ def replay(
     realized_duty = np.asarray(realized_duty)
     commanded_duty = np.asarray(commanded_duty)
     mean_temp_last_hour_f = float(temps[-3600:].mean())
+    # Coldest reading over the lid event and the recovery that follows it. The
+    # lid detector arms on depth (hold.py:241), so this is what says whether the
+    # window is a lid event at all rather than a shallow dip wearing the label.
+    lid_min_temp_f = float(temps[lid_open_at : lid_open_at + lid_open_for + LID_RECOVERY_WINDOW_S].min())
     if abs(mean_temp_last_hour_f - setpoint_f) > REGIME_TOL_F:
         raise RuntimeError(
             f"seed {seed}: mean temperature over the last simulated hour is "
@@ -442,6 +486,7 @@ def replay(
         "n_lid": int(lid_mask.sum()),
         "warm_start_s": int(warm_start_s),
         "mean_temp_last_hour_f": mean_temp_last_hour_f,
+        "lid_min_temp_f": lid_min_temp_f,
         "realized_duty_mean": realized_duty_mean,
         "commanded_duty_mean": commanded_duty_mean,
         # PRIMARY acceptance quantity: how often, and how far, the net's

@@ -2696,7 +2696,7 @@ EOF
 - Create: `docs/superpowers/experiments/_matrix_after_mpc.json` (generated)
 - Create: `docs/superpowers/experiments/_net_vs_nlp_after.json` (generated)
 
-> **CORRECTION (Task 17, superseding Task 16) — this task's GrillSim matrix conclusion is replaced. Its replay/agreement conclusion stands, unchanged.**
+> **CORRECTION (Task 17, superseding Task 16) — this task's GrillSim matrix conclusion is replaced. Its replay/agreement conclusion is re-measured by Task 18 below, which reaches the same decision.**
 >
 > Task 14's matrix figures (`IAE -6.2% mean, pct_within_5f +2.09, overshoot 9.9 -> 7.5 F, settle ~300 s sooner` on `lid_open_225`) were measured under a `controller_matrix.py` lid model that held the auger off and reported applied duty `0.0` for all 120 s of the pause. Task 16 corrected that *actuator* model to `hold.py`'s: one `AppliedOutput(ratio=0.0)` at the detection instant (`hold.py:238-266`, one-shot via the `target_temp_achieved` interlock), then `cycle.ratio` pinned to `cycle_data["u_min"]` (`hold.py:171-173`) with the auger still cycling at that duty (`hold.py:228` -> `base.py:118-147`, no lid gate). Measured under that correction, the effect of applied-duty feedback was `+0.86%` IAE.
 >
@@ -2717,7 +2717,7 @@ EOF
 >
 > **The disturbance amplitude is chosen, not identified.** `GrillSim`'s `h_lid = 1.5` was calibrated so the excursion crosses `LidOpenThreshold` with margin, not fitted to a real grill, so the *magnitude* of the percentages below is a function of that choice; the direction and the mechanism are not.
 >
-> **What this does and does not establish.** `-5.96%` over 5 seeds, sign consistent on all 5, range `-5.61%`..`-6.36%`: on this scenario the effect is unambiguous, and it replaces both earlier numbers. It is one scenario at one setpoint on one plant at one chosen leak coefficient, so it establishes that applied-duty feedback pays off when commanded and applied duty diverge by several times over a sustained window — not a figure to quote for closed-loop performance generally. The paths this matrix still does not cover (manual override, `u_max` clamping outside a pause, the sub-`u_min` reports Task 15's retraining addressed) remain uncovered. Task 14's Step 4 decision — *"Task 15 runs, the net is not shipped unchanged"* — rested on the **replay** excursion/RMS gate, not on the matrix, and is unaffected by any of this.
+> **What this does and does not establish.** `-5.96%` over 5 seeds, sign consistent on all 5, range `-5.61%`..`-6.36%`: on this scenario the effect is unambiguous, and it replaces both earlier numbers. It is one scenario at one setpoint on one plant at one chosen leak coefficient, so it establishes that applied-duty feedback pays off when commanded and applied duty diverge by several times over a sustained window — not a figure to quote for closed-loop performance generally. The paths this matrix still does not cover (manual override, `u_max` clamping outside a pause, the sub-`u_min` reports Task 15's retraining addressed) remain uncovered. Task 14's Step 4 decision — *"Task 15 runs, the net is not shipped unchanged"* — rested on the **replay** excursion/RMS gate, not on the matrix. That gate was itself measured on a lid the replay never opened; Task 18 below re-measures it.
 >
 > **Artifact state.** Both matrix artifacts were re-captured by Task 17 under the open-lid plant, and they remain a genuine before/after pair on their 30 `mpc` rows:
 >
@@ -2777,6 +2777,26 @@ EOF
 Those key names are the ones the script actually emits — check them against a baseline record before trusting this snippet, since a `KeyError` here is the good outcome and a silently-renamed key is not.
 
 The matrix half of this snippet compares two real arms after Task 17's re-capture, but it separates them on one scenario only. Expect ~1e-10 relative drift on the 25 non-lid rows — floating-point noise from `set_output`'s inverse of `allocate()`, amplified by 3.5 h of integration, not an effect — and `-5.96%` mean IAE on the 5 `lid_open_225` rows. See the Task 17 correction at the top of this task before reading any matrix number below. The replay half is unaffected.
+
+> **CORRECTION (Task 18) — the replay's lid window had the same defect, and the agreement decision survives it.**
+>
+> `net_vs_nlp_replay.py:337` called `plant.step` without `lid_open`, exactly as `controller_matrix.py` did before Task 17. Everything around it was faithful to `hold.py` — the single `AppliedOutput(0.0)` at detection, `u_min` pinning, the auger still cycling — but the chamber never lost heat, and cutting the fan *lowers* `h_amb` (`grill_sim.py:112`), so it warmed across the window. Measured on the replay's own operating point: the deepest dip was **1.5 F**, with the chamber peaking at 228.3 F against the 223.8 F it started from, versus the 33.75 F fall that arms `hold.py:241`. The replay also pinned the actuators for the whole 120 s window rather than `LidOpenPauseTime`. Both are fixed, and `lid_min_temp_f` is now recorded in every row so the excursion is evidence in the artifact rather than a claim in prose.
+>
+> **The gate's primary quantity is unchanged: `excursion_n_lid` is `0/24` on every seed of every arm.** By the reading order this task fixes below — excursion count decides, `rms_all_raw_warm` may size but never overrule it — the retrained net still passes under a lid that opens. The net's closest approach to `Q_min` in the lid window *widened*, from `+1.437` before the fix to `+1.856..+2.002` after, out of a 95-wide box.
+>
+> Applied-duty feedback, compared within `lid_model="faithful"` as the comparability rule requires (3 seeds, sign consistent on all 3):
+>
+> | metric | `estimator_input="command"` | `estimator_input="applied"` | change |
+> |---|---|---|---|
+> | `rms_lid_raw` | 6.70 / 6.70 / 6.72 | 5.27 / 5.28 / 5.34 | **-21%** |
+> | `rms_all_raw_warm` | 0.928 / 0.928 / 0.926 | 0.659 / 0.660 / 0.658 | **-29%** |
+> | `excursion_n_lid` | 0/24 | 0/24 | unchanged |
+>
+> **What the corrected lid does change** is the size of the disagreement it is measuring. On the same arm, `rms_lid_raw` went `1.20 -> 5.27` and `max_lid_raw` `1.62 -> 10.04` once the lid actually opened: the window now visits genuinely cold states, and the net disagrees with the NLP far more there than the old figures suggested. It stays inside `[Q_min, Q_max]` throughout, so this sizes the margin rather than spending it.
+>
+> **Two artifacts could not be re-captured and are pre-Task-18.** `_net_vs_nlp_baseline.json` is a genuine pre-change arm (pre-`_applied_Q`, pre-`set_output`) and must stay one. `_net_vs_nlp_after_faithful.json` was measured against the net as it stood *before* Task 15 retrained it, which this checkout no longer has. Do not compare either against the three arms above. The rows record `lid_model` and `estimator_input` but **no identity for the `.npz`**, so nothing in the files themselves distinguishes a pre- from a post-retrain arm — the provenance lives only in the filenames and in this note.
+>
+> **`sample_mpc.py` still has no thermal lid**, so the net's training episodes contain the actuator pause but never the cold chamber the replay now visits. That is the most plausible source of the `1.20 -> 5.27` growth. It is not blocking — excursions stay at zero — but retraining on a thermally-correct lid is the obvious next lever if that margin ever needs widening. Not done here: it is the most expensive step in either plan.
 
 The gate is **relative**, and the agreement gate binds. Read the quantities in this order:
 
