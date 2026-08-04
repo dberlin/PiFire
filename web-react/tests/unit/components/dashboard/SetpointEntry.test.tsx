@@ -74,6 +74,21 @@ describe("SetpointEntry", () => {
     expect(box().value).toBe("180");
   });
 
+  it("owns an edited value while open and refreshes it only when reopened", async () => {
+    const user = userEvent.setup();
+    const props = { units: "F" as const, onSubmit: rs.fn(), onCancel: rs.fn() };
+    const { rerender } = render(<SetpointEntry {...props} open initial={180} />);
+
+    await user.clear(box());
+    await user.type(box(), "310");
+    rerender(<SetpointEntry {...props} open initial={181} />);
+    expect(box().value).toBe("310");
+
+    rerender(<SetpointEntry {...props} open={false} initial={190} />);
+    rerender(<SetpointEntry {...props} open initial={190} />);
+    expect(box().value).toBe("190");
+  });
+
   it("clamps a typed over-range value once the field is left", async () => {
     const user = userEvent.setup();
     const onSubmit = rs.fn();

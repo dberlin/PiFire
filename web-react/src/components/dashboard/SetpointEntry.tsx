@@ -52,11 +52,10 @@ export function SetpointEntry({
   // even though `temp` has already clamped it to the floor, or the field is
   // untypeable (the reason NumberField clamps on blur rather than on change).
   const [draft, setDraft] = useState<string | null>(null);
-  // Re-seed the slider from `initial` (clamped) whenever open/initial/units or
-  // the bounds change, but only while open — adjusted synchronously during
-  // render (React's recommended pattern for deriving state from prop changes)
-  // rather than in an effect.
-  const seedKey = `${open}|${initial}|${units}|${lo}|${hi}`;
+  // Re-seed from `initial` when the dialog opens or its units/bounds change.
+  // `initial` alone can change on every live probe frame; once open, the modal
+  // owns the edit and must not replace it with those readings.
+  const seedKey = `${open}|${units}|${lo}|${hi}`;
   const [prevSeedKey, setPrevSeedKey] = useState(seedKey);
   if (seedKey !== prevSeedKey) {
     setPrevSeedKey(seedKey);
