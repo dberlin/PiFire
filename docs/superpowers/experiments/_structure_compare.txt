@@ -24,6 +24,13 @@ closest a closed-loop measurement can get to that grill.
 
 SETPOINT TRACKING -- median over seeds
 ------------------------------------------------------------------------------
+READ THE MAK ROWS ON over F / peak F / IAE, NOT ON %<5F OR settle s. That
+chamber's time constant is about 2 hours, so NO arm -- learned, uncalibrated,
+either structure -- reaches the 5 F band inside a 3 h run, and every settle_s
+below reads `never`. %<5F there is a near-degenerate metric measuring how far
+the tail of one overshoot got, not how well the setpoint was held; a rise from
+0.2% to 5% is NOT a quality score. The GrillSim rows have no such caveat.
+
 plant        arm   cook    %<5F   over F   peak F  settle s        IAE
 GrillSim     U5       1   97.27      4.7    329.7       298      36146
 GrillSim     F5       1   97.27      4.7    329.7       298      36146
@@ -65,52 +72,75 @@ MAKGrillSim  F3       3       5.10       5.36     0.26
 
 PROMOTION GATE -- every verdict, both arms
 ------------------------------------------------------------------------------
-plant        arm   seed cook  accepted  reason
-GrillSim     F5       0    1     False  h_amb=1.00001e-09 is outside [0.0001, 1000]
-GrillSim     F5       0    2     False  h_amb=1.00001e-09 is outside [0.0001, 1000]
-GrillSim     F5       0    3     False  h_amb=1.00001e-09 is outside [0.0001, 1000]
-GrillSim     F5       1    1     False  h_amb=1.14321e-09 is outside [0.0001, 1000]
-GrillSim     F5       1    2     False  h_amb=1.14321e-09 is outside [0.0001, 1000]
-GrillSim     F5       1    3     False  h_amb=1.14321e-09 is outside [0.0001, 1000]
-GrillSim     F5       2    1     False  h_amb=1.00052e-09 is outside [0.0001, 1000]
-GrillSim     F5       2    2     False  h_amb=1.00052e-09 is outside [0.0001, 1000]
-GrillSim     F5       2    3     False  h_amb=1.00052e-09 is outside [0.0001, 1000]
-GrillSim     F3       0    1      True  better fit on the same data
-GrillSim     F3       0    2     False  candidate RMSE 0.772 does not beat incumbent 0.794 by the 50% required for a unchanged tau across the operating range and a shorter dead time
-GrillSim     F3       0    3     False  candidate RMSE 0.772 does not beat incumbent 0.794 by the 50% required for a unchanged tau across the operating range and a shorter dead time
-GrillSim     F3       1    1      True  better fit on the same data
-GrillSim     F3       1    2     False  candidate RMSE 0.715 does not beat incumbent 0.744 by the 50% required for a unchanged tau across the operating range and a shorter dead time
-GrillSim     F3       1    3     False  candidate RMSE 0.715 does not beat incumbent 0.744 by the 50% required for a unchanged tau across the operating range and a shorter dead time
-GrillSim     F3       2    1      True  better fit on the same data
-GrillSim     F3       2    2     False  candidate RMSE 0.798 does not beat incumbent 0.825 by the 50% required for a unchanged tau across the operating range and a shorter dead time
-GrillSim     F3       2    3     False  candidate RMSE 0.798 does not beat incumbent 0.825 by the 50% required for a unchanged tau across the operating range and a shorter dead time
-MAKGrillSim  F5       0    1     False  h_amb=1.00743e-09 is outside [0.0001, 1000]
-MAKGrillSim  F5       0    2     False  h_amb=1.00743e-09 is outside [0.0001, 1000]
-MAKGrillSim  F5       0    3     False  h_amb=1.00743e-09 is outside [0.0001, 1000]
-MAKGrillSim  F5       1    1     False  h_amb=1.00163e-09 is outside [0.0001, 1000]
-MAKGrillSim  F5       1    2     False  h_amb=1.00163e-09 is outside [0.0001, 1000]
-MAKGrillSim  F5       1    3     False  h_amb=1.00163e-09 is outside [0.0001, 1000]
-MAKGrillSim  F5       2    1     False  h_amb=1.00158e-09 is outside [0.0001, 1000]
-MAKGrillSim  F5       2    2     False  h_amb=1.00158e-09 is outside [0.0001, 1000]
-MAKGrillSim  F5       2    3     False  h_amb=1.00158e-09 is outside [0.0001, 1000]
-MAKGrillSim  F3       0    1      True  better fit on the same data
-MAKGrillSim  F3       0    2      True  better fit on the same data
-MAKGrillSim  F3       0    3      True  better fit on the same data
-MAKGrillSim  F3       1    1      True  better fit on the same data
-MAKGrillSim  F3       1    2      True  better fit on the same data
-MAKGrillSim  F3       1    3      True  better fit on the same data
-MAKGrillSim  F3       2    1      True  better fit on the same data
-MAKGrillSim  F3       2    2      True  better fit on the same data
-MAKGrillSim  F3       2    3      True  better fit on the same data
+`cand C` and `inc C` are the fit RMSEs the refit itself reported, in degrees
+C, so a refusal can be read against how well the candidate actually described
+the cook. A refused F5 candidate fits fifty times better than the model it was
+refused in favour of -- what the gate rejects is not the fit.
+plant        arm   seed cook  cand C   inc C  accepted  reason
+GrillSim     F5       0    1    0.68   35.04     False  h_amb=1.00001e-09 is outside [0.0001, 1000]
+GrillSim     F5       0    2    0.68   35.04     False  h_amb=1.00001e-09 is outside [0.0001, 1000]
+GrillSim     F5       0    3    0.68   35.04     False  h_amb=1.00001e-09 is outside [0.0001, 1000]
+GrillSim     F5       1    1    0.67   35.07     False  h_amb=1.14321e-09 is outside [0.0001, 1000]
+GrillSim     F5       1    2    0.67   35.07     False  h_amb=1.14321e-09 is outside [0.0001, 1000]
+GrillSim     F5       1    3    0.67   35.07     False  h_amb=1.14321e-09 is outside [0.0001, 1000]
+GrillSim     F5       2    1    0.71   35.03     False  h_amb=1.00052e-09 is outside [0.0001, 1000]
+GrillSim     F5       2    2    0.71   35.03     False  h_amb=1.00052e-09 is outside [0.0001, 1000]
+GrillSim     F5       2    3    0.71   35.03     False  h_amb=1.00052e-09 is outside [0.0001, 1000]
+GrillSim     F3       0    1    0.77   34.97      True  better fit on the same data
+GrillSim     F3       0    2    0.77    0.79     False  candidate RMSE 0.772 does not beat incumbent 0.794 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+GrillSim     F3       0    3    0.77    0.79     False  candidate RMSE 0.772 does not beat incumbent 0.794 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+GrillSim     F3       1    1    0.72   35.01      True  better fit on the same data
+GrillSim     F3       1    2    0.72    0.74     False  candidate RMSE 0.715 does not beat incumbent 0.744 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+GrillSim     F3       1    3    0.72    0.74     False  candidate RMSE 0.715 does not beat incumbent 0.744 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+GrillSim     F3       2    1    0.79   34.97      True  better fit on the same data
+GrillSim     F3       2    2    0.80    0.82     False  candidate RMSE 0.798 does not beat incumbent 0.825 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+GrillSim     F3       2    3    0.80    0.82     False  candidate RMSE 0.798 does not beat incumbent 0.825 by the 50% required for a unchanged tau across the operating range and a shorter dead time
+MAKGrillSim  F5       0    1    1.45  138.78     False  h_amb=1.00743e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       0    2    1.45  138.78     False  h_amb=1.00743e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       0    3    1.45  138.78     False  h_amb=1.00743e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       1    1    1.45  138.88     False  h_amb=1.00163e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       1    2    1.45  138.88     False  h_amb=1.00163e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       1    3    1.45  138.88     False  h_amb=1.00163e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       2    1    1.37  138.87     False  h_amb=1.00158e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       2    2    1.37  138.87     False  h_amb=1.00158e-09 is outside [0.0001, 1000]
+MAKGrillSim  F5       2    3    1.37  138.87     False  h_amb=1.00158e-09 is outside [0.0001, 1000]
+MAKGrillSim  F3       0    1    1.72  139.42      True  better fit on the same data
+MAKGrillSim  F3       0    2    1.47   15.71      True  better fit on the same data
+MAKGrillSim  F3       0    3    1.85    2.96      True  better fit on the same data
+MAKGrillSim  F3       1    1    1.72  139.52      True  better fit on the same data
+MAKGrillSim  F3       1    2    1.49   15.59      True  better fit on the same data
+MAKGrillSim  F3       1    3    1.87    2.96      True  better fit on the same data
+MAKGrillSim  F3       2    1    1.64  139.51      True  better fit on the same data
+MAKGrillSim  F3       2    2    1.57   15.66      True  better fit on the same data
+MAKGrillSim  F3       2    3    1.95    2.97      True  better fit on the same data
 
   F5: 0 accepted of 18 refits (0%)
   F3: 12 accepted of 18 refits (67%)
+
+WHICH GUARD ACTUALLY DECIDED, AND OVER WHAT DENOMINATOR. A12's identifiability
+floor could only ever be reached by the F3 refits: `_IDENTIFIABILITY_FLOOR` and
+`update_mpc.identifiability` DO NOT EXIST at 282ee65c9309, so the other half of
+the refits above never evaluated it. Over the 18 refits that could, it never
+bound -- a 3 h hold from a COLD start is not a flat record, and its ramp
+determines the model. F5's refusals never reach that test either: `evaluate`
+short-circuits on the PROMOTION_BOUNDS check for h_amb first. Those bounds are
+byte-identical at both revisions -- h_amb (1e-4, 1e3) -- so what separates the
+arms here is the fitted value, not a change to the gate.
 
 HORIZON -- configured floor vs what was built, and what the gate demanded
 ------------------------------------------------------------------------------
 `brake s` is longest_braking_distance of the model the run was BUILT with,
 which is what effective_n_horizon raises the horizon to cover. It is blank
 for the two-lump arms: their coast is not this estimator's to compute.
+
+ONLY THE U3/F3 ROWS TEST ANYTHING HERE. `built` is read from the controller's
+`_built_n_horizon`, which does not exist at 282ee65c9309, so on every U5/F5 row
+it falls back to the configured value and the two columns agree by
+construction. The claim that the derived horizon never bound is therefore over
+the 24 U3/F3 runs, not all 48. On those, the configured floor was the binding
+term every time: the longest coast any model implied is the largest `brake s`
+below, against the 600 s that 24 steps of 25 s t_step already cover, and
+neither the 2400 s nor the 96-step cap was approached.
 plant        arm   cook  configured   built   brake s  gate needed
 GrillSim     U5       1          24      24                      -
 GrillSim     F5       1          24      24                      -

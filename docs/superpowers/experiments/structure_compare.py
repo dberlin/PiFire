@@ -306,10 +306,7 @@ def _render(shards):
                     v = sel[0]["refit"]
                     accepted.setdefault(arm, []).append(bool(v["accepted"]))
                     cand, inc = _fit_rmses(v)
-                    w(
-                        f"{plant:<13}{arm:<5}{seed:>5}{cook:>5}{cand:>8}{inc:>8}"
-                        f"{str(v['accepted']):>10}  {v['reason']}"
-                    )
+                    w(f"{plant:<13}{arm:<5}{seed:>5}{cook:>5}{cand:>8}{inc:>8}{str(v['accepted']):>10}  {v['reason']}")
     w("")
     for arm, flags in accepted.items():
         w(f"  {arm}: {sum(flags)} accepted of {len(flags)} refits ({100.0 * sum(flags) / len(flags):.0f}%)")
