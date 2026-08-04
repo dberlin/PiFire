@@ -54,12 +54,23 @@ WHAT IS MEASURED.
   R6 HORIZON ARITHMETIC. The chamber time constant against the 600 s the
      controller plans over, and against the lead time R5 actually needed.
 
+  R7 THE SHIPPED MPC AT A FEASIBLE OPERATING POINT. R1-R5 leave one inference
+     open: that the MPC, not merely this study's crude controller, holds 325 F
+     once the setpoint is inside the reachable band. That inference is measured
+     here rather than assumed. The shipped MPC is run through A9a's own
+     `controller_matrix.run_scenario`, on `MAKGrillSim`, over A9a's `steady_325`
+     and A9a's seeds, at two `u_min` values -- and at ONE `HoldCycleTime`, so
+     `u_min` is the single variable between the rows. (A9a moved both at once:
+     it ran u_min=0.15 WITH HoldCycleTime=20, so its published numbers cannot
+     attribute the difference and are not the comparison used here.)
+
 WHAT IS DELIBERATELY NOT MEASURED.
 
-  * The MPC is NOT re-run. A9a's MAK numbers are quoted from
-    `_structure_compare.txt` and this script's R5 arm is run through the same
-    metric definitions so the columns are comparable; re-running the optimiser
-    would cost the whole budget and could not change R1's arithmetic.
+  * R7 runs the UNCALIBRATED MPC only -- the shipped defaults, no refit, no
+    adopted model. It is A9a's U3 arm, not its best F3 arm, because the F3 arm
+    is the product of three successive cooks and a promotion gate. So R7
+    answers "does the shipped controller reach and hold the setpoint once it is
+    feasible", not "how well does a calibrated MPC track".
   * No parameter of the controller is changed and nothing under `controller/`
     is touched. Where a defect is found it is reported, not fixed.
   * Fan authority on `MAKGrillSim` is INHERITED, not fitted: the MAK
@@ -105,6 +116,16 @@ R5_KP = (0.0005, 0.001, 0.002, 0.004)  # duty per F of error
 R5_LEAD = (0.0, 100.0, 200.0, 400.0, 800.0)  # s of derivative lead
 R5_TI = (900.0, 3600.0)  # s, integral time for the `pi` arm
 R5_UMIN = (0.15, 0.10)
+
+# R7: both rows at the SHIPPED cycle time, so u_min is the only variable.
+R7_UMIN = (0.15, 0.10)
+R7_CYCLE_S = 25
+R7_WORKERS = 4  # another agent may be running the test suite; do not saturate
+
+# R8: HoldCycleTime is not fixed -- it defaults to 25 s and may be raised. The
+# user's stated ceiling is 60 s, and the range they report holding is 180-600 F.
+R8_CYCLES = (20, 25, 30, 40, 60)
+R8_SETPOINTS = (180.0, 200.0, 225.0, 325.0, 450.0, 520.0, 600.0)
 
 PLANTS = {"GrillSim": GrillSim, "MAKGrillSim": MAKGrillSim}
 
@@ -302,6 +323,42 @@ def run_simple(plant_cls, *, arm, Kp, lead_s, Ti, u_min, fan, seed, setpoint_f=S
 
 
 # ---------------------------------------------------------------------------
+# R7 -- the shipped MPC, through A9a's own harness.
+#
+# `run_scenario` reads its clamp from the harness module's CYCLE_DATA global, so
+# the config under test is installed there before the workers fork. Nothing in
+# controller/ is touched: only the harness's copy of the grill's cycle settings
+# moves, and it moves TOWARD what common/defaults.py ships.
+# ---------------------------------------------------------------------------
+
+
+def _mpc_init(cycle_data):
+    from docs.superpowers.experiments import controller_matrix as cm
+
+    cm.CYCLE_DATA.update(cycle_data)
+
+
+def _mpc_run(seed):
+    import contextlib
+    import io
+
+    from docs.superpowers.experiments import controller_matrix as cm
+
+    # mpc.py prints an uncalibrated-model banner on construction; it belongs in
+    # the record but not in the middle of a table.
+    with contextlib.redirect_stdout(io.StringIO()):
+        return cm.run_scenario("mpc", cm.SCENARIOS["steady_325"], seed, plant="MAKGrillSim")
+
+
+def run_mpc_batch(u_min, cycle_s, seeds=SEEDS):
+    from multiprocessing import Pool
+
+    cycle = {"HoldCycleTime": cycle_s, "u_min": u_min, "u_max": HARNESS_CYCLE["u_max"]}
+    with Pool(min(R7_WORKERS, len(seeds)), initializer=_mpc_init, initargs=(cycle,)) as pool:
+        return pool.map(_mpc_run, list(seeds))
+
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 
@@ -326,7 +383,12 @@ def main():
         f"{len(R5_TI)} Ti, u_min in {R5_UMIN}, seeds {SEEDS}"
     )
     w("  R6  horizon arithmetic")
-    w("  NOT run: the MPC itself (A9a's numbers are quoted), lid events, startup.")
+    w(f"  R7  the SHIPPED uncalibrated MPC on MAKGrillSim, u_min in {R7_UMIN} at a")
+    w(f"      fixed HoldCycleTime={R7_CYCLE_S}, seeds {SEEDS}, {R7_WORKERS} workers")
+    w(f"  R8  reachable band vs HoldCycleTime in {R8_CYCLES}, and validation of the")
+    w(f"      plant against the {R8_SETPOINTS[0]:.0f}-{R8_SETPOINTS[-1]:.0f} F range the user reports holding")
+    w("  NOT run: a CALIBRATED MPC (R7 is A9a's U3 arm, not its F3 arm), lid")
+    w("  events, setpoint steps, startup.")
     w()
     w("THE TWO u_min VALUES IN PLAY. common/defaults.py ships u_min=0.10 with a")
     w("25 s HoldCycleTime. The A9a harness (controller_matrix.py:53) runs")
@@ -527,6 +589,103 @@ def main():
     w()
     w("The best lead time R5 found is in the `lead` column above; read it against")
     w("the plant deadtime (GrillSim 20 s, MAKGrillSim 100 s) and against 600 s.")
+    w()
+
+    # ---------------- R7 ----------------
+    w("R7 -- THE SHIPPED MPC AT A FEASIBLE OPERATING POINT")
+    w("-" * 78)
+    w("A9a's own harness, A9a's scenario and seeds, MAKGrillSim, the UNCALIBRATED")
+    w("shipped MPC. HoldCycleTime is held at the shipped 25 s in BOTH rows, so")
+    w("u_min is the only variable between them. Medians over seeds.")
+    w()
+    w(
+        f"{'u_min':>7}{'floor F':>9}{'%<5F':>8}{'over F':>8}{'peak F':>8}"
+        f"{'settle':>8}{'final F':>9}{'duty':>8}{'IAE':>10}"
+    )
+    probe = MAKGrillSim(seed=0)
+    for u_min in R7_UMIN:
+        rows = run_mpc_batch(u_min, R7_CYCLE_S)
+        med = {}
+        for k in ("pct_within_5f", "overshoot_f", "final_temp_f", "mean_duty", "iae"):
+            med[k] = statistics.median([r[k] for r in rows])
+        settles = [r["settle_s"] for r in rows if r["settle_s"] is not None]
+        settle = f"{statistics.median(settles):.0f}" if len(settles) > len(rows) // 2 else "never"
+        floor = c_to_f(steady_T_c(probe, u_min, 1.0))
+        w(
+            f"{u_min:>7.2f}{floor:>9.1f}{med['pct_within_5f']:>8.2f}{med['overshoot_f']:>8.1f}"
+            f"{SETPOINT_F + med['overshoot_f']:>8.1f}{settle:>8}{med['final_temp_f']:>9.1f}"
+            f"{med['mean_duty']:>8.4f}{med['iae']:>10.0f}"
+        )
+    w()
+    w("`floor F` is R1's minimum-firing-rate equilibrium at fan 1.0, repeated here")
+    w("so the row can be read against what the actuator allows. `final F` is where")
+    w("the 3 h run ended; on an infeasible row it cannot approach the setpoint.")
+    w("The uncalibrated-model banner mpc.py prints on construction is suppressed")
+    w("inside the workers so it does not land in the table; it fires on every run.")
+    w()
+
+    # ---------------- R8 ----------------
+    w("R8 -- DUTY RESOLUTION: THE REACHABLE BAND AGAINST HoldCycleTime")
+    w("-" * 78)
+    w("A duty-cycled auger cannot ask for an arbitrarily small duty. The harness")
+    w("asserts `cycle_time*ratio >= 1 and cycle_time*(1-ratio) >= 1`")
+    w("(controller_matrix.py:169), so the smallest duty it can express is")
+    w("1/HoldCycleTime. THAT BOUND IS A HARNESS ARTEFACT, NOT A PHYSICAL ONE:")
+    w("`_auger_toggle_tick`'s own docstring says production evaluates the toggle")
+    w("at ~20 Hz onto an auger that integrates fuel continuously, so the shipped")
+    w("resolution is far finer than 1 s. The real floor is whatever the auger")
+    w("mechanism and pellet delivery impose, and NOBODY HAS MEASURED IT. The")
+    w("table below is therefore the band this SIMULATION can express, and it is")
+    w("an upper bound on the restriction a real grill suffers.")
+    w()
+    w("The binding minimum duty is max(u_min setting, 1/HoldCycleTime); the rows")
+    w("below set u_min to the resolution floor, so they isolate resolution.")
+    w()
+    w(f"{'plant':<12}{'cycle s':>8}{'min duty':>10}{'min F f0':>10}{'min F f1':>10}{'max F f0':>10}{'max F f1':>10}")
+    for name, cls in PLANTS.items():
+        probe = cls(seed=0)
+        for cyc in R8_CYCLES:
+            u_res = 1.0 / cyc
+            w(
+                f"{name:<12}{cyc:>8d}{u_res:>10.4f}"
+                f"{c_to_f(steady_T_c(probe, u_res, 0.0)):>10.1f}"
+                f"{c_to_f(steady_T_c(probe, u_res, 1.0)):>10.1f}"
+                f"{c_to_f(steady_T_c(probe, HARNESS_CYCLE['u_max'], 0.0)):>10.1f}"
+                f"{c_to_f(steady_T_c(probe, HARNESS_CYCLE['u_max'], 1.0)):>10.1f}"
+            )
+    w()
+    w("Duty MAKGrillSim needs across the range the user reports this grill holds:")
+    w(f"{'setpoint F':>11}{'fan 0.0':>10}{'fan 1.0':>10}   smallest cycle s that expresses it")
+    probe = MAKGrillSim(seed=0)
+    for sp in R8_SETPOINTS:
+        u0 = required_duty(probe, f_to_c(sp), 0.0)
+        u1 = required_duty(probe, f_to_c(sp), 1.0)
+        # The setpoint is holdable when SOME fan setting needs at least the
+        # resolution floor; more fan raises the duty needed, so fan 1.0 is the
+        # easiest case at the bottom of the range.
+        ok = [c for c in R8_CYCLES if 1.0 / c <= max(u0, u1) <= HARNESS_CYCLE["u_max"]]
+        note = f"{min(ok)} s" if ok else f"none <= {max(R8_CYCLES)} s"
+        w(f"{sp:>11.0f}{u0:>10.4f}{u1:>10.4f}   {note}")
+    w()
+    w("More fan RAISES the duty a low setpoint needs, so at the bottom of the")
+    w("range the fan is what makes a setpoint expressible. That is the opposite")
+    w("of a brake: it is operating range.")
+    w()
+    w("VALIDATION AGAINST A KNOWN REAL DATUM. The user reports this physical")
+    w(f"grill is controllable from {R8_SETPOINTS[0]:.0f} F to {R8_SETPOINTS[-1]:.0f} F, and the logged cook")
+    w("reached 520 F. A plant model that cannot express that range would be")
+    w("miscalibrated, the way H=140 was before it was corrected to 420.")
+    lo, hi = R8_SETPOINTS[0], R8_SETPOINTS[-1]
+    u_lo = max(required_duty(probe, f_to_c(lo), 0.0), required_duty(probe, f_to_c(lo), 1.0))
+    u_hi = max(required_duty(probe, f_to_c(hi), 0.0), required_duty(probe, f_to_c(hi), 1.0))
+    lo_ok = [c for c in R8_CYCLES if 1.0 / c <= u_lo]
+    w(
+        f"  {lo:.0f} F needs duty {u_lo:.4f} (fan 1.0) -- expressible from "
+        f"{min(lo_ok) if lo_ok else '>' + str(max(R8_CYCLES))} s cycle upward"
+    )
+    w(f"  {hi:.0f} F needs duty {u_hi:.4f} (fan 1.0) -- against u_max {HARNESS_CYCLE['u_max']:.2f}")
+    verdict = "REPRODUCES" if lo_ok and u_hi <= HARNESS_CYCLE["u_max"] else "CANNOT REPRODUCE"
+    w(f"  verdict: MAKGrillSim {verdict} the user's stated {lo:.0f}-{hi:.0f} F range.")
     w()
     w("WALL CLOCK")
     w("-" * 78)

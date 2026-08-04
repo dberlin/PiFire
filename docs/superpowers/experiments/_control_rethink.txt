@@ -9,7 +9,12 @@ BUDGET AND RUN LIST (fixed before anything ran)
   R4  time to fall back into the 5 F band from A9a's observed +42.4 F
   R5  crude FF/PI + lead controller, 4x5 grid, 2 Ti, u_min in (0.15, 0.1), seeds (0, 1, 2)
   R6  horizon arithmetic
-  NOT run: the MPC itself (A9a's numbers are quoted), lid events, startup.
+  R7  the SHIPPED uncalibrated MPC on MAKGrillSim, u_min in (0.15, 0.1) at a
+      fixed HoldCycleTime=25, seeds (0, 1, 2), 4 workers
+  R8  reachable band vs HoldCycleTime in (20, 25, 30, 40, 60), and validation of the
+      plant against the 180-600 F range the user reports holding
+  NOT run: a CALIBRATED MPC (R7 is A9a's U3 arm, not its F3 arm), lid
+  events, setpoint steps, startup.
 
 THE TWO u_min VALUES IN PLAY. common/defaults.py ships u_min=0.10 with a
 25 s HoldCycleTime. The A9a harness (controller_matrix.py:53) runs
@@ -152,6 +157,72 @@ MAKGrillSim   1.00     5707     95.1     0.105
 The best lead time R5 found is in the `lead` column above; read it against
 the plant deadtime (GrillSim 20 s, MAKGrillSim 100 s) and against 600 s.
 
+R7 -- THE SHIPPED MPC AT A FEASIBLE OPERATING POINT
+------------------------------------------------------------------------------
+A9a's own harness, A9a's scenario and seeds, MAKGrillSim, the UNCALIBRATED
+shipped MPC. HoldCycleTime is held at the shipped 25 s in BOTH rows, so
+u_min is the only variable between them. Medians over seeds.
+
+  u_min  floor F    %<5F  over F  peak F  settle  final F    duty       IAE
+   0.15    368.9    0.21    82.4   407.4   never    369.1  0.2028    645147
+   0.10    283.8   63.87    79.2   404.2    3959    324.9  0.1710    225618
+
+`floor F` is R1's minimum-firing-rate equilibrium at fan 1.0, repeated here
+so the row can be read against what the actuator allows. `final F` is where
+the 3 h run ended; on an infeasible row it cannot approach the setpoint.
+The uncalibrated-model banner mpc.py prints on construction is suppressed
+inside the workers so it does not land in the table; it fires on every run.
+
+R8 -- DUTY RESOLUTION: THE REACHABLE BAND AGAINST HoldCycleTime
+------------------------------------------------------------------------------
+A duty-cycled auger cannot ask for an arbitrarily small duty. The harness
+asserts `cycle_time*ratio >= 1 and cycle_time*(1-ratio) >= 1`
+(controller_matrix.py:169), so the smallest duty it can express is
+1/HoldCycleTime. THAT BOUND IS A HARNESS ARTEFACT, NOT A PHYSICAL ONE:
+`_auger_toggle_tick`'s own docstring says production evaluates the toggle
+at ~20 Hz onto an auger that integrates fuel continuously, so the shipped
+resolution is far finer than 1 s. The real floor is whatever the auger
+mechanism and pellet delivery impose, and NOBODY HAS MEASURED IT. The
+table below is therefore the band this SIMULATION can express, and it is
+an upper bound on the restriction a real grill suffers.
+
+The binding minimum duty is max(u_min setting, 1/HoldCycleTime); the rows
+below set u_min to the resolution floor, so they isolate resolution.
+
+plant        cycle s  min duty  min F f0  min F f1  max F f0  max F f1
+GrillSim          20    0.0500     137.4     116.2     536.7     657.2
+GrillSim          25    0.0400     123.3     105.8     536.7     657.2
+GrillSim          30    0.0333     113.6      98.7     536.7     657.2
+GrillSim          40    0.0250     101.3      89.8     536.7     657.2
+GrillSim          60    0.0167      88.7      80.9     536.7     657.2
+MAKGrillSim       20    0.0500     224.1     184.4     813.6     992.4
+MAKGrillSim       25    0.0400     196.4     162.6     813.6     992.4
+MAKGrillSim       30    0.0333     177.1     147.6     813.6     992.4
+MAKGrillSim       40    0.0250     151.9     128.5     813.6     992.4
+MAKGrillSim       60    0.0167     125.3     108.8     813.6     992.4
+
+Duty MAKGrillSim needs across the range the user reports this grill holds:
+ setpoint F   fan 0.0   fan 1.0   smallest cycle s that expresses it
+        180    0.0343    0.0479   25 s
+        200    0.0413    0.0573   20 s
+        225    0.0503    0.0695   20 s
+        325    0.0920    0.1233   20 s
+        450    0.1588    0.2053   20 s
+        520    0.2053    0.2603   20 s
+        600    0.2682    0.3329   20 s
+
+More fan RAISES the duty a low setpoint needs, so at the bottom of the
+range the fan is what makes a setpoint expressible. That is the opposite
+of a brake: it is operating range.
+
+VALIDATION AGAINST A KNOWN REAL DATUM. The user reports this physical
+grill is controllable from 180 F to 600 F, and the logged cook
+reached 520 F. A plant model that cannot express that range would be
+miscalibrated, the way H=140 was before it was corrected to 420.
+  180 F needs duty 0.0479 (fan 1.0) -- expressible from 25 s cycle upward
+  600 F needs duty 0.3329 (fan 1.0) -- against u_max 0.90
+  verdict: MAKGrillSim REPRODUCES the user's stated 180-600 F range.
+
 WALL CLOCK
 ------------------------------------------------------------------------------
-  total 132.9 s
+  total 420.3 s
