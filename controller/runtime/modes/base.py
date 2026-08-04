@@ -511,11 +511,20 @@ class ControlMode:
                 status_data["outpins"][item] = current[item]
             except KeyError:
                 continue
-        status_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
-        if self.settings["platform"].get("dc_fan"):
-            status_data["fan_duty"] = int(control.get("duty_cycle", 0) or 0)
+        if mode == Mode.MANUAL:
+            status_data["cycle_ratio"] = 1.0 if current.get("auger") else 0.0
+            if not current.get("fan"):
+                status_data["fan_duty"] = 0
+            elif self.settings["platform"].get("dc_fan"):
+                status_data["fan_duty"] = int(current.get("pwm", 0) or 0)
+            else:
+                status_data["fan_duty"] = 100
         else:
-            status_data["fan_duty"] = 100 if status_data["outpins"].get("fan") else 0
+            status_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
+            if self.settings["platform"].get("dc_fan"):
+                status_data["fan_duty"] = int(control.get("duty_cycle", 0) or 0)
+            else:
+                status_data["fan_duty"] = 100 if current.get("fan") else 0
         # ---- mode-specific status fields ----
         status_data.update(self.status_fragment())
         return status_data

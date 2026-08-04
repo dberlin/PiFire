@@ -16,6 +16,9 @@ Hold, Monitor, Manual) via the harness's capped-probe injection. No scenario
 here can loop indefinitely.
 """
 
+from common.common import WriteKind
+from controller.runtime.store import InMemoryStore
+
 from tests.characterization.harness import run_mode
 from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.fakes.probes import FakeProbes
@@ -224,6 +227,175 @@ def test_monitor_idles_powered_off_and_bounded_by_probe_cap():
     assert ("power_on", ()) not in result.grill_calls
     assert result.final_control["mode"] == "Monitor"
     assert result.final_control["updated"] is True  # ended via harness's probe-cap injection
+
+
+class _InjectManualPwm:
+    def __init__(self, probes, store, pwm):
+        self._probes = probes
+        self._store = store
+        self._pwm = pwm
+        self._reads = 0
+
+    def read_probes(self):
+        self._reads += 1
+        if self._reads == 2:
+            self._store.write_control(
+                {"manual": {"change": "pwm", "pwm": self._pwm}},
+                WriteKind.MERGE,
+                origin="test-manual-pwm",
+            )
+        return self._probes.read_probes()
+
+    def __getattr__(self, name):
+        return getattr(self._probes, name)
+
+
+def test_manual_auger_on_publishes_full_duty():
+    settings = base_settings()
+    control_data = base_control(mode="Manual")
+    control_data["manual"].update(change="auger", output=True)
+
+    result = run_mode(
+        "Manual",
+        settings=settings,
+        control_data=control_data,
+        pellet_db=base_pellet_db(),
+        probes=FakeProbes().script([120]),
+        probe_cap=15,
+    )
+
+    assert result.final_status["outpins"]["auger"] is True
+    assert result.final_status["cycle_ratio"] == 1.0
+
+
+def test_manual_dc_fan_on_publishes_actual_pwm_not_automatic_duty():
+    settings = base_settings()
+    settings["platform"]["dc_fan"] = True
+    control_data = base_control(mode="Manual")
+    control_data["duty_cycle"] = 0
+    control_data["manual"].update(change="fan", output=True)
+
+    result = run_mode(
+        "Manual",
+        settings=settings,
+        control_data=control_data,
+        pellet_db=base_pellet_db(),
+        probes=FakeProbes().script([120]),
+        grill=FakeGrillPlatform(dc_fan=True),
+        probe_cap=15,
+    )
+
+    assert result.final_status["outpins"]["fan"] is True
+    assert result.final_status["outpins"]["pwm"] == 100
+    assert result.final_status["fan_duty"] == 100
+
+
+def test_manual_dc_fan_publishes_selected_pwm():
+    settings = base_settings()
+    settings["platform"]["dc_fan"] = True
+    control_data = base_control(mode="Manual")
+    control_data["duty_cycle"] = 0
+    control_data["manual"].update(change="fan", output=True)
+    pellet_db = base_pellet_db()
+    store = InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
+    probes = _InjectManualPwm(FakeProbes().script([120]), store, 55)
+
+    result = run_mode(
+        "Manual",
+        settings=settings,
+        control_data=control_data,
+        pellet_db=pellet_db,
+        probes=probes,
+        grill=FakeGrillPlatform(dc_fan=True),
+        probe_cap=15,
+        store=store,
+    )
+
+    assert result.final_status["outpins"]["fan"] is True
+    assert result.final_status["outpins"]["pwm"] == 55
+    assert result.final_status["fan_duty"] == 55
+
+
+def test_manual_relay_fan_publishes_binary_duty():
+    settings = base_settings()
+    on_control = base_control(mode="Manual")
+    on_control["manual"].update(change="fan", output=True)
+
+    on_result = run_mode(
+        "Manual",
+        settings=settings,
+        control_data=on_control,
+        pellet_db=base_pellet_db(),
+        probes=FakeProbes().script([120]),
+        probe_cap=15,
+    )
+    off_result = run_mode(
+        "Manual",
+        settings=base_settings(),
+        control_data=base_control(mode="Manual"),
+        pellet_db=base_pellet_db(),
+        probes=FakeProbes().script([120]),
+        probe_cap=15,
+    )
+
+    assert on_result.final_status["outpins"]["fan"] is True
+    assert on_result.final_status["fan_duty"] == 100
+    assert off_result.final_status["outpins"]["fan"] is False
+    assert off_result.final_status["fan_duty"] == 0
+
+
+def test_manual_outputs_off_publish_zero_duties():
+    settings = base_settings()
+    settings["platform"]["dc_fan"] = True
+
+    result = run_mode(
+        "Manual",
+        settings=settings,
+        control_data=base_control(mode="Manual"),
+        pellet_db=base_pellet_db(),
+        probes=FakeProbes().script([120]),
+        grill=FakeGrillPlatform(dc_fan=True),
+        probe_cap=15,
+    )
+
+    assert result.final_status["outpins"]["auger"] is False
+    assert result.final_status["outpins"]["fan"] is False
+    assert result.final_status["cycle_ratio"] == 0.0
+    assert result.final_status["fan_duty"] == 0
+
+
+def test_smoke_keeps_automatic_fan_duty_semantics():
+    settings = base_settings()
+    settings["platform"]["dc_fan"] = True
+    control_data = base_control(mode="Smoke")
+    control_data["duty_cycle"] = 37
+
+    result = run_mode(
+        "Smoke",
+        settings=settings,
+        control_data=control_data,
+        pellet_db=base_pellet_db(),
+        probes=FakeProbes().script([200]),
+        grill=FakeGrillPlatform(dc_fan=True),
+        probe_cap=15,
+    )
+
+    assert result.final_status["fan_duty"] == 37
+
+
+def test_relay_modes_keep_binary_fan_duty_semantics():
+    for mode, temp, expected in (("Smoke", 200, 100), ("Monitor", 120, 0)):
+        result = run_mode(
+            mode,
+            settings=base_settings(),
+            control_data=base_control(mode=mode),
+            pellet_db=base_pellet_db(),
+            probes=FakeProbes().script([temp]),
+            probe_cap=15,
+        )
+
+        assert result.final_status["outpins"]["fan"] is (expected == 100)
+        assert result.final_status["fan_duty"] == expected
 
 
 def test_manual_override_fan_on_applies_and_records_grill_call():
