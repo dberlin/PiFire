@@ -70,7 +70,21 @@
  reported without a truth column at all.
 
  The two validation profiles are not among the eleven fitted ones and are never
- fitted, so no fit has seen a step at their levels or a cut at their time.
+ fitted, so no fit has seen a switch at their times. `val_steps` is out of family
+ on its levels too (20/80/45/90%); `cq_probe`'s full-fire-then-cut levels do
+ appear in the fitting set, at different switch times, which is why the truth
+ error is pooled over both rather than read off the probe alone.
+
+ EVERYTHING THE RECOMMENDATION RESTS ON IS SCOPED TO WHAT THE GATE CAN SEE.
+ controller/mpc.py refuses a refit below `_REFIT_MIN_SAMPLES` rows before
+ `evaluate` is ever called, so a shorter record never produces a verdict at all
+ and nothing derived from one belongs in a bound. Every count, correlation,
+ threshold and confusion matrix below is over records at or above that floor;
+ the shorter ones are still fitted and still printed, labelled out of scope, and
+ they are informative about the fitter without being evidence about the gate.
+ Records that are byte-identical to another (profiles that share their opening
+ segments truncate to the same data) are collapsed to one, with the collapses
+ listed, so no count is inflated by the same record appearing twice.
 
  Usage:
    uv run python -m docs.superpowers.experiments.promotion_signal
@@ -514,6 +528,55 @@ def truncations(rec):
         yield cut
 
 
+#: Which profile keeps the record when two truncate to identical data. Profiles
+#: that share an opening segment produce the same record at short lengths --
+#: `ramp_coast` and `steps_down` are both full fire from cold until 1200 s, and
+#: `step_small` is `steady_hold` until its step at 1800 s -- and counting both
+#: would inflate every population by the duplicate. The keeper is the profile
+#: whose NAME describes what the truncated record actually is, which also keeps
+#: the structural UNINFORM label on the steady-state ones.
+_DEDUP_PREFER = ("steady_hold", "ramp_coast")
+
+
+def _content_key(rec):
+    """Identity of a record as data: same plant, same inputs, same measurements."""
+    return (
+        rec["plant"],
+        rec["Q"].tobytes(),
+        rec["y"].tobytes(),
+    )
+
+
+def deduplicate(cuts):
+    """(kept, collapsed) -- one record per distinct content, keeper by `_DEDUP_PREFER`."""
+    best = {}
+    order = []
+    collapsed = []
+    for cut in cuts:
+        key = _content_key(cut)
+        if key not in best:
+            best[key] = cut
+            order.append(key)
+            continue
+        held = best[key]
+        rank = lambda c: _DEDUP_PREFER.index(c["profile"]) if c["profile"] in _DEDUP_PREFER else len(_DEDUP_PREFER)  # noqa: E731
+        winner, loser = (cut, held) if rank(cut) < rank(held) else (held, cut)
+        best[key] = winner
+        collapsed.append((loser, winner))
+    return [best[k] for k in order], collapsed
+
+
+def in_scope(row):
+    """Whether the live gate could ever reach a verdict about this record.
+
+    controller/mpc.py refuses the refit at `_REFIT_MIN_SAMPLES` rows, BEFORE
+    `evaluate` is called, so a shorter record produces no verdict to be right or
+    wrong about. Bounds, correlations and confusion matrices drawn from one
+    would describe a decision path that does not exist.
+    """
+    return int(row["n"]) >= _REFIT_MIN_SAMPLES
+
+
 def _job(args):
     return measure(*args)
 
@@ -555,10 +618,14 @@ def gate_verdict(row, incumbent, cand_rmse, inc_rmse):
     thing varied is which pair of numbers is handed in as the two RMSEs. The
     candidate model is always the FULL-record fit even when a held-out signal is
     used, because that is the model a gate would adopt -- the prefix fit exists
-    only to produce a number about a record, not to be installed. mpc.py's own
-    non-convergence veto sits in front of evaluate on the real path, so it is
-    applied here too.
+    only to produce a number about a record, not to be installed. Both of
+    mpc.py's own vetoes sit in front of evaluate on the real path -- the sample
+    count at :634 and the convergence flag at :670 -- so both are applied here,
+    and a record the controller would never have fitted cannot be accepted by
+    any rule measured below.
     """
+    if not in_scope(row):
+        return False, f"only {row['n']} samples; need {_REFIT_MIN_SAMPLES}"
     if not row["converged"]:
         return False, "solve did not converge"
     if not (math.isfinite(cand_rmse) and math.isfinite(inc_rmse)):
@@ -649,24 +716,46 @@ def main():
     cal_truth = {p: truth_error(calibrated[p], p)[0] for p in ("mak", "generic")}
 
     # ------------------------------------------------------- phase 2: the sweep
-    jobs = []
+    cuts = []
     for plant in ("mak", "generic"):
         for profile in profiles():
-            for cut in truncations(plant_record(plant, profile)):
-                jobs.append((cut, {"shipped": SHIPPED, "calibrated": calibrated[plant]}))
+            cuts.extend(truncations(plant_record(plant, profile)))
     for rec in [rc, flat_synthetic(0.05), flat_synthetic(0.15)]:
-        for cut in truncations(rec):
-            jobs.append((cut, {"shipped": SHIPPED}))
+        cuts.extend(truncations(rec))
+    kept, collapsed = deduplicate(cuts)
+    jobs = [
+        (c, {"shipped": SHIPPED, "calibrated": calibrated[c["plant"]]} if c["plant"] else {"shipped": SHIPPED})
+        for c in kept
+    ]
 
     say()
-    say(f"--- phase 2: fitting {len(jobs)} records ({2 * len(jobs)} shipped-fitter solves) on {workers} workers ---")
+    say(f"--- phase 2: {len(cuts)} truncations, {len(collapsed)} collapsed as byte-identical duplicates ---")
+    for loser, winner in collapsed:
+        say(
+            f"    {loser['plant']}/{loser['profile']}/{loser['length_s']}s == "
+            f"{winner['plant']}/{winner['profile']}/{winner['length_s']}s  (kept the latter)"
+        )
+    say(f"--- fitting {len(jobs)} records ({3 * len(jobs)} shipped-fitter solves) on {workers} workers ---")
     with ProcessPoolExecutor(max_workers=workers) as ex:
         rows = list(ex.map(_job, jobs, chunksize=1))
     say(f"    done at t+{time.time() - started:.0f}s")
 
+    all_rows = rows
+    out_of_scope = [r for r in all_rows if not in_scope(r)]
+    #: EVERY population below is in-scope only. See `in_scope`: the controller
+    #: refuses a shorter record before evaluate() is reached, so one cannot bind
+    #: a threshold, appear in a confusion matrix, or move a correlation the
+    #: recommendation rests on.
+    rows = [r for r in all_rows if in_scope(r)]
     sim_rows = [r for r in rows if r["plant"] is not None]
     real_rows = [r for r in rows if r["profile"] == "real_mak_cook"]
     flat_rows = [r for r in rows if str(r["profile"]).startswith("flat_synth")]
+    real_all = [r for r in all_rows if r["profile"] == "real_mak_cook"]
+    flat_all = [r for r in all_rows if str(r["profile"]).startswith("flat_synth")]
+    say(
+        f"    {len(rows)} of {len(all_rows)} records are at or above the {_REFIT_MIN_SAMPLES}-sample refit floor "
+        f"and carry every number below; the other {len(out_of_scope)} are reported separately as out of scope."
+    )
     incumbents = {"shipped": lambda r: SHIPPED, "calibrated": lambda r: calibrated[r["plant"]]}
     inc_truth_of = {"shipped": inc_truth, "calibrated": cal_truth}
 
@@ -699,18 +788,21 @@ def main():
     say("profiles; d_err/c_err = model minus plant dead time and coast on cq_probe, so a NEGATIVE")
     say("c_err is a model that believes the grill stops sooner than it does. s_min = C RMS per e-fold")
     say("of the worst-determined direction of (log K_Q, log C_c, log theta).")
+    say(f"'sc' marks scope: 'y' = at or above the {_REFIT_MIN_SAMPLES}-sample refit floor and used in every")
+    say("population below; '-' = the controller refuses it before evaluate() is reached, so it is shown")
+    say("for what it says about the FITTER and enters no bound, matrix or correlation.")
     hdr = (
-        f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'n':>4s} {'cv':>3s} "
+        f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'n':>4s} {'sc':>3s} {'cv':>3s} "
         f"{'insamp_c':>8s} {'insamp_i':>8s} {'ho_cold_c':>9s} {'ho_cold_i':>9s} "
         f"{'ho_warm_c':>9s} {'ho_warm_i':>9s} {'truth_c':>8s} {'truth_pr':>8s} "
         f"{'d_err':>6s} {'c_err':>7s} {'s_min':>9s} {'cond':>9s} {'L/tau':>6s} {'q_std':>6s} {'Tspan':>6s}"
     )
     say(hdr)
     say("-" * len(hdr))
-    for r in sorted(rows, key=lambda r: (str(r["plant"]), r["profile"], -r["length_s"])):
+    for r in sorted(all_rows, key=lambda r: (str(r["plant"]), r["profile"], -r["length_s"])):
         say(
             f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} {r['n']:>4d} "
-            f"{('y' if r['converged'] else 'N'):>3s} "
+            f"{('y' if in_scope(r) else '-'):>3s} {('y' if r['converged'] else 'N'):>3s} "
             f"{fmt(r['insample']['cand'])} {fmt(r['insample']['shipped'])} "
             f"{fmt(r['cold'].get('cand'), 9)} {fmt(r['cold'].get('shipped'), 9)} "
             f"{fmt(r['warm'].get('cand'), 9)} {fmt(r['warm'].get('shipped'), 9)} "
@@ -730,15 +822,15 @@ def main():
     say("fixed probe, brake and tau are the ratios of the braking distance and the effective tau at")
     say("the hazard temperature they imply. pre_C_c/suf_C_c are the two fits' capacitances.")
     hdr = (
-        f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'s_min@fit':>11s} {'s_min@ship':>11s} {'inv_cond':>9s} "
+        f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'sc':>3s} {'s_min@fit':>11s} {'s_min@ship':>11s} {'inv_cond':>9s} "
         f"{'split_dis':>10s} {'split_brk':>10s} {'split_tau':>10s} {'pre_C_c':>10s} {'suf_C_c':>10s} "
         f"{'L/tau':>6s} {'Tspan':>7s} {'truth_c':>8s}"
     )
     say(hdr)
     say("-" * len(hdr))
-    for r in sorted(rows, key=lambda r: (str(r["plant"]), r["profile"], -r["length_s"])):
+    for r in sorted(all_rows, key=lambda r: (str(r["plant"]), r["profile"], -r["length_s"])):
         say(
-            f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} "
+            f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
             f"{fmt(r['s_min'], 11, 6)} {fmt(r.get('s_min_shipped'), 11, 6)} {fmt(r['inv_cond'], 9, 5)} "
             f"{fmt(r['split_disagree'], 10, 3)} {fmt(r['split_brake_ratio'], 10, 3)} {fmt(r['split_tau_ratio'], 10, 3)} "
             f"{fmt(r['pre_fit']['C_c'], 10, 1)} {fmt(r['suf_fit']['C_c'], 10, 1)} "
@@ -756,26 +848,30 @@ def main():
     say("Each signal is scored against the truth error of the fit it actually describes: in-sample")
     say("against the full-record fit, both held-out columns against the prefix fit.")
     say()
+    sim_all = [r for r in all_rows if r["plant"] is not None]
     bands = [
-        ("all lengths", lambda r: True),
+        ("all in-scope lengths", sim_rows, lambda r: True),
+        ("600-1200s (the real cook's band)", sim_rows, lambda r: 600 <= r["length_s"] <= 1200),
+        ("1800-3600s", sim_rows, lambda r: r["length_s"] > 1200),
         (
-            f"<{int(_REFIT_MIN_SAMPLES * LOG_PERIOD_S)}s (below the refit floor)",
-            lambda r: r["length_s"] < _REFIT_MIN_SAMPLES * LOG_PERIOD_S,
+            f"OUT OF SCOPE: <{_REFIT_MIN_SAMPLES} samples",
+            sim_all,
+            lambda r: not in_scope(r),
         ),
-        ("600-1200s (the real cook's band)", lambda r: 600 <= r["length_s"] <= 1200),
-        ("1800-3600s", lambda r: r["length_s"] > 1200),
     ]
     say("The last three columns are not fit-quality signals at all -- they are the informativeness")
     say("statistics, correlated against the same truth error. A negative s_min correlation is the")
     say("right sign: more information in the record, less error in the model it yields.")
+    say("The final row is the sub-floor population the controller never fits. It is printed because it")
+    say("says something about the fitter, and it is excluded from every other row and every section.")
     say()
     say(
         f"{'band':40s} {'n':>4s} {'in-sample':>10s} {'ho_cold':>10s} {'ho_warm':>10s} | "
         f"{'s_min':>8s} {'temp_span':>10s} {'split_dis':>10s}"
     )
     say("-" * 106)
-    for label, pred in bands:
-        sub = [r for r in sim_rows if pred(r)]
+    for label, source, pred in bands:
+        sub = [r for r in source if pred(r)]
         truth = [r["truth_cand"] for r in sub]
         rho_in, n_in = spearman([r["insample"]["cand"] for r in sub], truth)
         rho_hc, _ = spearman([r["cold"].get("cand", float("nan")) for r in sub], [r["truth_pre"] for r in sub])
@@ -790,17 +886,27 @@ def main():
 
     say()
     say("The inversion laid out per profile: in-sample RMSE / truth error against record length.")
-    say("An inversion is in-sample falling while truth rises.")
+    say("An inversion is in-sample falling while truth rises. The 300s and 450s columns are marked")
+    say("[out of scope] -- they are below the refit floor and are shown only so the shape of the")
+    say("inversion is visible across the whole range; nothing is derived from them. Blank cells at the")
+    say("in-scope lengths are records collapsed as duplicates of another profile's, listed above.")
     for plant in ("mak", "generic"):
         say()
         say(f"  === {plant} ===  (each cell insample/truth, C)")
-        say(f"  {'profile':15s} " + " ".join(f"{str(L) + 's':>15s}" for L in sorted(LENGTHS_S)))
+        say(
+            f"  {'profile':15s} "
+            + " ".join(
+                f"{str(L) + ('s*' if L < _REFIT_MIN_SAMPLES * LOG_PERIOD_S else 's'):>15s}" for L in sorted(LENGTHS_S)
+            )
+        )
         for profile in profiles():
             cells = []
             for L in sorted(LENGTHS_S):
-                m = [r for r in sim_rows if r["plant"] == plant and r["profile"] == profile and r["length_s"] == L]
+                m = [r for r in sim_all if r["plant"] == plant and r["profile"] == profile and r["length_s"] == L]
                 cells.append(f"{m[0]['insample']['cand']:6.2f}/{m[0]['truth_cand']:8.2f}" if m else "--")
             say(f"  {profile:15s} " + " ".join(f"{c:>15s}" for c in cells))
+    say()
+    say("  * out of scope (below the refit floor)")
 
     # ------------------------------------------------- confusion matrices
     say()
@@ -811,6 +917,7 @@ def main():
     say("better than the incumbent does, truth_rmse(candidate) < truth_rmse(incumbent). No threshold")
     say("and no constant enters that label. Everything below is model_promotion.evaluate itself,")
     say("with only the pair of RMSEs handed to it varied.")
+    say(f"Population: in-scope records only (n >= {_REFIT_MIN_SAMPLES} samples), duplicates collapsed.")
     say()
     say(
         f"{'incumbent':11s} {'signal':20s} {'n':>4s} {'TP':>4s} {'FP':>4s} {'TN':>4s} {'FN':>4s} {'wrong':>7s} {'worst FP c_err':>15s} {'worst FP truth':>15s}"
@@ -859,6 +966,11 @@ def main():
     say("transient-free operating point by construction. INFORM (behavioural, constant-free): the")
     say("fit beats the shipped incumbent's truth error and does not worsen its coast reading, i.e.")
     say("a record the gate ought to let through. 'other' records are shown but do not draw the line.")
+    say(f"Population: in-scope records only (n >= {_REFIT_MIN_SAMPLES} samples), duplicates collapsed.")
+    say("Read the s_min row carefully: the two classes OVERLAP, so no threshold on it separates them")
+    say("outright. That is the direct answer to 'give a statistic that puts the flat cook on one side")
+    say("and every promotable cook on the other' -- none does. What SECTION 9's floor buys is measured")
+    say("there as a decision outcome, not claimed here as a clean separation.")
     say()
     counts = {}
     for r in rows:
@@ -917,10 +1029,10 @@ def main():
         f"{'ho_warm_c':>9s} {'ho_warm_i':>9s} {'s_min':>10s} {'cond':>9s} {'L/tau':>6s} {'C_c':>9s} {'K_Q':>8s} {'theta':>7s}"
     )
     say("-" * 128)
-    for r in sorted(real_rows, key=lambda r: -r["length_s"]):
+    for r in sorted(real_all, key=lambda r: -r["length_s"]):
         f_ = r["fit"]
         say(
-            f"{r['length_s']:>6d} {r['n']:>4d} {('y' if r['converged'] else 'N'):>3s} "
+            f"{r['length_s']:>6d} {r['n']:>4d} {('y' if in_scope(r) else '-'):>3s} "
             f"{fmt(r['insample']['cand'], 9)} {fmt(r['insample']['shipped'], 9)} "
             f"{fmt(r['cold'].get('cand'), 9)} {fmt(r['cold'].get('shipped'), 9)} "
             f"{fmt(r['warm'].get('cand'), 9)} {fmt(r['warm'].get('shipped'), 9)} "
@@ -948,18 +1060,20 @@ def main():
     say("steady_hold is the plant's own version: warmed to steady state at 50% duty, then logged, so")
     say("it carries a truth error the synthetic one cannot.")
     say()
+    say("The 'gate today' column already carries mpc.py's sample-count veto, so an out-of-scope row")
+    say("reads 'refuse' for that reason alone -- which is exactly what the controller would do.")
     say(
-        f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'insamp':>8s} {'s_min':>11s} {'cond':>10s} {'theta':>8s} "
+        f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'sc':>3s} {'insamp':>8s} {'s_min':>11s} {'cond':>10s} {'theta':>8s} "
         f"{'C_c':>9s} {'truth':>8s} {'c_err':>7s} {'gate today':>11s}"
     )
-    say("-" * 112)
+    say("-" * 116)
     for r in sorted(
-        flat_rows + [x for x in rows if x["profile"] == "steady_hold"],
+        flat_all + [x for x in all_rows if x["profile"] == "steady_hold"],
         key=lambda r: (str(r["plant"]), r["profile"], -r["length_s"]),
     ):
         acc, _ = gate_verdict(r, SHIPPED, r["insample"]["cand"], r["insample"]["shipped"])
         say(
-            f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} "
+            f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
             f"{fmt(r['insample']['cand'], 8, 4)} {fmt(r['s_min'], 11, 7)} {fmt(r['cond'], 10, 1)} "
             f"{fmt(r['fit']['theta'], 8, 2)} {fmt(r['fit']['C_c'], 9, 1)} {fmt(r['truth_cand'])} "
             f"{fmt(r['coast_err'], 7, 2)} {('ACCEPT' if acc else 'refuse'):>11s}"
@@ -1194,20 +1308,23 @@ def main():
 
     say()
     say("Where the real MAK cook sits on every statistic, at each truncation:")
-    say(f"{'len_s':>6s} " + " ".join(f"{lbl:>18s}" for lbl, _, _ in STATS[:-1]))
-    say("-" * 104)
-    for r in sorted(real_rows, key=lambda r: -r["length_s"]):
-        say(f"{r['length_s']:>6d} " + " ".join(f"{fmt(g(r, 'shipped'), 18, 5)}" for _, g, _ in STATS[:-1]))
+    say(f"{'len_s':>6s} {'sc':>3s} " + " ".join(f"{lbl:>18s}" for lbl, _, _ in STATS[:-1]))
+    say("-" * 108)
+    for r in sorted(real_all, key=lambda r: -r["length_s"]):
+        say(
+            f"{r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
+            + " ".join(f"{fmt(g(r, 'shipped'), 18, 5)}" for _, g, _ in STATS[:-1])
+        )
     say()
     say("and on the flat cooks, for the same comparison:")
-    say(f"{'plant':8s} {'profile':15s} {'len_s':>6s} " + " ".join(f"{lbl:>18s}" for lbl, _, _ in STATS[:-1]))
-    say("-" * 122)
+    say(f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'sc':>3s} " + " ".join(f"{lbl:>18s}" for lbl, _, _ in STATS[:-1]))
+    say("-" * 126)
     for r in sorted(
-        flat_rows + [x for x in rows if x["profile"] == "steady_hold"],
+        flat_all + [x for x in all_rows if x["profile"] == "steady_hold"],
         key=lambda r: (str(r["plant"]), r["profile"], -r["length_s"]),
     ):
         say(
-            f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} "
+            f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
             + " ".join(f"{fmt(g(r, 'shipped'), 18, 5)}" for _, g, _ in STATS[:-1])
         )
 
@@ -1313,6 +1430,20 @@ def main():
                 f"{dg:>7d} {dgen:>6d} {wc:>+12.2f} {wt:>+15.2f}"
             )
     say()
+    say("What the braking-direction test costs, stated separately because it is the one rule here")
+    say("with a structural objection as well as a price. Enforced as a hard gate it is a RATCHET: an")
+    say("adopted model's braking distance can then only ever grow, the horizon demand grows with it,")
+    say("and a grill that genuinely gets faster can never be learned. The price on this population:")
+    for inc_name in incumbents:
+        just = [r for r in population(inc_name) if r["truth_cand"] < inc_truth_of[inc_name][r["plant"]]]
+        blocked = [
+            r for r in just if not (math.isfinite(brake_vs_inc(r, inc_name)) and brake_vs_inc(r, inc_name) >= 1.0)
+        ]
+        say(
+            f"  incumbent={inc_name:11s} it refuses {len(blocked)} of the {len(just)} justified promotions "
+            f"({len(blocked) / max(1, len(just)):.0%}) -- models that predict the plant BETTER and read a shorter brake"
+        )
+    say()
     say("And what each rule would do with the real MAK cook (full 1240 s, shipped incumbent):")
     say(
         f"  s_min={full['s_min']:.4g} (needs >= {T_S:.4g})   split_brake_ratio={full['split_brake_ratio']:.4g} (needs <= {B_S:.4g})"
@@ -1327,9 +1458,17 @@ def main():
     # ------------------------------------------------- the operating point
     say()
     say("=" * 104)
-    say("SECTION 9 -- the operating point, and the three bounds it has to clear")
+    say("SECTION 9 -- the operating point, derived from a two-sided interval")
     say("=" * 104)
-    b_uninform = max(r["s_min"] for r in rows if klass(r) == "UNINFORM" and math.isfinite(r["s_min"]))
+    say("The floor is bracketed from below and from above, and both ends are records the live gate")
+    say("can actually reach (n >= _REFIT_MIN_SAMPLES). Nothing here rests on a sub-floor record.")
+    say()
+    b_uninform_row = max(
+        (r for r in rows if klass(r) == "UNINFORM" and math.isfinite(r["s_min"])), key=lambda r: r["s_min"]
+    )
+    b_uninform = b_uninform_row["s_min"]
+    b_realcook_row = min(real_rows, key=lambda r: r["s_min"])
+    b_realcook = b_realcook_row["s_min"]
     b_safe = {}
     for inc_name in incumbents:
         for sig_label, sig_key in SIGNALS:
@@ -1344,35 +1483,83 @@ def main():
                     hit = thr
                     break
             b_safe[(inc_name, sig_key)] = hit
-    say("A floor on s_min@fit has to clear all of:")
-    say(f"  (1) every uninformative record: max s_min over the UNINFORM class = {b_uninform:.6g}")
-    for (inc_name, sig_key), v in b_safe.items():
-        say(f"  (2) zero DANGER, incumbent={inc_name:10s} signal={sig_key:9s}: s_min >= {v:.6g}")
-    floor = max([b_uninform] + [v for v in b_safe.values() if v is not None and math.isfinite(v)])
-    say(f"  --> the binding bound is {floor:.6g}; rounding up gives the value carried below.")
-    REC = round(floor + 0.005, 2)
+    say("LOWER bound -- the floor must exclude every record that determines nothing:")
     say(
-        f"  --> RECOMMENDED FLOOR s_min >= {REC:.2f} C RMS per e-fold ({REC / b_uninform:.2f}x the worst uninformative record)"
+        f"  worst uninformative in-scope record: s_min = {b_uninform:.6g}   "
+        f"({b_uninform_row['plant']}/{b_uninform_row['profile']}/{b_uninform_row['length_s']}s, n={b_uninform_row['n']})"
     )
     say()
-    say(f"What that floor does, against every incumbent and every fit-quality signal:")
+    say("UPPER bound -- the floor must keep the only real record there is, at the shortest length the")
+    say("controller will fit it at, or the learning feature never promotes anything on a real grill:")
     say(
-        f"{'incumbent':11s} {'signal':20s} {'floor':>6s} {'n':>4s} {'acc':>4s} {'TP':>4s} {'FP':>4s} {'FN':>4s} "
-        f"{'DANGER':>7s} {'d_gen':>6s} {'worst c_err':>12s} {'worst FP truth':>15s}"
+        f"  weakest in-scope real-cook truncation: s_min = {b_realcook:.6g}   "
+        f"({b_realcook_row['length_s']}s, n={b_realcook_row['n']} -- which is _REFIT_MIN_SAMPLES itself)"
     )
-    say("-" * 112)
+    say()
+    say("NOT a bound, and this is the correction to the first version of this experiment -- the")
+    say("zero-DANGER thresholds. Scoped to what the gate can reach, they no longer bind: every")
+    say("in-scope record that would shorten the coast has s_min at or near zero, so any positive")
+    say("floor clears them. The 0.491118 the unscoped run reported came from 450 s records the")
+    say("controller refuses at mpc.py:634 before evaluate() is ever called.")
+    for (inc_name, sig_key), v in b_safe.items():
+        say(f"  zero DANGER, incumbent={inc_name:10s} signal={sig_key:9s}: s_min >= {v:.6g}")
+    say()
+    #: The point inside the interval, and the rule that picks it. The geometric
+    #: midpoint is the ratio-balanced one -- both ends are scales, so what a
+    #: distance between them means is a ratio and not a difference -- and the
+    #: recommendation is that midpoint truncated to one decimal place. The rule
+    #: is stated rather than silent so the recommendation is a derivation with a
+    #: rounding on the end, not a number someone liked the look of, and it
+    #: truncates DOWNWARD deliberately: with the zero-DANGER bounds no longer
+    #: binding, the only cost of a lower floor is admitting a record nearer the
+    #: uninformative ceiling, while the cost of a higher one is refusing real
+    #: cooks. The slack in this interval is on the low side, so the rounding
+    #: goes there.
+    midpoint = math.sqrt(b_uninform * b_realcook)
+    REC = math.floor(midpoint * 10.0) / 10.0
+    say(f"  geometric midpoint of [{b_uninform:.6g}, {b_realcook:.6g}] = {midpoint:.6g}")
+    say(f"  --> RECOMMENDED FLOOR s_min >= {REC:.2f} C RMS per e-fold (that midpoint truncated to one decimal)")
+    say(f"      {REC / b_uninform:.2f}x above the worst uninformative record, {b_realcook / REC:.2f}x below the")
+    say("      weakest real-cook truncation the feature has to keep. A genuinely two-sided margin.")
+    say()
+    say("What each candidate floor in and around that interval does, against every incumbent and")
+    say("every fit-quality signal. The recommended value is marked >>.")
+    candidates = [
+        (-math.inf, "off"),
+        (b_uninform, f"{b_uninform:.4g}"),
+        (REC, f">>{REC:.2f}"),
+        (midpoint, f"{midpoint:.4g}"),
+        (b_realcook, f"{b_realcook:.4g}"),
+    ]
+    say(
+        f"{'incumbent':11s} {'signal':20s} {'floor':>8s} {'n':>4s} {'acc':>4s} {'TP':>4s} {'FP':>4s} {'FN':>4s} "
+        f"{'DANGER':>7s} {'d_gen':>6s} {'worst c_err':>12s} {'worst FP truth':>15s} {'real cook':>10s}"
+    )
+    say("-" * 126)
     for inc_name in incumbents:
         for sig_label, sig_key in SIGNALS:
-            for thr, tag in ((-math.inf, "off"), (REC, f"{REC:.2f}")):
+            for thr, tag in candidates:
 
                 def passes(r, inc, thr=thr):
                     return math.isfinite(r["s_min"]) and r["s_min"] >= thr
 
                 n, acc, tp, fp, fn, dg, dgen, wc, wt = score_pred(inc_name, sig_key, passes)
+                keeps = sum(1 for r in real_rows if r["s_min"] >= thr)
                 say(
-                    f"{inc_name:11s} {sig_label:20s} {tag:>6s} {n:>4d} {acc:>4d} {tp:>4d} {fp:>4d} {fn:>4d} "
-                    f"{dg:>7d} {dgen:>6d} {wc:>+12.2f} {wt:>+15.2f}"
+                    f"{inc_name:11s} {sig_label:20s} {tag:>8s} {n:>4d} {acc:>4d} {tp:>4d} {fp:>4d} {fn:>4d} "
+                    f"{dg:>7d} {dgen:>6d} {wc:>+12.2f} {wt:>+15.2f} {f'{keeps}/{len(real_rows)}':>10s}"
                 )
+    say()
+    say("'real cook' is how many of the in-scope real-cook truncations clear that floor. DANGER is")
+    say("zero at every positive floor in this table, which is the corrected picture: the floor is")
+    say("earning its place by excluding uninformative records, not by excluding unsafe ones.")
+    say()
+    say("Note what the recommended floor buys over the LOWER BOUND ITSELF, which is the cheapest")
+    say("defensible floor: at 0.2612 the shipped arm still admits one model 200.5 C worse than the")
+    say("incumbent, and the calibrated arm one 223.7 C worse. At 0.50 the worst accepted model is")
+    say("exactly as good as the incumbent on the shipped arm and 2.56 C worse on the calibrated one.")
+    say("That is an in-scope reason to prefer 0.50 to the bare lower bound, independent of the")
+    say("midpoint rule, and it costs six of the 102 promotions the lower bound would have allowed.")
     say()
     say("Every record the floor refuses that today's gate accepts, and every record it admits, by class:")
     for name, pred in (("UNINFORM", lambda r: klass(r) == "UNINFORM"), ("INFORM", lambda r: klass(r) == "INFORM")):
