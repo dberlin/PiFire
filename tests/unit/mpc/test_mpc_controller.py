@@ -623,7 +623,15 @@ def test_the_running_warning_and_the_promotion_policy_size_the_horizon_alike(cap
         _warn_about_model(cfg)
         warned = "horizon" in capsys.readouterr().out.lower()
         demanded = evaluate(
-            cfg, None, candidate_rmse=2.0, incumbent_rmse=None, n_horizon=n_horizon, t_step=25.0
+            cfg,
+            None,
+            candidate_rmse=2.0,
+            incumbent_rmse=None,
+            # Clear of the floor, so what varies across this loop is the
+            # horizon and nothing else.
+            identifiability=2.0,
+            n_horizon=n_horizon,
+            t_step=25.0,
         ).horizon_needed
         assert warned is (demanded is not None), f"n_horizon={n_horizon} disagreed"
         assert warned is (n_horizon * 25.0 < brake), f"n_horizon={n_horizon} did not follow the braking distance"

@@ -71,6 +71,50 @@ _RMSE_MARGIN_FASTER = 0.50
 #: any growth at all already takes the narrow one.
 _TAU_DEADBAND = 0.10
 
+#: How much a cook must determine the model before its fit may drive a grill.
+#:
+#: The unit is degrees C RMS per e-fold of the least-constrained direction in
+#: (log K_Q, log C_c, log theta) -- controller/update_mpc.identifiability, which
+#: is what supplies the value judged against this. A record scoring below this
+#: leaves some combination of the three free to move by a factor of e without
+#: the prediction moving, so what comes out of the solve is the starting point
+#: rather than the grill. Every other test in this file asks whether a model is
+#: good; this one asks whether the cook said anything, and no error statistic
+#: can answer that -- an in-sample RMSE reaches 0.00 on a record that determines
+#: nothing at all.
+#:
+#: The interval this sits inside is bounded at both ends by real records, each
+#: measured by docs/superpowers/experiments/promotion_signal.py with its output
+#: committed as _promotion_signal.txt beside it (Section 9):
+#:
+#:     lower  0.261203   generic/steady_hold/3600s, n=721 -- the strongest
+#:                       record that still determines nothing, so the floor must
+#:                       sit above it
+#:     upper  1.098188   the real MAK cook truncated to 600 s, n=120 -- the
+#:                       weakest record that must still be KEPT, so the floor
+#:                       must sit below it
+#:
+#: Both ends are scales, so the distance between them is a ratio and the point
+#: between them is their geometric midpoint, sqrt(0.261203 * 1.098188) =
+#: 0.535584, truncated DOWNWARD to one decimal. That leaves 1.91x of margin
+#: above the lower bound and 2.20x below the upper, and the truncation goes down
+#: because the two costs are not symmetric: too low admits a record near the
+#: uninformative ceiling, while too high refuses real cooks and the learning
+#: this gate exists to allow never happens at all.
+#:
+#: Not the bare lower bound, which the interval alone would permit. At 0.261203
+#: the shipped model still adopts a candidate 200.5 C worse than the incumbent
+#: on the truth probe, and a calibrated one 223.7 C worse; at 0.50 the worst
+#: accepted candidate is no worse than the incumbent on the shipped arm and
+#: 2.56 C worse on the calibrated arm. Six of 102 acceptances buy that.
+#:
+#: Both bounds are drawn only from records of at least controller/mpc.py's
+#: `_REFIT_MIN_SAMPLES`, because mpc.py:634 refuses a shorter refit before
+#: `evaluate` is reached -- a bound set by a record this gate cannot be shown is
+#: not a bound on anything, and the shorter records are the extremes that would
+#: otherwise set one.
+_IDENTIFIABILITY_FLOOR = 0.50
+
 #: Incumbent fields the shrink comparison needs. A partial incumbent missing
 #: one of these cannot be judged, so it is refused rather than raising.
 _INCUMBENT_KEYS = ("C_c", "h_amb", "theta", "n_delay", "sigma")
@@ -428,8 +472,15 @@ def _range_label(labels):
     return "longer" if all(label == "longer" for label in labels) else "unchanged"
 
 
-def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon, t_step):
-    """Whether `candidate` may replace `incumbent`, and what horizon it needs."""
+def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, identifiability, n_horizon, t_step):
+    """Whether `candidate` may replace `incumbent`, and what horizon it needs.
+
+    `identifiability` is how well the record this candidate was fitted to pins
+    the model down, in the units `_IDENTIFIABILITY_FLOOR` documents --
+    controller/update_mpc.identifiability computes it. It is required rather
+    than optional: a caller that has not measured it has not shown its cook
+    determined anything, and a default would let that caller through silently.
+    """
     for key, (lo, hi) in PROMOTION_BOUNDS.items():
         value = _finite(candidate.get(key))
         if value is None:
@@ -447,6 +498,22 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, n_horizon,
 
     if _finite(candidate_rmse) is None or float(candidate_rmse) <= 0:
         return Verdict(False, "candidate RMSE must be a positive, finite number")
+
+    # Ahead of everything below, and ahead of the no-incumbent shortcut, because
+    # a cook that did not determine the model has produced no candidate worth
+    # comparing to anything -- including nothing. The first fit on an
+    # undetermined record is the exact case this closes, so it must not reach
+    # the "no incumbent" acceptance. A value that could not be computed is
+    # refused for the same reason a low one is: neither shows the record
+    # determined anything. The verdict carries no horizon demand, deliberately
+    # -- a model that is not adopted asks nothing of the grill.
+    ident = _finite(identifiability)
+    if ident is None or ident < _IDENTIFIABILITY_FLOOR:
+        shown = "unmeasurable" if ident is None else f"{ident:.3g} C per e-fold"
+        return Verdict(
+            False,
+            f"the cook does not determine the model (identifiability {shown}, floor {_IDENTIFIABILITY_FLOOR:.3g})",
+        )
 
     if _finite(t_step) is None or float(t_step) <= 0:
         return Verdict(False, "t_step must be a positive, finite number")

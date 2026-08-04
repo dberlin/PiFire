@@ -35,6 +35,14 @@ REAL_MAK_FIT = dict(
     sigma=1.4e-9,
 )
 
+#: An identifiability well clear of the floor, so every test below is about the
+#: rule it names rather than about whether its record determined anything. A
+#: literal for the same reason the temperatures below are: a value read from the
+#: module would move with any mutation of the floor and stop pinning it. What
+#: the floor itself is worth is measured against real fitted records in
+#: tests/unit/mpc/test_mpc_refit.py, which has a solver to hand.
+DETERMINED = 2.0
+
 #: Literals, not the module's own reference temperatures: 550 F is `maxtemp`
 #: and 75 F is `minstartuptemp`, both from common/settings_schema.py. Importing
 #: the module's constants here would move every expectation below along with
@@ -44,7 +52,13 @@ _FLOOR_C = (75.0 - 32.0) * 5.0 / 9.0
 
 
 def _ev(candidate, incumbent=INCUMBENT, cand_rmse=2.0, inc_rmse=5.0, **kw):
-    return evaluate(candidate, incumbent, candidate_rmse=cand_rmse, incumbent_rmse=inc_rmse, **{**HORIZON, **kw})
+    return evaluate(
+        candidate,
+        incumbent,
+        candidate_rmse=cand_rmse,
+        incumbent_rmse=inc_rmse,
+        **{"identifiability": DETERMINED, **HORIZON, **kw},
+    )
 
 
 def _crossing_at(incumbent, t_cross_c, ratio):
@@ -265,7 +279,14 @@ def test_repeated_sigma_for_h_amb_trades_cannot_walk_the_cool_end_tau_down():
             h_amb=incumbent["h_amb"] + 4.0 * step * (_HAZARD_C + 273.15) ** 3,
         )
         candidate_rmse = incumbent_rmse * 0.97  # clears the 2% bar decisively, not the 50% bar
-        v = evaluate(candidate, incumbent, candidate_rmse=candidate_rmse, incumbent_rmse=incumbent_rmse, **HORIZON)
+        v = evaluate(
+            candidate,
+            incumbent,
+            candidate_rmse=candidate_rmse,
+            incumbent_rmse=incumbent_rmse,
+            identifiability=DETERMINED,
+            **HORIZON,
+        )
         if v.accepted:
             incumbent, incumbent_rmse = candidate, candidate_rmse
     assert incumbent["sigma"] == GOOD["sigma"]
@@ -316,7 +337,14 @@ def test_repeated_small_sigma_increases_cannot_walk_true_tau_down_without_cleari
     for _ in range(15):
         candidate = dict(incumbent, sigma=incumbent["sigma"] + 1e-10)  # small step toward the 2e-9 cap
         candidate_rmse = incumbent_rmse * 0.97  # clears the 2% bar decisively, not the 50% bar
-        v = evaluate(candidate, incumbent, candidate_rmse=candidate_rmse, incumbent_rmse=incumbent_rmse, **HORIZON)
+        v = evaluate(
+            candidate,
+            incumbent,
+            candidate_rmse=candidate_rmse,
+            incumbent_rmse=incumbent_rmse,
+            identifiability=DETERMINED,
+            **HORIZON,
+        )
         if v.accepted:
             incumbent, incumbent_rmse = candidate, candidate_rmse
     assert incumbent["sigma"] == 0.0
@@ -334,7 +362,14 @@ def test_repeated_joint_sigma_and_tau_cuts_cannot_walk_true_tau_down_without_cle
             sigma=incumbent["sigma"] + 5e-11,  # small step, well under the 2e-9 cap
         )
         candidate_rmse = incumbent_rmse * 0.97  # clears the 2% bar decisively, not the 50% bar
-        v = evaluate(candidate, incumbent, candidate_rmse=candidate_rmse, incumbent_rmse=incumbent_rmse, **HORIZON)
+        v = evaluate(
+            candidate,
+            incumbent,
+            candidate_rmse=candidate_rmse,
+            incumbent_rmse=incumbent_rmse,
+            identifiability=DETERMINED,
+            **HORIZON,
+        )
         if v.accepted:
             incumbent, incumbent_rmse = candidate, candidate_rmse
     assert incumbent["C_c"] == GOOD["C_c"]
@@ -388,7 +423,14 @@ def test_repeated_small_tau_cuts_cannot_walk_tau_down_without_clearing_the_wide_
     for _ in range(15):
         candidate = dict(incumbent, C_c=incumbent["C_c"] * 0.91)  # ~9% cut, just under the old deadband
         candidate_rmse = incumbent_rmse * 0.97  # clears the 2% bar decisively, not the 50% bar
-        v = evaluate(candidate, incumbent, candidate_rmse=candidate_rmse, incumbent_rmse=incumbent_rmse, **HORIZON)
+        v = evaluate(
+            candidate,
+            incumbent,
+            candidate_rmse=candidate_rmse,
+            incumbent_rmse=incumbent_rmse,
+            identifiability=DETERMINED,
+            **HORIZON,
+        )
         if v.accepted:
             incumbent, incumbent_rmse = candidate, candidate_rmse
     assert incumbent["C_c"] == GOOD["C_c"]

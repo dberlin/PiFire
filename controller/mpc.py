@@ -628,7 +628,7 @@ class Controller(ControllerBase):
         it reaches the grill through the next cook's restore.
         """
         from controller.model_promotion import evaluate
-        from controller.update_mpc import fit_params, fit_quality
+        from controller.update_mpc import fit_params, fit_quality, identifiability
 
         rows = list(history if history is not None else self._history)
         if len(rows) < _REFIT_MIN_SAMPLES:
@@ -657,6 +657,11 @@ class Controller(ControllerBase):
             incumbent = {k: float(self.cfg[k]) for k in self._MODEL_PARAM_KEYS}
             cand_rmse, _ = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
             inc_rmse, _ = fit_quality(t, temp, Q, incumbent, T_amb=T_amb)
+            # How much this cook actually determined, measured at the point the
+            # solve landed on. Six more simulations against the solve's own
+            # hundreds, and the only thing asked here that the fit residual
+            # cannot say -- a flat cook fits itself perfectly and pins nothing.
+            ident = identifiability(t, Q, fitted, T_amb=T_amb, T0=float(temp[0]))
         except (ValueError, FloatingPointError) as e:
             return _Verdict(False, f"fit failed: {e}")
 
@@ -679,6 +684,7 @@ class Controller(ControllerBase):
             incumbent,
             candidate_rmse=cand_rmse,
             incumbent_rmse=inc_rmse,
+            identifiability=ident,
             n_horizon=int(self.cfg["n_horizon"]),
             t_step=float(self.cfg["t_step"]),
         )

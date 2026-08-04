@@ -610,6 +610,11 @@ def spearman(a, b):
     return float(np.corrcoef(ra, rb)[0, 1]), len(a)
 
 
+#: An identifiability far above anything a record produces, so `gate_verdict`
+#: keeps measuring the gate WITHOUT a floor whatever floor is shipped.
+_NO_FLOOR = 1e9
+
+
 def gate_verdict(row, incumbent, cand_rmse, inc_rmse):
     """model_promotion.evaluate on one row, with the fit-quality signal swapped.
 
@@ -635,6 +640,12 @@ def gate_verdict(row, incumbent, cand_rmse, inc_rmse):
         incumbent,
         candidate_rmse=cand_rmse,
         incumbent_rmse=inc_rmse,
+        # Deliberately clears any floor. Every rule this experiment measures
+        # applies its own s_min threshold OUTSIDE this function -- Section 9
+        # sweeps the floor as its own axis, and its `off` row is what this
+        # function has to be able to produce -- so the floor now inside
+        # evaluate() would double-count and erase the arm being compared to.
+        identifiability=_NO_FLOOR,
         n_horizon=N_HORIZON,
         t_step=T_STEP,
     )

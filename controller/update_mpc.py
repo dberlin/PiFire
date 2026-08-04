@@ -222,6 +222,64 @@ def fit_quality(t, temp, Q, fitted, *, T_amb):
     return float(np.sqrt(np.mean(err**2))), float(np.max(np.abs(err)))
 
 
+# One part in a thousand of a log, for the central differences below. The solve
+# itself works in log space, so this probes the parameters in the space they are
+# identified in; small enough that the model is linear across the step and large
+# enough to stay well clear of the simulator's own resolution.
+_IDENT_STEP = 1e-3
+
+
+def identifiability(t, Q, fitted, *, T_amb, T0):
+    """How well this record pins down the free parameters, in C RMS per e-fold.
+
+    The smallest singular value of the prediction's Jacobian with respect to
+    `_FREE` in log space, normalised per sample. Its units are degrees C RMS per
+    e-fold of the orthonormal parameter direction this record constrains least,
+    so it answers: how far can this record's best-fitting parameters be moved,
+    in the direction it pins down worst, before the prediction moves at all? A
+    record that leaves some direction free scores near zero, and the model it
+    produces is determined by the starting point rather than by the cook.
+
+    IT DOES NOT LOOK AT THE MEASURED TEMPERATURES beyond the `T0` the simulation
+    starts from. The Jacobian is the model's, and the model is driven by `t`, `Q`
+    and the fitted point alone -- so this is a property of what the record ASKED
+    the grill to do, not of how well the fit turned out. That independence is
+    what lets it stand beside a residual statistic and say something the residual
+    cannot: an in-sample RMSE is minimised just as neatly on a record that
+    determines nothing, and is therefore silent about exactly the case this
+    catches.
+
+    `None` where no such measurement exists: a free parameter that is not a
+    positive finite scale has no logarithm to perturb, and a simulation that
+    leaves the reals says nothing about the record. Both shapes of the latter
+    are caught -- a raised OverflowError out of the chamber's float arithmetic
+    and a quiet NaN out of numpy -- for the reason `fit_params.simulate` states.
+    """
+    cols = []
+    for key in _FREE:
+        base = float(fitted[key])
+        if not (base > 0.0 and math.isfinite(base)):
+            return None
+        try:
+            up = _sim_at(t, Q, fitted, key, base * math.exp(_IDENT_STEP), T_amb=T_amb, T0=T0)
+            dn = _sim_at(t, Q, fitted, key, base * math.exp(-_IDENT_STEP), T_amb=T_amb, T0=T0)
+        except OverflowError:
+            return None
+        if not (np.all(np.isfinite(up)) and np.all(np.isfinite(dn))):
+            return None
+        cols.append((up - dn) / (2.0 * _IDENT_STEP))
+    jacobian = np.column_stack(cols) / math.sqrt(len(t))
+    svals = np.linalg.svd(jacobian, compute_uv=False)
+    return float(svals[-1])
+
+
+def _sim_at(t, Q, fitted, key, value, *, T_amb, T0):
+    """The model's trajectory with one parameter moved off the fitted point."""
+    params = dict(fitted)
+    params[key] = value
+    return simulate_grey_box(t, Q, T_amb=T_amb, T0=float(T0), **_sim_kwargs(params))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Fit MPC grey-box parameters to a calibration log.")
     ap.add_argument("csv")
