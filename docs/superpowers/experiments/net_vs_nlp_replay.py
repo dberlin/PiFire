@@ -57,6 +57,20 @@ full authority, fan running, chamber still cold -- is a state this harness
 exercises rather than skips. `lid_model` below describes the ACTUATOR pause;
 the physical window is not a model choice, it is the plant losing heat.
 
+The lid-window figures therefore cover two populations, and are reported three
+ways so a reader can pick the one the question needs: `*_lid` over the whole
+physical opening, `*_lid_paused` over its first `LID_PAUSE_S` (the samples taken
+while the auger is pinned), and `*_lid_released` over the remainder. `n_lid` is
+the sum of the two sub-counts, so a `*_lid` figure is not comparable to one
+taken when the pause and the opening were the same length -- the denominator
+covers the same number of seconds but a different mix of states.
+
+`lid_min_temp_f` and `lid_recovery_s` size the excursion the window produces.
+They fail in opposite directions: a pause held for the whole opening digs a
+*deeper* trough than production, satisfying any depth bound while
+misrepresenting how long control was surrendered, and only the recovery figure
+separates the two.
+
 Two knobs select which experiment arm a run measures, and both are recorded
 into every output row so a later comparison can tell arms apart.
 
@@ -112,6 +126,7 @@ must hold in either mode.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -127,7 +142,7 @@ from controller.applied_output import AppliedOutput, OutputSource  # noqa: E402
 from controller.grill_sim import GrillSim  # noqa: E402
 from controller.mpc import Controller  # noqa: E402
 from controller.mpc_net import NetPolicy, net_path_for  # noqa: E402
-from controller_matrix import _auger_toggle_tick  # noqa: E402
+from controller_matrix import _auger_toggle_tick, _recovery_s  # noqa: E402
 
 OUT = os.path.join(_ROOT, "docs/superpowers/experiments/_net_vs_nlp_baseline.json")
 ARTIFACT = os.path.join(_ROOT, "controller/mpc_policy_net.npz")
@@ -140,7 +155,9 @@ LID_PAUSE_S = default_settings()["cycle_data"]["LidOpenPauseTime"]
 
 # Seconds past the lid closing that `lid_min_temp_f` keeps watching. The chamber
 # is still climbing back when the lid shuts, so the coldest reading of the event
-# lands after the window rather than inside it.
+# lands after the window rather than inside it. It has to outlast the recovery
+# itself or the trough it reports is an artifact of where the watch stopped;
+# the test suite binds it against the recovery bound for exactly that reason.
 LID_RECOVERY_WINDOW_S = 300
 
 CYCLE_DATA = {"HoldCycleTime": 20, "u_min": 0.15, "u_max": 0.9}
@@ -172,6 +189,21 @@ def _c_to_f(c):
 
 def _rms(a):
     return float(np.sqrt((a**2).mean()))
+
+
+def _sha256(path):
+    """Content identity of the policy artifact a row was measured against.
+
+    `lid_model` and `estimator_input` say which arm a row belongs to; without
+    this, two rows measured against different `.npz` files are indistinguishable
+    from the files themselves, and a re-capture across a retrain reads as a
+    change in the thing under test.
+    """
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def _split_is_live(cycle_data):
@@ -251,7 +283,8 @@ def replay(
     period = core.get_control_period()
     cycle_time = CYCLE_DATA["HoldCycleTime"]
 
-    net = NetPolicy.load(net_path_for(ARTIFACT, bool(core.cfg["enable_fan_input"])))
+    net_path = net_path_for(ARTIFACT, bool(core.cfg["enable_fan_input"]))
+    net = NetPolicy.load(net_path)
     assert core.cfg["Q_min"] == net.calib["Q_min"] and core.cfg["Q_max"] == net.calib["Q_max"], (
         "controller cfg and the net artifact's calibration disagree on "
         "[Q_min, Q_max] -- the two policies would be clipped to different "
@@ -267,6 +300,12 @@ def replay(
     )
 
     triples, q_nlp_clamped, q_nlp_raw, solve_failed, in_lid, sample_t = [], [], [], [], [], []
+    # The lid window contains two regimes of different length, so the samples
+    # inside it are not one population: for the first LID_PAUSE_S the auger is
+    # pinned, and for the remainder the controller has full authority over a
+    # chamber that is still open and still cooling. Recorded separately so the
+    # excursion count can be read either way.
+    in_lid_paused = []
     temps = []
     # `realized_duty` is the auger's actual on-fraction each second, via
     # _auger_toggle_tick -- NOT what controller_matrix.py calls `duties`
@@ -300,6 +339,7 @@ def replay(
             q_nlp_raw.append(float(core._last_Q_raw))
             solve_failed.append(bool(core._last_solve_failed))
             in_lid.append(lid)
+            in_lid_paused.append(lid_paused)
             sample_t.append(t)
             # Semantic pin for `core._last_Q`: PROVENANCE, not consistency.
             # Comparing allocate(core._last_Q) against raw["cycle_ratio"]
@@ -396,6 +436,12 @@ def replay(
     # lid detector arms on depth (hold.py:241), so this is what says whether the
     # window is a lid event at all rather than a shallow dip wearing the label.
     lid_min_temp_f = float(temps[lid_open_at : lid_open_at + lid_open_for + LID_RECOVERY_WINDOW_S].min())
+    # Width of the same excursion, on controller_matrix.py's definition (its
+    # `_recovery_s`, imported rather than restated): seconds from the lid
+    # opening until the chamber is first back inside the 5 F band that
+    # definition uses. Depth alone cannot say how long control was surrendered,
+    # because a longer pause only digs the trough deeper.
+    lid_recovery_s = _recovery_s(temps[lid_open_at:] - setpoint_f)
     if abs(mean_temp_last_hour_f - setpoint_f) > REGIME_TOL_F:
         raise RuntimeError(
             f"seed {seed}: mean temperature over the last simulated hour is "
@@ -449,6 +495,13 @@ def replay(
     sample_t_arr = np.asarray(sample_t)
     warm_mask = sample_t_arr >= warm_start_s
     lid_mask = np.asarray(in_lid)
+    # The lid window's two regimes. `lid_paused_mask` is the window the plan's
+    # gate paragraph describes ("while the auger is paused"); `lid_released_mask`
+    # is the rest of the physical opening, where the controller has full
+    # authority over a chamber that is colder than any training episode reaches.
+    # `lid_mask` remains their union, so the whole-window figures stay readable.
+    lid_paused_mask = np.asarray(in_lid_paused)
+    lid_released_mask = lid_mask & ~lid_paused_mask
 
     net_raw_vals = np.asarray([net.firing_rate_raw(x, u, sp) for x, u, sp in triples])
     diffs_clamped = np.asarray([abs(np.clip(nq, 0.0, 1.0) - q) for nq, q in zip(net_raw_vals, q_nlp_clamped)])
@@ -456,6 +509,15 @@ def replay(
 
     def _excursions(mask):
         sel = net_raw_vals[mask]
+        if sel.size == 0:
+            return {
+                "n": 0,
+                "n_excursions": 0,
+                "worst_below_q_min": None,
+                "worst_above_q_max": None,
+                "margin_min_to_q_min": None,
+                "margin_min_to_q_max": None,
+            }
         below = sel < core.cfg["Q_min"]
         above = sel > core.cfg["Q_max"]
         return {
@@ -474,6 +536,8 @@ def replay(
     excursions_whole = _excursions(np.ones_like(lid_mask))
     excursions_warm = _excursions(warm_mask)
     excursions_lid = _excursions(lid_mask)
+    excursions_lid_paused = _excursions(lid_paused_mask)
+    excursions_lid_released = _excursions(lid_released_mask)
 
     return {
         "seed": seed,
@@ -482,11 +546,25 @@ def replay(
         # lid_models are not comparable to each other (see module docstring).
         "lid_model": lid_model,
         "estimator_input": estimator_input,
+        # Which policy artifact this row was measured against. Without it, two
+        # rows separated by a retrain are indistinguishable from the files
+        # themselves and a re-capture across one reads as a change in the arm.
+        "net_path": os.path.relpath(net_path, _ROOT),
+        "net_sha256": _sha256(net_path),
         "n": int(diffs_clamped.size),
         "n_lid": int(lid_mask.sum()),
+        # The gate's window, split into the two regimes it contains. n_lid is
+        # their sum and is unchanged by the split; what changed is that only
+        # n_lid_paused is now "while the auger is paused".
+        "n_lid_paused": int(lid_paused_mask.sum()),
+        "n_lid_released": int(lid_released_mask.sum()),
         "warm_start_s": int(warm_start_s),
         "mean_temp_last_hour_f": mean_temp_last_hour_f,
         "lid_min_temp_f": lid_min_temp_f,
+        # Width of the lid excursion (see above): the pair lid_min_temp_f /
+        # lid_recovery_s fails in opposite directions, so neither alone pins
+        # the modelled pause length.
+        "lid_recovery_s": lid_recovery_s,
         "realized_duty_mean": realized_duty_mean,
         "commanded_duty_mean": commanded_duty_mean,
         # PRIMARY acceptance quantity: how often, and how far, the net's
@@ -499,6 +577,16 @@ def replay(
         "excursion_n_lid": excursions_lid["n_excursions"],
         "excursion_worst_below_q_min_lid": excursions_lid["worst_below_q_min"],
         "excursion_worst_above_q_max_lid": excursions_lid["worst_above_q_max"],
+        # The same count over each half of the lid window. The "_paused" half is
+        # the plan's stated gate window; the "_released" half is the harder
+        # extrapolation, since nothing in training visits a chamber that cold
+        # with the controller free to answer.
+        "excursion_n_lid_paused": excursions_lid_paused["n_excursions"],
+        "excursion_worst_below_q_min_lid_paused": excursions_lid_paused["worst_below_q_min"],
+        "excursion_worst_above_q_max_lid_paused": excursions_lid_paused["worst_above_q_max"],
+        "excursion_n_lid_released": excursions_lid_released["n_excursions"],
+        "excursion_worst_below_q_min_lid_released": excursions_lid_released["worst_below_q_min"],
+        "excursion_worst_above_q_max_lid_released": excursions_lid_released["worst_above_q_max"],
         # SECONDARY/context: whole-run excursion count (includes the startup
         # transient -- kept, labelled, not the acceptance number).
         "excursion_n_whole": excursions_whole["n_excursions"],
@@ -514,6 +602,10 @@ def replay(
         "margin_min_to_q_max_whole": excursions_whole["margin_min_to_q_max"],
         "margin_min_to_q_min_lid": excursions_lid["margin_min_to_q_min"],
         "margin_min_to_q_max_lid": excursions_lid["margin_min_to_q_max"],
+        "margin_min_to_q_min_lid_paused": excursions_lid_paused["margin_min_to_q_min"],
+        "margin_min_to_q_max_lid_paused": excursions_lid_paused["margin_min_to_q_max"],
+        "margin_min_to_q_min_lid_released": excursions_lid_released["margin_min_to_q_min"],
+        "margin_min_to_q_max_lid_released": excursions_lid_released["margin_min_to_q_max"],
         # SECONDARY: raw RMS/max, warm-window (what a later comparison should
         # read) and whole-run (kept, clearly labelled, not hidden).
         "rms_all_raw_warm": _rms(diffs_raw[warm_mask]),
@@ -579,7 +671,13 @@ def main(argv=None):
         )
         print(
             f"  excursions: warm={r['excursion_n_warm']}/{r['n']} lid={r['excursion_n_lid']}/{r['n_lid']} "
+            f"(paused={r['excursion_n_lid_paused']}/{r['n_lid_paused']} "
+            f"released={r['excursion_n_lid_released']}/{r['n_lid_released']}) "
             f"whole={r['excursion_n_whole']} ({r['excursion_pct_whole']:.1f}%, context only)"
+        )
+        print(
+            f"  lid excursion: lid_min_temp_f={r['lid_min_temp_f']:.2f} lid_recovery_s={r['lid_recovery_s']} "
+            f"net={r['net_path']} sha256={r['net_sha256'][:12]}"
         )
         # signed: positive = that far inside the boundary, negative = crossed
         # it by that much -- do not add a literal sign prefix here, the

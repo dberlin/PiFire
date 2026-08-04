@@ -1,0 +1,55 @@
+{
+ "_arm": {
+  "estimator_input": "applied",
+  "lid_model": "faithful",
+  "seeds": [
+   0
+  ]
+ },
+ "_harness_commit": "21ec263f",
+ "_net_path": "controller/mpc_policy_net.npz",
+ "_net_sha256": "d6ddc3f053053fcf27d4ca28f35bbd1572829309039459108eeb0d4c8d8f25c3",
+ "_what_this_is": "PRE-TASK-18 CONTROL, NOT AN EXPERIMENT ARM. Produced by running the net_vs_nlp_replay.py of commit 21ec263f -- the harness BEFORE the lid fix, where plant.step was called without lid_open and the actuators were pinned for the whole 120 s physical window -- against the net artifact this checkout carries. Its only purpose is to isolate what the lid fix alone moved: compare it against the same arm in _net_vs_nlp_retrained_faithful.json (lid_model=faithful, estimator_input=applied, same seed, same .npz). Never compare it against a different arm, and never treat it as a before-run for the applied-vs-command question -- both sides of that comparison are post-fix.",
+ "rows": [
+  {
+   "applied_q_split_expected": true,
+   "commanded_duty_mean": 0.1700437729669333,
+   "estimator_input": "applied",
+   "excursion_n_lid": 0,
+   "excursion_n_warm": 26,
+   "excursion_n_whole": 28,
+   "excursion_pct_warm": 1.2560386473429952,
+   "excursion_pct_whole": 1.2962962962962963,
+   "excursion_worst_above_q_max_lid": 0.0,
+   "excursion_worst_above_q_max_warm": 0.0,
+   "excursion_worst_above_q_max_whole": 1.0584896457810373,
+   "excursion_worst_below_q_min_lid": 0.0,
+   "excursion_worst_below_q_min_warm": 0.7976718612291158,
+   "excursion_worst_below_q_min_whole": 0.7976718612291158,
+   "lid_model": "faithful",
+   "margin_min_to_q_max_lid": 89.08059829092632,
+   "margin_min_to_q_max_whole": -1.0584896457810373,
+   "margin_min_to_q_min_lid": 1.4366084847108098,
+   "margin_min_to_q_min_whole": -0.7976718612291158,
+   "max_all_clamped_warm": 1.6177039506552493,
+   "max_all_clamped_whole": 10.93431784697465,
+   "max_all_raw_warm": 1.6177039506552493,
+   "max_all_raw_whole": 10.93431784697465,
+   "max_lid_clamped": 1.6177039506552493,
+   "max_lid_raw": 1.6177039506552493,
+   "mean_temp_last_hour_f": 225.0329568729919,
+   "n": 2160,
+   "n_lid": 24,
+   "q_span": 95.0,
+   "realized_duty_mean": 0.1689073267797811,
+   "rms_all_clamped_warm": 0.19662682618229052,
+   "rms_all_clamped_whole": 0.7166432486324571,
+   "rms_all_raw_warm": 0.20859843421244006,
+   "rms_all_raw_whole": 0.7202416350274855,
+   "rms_lid_clamped": 1.2012039466515876,
+   "rms_lid_raw": 1.2012039466515876,
+   "seed": 0,
+   "warm_start_s": 449
+  }
+ ]
+}
