@@ -312,8 +312,14 @@ def _run_matrix(
         for stored in stored_rows:
             document = dict(stored)
             evidence_id = document.get("evidence_id")
-            if evidence_id is not None and "model_evidence" not in document:
-                document["model_evidence"] = evidence_bundles[str(evidence_id)]
+            if "model_evidence" not in document and evidence_id is not None:
+                shared = evidence_bundles.get(str(evidence_id))
+                if not isinstance(shared, Mapping):
+                    raise ValueError(f"missing evidence bundle {evidence_id!r}")
+                runtime = document.pop("runtime_model_evidence", {})
+                if not isinstance(runtime, Mapping):
+                    raise ValueError("runtime_model_evidence must be a mapping")
+                document["model_evidence"] = {**shared, **runtime}
             rows.append(_scenario_from_document(document))
         from .artifact import ArmFailure
 
@@ -443,7 +449,7 @@ def _write_text_atomically(path: Path, payload: str) -> None:
     try:
         if path.suffix == ".gz":
             with temporary.open("wb") as raw:
-                with gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as sink:
+                with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as sink:
                     sink.write(payload.encode("utf-8"))
         else:
             temporary.write_text(payload, encoding="utf-8")
@@ -519,14 +525,17 @@ def _window_free_run_scores(
             incumbent = origin["incumbent"].affine_prediction(
                 steps, float(origin["q_previous"]), ambient
             )
-            candidate_error = float(np.sqrt(np.mean((candidate.free_output_c + candidate.input_response_c @ q - actual) ** 2)))
-            incumbent_error = float(np.sqrt(np.mean((incumbent.free_output_c + incumbent.input_response_c @ q - actual) ** 2)))
+            candidate_prediction = candidate.free_output_c + candidate.input_response_c @ q
+            incumbent_prediction = incumbent.free_output_c + incumbent.input_response_c @ q
+            candidate_error = float(np.sqrt(np.mean((candidate_prediction - actual) ** 2)))
+            incumbent_error = float(np.sqrt(np.mean((incumbent_prediction - actual) ** 2)))
             candidate_errors.append(candidate_error)
             incumbent_errors.append(incumbent_error)
             origins.append(int(origin["frame_s"]))
-            if any(bool(item["coast"]) for item in future):
-                coast_candidate.append(candidate_error)
-                coast_incumbent.append(incumbent_error)
+            braking_mask = np.asarray([bool(item["braking"]) for item in future])
+            if braking_mask.any():
+                coast_candidate.extend(np.abs(candidate_prediction[braking_mask] - actual[braking_mask]))
+                coast_incumbent.extend(np.abs(incumbent_prediction[braking_mask] - actual[braking_mask]))
         per_horizon[str(steps * _FRAME_S)] = {
             "candidate_rmse_c": float(np.mean(candidate_errors)),
             "incumbent_rmse_c": float(np.mean(incumbent_errors)),
@@ -546,7 +555,7 @@ def _window_free_run_scores(
         {
             "horizon_metrics": per_horizon,
             "score_frame_ids": frame_ids,
-            "braking_or_coast_sample_count": int(sum(bool(sample["coast"]) for sample in samples)),
+            "braking_or_coast_sample_count": int(sum(bool(sample["braking"]) for sample in samples)),
         },
     )
 
@@ -681,7 +690,9 @@ def _run_scenario(
                     "q": frame.realized_duty,
                     "ambient_c": simulator.T_amb,
                     "temp_c": temperatures[-1],
-                    "coast": state is OperatingState.COAST,
+                    "braking": state is OperatingState.COAST or (
+                        second > 0 and target < targets[-2]
+                    ),
                 }
             )
             challenger_refresh_before = _refresh_marker(manager.challenger.snapshot())
@@ -1392,6 +1403,7 @@ def _artifact_from_rows(config: ExperimentConfig, rows: list[ScenarioResult], fa
             seen_evidence.add(evidence_key)
             for horizon, values in (row.horizon_residuals_c or {}).items():
                 prediction_origins[row.arm][horizon][row.evidence_id] = values
+        if row.mode == "online" and row.initialization != "correct":
             for metric in (
                 "recovery_before_mae_c",
                 "recovery_after_mae_c",

@@ -342,6 +342,7 @@ def test_recommendation_uses_recovery_improvement_ratio_not_absolute_after_error
                 recovery_improvement_ratio=1.0,
                 recovery_improvement_delta=0.0,
                 raw_solve_p99_ms=1.0,
+                recovery_available=True,
             ),
             ArmEvidence(
                 "dmc",
@@ -352,6 +353,7 @@ def test_recommendation_uses_recovery_improvement_ratio_not_absolute_after_error
                 recovery_improvement_ratio=0.1,
                 recovery_improvement_delta=90.0,
                 raw_solve_p99_ms=1.0,
+                recovery_available=True,
             ),
         ),
         source_revision="abc123",
@@ -455,3 +457,15 @@ def test_gzip_artifact_transport_is_lossless_and_compact(tmp_path) -> None:
     assert output.read_bytes()[:2] == b"\x1f\x8b"
     assert output.stat().st_size < len(artifact.to_json().encode())
     assert load_artifact(output).to_document() == artifact.to_document()
+
+
+def test_gzip_transport_is_byte_identical_across_output_paths(tmp_path) -> None:
+    from docs.superpowers.experiments.linear_mpc_bakeoff.runner import write_artifact_atomically
+
+    artifact = artifact_with_scores()
+    left = tmp_path / "left.json.gz"
+    right = tmp_path / "right.json.gz"
+    write_artifact_atomically(left, artifact)
+    write_artifact_atomically(right, artifact)
+
+    assert left.read_bytes() == right.read_bytes()

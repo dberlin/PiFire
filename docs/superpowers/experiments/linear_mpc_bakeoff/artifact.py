@@ -353,8 +353,8 @@ class ExperimentArtifact:
         for stored in document.get("scenarios", ()):
             row = dict(stored)
             evidence_id = row.get("evidence_id")
-            runtime = row.pop("runtime_model_evidence", {})
-            if evidence_id is not None:
+            if "model_evidence" not in row and evidence_id is not None:
+                runtime = row.pop("runtime_model_evidence", {})
                 try:
                     row["model_evidence"] = {**bundles[str(evidence_id)], **runtime}
                 except KeyError as exc:
@@ -483,13 +483,16 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
         item.simulator_diagnostics_available and item.simulator_diagnostics_valid
         for item in valid_evidence
     )
+    include_recovery = bool(valid_evidence) and all(
+        item.recovery_available for item in valid_evidence
+    )
     frontier = _pareto_frontier(
-        valid_evidence, include_runtime, include_diagnostics
+        valid_evidence, include_runtime, include_diagnostics, include_recovery
     )
     ranking_pool = list(frontier) if include_diagnostics else valid_evidence
     selected: str | None = None
     if ranking_pool and not _material_pareto_conflict(
-        frontier, include_runtime, include_diagnostics
+        frontier, include_runtime, include_diagnostics, include_recovery
     ):
         best_score = min(item.worst_domain_score for item in ranking_pool)
         contenders = [
@@ -498,7 +501,7 @@ def recommend(artifact: ExperimentArtifact) -> Recommendation:
         selected = min(
             contenders,
             key=lambda item: _selection_key(
-                item, include_runtime, include_diagnostics
+                item, include_runtime, include_diagnostics, include_recovery
             ),
         ).name
     return Recommendation(
@@ -538,6 +541,7 @@ def _pareto_frontier(
     evidence: Sequence[ArmEvidence],
     include_runtime: bool,
     include_diagnostics: bool,
+    include_recovery: bool,
 ) -> tuple[ArmEvidence, ...]:
     if not evidence:
         return ()
@@ -545,7 +549,7 @@ def _pareto_frontier(
         max(min(values), 1e-12)
         for values in zip(
             *(
-                _pareto_values(item, include_runtime, include_diagnostics)
+                _pareto_values(item, include_runtime, include_diagnostics, include_recovery)
                 for item in evidence
             )
         )
@@ -554,7 +558,7 @@ def _pareto_frontier(
         item
         for item in sorted(evidence, key=lambda value: value.name)
         if not any(
-            _dominates(other, item, scales, include_runtime, include_diagnostics)
+            _dominates(other, item, scales, include_runtime, include_diagnostics, include_recovery)
             for other in evidence
             if other is not item
         )
@@ -562,13 +566,14 @@ def _pareto_frontier(
 
 
 def _pareto_values(
-    evidence: ArmEvidence, include_runtime: bool, include_diagnostics: bool
+    evidence: ArmEvidence, include_runtime: bool, include_diagnostics: bool, include_recovery: bool
 ) -> tuple[float, ...]:
     values = [
         evidence.worst_domain_score,
         evidence.prediction_error,
-        evidence.recovery_improvement_ratio,
     ]
+    if include_recovery:
+        values.append(evidence.recovery_improvement_ratio)
     if include_runtime:
         values.append(evidence.projected_solve_p99_ms)
     if include_diagnostics:
@@ -583,12 +588,11 @@ def _pareto_values(
 
 
 def _selection_key(
-    evidence: ArmEvidence, include_runtime: bool, include_diagnostics: bool
+    evidence: ArmEvidence, include_runtime: bool, include_diagnostics: bool, include_recovery: bool
 ) -> tuple[float | int | str, ...]:
-    values: list[float | int | str] = [
-        evidence.prediction_error,
-        evidence.recovery_improvement_ratio,
-    ]
+    values: list[float | int | str] = [evidence.prediction_error]
+    if include_recovery:
+        values.append(evidence.recovery_improvement_ratio)
     if include_runtime:
         values.append(evidence.projected_solve_p99_ms)
     if include_diagnostics:
@@ -608,17 +612,18 @@ def _dominates(
     scales: Sequence[float],
     include_runtime: bool,
     include_diagnostics: bool,
+    include_recovery: bool,
 ) -> bool:
     normalized_left = tuple(
         value / scale
         for value, scale in zip(
-            _pareto_values(left, include_runtime, include_diagnostics), scales
+            _pareto_values(left, include_runtime, include_diagnostics, include_recovery), scales
         )
     )
     normalized_right = tuple(
         value / scale
         for value, scale in zip(
-            _pareto_values(right, include_runtime, include_diagnostics), scales
+            _pareto_values(right, include_runtime, include_diagnostics, include_recovery), scales
         )
     )
     return all(a <= b for a, b in zip(normalized_left, normalized_right)) and any(
@@ -630,12 +635,13 @@ def _material_pareto_conflict(
     frontier: Sequence[ArmEvidence],
     include_runtime: bool,
     include_diagnostics: bool,
+    include_recovery: bool,
 ) -> bool:
     if len(frontier) < 2:
         return False
     for values in zip(
         *(
-            _pareto_values(item, include_runtime, include_diagnostics)
+            _pareto_values(item, include_runtime, include_diagnostics, include_recovery)
             for item in frontier
         )
     ):
