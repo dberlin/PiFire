@@ -551,235 +551,6 @@ def test_a_recovering_policy_clears_the_frozen_output_report(capsys):
     assert "policy has failed" not in capsys.readouterr().out
 
 
-def test_a_horizon_shorter_than_the_braking_distance_is_reported(capsys):
-    cfg = dict(_DEFAULTS)
-    # 360 s of coast after a fuel cut, against a 24*25 = 600 s horizon... which
-    # covers it. n_horizon is cut so the horizon is genuinely the short one.
-    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=3200.0, theta=110.0, n_horizon=8)
-    _warn_about_model(cfg)
-    out = capsys.readouterr().out
-    assert "horizon" in out.lower()
-    assert "200" in out  # 8 * 25 s
-    assert "fuel cut" in out
-
-
-def test_an_adequate_horizon_is_not_reported(capsys):
-    cfg = dict(_DEFAULTS)
-    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=3200.0, theta=110.0, n_horizon=200, t_step=25.0)
-    _warn_about_model(cfg)
-    assert "horizon" not in capsys.readouterr().out.lower()
-
-
-def test_a_coast_with_no_end_is_reported_as_one_no_horizon_reaches(capsys):
-    """The one config raising the horizon cannot rescue.
-
-    A model with no firing-rate gain never predicts the chamber stops rising,
-    so the longest horizon this controller will build is still short of the
-    coast. The controller runs anyway -- every condition here is advisory --
-    which is why saying so is the whole of what it can do. No setting is
-    offered, because an endless coast is not a shortfall any setting closes.
-    """
-    from controller.model_promotion import longest_braking_distance
-
-    cfg = dict(_DEFAULTS)
-    cfg.update(C_c=11000.0, h_amb=2.7, theta=110.0, K_Q=0.0, n_horizon=8)
-    assert longest_braking_distance(cfg) == math.inf
-
-    _warn_about_model(cfg)
-    out = capsys.readouterr().out
-    assert "no end this model predicts" in out
-    assert "No setting reaches the end of this coast" in out
-    assert "Raise" not in out
-    assert "inf s" not in out  # a coast with no end has no number to print
-
-
-#: A model whose chamber goes on rising for about 2015 s after a fuel cut --
-#: past CONFIG's 20 * 25 = 500 s horizon and well inside the cap. Written out
-#: rather than derived so the numbers the tests below assert are pinned to
-#: parameters and not to whatever the module currently computes.
-_SLOW_COAST = dict(C_c=2520.0, h_amb=0.224, T_amb=20.0, theta=600.0, n_delay=8, K_Q=695.0, sigma=1.4e-9)
-_QUICK_COAST = dict(_SLOW_COAST, theta=50.0)
-
-
-def test_a_coast_the_configured_horizon_cannot_hold_is_BUILT_at_the_longer_one(capsys):
-    """The configured n_horizon is a floor; what gets built is what the coast needs.
-
-    Both the intention and the NLP are asserted: the whole defect was a
-    controller that computed a horizon requirement, said it out loud, and then
-    built the short horizon anyway.
-    """
-    from controller.model_promotion import longest_braking_distance
-
-    cfg = dict(CONFIG, **_SLOW_COAST)
-    brake = longest_braking_distance(cfg)
-    needed = math.ceil(brake / cfg["t_step"])
-    assert needed > cfg["n_horizon"]
-
-    c = Controller(cfg, "C", dict(CYCLE))
-    assert c._built_n_horizon == needed
-    assert c.mpc.settings.n_horizon == needed
-    assert c.cfg["n_horizon"] == CONFIG["n_horizon"]  # the operator's setting is untouched
-
-    out = capsys.readouterr().out
-    assert f"{needed} steps" in out
-    assert "t_step" not in out  # only the step count is on offer
-
-
-def test_a_coast_the_configured_horizon_covers_is_built_at_the_configured_one():
-    """The negative control: without it the raise above could be unconditional."""
-    from controller.model_promotion import longest_braking_distance
-
-    c = Controller(dict(CONFIG), "C", dict(CYCLE))
-    assert longest_braking_distance(c.cfg) < CONFIG["n_horizon"] * CONFIG["t_step"]
-    assert c._built_n_horizon == CONFIG["n_horizon"]
-    assert c.mpc.settings.n_horizon == CONFIG["n_horizon"]
-
-
-def test_a_horizon_the_step_bound_cuts_short_offers_the_setting_that_helps(capsys):
-    """A shortfall a reachable setting repairs is reported with that setting.
-
-    `_HORIZON_CAP_STEPS` truncates where `t_step` is fine enough to turn an
-    ordinary coast into an extraordinary NLP, and a longer `t_step` spans the
-    same seconds in fewer steps -- so the window grows and the solve does not.
-    Running short in silence is the failure this message exists to prevent, and
-    advice that cannot work is the same failure wearing a message.
-    """
-    from controller.model_promotion import _HORIZON_CAP_STEPS, _MAX_CONFIGURABLE_HORIZON_S, longest_braking_distance
-
-    cfg = dict(CONFIG, **_SLOW_COAST, t_step=1.0, n_horizon=60)
-    brake = longest_braking_distance(cfg)
-    assert brake > _HORIZON_CAP_STEPS * cfg["t_step"]  # the step bound bites
-    assert brake <= _MAX_CONFIGURABLE_HORIZON_S  # and a setting still reaches it
-
-    c = Controller(cfg, "C", dict(CYCLE))
-    assert c._built_n_horizon == _HORIZON_CAP_STEPS
-    assert c.mpc.settings.n_horizon == _HORIZON_CAP_STEPS
-
-    out = capsys.readouterr().out
-    assert "does not reach the end of that coast" in out
-    assert f"product reaches {brake:.0f} s" in out  # how far, not just that it is short
-    assert "t_step is the cheaper of the two" in out
-    assert "out of range" not in out
-
-
-def test_a_coast_inside_some_reachable_setting_is_never_called_out_of_range(capsys):
-    """The caps hold down the raise, so they do not bound what a config reaches.
-
-    A coast past both caps can still sit inside a horizon somebody configures,
-    because `built_n_horizon` takes an outer max against `n_horizon`. Reading a
-    cap as the limit tells an operator who could fix this that their model is
-    out of range, and sends them off to refit something that is not the problem.
-    The fixture is deliberately in that gap: past the 2400 s cap, inside the
-    3600 s the settings reach, at an `n_horizon` high enough that the floor is
-    not what covers it.
-    """
-    from controller.model_promotion import _HORIZON_CAP_S, _MAX_CONFIGURABLE_HORIZON_S, longest_braking_distance
-
-    cfg = dict(CONFIG, **dict(_SLOW_COAST, theta=900.0), t_step=25.0, n_horizon=50)
-    brake = longest_braking_distance(cfg)
-    assert _HORIZON_CAP_S < brake <= _MAX_CONFIGURABLE_HORIZON_S  # the gap
-
-    c = Controller(cfg, "C", dict(CYCLE))
-    assert c._built_n_horizon * cfg["t_step"] < brake  # this config is short
-
-    out = capsys.readouterr().out
-    assert "out of range" not in out  # it is not; a setting covers it
-    assert f"product reaches {brake:.0f} s" in out
-
-    # And the advice works: a setting inside controllers.json's ranges whose
-    # product clears the coast really does cover it.
-    fixed = Controller(dict(cfg, n_horizon=51, t_step=60.0), "C", dict(CYCLE))
-    assert 51 * 60.0 >= brake
-    assert fixed._built_n_horizon * 60.0 >= brake
-    assert "keeps rising" not in capsys.readouterr().out  # nothing left to warn about
-
-
-def test_a_coast_past_every_reachable_setting_offers_no_lever(capsys):
-    """A shortfall no configuration repairs must not pretend otherwise.
-
-    Past `_MAX_CONFIGURABLE_HORIZON_S` there is nothing to raise: that product
-    is already both settings at their maxima. Naming a lever here would be
-    advice that cannot work, which is the same failure as saying nothing.
-    """
-    from controller.model_promotion import _MAX_CONFIGURABLE_HORIZON_S, longest_braking_distance
-
-    cfg = dict(CONFIG, **dict(_SLOW_COAST, theta=1200.0), t_step=60.0, n_horizon=60)  # settings maxima
-    brake = longest_braking_distance(cfg)
-    assert brake > _MAX_CONFIGURABLE_HORIZON_S  # past every configuration
-
-    c = Controller(cfg, "C", dict(CYCLE))
-    assert c._built_n_horizon * cfg["t_step"] == _MAX_CONFIGURABLE_HORIZON_S  # everything on offer
-
-    out = capsys.readouterr().out
-    assert "No setting reaches the end of this coast" in out
-    assert "out of range" in out
-    assert "Raise" not in out  # no lever, because none of them move this
-
-
-def test_adopting_a_slow_model_then_a_quick_one_brings_the_horizon_back_down():
-    """The property the derived-not-stored horizon exists to guarantee.
-
-    Writing an adopted model's demand into n_horizon would leave the horizon
-    only able to grow: this grill's next model would be sized against the last
-    one's coast rather than against what the operator set, and the solve cost
-    would rise once and stay. Each build is asked afresh here, which is what a
-    later refactor to a stored value would fail.
-    """
-    floor = CONFIG["n_horizon"]
-    c = Controller(dict(CONFIG), "C", dict(CYCLE))
-
-    c._adopt_model(_SLOW_COAST, rmse=2.0, samples=100, band_c=(20.0, 200.0))
-    assert c.cfg["n_horizon"] == floor
-    assert Controller(dict(c.cfg), "C", dict(CYCLE))._built_n_horizon > floor
-
-    c._adopt_model(_QUICK_COAST, rmse=1.0, samples=100, band_c=(20.0, 200.0))
-    assert c.cfg["n_horizon"] == floor
-    assert Controller(dict(c.cfg), "C", dict(CYCLE))._built_n_horizon == floor
-
-
-def test_the_running_warning_and_the_promotion_policy_size_the_horizon_alike(capsys):
-    """One model, one answer, whichever code path says it.
-
-    This warning used to compute C_c/h_amb inline while `evaluate` sized its
-    demand from the braking distance, so a refit could print an adequate
-    horizon and the controller could call the same horizon short. Both read
-    the same function now, and this pins that: the warning fires exactly when
-    the promotion policy asks for more steps than the config has.
-    """
-    from controller.model_promotion import evaluate, longest_braking_distance
-
-    cfg = dict(_DEFAULTS)
-    cfg.update(C_c=11000.0, h_amb=2.7, K_Q=3200.0, theta=110.0, t_step=25.0)
-    brake = longest_braking_distance(cfg)
-    discredited = cfg["C_c"] / cfg["h_amb"]
-    assert brake == pytest.approx(353.3, abs=5.0)
-    assert discredited == pytest.approx(4074.0, abs=5.0)
-
-    # 24 steps of 25 s is the shipped horizon and it sits BETWEEN the two
-    # quantities: past the braking distance, far short of C_c/h_amb. It is the
-    # only kind of point that can tell the two rules apart, so it has to be in
-    # here -- 8 and 200 steps agree under either rule and prove nothing.
-    assert brake < 24 * 25.0 < discredited
-
-    for n_horizon in (8, 24, 200):
-        cfg["n_horizon"] = n_horizon
-        _warn_about_model(cfg)
-        warned = "horizon" in capsys.readouterr().out.lower()
-        demanded = evaluate(
-            cfg,
-            None,
-            candidate_rmse=2.0,
-            incumbent_rmse=None,
-            # Clear of the floor, so what varies across this loop is the
-            # horizon and nothing else.
-            identifiability=2.0,
-            n_horizon=n_horizon,
-            t_step=25.0,
-        ).horizon_needed
-        assert warned is (demanded is not None), f"n_horizon={n_horizon} disagreed"
-        assert warned is (n_horizon * 25.0 < brake), f"n_horizon={n_horizon} did not follow the braking distance"
-
-
 def test_set_target_keeps_the_applied_normalized_load_history():
     c = Controller(dict(CONFIG), "C", dict(CYCLE))
     c._last_combustion_load = 0.875
@@ -993,3 +764,27 @@ def test_nlp_reaches_upper_authority_when_raw_equilibrium_exceeds_two_without_fa
     assert diagnostics.bounded_firing_load == pytest.approx(1.0)
     assert diagnostics.failure_state.value == "success"
     assert controller.get_status()["policy_failures"] == 0
+
+
+def test_configured_horizon_is_the_only_horizon_built_or_reported(capsys):
+    """A slow fitted coast must not rewrite MPC construction or status."""
+    configured = 3
+    controller = Controller(
+        dict(
+            CONFIG,
+            C_c=2520.0,
+            h_amb=0.224,
+            T_amb=20.0,
+            theta=600.0,
+            n_delay=8,
+            K_Q=695.0,
+            sigma=1.4e-9,
+            n_horizon=configured,
+        ),
+        "C",
+        dict(CYCLE),
+    )
+
+    assert not hasattr(controller, "_built_n_horizon")
+    assert controller.mpc.settings.n_horizon == configured
+    assert "horizon" not in capsys.readouterr().out.lower()

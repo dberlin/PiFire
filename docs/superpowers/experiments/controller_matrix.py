@@ -612,8 +612,6 @@ def run_scenario(
         cfg = getattr(core, "cfg", None)
         if cfg is not None and "n_horizon" in cfg:
             result["configured_n_horizon"] = int(cfg["n_horizon"])
-            built = getattr(core, "_built_n_horizon", None)
-            result["built_n_horizon"] = int(cfg["n_horizon"]) if built is None else int(built)
         if refit:
             result["refit"] = _refit_after_cook(core)
         if trace_sink is not None:
@@ -643,7 +641,6 @@ def _refit_after_cook(core):
     return {
         "accepted": bool(verdict.accepted),
         "reason": str(verdict.reason),
-        "horizon_needed": getattr(verdict, "horizon_needed", None),
         "samples": len(getattr(core, "cook_history", list)()),
         "seconds": round(time.perf_counter() - started, 2),
         "params": None if snapshot is None else dict(snapshot["params"]),

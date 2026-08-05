@@ -4,7 +4,6 @@ import json
 
 import pytest
 
-from controller.model_promotion import longest_braking_distance
 from controller.mpc import _DEFAULTS, Controller
 
 #: The schema this controller writes and is the only one it will read back.
@@ -369,37 +368,19 @@ def _snapshot(params, revision=3):
     }
 
 
-def test_a_restored_model_reaches_the_estimator_the_horizon_and_the_solve():
-    """The seam a restore has to cross, checked on the far side of it.
-
-    This is what production does: `HoldMode.setup` builds the controller from
-    settings and THEN hands it the stored snapshot, so anything a restore only
-    writes into `cfg` never reaches the three things sized from cfg at build
-    time -- the estimator's thermal parameters, the horizon derived from the
-    model's braking distance, and the policy that solves. A cfg-only restore
-    leaves a season of learning inert while `restore_model` reports True, and
-    sizes the horizon from the shipped model's short coast: brakes applied late
-    on a grill whose own model says it coasts three times further.
-
-    Checked as observable behaviour rather than as a rebuild: which objects are
-    replaced is this class's business, but that the restored model steers is
-    not.
-    """
+def test_a_restored_model_reaches_the_estimator_and_the_configured_horizon():
+    """A restored model rebuilds thermal state without changing configuration."""
     c = _c()
     reference = _c()
     for each in (c, reference):
         each.set_target(110.0)
-    shipped_horizon = c._built_n_horizon
 
     assert c.restore_model(_snapshot(SLOW_PARAMS)) is True
 
     # The estimator predicts with the restored parameters, not the ones it was
     # constructed from.
     assert c.estimator.C_c == pytest.approx(SLOW_PARAMS["C_c"])
-    # The horizon is re-derived from the restored model's coast, so the plan
-    # still contains the end of a full brake.
-    assert c._built_n_horizon > shipped_horizon
-    assert c._built_n_horizon * float(c.cfg["t_step"]) >= longest_braking_distance(c.cfg)
+    assert not hasattr(c, "_built_n_horizon")
     # And the policy solving is the restored one: same setpoint, same
     # measurement, different firing rate from the controller that did not
     # restore.

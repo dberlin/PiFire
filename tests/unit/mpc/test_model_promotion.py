@@ -1,5 +1,6 @@
 """What may replace a model that is currently driving a fire."""
 
+import inspect
 import json
 import math
 import pathlib
@@ -10,22 +11,15 @@ import controller.model_promotion as model_promotion
 from controller.model_promotion import (
     PROMOTION_BOUNDS,
     _COAST_BOUND,
-    _HORIZON_CAP_S,
-    _HORIZON_CAP_STEPS,
-    _MAX_CONFIGURABLE_HORIZON_S,
     _model_coast,
     braking_distance,
-    built_n_horizon,
-    effective_n_horizon,
     effective_tau,
     evaluate,
-    longest_braking_distance,
     steady_state_at_full_fire,
 )
 
 GOOD = dict(C_c=2520.0, h_amb=0.224, T_amb=20.0, theta=93.0, n_delay=4, K_Q=695.0, sigma=1.4e-9)
 INCUMBENT = dict(GOOD, C_c=2000.0, h_amb=0.30)  # tau 6667 vs candidate 11250
-HORIZON = dict(n_horizon=144, t_step=25.0)
 
 #: controller/update_mpc.py's fit to tests/unit/mpc/fixtures/
 #: mak_cook_2026-08-02.csv -- the 450 F cook that overshot by 70 F. Written out
@@ -65,8 +59,23 @@ def _ev(candidate, incumbent=INCUMBENT, cand_rmse=2.0, inc_rmse=5.0, **kw):
         incumbent,
         candidate_rmse=cand_rmse,
         incumbent_rmse=inc_rmse,
-        **{"identifiability": DETERMINED, **HORIZON, **kw},
+        identifiability=DETERMINED,
+        **kw,
     )
+
+
+@pytest.mark.parametrize("name", ("longest_braking_distance", "effective_n_horizon", "built_n_horizon"))
+def test_promotion_exposes_no_derived_horizon_helpers(name):
+    """Coast safety remains a product bound, never a horizon-sizing API."""
+    assert not hasattr(model_promotion, name)
+
+
+def test_promotion_evaluation_has_no_horizon_inputs_or_verdict_field():
+    """Fit quality decides promotion without promising a derived build length."""
+    parameters = inspect.signature(model_promotion.evaluate).parameters
+    assert "n_horizon" not in parameters
+    assert "t_step" not in parameters
+    assert not hasattr(model_promotion.Verdict(True, "fit quality accepted"), "horizon_needed")
 
 
 def _crossing_at(incumbent, t_cross_c, ratio):
@@ -183,11 +192,10 @@ def test_the_theta_bound_is_enforced():
     the narrower horizon would let that refusal stand in for this bound and the
     test would pass with the bound deleted.
     """
-    wide = dict(n_horizon=212, t_step=25.0)  # 5300 s, past this candidate's coast
     assert _ev(dict(GOOD, theta=-1e-9)).accepted is False
     assert _ev(dict(GOOD, theta=0.0, n_delay=0)).accepted is True
-    assert _ev(dict(GOOD, theta=1200.0), **wide).accepted is True
-    assert _ev(dict(GOOD, theta=1200.0 + 1e-3), **wide).accepted is False
+    assert _ev(dict(GOOD, theta=1200.0)).accepted is True
+    assert _ev(dict(GOOD, theta=1200.0 + 1e-3)).accepted is False
 
 
 def test_an_incumbent_missing_n_delay_is_refused_not_a_crash():
@@ -303,7 +311,6 @@ def test_repeated_sigma_for_h_amb_trades_cannot_walk_the_cool_end_tau_down():
             candidate_rmse=candidate_rmse,
             incumbent_rmse=incumbent_rmse,
             identifiability=DETERMINED,
-            **HORIZON,
         )
         if v.accepted:
             incumbent, incumbent_rmse = candidate, candidate_rmse
@@ -361,7 +368,6 @@ def test_repeated_small_sigma_increases_cannot_walk_true_tau_down_without_cleari
             candidate_rmse=candidate_rmse,
             incumbent_rmse=incumbent_rmse,
             identifiability=DETERMINED,
-            **HORIZON,
         )
         if v.accepted:
             incumbent, incumbent_rmse = candidate, candidate_rmse
@@ -386,7 +392,6 @@ def test_repeated_joint_sigma_and_tau_cuts_cannot_walk_true_tau_down_without_cle
             candidate_rmse=candidate_rmse,
             incumbent_rmse=incumbent_rmse,
             identifiability=DETERMINED,
-            **HORIZON,
         )
         if v.accepted:
             incumbent, incumbent_rmse = candidate, candidate_rmse
@@ -401,19 +406,6 @@ def test_an_incumbent_with_no_positive_reference_always_faces_the_wide_margin():
     incumbent = dict(GOOD, C_c=2000.0, h_amb=0.30, theta=0.0, n_delay=0)
     v = _ev(GOOD, incumbent=incumbent, cand_rmse=4.85, inc_rmse=5.0)  # clears the 2% bar, not the 50% bar
     assert v.accepted is False
-
-
-def test_a_zero_time_step_is_refused_not_a_crash():
-    assert _ev(GOOD, n_horizon=144, t_step=0.0).accepted is False
-
-
-def test_a_non_finite_time_step_does_not_report_the_horizon_as_adequate():
-    v = _ev(GOOD, n_horizon=144, t_step=float("nan"))
-    assert v.accepted is False
-
-
-def test_a_negative_horizon_count_is_refused():
-    assert _ev(GOOD, n_horizon=-1, t_step=25.0).accepted is False
 
 
 def test_shrinking_tau_needs_more_evidence_than_raising_it():
@@ -447,7 +439,6 @@ def test_repeated_small_tau_cuts_cannot_walk_tau_down_without_clearing_the_wide_
             candidate_rmse=candidate_rmse,
             incumbent_rmse=incumbent_rmse,
             identifiability=DETERMINED,
-            **HORIZON,
         )
         if v.accepted:
             incumbent, incumbent_rmse = candidate, candidate_rmse
@@ -521,217 +512,6 @@ def test_shortening_dead_time_needs_the_same_wide_margin_as_tau():
     assert v.accepted is False
 
 
-def test_a_model_needing_more_horizon_than_configured_reports_it():
-    """A braking distance of a few hundred seconds against a 2*25 = 50 s horizon.
-
-    50 s is genuinely short for this model: GOOD's chamber goes on rising for
-    321 s after a fuel cut. The horizon has to be this small for the test to
-    bite, because 600 s -- what the grill ships with -- already covers GOOD
-    twice over.
-    """
-    v = _ev(GOOD, n_horizon=2, t_step=25.0)
-    assert v.horizon_needed is not None
-    assert v.horizon_needed > 2
-
-
-def test_an_adequate_horizon_asks_for_nothing():
-    assert _ev(GOOD, n_horizon=600, t_step=25.0).horizon_needed is None
-
-
-def test_a_coast_the_configured_horizon_cannot_hold_is_adopted_at_a_longer_one():
-    """The demand is met by building further ahead, not by refusing the model.
-
-    A horizon is nearly free next to a 25 s control period, while refusing
-    would keep an incumbent this gate has just called the worse description of
-    the same grill -- and the coast is the grill's, so the incumbent does not
-    make it shorter by being kept. The verdict and the horizon the build uses
-    are asserted together here because the defect this closes was precisely
-    that they disagreed.
-    """
-    slow = dict(GOOD, theta=600.0, n_delay=8)
-    brake = longest_braking_distance(slow)
-    assert 24 * 25.0 < brake < 2400.0  # past the shipped horizon, inside the cap
-
-    v = _ev(slow, n_horizon=24, t_step=25.0)
-    assert v.accepted is True
-    assert v.horizon_needed == math.ceil(brake / 25.0)
-    assert effective_n_horizon(slow, n_horizon=24, t_step=25.0) == v.horizon_needed
-
-
-def test_a_coast_longer_than_the_cap_can_cover_is_refused():
-    """The one horizon refusal. Past here no buildable horizon contains the
-    brake, so the controller would be planning without its end in view."""
-    wild = dict(GOOD, C_c=1.0, h_amb=1e-4, theta=1200.0, n_delay=1, K_Q=1e4, sigma=0.0)
-    brake = longest_braking_distance(wild)
-    assert brake > 2400.0
-
-    v = _ev(wild, n_horizon=24, t_step=25.0)
-    assert v.accepted is False
-    assert f"{brake:.0f} s" in v.reason  # what the model asks for
-    assert "2400 s" in v.reason  # and the cap that will not stretch to it
-
-
-def test_the_cap_bounds_what_a_wild_model_can_demand_of_the_build():
-    wild = dict(GOOD, C_c=1.0, h_amb=1e-4, theta=1200.0, n_delay=1, K_Q=1e4, sigma=0.0)
-    assert effective_n_horizon(wild, n_horizon=24, t_step=25.0) == 96  # 2400 s / 25 s
-
-
-def test_the_configured_horizon_is_a_floor_that_a_quick_model_does_not_lower():
-    """GOOD stops well inside 144 steps, and the operator still gets 144."""
-    assert longest_braking_distance(GOOD) < 144 * 25.0
-    assert effective_n_horizon(GOOD, n_horizon=144, t_step=25.0) == 144
-    # Including past the cap: what the cap bounds is the demand a fitted model
-    # can make of the build, never the length the operator asked for.
-    assert effective_n_horizon(GOOD, n_horizon=200, t_step=25.0) == 200  # 5000 s, past the 2400 s cap
-
-
-def test_the_step_bound_holds_the_build_but_never_the_refusal():
-    """The two bounds answer different questions and only one may refuse.
-
-    `_HORIZON_CAP_S` is about the model: a demand to plan 40 minutes past the
-    configured horizon is not a description of a pellet grill. `_HORIZON_CAP_STEPS`
-    is about the configuration: at a fine `t_step` an ordinary coast turns into
-    an NLP larger than any this project has timed. Wiring the second into
-    `evaluate` would refuse every model at `t_step = 1` -- including the shipped
-    default's own parameters, whose 150 s coast needs 150 steps there -- and the
-    reason would blame the model for an operator's setting.
-    """
-    # An ordinary, believable model: the fit to the real MAK cook.
-    assert 96 < longest_braking_distance(REAL_MAK_FIT) < 2400.0
-
-    # At t_step = 1 its coast asks for more steps than the build will assemble.
-    asked = effective_n_horizon(REAL_MAK_FIT, n_horizon=24, t_step=1.0)
-    assert asked == math.ceil(longest_braking_distance(REAL_MAK_FIT))
-    assert built_n_horizon(REAL_MAK_FIT, n_horizon=24, t_step=1.0) == _HORIZON_CAP_STEPS
-    assert asked > _HORIZON_CAP_STEPS
-
-    # And it is still adopted, because the shortfall is the setting's, not its.
-    assert _ev(REAL_MAK_FIT, n_horizon=24, t_step=1.0).accepted is True
-
-    # At the shipped t_step the two agree, so nothing shipped turns on this.
-    for params in (GOOD, REAL_MAK_FIT, dict(GOOD, theta=600.0, n_delay=8)):
-        assert built_n_horizon(params, n_horizon=24, t_step=25.0) == effective_n_horizon(
-            params, n_horizon=24, t_step=25.0
-        )
-
-
-def test_the_step_bound_does_not_lower_a_horizon_the_operator_configured():
-    """Like the seconds bound, it holds down the raise and not the setting."""
-    assert built_n_horizon(GOOD, n_horizon=200, t_step=25.0) == 200
-
-
-def test_the_reachable_horizon_matches_the_settings_schema():
-    """Pins `_MAX_CONFIGURABLE_HORIZON_S` to the two options it is a product of.
-
-    It decides whether a coast is reachable at all, and so whether an operator
-    reading a short-horizon warning is told to change a setting or to refit the
-    model. That answer is only right while the number matches the ranges the
-    settings UI actually offers, and nothing else would notice either
-    `option_max` moving -- the constant lives in code and the ranges live in a
-    JSON blob loaded by a different process.
-    """
-    schema = json.loads((pathlib.Path(__file__).parents[3] / "controller" / "controllers.json").read_text())
-
-    found = {}
-
-    def walk(node):
-        if isinstance(node, dict):
-            if node.get("option_name") in ("n_horizon", "t_step"):
-                found[node["option_name"]] = node
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for value in node:
-                walk(value)
-
-    walk(schema)
-    assert set(found) == {"n_horizon", "t_step"}, "the options this constant is derived from are gone"
-
-    reachable = float(found["n_horizon"]["option_max"]) * float(found["t_step"]["option_max"])
-    assert reachable == _MAX_CONFIGURABLE_HORIZON_S
-
-    # And the caps are genuinely below it, which is what makes the distinction
-    # the warning draws a real one rather than a branch that never fires.
-    assert _HORIZON_CAP_S < _MAX_CONFIGURABLE_HORIZON_S
-
-
-def test_the_horizon_built_never_reaches_past_the_seconds_bound():
-    """The step count rounds DOWN, so the reason string's cap is not exceeded.
-
-    Rounding up would plan up to one step past `_HORIZON_CAP_S` while every
-    message still named that number, which is the sort of disagreement this
-    whole task exists to remove.
-    """
-    wild = dict(GOOD, C_c=1.0, h_amb=1e-4, theta=1200.0, n_delay=1, K_Q=1e4, sigma=0.0)
-    for t_step in (1.0, 7.0, 25.0, 60.0):
-        covered = effective_n_horizon(wild, n_horizon=1, t_step=t_step) * t_step
-        assert covered <= 2400.0, f"t_step={t_step} planned {covered} s"
-
-
-def test_the_horizon_follows_the_model_down_again():
-    """A quicker model reads back at the floor, asked model by model.
-
-    This is the shape of the no-ratchet property but not a pin on it: the
-    function is pure, so a stored-horizon implementation that ratcheted `cfg`
-    would still pass here. What pins no-ratchet is the Controller-level
-    `test_adopting_a_slow_model_then_a_quick_one_brings_the_horizon_back_down`,
-    which adopts one model then the other and re-reads the built value.
-    """
-    slow = dict(GOOD, theta=600.0, n_delay=8)
-    assert effective_n_horizon(slow, n_horizon=24, t_step=25.0) > 24
-    assert effective_n_horizon(GOOD, n_horizon=24, t_step=25.0) == 24
-
-
-def test_the_cap_is_seconds_so_a_finer_t_step_covers_the_same_coast():
-    """What the cap bounds is the coast, which is seconds.
-
-    A step count means nothing without t_step, so the cap is stated in seconds
-    and the step count follows it: the same 2400 s of foresight is 96 steps at
-    the shipped 25 s cadence and 2400 steps at controllers.json's minimum of
-    1 s. A coast the controller can plan around therefore stays acceptable at
-    every cadence, rather than the cadence deciding which models exist.
-    """
-    slow = dict(GOOD, theta=600.0, n_delay=8)
-    brake = longest_braking_distance(slow)
-    assert 24 * 25.0 < brake < 2400.0
-
-    assert effective_n_horizon(slow, n_horizon=24, t_step=25.0) == math.ceil(brake / 25.0)
-    assert effective_n_horizon(slow, n_horizon=24, t_step=1.0) == math.ceil(brake / 1.0)
-    assert _ev(slow, n_horizon=24, t_step=25.0).accepted is True
-    assert _ev(slow, n_horizon=24, t_step=1.0).accepted is True
-
-    # And the cap itself follows the cadence the same way, so what it refuses is
-    # a coast rather than a step count.
-    wild = dict(GOOD, C_c=1.0, h_amb=1e-4, theta=1200.0, n_delay=1, K_Q=1e4, sigma=0.0)
-    assert effective_n_horizon(wild, n_horizon=24, t_step=1.0) == 2400
-    assert _ev(wild, n_horizon=24, t_step=1.0).accepted is False
-
-
-def test_the_horizon_is_sized_from_the_braking_distance_not_from_the_time_constant():
-    """What the horizon has to cover is the coast after a fuel cut.
-
-    The demand used to be C_c/h_amb over t_step. It is not any more, and these
-    two models say so: they carry the same C_c/h_amb -- so the old rule would
-    ask for the same 160 steps from both -- while their transport delays, and
-    so the distances they take to stop, differ by a factor of four.
-
-    Pinned as a ratio rather than a step count because what changed is which
-    quantity is being read, not the arithmetic that turns seconds into steps.
-    """
-    slow_chain = dict(GOOD, C_c=2000.0, h_amb=0.5, theta=400.0)
-    fast_chain = dict(GOOD, C_c=2000.0, h_amb=0.5, theta=100.0)
-    assert slow_chain["C_c"] / slow_chain["h_amb"] == fast_chain["C_c"] / fast_chain["h_amb"]
-
-    ratio = longest_braking_distance(slow_chain) / longest_braking_distance(fast_chain)
-    assert ratio == pytest.approx(4.0, rel=0.05)
-
-    slow = _ev(slow_chain, n_horizon=1, t_step=25.0).horizon_needed
-    fast = _ev(fast_chain, n_horizon=1, t_step=25.0).horizon_needed
-    assert slow > fast
-    # The old rule's answer, 4000 s over a 25 s step, must not be either of them.
-    assert 160 not in (slow, fast)
-
-
 def test_a_model_that_cannot_hold_the_reference_temperature_has_nothing_to_brake():
     """Full fire below the chamber's own loss means the chamber is not rising.
 
@@ -741,7 +521,6 @@ def test_a_model_that_cannot_hold_the_reference_temperature_has_nothing_to_brake
     """
     feeble = dict(GOOD, K_Q=1e-3, h_amb=1e3)
     assert braking_distance(feeble, _HAZARD_C) == 0.0
-    assert _ev(feeble, n_horizon=1, t_step=25.0).horizon_needed is None
 
 
 def test_a_chamber_with_no_delay_chain_has_nothing_to_brake():
@@ -757,7 +536,6 @@ def test_a_chamber_with_no_delay_chain_has_nothing_to_brake():
     """
     no_chain = dict(GOOD, n_delay=0)
     assert braking_distance(no_chain, _HAZARD_C) == 0.0
-    assert _ev(no_chain, n_horizon=1, t_step=25.0).horizon_needed is None
     # Same model, one lag state: the chain is back and so is the demand, so the
     # zero above is the absent chain and not an unreachable code path.
     assert braking_distance(dict(no_chain, n_delay=1), _HAZARD_C) > 0.0
@@ -820,8 +598,7 @@ def test_the_public_reading_is_the_model_s_own_coast_widened_exactly_once():
 
     The two claims are separable and this pins the join between them: the
     public function is the model's own decay scaled by `_COAST_BOUND` and by
-    nothing else. An implementation that forgot the bound, applied it twice, or
-    applied it in `longest_braking_distance` as well would all fail here.
+    nothing else. Forgetting the bound or applying it twice would fail here.
 
     Why a bound at all is in `_COAST_BOUND`'s own comment: the fitted chain
     recovers only part of a real grill's transport delay, so the model's
@@ -904,34 +681,6 @@ def test_the_implied_steady_state_is_where_full_fire_meets_the_chamber_loss():
     assert min(steady_state_at_full_fire(escaped), steady_state_at_full_fire(REAL_MAK_FIT)) > _HAZARD_C
 
 
-def test_the_braking_distance_is_read_at_the_end_of_the_range_that_takes_longest():
-    """One horizon has to be adequate everywhere the grill runs.
-
-    The cool end is where the flux has furthest to fall before it meets the
-    chamber's loss, so it is the end that sizes the horizon. Reading the hot
-    end instead would ask for less than the grill needs at the cool one.
-    """
-    cool = braking_distance(GOOD, _FLOOR_C)
-    hot = braking_distance(GOOD, _HAZARD_C)
-    assert cool > hot
-    assert longest_braking_distance(GOOD) == cool
-
-
-def test_a_reference_at_or_below_ambient_is_not_read_as_an_endless_brake():
-    """Nothing pulls heat out of a chamber the surroundings are warming.
-
-    The cool end of the operating range is 23.9 C, so a warm day puts it under
-    ambient, where the loss term goes negative and the chamber never stops
-    rising on its own. That is not a braking distance and must not become an
-    infinite horizon demand: the hot end is above any ambient the bounds
-    admit, so it is the one that answers.
-    """
-    warm_day = dict(GOOD, T_amb=35.0)
-    assert braking_distance(warm_day, _FLOOR_C) == math.inf
-    assert math.isfinite(longest_braking_distance(warm_day))
-    assert longest_braking_distance(warm_day) == braking_distance(warm_day, _HAZARD_C)
-
-
 def test_the_estimate_matches_the_coast_the_real_cook_shows_at_the_cook_s_own_temperature():
     """Like for like: same temperature, and a step compared against a step.
 
@@ -1000,56 +749,6 @@ def test_the_estimate_matches_the_coast_the_real_cook_shows_at_the_cook_s_own_te
     assert braking_distance(REAL_MAK_FIT, _FLOOR_C) > 1.5 * estimate
 
 
-def test_the_real_cook_needs_a_horizon_in_the_order_the_cook_itself_shows():
-    """The defect that shipped: a demand two orders of magnitude past the cook.
-
-    `horizon_needed` is sized from the cool end of the operating range, not
-    from the temperature the cook happened to reach, because one horizon has
-    to be adequate everywhere the grill runs. That reading is 367 s -- longer
-    than the 198 s the cook's own temperature calls for, and the same order as
-    the 263 s the log spans between fuel cut and peak.
-
-    Sized from C_c/h_amb the demand was 7184 s, 288 steps: a horizon the log
-    contains no evidence for, since a ramp that never approaches steady state
-    does not determine that ratio.
-    """
-    raw_coast_s = 1108.573 - 845.966
-    assert raw_coast_s == pytest.approx(263.0, abs=1.0)
-
-    brake = longest_braking_distance(REAL_MAK_FIT)
-    assert brake == pytest.approx(367.5, abs=2.0)
-    assert brake < 2.0 * raw_coast_s
-
-    v = _ev(REAL_MAK_FIT, n_horizon=1, t_step=25.0)
-    assert v.horizon_needed == int(math.ceil(brake / 25.0))
-    # The old rule, for contrast: C_c/h_amb over the same 25 s step.
-    assert REAL_MAK_FIT["C_c"] / REAL_MAK_FIT["h_amb"] / 25.0 > 10 * v.horizon_needed
-    # And the horizon the grill actually shipped with covers it, which is why
-    # this incident was never the horizon's fault.
-    assert _ev(REAL_MAK_FIT, n_horizon=24, t_step=25.0).horizon_needed is None
-
-
-def test_a_model_that_never_stops_rising_is_refused_rather_than_passed_quietly(monkeypatch):
-    """An unbounded brake must not read as "the horizon is fine".
-
-    `braking_distance` returns infinity for a chamber nothing pulls heat out
-    of. PROMOTION_BOUNDS makes that unreachable through `evaluate` today --
-    h_amb and K_Q both have positive floors, and the reference points at
-    or below ambient are dropped before they can produce a non-positive loss --
-    so this reaches past the bounds to force the branch rather than pretending
-    a candidate can express it. The branch exists because `horizon_needed`
-    is advisory: leaving it None on a model with no finite braking distance
-    would let the worst case be the one that travels silently.
-    """
-    import controller.model_promotion as mp
-
-    monkeypatch.setattr(mp, "longest_braking_distance", lambda *a, **k: math.inf)
-    verdict = _ev(GOOD, n_horizon=24, t_step=25.0)
-    assert verdict.accepted is False
-    assert verdict.horizon_needed is None
-    assert "stops rising" in verdict.reason
-
-
 def test_holding_h_amb_narrows_the_believed_tau_far_more_than_the_braking_distance():
     """What the fitter's held h_amb costs, in both directions.
 
@@ -1068,7 +767,7 @@ def test_holding_h_amb_narrows_the_believed_tau_far_more_than_the_braking_distan
     where the radiative share the hold gets wrong is small.
     """
     believed = dict(REAL_MAK_FIT)
-    tau_ratios, brake_ratios, sizing_ratios = [], [], []
+    tau_ratios, brake_ratios = [], []
     for mult in (0.2, 0.5, 1.0, 2.0, 5.0, 10.0):
         # The same log, read as a grill with `mult` times the ambient loss: the
         # ratios a cook determines are held, the absolute values are not.
@@ -1081,7 +780,6 @@ def test_holding_h_amb_narrows_the_believed_tau_far_more_than_the_braking_distan
         for t_ref in (_FLOOR_C, _HAZARD_C):
             tau_ratios.append(effective_tau(believed, t_ref) / effective_tau(truth, t_ref))
             brake_ratios.append(braking_distance(believed, t_ref) / braking_distance(truth, t_ref))
-        sizing_ratios.append(longest_braking_distance(believed) / longest_braking_distance(truth))
 
     # The exposure is real and it is stated, not claimed away.
     assert min(tau_ratios) < 0.45
@@ -1089,8 +787,6 @@ def test_holding_h_amb_narrows_the_believed_tau_far_more_than_the_braking_distan
     # The braking distance narrows too, but by half as much on a log scale...
     assert 0.80 < min(brake_ratios) < 0.90
     assert min(brake_ratios) > 2.0 * min(tau_ratios)
-    # ...and the reading the horizon is sized from barely narrows at all.
-    assert min(sizing_ratios) > 0.95
 
 
 def test_every_fitted_parameter_has_a_bound():

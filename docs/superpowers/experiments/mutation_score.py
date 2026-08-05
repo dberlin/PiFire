@@ -44,12 +44,6 @@ NODES = [
 #: (label, file, old, new). Each `old` must appear exactly once.
 MUTATIONS = [
     (
-        "M1 horizon sized from the time constant again",
-        PROMOTION,
-        "    brake = longest_braking_distance(candidate)",
-        '    brake = float(candidate["C_c"]) / float(candidate["h_amb"])',
-    ),
-    (
         "M2 braking distance ignores the transport delay's length",
         PROMOTION,
         '    mean = float(params["theta"]) if stages > 0 else 0.0',
@@ -76,28 +70,10 @@ MUTATIONS = [
         '    loss = float(params["h_amb"]) * (t_ref_c - t_amb)',
     ),
     (
-        "M6 range read at the hot end only",
+        "M9 full fire reduced below normalized maximum demand",
         PROMOTION,
-        "    refs = [t for t in (T_FLOOR_C, T_HAZARD_C) if t > t_amb]",
-        "    refs = [t for t in (T_HAZARD_C,) if t > t_amb]",
-    ),
-    (
-        "M7 range takes the shortest brake",
-        PROMOTION,
-        "    return max(braking_distance(params, t, q_full=q_full) for t in refs)",
-        "    return min(braking_distance(params, t, q_full=q_full) for t in refs)",
-    ),
-    (
-        "M8 a reference below ambient is kept",
-        PROMOTION,
-        "    refs = [t for t in (T_FLOOR_C, T_HAZARD_C) if t > t_amb]",
-        "    refs = [T_FLOOR_C, T_HAZARD_C]",
-    ),
-    (
-        "M9 full fire read as one unit of demand",
-        PROMOTION,
-        "Q_FULL_FIRE = 100.0",
-        "Q_FULL_FIRE = 1.0",
+        "NORMALIZED_FULL_LOAD = 1.0",
+        "NORMALIZED_FULL_LOAD = 0.1",
     ),
     (
         "M10 chain read as a single stage",
@@ -128,9 +104,9 @@ MUTATIONS = [
     ),
     (
         "M14 steady state ignores the radiative loss",
-        PROMOTION,
-        "        return h_amb * (t_c - t_amb) + sigma * ((t_c + _KELVIN) ** 4 - (t_amb + _KELVIN) ** 4)",
-        "        return h_amb * (t_c - t_amb)",
+        MODEL,
+        "    return (h_amb * (t_set - t_amb) + _rad_loss(t_set, t_amb, sigma) - d) / k_q",
+        "    return (h_amb * (t_set - t_amb) - d) / k_q",
     ),
     (
         "M15 steady state balanced against a tenth of full fire",
@@ -169,30 +145,6 @@ MUTATIONS = [
         "    return math.log(value) if value > 0.0 and math.isfinite(value) else value",
     ),
     (
-        "M20 running warning back on the time constant",
-        MPC,
-        "    brake = longest_braking_distance(cfg)",
-        '    brake = float(cfg["C_c"]) / float(cfg["h_amb"])',
-    ),
-    (
-        "M21 running warning never fires",
-        MPC,
-        "    if horizon < brake:",
-        "    if False:",
-    ),
-    (
-        "M22 running warning always fires",
-        MPC,
-        "    if horizon < brake:",
-        "    if True:",
-    ),
-    (
-        "M23 an endless brake passes with no demand attached",
-        PROMOTION,
-        '        return Verdict(False, "the model does not predict the chamber ever stops rising after a fuel cut")',
-        "        return Verdict(True, 'unbounded brake', None)",
-    ),
-    (
         "M24 steady-state search ceiling collapsed to nothing",
         PROMOTION,
         "_STEADY_STATE_CEILING_C = 100000.0",
@@ -202,20 +154,20 @@ MUTATIONS = [
     (
         "M25 the simulator drops the firing-rate gain",
         MODEL,
-        "            dT_c = (K_Q * heat_in - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
-        "            dT_c = (heat_in - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
+        "            dT_c = (K_Q * heat[k] - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
+        "            dT_c = (heat[k] - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
     ),
     (
         "M26 the simulator drops the radiative loss",
         MODEL,
-        "            dT_c = (K_Q * heat_in - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
-        "            dT_c = (K_Q * heat_in - h_amb * (T_c - T_amb)) / C_c",
+        "            dT_c = (K_Q * heat[k] - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
+        "            dT_c = (K_Q * heat[k] - h_amb * (T_c - T_amb)) / C_c",
     ),
     (
         "M27 the simulator ignores the transport chain",
         MODEL,
-        "                heat_in = lags[-1]",
-        "                heat_in = u",
+        "            heat = (load + coef @ dev[::-1]).tolist()",
+        "            heat = [load] * steps",
     ),
     (
         "M28 the simulator stops sub-stepping",
@@ -226,11 +178,15 @@ MUTATIONS = [
     (
         "M29 the do-mpc model keeps a firepot state the estimators do not",
         MODEL,
-        '    T_c = model.set_variable("_x", "T_c")\n    d = model.set_variable("_x", "d")\n    Q = model.set_variable("_u", "Q")',
+        '    q = [model.set_variable("_x", f"q{i}") for i in range(n_delay)]\n'
+        '    T_c = model.set_variable("_x", "T_c")\n'
+        '    d = model.set_variable("_x", "d")\n'
+        '    combustion_residual = model.set_variable("_u", "combustion_residual")',
+        '    q = [model.set_variable("_x", f"q{i}") for i in range(n_delay)]\n'
         '    model.set_variable("_x", "T_f")\n'
         '    T_c = model.set_variable("_x", "T_c")\n'
         '    d = model.set_variable("_x", "d")\n'
-        '    Q = model.set_variable("_u", "Q")',
+        '    combustion_residual = model.set_variable("_u", "combustion_residual")',
     ),
     (
         "M30 the Kalman state vector keeps the slot the firepot used to hold",
@@ -260,10 +216,10 @@ MUTATIONS = [
     ),
     # ---- the persisted snapshot -------------------------------------------
     (
-        "M33 the snapshot schema never moved off the two-lump version",
-        MPC,
-        "    _MODEL_SCHEMA = 2",
-        "    _MODEL_SCHEMA = 1",
+        "M33 the snapshot schema never moves with the model",
+        MODEL,
+        "MODEL_SCHEMA = 3",
+        "MODEL_SCHEMA = 2",
     ),
     (
         "M34 restore_model takes a snapshot of any version",
@@ -290,16 +246,16 @@ MUTATIONS = [
         "        if False:\n            return False",
     ),
     (
-        "M37 the net reads the disturbance from the two-lump slot",
+        "M37 the net reads the disturbance from the wrong state slot",
         NET,
-        "        d = x[self.n_delay + 1]",
-        "        d = x[self.n_delay + 2]",
+        "        disturbance = x[self.n_delay + 1]",
+        "        disturbance = x[self.n_delay + 2]",
     ),
     (
         "M38 the expected width still counts a firepot slot",
         NET,
-        '        return int(cfg.get("n_delay", self.n_delay)) + 4',
-        '        return int(cfg.get("n_delay", self.n_delay)) + 5',
+        '        return int(cfg["n_delay"]) + 4',
+        '        return int(cfg["n_delay"]) + 5',
     ),
     # ---- retired settings keys --------------------------------------------
     (
@@ -364,40 +320,6 @@ MUTATIONS = [
         MPC,
         "    n_delay=8,",
         "    n_delay=4,",
-    ),
-    # ---- the horizon cap, in both directions -------------------------------
-    # The cap is the only thing that refuses a model for its horizon, so it has
-    # to be pinned from both sides: raised, a coast no pellet grill has gets
-    # adopted anyway; lowered, a coast the controller could plan around is
-    # refused and the worse incumbent is kept.
-    (
-        "M49 the horizon cap raised past any believable coast",
-        PROMOTION,
-        "_HORIZON_CAP_S = 2400.0",
-        "_HORIZON_CAP_S = 48000.0",
-    ),
-    (
-        "M50 the horizon cap lowered under the coasts this project has measured",
-        PROMOTION,
-        "_HORIZON_CAP_S = 2400.0",
-        "_HORIZON_CAP_S = 300.0",
-    ),
-    # ---- the step bound on the build, in both directions --------------------
-    # It bounds the NLP the build assembles, and only that. Raised, a fine
-    # t_step assembles a solve nothing has timed; lowered, a horizon the
-    # measurements cover is truncated and the controller runs short of the coast
-    # at the shipped settings.
-    (
-        "M51 the build's step bound raised past what has been timed",
-        PROMOTION,
-        "_HORIZON_CAP_STEPS = 96",
-        "_HORIZON_CAP_STEPS = 2400",
-    ),
-    (
-        "M52 the build's step bound cutting the shipped horizon short",
-        PROMOTION,
-        "_HORIZON_CAP_STEPS = 96",
-        "_HORIZON_CAP_STEPS = 32",
     ),
 ]
 

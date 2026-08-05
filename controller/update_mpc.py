@@ -44,15 +44,7 @@ from common.control_trace import (
 from common.datastore_accessors import read_control_trace_cook, read_control_trace_session
 from controller.applied_output import OutputSource
 
-from controller.model_promotion import (
-    _MAX_CONFIGURABLE_HORIZON_S,
-    T_FLOOR_C,
-    T_HAZARD_C,
-    built_n_horizon,
-    effective_tau,
-    longest_braking_distance,
-    steady_state_at_full_fire,
-)
+from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau, steady_state_at_full_fire
 from controller.mpc_model import simulate_grey_box
 
 # Keys the controller reads back out of a fitted result.
@@ -80,9 +72,8 @@ CONFIG_KEYS = ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
 # way, to an all-radiative model at sigma 5e-3 and C_c 3e8. Holding both keeps
 # every fit inside the bounds. The price is that the radiative share is fixed
 # rather than fitted, so a grill whose share differs is described by a model
-# carrying the right C_c/h_amb and the wrong split. What that costs the
-# quantity the horizon is sized from is measured in
-# tests/unit/mpc/test_model_promotion.py.
+# carrying the right C_c/h_amb and the wrong split. That model mismatch is
+# measured in tests/unit/mpc/test_model_promotion.py.
 #
 # WHAT THE THREE FREE ONES ARE. They are exactly the directions a cook
 # determines. K_Q/C_c, the steady input gain, is the best-determined quantity
@@ -573,21 +564,12 @@ def main():
             "         covers a full heat-up and at least one step down, and that the fan was\n"
             "         under the controller's command throughout."
         )
-    # Both quantities come from controller/model_promotion.py rather than being
-    # recomputed here, so the horizon this utility asks for and the horizon the
-    # promotion policy reports cannot drift apart. The two are deliberately
-    # different: the time constant describes how sluggishly the chamber
-    # responds and is printed because it is what a reader recognises, while the
-    # braking distance -- how long the chamber goes on rising once the fuel is
-    # cut -- is what the horizon has to cover, and is the only one of the two a
-    # log like this determines.
-    horizon = float(_DEFAULTS["n_horizon"]) * float(_DEFAULTS["t_step"])
-    brake = longest_braking_distance(payload)
+    # The radiation-aware time constant describes the fitted chamber response.
     print(
         f"Chamber time constant: {effective_tau(payload, T_HAZARD_C):.0f} s at "
         f"{T_HAZARD_C:.0f} C rising to {effective_tau(payload, T_FLOOR_C):.0f} s at {T_FLOOR_C:.0f} C"
     )
-    print(f"Braking distance after a fuel cut: up to {brake:.0f} s across the operating range")
+
     # A cook that never approaches steady state cannot determine this, so it is
     # where a fit that has traded the chamber's parameters against each other
     # along a direction the log could not see says something visibly absurd. It
@@ -596,37 +578,6 @@ def main():
     # would have to be drawn much finer than the evidence supports.
     t_ss = steady_state_at_full_fire(payload)
     print(f"Implied steady state at full fire: {t_ss:.0f} C ({t_ss * 9.0 / 5.0 + 32.0:.0f} F)")
-    if horizon < brake:
-        # Not a warning any more: the controller derives its own horizon from
-        # this same braking distance and plans over the longer one. All that is
-        # left to say is what it will do, and that no setting has to be changed
-        # to get it -- configuring that length by hand would only stop a later,
-        # quicker model from shortening the horizon again.
-        steps = built_n_horizon(payload, n_horizon=_DEFAULTS["n_horizon"], t_step=_DEFAULTS["t_step"])
-        covered = steps * float(_DEFAULTS["t_step"])
-        # Read against every reachable configuration, not against the defaults
-        # this line happens to print: the caps hold down the raise only, so a
-        # coast past them can still sit inside a horizon somebody configures.
-        # Which of the two is true decides whether there is anything to change.
-        if covered >= brake:
-            outcome = "n_horizon does not need changing"
-        elif brake <= _MAX_CONFIGURABLE_HORIZON_S:
-            outcome = (
-                f"that spans {covered:.0f} s. Raise n_horizon and/or t_step in\n"
-                f"      Settings > Controller until their product reaches {brake:.0f} s; a longer\n"
-                f"      t_step is the cheaper of the two, spanning the same window in fewer steps"
-            )
-        else:
-            outcome = (
-                f"that spans {covered:.0f} s. No setting reaches this coast -- the furthest this\n"
-                f"      controller can be configured to plan is {_MAX_CONFIGURABLE_HORIZON_S:.0f} s"
-                f" -- so this fit's coast is\n      longer than the controller is built to brake"
-            )
-        print(
-            f"NOTE: the chamber keeps rising for {brake:.0f} s after a full fuel cut, past the\n"
-            f"      {horizon:.0f} s the default prediction horizon spans. The controller plans over\n"
-            f"      {steps} steps for this model on its own; {outcome}."
-        )
     print("\nPaste into Settings > Controller (controller.config.mpc):")
     print(_dump_json(payload))
 

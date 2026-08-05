@@ -172,26 +172,6 @@ def _agg(rows, key):
     return None if not values else statistics.median(values)
 
 
-def _brake(sel):
-    """Median coast, in seconds, of the models these runs planned with.
-
-    Read through the CURRENT checkout's estimator, so this is meaningful only
-    for runs whose model is the one it describes -- a single lump. `model_in`
-    is empty on a first cook and on every uncalibrated run, which is the
-    shipped defaults, so those fall back to them.
-    """
-    from controller.model_promotion import longest_braking_distance
-    from controller.mpc import _DEFAULTS
-
-    values = []
-    for row in sel:
-        params = dict(row.get("model_in") or {})
-        for key in ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma"):
-            params.setdefault(key, _DEFAULTS[key])
-        values.append(longest_braking_distance(params))
-    return statistics.median(values)
-
-
 def _fit_rmses(refit):
     """The candidate and incumbent fit errors this refit reported.
 
@@ -320,44 +300,6 @@ def _render(shards):
     w("short-circuits on the PROMOTION_BOUNDS check for h_amb first. Those bounds are")
     w("byte-identical at both revisions -- h_amb (1e-4, 1e3) -- so what separates the")
     w("arms here is the fitted value, not a change to the gate.")
-    w("")
-
-    w("HORIZON -- configured floor vs what was built, and what the gate demanded")
-    w("-" * 78)
-    w("`brake s` is longest_braking_distance of the model the run was BUILT with,")
-    w("which is what effective_n_horizon raises the horizon to cover. It is blank")
-    w("for the two-lump arms: their coast is not this estimator's to compute.")
-    w("")
-    w("ONLY THE U3/F3 ROWS TEST ANYTHING HERE. `built` is read from the controller's")
-    w("`_built_n_horizon`, which does not exist at 282ee65c9309, so on every U5/F5 row")
-    w("it falls back to the configured value and the two columns agree by")
-    w("construction. The claim that the derived horizon never bound is therefore over")
-    w("the 24 U3/F3 runs, not all 48. On those, the configured floor was the binding")
-    w("term every time: the longest coast any model implied is the largest `brake s`")
-    w("below, against the 600 s that 24 steps of 25 s t_step already cover, and")
-    w("neither the 2400 s nor the 96-step cap was approached.")
-    w(f"{'plant':<13}{'arm':<5}{'cook':>5}{'configured':>12}{'built':>8}{'brake s':>10}{'gate needed':>13}")
-    for plant in PLANTS:
-        for arm in ("U5", "F5", "U3", "F3"):
-            for cook in range(1, COOKS + 1):
-                sel = [r for r in rows if r["plant"] == plant and r["arm"] == arm and r["cook"] == cook]
-                if not sel:
-                    continue
-                needed = [
-                    (r.get("refit") or {}).get("horizon_needed")
-                    for r in sel
-                    if (r.get("refit") or {}).get("horizon_needed") is not None
-                ]
-                built = sorted({r.get("built_n_horizon") for r in sel})
-                cfgd = sorted({r.get("configured_n_horizon") for r in sel})
-                brake = "" if arm.endswith("5") else f"{_brake(sel):.0f}"
-                w(
-                    f"{plant:<13}{arm:<5}{cook:>5}"
-                    f"{','.join(str(v) for v in cfgd):>12}"
-                    f"{','.join(str(v) for v in built):>8}"
-                    f"{brake:>10}"
-                    f"{('-' if not needed else ','.join(str(v) for v in sorted(set(needed)))):>13}"
-                )
     w("")
 
     w("WALL CLOCK")

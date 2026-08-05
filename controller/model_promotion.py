@@ -271,125 +271,13 @@ T_HAZARD_C = (550.0 - 32.0) * 5.0 / 9.0
 #: which is the far end of the curve a single hot reference cannot see.
 T_FLOOR_C = (75.0 - 32.0) * 5.0 / 9.0
 
-#: How far past the operator's configured horizon a fitted model may push it,
-#: in SECONDS of coast. This bounds the RAISE, not the model and not the
-#: setting: a configured horizon that already spans a long coast is left alone,
-#: because a controller that can see the end of a brake can plan it whatever
-#: the number. What this refuses is a model that would demand more foresight
-#: than the operator asked for AND more than a pellet grill's brake can
-#: plausibly need.
-#:
-#: Seconds rather than steps, because a step count says nothing on its own --
-#: 96 steps is 2400 s at the shipped t_step and 96 s at controllers.json's
-#: minimum of 1 s. The step count follows from it, rounded DOWN so the horizon
-#: built never reaches past the bound it is named for.
-#:
-#: What bounds the number is the coast a pellet grill can physically have, not
-#: the cost of the solve. Two coasts have been measured here: the shipped
-#: default model's is 150 s, and controller/update_mpc.py's fit to the real MAK
-#: cook (tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv, recorded as
-#: REAL_MAK_FIT in tests/unit/mpc/test_model_promotion.py) reads 367 s. 2400 s
-#: is 16x the first and 6.5x the second. A demand to plan 40 minutes past what
-#: the operator configured is a fit that has run away along a direction the
-#: cook did not determine.
-#:
-#: Compute does not set it, because at this length compute is not scarce. At
-#: the shipped t_step = 25 s the bound is 96 steps, and the worst of 15 warm
-#: solves there is 91 ms at the shipped n_delay = 8 and 169 ms at
-#: controllers.json's largest selectable n_delay = 12. The period those have to
-#: fit inside is control_period -- how often the runtime loop calls update(),
-#: which solves on every call -- and NOT t_step, which only spaces the horizon's
-#: steps. Against the shipped control_period = 5 s that is 1.8 % and 3.4 %.
-#: The n_delay = 12 row is the one that has to hold: a bound a shipped setting
-#: can step outside is not a bound. Those are x86 Core Ultra readings and
-#: PiFire's nominal target is a Raspberry Pi 5; at an assumed 6x slowdown they
-#: are 11 % and 20 % of the shipped period. The measurement is
-#: docs/superpowers/experiments/horizon_solve_cost.py and its committed output
-#: is _horizon_solve_cost.txt beside it.
-#:
-#: Neither direction is free. Too high adopts a model whose brake the
-#: controller only appears to plan around. Too low refuses a model the gate has
-#: just judged the better description of this grill, and the incumbent left
-#: running may size the same physical coast no better.
-_HORIZON_CAP_S = 2400.0
-
-#: How many prediction steps a fitted model's coast may add to the build, on
-#: top of whatever the operator configured. Like _HORIZON_CAP_S it holds down
-#: the RAISE and not the setting: an operator who configures 200 steps gets 200,
-#: because a horizon somebody asked for is not this constant's business. What it
-#: bounds is how much larger a learned model may make the NLP than the length
-#: the grill was set up with.
-#:
-#: It exists because _HORIZON_CAP_S converts to steps through t_step, and t_step
-#: is settings-reachable down to 1 s: at that setting even the real MAK cook's
-#: ordinary 367 s coast would ask for 367 steps, and a capped model for 2400.
-#:
-#: 96 is the largest step count this project has a committed warm-solve
-#: measurement for, and the largest measured at BOTH selectable chain lengths
-#: (_horizon_solve_cost.txt: n_delay = 12, n_horizon = 96 -> 169 ms worst).
-#: Past it, headroom stops being a measured quantity and becomes an
-#: extrapolation up a curve that is already accelerating. It is derived against
-#: the shipped control_period = 5 s, where that worst solve is 3.4 % measured
-#: and 20 % at the assumed 6x Pi 5 slowdown. At controllers.json's minimum
-#: control_period = 1 s the same solve exceeds the period under that assumption
-#: -- which costs a cadence, not control: the runtime loop calls update() again
-#: when the solve returns, so the controller simply re-solves less often than
-#: configured, against a plant whose own time constants are minutes.
-#:
-#: It coincides with the step count _HORIZON_CAP_S already yields at the
-#: shipped t_step, so nothing about the shipped configuration turns on it.
-#:
-#: This bound belongs to the BUILD alone and must never reach `evaluate`. 96
-#: steps at t_step = 1 covers 96 s, short of even the shipped default model's
-#: own 150 s coast, so refusing on it would reject every model at a fine t_step
-#: and blame the model for an operator's setting. Where it truncates the
-#: horizon, controller/mpc.py's `_warn_about_model` says so.
-_HORIZON_CAP_STEPS = 96
-
-#: The furthest ahead this controller can be configured to plan, in seconds.
-#:
-#: Neither bound above lowers the configured horizon -- both hold down the
-#: raise, and `built_n_horizon` takes an outer max against `n_horizon` -- so
-#: coverage is at least `n_horizon * t_step` whatever a model asks for, and the
-#: most any configuration reaches is the product of the two settings' maxima:
-#:
-#:     n_horizon  option_max 60   x   t_step  option_max 60.0  =  3600 s
-#:
-#: Both come from the `mpc` controller's option list in
-#: controller/controllers.json. This is the number that decides whether a coast
-#: is reachable at ALL, and so whether the operator has anything to change; the
-#: caps above only decide how much of the reach a model gets without being
-#: asked for. Reading it as _HORIZON_CAP_S instead would tell an operator whose
-#: settings already span 3000 s that their 2600 s coast is out of range.
-#:
-#: Derived here rather than read from the schema so this module stays a pure
-#: computation over a parameter dict, and pinned to the schema by
-#: tests/unit/mpc/test_model_promotion.py, which fails if either option_max
-#: moves.
-_MAX_CONFIGURABLE_HORIZON_S = 60 * 60.0
-
 
 @dataclass
 class Verdict:
-    """The promotion decision, and the horizon the candidate would need.
-
-    `reason` reasons about the effective time constant -- C_c over the linear
-    plus linearized-radiative conductance -- at the ends of the operating
-    range, since a shortened one is the shape of a model that brakes late, and
-    it varies with temperature.
-
-    `horizon_needed` is a different quantity, not a scaled version of that
-    one. It is the braking distance: the seconds the chamber goes on rising
-    after full fire is cut, at whichever end of the range takes longest. A
-    horizon shorter than that cannot contain the end of any brake the
-    controller might plan. The time constant is the wrong number to size from
-    -- a heat-up ramp that never approaches steady state does not determine
-    it, so a horizon derived from it is a demand no measurement supports.
-    """
+    """The promotion decision and its fit-quality reason."""
 
     accepted: bool
     reason: str
-    horizon_needed: int | None = None
 
 
 def _finite(value):
@@ -457,9 +345,9 @@ def _model_coast(params, t_ref_c, *, q_full=NORMALIZED_FULL_LOAD):
 
     The chamber warming during the coast is left out, and a warmer chamber
     loses more, so the real crossing arrives sooner than this says. That
-    approximation errs long, which for a horizon requirement is the safe
-    direction; docs/superpowers/experiments/braking_distance_check.py measures
-    how far, against a direct integration of the same grey box.
+    approximation errs long, preserving a conservative coast estimate;
+    docs/superpowers/experiments/braking_distance_check.py measures its error
+    against a direct integration of the same grey box.
     """
     flux = float(params["K_Q"]) * float(q_full)
     if flux <= 0.0:
@@ -470,7 +358,7 @@ def _model_coast(params, t_ref_c, *, q_full=NORMALIZED_FULL_LOAD):
     )
     if loss <= 0.0:
         # Nothing at this temperature pulls heat out of the chamber, so it
-        # never stops rising on its own. No horizon covers that.
+        # never stops rising on its own.
         return math.inf
     ratio = loss / flux
     if ratio >= 1.0:
@@ -498,22 +386,11 @@ def _model_coast(params, t_ref_c, *, q_full=NORMALIZED_FULL_LOAD):
 
 
 def braking_distance(params, t_ref_c, *, q_full=NORMALIZED_FULL_LOAD):
-    """Seconds a REAL GRILL at `t_ref_c` keeps rising after full fire is cut.
+    """Bound a real grill's post-cut coast at `t_ref_c`.
 
-    This is what a prediction horizon has to cover: unless the horizon reaches
-    past this, no plan the controller can make ends with the chamber having
-    stopped, and the overshoot it is trying to avoid happens outside anything
-    it can see. It is a necessary length, not a sufficient one.
-
-    A bound rather than a best estimate, because the horizon requirement it
-    feeds has to fail closed. `_model_coast` reads the fitted model exactly, and
-    the fitted model is shorter than the grill it describes -- so the reading
-    faithful to the model lands under a real coast, and `_COAST_BOUND` is what
-    closes that gap.
-
-    The zero and infinite branches of `_model_coast` are already bounds --
-    nothing to brake, and no horizon suffices -- and scaling them changes
-    neither, so this applies at one point and every caller inherits it.
+    `_model_coast` reads the fitted model exactly. The fitted model is shorter
+    than the grill it describes, so `_COAST_BOUND` widens that reading. Zero
+    and infinity already encode their own bounds and remain unchanged.
     """
     return _COAST_BOUND * _model_coast(params, t_ref_c, q_full=q_full)
 
@@ -534,82 +411,6 @@ def steady_state_at_full_fire(params, *, q_full=NORMALIZED_FULL_LOAD):
         if target <= 0.0:
             return t_amb
         return math.inf
-
-
-def longest_braking_distance(params, *, q_full=NORMALIZED_FULL_LOAD):
-    """The braking distance at whichever end of the operating range is worst.
-
-    One horizon has to be adequate everywhere the grill runs, so it is sized
-    from the end that takes longest to stop. That is the cool end: the loss
-    the decaying flux has to fall below is smallest there, so the flux has
-    furthest to fall. Reference points at or below ambient are skipped -- a
-    chamber the surroundings are warming is not braking, and the hazard end is
-    above any ambient PROMOTION_BOUNDS admits, so at least one point remains.
-    """
-    t_amb = float(params["T_amb"])
-    refs = [t for t in (T_FLOOR_C, T_HAZARD_C) if t > t_amb]
-    return max(braking_distance(params, t, q_full=q_full) for t in refs)
-
-
-def effective_n_horizon(params, *, n_horizon, t_step):
-    """How many prediction steps a controller planning with `params` asks for.
-
-    The configured `n_horizon` is a floor, not the answer. A chamber that goes
-    on rising past the end of the horizon leaves the end of its own brake out
-    of view, so the horizon is raised to cover `longest_braking_distance`, and
-    the raise stops at the `_HORIZON_CAP_S` seconds a demand may reach past the
-    configured length. A model needing less than the operator configured lowers
-    nothing: the setting is a floor in both senses.
-
-    This is the demand, not the length built. `built_n_horizon` applies the
-    separate bound on how large an NLP this controller will assemble; the two
-    part company only where `t_step` is short. `evaluate` reads THIS one, so
-    what it refuses a model for is always the model's own coast and never the
-    step count an operator's `t_step` happens to turn that coast into.
-
-    Derived on every build rather than written back into the configuration, so
-    the horizon tracks the current model in BOTH directions -- a later, quicker
-    model brings it down again -- and the stored `n_horizon` goes on meaning
-    what the operator set. A stored value could only ratchet upwards.
-
-    A model that never predicts the chamber stops rising asks for the cap: no
-    horizon satisfies it, and the cap is the furthest a demand may reach.
-    `evaluate` refuses such a model outright, so this is the reading for one
-    that arrives in a configuration instead of through the gate.
-    """
-    steps = int(n_horizon)
-    step_s = float(t_step)
-    if not (step_s > 0.0 and math.isfinite(step_s)):
-        return steps
-    # Rounded down: a step count rounded up would plan up to one step past
-    # _HORIZON_CAP_S, and the reason strings below name that bound exactly.
-    cap = int(_HORIZON_CAP_S // step_s)
-    brake = longest_braking_distance(params)
-    if math.isfinite(brake):
-        needed = int(math.ceil(brake / step_s))
-    elif brake == math.inf:
-        needed = cap
-    else:
-        needed = 0  # nothing was computed, so nothing is being asked for
-    return max(steps, min(needed, cap))
-
-
-def built_n_horizon(params, *, n_horizon, t_step):
-    """How many prediction steps the NLP is actually assembled with.
-
-    `effective_n_horizon` is what the model's coast asks for; this is what gets
-    built, which is that demand additionally held to `_HORIZON_CAP_STEPS`. The
-    two agree at every shipped setting and part company only where `t_step` is
-    fine enough that covering a believable coast would take more steps than
-    this project has measured a solve for.
-
-    The shortfall that opens there is a property of the configuration rather
-    than of the model, which is why it stops here instead of reaching
-    `evaluate`, and why controller/mpc.py's `_warn_about_model` reports it. The
-    operator's own `n_horizon` is never lowered by this: like the seconds
-    bound, it holds down the raise and not the setting.
-    """
-    return max(int(n_horizon), min(effective_n_horizon(params, n_horizon=n_horizon, t_step=t_step), _HORIZON_CAP_STEPS))
 
 
 def effective_tau(params, t_ref_c):
@@ -675,15 +476,8 @@ def _range_label(labels):
     return "longer" if all(label == "longer" for label in labels) else "unchanged"
 
 
-def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, identifiability, n_horizon, t_step):
-    """Whether `candidate` may replace `incumbent`, and what horizon it needs.
-
-    `identifiability` is how well the record this candidate was fitted to pins
-    the model down, in the units `_IDENTIFIABILITY_FLOOR` documents --
-    controller/update_mpc.identifiability computes it. It is required rather
-    than optional: a caller that has not measured it has not shown its cook
-    determined anything, and a default would let that caller through silently.
-    """
+def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, identifiability):
+    """Whether fit quality permits `candidate` to replace `incumbent`."""
     for key, (lo, hi) in PROMOTION_BOUNDS.items():
         value = _finite(candidate.get(key))
         if value is None:
@@ -708,8 +502,7 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, identifiab
     # undetermined record is the exact case this closes, so it must not reach
     # the "no incumbent" acceptance. A value that could not be computed is
     # refused for the same reason a low one is: neither shows the record
-    # determined anything. The verdict carries no horizon demand, deliberately
-    # -- a model that is not adopted asks nothing of the grill.
+    # determined anything.
     ident = _finite(identifiability)
     if ident is None or ident < _IDENTIFIABILITY_FLOOR:
         shown = "unmeasurable" if ident is None else f"{ident:.3g} C per e-fold"
@@ -718,57 +511,18 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, identifiab
             f"the cook does not determine the model (identifiability {shown}, floor {_IDENTIFIABILITY_FLOOR:.3g})",
         )
 
-    if _finite(t_step) is None or float(t_step) <= 0:
-        return Verdict(False, "t_step must be a positive, finite number")
-    if _finite(n_horizon) is None or float(n_horizon) <= 0:
-        return Verdict(False, "n_horizon must be a positive, finite number")
-
-    # What the horizon has to cover is the braking distance -- how long the
-    # chamber goes on rising after the fuel is cut -- not a time constant. The
-    # two are not the same size and need not even be the same order: a ramp
-    # that never approaches steady state does not determine C_c/h_amb, so a
-    # horizon sized from it asks for a length no measurement supports, while
-    # the coast after a cut is directly observable in the same log.
-    horizon_needed = None
-    brake = longest_braking_distance(candidate)
-    if not math.isfinite(brake):
-        # A chamber this model never predicts will stop rising. No horizon
-        # covers that, so it is refused rather than passed with no demand
-        # attached -- silence here would read as "the horizon is fine".
-        return Verdict(False, "the model does not predict the chamber ever stops rising after a fuel cut")
-    # The seconds bound is the one thing here that refuses a model for its
-    # horizon. A demand under it is met by building a longer horizon -- the
-    # extra steps cost single-digit percent of the 5 s control_period the solve
-    # actually has to fit inside -- so refusing there would keep a model the
-    # comparison below has just called worse, over a coast the grill has
-    # whatever the verdict says. Past it the demand is no longer a description
-    # of a pellet grill's brake, so it must not be planned with.
-    #
-    # Read from `effective_n_horizon` and never `built_n_horizon`: the step
-    # bound the build applies is a fact about t_step, and a model must not be
-    # refused for what an operator's discretization turns its coast into.
-    covered = effective_n_horizon(candidate, n_horizon=n_horizon, t_step=t_step) * float(t_step)
-    if covered < brake:
-        return Verdict(
-            False,
-            f"the chamber keeps rising for {brake:.0f} s after a fuel cut, past the {covered:.0f} s "
-            f"this controller plans over under a {_HORIZON_CAP_S:.0f} s horizon cap",
-        )
-    if float(n_horizon) * float(t_step) < brake:
-        horizon_needed = int(math.ceil(brake / float(t_step)))
-
     if incumbent is None:
-        return Verdict(True, "no incumbent", horizon_needed)
+        return Verdict(True, "no incumbent")
 
     if incumbent_rmse is None:
-        return Verdict(False, "incumbent RMSE is not recorded; cannot compare", horizon_needed)
+        return Verdict(False, "incumbent RMSE is not recorded; cannot compare")
 
     if _finite(incumbent_rmse) is None or float(incumbent_rmse) <= 0:
-        return Verdict(False, "incumbent RMSE must be a positive, finite number", horizon_needed)
+        return Verdict(False, "incumbent RMSE must be a positive, finite number")
 
     for key in _INCUMBENT_KEYS:
         if _finite(incumbent.get(key)) is None:
-            return Verdict(False, "incumbent model is missing required parameters", horizon_needed)
+            return Verdict(False, "incumbent model is missing required parameters")
 
     theta_candidate = _effective_theta(candidate)
     theta_incumbent = _effective_theta(incumbent)
@@ -799,6 +553,5 @@ def evaluate(candidate, incumbent, *, candidate_rmse, incumbent_rmse, identifiab
             False,
             f"candidate RMSE {candidate_rmse:.3g} does not beat incumbent "
             f"{incumbent_rmse:.3g} by the {margin:.0%} required for {direction}",
-            horizon_needed,
         )
-    return Verdict(True, "better fit on the same data", horizon_needed)
+    return Verdict(True, "better fit on the same data")

@@ -32,12 +32,7 @@ import numpy as np
 from common.control_trace import ActuationMode
 from controller.base import ControllerBase, MpcFailureState, MpcTraceDiagnostics
 from controller.model_promotion import Verdict as _Verdict
-from controller.model_promotion import (
-    _MAX_CONFIGURABLE_HORIZON_S,
-    built_n_horizon,
-    feasibility_report,
-    longest_braking_distance,
-)
+from controller.model_promotion import feasibility_report
 from controller.mpc_model import (
     MODEL_SCHEMA,
     GreyBoxEKF,
@@ -257,61 +252,6 @@ def _warn_about_model(cfg):
             "[mpc] model is uncalibrated (every thermal parameter is still the shipped default). "
             "Expect large overshoot until you fit this grill with controller/update_mpc.py."
         )
-    # The same quantity model_promotion.evaluate() sizes horizon_needed from,
-    # through the same function, so this message and the verdict a refit prints
-    # cannot describe one model in two ways.
-    brake = longest_braking_distance(cfg)
-    horizon = float(cfg["n_horizon"]) * float(cfg["t_step"])
-    if horizon < brake:
-        # This does not ask for n_horizon to be raised to the derived value. The
-        # build already reaches that far, and a configured floor that high would
-        # stop a later, quicker model from bringing the horizon down again --
-        # the hand-made version of the ratchet the derivation exists to avoid.
-        #
-        # The build's own step bound is read here, not the demand: where the two
-        # differ the horizon really is short, and saying so is the whole point
-        # of this message. Running under-horizoned in silence is the defect it
-        # exists to prevent.
-        steps = built_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
-        covered = steps * float(cfg["t_step"])
-        # A model that predicts no end to the coast has no number to report, and
-        # is the one case where no horizon is enough at any length.
-        coast = f"for {brake:.0f} s" if math.isfinite(brake) else "with no end this model predicts"
-        # What decides whether the operator has anything to change is whether ANY
-        # setting spans this coast, not which of the two caps truncated the
-        # raise. Both caps hold down the raise only, so a configured horizon is
-        # always built in full -- which means a coast past the caps can still be
-        # inside a configuration, and saying otherwise sends an operator who
-        # could fix this away to refit a model that is not the problem.
-        if covered >= brake:
-            reach = f"planning over {steps} steps ({covered:.0f} s) instead"
-        elif brake <= _MAX_CONFIGURABLE_HORIZON_S:
-            # A setting exists, so the useful thing to say is which one and how
-            # far. Both levers are named because either reaches it, and t_step
-            # is marked as the cheaper because it spans the same window in fewer
-            # steps -- n_horizon buys the same seconds by growing the NLP. It is
-            # offered rather than taken: t_step also re-discretizes the model the
-            # MPC solves, a larger change to controller behaviour than
-            # lengthening the window and not one to make on a grill's behalf.
-            reach = (
-                f"planning over {steps} steps ({covered:.0f} s), which does not reach the end of "
-                f"that coast. Raise n_horizon and/or t_step in Settings > Controller until their "
-                f"product reaches {brake:.0f} s; t_step is the cheaper of the two, since a longer "
-                "step spans the same window in fewer steps and does not grow the solve"
-            )
-        else:
-            # Past every reachable configuration, so there is no lever to offer
-            # and naming one would be advice that cannot work.
-            reach = (
-                f"planning over {steps} steps ({covered:.0f} s). No setting reaches the end of this "
-                f"coast -- the furthest this controller can be configured to plan is "
-                f"{_MAX_CONFIGURABLE_HORIZON_S:.0f} s -- so it is the model that is out of range "
-                "and not the configuration; refit this grill with controller/update_mpc.py"
-            )
-        print(
-            f"[mpc] configured prediction horizon is {horizon:.0f} s but the chamber keeps rising "
-            f"{coast} after a full fuel cut; {reach}."
-        )
 
 
 def requires_modules(config):
@@ -365,40 +305,19 @@ class Controller(ControllerBase):
         self._trace_diagnostics = None
         self._trace_allocation: AllocationResult | None = None
 
-        # Everything the thermal parameters size -- the estimator, the horizon
-        # and the policy -- is built through the same call `restore_model` uses,
-        # so a model that arrives from the store reaches the solver the same way
-        # a configured one does.
-        self.estimator, self._net, self.model, self.mpc, self._built_n_horizon = self._build_for(cfg)
+        self.estimator, self._net, self.model, self.mpc = self._build_for(cfg)
 
     def _build_for(self, cfg):
-        """Everything the thermal parameters size, built from `cfg`.
-
-        Returns the parts rather than assigning them, so a caller adopting a
-        model can build against the merged config and commit only once every
-        part exists -- a failed build leaves the running controller untouched
-        rather than half-replaced.
-
-        The horizon is derived here rather than written into cfg: the
-        configured n_horizon is raised, where this model's coast needs it,
-        towards a length that contains the end of a full brake, and held to the
-        largest NLP this controller has a measured solve time for. Keeping cfg's
-        own value means a later, quicker model shortens the horizon again and
-        the operator's setting keeps meaning what they set.
-        """
+        """Build thermal components at the configured planning horizon."""
         n_delay = int(cfg["n_delay"])
-        n_horizon = built_n_horizon(cfg, n_horizon=cfg["n_horizon"], t_step=cfg["t_step"])
+        n_horizon = int(cfg["n_horizon"])
         estimator = self._build_estimator(cfg, n_delay)
-        # Firing-rate policy. 'net' uses the pure-numpy neural approximation (no
-        # IPOPT/CasADi); it falls back to the NLP if the artifact is missing or
-        # its calibration does not match this config -- which is what a model
-        # learned since the artifact was fit does.
         net, model, mpc = None, None, None
         if str(cfg.get("policy", "nlp")).lower() == "net":
             net = _load_net_policy(cfg, n_horizon)
         if net is None:
             model, mpc = self._build_nlp(cfg, n_delay, n_horizon)
-        return estimator, net, model, mpc, n_horizon
+        return estimator, net, model, mpc
 
     def _build_estimator(self, cfg, n_delay):
         """State/disturbance estimator (independent of the policy). EKF linearizes
@@ -447,12 +366,7 @@ class Controller(ControllerBase):
         )
 
     def _build_nlp(self, cfg, n_delay, n_horizon):
-        """Build the do-mpc NLP policy (lazily imports do_mpc/CasADi/IPOPT).
-
-        `n_horizon` is the effective horizon, which is at least cfg's and may
-        be longer; cfg's own value is the floor it was derived from and is
-        never the length built.
-        """
+        """Build the do-mpc NLP policy at the configured horizon."""
         import do_mpc
 
         model = build_do_mpc_model(
@@ -695,7 +609,7 @@ class Controller(ControllerBase):
             print(f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with.")
             return False
         self.cfg.update(merged)
-        self.estimator, self._net, self.model, self.mpc, self._built_n_horizon = rebuilt
+        self.estimator, self._net, self.model, self.mpc = rebuilt
         # The state estimate belonged to the estimator just replaced. The new
         # one starts from its own initial state, so there is nothing to report
         # until it has seen a measurement.
@@ -802,23 +716,12 @@ class Controller(ControllerBase):
             candidate_rmse=cand_rmse,
             incumbent_rmse=inc_rmse,
             identifiability=ident,
-            n_horizon=int(self.cfg["n_horizon"]),
-            t_step=float(self.cfg["t_step"]),
         )
         print(
             f"[mpc] refit: {verdict.reason} (candidate RMSE {cand_rmse:.2f} C, "
             f"incumbent {inc_rmse:.2f} C, {fitted['nfev']} evaluations over "
             f"{len(rows)} samples in {time.perf_counter() - started:.1f} s)"
         )
-        if verdict.accepted and verdict.horizon_needed:
-            # Reported only where it has a consequence. A refused model is not
-            # what the next build plans with, so what horizon it would have
-            # wanted is not a fact about this grill.
-            print(
-                f"[mpc] refit: this model's coast needs {verdict.horizon_needed} prediction steps "
-                f"at t_step {self.cfg['t_step']:.0f} s, past the configured n_horizon "
-                f"{int(self.cfg['n_horizon'])}; the next build plans over that many."
-            )
         if verdict.accepted:
             self._adopt_model(
                 fitted,

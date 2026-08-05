@@ -22,7 +22,7 @@ from common.control_trace import (
 )
 from common.datastore_accessors import append_control_trace
 from controller.applied_output import OutputSource
-from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau, longest_braking_distance
+from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau
 from controller.mpc import _DEFAULTS
 from controller.mpc_model import simulate_grey_box
 from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality, load_trace_samples
@@ -290,11 +290,8 @@ def test_the_reported_time_constant_accounts_for_radiative_conductance():
 def test_the_cli_reports_the_radiation_aware_time_constant(ds, capsys, monkeypatch):
     """The kept CLI fix, exercised through `main()` rather than around it.
 
-    The utility reports two different things and must not confuse them: the
-    effective time constant at each end of the operating range, which is what
-    the chamber's response is, and the braking distance, which is what the
-    horizon has to cover. This checks the reporting, not the trigger.
-    """
+    The utility reports fit quality and the radiation-aware response only;
+    a calibration result makes no horizon recommendation."""
     import controller.update_mpc as U
 
     t, Q, temp = _dataset()
@@ -314,9 +311,8 @@ def test_the_cli_reports_the_radiation_aware_time_constant(ds, capsys, monkeypat
     assert f"{cold:.0f} s at {T_FLOOR_C:.0f} C" in out
     # The radiation-free number must not be what got printed as the response.
     assert f"Chamber time constant: {payload['C_c'] / payload['h_amb']:.0f} s" not in out
-    # ...and the braking distance is reported as its own quantity, not folded
-    # into the time constant the line above prints.
-    assert f"Braking distance after a fuel cut: up to {longest_braking_distance(payload):.0f} s" in out
+    assert "braking distance" not in out.lower()
+    assert "horizon" not in out.lower()
 
 
 def test_the_cli_says_so_when_the_solver_ran_out_of_evaluations(ds, capsys, monkeypatch):

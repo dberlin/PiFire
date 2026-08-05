@@ -120,9 +120,6 @@ N_DELAY = int(_DEFAULTS["n_delay"])
 #: one carry the same number of samples per second of grill.
 LOG_PERIOD_S = float(_DEFAULTS["control_period"])
 LOG_STRIDE = int(round(LOG_PERIOD_S / DT))
-#: The horizon and step evaluate() is asked about: the shipped pair, so its
-#: braking-distance demand is the one a real grill would be given.
-N_HORIZON, T_STEP = int(_DEFAULTS["n_horizon"]), float(_DEFAULTS["t_step"])
 
 MODEL_KEYS = Controller._MODEL_PARAM_KEYS
 SHIPPED = {k: float(_DEFAULTS[k]) for k in MODEL_KEYS}
@@ -456,9 +453,7 @@ def measure(rec, incumbents):
         out["suf_converged"] = bool(suf["converged"])
         out["suf_fit"] = {key: float(suf[key]) for key in MODEL_KEYS}
         out["split_disagree"] = model_disagreement(out["pre_fit"], out["suf_fit"])
-        out["split_brake_ratio"] = _ratio(
-            promo.longest_braking_distance(out["pre_fit"]), promo.longest_braking_distance(out["suf_fit"])
-        )
+        out["split_brake_ratio"] = float("nan")
         out["split_tau_ratio"] = _ratio(
             promo.effective_tau(out["pre_fit"], promo.T_HAZARD_C), promo.effective_tau(out["suf_fit"], promo.T_HAZARD_C)
         )
@@ -485,9 +480,7 @@ def measure(rec, incumbents):
     out["s_max"] = float(sv[0]) if sv is not None else float("nan")
     out["cond"] = float(sv[0] / sv[-1]) if (sv is not None and sv[-1] > 0) else float("inf")
     out["inv_cond"] = float(sv[-1] / sv[0]) if (sv is not None and sv[0] > 0) else 0.0
-    #: The quantity the horizon is sized from, read off the candidate itself.
-    #: Needs no plant and no record, so a gate can compare it to the incumbent's.
-    out["brake_s"] = float(promo.longest_braking_distance(out["fit"]))
+    out["brake_s"] = float("nan")
     out["q_std"] = float(np.std(Q))
     out["q_range"] = float(np.max(Q) - np.min(Q))
     out["q_levels"] = float(len(np.unique(np.round(Q, 1))))
@@ -646,8 +639,6 @@ def gate_verdict(row, incumbent, cand_rmse, inc_rmse):
         # function has to be able to produce -- so the floor inside evaluate()
         # would double-count and erase the arm being compared to.
         identifiability=_NO_FLOOR,
-        n_horizon=N_HORIZON,
-        t_step=T_STEP,
     )
     return bool(v.accepted), v.reason
 
@@ -676,9 +667,7 @@ def main():
         f"log cadence    : {LOG_PERIOD_S:g}s;  refit floor {_REFIT_MIN_SAMPLES} samples "
         f"(= {_REFIT_MIN_SAMPLES * LOG_PERIOD_S:.0f}s at that cadence)"
     )
-    say(
-        f"held-out split : {SPLIT_FRAC:.4f} of the record;  evaluate() asked at n_horizon={N_HORIZON} t_step={T_STEP:g}"
-    )
+    say(f"held-out split : {SPLIT_FRAC:.4f} of the record")
     say("shipped incumb.: " + " ".join(f"{k}={SHIPPED[k]:g}" for k in MODEL_KEYS))
 
     # ---------------------------------------------------------- self-checks
@@ -1177,18 +1166,8 @@ def main():
         ("(none)", lambda r, inc: 1.0, True),
     )
 
-    #: The braking distance each incumbent implies, so a candidate's can be
-    #: compared to it directly. This is the quantity the horizon is sized from
-    #: and the one a brakes-late model gets wrong, and both sides of the
-    #: comparison are read off models -- no plant, no record, so a live gate can
-    #: compute it.
-    inc_brake_of = {
-        name: {p: promo.longest_braking_distance(of({"plant": p})) for p in ("mak", "generic")}
-        for name, of in incumbents.items()
-    }
-    # The real cook and the flat cooks have no plant. Only the shipped incumbent
-    # is defined for them, and it does not depend on one.
-    inc_brake_of["shipped"][None] = promo.longest_braking_distance(SHIPPED)
+    # Derived horizon metrics were retired with the runtime horizon floor.
+    inc_brake_of = {name: {} for name in incumbents}
 
     def brake_vs_inc(r, inc):
         """Candidate braking distance over the incumbent's. Below 1 is a shortening."""

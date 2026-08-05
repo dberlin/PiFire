@@ -231,7 +231,7 @@ def test_identification_off_is_invisible():
     flagged = Controller({"enable_identification": True}, "F", _shipped_cycle_data())
     plain = Controller({}, "F", _shipped_cycle_data())
     assert {k: flagged.cfg[k] for k in MODEL_KEYS} == {k: plain.cfg[k] for k in MODEL_KEYS}
-    assert flagged._built_n_horizon == plain._built_n_horizon
+    assert flagged.mpc.settings.n_horizon == plain.mpc.settings.n_horizon == flagged.cfg["n_horizon"]
 
     learned = _cook({}, refit=True)
     verdict = learned["refit"]
@@ -241,7 +241,9 @@ def test_identification_off_is_invisible():
     }, "the promoted model is the shipped one; the control below would be vacuous"
 
     forgetful = _cook({}, refit=False)
-    for key in ("overshoot_f", "undershoot_f", "iae", "pct_within_5f", "settle_s", "built_n_horizon"):
+    assert "built_n_horizon" not in forgetful
+    assert "built_n_horizon" not in learned
+    for key in ("overshoot_f", "undershoot_f", "iae", "pct_within_5f", "settle_s", "configured_n_horizon"):
         assert forgetful[key] == learned[key], (
             f"{key} moved without identification: {forgetful[key]} against {learned[key]}"
         )

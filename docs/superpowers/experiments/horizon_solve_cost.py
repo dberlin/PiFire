@@ -1,44 +1,12 @@
 #!/usr/bin/env python3
 
-"""What the horizon cap costs, against the control period it has to fit in.
+"""Measure configured MPC horizon solve costs.
 
-Provenance for two constants in `controller/model_promotion.py`.
+The controller builds precisely the configured `n_horizon`. This experiment
+records representative warm-solve costs for the shipped 24-step configuration
+and a 96-step comparison at the shipped discretization.
 
-`_HORIZON_CAP_S` is set by the coast a pellet grill can physically have, not by
-solve time; what this measures for it is the supporting claim -- that honouring
-a coast that long is not competing with the re-solve cadence, so nothing is
-being traded away to get a horizon that long.
-
-`_HORIZON_CAP_STEPS` is set by this table directly: it is the largest step count
-measured here, and measured at BOTH selectable chain lengths, which is what the
-build will not go past.
-
-The period a solve has to fit inside is `control_period` -- how often the
-runtime worker loop calls `Controller.update()`, which solves the NLP on every
-call -- and NOT `t_step`, which only says how far apart the horizon's steps are.
-
-Two points per chain length, and only two, because only two are load-bearing:
-
-    n_horizon = 24   the shipped default horizon, the baseline it costs more than
-    n_horizon = 96   the cap at the shipped t_step = 25 s
-
-Two chain lengths, because the NLP's state dimension is n_delay + 2 and the
-solve cost is a function of both that and the step count:
-
-    n_delay =  8     the shipped default
-    n_delay = 12     the largest controller/controllers.json lets an operator pick
-
-Everything else is the shipped configuration at the shipped t_step, warm solves
-only -- the cold start is discarded, since it happens once per cook while the
-cap is about every step after it.
-
-This is deliberately not a sweep. Solve cost grows superlinearly in n_horizon,
-so points past the cap cost minutes to measure and decide nothing: the cap is
-not the point where solving gets expensive, and reading it as though it were is
-what would put it in the wrong place.
-
-Run:  uv run python -m docs.superpowers.experiments.horizon_solve_cost
-Committed output: _horizon_solve_cost.txt beside this file.
+Run: `uv run python -m docs.superpowers.experiments.horizon_solve_cost`
 """
 
 import contextlib

@@ -29,10 +29,7 @@ WHAT IS MEASURED.
      coast is measured at each fan setting, on both plants. The fan raises
      chamber loss (h_amb up to 1.6x) but also raises firepot->chamber transfer
      and the burn rate of fuel already in the pot, so its net worth as a brake
-     is a measurement, not an inference. The true coast is also compared
-     against what the controller's own `longest_braking_distance` estimator
-     predicts for its shipped nominal model, since that estimator is what sizes
-     the horizon.
+     is a measurement, not an inference.
 
   R4 RECOVERY ASYMMETRY. Placed 42.4 F above setpoint -- exactly A9a's observed
      MAK overshoot -- and firing at u_min, how long until the chamber falls
@@ -465,17 +462,6 @@ def main():
                 f"{(peak - T_cut) * 9 / 5:>8.1f}{t_peak:>10d}{c_to_f(T_end):>9.1f}"
             )
     w()
-    try:
-        from controller.model_promotion import longest_braking_distance
-        from controller.mpc import _DEFAULTS
-
-        brake = longest_braking_distance(dict(_DEFAULTS))
-        w(f"The shipped brake estimator on the shipped nominal model: {brake} s.")
-    except Exception as exc:  # the estimator's signature is not this study's subject
-        w(f"(shipped brake estimator not queried: {type(exc).__name__}: {exc})")
-    w("Compare that to the MAKGrillSim t_peak above -- and note the estimator")
-    w("answers about the CONTROLLER's model, so it is blind to any coast the")
-    w("model does not carry.")
     w()
 
     # ---------------- R4 ----------------

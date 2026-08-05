@@ -177,8 +177,6 @@ def test_an_uninformative_cook_is_refused_because_it_determines_nothing():
         candidate_rmse=cand_rmse,
         incumbent_rmse=inc_rmse,
         identifiability=2.0,
-        n_horizon=int(c.cfg["n_horizon"]),
-        t_step=float(c.cfg["t_step"]),
     )
     assert permitted.accepted is True
     assert fitted["theta"] < 0.2 * learned_theta
@@ -348,13 +346,9 @@ def test_a_fitted_point_with_no_logarithm_is_unmeasurable_and_is_refused():
         candidate_rmse=1.0,
         incumbent_rmse=5.0,
         identifiability=None,
-        n_horizon=24,
-        t_step=25.0,
     )
     assert verdict.accepted is False
     assert "identifiability" in verdict.reason
-    # A refused model imposes no horizon demand on the grill.
-    assert verdict.horizon_needed is None
 
 
 def test_a_simulation_that_overflows_is_unmeasurable_rather_than_an_exception():
@@ -401,8 +395,6 @@ def test_the_identifiability_argument_is_required_of_every_caller():
             None,
             candidate_rmse=1.0,
             incumbent_rmse=None,
-            n_horizon=24,
-            t_step=25.0,
         )
 
 
@@ -420,8 +412,6 @@ def test_an_undetermined_first_fit_cannot_slip_through_on_having_no_incumbent():
         candidate_rmse=1.0,
         incumbent_rmse=None,
         identifiability=0.4,
-        n_horizon=24,
-        t_step=25.0,
     )
     assert verdict.accepted is False
     assert "does not determine the model" in verdict.reason
@@ -655,8 +645,6 @@ def test_an_unmeasurable_candidate_is_refused_by_the_gate_that_owns_the_judgemen
         # Clear of the floor: what is pinned here is the unmeasurable
         # candidate, not whether the record determined it.
         identifiability=_IDENTIFIABILITY_FLOOR * 2.0,
-        n_horizon=24,
-        t_step=25.0,
     )
     assert verdict.accepted is False
     assert "candidate RMSE" in verdict.reason
@@ -737,8 +725,6 @@ def test_an_unmeasured_error_is_none_and_survives_the_store(model_store):
         # Clear of the floor: what is being pinned is the missing incumbent
         # error, not whether the record determined the candidate.
         identifiability=2.0,
-        n_horizon=24,
-        t_step=25.0,
     )
     assert verdict.accepted is False
     assert "not recorded" in verdict.reason
