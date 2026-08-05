@@ -14,6 +14,8 @@ from controller.fopdt_identifier import (
     BLEND,
     CONFIRM_WINDOW,
     DELAYS,
+    DISTRUST_RATIO,
+    DISTRUST_WINDOW,
     EW_ALPHA,
     GAIN_MAX,
     GAIN_MIN,
@@ -512,18 +514,58 @@ def test_restore_adopts_a_valid_model_and_rejects_an_impossible_one():
 
 
 def test_the_revision_advances_only_on_a_material_change():
+    """The materiality gate protects a model this cook has actually EARNED
+    (promoted and confirmed against this plant), as opposed to one merely
+    restored from a previous cook -- see
+    test_a_restored_models_materiality_gate_does_not_block_a_small_revision,
+    which runs the identical within-band perturbation against a restored
+    model and expects the opposite outcome."""
     identifier = FOPDTIdentifier()
-    # 40.0 is the delay this plant and schedule identify to: the 5 s DELAYS
-    # grid puts the true 35 s one step below.
-    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 1})
-    rev = identifier.trusted_model()["revision"]
-    plant = _FOPDTPlant(K=802.0, tau=602.0, theta=35.0)  # within the material band
+    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=40.0)
     _drive(identifier, plant, _excitation_schedule(600))
+    model = identifier.trusted_model()
+    assert model is not None, identifier.status()
+    rev = model["revision"]
+    # within the material band of the model just earned above
+    plant2 = _FOPDTPlant(K=model["K"] * 1.02, tau=model["tau"] * 1.02, theta=model["theta"])
+    _drive(identifier, plant2, _excitation_schedule(600))
     assert identifier.trusted_model()["revision"] == rev
     # positive control: the identifier must have actually reached a decision,
     # not merely have never promoted anything -- otherwise this test cannot
     # distinguish the material gate working from a dead identifier.
     assert identifier.status()["candidates_passing"] > 0
+
+
+def test_a_restored_models_materiality_gate_does_not_block_a_small_revision():
+    """The positive counterpart to test_the_revision_advances_only_on_a_material_change,
+    which runs the identical within-band perturbation against an EARNED model
+    and expects the revision to stay put. A model just restored from a
+    previous cook has not yet earned that protection: it is freely revisable,
+    so the same size of change here DOES advance the revision."""
+    identifier = FOPDTIdentifier()
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 1})
+    rev = identifier.trusted_model()["revision"]
+    plant = _FOPDTPlant(K=802.0, tau=602.0, theta=35.0)  # within the material band
+    _drive(identifier, plant, _excitation_schedule(600))
+    assert identifier.trusted_model()["revision"] > rev
+    assert identifier.status()["candidates_passing"] > 0
+
+
+def test_an_earned_revision_re_establishes_the_materiality_gate():
+    """Once a restored model's free-revision window closes with an adoption
+    (this cook's own evidence has now earned it churn protection), a further
+    within-band perturbation must NOT advance the revision again."""
+    identifier = FOPDTIdentifier()
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 1})
+    plant = _FOPDTPlant(K=802.0, tau=602.0, theta=35.0)  # within the material band: revises freely
+    _drive(identifier, plant, _excitation_schedule(600))
+    model = identifier.trusted_model()
+    assert model["revision"] == 2
+    assert identifier._restored is False
+    rev = model["revision"]
+    plant2 = _FOPDTPlant(K=model["K"] * 1.02, tau=model["tau"] * 1.02, theta=model["theta"])
+    _drive(identifier, plant2, _excitation_schedule(600))
+    assert identifier.trusted_model()["revision"] == rev
 
 
 def test_confirmation_requires_a_full_window_before_trust():
@@ -592,7 +634,11 @@ def test_a_material_change_advances_the_revision_and_blends_the_continuous_param
     by the BLEND fraction toward it while theta moves to the candidate's grid value
     outright -- the blend formula in _adopt is otherwise never exercised."""
     identifier = FOPDTIdentifier()
-    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 10.0, "revision": 1})
+    # theta matches the plant's true delay exactly, so only K is materially
+    # wrong -- a restored delay that is ALSO wrong is the distrust check's
+    # territory (see test_distrust_clears_and_the_identifier_re_promotes_normally),
+    # and would clear trust before this blend pathway ever runs.
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 35.0, "revision": 1})
     plant = _FOPDTPlant(K=900.0, tau=600.0, theta=35.0)  # K moved 12.5%: outside MATERIAL_K
     model = None
     for u in _excitation_schedule(600):
@@ -612,7 +658,7 @@ def test_a_material_change_advances_the_revision_and_blends_the_continuous_param
     assert model["K"] == pytest.approx((1.0 - BLEND) * 800.0 + BLEND * candidate_K)
     assert model["tau"] == pytest.approx((1.0 - BLEND) * 600.0 + BLEND * candidate_tau)
     assert model["theta"] == float(DELAYS[winner])
-    assert model["theta"] != 10.0  # moved outright, not blended toward the restored value
+    assert model["theta"] != 35.0  # moved outright, not blended toward the restored value
 
 
 def test_restore_clears_a_stale_confirmation_window():
@@ -630,6 +676,141 @@ def test_restore_clears_a_stale_confirmation_window():
     assert identifier.trusted_model() == {"K": 700.0, "tau": 900.0, "theta": 10.0, "revision": 9}
 
 
+# ---------------------------------------------------------------------- distrust
+
+
+def _resid_setup(identifier, theta, other_resid=1.0):
+    """Point identifier at a trusted delay and hand back its bank index, so a
+    test can drive resid_ew directly without a multi-hour simulation."""
+    idx = int(np.where(DELAYS == theta)[0][0])
+    other = 0 if idx != 0 else 1
+    identifier._bank.resid_ew[:] = other_resid
+    return idx, other
+
+
+def test_a_materially_degraded_residual_drops_trust():
+    """When the trusted delay's residual runs far worse than the best
+    candidate's for DISTRUST_WINDOW straight observations, trust is dropped
+    and the count in status() moves -- this is the load-bearing change: a
+    wrong-gain model degrades control without spiking _safe's residual
+    envelope, so this is the only thing that can catch it."""
+    identifier = FOPDTIdentifier()
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 5})
+    idx, other = _resid_setup(identifier, 20.0)
+    identifier._bank.resid_ew[idx] = 100.0  # unambiguously worse than the best
+    for _ in range(DISTRUST_WINDOW):
+        identifier._check_distrust()
+    assert identifier.trusted_model() is None
+    assert identifier.status()["distrust_count"] == 1
+
+
+def test_a_healthy_residual_is_not_dropped():
+    """The anti-flapping direction: a trusted delay whose residual stays
+    competitive with the best candidate's must never be dropped, no matter
+    how long it is observed. This is the one that fails if DISTRUST_RATIO or
+    DISTRUST_WINDOW is too tight."""
+    identifier = FOPDTIdentifier()
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 5})
+    idx, other = _resid_setup(identifier, 20.0)
+    identifier._bank.resid_ew[idx] = 1.0  # ties the best candidate
+    for _ in range(DISTRUST_WINDOW * 5):
+        identifier._check_distrust()
+    assert identifier.trusted_model() is not None
+    assert identifier.status()["distrust_count"] == 0
+
+
+def test_distrust_ratio_boundary_does_not_trip_exactly_at_the_threshold():
+    """DISTRUST_RATIO's own value (8.0) is asserted as a literal here, not
+    read back from the constant: the check is a strict `>`, so a ratio of
+    exactly 8.0 must never trip it, and writing the boundary as a fixed
+    number means a future change to the constant itself still gets checked
+    against this same literal boundary rather than silently moving with it."""
+    assert DISTRUST_RATIO == 8.0
+    identifier = FOPDTIdentifier()
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 1})
+    idx, other = _resid_setup(identifier, 20.0)
+    identifier._bank.resid_ew[idx] = 8.0
+    for _ in range(DISTRUST_WINDOW * 2):
+        identifier._check_distrust()
+    assert identifier.trusted_model() is not None
+
+
+def test_distrust_ratio_boundary_trips_just_above_the_threshold():
+    assert DISTRUST_RATIO == 8.0
+    identifier = FOPDTIdentifier()
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 1})
+    idx, other = _resid_setup(identifier, 20.0)
+    identifier._bank.resid_ew[idx] = 8.01
+    for _ in range(DISTRUST_WINDOW):
+        identifier._check_distrust()
+    assert identifier.trusted_model() is None
+
+
+def test_distrust_window_boundary_requires_the_full_sustain_count():
+    """DISTRUST_WINDOW straight bad observations are required: one short must
+    not trip it, the same boundary discipline as
+    test_confirmation_requires_a_full_window_before_trust."""
+    identifier = FOPDTIdentifier()
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 1})
+    idx, other = _resid_setup(identifier, 20.0)
+    identifier._bank.resid_ew[idx] = 100.0
+    for _ in range(DISTRUST_WINDOW - 1):
+        identifier._check_distrust()
+    assert identifier.trusted_model() is not None
+    identifier._check_distrust()  # the DISTRUST_WINDOW-th straight bad observation
+    assert identifier.trusted_model() is None
+
+
+def test_distrust_is_not_sticky():
+    """Once cleared, distrust leaves no latch: a model restored at the same
+    delay, now with a healthy residual, is not immediately redropped, and the
+    count does not move again."""
+    identifier = FOPDTIdentifier()
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 5})
+    idx, other = _resid_setup(identifier, 20.0)
+    identifier._bank.resid_ew[idx] = 100.0
+    for _ in range(DISTRUST_WINDOW):
+        identifier._check_distrust()
+    assert identifier.trusted_model() is None
+    assert identifier.status()["distrust_count"] == 1
+
+    identifier._bank.resid_ew[idx] = 1.0  # the same candidate now looks fine
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 6})
+    for _ in range(DISTRUST_WINDOW * 2):
+        identifier._check_distrust()
+    assert identifier.trusted_model() is not None
+    assert identifier.status()["distrust_count"] == 1  # unchanged: no re-trip
+
+
+def test_distrust_clears_and_the_identifier_re_promotes_normally():
+    """End-to-end through observe()/record_output(), not direct resid_ew
+    manipulation: a model restored at a delay the actual plant no longer
+    supports is dropped, and normal promotion re-adopts a model that matches
+    the plant actually being observed -- distrust is not a dead end."""
+    identifier = FOPDTIdentifier()
+    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 100.0, "revision": 9})
+    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=35.0)  # true delay far from the restored one
+
+    dropped = False
+    for u in _excitation_schedule(1200):
+        _drive(identifier, plant, [u])
+        if identifier.status()["distrust_count"] >= 1:
+            dropped = True
+            break
+    assert dropped, identifier.status()
+    assert identifier.trusted_model() is None
+
+    promoted = False
+    for u in _excitation_schedule(1200):
+        _drive(identifier, plant, [u])
+        if identifier.trusted_model() is not None:
+            promoted = True
+            break
+    assert promoted, identifier.status()
+    model = identifier.trusted_model()
+    assert model["K"] == pytest.approx(800.0, rel=0.10)
+
+
 def test_status_reports_what_the_gates_are_waiting_for():
     identifier = FOPDTIdentifier()
     status = identifier.status()
@@ -643,5 +824,7 @@ def test_status_reports_what_the_gates_are_waiting_for():
         "runner_up_residual",
         "trusted",
         "candidates_passing",
+        "distrust_count",
+        "distrust_ratio",
     ):
         assert key in status

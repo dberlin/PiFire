@@ -130,7 +130,13 @@ class Controller(PIDControllerBase):
         }
 
     def get_model_snapshot(self):
-        return self.identifier.trusted_model()
+        model = self.identifier.trusted_model()
+        if model is None:
+            return None
+        # Provenance only: status() and any future policy can see where the
+        # model came from, but restore() never refuses on it -- a K/tau fit
+        # near one setpoint is still a reasonable starting estimate at another.
+        return {**model, "setpoint_f": _to_f(self.set_point, self.units)}
 
     def restore_model(self, snapshot):
         if not self.identifier.restore(snapshot):

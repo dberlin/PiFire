@@ -326,7 +326,35 @@ def test_a_snapshot_survives_the_store_round_trip(clock):
     fresh = _controller("pid_sp", clock)
     assert fresh.get_model_snapshot() is None
     assert fresh.restore_model(store.load("pid_sp")) is True
-    assert fresh.get_model_snapshot() == {"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3}
+    assert fresh.get_model_snapshot() == {"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3, "setpoint_f": 0.0}
+
+
+def test_the_snapshot_round_trips_setpoint_f(clock):
+    """setpoint_f is stamped from the controller's own target at snapshot
+    time, via the same _to_f every other temperature in this module uses."""
+    sp = _controller("pid_sp", clock)
+    sp.set_target(225.0)
+    sp.restore_model({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3})
+    assert sp.get_model_snapshot()["setpoint_f"] == 225.0
+
+
+def test_setpoint_f_is_stamped_in_fahrenheit_regardless_of_install_units(clock):
+    sp = _controller("pid_sp", clock, units="C")
+    sp.set_target(100.0)  # 100 C == 212 F
+    sp.restore_model({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3})
+    assert sp.get_model_snapshot()["setpoint_f"] == pytest.approx(212.0)
+
+
+def test_restore_does_not_refuse_on_a_setpoint_f_mismatch(clock):
+    """setpoint_f is provenance only -- restore() must not gate on it, even
+    when it plainly does not match the controller's current target. A K/tau
+    fit near one setpoint is still a reasonable starting estimate at another;
+    relaxing the bar to STOP trusting a model is safe, relaxing it to START
+    trusting is not, so this is deliberately not a refusal condition."""
+    sp = _controller("pid_sp", clock)
+    sp.set_target(600.0)  # wildly different from the snapshot's provenance
+    assert sp.restore_model({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3, "setpoint_f": 225.0}) is True
+    assert sp.get_model_snapshot()["K"] == 800.0
 
 
 def test_a_restored_model_is_active_on_the_first_tick(clock):

@@ -307,6 +307,22 @@ BLEND = 0.1
 #: A dt outside this band is a clock jump or a stalled loop, not an observation.
 DT_MIN, DT_MAX = 1.0, 600.0
 
+#: A model that no longer describes the plant degrades control without
+#: spiking _safe's one-step residual envelope (a wrong-gain error is modest
+#: and persistent, not a spike), so it is caught here instead: the RLS bank
+#: keeps fitting every delay candidate against the raw measurement regardless
+#: of what is trusted, and the trusted candidate's residual is compared
+#: against the best one on every accepted observation. Measured on GrillSim
+#: (closed loop, pid_sp + FOPDTIdentifier, a model transplanted from a
+#: different operating point onto a plant already at temperature): a
+#: correctly-trusted model's ratio never exceeded ~7.6 across 42 seeded 4-6
+#: hour runs, while a transplanted model sustains it above 10 within minutes.
+#: 8.0 sits with margin above the observed correct-model ceiling; requiring it
+#: sustained for DISTRUST_WINDOW straight observations (not a single sample)
+#: adds a further margin against a one-tick noise spike.
+DISTRUST_RATIO = 8.0
+DISTRUST_WINDOW = 20
+
 
 class FOPDTIdentifier:
     """Passive online identification of the grill's FOPDT parameters.
@@ -335,6 +351,12 @@ class FOPDTIdentifier:
         self._trusted = None
         self._revision = 0
         self._confirm = None
+        # A model just restored from a previous cook has not yet been
+        # confirmed against THIS plant, so the materiality gate leaves it
+        # alone until an adoption earns that protection (see _evaluate).
+        self._restored = False
+        self._distrust_confirm = 0
+        self._distrust_count = 0
 
     # -------------------------------------------------------------- properties
     @property
@@ -407,6 +429,7 @@ class FOPDTIdentifier:
         self._duty_n += 1
         self._duty_sum += mean_duty
         self._duty_sq += mean_duty * mean_duty
+        self._check_distrust()
         self._evaluate()
         return True
 
@@ -428,6 +451,42 @@ class FOPDTIdentifier:
             and (self._temp_hi - self._temp_lo) >= MIN_TEMP_SPAN_F
         )
 
+    def _trusted_index(self):
+        return int(np.argmin(np.abs(DELAYS - self._trusted["theta"])))
+
+    def _distrust_ratio(self):
+        """The trusted delay's residual relative to the best candidate's, or
+        None while untrusted. Unconditional on `_excited()`: this is exactly
+        the regime -- degraded control suppressing the excitation promote()
+        needs -- the distrust check exists to catch."""
+        if self._trusted is None:
+            return None
+        resid = self._bank.resid_ew
+        best = float(np.min(resid))
+        if best <= 0.0:
+            return None
+        return float(resid[self._trusted_index()]) / best
+
+    def _check_distrust(self):
+        """Drop trust once the trusted delay's residual has run materially
+        worse than the best candidate's for DISTRUST_WINDOW straight
+        observations. Not sticky: clearing `_trusted` here is the only
+        effect: the identifier is simply untrusted again and re-promotes
+        through the normal machinery once the evidence supports it."""
+        ratio = self._distrust_ratio()
+        if ratio is None:
+            self._distrust_confirm = 0
+            return
+        if ratio > DISTRUST_RATIO:
+            self._distrust_confirm += 1
+        else:
+            self._distrust_confirm = 0
+        if self._distrust_confirm >= DISTRUST_WINDOW:
+            self._distrust_count += 1
+            self._distrust_confirm = 0
+            self._trusted = None
+            self._confirm = None
+
     def _evaluate(self):
         if not self._excited():
             return
@@ -443,7 +502,11 @@ class FOPDTIdentifier:
             "tau": float(params["tau"][winner]),
             "theta": float(DELAYS[winner]),
         }
-        if self._trusted is not None and not self._material(candidate):
+        # A restored model has not yet been confirmed against this cook's
+        # plant, so it has not earned the churn protection the materiality
+        # gate gives a model this cook already confirmed -- any candidate
+        # that survives confirmation below replaces it outright.
+        if self._trusted is not None and not self._restored and not self._material(candidate):
             self._confirm = None
             return
         if not self._confirmed(candidate):
@@ -486,6 +549,9 @@ class FOPDTIdentifier:
                 "theta": candidate["theta"],
             }
         self._revision += 1
+        # This adoption is evidence from the current cook's own plant, so the
+        # model has now earned the churn protection a restored one lacks.
+        self._restored = False
 
     def trusted_model(self):
         if self._trusted is None:
@@ -514,6 +580,9 @@ class FOPDTIdentifier:
         # A confirmation window built against the pre-restore trusted state must
         # not count toward confirming a candidate against this one.
         self._confirm = None
+        # Not yet confirmed against this cook's plant -- see _evaluate.
+        self._restored = True
+        self._distrust_confirm = 0
         return True
 
     def status(self):
@@ -533,4 +602,6 @@ class FOPDTIdentifier:
             "candidates_passing": int(gate_mask(params, rse_K, rse_tau).sum()),
             "confirming": None if self._confirm is None else self._confirm["n"],
             "trusted": self.trusted_model(),
+            "distrust_count": self._distrust_count,
+            "distrust_ratio": self._distrust_ratio(),
         }
