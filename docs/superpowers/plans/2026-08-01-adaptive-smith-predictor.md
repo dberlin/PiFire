@@ -1639,7 +1639,8 @@ class SmithPredictor:
         self._x0 = 0.0
         self._xd = 0.0
         self._last_t = None
-        self._last_prediction = None
+        self._last_measured = None
+        self._prev_xd = None
         self._residual_streak = 0
         self._disabled = False
 
@@ -1690,7 +1691,8 @@ class SmithPredictor:
         self._x0 = 0.0
         self._xd = 0.0
         self._last_t = None
-        self._last_prediction = None
+        self._last_measured = None
+        self._prev_xd = None
         self._residual_streak = 0
         self._disabled = False
 
@@ -1703,18 +1705,26 @@ class SmithPredictor:
             return measured
         if self._last_t is None:
             self._last_t = now
-            self._last_prediction = measured
+            self._last_measured = measured
+            self._prev_xd = self._xd
             return measured
 
         self._integrate(self._last_t, now)
         self._last_t = now
 
         predicted = measured + self._x0 - self._xd
-        if not self._safe(predicted, measured):
+        # the residual is the delayed branch's own one-step forecast error of
+        # the MEASURED signal (xd models measured output), not the Smith
+        # output's forecast error: the output predicts temperature after the
+        # dead time, not the next measurement
+        expected_measured = self._last_measured + (self._xd - self._prev_xd)
+        residual = abs(measured - expected_measured)
+        if not self._safe(predicted, residual):
             self.reset()
             self._disabled = True
             return measured
-        self._last_prediction = predicted
+        self._last_measured = measured
+        self._prev_xd = self._xd
         return predicted
 
     def _integrate(self, t0, t1):
@@ -1737,12 +1747,12 @@ class SmithPredictor:
         decay = math.exp(-dt / tau)
         return x * decay + gain * u * (1.0 - decay)
 
-    def _safe(self, predicted, measured):
+    def _safe(self, predicted, residual):
         if not math.isfinite(predicted) or not math.isfinite(self._x0) or not math.isfinite(self._xd):
             return False
         if not TEMP_MIN_F <= predicted <= TEMP_MAX_F:
             return False
-        if self._last_prediction is not None and abs(measured - self._last_prediction) > MAX_RESIDUAL_F:
+        if residual > MAX_RESIDUAL_F:
             self._residual_streak += 1
         else:
             self._residual_streak = 0
@@ -1934,7 +1944,8 @@ The bug the tests expose: `temperature()` calls `self.reset()` (which clears `_d
         equally, so a later re-trust starts from a zero correction."""
         self._x0 = 0.0
         self._xd = 0.0
-        self._last_prediction = None
+        self._last_measured = None
+        self._prev_xd = None
         self._residual_streak = 0
         self._disabled = True
 ```
