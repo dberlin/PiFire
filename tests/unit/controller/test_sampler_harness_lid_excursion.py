@@ -48,6 +48,12 @@ THRESHOLD_PCT = default_settings()["cycle_data"]["LidOpenThreshold"]
 TRIGGER_C = ((SETPOINT_F * (100 - THRESHOLD_PCT) / 100.0) - 32.0) / 1.8
 
 EPISODE_MINUTES = 30
+# The exploration dither generation actually runs at (`sample_mpc.main`'s
+# default). It is a standard deviation on a 0-1 duty, so a value near 1 does not
+# widen the visited region -- it replaces the controller, driving half the steps
+# to a clipped 0 or 1 at random. An episode driven that way swings tens of
+# degrees on its own, which is not a lid excursion and cannot be measured as one.
+DITHER = 0.08
 CYCLE_S = sample_mpc.CYCLE["HoldCycleTime"]
 LID_START_STEP = 40
 LID_WINDOW_STEPS = 5
@@ -102,7 +108,7 @@ def _drive_episode(seed, *, h_lid=None, pause_steps=None):
         # A single setpoint for the whole episode: the sampler's segment schedule
         # draws from [sp_lo, sp_hi], so collapsing the range removes the only
         # source of temperature variation that is not the lid.
-        sample_mpc._episode_span((seed, EPISODE_MINUTES, 8.0, SETPOINT_C, SETPOINT_C, False))
+        sample_mpc._episode_span((seed, EPISODE_MINUTES, DITHER, SETPOINT_C, SETPOINT_C, False))
     finally:
         sample_mpc.GrillSim, sample_mpc._draw_lid_events = real_sim, real_draw
         sample_mpc.LID_PAUSE_STEPS = real_pause
