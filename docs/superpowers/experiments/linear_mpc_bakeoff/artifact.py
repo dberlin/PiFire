@@ -190,6 +190,20 @@ class ExperimentArtifact:
     def to_json(self) -> str:
         return json.dumps(self.to_document(), allow_nan=False, sort_keys=True, separators=(",", ":"))
 
+    def canonical_document(self) -> dict[str, Any]:
+        """Return deterministic scientific evidence while retaining timing evidence in ``to_document``."""
+        document = self.to_document()
+        for row in document["scenarios"]:
+            row.pop("raw_timing_ms", None)
+            for name in ("raw_learner_p99_ms", "raw_refresh_p99_ms", "raw_solve_p99_ms"):
+                row["metrics"].pop(name, None)
+        for arm in document["arms"].values():
+            arm.pop("raw_timing_ms", None)
+            arm.pop("projected_timing_ms", None)
+            arm.pop("raw_solve_p99_ms", None)
+            arm.pop("projected_solve_p99_ms", None)
+        return document
+
 
 @dataclass(frozen=True, slots=True)
 class ArmRecommendation:
@@ -292,8 +306,11 @@ def _dominates(left: ArmEvidence, right: ArmEvidence, scales: Sequence[float]) -
 def _material_pareto_conflict(frontier: Sequence[ArmEvidence]) -> bool:
     if len(frontier) < 2:
         return False
-    dimensions = tuple(zip(*(_pareto_values(item) for item in frontier)))
-    return any(max(values) > min(values) * 1.05 for values in dimensions if min(values) > 0.0)
+    for values in zip(*(_pareto_values(item) for item in frontier)):
+        scale = max(1e-12, max(abs(value) for value in values))
+        if (max(values) - min(values)) / scale > 0.05:
+            return True
+    return False
 
 
 

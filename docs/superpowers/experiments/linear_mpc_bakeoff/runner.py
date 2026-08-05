@@ -190,7 +190,6 @@ def _run_matrix(
     if resume and checkpoint is not None and checkpoint.exists():
         checkpoint_document = json.loads(checkpoint.read_text(encoding="utf-8"))
         rows = [_scenario_from_document(row) for row in checkpoint_document.get("rows", ())]
-        rows = [_deterministic_timing_row(row) for row in rows]
         from .artifact import ArmFailure
 
         failures = [
@@ -215,7 +214,7 @@ def _run_matrix(
                 arm=arm,
                 initialization=initialization,
             )
-            rows.append(_deterministic_timing_row(row))
+            rows.append(row)
         except Exception as exc:
             from .artifact import ArmFailure
 
@@ -297,16 +296,6 @@ def _write_checkpoint(
             temporary.unlink()
 
 
-def _deterministic_timing_row(row: ScenarioResult) -> ScenarioResult:
-    """Store a nonzero, reproducible measurement footprint for canonical checkpoints."""
-    metrics = dict(row.metrics)
-    learner = (0.001,)
-    refresh = tuple(0.001 for _ in row.raw_refresh_ms)
-    solve = tuple(0.001 for _ in row.raw_solve_ms)
-    metrics["raw_learner_p99_ms"] = 0.001
-    metrics["raw_refresh_p99_ms"] = 0.001 if refresh else 0.0
-    metrics["raw_solve_p99_ms"] = 0.001 if solve else 0.0
-    return replace(row, metrics=metrics, raw_learner_ms=learner, raw_refresh_ms=refresh, raw_solve_ms=solve)
 
 
 def _run_scenario(
@@ -427,9 +416,8 @@ def _prepared_model(arm: str, seed: int, initialization: str):
             )
         )
     after = _horizon_residuals(model, record, starts=range(480, 600, 20))
-    residuals = {horizon: before[horizon] + after[horizon] for horizon in before}
     recovery_mae = float(np.mean(after[600]))
-    return model, fit_ms, residuals, recovery_mae
+    return model, fit_ms, after, recovery_mae
 
 
 def _identification_records(seed: int, initialization: str) -> tuple[SignalRecord, SignalRecord]:

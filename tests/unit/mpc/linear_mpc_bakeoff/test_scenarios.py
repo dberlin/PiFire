@@ -36,7 +36,7 @@ def test_resume_matches_clean_artifact(tmp_path: Path) -> None:
         tmp_path / "resume", resume=True, interrupt_after=3
     )
 
-    assert clean.to_json() == interrupted_then_resumed.to_json()
+    assert clean.canonical_document() == interrupted_then_resumed.canonical_document()
 
 
 def test_checkpoint_is_atomic_and_does_not_leave_temporary_file(tmp_path: Path) -> None:

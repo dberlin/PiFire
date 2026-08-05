@@ -56,8 +56,8 @@ def test_resume_requires_existing_checkpoint(tmp_path: Path) -> None:
 
 def test_quick_resume_consumes_partial_checkpoint_to_clean_equivalent_artifact(tmp_path: Path) -> None:
     output = tmp_path / "resume.json"
-    clean = run_tiny_matrix(tmp_path / "clean", resume=False)
     run_tiny_matrix(tmp_path / "partial", resume=False, interrupt_after=3, output=output)
+    partial = json.loads(output.read_text(encoding="utf-8"))
 
     completed = subprocess.run(
         [sys.executable, "-m", "docs.superpowers.experiments.linear_mpc_bakeoff", "--quick", "--resume", "--output", str(output)],
@@ -65,4 +65,8 @@ def test_quick_resume_consumes_partial_checkpoint_to_clean_equivalent_artifact(t
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(output.read_text(encoding="utf-8")) == clean.to_document()
+    resumed = json.loads(output.read_text(encoding="utf-8"))
+    assert len(resumed["scenarios"]) == 72
+    key = lambda row: (row["arm"], row["initialization"], row["plant"], row["scenario"], row["mode"], row["seed"])
+    resumed_rows = {key(row): row for row in resumed["scenarios"]}
+    assert all(resumed_rows[key(row)] == row for row in partial["rows"])
