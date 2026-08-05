@@ -16,6 +16,8 @@ def test_min_fire_maps_to_lower_bounds_with_a_frozen_traceable_result():
     assert allocation.fan_duty == pytest.approx(40.0)
     assert allocation.normalized_combustion_load == pytest.approx(5.0)
     assert allocation.auger_clamp_reason is AllocationClampReason.NONE
+    assert (allocation.q_min, allocation.q_max, allocation.u_min, allocation.u_max) == (5.0, 100.0, 0.1, 0.9)
+    assert (allocation.fan_min_pct, allocation.fan_max_pct, allocation.fan_enabled) == (40.0, 100.0, True)
     assert dataclasses.is_dataclass(allocation)
     with pytest.raises(dataclasses.FrozenInstanceError):
         allocation.auger_duty = 0.2
@@ -56,4 +58,5 @@ def test_fan_disabled_returns_no_fan_command():
     allocation = allocate(60, **cfg)
 
     assert allocation.fan_duty is None
+    assert allocation.fan_enabled is False
     assert 0.1 < allocation.auger_duty < 0.9

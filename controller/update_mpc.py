@@ -131,9 +131,10 @@ def load_trace_samples(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load one complete, uninterrupted MPC session as fitting arrays.
 
-    Hold closes the prior command interval under the next accepted update. The
+    Hold labels each applied interval with the command that produced it. The
     returned temperature/load pairs therefore use each update except the final
-    one and the complete applied output keyed by the following update revision.
+    one and its own same-revision complete applied output. An optional revision
+    zero SEED interval is ignored because it predates the first accepted command.
     """
     if (cook_id is None) == (session_id is None):
         raise TraceSelectionError("select exactly one of cook_id or session_id")
@@ -171,11 +172,28 @@ def load_trace_samples(
 
     updates: list[tuple[int, MpcUpdatePayload]] = []
     complete_outputs: dict[int, tuple[int, AppliedOutputPayload]] = {}
+    seed_outputs = 0
     partial_outputs: list[tuple[int, AppliedOutputPayload]] = []
     previous_revision = -1
     previous_wall_ms = -1
+    seed_allowed = False
     for index, record in enumerate(records):
         payload = record.payload
+        if isinstance(payload, SessionPayload):
+            seed_allowed = True
+            continue
+        if isinstance(payload, AppliedOutputPayload) and payload.result_revision == 0:
+            seed_outputs += 1
+            if (
+                not seed_allowed
+                or seed_outputs != 1
+                or payload.output_source is not OutputSource.SEED
+                or not payload.sample_complete
+            ):
+                raise TraceSelectionError("revision zero applied output must be the one complete initial seed")
+            seed_allowed = False
+            continue
+        seed_allowed = False
         if isinstance(payload, MpcUpdatePayload):
             revision = payload.result_revision
             if revision <= previous_revision:
@@ -216,18 +234,19 @@ def load_trace_samples(
         partial_index, partial = partial_outputs[0]
         if partial.result_revision != latest_revision:
             raise TraceSelectionError("terminal incomplete applied-output interval does not match its latest update")
-        latest_complete = complete_outputs.get(latest_revision)
-        if partial_index <= updates[-1][0] or latest_complete is None or latest_complete[0] >= partial_index:
+        if partial_index <= updates[-1][0]:
             raise TraceSelectionError("terminal incomplete applied-output interval does not follow its latest update")
         if any(
             isinstance(record.payload, (MpcUpdatePayload, AppliedOutputPayload))
             for record in records[partial_index + 1 :]
         ):
             raise TraceSelectionError("terminal incomplete applied-output interval has a later update or output")
-        if partial.interval_start_ms < latest_complete[1].interval_end_ms:
-            raise TraceSelectionError(
-                "terminal incomplete applied-output interval does not follow its complete interval"
-            )
+        if complete_outputs:
+            latest_complete = max(complete_outputs.values(), key=lambda item: item[0])[1]
+            if partial.interval_start_ms < latest_complete.interval_end_ms:
+                raise TraceSelectionError(
+                    "terminal incomplete applied-output interval does not follow its complete interval"
+                )
 
     update_indices = {payload.result_revision: index for index, payload in updates}
     for revision, (output_index, _) in complete_outputs.items():
@@ -235,17 +254,15 @@ def load_trace_samples(
             raise TraceSelectionError("complete applied output does not match an accepted MPC update")
         if output_index <= update_indices[revision]:
             raise TraceSelectionError("complete applied output must follow its accepted update")
-    for update_position, (update_index, update) in enumerate(updates):
+    for update_position, (_, update) in enumerate(updates[:-1]):
         complete_output = complete_outputs.get(update.result_revision)
-        if complete_output is None or update_position + 1 == len(updates):
-            continue
+        if complete_output is None:
+            raise TraceSelectionError(
+                "every accepted MPC update except the latest requires one complete applied output"
+            )
         next_update_index = updates[update_position + 1][0]
         if complete_output[0] >= next_update_index:
             raise TraceSelectionError("complete applied output must precede the next accepted update")
-    expected_revisions = {payload.result_revision for _, payload in updates[1:]}
-    missing_revisions = expected_revisions - set(complete_outputs)
-    if missing_revisions:
-        raise TraceSelectionError("every next accepted MPC update requires one complete applied output")
 
     paired_updates = updates[:-1]
     start_ms = paired_updates[0][1].wall_ms
@@ -253,10 +270,7 @@ def load_trace_samples(
         np.asarray([(update.wall_ms - start_ms) / 1000.0 for _, update in paired_updates], dtype=float),
         np.asarray([update.measured_temperature for _, update in paired_updates], dtype=float),
         np.asarray(
-            [
-                complete_outputs[updates[index + 1][1].result_revision][1].realized_combustion_load
-                for index, (_, update) in enumerate(paired_updates)
-            ],
+            [complete_outputs[update.result_revision][1].realized_combustion_load for _, update in paired_updates],
             dtype=float,
         ),
     )

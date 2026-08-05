@@ -250,7 +250,6 @@ class HoldMode(ControlMode):
         diagnostics = result.diagnostics
         if diagnostics is None or result.completed_wall_time is None or result.solve_end_monotonic is None:
             return False
-        self.state.controller.trace_result_revision = result.revision
         wall_ms = int(result.completed_wall_time * 1_000)
         monotonic_ms = int(result.solve_end_monotonic * 1_000)
         common = dict(
@@ -373,10 +372,14 @@ class HoldMode(ControlMode):
                     result_revision=result.revision,
                     normalized_combustion_load=allocation.normalized_combustion_load,
                     requested_auger_duty=allocation.auger_duty,
-                    requested_fan_duty=allocation.fan_duty or 0.0,
-                    u_max=float(self.settings["cycle_data"]["u_max"]),
-                    fan_min_duty=float(self.settings["controller"]["config"]["mpc"].get("fan_min_pct", 0.0)),
-                    fan_max_duty=float(self.settings["controller"]["config"]["mpc"].get("fan_max_pct", 100.0)),
+                    requested_fan_duty=allocation.fan_duty,
+                    q_min=allocation.q_min,
+                    q_max=allocation.q_max,
+                    u_min=allocation.u_min,
+                    u_max=allocation.u_max,
+                    fan_min_pct=allocation.fan_min_pct,
+                    fan_max_pct=allocation.fan_max_pct,
+                    fan_enabled=allocation.fan_enabled,
                     mpc_has_fan_authority=self.state.controller.controls_fan,
                     auger_clamp_reason=allocation.auger_clamp_reason,
                     fan_clamp_reason=allocation.fan_clamp_reason,
@@ -384,15 +387,17 @@ class HoldMode(ControlMode):
                 )
         else:
             return False
-        self._trace_record(TraceEventKind.CONTROL_UPDATE, payload, wall_ms)
-        if allocation_payload is not None:
-            self._trace_record(TraceEventKind.ALLOCATION, allocation_payload, wall_ms)
-            self.state.controller.trace_mpc_stale = diagnostics.consecutive_policy_failures > 0
         self._trace_complete_applied_interval(
             now,
             sample_complete=True,
             realized_combustion_load=realized_combustion_load,
         )
+        self.state.controller.trace_result_revision = result.revision
+        self._trace_record(TraceEventKind.CONTROL_UPDATE, payload, wall_ms)
+        if allocation_payload is not None:
+            self._trace_record(TraceEventKind.ALLOCATION, allocation_payload, wall_ms)
+            self.state.controller.trace_mpc_stale = diagnostics.consecutive_policy_failures > 0
+
         return True
 
     def _trace_complete_applied_interval(
@@ -410,7 +415,7 @@ class HoldMode(ControlMode):
         self._trace_record(
             TraceEventKind.APPLIED_OUTPUT,
             AppliedOutputPayload(
-                result_revision=max(0, controller.trace_result_revision),
+                result_revision=controller.trace_interval_result_revision,
                 interval_start_ms=start_ms,
                 interval_end_ms=end_ms,
                 realized_auger_duty=controller.trace_prior_realized_auger_duty,
@@ -432,6 +437,7 @@ class HoldMode(ControlMode):
         )
         self._runner.set_output(applied)
         controller.trace_interval_start_ms = int(now * 1_000)
+        controller.trace_interval_result_revision = max(0, controller.trace_result_revision)
         controller.trace_prior_requested_auger_duty = (
             applied.requested if applied.requested is not None else applied.ratio
         )
@@ -451,8 +457,9 @@ class HoldMode(ControlMode):
         controller.trace_frame_scheduled_on_seconds = hold_cycle_seconds * bounded_duty
         controller.trace_frame_scheduled_off_seconds = hold_cycle_seconds * (1 - bounded_duty)
         controller.trace_frame_actual_on_seconds = 0.0
-        controller.trace_frame_transition_count = 1 if active else 0
+        controller.trace_frame_transition_count = 0
         controller.trace_frame_active = active
+        controller.trace_frame_actual_start_active = active
         controller.trace_frame_on_started_ms = start_ms if active else None
 
     def _trace_finish_frame(self, now: float, inhibit: InhibitReason = InhibitReason.NONE) -> None:
@@ -481,6 +488,7 @@ class HoldMode(ControlMode):
                 fan_assist_active=self.state.fan.assist,
                 inhibit_reason=inhibit,
                 output_active=controller.trace_frame_active,
+                actual_start_active=controller.trace_frame_actual_start_active,
             ),
             end_ms,
         )
@@ -567,6 +575,7 @@ class HoldMode(ControlMode):
             self._runner.set_output(initial_output)
             controller = self.state.controller
             controller.trace_interval_start_ms = int(initial_output.timestamp * 1_000)
+            controller.trace_interval_result_revision = 0
             controller.trace_prior_requested_auger_duty = (
                 initial_output.requested if initial_output.requested is not None else initial_output.ratio
             )

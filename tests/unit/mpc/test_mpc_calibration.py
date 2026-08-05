@@ -88,9 +88,27 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
             ),
         )
     ]
+    records.append(
+        ControlTraceRecord(
+            ts_ms=0,
+            session_id=session_id,
+            cook_id=cook_id,
+            controller=ControllerType.MPC,
+            event_kind=TraceEventKind.APPLIED_OUTPUT,
+            payload=AppliedOutputPayload(
+                result_revision=0,
+                interval_start_ms=0,
+                interval_end_ms=0,
+                realized_auger_duty=0.0,
+                realized_combustion_load=None,
+                actual_fan_duty=None,
+                sample_complete=True,
+                output_source=OutputSource.SEED,
+            ),
+        )
+    )
     previous_timestamp_ms: int | None = None
-    previous_load: float | None = None
-    for revision, (time_s, temperature, load) in enumerate(zip(t, temp, Q)):
+    for revision, (time_s, temperature, load) in enumerate(zip(t, temp, Q), start=1):
         timestamp_ms = int(float(time_s) * 1000)
         load = float(load)
         records.append(
@@ -140,7 +158,7 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
             )
         )
         interval_start_ms = timestamp_ms if previous_timestamp_ms is None else previous_timestamp_ms
-        realized_load = load if previous_load is None else previous_load
+        realized_load = load
         records.append(
             ControlTraceRecord(
                 ts_ms=timestamp_ms + 1,
@@ -161,7 +179,6 @@ def _seed_trace(t, temp, Q, *, cook_id="calibration-cook", session_id="calibrati
             )
         )
         previous_timestamp_ms = timestamp_ms
-        previous_load = load
     append_control_trace(records)
 
 

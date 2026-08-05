@@ -81,6 +81,34 @@ Important: PiFire has cycle settings that are separate from the controller, and 
 *Outputs:*
 - Cycle Ratio (Auger On Time / Auger Off Time) (output from Controller.update())
 
+### Control traces, replay, and MPC calibration
+
+HOLD writes typed controller traces to PiFire's SQLite database for the selected
+cook and controller session.  They retain the complete controller decision,
+MPC allocation, scheduling, safety, and applied-output chain for **30 days**;
+there is no controller log-path setting or parallel CSV/export format.
+
+Select one typed session when investigating a controller decision:
+
+```python
+from controller.control_trace_replay import replay_session
+
+report = replay_session("session-id", database_path="/path/to/pifire.db")
+assert report.valid, report.issues
+```
+
+`replay_session()` reads that session through the typed datastore accessor in
+insertion order and returns all precise violations rather than changing a live
+controller.  A `RECORDER_GAP` makes the report invalid: it means the bounded
+recorder had to discard records during a database outage, so the missing span
+cannot be reconstructed.
+
+MPC calibration likewise selects typed SQLite cook/session records through
+`controller.update_mpc`; it no longer accepts production CSV logs.  Pick the
+specific cook or session and database path for calibration rather than copying
+or exporting trace rows.
+
+
 ### User Configuration, Registering the Controller
 
 There is a controller JSON ('./controller/controllers.json') that contains the metadata for all of the available controllers and settings information.  This allows for the user to be able to select and configure the controller via the WebUI settings page (Work Cycle Settings).

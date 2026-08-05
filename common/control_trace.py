@@ -284,10 +284,14 @@ class AllocationPayload:
     result_revision: NonNegativeInt
     normalized_combustion_load: FiniteFloat
     requested_auger_duty: FiniteFloat
-    requested_fan_duty: FiniteFloat
+    requested_fan_duty: FiniteFloat | None
+    q_min: FiniteFloat
+    q_max: FiniteFloat
+    u_min: FiniteFloat
     u_max: FiniteFloat
-    fan_min_duty: FiniteFloat
-    fan_max_duty: FiniteFloat
+    fan_min_pct: FiniteFloat
+    fan_max_pct: FiniteFloat
+    fan_enabled: bool
     mpc_has_fan_authority: bool
     auger_clamp_reason: AllocationClampReason
     fan_clamp_reason: AllocationClampReason
@@ -295,9 +299,17 @@ class AllocationPayload:
     payload_type: Literal["allocation"] = "allocation"
 
     @model_validator(mode="after")
-    def validate_fan_bounds(self) -> AllocationPayload:
-        if self.fan_min_duty > self.fan_max_duty:
-            raise ValueError("fan_min_duty must not exceed fan_max_duty")
+    def validate_allocator_inputs(self) -> AllocationPayload:
+        if self.q_min > self.q_max:
+            raise ValueError("q_min must not exceed q_max")
+        if self.u_min > self.u_max:
+            raise ValueError("u_min must not exceed u_max")
+        if self.fan_min_pct > self.fan_max_pct:
+            raise ValueError("fan_min_pct must not exceed fan_max_pct")
+        if not self.fan_enabled and self.requested_fan_duty is not None:
+            raise ValueError("disabled fan allocation must not request a fan duty")
+        if not self.fan_enabled and self.fan_clamp_reason is not AllocationClampReason.NONE:
+            raise ValueError("disabled fan allocation must not carry a fan clamp")
         return self
 
 
@@ -313,6 +325,7 @@ class FixedCycleFramePayload:
     scheduled_on_seconds: NonNegativeFloat
     scheduled_off_seconds: NonNegativeFloat
     actual_on_seconds: NonNegativeFloat
+    actual_start_active: bool
     transition_count: NonNegativeInt
     fan_assist_active: bool
     inhibit_reason: InhibitReason
@@ -328,6 +341,15 @@ class FixedCycleFramePayload:
         duration_seconds = (self.cycle_end_ms - self.cycle_start_ms) / 1000
         if self.actual_on_seconds > duration_seconds:
             raise ValueError("actual_on_seconds must not exceed cycle duration")
+        if self.output_active is not (self.actual_start_active ^ bool(self.transition_count % 2)):
+            raise ValueError("fixed-cycle transition parity must match start and end state")
+        if self.transition_count == 0 and not math.isclose(
+            self.actual_on_seconds,
+            duration_seconds if self.actual_start_active else 0.0,
+            rel_tol=0,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("zero-transition fixed-cycle delivery must match start state")
         return self
 
 
@@ -343,6 +365,7 @@ class FramedPulseFramePayload:
     scheduled_on_seconds: NonNegativeFloat
     delivered_on_seconds: NonNegativeFloat
     transition_count: NonNegativeInt
+    actual_start_active: bool
     actual_end_active: bool
     requested_fan_duty: FiniteFloat | None
     applied_fan_duty: FiniteFloat | None
@@ -361,6 +384,15 @@ class FramedPulseFramePayload:
             raise ValueError("scheduled_on_seconds must not exceed frame_seconds")
         if self.delivered_on_seconds > self.frame_seconds:
             raise ValueError("delivered_on_seconds must not exceed frame_seconds")
+        if self.actual_end_active is not (self.actual_start_active ^ bool(self.transition_count % 2)):
+            raise ValueError("framed-pulse transition parity must match start and end state")
+        if self.transition_count == 0 and not math.isclose(
+            self.delivered_on_seconds,
+            self.frame_seconds if self.actual_start_active else 0.0,
+            rel_tol=0,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("zero-transition framed-pulse delivery must match start state")
         return self
 
 

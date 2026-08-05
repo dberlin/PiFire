@@ -124,6 +124,7 @@ I've added a discord server [here](https://discord.gg/F9mbCrbrZS) which can be a
 ### Updates
 
 * 8/2026 - Removed the Fuzzy Logic Controller, Machine Learning Controller, PID Auto Center, PID w/ Integrator Clamping, PID w/ Integrator Clamping and PB as %, and Parallel PID w/ optional Integrator Clamping controllers. Upgraded installations that selected one migrate to standard PID while preserving their existing standard-PID configuration.
+* 8/2026 - Added typed SQLite control traces for PID, PID-SP, and MPC HOLD sessions. Traces retain 30 days of session/cook-selected controller, allocation, scheduling, safety, and applied-output evidence; replay reports gaps or corruption without changing a live controller. MPC calibration now selects these database traces, and production CSV controller logging has been removed.
 * 9/2020 - Initial Release
 * 12/2020 - Moved documentation to [https://nebhead.github.io/PiFire-Pages](https://nebhead.github.io/PiFire-Pages)
 * 11/2021 - Many new features, bug fixes, and improvements.  New hardware support etc. which have been in incorporated over the last year, have been merged from the development branch

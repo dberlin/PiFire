@@ -23,11 +23,18 @@ ALLOCATOR_REVISION = 1
 
 @dataclass(frozen=True, slots=True)
 class AllocationResult:
-    """One physical allocation of an MPC firing-load request."""
+    """One physical allocation with every pure allocator input retained."""
 
     normalized_combustion_load: float
     auger_duty: float
     fan_duty: float | None
+    q_min: float
+    q_max: float
+    u_min: float
+    u_max: float
+    fan_min_pct: float
+    fan_max_pct: float
+    fan_enabled: bool
     auger_clamp_reason: AllocationClampReason
     fan_clamp_reason: AllocationClampReason
     allocator_revision: int = ALLOCATOR_REVISION
@@ -54,6 +61,13 @@ def allocate(
         normalized_combustion_load=normalized_load,
         auger_duty=auger_duty,
         fan_duty=fan_duty,
+        q_min=Q_min,
+        q_max=Q_max,
+        u_min=u_min,
+        u_max=u_max,
+        fan_min_pct=fan_min_pct,
+        fan_max_pct=fan_max_pct,
+        fan_enabled=enable_fan,
         auger_clamp_reason=AllocationClampReason.AUGER_MAX
         if normalized_load == Q_max and Q > Q_max
         else AllocationClampReason.NONE,

@@ -117,7 +117,14 @@ def _allocation(_q, **_):
     return AllocationResult(
         normalized_combustion_load=100.0,
         auger_duty=0.5,
-        fan_duty=0.0,
+        fan_duty=None,
+        q_min=0.0,
+        q_max=100.0,
+        u_min=0.1,
+        u_max=0.9,
+        fan_min_pct=40.0,
+        fan_max_pct=100.0,
+        fan_enabled=False,
         auger_clamp_reason=AllocationClampReason.NONE,
         fan_clamp_reason=AllocationClampReason.NONE,
     )
@@ -130,7 +137,7 @@ def test_mpc_trace_diagnostics_capture_one_solve_without_recomputing_policy(monk
     monkeypatch.setattr(mpc.time, "time", lambda: 1000.0)
     monkeypatch.setattr(mpc, "allocate", _allocation)
 
-    assert core.update(100.0) == {"cycle_ratio": 0.5, "fan": {"duty": 0.0}}
+    assert core.update(100.0) == {"cycle_ratio": 0.5, "fan": {"duty": None}}
 
     diagnostic = core.trace_diagnostics()
     assert isinstance(diagnostic, MpcTraceDiagnostics)

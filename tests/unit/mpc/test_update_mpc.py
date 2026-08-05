@@ -116,6 +116,7 @@ def _applied(
     load: float | None,
     *,
     complete: bool = True,
+    source: OutputSource = OutputSource.CONTROLLER,
 ) -> ControlTraceRecord:
     return ControlTraceRecord(
         ts_ms=recorded_ms,
@@ -131,7 +132,7 @@ def _applied(
             realized_combustion_load=load,
             actual_fan_duty=100.0,
             sample_complete=complete,
-            output_source=OutputSource.CONTROLLER,
+            output_source=source,
         ),
     )
 
@@ -154,6 +155,7 @@ def _teardown_frame() -> ControlTraceRecord:
             scheduled_on_seconds=0.0,
             scheduled_off_seconds=5.0,
             actual_on_seconds=0.0,
+            actual_start_active=False,
             transition_count=0,
             fan_assist_active=False,
             inhibit_reason=InhibitReason.NONE,
@@ -165,20 +167,20 @@ def _teardown_frame() -> ControlTraceRecord:
 def _lifecycle_records(*, terminal_partial: bool = False) -> list[ControlTraceRecord]:
     records = [
         _session(),
+        _applied(0, 1, 0, 1_000, None, source=OutputSource.SEED),
         _update(2, 1_000, 100.0, 20.0),
-        _applied(2, 1_001, 0, 1_000, 99.0),
+        _applied(2, 6_000, 1_000, 6_000, 20.0),
         _update(7, 6_000, 110.0, 25.0),
-        _applied(7, 6_001, 1_000, 6_000, 20.0),
+        _applied(7, 11_000, 6_000, 11_000, 25.0),
         _update(12, 11_000, 120.0, 30.0),
-        _applied(12, 11_001, 6_000, 11_000, 25.0),
     ]
     if terminal_partial:
-        records.append(_applied(12, 11_002, 11_000, 16_000, None, complete=False))
+        records.append(_applied(12, 16_000, 11_000, 16_000, None, complete=False))
         records.append(_teardown_frame())
     return records
 
 
-def test_load_trace_samples_pairs_temperature_with_the_next_update_s_complete_load(ds):
+def test_load_trace_samples_pairs_temperature_with_its_own_complete_load(ds):
     append_control_trace(_lifecycle_records())
 
     time_s, temperature_c, combustion_load = load_trace_samples(cook_id=COOK_ID, database_path=ds.DB_PATH)
@@ -186,6 +188,28 @@ def test_load_trace_samples_pairs_temperature_with_the_next_update_s_complete_lo
     np.testing.assert_allclose(time_s, (0.0, 5.0))
     np.testing.assert_allclose(temperature_c, (100.0, 110.0))
     np.testing.assert_allclose(combustion_load, (20.0, 25.0))
+
+
+@pytest.mark.parametrize("with_initial_seed", (True, False))
+def test_load_trace_samples_accepts_pristine_traces_with_or_without_initial_seed(ds, with_initial_seed):
+    records = _lifecycle_records()
+    if not with_initial_seed:
+        records.pop(1)
+    append_control_trace(records)
+
+    _, temperature_c, combustion_load = load_trace_samples(session_id=SESSION_ID)
+
+    np.testing.assert_allclose(temperature_c, (100.0, 110.0))
+    np.testing.assert_allclose(combustion_load, (20.0, 25.0))
+
+
+def test_load_trace_samples_rejects_a_late_revision_zero_seed(ds):
+    records = _lifecycle_records()
+    records.append(records[1].model_copy(update={"ts_ms": 12_000}))
+    append_control_trace(records)
+
+    with pytest.raises(TraceSelectionError, match="initial seed"):
+        load_trace_samples(session_id=SESSION_ID)
 
 
 def test_load_trace_samples_accepts_an_active_session_without_a_terminal_partial(ds):
@@ -218,8 +242,8 @@ def test_load_trace_samples_rejects_terminal_partial_with_a_nonlatest_revision(d
 
 def test_load_trace_samples_rejects_complete_output_before_its_matching_update(ds):
     records = _lifecycle_records()
-    records[3:5] = [
-        _applied(7, 5_000, 1_000, 6_000, 20.0),
+    records[4:6] = [
+        _applied(7, 6_000, 1_000, 6_000, 25.0),
         _update(7, 6_000, 110.0, 25.0),
     ]
     append_control_trace(records)
@@ -230,10 +254,9 @@ def test_load_trace_samples_rejects_complete_output_before_its_matching_update(d
 
 def test_load_trace_samples_rejects_complete_output_after_the_next_update(ds):
     records = _lifecycle_records()
-    records[4:7] = [
+    records[5:7] = [
         _update(12, 11_000, 120.0, 30.0),
-        _applied(7, 11_001, 1_000, 6_000, 20.0),
-        _applied(12, 11_002, 6_000, 11_000, 25.0),
+        _applied(7, 11_001, 6_000, 11_000, 25.0),
     ]
     append_control_trace(records)
     with pytest.raises(TraceSelectionError, match="precede the next accepted update"):
